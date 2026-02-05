@@ -5,6 +5,7 @@ import { generateWorldMap, getStartingPosition } from '../map/MapData';
 import { Party } from '../entities/Party';
 import { BattleTimer } from '../systems/BattleTimer';
 import { UnlockSystem } from '../systems/UnlockSystem';
+import { UIManager } from '../ui/UIManager';
 import {
   HEX_SIZE,
   getHexCorners,
@@ -17,6 +18,7 @@ export class WorldMapScene extends Phaser.Scene {
   private party!: Party;
   private battleTimer!: BattleTimer;
   private unlockSystem!: UnlockSystem;
+  private uiManager!: UIManager;
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
@@ -26,18 +28,15 @@ export class WorldMapScene extends Phaser.Scene {
   // Tile icons (stored for cleanup on re-render)
   private tileIcons: Phaser.GameObjects.Text[] = [];
 
-  // Map offset (to center the map)
-  private mapOffsetX = 0;
-  private mapOffsetY = 0;
+  // Map offset (small padding from origin)
+  private mapOffsetX = HEX_SIZE;
+  private mapOffsetY = HEX_SIZE;
 
   // Drag panning state
   private isDragging = false;
   private wasDragging = false;
   private dragStartX = 0;
   private dragStartY = 0;
-
-  // UI
-  private statusText!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'WorldMapScene' });
@@ -47,8 +46,8 @@ export class WorldMapScene extends Phaser.Scene {
     // Generate the map from schema
     this.grid = generateWorldMap();
 
-    // Calculate map offset to center it
-    this.calculateMapOffset();
+    // Create HTML-based UI (separate from canvas zoom/pan)
+    this.uiManager = new UIManager();
 
     // Create graphics layers
     this.tileGraphics = this.add.graphics();
@@ -89,9 +88,12 @@ export class WorldMapScene extends Phaser.Scene {
           // Unlock adjacent tiles on victory
           this.unlockSystem.unlockAdjacentTiles(this.party.tile);
         }
-        // On defeat, player continues moving through already-unlocked tiles
-        // (no special handling needed - just don't unlock new tiles)
         this.updateStatusText();
+      },
+      canMoveToNextTile: () => {
+        // Check if the next tile in the path is unlocked
+        const nextTile = this.party.nextTile;
+        return nextTile ? this.unlockSystem.isUnlocked(nextTile) : false;
       },
     });
 
@@ -115,9 +117,6 @@ export class WorldMapScene extends Phaser.Scene {
     // Set up input
     this.setupInput();
 
-    // Create status UI
-    this.createUI();
-
     // Initial status
     this.updateStatusText();
   }
@@ -125,28 +124,6 @@ export class WorldMapScene extends Phaser.Scene {
   private centerCameraOnParty(): void {
     const sprite = this.party.getSprite();
     this.cameras.main.centerOn(sprite.x, sprite.y);
-  }
-
-  private calculateMapOffset(): void {
-    // Calculate the bounds of the map
-    const tiles = this.grid.getAllTiles();
-    let minX = Infinity, maxX = -Infinity;
-    let minY = Infinity, maxY = -Infinity;
-
-    for (const tile of tiles) {
-      const pos = tile.pixelPosition;
-      minX = Math.min(minX, pos.x);
-      maxX = Math.max(maxX, pos.x);
-      minY = Math.min(minY, pos.y);
-      maxY = Math.max(maxY, pos.y);
-    }
-
-    // Center the map in the game view
-    const mapWidth = maxX - minX + HEX_SIZE * 2;
-    const mapHeight = maxY - minY + HEX_SIZE * 2;
-
-    this.mapOffsetX = (this.cameras.main.width - mapWidth) / 2 - minX + HEX_SIZE;
-    this.mapOffsetY = (this.cameras.main.height - mapHeight) / 2 - minY + HEX_SIZE;
   }
 
   private renderGrid(): void {
@@ -363,15 +340,8 @@ export class WorldMapScene extends Phaser.Scene {
       return;
     }
 
-    // Check if tile is unlocked
-    if (!this.unlockSystem.isUnlocked(tile)) {
-      // Show feedback for locked tile
-      this.flashTile(tile, 0x666666);
-      return;
-    }
-
-    // Set destination
-    const success = this.party.setDestination(tile, this.unlockSystem);
+    // Set destination (allow moving through fog - we'll keep trying if we lose battles)
+    const success = this.party.setDestination(tile);
 
     if (success) {
       this.updatePathDisplay();
@@ -479,18 +449,6 @@ export class WorldMapScene extends Phaser.Scene {
     });
   }
 
-  private createUI(): void {
-    this.statusText = this.add.text(16, 16, '', {
-      fontSize: '16px',
-      fontFamily: 'Arial',
-      color: '#ffffff',
-      backgroundColor: '#000000aa',
-      padding: { x: 10, y: 5 },
-    });
-    this.statusText.setScrollFactor(0);
-    this.statusText.setDepth(1000);
-  }
-
   private updateStatusText(): void {
     const battleState = this.battleTimer.currentState;
     const remaining = this.party.remainingPath.length;
@@ -502,10 +460,14 @@ export class WorldMapScene extends Phaser.Scene {
       status += ' | Click a tile to travel';
     }
 
-    this.statusText.setText(status);
+    this.uiManager.setStatus(status);
   }
 
   update(): void {
     this.battleTimer.update();
+  }
+
+  shutdown(): void {
+    this.uiManager.destroy();
   }
 }

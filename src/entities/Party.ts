@@ -3,11 +3,16 @@ import { CubeCoord } from '../utils/HexUtils';
 import { HexTile } from '../map/HexTile';
 import { HexGrid } from '../map/HexGrid';
 import { HexPathfinder } from '../map/HexPathfinder';
-import { UnlockSystem } from '../systems/UnlockSystem';
 
 export type PartyState = 'idle' | 'moving' | 'in_battle';
+export type BattleVisualState = 'none' | 'fighting' | 'victory' | 'defeat';
 
 const MOVE_DURATION = 300; // ms per tile movement
+
+// Party colors for different states
+const PARTY_COLOR_DEFAULT = 0x44ff88;   // Green (default/victory - keep moving!)
+const PARTY_COLOR_FIGHTING = 0xffaa44;  // Orange (in combat)
+const PARTY_COLOR_DEFEAT = 0xff6b6b;    // Coral red (lost)
 
 export class Party {
   private scene: Phaser.Scene;
@@ -17,6 +22,7 @@ export class Party {
   private currentTile: HexTile;
   private targetTile: HexTile | null = null;  // Tile we're currently moving towards
   private movementQueue: HexTile[] = [];
+  private battleTween?: Phaser.Tweens.Tween;
   private state: PartyState = 'idle';
 
   // Event callbacks
@@ -68,18 +74,24 @@ export class Party {
   }
 
   /**
+   * Get the next tile in the movement queue without removing it.
+   */
+  get nextTile(): HexTile | null {
+    return this.movementQueue.length > 0 ? this.movementQueue[0] : null;
+  }
+
+  /**
    * Set a new destination. Calculates path and queues movement.
-   * If unlockSystem is provided, only paths through unlocked tiles are allowed.
    * Returns true if a valid path was found.
    */
-  setDestination(destinationTile: HexTile, unlockSystem?: UnlockSystem): boolean {
+  setDestination(destinationTile: HexTile): boolean {
     if (!destinationTile.isTraversable) {
       return false;
     }
 
     // If we're mid-movement, calculate path from where we're heading, not where we are
     const startTile = this.targetTile ?? this.currentTile;
-    const path = this.pathfinder.findPath(startTile.coord, destinationTile.coord, unlockSystem);
+    const path = this.pathfinder.findPath(startTile.coord, destinationTile.coord);
 
     if (!path || path.length <= 1) {
       return false;
@@ -145,25 +157,57 @@ export class Party {
    */
   enterBattle(): void {
     this.setState('in_battle');
+    this.setBattleVisual('fighting');
 
-    // Visual feedback: shake and flash
-    this.scene.tweens.add({
+    // Visual feedback: continuous throb animation during battle
+    this.battleTween = this.scene.tweens.add({
       targets: this.sprite,
       scaleX: 1.2,
       scaleY: 1.2,
-      duration: 100,
+      duration: 150,
       yoyo: true,
-      repeat: 2,
+      repeat: -1,  // Loop forever until stopped
     });
   }
 
   /**
-   * Exit battle state.
+   * Exit battle state with result.
    */
-  exitBattle(): void {
+  exitBattle(result?: 'victory' | 'defeat'): void {
+    // Stop the throb animation
+    if (this.battleTween) {
+      this.battleTween.stop();
+      this.battleTween = undefined;
+      // Reset scale to normal
+      this.sprite.setScale(1);
+    }
+
     if (this.state === 'in_battle') {
       this.setState('idle');
     }
+
+    if (result) {
+      this.setBattleVisual(result);
+    }
+  }
+
+  /**
+   * Set the visual state of the party (color indicator).
+   */
+  setBattleVisual(visualState: BattleVisualState): void {
+    let color: number;
+    switch (visualState) {
+      case 'fighting':
+        color = PARTY_COLOR_FIGHTING;
+        break;
+      case 'defeat':
+        color = PARTY_COLOR_DEFEAT;
+        break;
+      case 'victory':
+      default:
+        color = PARTY_COLOR_DEFAULT;
+    }
+    this.sprite.setFillStyle(color);
   }
 
   private setState(newState: PartyState): void {

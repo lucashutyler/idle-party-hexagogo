@@ -4,14 +4,15 @@ import { Party } from '../entities/Party';
 export type BattleTimerState = 'moving' | 'battle';
 export type BattleResult = 'victory' | 'defeat';
 
-const BATTLE_DURATION = 1200;  // ms for battle animation
-const RESULT_DURATION = 600;   // ms to show result before continuing
+const BATTLE_DURATION = 2000;  // 2 seconds of fighting (orange)
+const RESULT_DURATION = 1000;  // 1 second to show victory/defeat before moving
 const DEFEAT_CHANCE = 0.2;     // 20% chance to lose
 
 export interface BattleTimerCallbacks {
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
+  canMoveToNextTile?: () => boolean; // Check if next tile is accessible (e.g., unlocked)
 }
 
 export class BattleTimer {
@@ -22,13 +23,11 @@ export class BattleTimer {
   private battleTimer?: Phaser.Time.TimerEvent;
   private resultTimer?: Phaser.Time.TimerEvent;
 
-  // UI elements
-  private battleText?: Phaser.GameObjects.Text;
-
   // Events
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
+  canMoveToNextTile?: () => boolean;
 
   constructor(scene: Phaser.Scene, party: Party, callbacks?: BattleTimerCallbacks) {
     this.scene = scene;
@@ -39,22 +38,13 @@ export class BattleTimer {
       this.onBattleStart = callbacks.onBattleStart;
       this.onBattleEnd = callbacks.onBattleEnd;
       this.onStateChange = callbacks.onStateChange;
+      this.canMoveToNextTile = callbacks.canMoveToNextTile;
     }
 
-    // Create battle text (hidden initially)
-    this.battleText = scene.add.text(0, 0, '', {
-      fontSize: '24px',
-      fontFamily: 'Arial',
-      color: '#ffffff',
-      stroke: '#000000',
-      strokeThickness: 4,
+    // Start the battle loop after a brief delay to let the scene render first
+    this.scene.time.delayedCall(100, () => {
+      this.triggerBattle();
     });
-    this.battleText.setOrigin(0.5);
-    this.battleText.setDepth(200);
-    this.battleText.setVisible(false);
-
-    // Start the battle loop immediately
-    this.triggerBattle();
   }
 
   /**
@@ -72,16 +62,12 @@ export class BattleTimer {
    */
   stop(): void {
     this.clearTimers();
-    this.hideBattleText();
   }
 
   private triggerBattle(): void {
     this.setState('battle');
     this.party.enterBattle();
     this.onBattleStart?.();
-
-    // Show battle text
-    this.showBattleText('⚔️ BATTLE! ⚔️', 'fighting');
 
     // Determine battle outcome after the fight
     this.battleTimer = this.scene.time.addEvent({
@@ -96,13 +82,13 @@ export class BattleTimer {
     const isDefeat = Math.random() < DEFEAT_CHANCE;
     const result: BattleResult = isDefeat ? 'defeat' : 'victory';
 
-    // Show result text
-    this.showBattleText(
-      isDefeat ? '💀 DEFEAT!' : '✓ VICTORY!',
-      isDefeat ? 'defeat' : 'victory'
-    );
+    // Update party visual to show result
+    this.party.exitBattle(result);
 
-    // After showing result, resolve the battle
+    // Notify immediately so fog reveals right away on victory
+    this.onBattleEnd?.(result);
+
+    // After showing result, resolve the battle (movement)
     this.resultTimer = this.scene.time.addEvent({
       delay: RESULT_DURATION,
       callback: () => this.resolveBattle(result),
@@ -111,19 +97,21 @@ export class BattleTimer {
   }
 
   private resolveBattle(result: BattleResult): void {
-    this.hideBattleText();
-    this.party.exitBattle();
-    this.onBattleEnd?.(result);
 
-    // Move to next tile if we have a destination (regardless of victory/defeat)
-    // Victory unlocks new tiles (handled by onBattleEnd callback)
-    // Defeat just continues movement through already-unlocked tiles
-    if (this.party.hasDestination) {
+    // Determine if we can move to the next tile
+    // Victory always allows movement (unlocks happen in onBattleEnd callback)
+    // Defeat only allows movement if the next tile is already accessible (unlocked)
+    const canMove = this.party.hasDestination && (
+      result === 'victory' ||
+      (this.canMoveToNextTile?.() ?? false)
+    );
+
+    if (canMove) {
       this.party.moveToNextTile();
     }
     this.setState('moving');
 
-    // When movement completes (or immediately if no movement), trigger next battle
+    // When movement completes, trigger next battle
     const checkMovementComplete = () => {
       if (this.party.currentState === 'idle') {
         this.triggerBattle();
@@ -133,68 +121,8 @@ export class BattleTimer {
       }
     };
 
-    // Small delay to let movement tween start (or proceed immediately if no movement)
+    // Small delay to let movement tween start
     this.scene.time.delayedCall(50, checkMovementComplete);
-  }
-
-  private showBattleText(text: string, type: 'fighting' | 'victory' | 'defeat'): void {
-    if (!this.battleText) return;
-
-    // Kill any existing tweens
-    this.scene.tweens.killTweensOf(this.battleText);
-
-    const sprite = this.party.getSprite();
-    this.battleText.setText(text);
-    this.battleText.setPosition(sprite.x, sprite.y - 50);
-    this.battleText.setScale(1);
-    this.battleText.setVisible(true);
-
-    // Set color based on type
-    switch (type) {
-      case 'fighting':
-        this.battleText.setColor('#ffff44');
-        // Pulsing animation during fight
-        this.scene.tweens.add({
-          targets: this.battleText,
-          scaleX: 1.1,
-          scaleY: 1.1,
-          duration: 150,
-          yoyo: true,
-          repeat: -1,
-        });
-        break;
-      case 'victory':
-        this.battleText.setColor('#44ff44');
-        // Pop-in animation for victory
-        this.battleText.setScale(0.5);
-        this.scene.tweens.add({
-          targets: this.battleText,
-          scaleX: 1.2,
-          scaleY: 1.2,
-          duration: 200,
-          ease: 'Back.easeOut',
-        });
-        break;
-      case 'defeat':
-        this.battleText.setColor('#ff4444');
-        // Shake animation for defeat
-        this.scene.tweens.add({
-          targets: this.battleText,
-          x: sprite.x - 5,
-          duration: 50,
-          yoyo: true,
-          repeat: 3,
-        });
-        break;
-    }
-  }
-
-  private hideBattleText(): void {
-    if (!this.battleText) return;
-
-    this.scene.tweens.killTweensOf(this.battleText);
-    this.battleText.setVisible(false);
-    this.battleText.setScale(1);
   }
 
   private clearTimers(): void {
@@ -220,21 +148,13 @@ export class BattleTimer {
   }
 
   /**
-   * Update battle text position to follow party.
+   * Update method (kept for compatibility, no longer needed for text positioning).
    */
   update(): void {
-    if (this.battleText?.visible) {
-      const sprite = this.party.getSprite();
-      // Only update Y position, X might be tweening for shake effect
-      this.battleText.y = sprite.y - 50;
-      if (this.state === 'battle') {
-        this.battleText.x = sprite.x;
-      }
-    }
+    // No-op - battle text is now HTML-based
   }
 
   destroy(): void {
     this.clearTimers();
-    this.battleText?.destroy();
   }
 }

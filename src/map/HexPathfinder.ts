@@ -1,7 +1,6 @@
-import { CubeCoord, cubeDistance } from '../utils/HexUtils';
+import { CubeCoord, cubeDistance, cubeToPixel } from '../utils/HexUtils';
 import { HexGrid } from './HexGrid';
 import { HexTile } from './HexTile';
-import { UnlockSystem } from '../systems/UnlockSystem';
 
 interface PathNode {
   tile: HexTile;
@@ -9,6 +8,32 @@ interface PathNode {
   h: number; // Heuristic (estimated cost to goal)
   f: number; // Total cost (g + h)
   parent: PathNode | null;
+}
+
+/**
+ * Calculate the perpendicular distance from a point to a line defined by two points.
+ * This measures how far "off course" a position is from the direct path.
+ */
+function crossTrackDistance(
+  point: { x: number; y: number },
+  lineStart: { x: number; y: number },
+  lineEnd: { x: number; y: number }
+): number {
+  const dx = lineEnd.x - lineStart.x;
+  const dy = lineEnd.y - lineStart.y;
+  const lineLengthSq = dx * dx + dy * dy;
+
+  // If start and end are the same point, just return distance to that point
+  if (lineLengthSq === 0) {
+    const pdx = point.x - lineStart.x;
+    const pdy = point.y - lineStart.y;
+    return Math.sqrt(pdx * pdx + pdy * pdy);
+  }
+
+  // Calculate perpendicular distance using cross product
+  // |((lineEnd - lineStart) × (lineStart - point))| / |lineEnd - lineStart|
+  const cross = Math.abs(dx * (lineStart.y - point.y) - dy * (lineStart.x - point.x));
+  return cross / Math.sqrt(lineLengthSq);
 }
 
 /**
@@ -23,10 +48,9 @@ export class HexPathfinder {
 
   /**
    * Find a path from start to goal using A*.
-   * If unlockSystem is provided, only paths through unlocked tiles are allowed.
    * Returns an array of tiles from start to goal (inclusive), or null if no path exists.
    */
-  findPath(start: CubeCoord, goal: CubeCoord, unlockSystem?: UnlockSystem): HexTile[] | null {
+  findPath(start: CubeCoord, goal: CubeCoord): HexTile[] | null {
     const startTile = this.grid.getTile(start);
     const goalTile = this.grid.getTile(goal);
 
@@ -38,15 +62,14 @@ export class HexPathfinder {
       return null;
     }
 
-    // If unlock system provided, goal must be unlocked
-    if (unlockSystem && !unlockSystem.isUnlocked(goalTile)) {
-      return null;
-    }
-
     // If start equals goal, return just the start tile
     if (startTile.key === goalTile.key) {
       return [startTile];
     }
+
+    // Pre-compute the ideal line from start to goal in pixel coordinates
+    const startPixel = cubeToPixel(start);
+    const goalPixel = cubeToPixel(goal);
 
     const openSet: Map<string, PathNode> = new Map();
     const closedSet: Set<string> = new Set();
@@ -92,12 +115,14 @@ export class HexPathfinder {
           continue;
         }
 
-        // If unlock system provided, only consider unlocked tiles
-        if (unlockSystem && !unlockSystem.isUnlocked(neighbor)) {
-          continue;
-        }
+        // Calculate cross-track distance as a small tie-breaker
+        // This prefers paths that stay close to the ideal straight line
+        const neighborPixel = cubeToPixel(neighbor.coord);
+        const crossTrack = crossTrackDistance(neighborPixel, startPixel, goalPixel);
+        // Scale it down significantly so it only breaks ties, doesn't affect path length
+        const tieBreaker = crossTrack * 0.0001;
 
-        const tentativeG = current.g + 1; // Cost of 1 per tile (can be modified for terrain costs)
+        const tentativeG = current.g + 1 + tieBreaker;
 
         const existingNode = openSet.get(neighbor.key);
 
