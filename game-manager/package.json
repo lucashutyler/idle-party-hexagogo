@@ -1,0 +1,16 @@
+{
+  "name": "@idle-party-rpg/game-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Game manager not yet implemented'",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@idle-party-rpg/shared": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

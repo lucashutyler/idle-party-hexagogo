@@ -1,4 +1,4 @@
-import { CubeCoord, cubeDistance, cubeToPixel } from '../utils/HexUtils';
+import { CubeCoord, cubeDistance, cubeToPixel } from './HexUtils';
 import { HexGrid } from './HexGrid';
 import { HexTile } from './HexTile';
 

@@ -3,3 +3,9 @@ dist/
 *.swp
 *.swo
 .DS_Store
+
+# TypeScript build output
+shared/dist/
+server/dist/
+game-manager/dist/
+*.tsbuildinfo

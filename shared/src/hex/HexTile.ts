@@ -1,4 +1,4 @@
-import { CubeCoord, cubeToPixel, cubeToKey } from '../utils/HexUtils';
+import { CubeCoord, cubeToPixel, cubeToKey } from './HexUtils';
 
 export enum TileType {
   Plains = 'plains',
@@ -59,9 +59,6 @@ export class HexTile {
   readonly type: TileType;
   readonly config: TileConfig;
   readonly key: string;
-
-  // Phaser graphics reference (set when rendered)
-  graphics?: Phaser.GameObjects.Graphics;
 
   constructor(coord: CubeCoord, type: TileType) {
     this.coord = coord;
