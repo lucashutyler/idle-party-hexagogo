@@ -75,18 +75,11 @@ export class ServerParty {
       return false;
     }
 
-    if (this.state === 'moving') {
-      return false;
-    }
-
     const nextTile = this.movementQueue.shift()!;
-    this.targetTile = nextTile;
-    this.setState('moving');
 
-    // Server movement is instant — no animation
+    // Server movement is instant — just update position
     this.currentTile = nextTile;
     this.targetTile = null;
-    this.setState('idle');
     this.onTileReached?.(nextTile);
 
     if (this.movementQueue.length === 0) {

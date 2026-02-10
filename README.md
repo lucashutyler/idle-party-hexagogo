@@ -32,8 +32,8 @@ TypeScript throughout. Vite for client bundling.
 - [ ] Multiple regions/zones
 
 ### Combat
-- [x] Auto-battle state machine (client-side prototype)
-- [x] Victory/defeat outcomes
+- [x] Auto-battle state machine (server-authoritative, always fighting)
+- [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
 - [ ] Class-based combat (classes weak solo, strong in party)
 - [ ] Monster definitions and balancing

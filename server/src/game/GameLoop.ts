@@ -53,9 +53,8 @@ export class GameLoop {
       },
     });
 
-    this.party.onTileReached = () => {
-      this.broadcastState();
-    };
+    // onTileReached — no separate broadcast needed; the battle timer's
+    // onStateChange (from showBattleResult → setState('result')) covers it.
 
     console.log(`Game loop started. Map: ${this.grid.size} tiles, ${this.unlockSystem.unlockedCount} unlocked`);
   }
@@ -73,10 +72,8 @@ export class GameLoop {
 
     const success = this.party.setDestination(tile);
 
-    if (success && this.battleTimer.currentState === 'moving') {
-      this.battleTimer.start();
-    }
-
+    // No need to start the battle loop — it's always running.
+    // The new destination will be picked up at the next result window.
     this.broadcastState();
     return success;
   }

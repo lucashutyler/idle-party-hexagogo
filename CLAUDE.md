@@ -10,6 +10,7 @@ Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters f
 - **Weak solo, strong together** — every class benefits greatly from partying with any other class
 - **Henchmen** — hireable NPCs for players without friends online yet
 - **Always running** — game state persists and progresses whether connected or not
+- **Always in combat** — the party is never truly idle; combat triggers continuously on every tile (towns, forests, etc.). The cycle is: 2s battle → 1s result window (celebration + optional movement) → repeat. Movement consumes part of the 1s result window so the gap between combats is always exactly 1s. The battle loop starts on server init and never stops.
 - **Server authoritative** — combat resolved server-side, updates pushed to clients
 - **Database-driven content** — tiles, monsters, quests stored in DB, managed via game manager
 - **Instanced worlds** — soft-capped at 1000 players; invites allowed beyond cap, no random joins
@@ -42,8 +43,8 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   │   └── WorldMapScene.ts   # Main scene — rendering, input, camera
 │   ├── entities/
 │   │   └── Party.ts           # Client party — sprites, tweens, visuals
-│   ├── systems/
-│   │   └── BattleTimer.ts     # Client battle timer (Phaser timers)
+│   ├── network/
+│   │   └── GameClient.ts      # WebSocket client (connects to server)
 │   └── ui/
 │       └── UIManager.ts       # HTML overlay UI (status bar)
 ├── index.html
@@ -76,7 +77,7 @@ npm run typecheck    # tsc --build (all packages)
 
 - **Hex coordinates**: Cube coordinates (q, r, s) where q + r + s = 0, flat-top hexagons, HEX_SIZE = 40px
 - **Event-driven**: Systems use callback properties (`onTileReached`, `onBattleEnd`, `onTilesUnlocked`) — scene subscribes for state sync
-- **State machines**: `BattleTimer` (`moving` | `battle`), `Party` (`idle` | `moving` | `in_battle`)
+- **State machines**: `ServerBattleTimer` (`battle` | `result`), `ServerParty` (`idle` | `moving` | `in_battle`). The battle loop runs from server start and never stops: `battle` (2s) → `result` (1s celebration/move window) → `battle` → … Movement happens instantly at the start of the result window; the client animates the tween during the celebration pause.
 - **Separation of concerns**: Phaser Graphics for rendering, HTML overlay for UI (camera-independent), pure logic in systems
 - **A* pathfinding**: Hex distance heuristic with cross-track tie-breaker
 

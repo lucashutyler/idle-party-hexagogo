@@ -2,7 +2,6 @@ import {
   BATTLE_DURATION,
   RESULT_DURATION,
   DEFEAT_CHANCE,
-  MOVE_DURATION,
 } from '@idle-party-rpg/shared';
 import type { BattleTimerState, BattleResult, BattleVisual } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty';
@@ -16,13 +15,12 @@ export interface ServerBattleCallbacks {
 
 export class ServerBattleTimer {
   private party: ServerParty;
-  private state: BattleTimerState = 'moving';
+  private state: BattleTimerState = 'battle';
   private currentVisual: BattleVisual = 'none';
   private currentResult?: BattleResult;
 
   private battleTimeout?: ReturnType<typeof setTimeout>;
   private resultTimeout?: ReturnType<typeof setTimeout>;
-  private moveTimeout?: ReturnType<typeof setTimeout>;
 
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
@@ -39,24 +37,14 @@ export class ServerBattleTimer {
       this.canMoveToNextTile = callbacks.canMoveToNextTile;
     }
 
-    // Start the battle loop
-    setTimeout(() => this.triggerBattle(), 100);
-  }
-
-  start(): void {
-    if (this.state !== 'battle') {
-      this.triggerBattle();
-    }
-  }
-
-  stop(): void {
-    this.clearTimers();
+    // Always fighting — start the loop immediately
+    this.triggerBattle();
   }
 
   private triggerBattle(): void {
-    this.setState('battle');
     this.currentVisual = 'fighting';
     this.party.enterBattle();
+    this.setState('battle');
     this.onBattleStart?.();
 
     this.battleTimeout = setTimeout(() => this.showBattleResult(), BATTLE_DURATION);
@@ -69,14 +57,8 @@ export class ServerBattleTimer {
     this.currentResult = result;
     this.currentVisual = result === 'victory' ? 'victory' : 'defeat';
     this.party.exitBattle();
-    this.onBattleEnd?.(result);
 
-    this.resultTimeout = setTimeout(() => this.resolveBattle(result), RESULT_DURATION);
-  }
-
-  private resolveBattle(result: BattleResult): void {
-    this.currentVisual = 'none';
-
+    // Move during the result window (server-instant; client tweens the animation)
     const canMove = this.party.hasDestination && (
       result === 'victory' ||
       (this.canMoveToNextTile?.() ?? false)
@@ -85,10 +67,19 @@ export class ServerBattleTimer {
     if (canMove) {
       this.party.moveToNextTile();
     }
-    this.setState('moving');
 
-    // Wait for move duration then trigger next battle
-    this.moveTimeout = setTimeout(() => this.triggerBattle(), MOVE_DURATION);
+    this.setState('result');
+    this.onBattleEnd?.(result);
+
+    // After the result/celebration window, next battle begins
+    this.resultTimeout = setTimeout(() => this.resolveBattle(), RESULT_DURATION);
+  }
+
+  private resolveBattle(): void {
+    this.currentVisual = 'none';
+
+    // Always fight — next battle immediately
+    this.triggerBattle();
   }
 
   private clearTimers(): void {
@@ -99,10 +90,6 @@ export class ServerBattleTimer {
     if (this.resultTimeout) {
       clearTimeout(this.resultTimeout);
       this.resultTimeout = undefined;
-    }
-    if (this.moveTimeout) {
-      clearTimeout(this.moveTimeout);
-      this.moveTimeout = undefined;
     }
   }
 
