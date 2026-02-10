@@ -1,4 +1,4 @@
-import { CubeCoord, cubeToKey, getNeighbors, cubeEquals, offsetToCube } from '../utils/HexUtils';
+import { CubeCoord, cubeToKey, getNeighbors, cubeEquals, offsetToCube } from './HexUtils';
 import { HexTile, TileType } from './HexTile';
 import { MapSchema } from './MapSchema';
 

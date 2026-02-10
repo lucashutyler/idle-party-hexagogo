@@ -1,5 +1,5 @@
-import { HexTile } from '../map/HexTile';
-import { HexGrid } from '../map/HexGrid';
+import { HexTile } from '../hex/HexTile';
+import { HexGrid } from '../hex/HexGrid';
 
 /**
  * Tracks which tiles have been unlocked by the player.
@@ -80,6 +80,13 @@ export class UnlockSystem {
       }
     }
     return tiles;
+  }
+
+  /**
+   * Get all unlocked tile keys.
+   */
+  getUnlockedKeys(): string[] {
+    return Array.from(this.unlockedKeys);
   }
 
   /**

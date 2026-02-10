@@ -1,24 +1,28 @@
 import Phaser from 'phaser';
-import { HexGrid } from '../map/HexGrid';
-import { HexTile, TileType } from '../map/HexTile';
-import { generateWorldMap, getStartingPosition } from '../map/MapData';
-import { Party } from '../entities/Party';
-import { BattleTimer } from '../systems/BattleTimer';
-import { UnlockSystem } from '../systems/UnlockSystem';
-import { UIManager } from '../ui/UIManager';
 import {
+  HexGrid,
+  TileType,
+  generateWorldMap,
   HEX_SIZE,
   getHexCorners,
   pixelToCube,
   offsetToCube,
-} from '../utils/HexUtils';
+  cubeToPixel,
+  cubeToOffset,
+} from '@idle-party-rpg/shared';
+import type { ServerStateMessage } from '@idle-party-rpg/shared';
+import { Party } from '../entities/Party';
+import { GameClient } from '../network/GameClient';
+import { UIManager } from '../ui/UIManager';
 
 export class WorldMapScene extends Phaser.Scene {
   private grid!: HexGrid;
-  private party!: Party;
-  private battleTimer!: BattleTimer;
-  private unlockSystem!: UnlockSystem;
+  private party?: Party;
+  private gameClient!: GameClient;
   private uiManager!: UIManager;
+
+  /** Set of tile keys the server says are unlocked. */
+  private unlockedKeys = new Set<string>();
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
@@ -43,10 +47,10 @@ export class WorldMapScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Generate the map from schema
+    // Generate the map from schema (used for rendering / tile lookup only)
     this.grid = generateWorldMap();
 
-    // Create HTML-based UI (separate from canvas zoom/pan)
+    // Create HTML-based UI
     this.uiManager = new UIManager();
 
     // Create graphics layers
@@ -54,80 +58,71 @@ export class WorldMapScene extends Phaser.Scene {
     this.pathGraphics = this.add.graphics();
     this.highlightGraphics = this.add.graphics();
 
-    // Create the party
-    const startPos = getStartingPosition();
-    const startCoord = offsetToCube(startPos);
-    const startTile = this.grid.getTile(startCoord);
-
-    if (!startTile) {
-      console.error('Invalid starting position');
-      return;
-    }
-
-    // Create unlock system BEFORE rendering (so tiles show correct unlock state)
-    this.unlockSystem = new UnlockSystem(this.grid, startTile);
-    this.unlockSystem.onTilesUnlocked = (tiles) => {
-      // Re-render grid to show newly unlocked tiles
-      this.renderGrid();
-      console.log(`Unlocked ${tiles.length} new tiles!`);
-    };
-
-    // Render the hex grid (after unlock system is created)
+    // Render the hex grid (all locked initially — server will tell us what's unlocked)
     this.renderGrid();
 
-    this.party = new Party(this, this.grid, startTile, this.mapOffsetX, this.mapOffsetY);
-
-    // Create battle timer - set up callbacks BEFORE creating timer
-    // (timer triggers first battle immediately in constructor)
-    this.battleTimer = new BattleTimer(this, this.party, {
-      onStateChange: () => {
-        this.updateStatusText();
-      },
-      onBattleEnd: (result) => {
-        if (result === 'victory') {
-          // Unlock adjacent tiles on victory
-          this.unlockSystem.unlockAdjacentTiles(this.party.tile);
-        }
-        this.updateStatusText();
-      },
-      canMoveToNextTile: () => {
-        // Check if the next tile in the path is unlocked
-        const nextTile = this.party.nextTile;
-        return nextTile ? this.unlockSystem.isUnlocked(nextTile) : false;
-      },
-    });
-
-    // Set up party callbacks
-    this.party.onDestinationReached = () => {
-      this.clearPath();
-      this.updateStatusText();
-    };
-
-    this.party.onTileReached = () => {
-      this.updatePathDisplay();
-    };
-
-    // Set up camera
+    // Set up camera + input
     this.setupCamera();
     this.setupDragPanning();
-
-    // Center camera on party
-    this.centerCameraOnParty();
-
-    // Set up input
     this.setupInput();
 
-    // Initial status
-    this.updateStatusText();
+    // Connect to server
+    this.gameClient = new GameClient();
+    this.gameClient.onState = (state) => this.applyServerState(state);
+    this.gameClient.onConnectionChange = (connected) => {
+      this.uiManager.setStatus(connected ? 'Connected' : 'Disconnected — reconnecting...');
+    };
+
+    this.uiManager.setStatus('Connecting...');
   }
 
-  private centerCameraOnParty(): void {
-    const sprite = this.party.getSprite();
-    this.cameras.main.centerOn(sprite.x, sprite.y);
+  // ── Server state ─────────────────────────────────────────────
+
+  private applyServerState(state: ServerStateMessage): void {
+    const snap = this.gameClient.isInitialState;
+
+    // Update unlocked set & re-render if changed
+    const newKeys = new Set(state.unlocked);
+    if (newKeys.size !== this.unlockedKeys.size || !this.setsEqual(newKeys, this.unlockedKeys)) {
+      this.unlockedKeys = newKeys;
+      this.renderGrid();
+    }
+
+    // Create party lazily on first state
+    if (!this.party) {
+      this.party = new Party(
+        this,
+        state.party.col,
+        state.party.row,
+        this.mapOffsetX,
+        this.mapOffsetY,
+      );
+
+      // Center camera on party
+      const sprite = this.party.getSprite();
+      this.cameras.main.centerOn(sprite.x, sprite.y);
+    }
+
+    // Apply position & visual
+    this.party.applyServerState(state.party, state.battle.visual, snap);
+
+    // Update path display from server-provided path
+    this.updatePathFromServer(state.party.path);
+
+    // Update status text
+    this.updateStatusText(state);
   }
+
+  private setsEqual(a: Set<string>, b: Set<string>): boolean {
+    for (const key of a) {
+      if (!b.has(key)) return false;
+    }
+    return true;
+  }
+
+  // ── Rendering ────────────────────────────────────────────────
 
   private renderGrid(): void {
-    // Clear previous graphics
     this.tileGraphics.clear();
 
     // Destroy old tile icons
@@ -139,23 +134,17 @@ export class WorldMapScene extends Phaser.Scene {
     const corners = getHexCorners(HEX_SIZE);
 
     for (const tile of this.grid.getAllTiles()) {
-      // Skip rendering void tiles (they're holes)
-      if (tile.type === TileType.Void) {
-        continue;
-      }
+      if (tile.type === TileType.Void) continue;
 
       const pos = tile.pixelPosition;
       const x = pos.x + this.mapOffsetX;
       const y = pos.y + this.mapOffsetY;
 
-      // Check if tile is unlocked
-      const isUnlocked = this.unlockSystem?.isUnlocked(tile) ?? false;
-
-      // Locked tiles are darker and more transparent
+      const isUnlocked = this.unlockedKeys.has(tile.key);
       const alpha = isUnlocked ? 1 : 0.4;
       const color = isUnlocked ? tile.color : this.darkenColor(tile.color, 0.5);
 
-      // Draw hex fill
+      // Fill
       this.tileGraphics.fillStyle(color, alpha);
       this.tileGraphics.beginPath();
       this.tileGraphics.moveTo(x + corners[0].x, y + corners[0].y);
@@ -165,7 +154,7 @@ export class WorldMapScene extends Phaser.Scene {
       this.tileGraphics.closePath();
       this.tileGraphics.fillPath();
 
-      // Draw hex outline - locked tiles have darker outline
+      // Outline
       const outlineColor = isUnlocked ? 0x1a1a2e : 0x0a0a1e;
       const outlineAlpha = isUnlocked ? 0.5 : 0.3;
       this.tileGraphics.lineStyle(2, outlineColor, outlineAlpha);
@@ -177,14 +166,11 @@ export class WorldMapScene extends Phaser.Scene {
       this.tileGraphics.closePath();
       this.tileGraphics.strokePath();
 
-      // Draw icons for special tiles (only if unlocked or partially visible)
-      this.drawTileIcon(tile, x, y, isUnlocked);
+      // Icons
+      this.drawTileIcon(tile.type, x, y, isUnlocked);
     }
   }
 
-  /**
-   * Darken a color by a factor (0-1, where 0 is black and 1 is original).
-   */
   private darkenColor(color: number, factor: number): number {
     const r = Math.floor(((color >> 16) & 0xff) * factor);
     const g = Math.floor(((color >> 8) & 0xff) * factor);
@@ -192,10 +178,10 @@ export class WorldMapScene extends Phaser.Scene {
     return (r << 16) | (g << 8) | b;
   }
 
-  private drawTileIcon(tile: HexTile, x: number, y: number, isUnlocked: boolean): void {
+  private drawTileIcon(type: TileType, x: number, y: number, isUnlocked: boolean): void {
     let icon = '';
 
-    switch (tile.type) {
+    switch (type) {
       case TileType.Town:
         icon = '🏠';
         break;
@@ -214,32 +200,77 @@ export class WorldMapScene extends Phaser.Scene {
     }
 
     if (icon) {
-      const text = this.add.text(x, y, icon, {
-        fontSize: '20px',
-      });
+      const text = this.add.text(x, y, icon, { fontSize: '20px' });
       text.setOrigin(0.5);
       text.setDepth(10);
-      // Fade icons on locked tiles
       text.setAlpha(isUnlocked ? 1 : 0.3);
-      // Store for cleanup on re-render
       this.tileIcons.push(text);
     }
   }
 
+  private updatePathFromServer(path: { col: number; row: number }[]): void {
+    this.pathGraphics.clear();
+    if (path.length === 0) return;
+
+    const corners = getHexCorners(HEX_SIZE * 0.3);
+
+    for (const step of path) {
+      const pixel = cubeToPixel(offsetToCube({ col: step.col, row: step.row }));
+      const x = pixel.x + this.mapOffsetX;
+      const y = pixel.y + this.mapOffsetY;
+
+      this.pathGraphics.fillStyle(0xffff00, 0.4);
+      this.pathGraphics.beginPath();
+      this.pathGraphics.moveTo(x + corners[0].x, y + corners[0].y);
+      for (let i = 1; i < 6; i++) {
+        this.pathGraphics.lineTo(x + corners[i].x, y + corners[i].y);
+      }
+      this.pathGraphics.closePath();
+      this.pathGraphics.fillPath();
+    }
+
+    // Destination marker
+    const dest = path[path.length - 1];
+    const destPixel = cubeToPixel(offsetToCube({ col: dest.col, row: dest.row }));
+    this.pathGraphics.fillStyle(0x00ff00, 0.6);
+    this.pathGraphics.fillCircle(
+      destPixel.x + this.mapOffsetX,
+      destPixel.y + this.mapOffsetY,
+      8,
+    );
+  }
+
+  private updateStatusText(state: ServerStateMessage): void {
+    const battleState = state.battle.state;
+    const remaining = state.party.path.length;
+
+    let status = `State: ${battleState}`;
+    if (state.battle.visual !== 'none') {
+      status += ` (${state.battle.visual})`;
+    }
+    if (remaining > 0) {
+      status += ` | Tiles remaining: ${remaining}`;
+    } else {
+      status += ' | Click a tile to travel';
+    }
+
+    this.uiManager.setStatus(status);
+  }
+
+  // ── Camera & Input ───────────────────────────────────────────
+
   private setupCamera(): void {
-    // Enable zoom with mouse wheel
     this.input.on('wheel', (
       _pointer: Phaser.Input.Pointer,
       _gameObjects: Phaser.GameObjects.GameObject[],
       _deltaX: number,
-      deltaY: number
+      deltaY: number,
     ) => {
       const camera = this.cameras.main;
       const zoomDelta = deltaY > 0 ? -0.1 : 0.1;
       camera.zoom = Phaser.Math.Clamp(camera.zoom + zoomDelta, 0.5, 2);
     });
 
-    // Pan with arrow keys
     this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
       const camera = this.cameras.main;
       const panSpeed = 10;
@@ -262,11 +293,9 @@ export class WorldMapScene extends Phaser.Scene {
   }
 
   private setupDragPanning(): void {
-    // Track drag distance to distinguish click from drag
     let dragDistance = 0;
     const DRAG_THRESHOLD = 5;
 
-    // Start drag on left-click
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.leftButtonDown()) {
         this.isDragging = true;
@@ -276,7 +305,6 @@ export class WorldMapScene extends Phaser.Scene {
       }
     });
 
-    // Pan while dragging
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (this.isDragging && pointer.isDown) {
         const camera = this.cameras.main;
@@ -293,15 +321,12 @@ export class WorldMapScene extends Phaser.Scene {
       }
     });
 
-    // Stop dragging on pointer up
     this.input.on('pointerup', () => {
-      // Store whether this was a drag or click before resetting
       this.wasDragging = dragDistance > DRAG_THRESHOLD;
       this.isDragging = false;
       dragDistance = 0;
     });
 
-    // Also stop if pointer leaves the game
     this.input.on('pointerupoutside', () => {
       this.isDragging = false;
       dragDistance = 0;
@@ -309,9 +334,7 @@ export class WorldMapScene extends Phaser.Scene {
   }
 
   private setupInput(): void {
-    // Handle click on pointerup to distinguish from drag
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      // Only handle as click if it wasn't a drag
       if (!this.wasDragging) {
         this.handleClick(pointer);
       }
@@ -335,26 +358,13 @@ export class WorldMapScene extends Phaser.Scene {
     if (!tile) return;
 
     if (!tile.isTraversable) {
-      // Show feedback for impassable tile
-      this.flashTile(tile, 0xff0000);
+      this.flashTile(tile.pixelPosition, 0xff0000);
       return;
     }
 
-    // Set destination (allow moving through fog - we'll keep trying if we lose battles)
-    const success = this.party.setDestination(tile);
-
-    if (success) {
-      this.updatePathDisplay();
-
-      // Trigger battle immediately if in moving state
-      if (this.battleTimer.currentState === 'moving') {
-        this.battleTimer.start();
-      }
-    } else {
-      this.flashTile(tile, 0xffff00);
-    }
-
-    this.updateStatusText();
+    // Send move command to server — server will pathfind and respond with state
+    const offset = cubeToOffset(cubeCoord);
+    this.gameClient.sendMove(offset.col, offset.row);
   }
 
   private handleHover(pointer: Phaser.Input.Pointer): void {
@@ -369,7 +379,6 @@ export class WorldMapScene extends Phaser.Scene {
 
     if (!tile) return;
 
-    // Highlight hovered tile
     const corners = getHexCorners(HEX_SIZE);
     const pos = tile.pixelPosition;
     const x = pos.x + this.mapOffsetX;
@@ -386,48 +395,8 @@ export class WorldMapScene extends Phaser.Scene {
     this.highlightGraphics.strokePath();
   }
 
-  private updatePathDisplay(): void {
-    this.pathGraphics.clear();
-
-    const path = this.party.remainingPath;
-    if (path.length === 0) return;
-
-    const corners = getHexCorners(HEX_SIZE * 0.3);
-
-    // Draw path tiles
-    for (const tile of path) {
-      const pos = tile.pixelPosition;
-      const x = pos.x + this.mapOffsetX;
-      const y = pos.y + this.mapOffsetY;
-
-      this.pathGraphics.fillStyle(0xffff00, 0.4);
-      this.pathGraphics.beginPath();
-      this.pathGraphics.moveTo(x + corners[0].x, y + corners[0].y);
-      for (let i = 1; i < 6; i++) {
-        this.pathGraphics.lineTo(x + corners[i].x, y + corners[i].y);
-      }
-      this.pathGraphics.closePath();
-      this.pathGraphics.fillPath();
-    }
-
-    // Draw destination marker
-    const destination = path[path.length - 1];
-    const destPos = destination.pixelPosition;
-    this.pathGraphics.fillStyle(0x00ff00, 0.6);
-    this.pathGraphics.fillCircle(
-      destPos.x + this.mapOffsetX,
-      destPos.y + this.mapOffsetY,
-      8
-    );
-  }
-
-  private clearPath(): void {
-    this.pathGraphics.clear();
-  }
-
-  private flashTile(tile: HexTile, color: number): void {
+  private flashTile(pos: { x: number; y: number }, color: number): void {
     const corners = getHexCorners(HEX_SIZE);
-    const pos = tile.pixelPosition;
     const x = pos.x + this.mapOffsetX;
     const y = pos.y + this.mapOffsetY;
 
@@ -449,25 +418,12 @@ export class WorldMapScene extends Phaser.Scene {
     });
   }
 
-  private updateStatusText(): void {
-    const battleState = this.battleTimer.currentState;
-    const remaining = this.party.remainingPath.length;
-
-    let status = `State: ${battleState}`;
-    if (remaining > 0) {
-      status += ` | Tiles remaining: ${remaining}`;
-    } else {
-      status += ' | Click a tile to travel';
-    }
-
-    this.uiManager.setStatus(status);
-  }
-
   update(): void {
-    this.battleTimer.update();
+    // No-op — all updates are driven by server state callbacks
   }
 
   shutdown(): void {
+    this.gameClient.destroy();
     this.uiManager.destroy();
   }
 }

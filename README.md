@@ -34,7 +34,7 @@ TypeScript throughout. Vite for client bundling.
 ### Combat
 - [x] Auto-battle state machine (client-side prototype)
 - [x] Victory/defeat outcomes
-- [ ] Server-side combat resolution (clients receive updates)
+- [x] Server-side combat resolution (clients receive updates)
 - [ ] Class-based combat (classes weak solo, strong in party)
 - [ ] Monster definitions and balancing
 - [ ] Loot/rewards system
@@ -60,11 +60,11 @@ TypeScript throughout. Vite for client bundling.
 - [ ] Quest chains / storylines
 
 ### Server
-- [ ] Node.js/TypeScript server
+- [x] Node.js/TypeScript server
 - [ ] Persistent game state (runs 24/7, resumable)
 - [ ] Instanced worlds (soft-cap 1000 players)
 - [ ] Player authentication
-- [ ] Real-time client sync
+- [x] Real-time client sync
 
 ### UI
 - [x] Map tab with hex rendering
@@ -81,7 +81,7 @@ TypeScript throughout. Vite for client bundling.
 - [ ] Game designer access only
 
 ### Infrastructure
-- [ ] Monorepo structure (client/, server/, game-manager/)
-- [ ] Single `npm run dev` runs all subprojects
-- [ ] Test coverage
-- [ ] Shared types package between client/server
+- [x] Monorepo structure (client/, server/, game-manager/)
+- [x] Single `npm run dev` runs all subprojects
+- [x] Test coverage
+- [x] Shared types package between client/server

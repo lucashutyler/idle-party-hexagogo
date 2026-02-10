@@ -15,48 +15,61 @@ Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters f
 - **Instanced worlds** — soft-capped at 1000 players; invites allowed beyond cap, no random joins
 - **Web-first** — mobile-friendly is the primary use case, desktop fully supported
 
-## Monorepo Structure (Target)
+## Monorepo Structure
+
+npm workspaces monorepo. `npm run dev` runs server + client concurrently.
 
 ```
-client/           Phaser 3 web client — tab-based UI (map, character, party, combat, town)
-server/           Node.js/TypeScript game server — persistent state, combat resolution
-game-manager/     Admin client for game designers — monster, area, quest editors
-```
+shared/                        @idle-party-rpg/shared — pure logic, types, constants
+├── src/
+│   ├── hex/
+│   │   ├── HexUtils.ts        # Hex math (cube coordinates, conversions)
+│   │   ├── HexTile.ts         # Tile types, configs, HexTile class
+│   │   ├── HexGrid.ts         # Hex grid data structure & algorithms
+│   │   ├── HexPathfinder.ts   # A* pathfinding on hex grid
+│   │   ├── MapSchema.ts       # World map definition (will move to DB)
+│   │   └── MapData.ts         # Map generation from schema
+│   ├── systems/
+│   │   ├── BattleTypes.ts     # Battle state types & constants
+│   │   └── UnlockSystem.ts    # Tile unlock tracking & progression
+│   └── index.ts               # Barrel export
+└── tests/                     # Vitest tests for shared logic
 
-`npm run dev` will run all three subprojects.
+client/                        @idle-party-rpg/client — Phaser 3 web client
+├── src/
+│   ├── main.ts                # Entry point — Phaser game config
+│   ├── scenes/
+│   │   └── WorldMapScene.ts   # Main scene — rendering, input, camera
+│   ├── entities/
+│   │   └── Party.ts           # Client party — sprites, tweens, visuals
+│   ├── systems/
+│   │   └── BattleTimer.ts     # Client battle timer (Phaser timers)
+│   └── ui/
+│       └── UIManager.ts       # HTML overlay UI (status bar)
+├── index.html
+└── vite.config.ts
 
-## Current Structure (Pre-Monorepo)
+server/                        @idle-party-rpg/server — Node.js game server
+├── src/
+│   ├── index.ts               # Express + WebSocket server
+│   └── game/
+│       ├── GameLoop.ts        # Server-side game loop
+│       ├── ServerBattleTimer.ts # Server battle timer (setTimeout)
+│       └── ServerParty.ts     # Server party state (no rendering)
 
-All code currently lives in `src/` as a single Phaser client:
-
-```
-src/
-├── main.ts                    # Entry point — Phaser game config
-├── scenes/
-│   └── WorldMapScene.ts       # Main scene — rendering, input, camera
-├── entities/
-│   └── Party.ts               # Party movement, state, visuals
-├── map/
-│   ├── HexGrid.ts             # Hex grid data structure & algorithms
-│   ├── HexTile.ts             # Tile definition & config
-│   ├── HexPathfinder.ts       # A* pathfinding on hex grid
-│   ├── MapData.ts             # Map generation from schema
-│   └── MapSchema.ts           # World map definition (will move to DB)
-├── systems/
-│   ├── BattleTimer.ts         # Battle state machine & timing
-│   └── UnlockSystem.ts        # Tile unlock tracking & progression
-├── ui/
-│   └── UIManager.ts           # HTML overlay UI (status bar)
-└── utils/
-    └── HexUtils.ts            # Hex math (cube coordinates, conversions)
+game-manager/                  @idle-party-rpg/game-manager — placeholder
 ```
 
 ## Commands
 
 ```bash
-npm run dev       # Start dev server (currently client only, will run all subprojects)
-npm run build     # tsc + vite build → dist/
-npm run test      # Run all tests (not yet configured)
+npm run dev          # Start server (:3001) + client (:3000) concurrently
+npm run dev:client   # Client only
+npm run dev:server   # Server only
+npm run build        # Build shared → client → server
+npm run test         # Run all tests (vitest)
+npm run test:shared  # Shared package tests only
+npm run typecheck    # tsc --build (all packages)
 ```
 
 ## Architecture & Patterns
@@ -73,7 +86,7 @@ npm run test      # Run all tests (not yet configured)
 - **Semicolons**: Always
 - **Naming**: PascalCase classes, camelCase methods/properties, UPPER_SNAKE_CASE constants
 - **Strict TS**: No implicit any, no unused locals/parameters, no fallthrough in switch
-- **Imports**: Explicit relative paths (no barrel imports)
+- **Imports**: Client/server import shared via `@idle-party-rpg/shared`; within-package imports use relative paths
 - **Class layout**: Properties → constructor → public methods → private methods
 - **Error handling**: Defensive checks with early returns
 - **README checklists**: The README.md roadmap uses `[x]`/`[ ]` checklists — check items off as they are completed
