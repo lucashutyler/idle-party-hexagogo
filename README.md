@@ -1,0 +1,87 @@
+# Idle Party RPG
+
+An idle multiplayer RPG on a hexagonal world map. Characters fight, move, and progress whether you're online or not. Party up with other players — every class is stronger together.
+
+## Quick Start
+
+```bash
+npm install
+npm run dev       # runs client, server, and game manager
+npm run test      # run all tests
+```
+
+## Architecture
+
+```
+client/           Phaser 3 web client — tab-based UI, mobile-friendly
+server/           Node.js game server — persistent 24/7 game state
+game-manager/     Admin tool for game designers — monsters, areas, quests
+```
+
+TypeScript throughout. Vite for client bundling.
+
+## Roadmap
+
+### World Map
+- [x] Hex grid with cube coordinates
+- [x] A* pathfinding
+- [x] Tile unlocking on victory (fog of war)
+- [x] Camera zoom/pan
+- [ ] Database-driven tile storage (managed via game manager)
+- [ ] Server-driven map state
+- [ ] Multiple regions/zones
+
+### Combat
+- [x] Auto-battle state machine (client-side prototype)
+- [x] Victory/defeat outcomes
+- [ ] Server-side combat resolution (clients receive updates)
+- [ ] Class-based combat (classes weak solo, strong in party)
+- [ ] Monster definitions and balancing
+- [ ] Loot/rewards system
+
+### Characters & Parties
+- [x] Party entity with movement
+- [ ] Individual character creation (one per player)
+- [ ] Class system (weak solo, strong together)
+- [ ] Henchmen (hireable NPCs for solo players)
+- [ ] Party formation and management
+- [ ] Character progression/leveling
+
+### Towns & Economy
+- [ ] Town interactions (shops, inns, etc.)
+- [ ] Currency system
+- [ ] Item/equipment system
+- [ ] Trading between players
+
+### Quests
+- [ ] Quest system framework
+- [ ] Quest types (kill, fetch, explore, escort)
+- [ ] Quest rewards
+- [ ] Quest chains / storylines
+
+### Server
+- [ ] Node.js/TypeScript server
+- [ ] Persistent game state (runs 24/7, resumable)
+- [ ] Instanced worlds (soft-cap 1000 players)
+- [ ] Player authentication
+- [ ] Real-time client sync
+
+### UI
+- [x] Map tab with hex rendering
+- [x] Status bar overlay
+- [ ] Tab-based navigation (map, character, party, combat, town)
+- [ ] Mobile-friendly responsive design
+- [ ] Desktop and phone feature parity
+
+### Game Manager
+- [ ] Separate admin client
+- [ ] Monster editor
+- [ ] Area/zone editor
+- [ ] Quest editor
+- [ ] Game designer access only
+
+### Infrastructure
+- [ ] Monorepo structure (client/, server/, game-manager/)
+- [ ] Single `npm run dev` runs all subprojects
+- [ ] Test coverage
+- [ ] Shared types package between client/server
