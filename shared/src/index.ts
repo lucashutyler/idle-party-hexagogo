@@ -50,7 +50,7 @@ export type {
 } from './systems/BattleTypes';
 export {
   BATTLE_DURATION,
-  RESULT_DURATION,
-  DEFEAT_CHANCE,
+  RESULT_PAUSE,
   MOVE_DURATION,
+  DEFEAT_CHANCE,
 } from './systems/BattleTypes';

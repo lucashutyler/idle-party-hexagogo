@@ -10,7 +10,7 @@ Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters f
 - **Weak solo, strong together** — every class benefits greatly from partying with any other class
 - **Henchmen** — hireable NPCs for players without friends online yet
 - **Always running** — game state persists and progresses whether connected or not
-- **Always in combat** — the party is never truly idle; combat triggers continuously on every tile (towns, forests, etc.). The cycle is: 2s battle → 1s result window (celebration + optional movement) → repeat. Movement consumes part of the 1s result window so the gap between combats is always exactly 1s. The battle loop starts on server init and never stops.
+- **Always in combat** — the party is never truly idle; combat triggers continuously on every tile (towns, forests, etc.). The cycle is: 2s battle → 1s result window → repeat. If moving: 600ms celebration pause, then 400ms movement. If not moving: full 1s pause. The battle loop starts on server init and never stops.
 - **Server authoritative** — combat resolved server-side, updates pushed to clients
 - **Database-driven content** — tiles, monsters, quests stored in DB, managed via game manager
 - **Instanced worlds** — soft-capped at 1000 players; invites allowed beyond cap, no random joins

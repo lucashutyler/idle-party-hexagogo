@@ -1,6 +1,7 @@
 import {
   BATTLE_DURATION,
-  RESULT_DURATION,
+  RESULT_PAUSE,
+  MOVE_DURATION,
   DEFEAT_CHANCE,
 } from '@idle-party-rpg/shared';
 import type { BattleTimerState, BattleResult, BattleVisual } from '@idle-party-rpg/shared';
@@ -21,6 +22,7 @@ export class ServerBattleTimer {
 
   private battleTimeout?: ReturnType<typeof setTimeout>;
   private resultTimeout?: ReturnType<typeof setTimeout>;
+  private moveTimeout?: ReturnType<typeof setTimeout>;
 
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
@@ -58,28 +60,32 @@ export class ServerBattleTimer {
     this.currentVisual = result === 'victory' ? 'victory' : 'defeat';
     this.party.exitBattle();
 
-    // Move during the result window (server-instant; client tweens the animation)
+    // Notify battle end (unlocks adjacent tiles on victory) before move check,
+    // so newly unlocked tiles are available for movement this cycle.
+    this.onBattleEnd?.(result);
+
     const canMove = this.party.hasDestination && (
       result === 'victory' ||
       (this.canMoveToNextTile?.() ?? false)
     );
 
-    if (canMove) {
-      this.party.moveToNextTile();
-    }
-
     this.setState('result');
-    this.onBattleEnd?.(result);
 
-    // After the result/celebration window, next battle begins
-    this.resultTimeout = setTimeout(() => this.resolveBattle(), RESULT_DURATION);
-  }
-
-  private resolveBattle(): void {
-    this.currentVisual = 'none';
-
-    // Always fight — next battle immediately
-    this.triggerBattle();
+    if (canMove) {
+      // Pause for celebration, then move, then next battle after move completes
+      this.resultTimeout = setTimeout(() => {
+        this.party.moveToNextTile();
+        this.currentVisual = 'none';
+        this.onStateChange?.(this.state); // broadcast updated position
+        this.moveTimeout = setTimeout(() => this.triggerBattle(), MOVE_DURATION);
+      }, RESULT_PAUSE);
+    } else {
+      // No movement — full 1s celebration, then next battle
+      this.resultTimeout = setTimeout(() => {
+        this.currentVisual = 'none';
+        this.triggerBattle();
+      }, RESULT_PAUSE + MOVE_DURATION);
+    }
   }
 
   private clearTimers(): void {
@@ -90,6 +96,10 @@ export class ServerBattleTimer {
     if (this.resultTimeout) {
       clearTimeout(this.resultTimeout);
       this.resultTimeout = undefined;
+    }
+    if (this.moveTimeout) {
+      clearTimeout(this.moveTimeout);
+      this.moveTimeout = undefined;
     }
   }
 
