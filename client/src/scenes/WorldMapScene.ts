@@ -12,14 +12,10 @@ import {
 } from '@idle-party-rpg/shared';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import { Party } from '../entities/Party';
-import { GameClient } from '../network/GameClient';
-import { UIManager } from '../ui/UIManager';
 
 export class WorldMapScene extends Phaser.Scene {
   private grid!: HexGrid;
   private party?: Party;
-  private gameClient!: GameClient;
-  private uiManager!: UIManager;
 
   /** Set of tile keys the server says are unlocked. */
   private unlockedKeys = new Set<string>();
@@ -42,6 +38,12 @@ export class WorldMapScene extends Phaser.Scene {
   private dragStartX = 0;
   private dragStartY = 0;
 
+  // External move handler (set by MapScreen)
+  private sendMoveFn?: (col: number, row: number) => void;
+
+  // Track initial state for snap vs tween
+  private isFirstState = true;
+
   constructor() {
     super({ key: 'WorldMapScene' });
   }
@@ -49,9 +51,6 @@ export class WorldMapScene extends Phaser.Scene {
   create(): void {
     // Generate the map from schema (used for rendering / tile lookup only)
     this.grid = generateWorldMap();
-
-    // Create HTML-based UI
-    this.uiManager = new UIManager();
 
     // Create graphics layers
     this.tileGraphics = this.add.graphics();
@@ -65,21 +64,18 @@ export class WorldMapScene extends Phaser.Scene {
     this.setupCamera();
     this.setupDragPanning();
     this.setupInput();
-
-    // Connect to server
-    this.gameClient = new GameClient();
-    this.gameClient.onState = (state) => this.applyServerState(state);
-    this.gameClient.onConnectionChange = (connected) => {
-      this.uiManager.setStatus(connected ? 'Connected' : 'Disconnected — reconnecting...');
-    };
-
-    this.uiManager.setStatus('Connecting...');
   }
 
-  // ── Server state ─────────────────────────────────────────────
+  // ── External API ──────────────────────────────────────────
 
-  private applyServerState(state: ServerStateMessage): void {
-    const snap = this.gameClient.isInitialState;
+  /** Set the callback for sending move commands to the server. */
+  setSendMove(fn: (col: number, row: number) => void): void {
+    this.sendMoveFn = fn;
+  }
+
+  /** Apply a state update from the server. */
+  applyServerState(state: ServerStateMessage, snap?: boolean): void {
+    const shouldSnap = snap ?? this.isFirstState;
 
     // Update unlocked set & re-render if changed
     const newKeys = new Set(state.unlocked);
@@ -104,13 +100,20 @@ export class WorldMapScene extends Phaser.Scene {
     }
 
     // Apply position & visual
-    this.party.applyServerState(state.party, state.battle.visual, snap);
+    this.party.applyServerState(state.party, state.battle.visual, shouldSnap);
 
     // Update path display from server-provided path
     this.updatePathFromServer(state.party.path);
 
-    // Update status text
-    this.updateStatusText(state);
+    this.isFirstState = false;
+  }
+
+  /** Center the camera on the party sprite. */
+  centerOnParty(): void {
+    if (this.party) {
+      const sprite = this.party.getSprite();
+      this.cameras.main.centerOn(sprite.x, sprite.y);
+    }
   }
 
   private setsEqual(a: Set<string>, b: Set<string>): boolean {
@@ -120,7 +123,7 @@ export class WorldMapScene extends Phaser.Scene {
     return true;
   }
 
-  // ── Rendering ────────────────────────────────────────────────
+  // ── Rendering ────────────────────────────────────────────
 
   private renderGrid(): void {
     this.tileGraphics.clear();
@@ -240,24 +243,7 @@ export class WorldMapScene extends Phaser.Scene {
     );
   }
 
-  private updateStatusText(state: ServerStateMessage): void {
-    const battleState = state.battle.state;
-    const remaining = state.party.path.length;
-
-    let status = `State: ${battleState}`;
-    if (state.battle.visual !== 'none') {
-      status += ` (${state.battle.visual})`;
-    }
-    if (remaining > 0) {
-      status += ` | Tiles remaining: ${remaining}`;
-    } else {
-      status += ' | Click a tile to travel';
-    }
-
-    this.uiManager.setStatus(status);
-  }
-
-  // ── Camera & Input ───────────────────────────────────────────
+  // ── Camera & Input ───────────────────────────────────────
 
   private setupCamera(): void {
     this.input.on('wheel', (
@@ -362,9 +348,9 @@ export class WorldMapScene extends Phaser.Scene {
       return;
     }
 
-    // Send move command to server — server will pathfind and respond with state
+    // Send move command via external handler
     const offset = cubeToOffset(cubeCoord);
-    this.gameClient.sendMove(offset.col, offset.row);
+    this.sendMoveFn?.(offset.col, offset.row);
   }
 
   private handleHover(pointer: Phaser.Input.Pointer): void {
@@ -420,10 +406,5 @@ export class WorldMapScene extends Phaser.Scene {
 
   update(): void {
     // No-op — all updates are driven by server state callbacks
-  }
-
-  shutdown(): void {
-    this.gameClient.destroy();
-    this.uiManager.destroy();
   }
 }

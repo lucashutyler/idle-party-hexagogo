@@ -68,9 +68,12 @@ TypeScript throughout. Vite for client bundling.
 
 ### UI
 - [x] Map tab with hex rendering
-- [x] Status bar overlay
-- [ ] Tab-based navigation (map, character, party, combat, town)
-- [ ] Mobile-friendly responsive design
+- [x] Tab-based bottom navigation (Combat, Map, Party, Items, Settings)
+- [x] Mobile-first responsive design
+- [x] Pixel/retro RPG visual style (Press Start 2P font)
+- [x] Combat screen with battle stage, timer bar, and combat log
+- [x] Lazy-loaded Phaser (Map tab only loads on first visit)
+- [x] Nav bar battle status indicators (pulse/flash on combat events)
 - [ ] Desktop and phone feature parity
 
 ### Game Manager

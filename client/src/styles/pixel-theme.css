@@ -1,0 +1,437 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+/* ── CSS Custom Properties ───────────────────────────────── */
+
+:root {
+  --pixel-font: 'Press Start 2P', monospace;
+  --nav-height: 56px;
+
+  /* Backgrounds */
+  --bg-dark: #1a1a2e;
+  --bg-panel: #16213e;
+  --bg-panel-light: #0f3460;
+  --bg-input: #0d1b2a;
+
+  /* Borders */
+  --border-pixel: #533483;
+  --border-light: #7b5ea7;
+
+  /* Text */
+  --text-primary: #e8e8e8;
+  --text-secondary: #a0a0b0;
+  --text-dim: #606070;
+
+  /* Accents */
+  --accent-gold: #f5c842;
+  --accent-red: #ff6b6b;
+  --accent-green: #44ff88;
+  --accent-orange: #ffaa44;
+  --accent-blue: #4a90d9;
+  --accent-purple: #b06cff;
+}
+
+/* ── Base Reset & Layout ─────────────────────────────────── */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--pixel-font);
+  color: var(--text-primary);
+  background-color: var(--bg-dark);
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Screen Container ────────────────────────────────────── */
+
+#screen-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: none;
+  overflow: hidden;
+}
+
+.screen.active {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Pixel Panel (reusable) ──────────────────────────────── */
+
+.pixel-panel {
+  background: var(--bg-panel);
+  border: 2px solid var(--border-pixel);
+  box-shadow:
+    inset -2px -2px 0 rgba(0, 0, 0, 0.3),
+    inset 2px 2px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ── Bottom Nav ──────────────────────────────────────────── */
+
+#bottom-nav {
+  height: var(--nav-height);
+  background: var(--bg-panel);
+  border-top: 2px solid var(--border-pixel);
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  z-index: 1000;
+}
+
+.nav-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  position: relative;
+  padding: 4px 0;
+  transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nav-tab.active {
+  color: var(--accent-gold);
+}
+
+.nav-tab:not(.active):active {
+  color: var(--text-secondary);
+}
+
+.nav-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.nav-label {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: calc(50% - 16px);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: none;
+}
+
+.nav-badge.visible {
+  display: block;
+}
+
+/* Nav tab status animations */
+.nav-tab.fighting-pulse .nav-icon {
+  animation: icon-pulse 0.6s ease-in-out infinite;
+  color: var(--accent-orange);
+}
+
+.nav-tab.victory-flash .nav-icon {
+  animation: icon-flash-green 0.4s ease-out;
+}
+
+.nav-tab.defeat-flash .nav-icon {
+  animation: icon-flash-red 0.4s ease-out;
+}
+
+.nav-tab.has-path .nav-icon {
+  color: var(--accent-green);
+}
+
+/* ── Combat Screen ───────────────────────────────────────── */
+
+#screen-combat {
+  background: var(--bg-dark);
+}
+
+.combat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 8px;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-pixel);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.combat-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-red);
+  flex-shrink: 0;
+}
+
+.connection-dot.connected {
+  background: var(--accent-green);
+}
+
+.combat-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 16px;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.combat-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.combat-member {
+  width: 40px;
+  height: 48px;
+  border: 2px solid var(--border-light);
+  transition: background-color 0.2s;
+}
+
+.combat-member.party {
+  background: var(--accent-green);
+}
+
+.combat-member.enemy {
+  background: var(--accent-purple);
+}
+
+.combat-vs {
+  font-size: 16px;
+  color: var(--accent-gold);
+  font-family: var(--pixel-font);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* Combat state animations */
+.combat-stage.fighting .combat-member.party {
+  background: var(--accent-orange);
+  animation: member-shake 0.15s ease-in-out infinite alternate;
+}
+
+.combat-stage.fighting .combat-member.enemy {
+  animation: member-shake 0.15s ease-in-out infinite alternate-reverse;
+}
+
+.combat-stage.victory .combat-member.party {
+  background: var(--accent-green);
+  animation: member-bounce 0.4s ease-out;
+}
+
+.combat-stage.victory .combat-member.enemy {
+  opacity: 0.3;
+  transition: opacity 0.3s;
+}
+
+.combat-stage.defeat .combat-member.party {
+  background: var(--accent-red);
+  opacity: 0.5;
+}
+
+.combat-stage.defeat .combat-member.enemy {
+  animation: member-bounce 0.4s ease-out;
+}
+
+/* Combat timer bar */
+.combat-timer {
+  height: 4px;
+  background: var(--bg-input);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.combat-timer-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent-orange);
+  transition: none;
+}
+
+.combat-timer-fill.running {
+  animation: timer-fill 2s linear forwards;
+}
+
+.combat-timer-fill.victory {
+  width: 100%;
+  background: var(--accent-green);
+  animation: none;
+}
+
+.combat-timer-fill.defeat {
+  width: 100%;
+  background: var(--accent-red);
+  animation: none;
+}
+
+/* Combat log */
+.combat-log {
+  flex: 1;
+  min-height: 80px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border-top: 2px solid var(--border-pixel);
+  font-size: 8px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+
+.combat-log::-webkit-scrollbar {
+  width: 4px;
+}
+
+.combat-log::-webkit-scrollbar-track {
+  background: var(--bg-input);
+}
+
+.combat-log::-webkit-scrollbar-thumb {
+  background: var(--border-pixel);
+}
+
+.log-entry {
+  padding: 2px 0;
+}
+
+.log-entry.victory {
+  color: var(--accent-green);
+}
+
+.log-entry.defeat {
+  color: var(--accent-red);
+}
+
+.log-entry.battle {
+  color: var(--accent-orange);
+}
+
+.log-entry.move {
+  color: var(--accent-blue);
+}
+
+.log-entry.unlock {
+  color: var(--accent-gold);
+}
+
+/* ── Placeholder Screen ──────────────────────────────────── */
+
+.placeholder-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+}
+
+.placeholder-icon {
+  font-size: 48px;
+}
+
+.placeholder-title {
+  font-family: var(--pixel-font);
+  font-size: 14px;
+  color: var(--accent-gold);
+}
+
+.placeholder-text {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-dim);
+}
+
+/* ── Map Screen ──────────────────────────────────────────── */
+
+#screen-map {
+  display: none;
+}
+
+#screen-map.active {
+  display: block;
+}
+
+#game-container {
+  width: 100%;
+  height: 100%;
+}
+
+#game-container canvas {
+  display: block;
+}
+
+/* ── Keyframe Animations ─────────────────────────────────── */
+
+@keyframes icon-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+@keyframes icon-flash-green {
+  0% { color: var(--accent-green); transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+
+@keyframes icon-flash-red {
+  0% { color: var(--accent-red); transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+
+@keyframes member-shake {
+  0% { transform: translateX(-2px); }
+  100% { transform: translateX(2px); }
+}
+
+@keyframes member-bounce {
+  0% { transform: translateY(0); }
+  40% { transform: translateY(-12px); }
+  100% { transform: translateY(0); }
+}
+
+@keyframes timer-fill {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}

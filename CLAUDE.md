@@ -38,16 +38,24 @@ shared/                        @idle-party-rpg/shared — pure logic, types, con
 
 client/                        @idle-party-rpg/client — Phaser 3 web client
 ├── src/
-│   ├── main.ts                # Entry point — Phaser game config
+│   ├── main.ts                # Entry point — imports CSS, creates App
+│   ├── App.ts                 # App shell — wires screens, nav, GameClient
+│   ├── screens/
+│   │   ├── ScreenManager.ts   # Screen show/hide with activate/deactivate lifecycle
+│   │   ├── CombatScreen.ts    # Primary screen — battle stage, timer, combat log
+│   │   ├── MapScreen.ts       # Phaser wrapper — lazy-loads game, pause/resume
+│   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
 │   ├── scenes/
-│   │   └── WorldMapScene.ts   # Main scene — rendering, input, camera
+│   │   └── WorldMapScene.ts   # Phaser scene — hex rendering, input, camera
 │   ├── entities/
 │   │   └── Party.ts           # Client party — sprites, tweens, visuals
 │   ├── network/
-│   │   └── GameClient.ts      # WebSocket client (connects to server)
-│   └── ui/
-│       └── UIManager.ts       # HTML overlay UI (status bar)
-├── index.html
+│   │   └── GameClient.ts      # WebSocket client — subscriber pattern, multi-listener
+│   ├── ui/
+│   │   └── BottomNav.ts       # 5-tab pixel-styled bottom navigation bar
+│   └── styles/
+│       └── pixel-theme.css    # Global retro RPG styles, animations, layout
+├── index.html                 # App shell DOM (screen containers + nav)
 └── vite.config.ts
 
 server/                        @idle-party-rpg/server — Node.js game server
@@ -76,10 +84,23 @@ npm run typecheck    # tsc --build (all packages)
 ## Architecture & Patterns
 
 - **Hex coordinates**: Cube coordinates (q, r, s) where q + r + s = 0, flat-top hexagons, HEX_SIZE = 40px
+- **Multi-screen app shell**: DOM-based screen switching (not Phaser scenes). `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-loads Phaser on first visit.
+- **GameClient subscriber pattern**: `subscribe(cb)` / `onConnection(cb)` return unsubscribe functions. Multiple screens listen concurrently. `lastState` cache lets late-mounting screens read current state immediately.
+- **Phaser isolation**: Phaser only runs when the Map tab is active. `game.loop.sleep()`/`wake()` halts/restarts the entire RAF loop. On re-activation, state is snapped (not tweened) so the player sees "where I am now" with no catch-up animation.
 - **Event-driven**: Systems use callback properties (`onTileReached`, `onBattleEnd`, `onTilesUnlocked`) — scene subscribes for state sync
 - **State machines**: `ServerBattleTimer` (`battle` | `result`), `ServerParty` (`idle` | `moving` | `in_battle`). The battle loop runs from server start and never stops: `battle` (2s) → `result` (1s celebration/move window) → `battle` → … Movement happens instantly at the start of the result window; the client animates the tween during the celebration pause.
-- **Separation of concerns**: Phaser Graphics for rendering, HTML overlay for UI (camera-independent), pure logic in systems
+- **Separation of concerns**: Phaser Graphics for rendering, HTML/CSS for all non-map UI (camera-independent), pure logic in shared systems
 - **A* pathfinding**: Hex distance heuristic with cross-track tie-breaker
+- **Visual style**: Pixel/retro RPG — Press Start 2P font, CSS custom properties for theming, CSS keyframe animations for battle states. All UI is vanilla HTML/CSS (no framework).
+
+## Keeping Docs Current
+
+When making changes that affect architecture, patterns, file structure, or game design decisions, **always update this file (CLAUDE.md) and README.md** to reflect the new state. This is especially important for:
+- New screens, systems, or major features
+- Changes to the file tree or monorepo structure
+- New game design decisions or philosophy changes
+- Architecture pattern changes (e.g., new subscription models, state management)
+- README.md roadmap checkboxes — check items off as they are completed
 
 ## Code Conventions
 

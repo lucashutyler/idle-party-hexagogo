@@ -2,25 +2,40 @@ import type { ServerStateMessage, ServerMessage, ClientMessage } from '@idle-par
 
 const RECONNECT_DELAY = 2000;
 
+type StateListener = (state: ServerStateMessage) => void;
+type ConnectionListener = (connected: boolean) => void;
+
 export class GameClient {
   private ws: WebSocket | null = null;
   private url: string;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private destroyed = false;
 
+  private stateListeners = new Set<StateListener>();
+  private connectionListeners = new Set<ConnectionListener>();
+
   /** True on connect, false after first state message — used to snap vs tween. */
   isInitialState = true;
 
-  /** Called every time the server sends a full state update. */
-  onState?: (state: ServerStateMessage) => void;
-
-  /** Called on connection status changes. */
-  onConnectionChange?: (connected: boolean) => void;
+  /** Most recent state from the server (null until first message). */
+  lastState: ServerStateMessage | null = null;
 
   constructor() {
     const host = window.location.hostname || 'localhost';
     this.url = `ws://${host}:3001`;
     this.connect();
+  }
+
+  /** Subscribe to state updates. Returns an unsubscribe function. */
+  subscribe(listener: StateListener): () => void {
+    this.stateListeners.add(listener);
+    return () => { this.stateListeners.delete(listener); };
+  }
+
+  /** Subscribe to connection status changes. Returns an unsubscribe function. */
+  onConnection(listener: ConnectionListener): () => void {
+    this.connectionListeners.add(listener);
+    return () => { this.connectionListeners.delete(listener); };
   }
 
   private connect(): void {
@@ -31,7 +46,9 @@ export class GameClient {
     this.ws.onopen = () => {
       console.log('[GameClient] connected');
       this.isInitialState = true;
-      this.onConnectionChange?.(true);
+      for (const listener of this.connectionListeners) {
+        listener(true);
+      }
     };
 
     this.ws.onmessage = (event) => {
@@ -39,7 +56,10 @@ export class GameClient {
         const msg: ServerMessage = JSON.parse(event.data as string);
 
         if (msg.type === 'state') {
-          this.onState?.(msg);
+          this.lastState = msg;
+          for (const listener of this.stateListeners) {
+            listener(msg);
+          }
           this.isInitialState = false;
         } else if (msg.type === 'error') {
           console.warn('[GameClient] server error:', msg.message);
@@ -51,7 +71,9 @@ export class GameClient {
 
     this.ws.onclose = () => {
       console.log('[GameClient] disconnected');
-      this.onConnectionChange?.(false);
+      for (const listener of this.connectionListeners) {
+        listener(false);
+      }
       this.scheduleReconnect();
     };
 
@@ -83,5 +105,7 @@ export class GameClient {
     }
     this.ws?.close();
     this.ws = null;
+    this.stateListeners.clear();
+    this.connectionListeners.clear();
   }
 }
