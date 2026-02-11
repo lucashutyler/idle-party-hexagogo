@@ -1,4 +1,4 @@
-import type { ServerStateMessage, ServerMessage, ClientMessage } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerMessage } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
@@ -10,9 +10,13 @@ export class GameClient {
   private url: string;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private destroyed = false;
+  private username: string | null = null;
 
   private stateListeners = new Set<StateListener>();
   private connectionListeners = new Set<ConnectionListener>();
+
+  /** Pending login resolve/reject — set during login() call. */
+  private loginResolve?: (result: { success: boolean; error?: string }) => void;
 
   /** True on connect, false after first state message — used to snap vs tween. */
   isInitialState = true;
@@ -23,7 +27,27 @@ export class GameClient {
   constructor() {
     const host = window.location.hostname || 'localhost';
     this.url = `ws://${host}:3001`;
-    this.connect();
+
+    // Snap party position when returning from a background browser tab
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        this.isInitialState = true;
+        this.sendRaw({ type: 'request_state' });
+      }
+    });
+  }
+
+  /**
+   * Connect to the server and authenticate with the given username.
+   * Resolves when login_success or login_error is received.
+   */
+  login(username: string): Promise<{ success: boolean; error?: string }> {
+    this.username = username;
+
+    return new Promise((resolve) => {
+      this.loginResolve = resolve;
+      this.connect();
+    });
   }
 
   /** Subscribe to state updates. Returns an unsubscribe function. */
@@ -49,11 +73,30 @@ export class GameClient {
       for (const listener of this.connectionListeners) {
         listener(true);
       }
+
+      // Send login message on connect (initial or reconnect)
+      if (this.username) {
+        this.sendRaw({ type: 'login', username: this.username });
+      }
     };
 
     this.ws.onmessage = (event) => {
       try {
         const msg: ServerMessage = JSON.parse(event.data as string);
+
+        if (msg.type === 'login_success') {
+          console.log(`[GameClient] logged in as "${msg.username}"`);
+          this.loginResolve?.({ success: true });
+          this.loginResolve = undefined;
+          return;
+        }
+
+        if (msg.type === 'login_error') {
+          console.warn('[GameClient] login error:', msg.message);
+          this.loginResolve?.({ success: false, error: msg.message });
+          this.loginResolve = undefined;
+          return;
+        }
 
         if (msg.type === 'state') {
           this.lastState = msg;
@@ -84,6 +127,8 @@ export class GameClient {
 
   private scheduleReconnect(): void {
     if (this.destroyed) return;
+    // Only auto-reconnect if we've logged in at least once
+    if (!this.username) return;
 
     this.reconnectTimer = setTimeout(() => {
       console.log('[GameClient] reconnecting...');
@@ -91,11 +136,14 @@ export class GameClient {
     }, RECONNECT_DELAY);
   }
 
-  sendMove(col: number, row: number): void {
-    const msg: ClientMessage = { type: 'move', col, row };
+  private sendRaw(msg: Record<string, unknown>): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
+  }
+
+  sendMove(col: number, row: number): void {
+    this.sendRaw({ type: 'move', col, row });
   }
 
   destroy(): void {

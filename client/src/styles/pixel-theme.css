@@ -289,7 +289,7 @@ html, body {
 }
 
 .combat-timer-fill.running {
-  animation: timer-fill 2s linear forwards;
+  animation: timer-fill var(--battle-duration, 2s) linear forwards;
 }
 
 .combat-timer-fill.victory {
@@ -400,6 +400,85 @@ html, body {
 
 #game-container canvas {
   display: block;
+}
+
+/* ── Login Screen ────────────────────────────────────────── */
+
+.login-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 24px;
+}
+
+.login-title {
+  font-family: var(--pixel-font);
+  font-size: 16px;
+  color: var(--accent-gold);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 280px;
+}
+
+.login-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 2px solid var(--border-pixel);
+  outline: none;
+}
+
+.login-input:focus {
+  border-color: var(--accent-gold);
+}
+
+.login-input::placeholder {
+  color: var(--text-dim);
+}
+
+.login-button {
+  width: 100%;
+  padding: 10px 12px;
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  color: var(--bg-dark);
+  background: var(--accent-gold);
+  border: 2px solid var(--accent-gold);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.login-button:hover:not(:disabled) {
+  background: #ffd866;
+  border-color: #ffd866;
+}
+
+.login-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.login-error {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--accent-red);
+  text-align: center;
+  display: none;
 }
 
 /* ── Keyframe Animations ─────────────────────────────────── */

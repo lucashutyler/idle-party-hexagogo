@@ -32,9 +32,11 @@ TypeScript throughout. Vite for client bundling.
 - [ ] Multiple regions/zones
 
 ### Combat
+Goal: real-time auto-battle where damage is calculated per tick, HP tracked for both sides, and combat ends when either the party or the monsters reach 0 HP. Currently using a randomized timer (2-10s) with coin-flip outcomes as a temporary stand-in.
 - [x] Auto-battle state machine (server-authoritative, always fighting)
 - [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
+- [ ] HP-based combat (damage per tick, party/monster health pools)
 - [ ] Class-based combat (classes weak solo, strong in party)
 - [ ] Monster definitions and balancing
 - [ ] Loot/rewards system
@@ -61,17 +63,24 @@ TypeScript throughout. Vite for client bundling.
 
 ### Server
 - [x] Node.js/TypeScript server
-- [ ] Persistent game state (runs 24/7, resumable)
+- [x] Per-player game state (independent battle timers, movement, unlocks)
+- [x] Username-based login with session persistence (battles run while disconnected)
+- [x] Multiple connections per username (same login in multiple tabs stays in sync)
+- [x] Server-side combat log (last 100 entries, streamed to all connections)
+- [ ] Persistent game state across server restarts
 - [ ] Instanced worlds (soft-cap 1000 players)
-- [ ] Player authentication
+- [ ] Password/token authentication
 - [x] Real-time client sync
 
 ### UI
+- [x] Login screen with username input
 - [x] Map tab with hex rendering
+- [x] Other players visible on map (blue circles with username labels, tweened movement)
+- [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
 - [x] Tab-based bottom navigation (Combat, Map, Party, Items, Settings)
 - [x] Mobile-first responsive design
 - [x] Pixel/retro RPG visual style (Press Start 2P font)
-- [x] Combat screen with battle stage, timer bar, and combat log
+- [x] Combat screen with battle stage, dynamic timer bar, and combat log
 - [x] Lazy-loaded Phaser (Map tab only loads on first visit)
 - [x] Nav bar battle status indicators (pulse/flash on combat events)
 - [ ] Desktop and phone feature parity

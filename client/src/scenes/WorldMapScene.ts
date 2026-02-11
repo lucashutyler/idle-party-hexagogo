@@ -10,8 +10,18 @@ import {
   cubeToPixel,
   cubeToOffset,
 } from '@idle-party-rpg/shared';
-import type { ServerStateMessage } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, OtherPlayerState } from '@idle-party-rpg/shared';
 import { Party } from '../entities/Party';
+
+const OTHER_PLAYER_COLOR = 0x4a90d9;
+const OTHER_PLAYER_RADIUS = 10;
+const OTHER_PLAYER_TWEEN_DURATION = 400;
+
+interface OtherPartyMarker {
+  circle: Phaser.GameObjects.Arc;
+  label: Phaser.GameObjects.Text;
+  tween?: Phaser.Tweens.Tween;
+}
 
 export class WorldMapScene extends Phaser.Scene {
   private grid!: HexGrid;
@@ -19,6 +29,9 @@ export class WorldMapScene extends Phaser.Scene {
 
   /** Set of tile keys the server says are unlocked. */
   private unlockedKeys = new Set<string>();
+
+  /** Other player markers on the map. */
+  private otherParties = new Map<string, OtherPartyMarker>();
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
@@ -75,7 +88,7 @@ export class WorldMapScene extends Phaser.Scene {
 
   /** Apply a state update from the server. */
   applyServerState(state: ServerStateMessage, snap?: boolean): void {
-    const shouldSnap = snap ?? this.isFirstState;
+    const shouldSnap = snap || this.isFirstState;
 
     // Update unlocked set & re-render if changed
     const newKeys = new Set(state.unlocked);
@@ -102,8 +115,23 @@ export class WorldMapScene extends Phaser.Scene {
     // Apply position & visual
     this.party.applyServerState(state.party, state.battle.visual, shouldSnap);
 
+    // Re-center camera on snap (initial load or browser tab resume)
+    if (shouldSnap) {
+      const sprite = this.party.getSprite();
+      if (this.isFirstState) {
+        // Very first state — instant center, nothing to animate from
+        this.cameras.main.centerOn(sprite.x, sprite.y);
+      } else {
+        // Returning from background tab — smooth pan to current position
+        this.cameras.main.pan(sprite.x, sprite.y, 500, 'Quad.easeInOut');
+      }
+    }
+
     // Update path display from server-provided path
     this.updatePathFromServer(state.party.path);
+
+    // Sync other players on the map
+    this.syncOtherPlayers(state.otherPlayers);
 
     this.isFirstState = false;
   }
@@ -121,6 +149,64 @@ export class WorldMapScene extends Phaser.Scene {
       if (!b.has(key)) return false;
     }
     return true;
+  }
+
+  // ── Other Players ────────────────────────────────────────
+
+  private syncOtherPlayers(others: OtherPlayerState[]): void {
+    const seen = new Set<string>();
+
+    for (const other of others) {
+      seen.add(other.username);
+      const pixel = cubeToPixel(offsetToCube({ col: other.col, row: other.row }));
+      const x = pixel.x + this.mapOffsetX;
+      const y = pixel.y + this.mapOffsetY;
+
+      let marker = this.otherParties.get(other.username);
+      if (marker) {
+        // Tween to new position if it changed
+        if (marker.circle.x !== x || marker.circle.y !== y) {
+          const m = marker;
+          m.tween?.stop();
+          m.tween = this.tweens.add({
+            targets: m.circle,
+            x, y,
+            duration: OTHER_PLAYER_TWEEN_DURATION,
+            ease: 'Quad.easeInOut',
+            onUpdate: () => {
+              m.label.setPosition(m.circle.x, m.circle.y + OTHER_PLAYER_RADIUS + 8);
+            },
+            onComplete: () => { m.tween = undefined; },
+          });
+        }
+      } else {
+        // Create new marker
+        const circle = this.add.circle(x, y, OTHER_PLAYER_RADIUS, OTHER_PLAYER_COLOR);
+        circle.setStrokeStyle(2, 0xffffff);
+        circle.setDepth(90);
+
+        const label = this.add.text(x, y + OTHER_PLAYER_RADIUS + 8, other.username, {
+          fontSize: '8px',
+          fontFamily: "'Press Start 2P', monospace",
+          color: '#ffffff',
+        });
+        label.setOrigin(0.5, 0);
+        label.setDepth(90);
+
+        marker = { circle, label };
+        this.otherParties.set(other.username, marker);
+      }
+    }
+
+    // Remove markers for players no longer present
+    for (const [username, marker] of this.otherParties) {
+      if (!seen.has(username)) {
+        marker.tween?.stop();
+        marker.circle.destroy();
+        marker.label.destroy();
+        this.otherParties.delete(username);
+      }
+    }
   }
 
   // ── Rendering ────────────────────────────────────────────

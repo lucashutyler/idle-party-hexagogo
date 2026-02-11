@@ -1,104 +1,13 @@
-import {
-  HexGrid,
-  UnlockSystem,
-  generateWorldMap,
-  getStartingPosition,
-  offsetToCube,
-} from '@idle-party-rpg/shared';
-import type { BattleResult, ServerStateMessage } from '@idle-party-rpg/shared';
-import { ServerParty } from './ServerParty';
-import { ServerBattleTimer } from './ServerBattleTimer';
+import { generateWorldMap } from '@idle-party-rpg/shared';
+import { PlayerManager } from './PlayerManager';
 
 export class GameLoop {
-  private grid: HexGrid;
-  private party: ServerParty;
-  private battleTimer: ServerBattleTimer;
-  private unlockSystem: UnlockSystem;
+  readonly playerManager: PlayerManager;
 
-  private onStateChange?: () => void;
+  constructor() {
+    const grid = generateWorldMap();
+    this.playerManager = new PlayerManager(grid);
 
-  constructor(onStateChange?: () => void) {
-    this.onStateChange = onStateChange;
-
-    // Generate world map
-    this.grid = generateWorldMap();
-    const startPos = getStartingPosition();
-    const startCoord = offsetToCube(startPos);
-    const startTile = this.grid.getTile(startCoord);
-
-    if (!startTile) {
-      throw new Error('Invalid starting position');
-    }
-
-    // Initialize unlock system
-    this.unlockSystem = new UnlockSystem(this.grid, startTile);
-
-    // Initialize party
-    this.party = new ServerParty(this.grid, startTile);
-
-    // Initialize battle timer with game logic callbacks
-    this.battleTimer = new ServerBattleTimer(this.party, {
-      onStateChange: () => {
-        this.broadcastState();
-      },
-      onBattleEnd: (result: BattleResult) => {
-        if (result === 'victory') {
-          this.unlockSystem.unlockAdjacentTiles(this.party.tile);
-        }
-        this.broadcastState();
-      },
-      canMoveToNextTile: () => {
-        const nextTile = this.party.nextTile;
-        return nextTile ? this.unlockSystem.isUnlocked(nextTile) : false;
-      },
-    });
-
-    // onTileReached — no separate broadcast needed; the battle timer's
-    // onStateChange (from showBattleResult → setState('result')) covers it.
-
-    console.log(`Game loop started. Map: ${this.grid.size} tiles, ${this.unlockSystem.unlockedCount} unlocked`);
-  }
-
-  /**
-   * Handle a move command from a client.
-   */
-  handleMove(col: number, row: number): boolean {
-    const coord = offsetToCube({ col, row });
-    const tile = this.grid.getTile(coord);
-
-    if (!tile || !tile.isTraversable) {
-      return false;
-    }
-
-    const success = this.party.setDestination(tile);
-
-    // No need to start the battle loop — it's always running.
-    // The new destination will be picked up at the next result window.
-    this.broadcastState();
-    return success;
-  }
-
-  /**
-   * Get the current game state for sending to clients.
-   */
-  getState(): Omit<ServerStateMessage, 'type'> {
-    return {
-      party: this.party.toJSON(),
-      battle: {
-        state: this.battleTimer.currentState,
-        result: this.battleTimer.lastResult,
-        visual: this.battleTimer.visual,
-      },
-      unlocked: this.unlockSystem.getUnlockedKeys(),
-      mapSize: this.grid.size,
-    };
-  }
-
-  private broadcastState(): void {
-    this.onStateChange?.();
-  }
-
-  destroy(): void {
-    this.battleTimer.destroy();
+    console.log(`Game loop started. Map: ${grid.size} tiles`);
   }
 }

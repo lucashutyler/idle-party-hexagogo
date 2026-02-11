@@ -1,13 +1,6 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, BattleVisual } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, CombatLogEntry } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
-
-const MAX_LOG_ENTRIES = 50;
-
-interface LogEntry {
-  text: string;
-  type: 'battle' | 'victory' | 'defeat' | 'move' | 'unlock';
-}
 
 export class CombatScreen implements Screen {
   private container: HTMLElement;
@@ -20,14 +13,11 @@ export class CombatScreen implements Screen {
   private stage!: HTMLElement;
   private timerFill!: HTMLElement;
   private logContainer!: HTMLElement;
+  private battleCounter!: HTMLElement;
 
-  // State tracking
-  private logEntries: LogEntry[] = [];
-  private lastVisual: BattleVisual = 'none';
-  private lastCol = -1;
-  private lastRow = -1;
-  private lastUnlockedCount = 0;
-  private battleCount = 0;
+  // Last rendered log length — for incremental DOM updates
+  private renderedLogLength = 0;
+  private lastLog: CombatLogEntry[] = [];
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -41,7 +31,9 @@ export class CombatScreen implements Screen {
 
   onActivate(): void {
     this.isActive = true;
-    this.renderLog();
+    // Full re-render of log on activate (may have accumulated while inactive)
+    this.renderedLogLength = 0;
+    this.renderLog(this.lastLog);
   }
 
   onDeactivate(): void {
@@ -78,10 +70,10 @@ export class CombatScreen implements Screen {
     this.stage = this.container.querySelector('.combat-stage')!;
     this.timerFill = this.container.querySelector('.combat-timer-fill')!;
     this.logContainer = this.container.querySelector('.combat-log')!;
+    this.battleCounter = this.container.querySelector('.battle-counter')!;
   }
 
   private wireSubscriptions(): void {
-    // Always-on: track state for log even when screen is not visible
     this.gameClient.subscribe((state) => this.handleState(state));
 
     this.gameClient.onConnection((connected) => {
@@ -93,43 +85,12 @@ export class CombatScreen implements Screen {
   }
 
   private handleState(state: ServerStateMessage): void {
-    const visual = state.battle.visual;
+    this.lastLog = state.combatLog;
 
-    // Generate log entries on state transitions
-    if (visual !== this.lastVisual) {
-      if (visual === 'fighting') {
-        this.battleCount++;
-        this.addLog(`Battle #${this.battleCount} begins!`, 'battle');
-      } else if (visual === 'victory') {
-        this.addLog('Victory!', 'victory');
-      } else if (visual === 'defeat') {
-        this.addLog('Defeat...', 'defeat');
-      }
-    }
-
-    // Detect movement
-    if (state.party.col !== this.lastCol || state.party.row !== this.lastRow) {
-      if (this.lastCol !== -1) {
-        this.addLog(`Moved to (${state.party.col}, ${state.party.row})`, 'move');
-      }
-      this.lastCol = state.party.col;
-      this.lastRow = state.party.row;
-    }
-
-    // Detect new tile unlocks
-    const unlockedCount = state.unlocked.length;
-    if (unlockedCount > this.lastUnlockedCount && this.lastUnlockedCount > 0) {
-      const diff = unlockedCount - this.lastUnlockedCount;
-      this.addLog(`${diff} new tile${diff > 1 ? 's' : ''} unlocked!`, 'unlock');
-    }
-    this.lastUnlockedCount = unlockedCount;
-
-    this.lastVisual = visual;
-
-    // Only update DOM when active
     if (!this.isActive) return;
 
     this.updateVisuals(state);
+    this.updateLog(state.combatLog);
   }
 
   private updateVisuals(state: ServerStateMessage): void {
@@ -137,8 +98,7 @@ export class CombatScreen implements Screen {
     this.locationLabel.textContent = `Tile (${state.party.col}, ${state.party.row})`;
 
     // Battle counter
-    const counter = this.container.querySelector('.battle-counter');
-    if (counter) counter.textContent = `#${this.battleCount}`;
+    this.battleCounter.textContent = `#${state.battleCount}`;
 
     // Stage visual state
     this.stage.classList.remove('fighting', 'victory', 'defeat');
@@ -146,9 +106,11 @@ export class CombatScreen implements Screen {
       this.stage.classList.add(state.battle.visual);
     }
 
-    // Timer bar
+    // Timer bar — use server-provided battle duration
     this.timerFill.classList.remove('running', 'victory', 'defeat');
     if (state.battle.state === 'battle') {
+      const durationSec = (state.battle.duration / 1000).toFixed(1);
+      this.timerFill.style.setProperty('--battle-duration', `${durationSec}s`);
       // Force reflow to restart the CSS animation
       this.timerFill.style.animation = 'none';
       void this.timerFill.offsetHeight;
@@ -161,26 +123,30 @@ export class CombatScreen implements Screen {
     }
   }
 
-  private addLog(text: string, type: LogEntry['type']): void {
-    this.logEntries.push({ text, type });
-    if (this.logEntries.length > MAX_LOG_ENTRIES) {
-      this.logEntries.shift();
+  private updateLog(log: CombatLogEntry[]): void {
+    if (log.length < this.renderedLogLength) {
+      // Log was trimmed (entries shifted off the front) — full re-render
+      this.renderedLogLength = 0;
+      this.renderLog(log);
+      return;
     }
 
-    // Append to DOM only if active
-    if (this.isActive) {
-      this.appendLogEntry({ text, type });
+    // Append only new entries
+    for (let i = this.renderedLogLength; i < log.length; i++) {
+      this.appendLogEntry(log[i]);
     }
+    this.renderedLogLength = log.length;
   }
 
-  private renderLog(): void {
+  private renderLog(log: CombatLogEntry[]): void {
     this.logContainer.innerHTML = '';
-    for (const entry of this.logEntries) {
+    for (const entry of log) {
       this.appendLogEntry(entry);
     }
+    this.renderedLogLength = log.length;
   }
 
-  private appendLogEntry(entry: LogEntry): void {
+  private appendLogEntry(entry: CombatLogEntry): void {
     const div = document.createElement('div');
     div.className = `log-entry ${entry.type}`;
     div.textContent = entry.text;

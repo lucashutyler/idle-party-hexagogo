@@ -1,5 +1,6 @@
 import {
-  BATTLE_DURATION,
+  MIN_BATTLE_DURATION,
+  MAX_BATTLE_DURATION,
   RESULT_PAUSE,
   MOVE_DURATION,
   DEFEAT_CHANCE,
@@ -11,6 +12,7 @@ export interface ServerBattleCallbacks {
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
+  onMove?: () => void;
   canMoveToNextTile?: () => boolean;
 }
 
@@ -19,6 +21,7 @@ export class ServerBattleTimer {
   private state: BattleTimerState = 'battle';
   private currentVisual: BattleVisual = 'none';
   private currentResult?: BattleResult;
+  private battleDuration: number = MIN_BATTLE_DURATION;
 
   private battleTimeout?: ReturnType<typeof setTimeout>;
   private resultTimeout?: ReturnType<typeof setTimeout>;
@@ -27,6 +30,7 @@ export class ServerBattleTimer {
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
+  onMove?: () => void;
   canMoveToNextTile?: () => boolean;
 
   constructor(party: ServerParty, callbacks?: ServerBattleCallbacks) {
@@ -36,6 +40,7 @@ export class ServerBattleTimer {
       this.onBattleStart = callbacks.onBattleStart;
       this.onBattleEnd = callbacks.onBattleEnd;
       this.onStateChange = callbacks.onStateChange;
+      this.onMove = callbacks.onMove;
       this.canMoveToNextTile = callbacks.canMoveToNextTile;
     }
 
@@ -44,12 +49,14 @@ export class ServerBattleTimer {
   }
 
   private triggerBattle(): void {
+    this.battleDuration = MIN_BATTLE_DURATION +
+      Math.floor(Math.random() * (MAX_BATTLE_DURATION - MIN_BATTLE_DURATION));
     this.currentVisual = 'fighting';
     this.party.enterBattle();
     this.setState('battle');
     this.onBattleStart?.();
 
-    this.battleTimeout = setTimeout(() => this.showBattleResult(), BATTLE_DURATION);
+    this.battleTimeout = setTimeout(() => this.showBattleResult(), this.battleDuration);
   }
 
   private showBattleResult(): void {
@@ -75,6 +82,7 @@ export class ServerBattleTimer {
       // Pause for celebration, then move, then next battle after move completes
       this.resultTimeout = setTimeout(() => {
         this.party.moveToNextTile();
+        this.onMove?.();
         this.currentVisual = 'none';
         this.onStateChange?.(this.state); // broadcast updated position
         this.moveTimeout = setTimeout(() => this.triggerBattle(), MOVE_DURATION);
@@ -120,6 +128,10 @@ export class ServerBattleTimer {
 
   get lastResult(): BattleResult | undefined {
     return this.currentResult;
+  }
+
+  get currentDuration(): number {
+    return this.battleDuration;
   }
 
   destroy(): void {

@@ -91,7 +91,8 @@ export class MapScreen implements Screen {
     this.unsubscribeState = this.gameClient.subscribe((state) => {
       const scene = this.game?.scene.getScene('WorldMapScene');
       if (scene) {
-        (scene as import('../scenes/WorldMapScene').WorldMapScene).applyServerState(state);
+        const snap = this.gameClient.isInitialState;
+        (scene as import('../scenes/WorldMapScene').WorldMapScene).applyServerState(state, snap);
       }
     });
   }
