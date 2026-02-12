@@ -2,12 +2,14 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { GameLoop } from './game/GameLoop';
+import { JsonFileStore } from './game/JsonFileStore';
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-const gameLoop = new GameLoop();
+const store = new JsonFileStore();
+const gameLoop = new GameLoop(store);
 const { playerManager } = gameLoop;
 
 app.get('/health', (_req, res) => {
@@ -79,6 +81,25 @@ wss.on('connection', (ws) => {
 });
 
 const PORT = process.env.PORT ?? 3001;
-server.listen(PORT, () => {
-  console.log(`Game server listening on port ${PORT}`);
+
+async function start() {
+  await gameLoop.init();
+
+  server.listen(PORT, () => {
+    console.log(`Game server listening on port ${PORT}`);
+  });
+}
+
+async function shutdown(signal: string) {
+  console.log(`\n${signal} received — shutting down...`);
+  await gameLoop.shutdown();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+start().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

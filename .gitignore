@@ -9,3 +9,6 @@ shared/dist/
 server/dist/
 game-manager/dist/
 *.tsbuildinfo
+
+# Game state saves
+data/

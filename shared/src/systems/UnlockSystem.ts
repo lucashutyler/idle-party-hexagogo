@@ -22,6 +22,17 @@ export class UnlockSystem {
   }
 
   /**
+   * Restore an UnlockSystem from a previously saved set of tile keys.
+   */
+  static fromKeys(grid: HexGrid, keys: string[]): UnlockSystem {
+    // Use Object.create to skip the constructor's auto-unlock logic
+    const instance = Object.create(UnlockSystem.prototype) as UnlockSystem;
+    instance.grid = grid;
+    instance.unlockedKeys = new Set(keys);
+    return instance;
+  }
+
+  /**
    * Check if a tile is unlocked.
    */
   isUnlocked(tile: HexTile): boolean {

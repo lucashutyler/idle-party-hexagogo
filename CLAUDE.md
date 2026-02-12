@@ -43,6 +43,7 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   ├── screens/
 │   │   ├── ScreenManager.ts   # Screen show/hide with activate/deactivate lifecycle
 │   │   ├── LoginScreen.ts     # Username login screen (shown first)
+│   │   ├── OfflineScreen.ts   # "Server unavailable" screen with retry button
 │   │   ├── CombatScreen.ts    # Primary screen — battle stage, timer, combat log
 │   │   ├── MapScreen.ts       # Phaser wrapper — lazy-loads game, pause/resume
 │   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
@@ -63,11 +64,15 @@ server/                        @idle-party-rpg/server — Node.js game server
 ├── src/
 │   ├── index.ts               # Express + WebSocket server, login routing
 │   └── game/
-│       ├── GameLoop.ts        # Thin wrapper: shared HexGrid + PlayerManager
+│       ├── GameLoop.ts        # Game init, periodic saves, shutdown
 │       ├── PlayerManager.ts   # Maps usernames → sessions, WebSocket routing
 │       ├── PlayerSession.ts   # Per-player state (party, battle timer, unlocks)
 │       ├── ServerBattleTimer.ts # Server battle timer (variable 2-10s duration)
-│       └── ServerParty.ts     # Server party state (no rendering)
+│       ├── ServerParty.ts     # Server party state (no rendering)
+│       ├── GameStateStore.ts  # GameStateStore interface + PlayerSaveData type
+│       └── JsonFileStore.ts   # JSON-file-based persistence (data/<username>.json)
+
+data/                          Player save files (gitignored, created at runtime)
 
 game-manager/                  @idle-party-rpg/game-manager — placeholder
 ```
@@ -100,6 +105,7 @@ npm run typecheck    # tsc --build (all packages)
 - **Separation of concerns**: Phaser Graphics for rendering, HTML/CSS for all non-map UI (camera-independent), pure logic in shared systems
 - **A* pathfinding**: Hex distance heuristic with cross-track tie-breaker
 - **Visual style**: Pixel/retro RPG — Press Start 2P font, CSS custom properties for theming, CSS keyframe animations for battle states. All UI is vanilla HTML/CSS (no framework).
+- **State persistence**: Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added. Saved state per player: `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`. The store interface is swappable for SQLite/Postgres.
 
 ## Keeping Docs Current
 
@@ -109,6 +115,14 @@ When making changes that affect architecture, patterns, file structure, or game 
 - New game design decisions or philosophy changes
 - Architecture pattern changes (e.g., new subscription models, state management)
 - README.md roadmap checkboxes — check items off as they are completed
+
+## State Persistence Maintenance
+
+**When adding or changing any per-player game state** (new systems, new fields on `PlayerSession`, `ServerParty`, etc.), you **must** update the save/restore logic to include the new state:
+1. Update `PlayerSaveData` in `GameStateStore.ts` with the new field(s)
+2. Update `PlayerSession.toSaveData()` to serialize the new state
+3. Update `PlayerSession.fromSaveData()` to restore the new state
+4. If the state lives in a sub-system (like `UnlockSystem`), ensure that system supports restoration from saved data
 
 ## Code Conventions
 

@@ -67,7 +67,7 @@ Goal: real-time auto-battle where damage is calculated per tick, HP tracked for 
 - [x] Username-based login with session persistence (battles run while disconnected)
 - [x] Multiple connections per username (same login in multiple tabs stays in sync)
 - [x] Server-side combat log (last 100 entries, streamed to all connections)
-- [ ] Persistent game state across server restarts
+- [x] Persistent game state across server restarts
 - [ ] Instanced worlds (soft-cap 1000 players)
 - [ ] Password/token authentication
 - [x] Real-time client sync
@@ -83,6 +83,7 @@ Goal: real-time auto-battle where damage is calculated per tick, HP tracked for 
 - [x] Combat screen with battle stage, dynamic timer bar, and combat log
 - [x] Lazy-loaded Phaser (Map tab only loads on first visit)
 - [x] Nav bar battle status indicators (pulse/flash on combat events)
+- [x] Server unavailable / offline screen with retry
 - [ ] Desktop and phone feature parity
 
 ### Game Manager

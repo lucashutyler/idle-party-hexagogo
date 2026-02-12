@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import { HexGrid } from '@idle-party-rpg/shared';
 import type { OtherPlayerState } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession';
+import type { GameStateStore, PlayerSaveData } from './GameStateStore';
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
@@ -103,5 +104,54 @@ export class PlayerManager {
       count += wsSet.size;
     }
     return count;
+  }
+
+  /**
+   * Collect save data for all active sessions.
+   */
+  getAllSaveData(): PlayerSaveData[] {
+    const data: PlayerSaveData[] = [];
+    for (const session of this.sessions.values()) {
+      data.push(session.toSaveData());
+    }
+    return data;
+  }
+
+  /**
+   * Restore sessions from saved data. Called on server startup before any connections.
+   */
+  restoreFromSaveData(saves: PlayerSaveData[]): void {
+    for (const data of saves) {
+      try {
+        const session = PlayerSession.fromSaveData(data, this.grid, () => {
+          this.sendStateToPlayer(data.username);
+        });
+        this.sessions.set(data.username, session);
+        console.log(`[PlayerManager] Restored session for "${data.username}"`);
+      } catch (err) {
+        console.error(`[PlayerManager] Failed to restore "${data.username}":`, err);
+      }
+    }
+    if (saves.length > 0) {
+      console.log(`[PlayerManager] Restored ${this.sessions.size} sessions`);
+    }
+  }
+
+  /**
+   * Save all sessions to the store.
+   */
+  async saveAll(store: GameStateStore): Promise<void> {
+    const data = this.getAllSaveData();
+    if (data.length === 0) return;
+    await store.saveAll(data);
+  }
+
+  /**
+   * Add a "Server shutting down" log entry to all sessions before saving.
+   */
+  addShutdownLog(): void {
+    for (const session of this.sessions.values()) {
+      session.addLogEntry('Server shutting down — saving state...', 'battle');
+    }
   }
 }

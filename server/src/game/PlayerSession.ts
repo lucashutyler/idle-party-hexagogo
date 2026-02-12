@@ -8,8 +8,10 @@ import {
 import type { BattleResult, ServerStateMessage, OtherPlayerState, CombatLogEntry } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty';
 import { ServerBattleTimer } from './ServerBattleTimer';
+import type { PlayerSaveData } from './GameStateStore';
 
 const MAX_LOG_ENTRIES = 100;
+const MAX_SAVE_LOG_ENTRIES = 1000;
 
 export class PlayerSession {
   readonly username: string;
@@ -41,26 +43,26 @@ export class PlayerSession {
     this.battleTimer = new ServerBattleTimer(this.party, {
       onBattleStart: () => {
         this.battleCount++;
-        this.addLog(`Battle #${this.battleCount} begins!`, 'battle');
+        this.addLogEntry(`Battle #${this.battleCount} begins!`, 'battle');
       },
       onStateChange: () => {
         this.broadcastToPlayer();
       },
       onBattleEnd: (result: BattleResult) => {
         if (result === 'victory') {
-          this.addLog('Victory!', 'victory');
+          this.addLogEntry('Victory!', 'victory');
           const unlocked = this.unlockSystem.unlockAdjacentTiles(this.party.tile);
           if (unlocked.length > 0) {
-            this.addLog(`${unlocked.length} new tile${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
+            this.addLogEntry(`${unlocked.length} new tile${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
           }
         } else {
-          this.addLog('Defeat...', 'defeat');
+          this.addLogEntry('Defeat...', 'defeat');
         }
         this.broadcastToPlayer();
       },
       onMove: () => {
         const pos = this.getPosition();
-        this.addLog(`Moved to (${pos.col}, ${pos.row})`, 'move');
+        this.addLogEntry(`Moved to (${pos.col}, ${pos.row})`, 'move');
       },
       canMoveToNextTile: () => {
         const nextTile = this.party.nextTile;
@@ -103,11 +105,102 @@ export class PlayerSession {
     return cubeToOffset(this.party.position);
   }
 
-  private addLog(text: string, type: CombatLogEntry['type']): void {
+  addLogEntry(text: string, type: CombatLogEntry['type']): void {
     this.combatLog.push({ text, type });
     if (this.combatLog.length > MAX_LOG_ENTRIES) {
       this.combatLog.shift();
     }
+  }
+
+  toSaveData(): PlayerSaveData {
+    const pos = this.getPosition();
+    const partyJSON = this.party.toJSON();
+
+    return {
+      username: this.username,
+      battleCount: this.battleCount,
+      combatLog: this.combatLog.slice(-MAX_SAVE_LOG_ENTRIES),
+      unlockedKeys: this.unlockSystem.getUnlockedKeys(),
+      position: { col: pos.col, row: pos.row },
+      target: partyJSON.targetCol !== undefined && partyJSON.targetRow !== undefined
+        ? { col: partyJSON.targetCol, row: partyJSON.targetRow }
+        : null,
+      movementQueue: partyJSON.path,
+    };
+  }
+
+  /**
+   * Restore a PlayerSession from saved data.
+   * Battle timer starts fresh; a "Server back online" log entry is added.
+   */
+  static fromSaveData(
+    data: PlayerSaveData,
+    grid: HexGrid,
+    broadcastToPlayer: () => void,
+  ): PlayerSession {
+    const coord = offsetToCube(data.position);
+    const currentTile = grid.getTile(coord);
+    if (!currentTile) {
+      throw new Error(`Invalid saved position for "${data.username}": (${data.position.col}, ${data.position.row})`);
+    }
+
+    // Resolve target tile
+    let targetTile = null;
+    if (data.target) {
+      const targetCoord = offsetToCube(data.target);
+      targetTile = grid.getTile(targetCoord) ?? null;
+    }
+
+    // Resolve movement queue
+    const movementQueue = data.movementQueue
+      .map(p => grid.getTile(offsetToCube(p)))
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+
+    // Build session via Object.create to bypass constructor
+    const session = Object.create(PlayerSession.prototype) as PlayerSession;
+    (session as { username: string }).username = data.username;
+    session['grid'] = grid;
+    session['broadcastToPlayer'] = broadcastToPlayer;
+    session['battleCount'] = data.battleCount;
+    session['combatLog'] = data.combatLog.slice(-MAX_LOG_ENTRIES);
+    session['unlockSystem'] = UnlockSystem.fromKeys(grid, data.unlockedKeys);
+    session['party'] = ServerParty.restore(grid, currentTile, targetTile, movementQueue);
+
+    // Add server-online log entry
+    session['addLogEntry']('Server back online — resuming!', 'battle');
+
+    // Start battle timer fresh (no resume of previous battle state)
+    session['battleTimer'] = new ServerBattleTimer(session['party'], {
+      onBattleStart: () => {
+        session['battleCount']++;
+        session['addLogEntry'](`Battle #${session['battleCount']} begins!`, 'battle');
+      },
+      onStateChange: () => {
+        session['broadcastToPlayer']();
+      },
+      onBattleEnd: (result: BattleResult) => {
+        if (result === 'victory') {
+          session['addLogEntry']('Victory!', 'victory');
+          const unlocked = session['unlockSystem'].unlockAdjacentTiles(session['party'].tile);
+          if (unlocked.length > 0) {
+            session['addLogEntry'](`${unlocked.length} new tile${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
+          }
+        } else {
+          session['addLogEntry']('Defeat...', 'defeat');
+        }
+        session['broadcastToPlayer']();
+      },
+      onMove: () => {
+        const pos = session.getPosition();
+        session['addLogEntry'](`Moved to (${pos.col}, ${pos.row})`, 'move');
+      },
+      canMoveToNextTile: () => {
+        const nextTile = session['party'].nextTile;
+        return nextTile ? session['unlockSystem'].isUnlocked(nextTile) : false;
+      },
+    });
+
+    return session;
   }
 
   destroy(): void {

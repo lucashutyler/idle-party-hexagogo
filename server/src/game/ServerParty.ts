@@ -22,6 +22,21 @@ export class ServerParty {
     this.currentTile = startTile;
   }
 
+  /**
+   * Restore party state from saved data.
+   */
+  static restore(
+    grid: HexGrid,
+    currentTile: HexTile,
+    targetTile: HexTile | null,
+    movementQueue: HexTile[],
+  ): ServerParty {
+    const party = new ServerParty(grid, currentTile);
+    party.targetTile = targetTile;
+    party.movementQueue = movementQueue;
+    return party;
+  }
+
   get position(): CubeCoord {
     return this.currentTile.coord;
   }

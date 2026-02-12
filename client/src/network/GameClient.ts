@@ -117,6 +117,13 @@ export class GameClient {
       for (const listener of this.connectionListeners) {
         listener(false);
       }
+
+      // If login() is still waiting, resolve with connection failure
+      if (this.loginResolve) {
+        this.loginResolve({ success: false, error: 'Could not connect to server' });
+        this.loginResolve = undefined;
+      }
+
       this.scheduleReconnect();
     };
 

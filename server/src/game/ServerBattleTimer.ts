@@ -53,8 +53,11 @@ export class ServerBattleTimer {
       Math.floor(Math.random() * (MAX_BATTLE_DURATION - MIN_BATTLE_DURATION));
     this.currentVisual = 'fighting';
     this.party.enterBattle();
-    this.setState('battle');
+
+    // Add "Battle begins!" log BEFORE the state change broadcast,
+    // so the client sees it in the same message as the 'battle' state transition.
     this.onBattleStart?.();
+    this.setState('battle');
 
     this.battleTimeout = setTimeout(() => this.showBattleResult(), this.battleDuration);
   }
