@@ -24,7 +24,10 @@ export class GameLoop {
   async init(): Promise<void> {
     const saves = await this.store.loadAll();
     if (saves.length > 0) {
+      console.log(`[GameLoop] Found ${saves.length} save file(s): ${saves.map(s => s.username).join(', ')}`);
       this.playerManager.restoreFromSaveData(saves);
+    } else {
+      console.log('[GameLoop] No save files found — fresh start');
     }
 
     this.saveInterval = setInterval(() => {
@@ -38,7 +41,11 @@ export class GameLoop {
    * Save all player state.
    */
   async saveAll(): Promise<void> {
-    await this.playerManager.saveAll(this.store);
+    const count = this.playerManager.sessionCount;
+    if (count > 0) {
+      await this.playerManager.saveAll(this.store);
+      console.log(`[GameLoop] Saved ${count} session(s)`);
+    }
   }
 
   /**
