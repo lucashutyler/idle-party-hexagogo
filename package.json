@@ -17,7 +17,8 @@
     "build": "npm run build --workspace=shared && npm run build --workspace=client && npm run build --workspace=server",
     "test": "npm run test --workspaces --if-present",
     "test:shared": "npm run test --workspace=shared",
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --build",
+    "start": "NODE_ENV=production node server/dist/index.js"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",

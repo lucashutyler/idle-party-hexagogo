@@ -14,7 +14,7 @@ const MAX_LOG_ENTRIES = 100;
 const MAX_SAVE_LOG_ENTRIES = 1000;
 
 export class PlayerSession {
-  readonly username: string;
+  username: string;
   private grid: HexGrid;
   private party: ServerParty;
   private battleTimer: ServerBattleTimer;

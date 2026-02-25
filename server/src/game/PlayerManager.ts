@@ -63,8 +63,37 @@ export class PlayerManager {
     return this.sessions.get(username);
   }
 
+  getSessionByUsername(username: string): PlayerSession | undefined {
+    return this.sessions.get(username);
+  }
+
   getUsernameForWs(ws: WebSocket): string | undefined {
     return this.connections.get(ws);
+  }
+
+  /**
+   * Rename a player: re-key the session map and update the session's username.
+   */
+  renamePlayer(oldUsername: string, newUsername: string): boolean {
+    const session = this.sessions.get(oldUsername);
+    if (!session) return false;
+
+    this.sessions.delete(oldUsername);
+    session.username = newUsername;
+    this.sessions.set(newUsername, session);
+
+    // Re-key connection maps
+    const wsSet = this.playerConnections.get(oldUsername);
+    if (wsSet) {
+      this.playerConnections.delete(oldUsername);
+      this.playerConnections.set(newUsername, wsSet);
+      for (const ws of wsSet) {
+        this.connections.set(ws, newUsername);
+      }
+    }
+
+    console.log(`[PlayerManager] Renamed "${oldUsername}" → "${newUsername}"`);
+    return true;
   }
 
   sendStateToPlayer(username: string): void {

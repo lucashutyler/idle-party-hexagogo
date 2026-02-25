@@ -9,12 +9,18 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@aws-sdk/client-ses": "^3.997.0",
     "@idle-party-rpg/shared": "*",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
     "express": "^4.21.0",
+    "express-session": "^1.19.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
+    "@types/express-session": "^1.18.2",
     "@types/ws": "^8.5.12",
     "tsx": "^4.19.0",
     "typescript": "^5.3.3"

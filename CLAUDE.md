@@ -39,10 +39,11 @@ shared/                        @idle-party-rpg/shared — pure logic, types, con
 client/                        @idle-party-rpg/client — Phaser 3 web client
 ├── src/
 │   ├── main.ts                # Entry point — imports CSS, creates App
-│   ├── App.ts                 # App shell — login flow, then game screens + nav
+│   ├── App.ts                 # App shell — auth flow → username → game screens + nav
 │   ├── screens/
 │   │   ├── ScreenManager.ts   # Screen show/hide with activate/deactivate lifecycle
-│   │   ├── LoginScreen.ts     # Username login screen (shown first)
+│   │   ├── LoginScreen.ts     # Email login screen (shown first)
+│   │   ├── UsernameScreen.ts  # Username choice screen (after email verification)
 │   │   ├── OfflineScreen.ts   # "Server unavailable" screen with retry button
 │   │   ├── CombatScreen.ts    # Primary screen — battle stage, timer, combat log
 │   │   ├── MapScreen.ts       # Phaser wrapper — lazy-loads game, pause/resume
@@ -52,17 +53,24 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   ├── entities/
 │   │   └── Party.ts           # Client party — sprites, tweens, visuals
 │   ├── network/
-│   │   └── GameClient.ts      # WebSocket client — login, subscriber pattern, auto-reauth
+│   │   ├── AuthClient.ts      # REST client for /auth/* endpoints
+│   │   └── GameClient.ts      # WebSocket client — cookie-based auth, subscriber pattern
 │   ├── ui/
 │   │   └── BottomNav.ts       # 5-tab pixel-styled bottom navigation bar
 │   └── styles/
 │       └── pixel-theme.css    # Global retro RPG styles, animations, layout
-├── index.html                 # App shell DOM (login + screen containers + nav)
-└── vite.config.ts
+├── index.html                 # App shell DOM (login + username + screen containers + nav)
+└── vite.config.ts             # Vite config with /auth proxy to server
 
 server/                        @idle-party-rpg/server — Node.js game server
 ├── src/
-│   ├── index.ts               # Express + WebSocket server, login routing
+│   ├── index.ts               # Express + WS server, session middleware, auth routes
+│   ├── auth/
+│   │   ├── AccountStore.ts    # Email→account JSON persistence (data/accounts.json)
+│   │   ├── TokenStore.ts      # In-memory magic link token store (15m expiry)
+│   │   ├── EmailService.ts    # AWS SES email sending (dev: console log)
+│   │   ├── authRoutes.ts      # REST endpoints: login, verify, session, username, logout
+│   │   └── session.d.ts       # express-session type augmentation
 │   └── game/
 │       ├── GameLoop.ts        # Game init, periodic saves, shutdown
 │       ├── PlayerManager.ts   # Maps usernames → sessions, WebSocket routing
@@ -84,6 +92,7 @@ npm run dev          # Start server (:3001) + client (:3000) concurrently
 npm run dev:client   # Client only
 npm run dev:server   # Server only
 npm run build        # Build shared → client → server
+npm start            # Production: NODE_ENV=production, serves client + WS from one port
 npm run test         # Run all tests (vitest)
 npm run test:shared  # Shared package tests only
 npm run typecheck    # tsc --build (all packages)
@@ -93,9 +102,10 @@ npm run typecheck    # tsc --build (all packages)
 
 - **Hex coordinates**: Cube coordinates (q, r, s) where q + r + s = 0, flat-top hexagons, HEX_SIZE = 40px
 - **Multi-screen app shell**: DOM-based screen switching (not Phaser scenes). `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-loads Phaser on first visit.
-- **Username-based login**: Simple text login (no password). Client calls `GameClient.login(username)` which connects WebSocket and sends `{ type: 'login', username }`. Server validates and creates/resumes a `PlayerSession`. On reconnect, the client auto-re-sends the login message.
+- **Email-based magic link auth**: Auth is handled over REST (`/auth/*`), not WebSocket. Flow: enter email → receive magic link (dev: auto-verify) → choose username → game. Sessions use `express-session` with httpOnly cookies (30-day expiry). In dev (`NODE_ENV !== 'production'`), verification is instant. In production, a magic link is emailed via AWS SES. Account data (email, username, verified status) is stored in `data/accounts.json` via `AccountStore`. Magic link tokens are in-memory with 15-minute expiry (`TokenStore`). Username is changeable later.
+- **WebSocket auth via session cookie**: WebSocket upgrade requests are authenticated by parsing the session cookie server-side. If no valid session/username, the upgrade is rejected with 401. No login messages are sent over WS — identity comes from the cookie.
 - **Per-player game state**: Each player gets their own `PlayerSession` with independent `ServerParty`, `ServerBattleTimer`, and `UnlockSystem`. Sessions persist when disconnected (battles keep running). `PlayerManager` maps usernames to sessions and WebSockets to usernames. Multiple connections per username are supported (e.g. two browser tabs with the same login both receive state).
-- **GameClient subscriber pattern**: `subscribe(cb)` / `onConnection(cb)` return unsubscribe functions. Multiple screens listen concurrently. `lastState` cache lets late-mounting screens read current state immediately. Connection is deferred until `login()` is called.
+- **GameClient subscriber pattern**: `subscribe(cb)` / `onConnection(cb)` return unsubscribe functions. Multiple screens listen concurrently. `lastState` cache lets late-mounting screens read current state immediately. Connection is deferred until `connect()` is called (after auth).
 - **Phaser isolation**: Phaser only runs when the Map tab is active. `game.loop.sleep()`/`wake()` halts/restarts the entire RAF loop. On re-activation, state is snapped (not tweened) so the player sees "where I am now" with no catch-up animation.
 - **Browser tab resume**: On `visibilitychange` → visible, the client sends `request_state` for an immediate server response (no waiting for the next battle cycle). The party position snaps instantly; the camera pans smoothly (500ms).
 - **Event-driven**: Systems use callback properties (`onTileReached`, `onBattleEnd`, `onTilesUnlocked`) — scene subscribes for state sync

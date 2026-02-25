@@ -59,29 +59,12 @@ export interface ClientMoveMessage {
   row: number;
 }
 
-export interface ClientLoginMessage {
-  type: 'login';
-  username: string;
-}
-
-export interface ServerLoginSuccessMessage {
-  type: 'login_success';
-  username: string;
-}
-
-export interface ServerLoginErrorMessage {
-  type: 'login_error';
-  message: string;
-}
-
 export type ServerMessage =
   | ServerStateMessage
-  | ServerLoginSuccessMessage
-  | ServerLoginErrorMessage
   | { type: 'error'; message: string };
 
 export interface ClientRequestStateMessage {
   type: 'request_state';
 }
 
-export type ClientMessage = ClientMoveMessage | ClientLoginMessage | ClientRequestStateMessage;
+export type ClientMessage = ClientMoveMessage | ClientRequestStateMessage;

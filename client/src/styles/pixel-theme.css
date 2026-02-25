@@ -422,6 +422,14 @@ html, body {
   text-align: center;
 }
 
+.login-subtitle {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.6;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;

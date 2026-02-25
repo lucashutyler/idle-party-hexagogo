@@ -1,25 +1,27 @@
 import type { Screen } from './ScreenManager';
 
-export class LoginScreen implements Screen {
+export class UsernameScreen implements Screen {
   private container: HTMLElement;
   private input!: HTMLInputElement;
   private button!: HTMLButtonElement;
   private errorEl!: HTMLElement;
-  private subtitleEl!: HTMLElement;
-  private onLoginCallback: (email: string) => void;
+  private onSubmitCallback: (username: string) => void;
 
-  constructor(containerId: string, onLogin: (email: string) => void) {
+  constructor(containerId: string, onSubmit: (username: string) => void) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
-    this.onLoginCallback = onLogin;
+    this.onSubmitCallback = onSubmit;
 
     this.buildDOM();
     this.wireEvents();
   }
 
   onActivate(): void {
-    this.reset();
+    this.input.disabled = false;
+    this.button.disabled = false;
+    this.button.textContent = 'Continue';
+    this.errorEl.style.display = 'none';
     this.input.focus();
   }
 
@@ -35,33 +37,17 @@ export class LoginScreen implements Screen {
   setLoading(loading: boolean): void {
     this.input.disabled = loading;
     this.button.disabled = loading;
-    this.button.textContent = loading ? 'Verifying...' : 'Verify';
-  }
-
-  showCheckEmail(): void {
-    this.subtitleEl.textContent = 'Check your email for a sign-in link!';
-    this.subtitleEl.style.display = 'block';
-    this.input.style.display = 'none';
-    this.button.style.display = 'none';
-    this.errorEl.style.display = 'none';
-  }
-
-  private reset(): void {
-    this.input.style.display = '';
-    this.button.style.display = '';
-    this.subtitleEl.style.display = 'none';
-    this.errorEl.style.display = 'none';
-    this.setLoading(false);
+    this.button.textContent = loading ? 'Saving...' : 'Continue';
   }
 
   private buildDOM(): void {
     this.container.innerHTML = `
       <div class="login-content">
-        <h1 class="login-title">Idle Party RPG</h1>
-        <p class="login-subtitle" style="display:none"></p>
+        <h1 class="login-title">Choose a Name</h1>
+        <p class="login-subtitle">Pick a username for your character.</p>
         <div class="login-form">
-          <input type="email" class="login-input" placeholder="Email" autocomplete="email" spellcheck="false" />
-          <button class="login-button">Verify</button>
+          <input type="text" class="login-input" placeholder="Username" maxlength="20" autocomplete="off" spellcheck="false" />
+          <button class="login-button">Continue</button>
           <div class="login-error"></div>
         </div>
       </div>
@@ -70,7 +56,6 @@ export class LoginScreen implements Screen {
     this.input = this.container.querySelector('.login-input')!;
     this.button = this.container.querySelector('.login-button')!;
     this.errorEl = this.container.querySelector('.login-error')!;
-    this.subtitleEl = this.container.querySelector('.login-subtitle')!;
   }
 
   private wireEvents(): void {
@@ -85,16 +70,20 @@ export class LoginScreen implements Screen {
   }
 
   private submit(): void {
-    const email = this.input.value.trim();
-    if (!email) {
-      this.showError('Enter your email');
+    const username = this.input.value.trim();
+    if (!username) {
+      this.showError('Enter a username');
       return;
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      this.showError('Enter a valid email address');
+    if (username.length > 20) {
+      this.showError('Username must be 1-20 characters');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+      this.showError('Letters, numbers, hyphens, underscores only');
       return;
     }
     this.errorEl.style.display = 'none';
-    this.onLoginCallback(email);
+    this.onSubmitCallback(username);
   }
 }

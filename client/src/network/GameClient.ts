@@ -1,4 +1,4 @@
-import type { ServerStateMessage, ServerMessage } from '@idle-party-rpg/shared';
+import type { ServerStateMessage } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
@@ -10,13 +10,13 @@ export class GameClient {
   private url: string;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private destroyed = false;
-  private username: string | null = null;
+  private connected = false;
 
   private stateListeners = new Set<StateListener>();
   private connectionListeners = new Set<ConnectionListener>();
 
-  /** Pending login resolve/reject — set during login() call. */
-  private loginResolve?: (result: { success: boolean; error?: string }) => void;
+  /** Pending connect resolve — set during connect() call. */
+  private connectResolve?: (result: { success: boolean; error?: string }) => void;
 
   /** True on connect, false after first state message — used to snap vs tween. */
   isInitialState = true;
@@ -26,7 +26,13 @@ export class GameClient {
 
   constructor() {
     const host = window.location.hostname || 'localhost';
-    this.url = `ws://${host}:3001`;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Dev: Vite on :3000, server on :3001 — WS connects to :3001
+    // Prod: single server serves both client and WS on the same origin
+    const port = window.location.port === '3000' ? '3001' : window.location.port;
+    this.url = port
+      ? `${protocol}//${host}:${port}`
+      : `${protocol}//${host}`;
 
     // Snap party position when returning from a background browser tab
     document.addEventListener('visibilitychange', () => {
@@ -38,15 +44,16 @@ export class GameClient {
   }
 
   /**
-   * Connect to the server and authenticate with the given username.
-   * Resolves when login_success or login_error is received.
+   * Connect to the WebSocket server. Auth is handled via session cookie —
+   * the browser sends the cookie automatically on upgrade.
+   * Resolves when the first state message is received (proving auth worked).
    */
-  login(username: string): Promise<{ success: boolean; error?: string }> {
-    this.username = username;
+  connect(): Promise<{ success: boolean; error?: string }> {
+    this.connected = false;
 
     return new Promise((resolve) => {
-      this.loginResolve = resolve;
-      this.connect();
+      this.connectResolve = resolve;
+      this.doConnect();
     });
   }
 
@@ -62,44 +69,33 @@ export class GameClient {
     return () => { this.connectionListeners.delete(listener); };
   }
 
-  private connect(): void {
+  private doConnect(): void {
     if (this.destroyed) return;
 
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
       console.log('[GameClient] connected');
+      this.connected = true;
       this.isInitialState = true;
       for (const listener of this.connectionListeners) {
         listener(true);
-      }
-
-      // Send login message on connect (initial or reconnect)
-      if (this.username) {
-        this.sendRaw({ type: 'login', username: this.username });
       }
     };
 
     this.ws.onmessage = (event) => {
       try {
-        const msg: ServerMessage = JSON.parse(event.data as string);
-
-        if (msg.type === 'login_success') {
-          console.log(`[GameClient] logged in as "${msg.username}"`);
-          this.loginResolve?.({ success: true });
-          this.loginResolve = undefined;
-          return;
-        }
-
-        if (msg.type === 'login_error') {
-          console.warn('[GameClient] login error:', msg.message);
-          this.loginResolve?.({ success: false, error: msg.message });
-          this.loginResolve = undefined;
-          return;
-        }
+        const msg = JSON.parse(event.data as string);
 
         if (msg.type === 'state') {
           this.lastState = msg;
+
+          // Resolve pending connect on first state message
+          if (this.connectResolve) {
+            this.connectResolve({ success: true });
+            this.connectResolve = undefined;
+          }
+
           for (const listener of this.stateListeners) {
             listener(msg);
           }
@@ -118,10 +114,10 @@ export class GameClient {
         listener(false);
       }
 
-      // If login() is still waiting, resolve with connection failure
-      if (this.loginResolve) {
-        this.loginResolve({ success: false, error: 'Could not connect to server' });
-        this.loginResolve = undefined;
+      // If connect() is still waiting, resolve with connection failure
+      if (this.connectResolve) {
+        this.connectResolve({ success: false, error: 'Could not connect to server' });
+        this.connectResolve = undefined;
       }
 
       this.scheduleReconnect();
@@ -134,12 +130,12 @@ export class GameClient {
 
   private scheduleReconnect(): void {
     if (this.destroyed) return;
-    // Only auto-reconnect if we've logged in at least once
-    if (!this.username) return;
+    // Only auto-reconnect if we've connected at least once
+    if (!this.connected) return;
 
     this.reconnectTimer = setTimeout(() => {
       console.log('[GameClient] reconnecting...');
-      this.connect();
+      this.doConnect();
     }, RECONNECT_DELAY);
   }
 

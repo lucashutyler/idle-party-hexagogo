@@ -1,6 +1,8 @@
 import { GameClient } from './network/GameClient';
+import { getSession, loginWithEmail, verifyToken, setUsername } from './network/AuthClient';
 import { ScreenManager } from './screens/ScreenManager';
 import { LoginScreen } from './screens/LoginScreen';
+import { UsernameScreen } from './screens/UsernameScreen';
 import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
 import { MapScreen } from './screens/MapScreen';
@@ -10,52 +12,126 @@ import { BottomNav } from './ui/BottomNav';
 const CONNECTION_ERROR = 'Could not connect to server';
 
 export class App {
-  private gameClient: GameClient;
+  private gameClient!: GameClient;
   private screenManager: ScreenManager;
   private loginScreen!: LoginScreen;
+  private usernameScreen!: UsernameScreen;
   private offlineScreen!: OfflineScreen;
   private navEl!: HTMLElement;
-  private pendingUsername: string | null = null;
 
   constructor() {
-    // 1. Shared WebSocket client (does not connect until login)
-    this.gameClient = new GameClient();
-
-    // 2. Screen manager
     this.screenManager = new ScreenManager();
 
-    // 3. Hide bottom nav until logged in
+    // Hide bottom nav until logged in
     this.navEl = document.getElementById('bottom-nav')!;
     this.navEl.style.display = 'none';
 
-    // 4. Offline screen (registered but not shown by default)
+    // Offline screen
     this.offlineScreen = new OfflineScreen('screen-offline', () => {
       this.retryConnection();
     });
     this.screenManager.register('offline', document.getElementById('screen-offline')!, this.offlineScreen);
 
-    // 5. Login screen
-    this.loginScreen = new LoginScreen('screen-login', (username) => {
-      this.handleLogin(username);
+    // Login screen (now email-based)
+    this.loginScreen = new LoginScreen('screen-login', (email) => {
+      this.handleEmailLogin(email);
     });
     this.screenManager.register('login', document.getElementById('screen-login')!, this.loginScreen);
 
-    this.screenManager.switchTo('login');
+    // Username choice screen
+    this.usernameScreen = new UsernameScreen('screen-username', (username) => {
+      this.handleUsernameChoice(username);
+    });
+    this.screenManager.register('username', document.getElementById('screen-username')!, this.usernameScreen);
+
+    // Check existing session on startup
+    this.checkSession();
   }
 
-  private async handleLogin(username: string): Promise<void> {
-    this.loginScreen.setLoading(true);
-    this.pendingUsername = username;
+  private async checkSession(): Promise<void> {
+    try {
+      const session = await getSession();
+      if (session.authenticated && session.username) {
+        // Already fully logged in — connect WS and enter game
+        await this.connectAndEnterGame();
+      } else if (session.authenticated && !session.username) {
+        // Authenticated but needs username
+        this.screenManager.switchTo('username');
+      } else {
+        // Not authenticated — show login
+        this.screenManager.switchTo('login');
+      }
+    } catch {
+      // Server unreachable
+      this.screenManager.switchTo('login');
+    }
+  }
 
-    const result = await this.gameClient.login(username);
+  private async handleEmailLogin(email: string): Promise<void> {
+    this.loginScreen.setLoading(true);
+
+    try {
+      const result = await loginWithEmail(email);
+
+      if (result.error) {
+        this.loginScreen.showError(result.error);
+        this.loginScreen.setLoading(false);
+        return;
+      }
+
+      if (result.mode === 'dev' && result.token) {
+        // Dev mode: auto-verify with the returned token
+        const session = await verifyToken(result.token);
+        if (session.authenticated) {
+          if (session.username) {
+            await this.connectAndEnterGame();
+          } else {
+            this.screenManager.switchTo('username');
+          }
+        } else {
+          this.loginScreen.showError('Verification failed');
+          this.loginScreen.setLoading(false);
+        }
+        return;
+      }
+
+      // Production mode: email sent, show "check your email" message
+      this.loginScreen.showCheckEmail();
+    } catch {
+      this.loginScreen.showError('Could not connect to server');
+      this.loginScreen.setLoading(false);
+    }
+  }
+
+  private async handleUsernameChoice(username: string): Promise<void> {
+    this.usernameScreen.setLoading(true);
+
+    try {
+      const result = await setUsername(username);
+
+      if (result.error) {
+        this.usernameScreen.showError(result.error);
+        this.usernameScreen.setLoading(false);
+        return;
+      }
+
+      await this.connectAndEnterGame();
+    } catch {
+      this.usernameScreen.showError('Could not connect to server');
+      this.usernameScreen.setLoading(false);
+    }
+  }
+
+  private async connectAndEnterGame(): Promise<void> {
+    this.gameClient = new GameClient();
+    const result = await this.gameClient.connect();
 
     if (!result.success) {
       if (result.error === CONNECTION_ERROR) {
         this.screenManager.switchTo('offline');
         return;
       }
-      this.loginScreen.showError(result.error ?? 'Login failed');
-      this.loginScreen.setLoading(false);
+      this.screenManager.switchTo('login');
       return;
     }
 
@@ -63,24 +139,18 @@ export class App {
   }
 
   private async retryConnection(): Promise<void> {
-    if (!this.pendingUsername) {
-      this.screenManager.switchTo('login');
-      this.loginScreen.setLoading(false);
-      return;
-    }
+    // Re-check session (cookie may still be valid) and retry WS
+    try {
+      const session = await getSession();
+      if (!session.authenticated || !session.username) {
+        this.screenManager.switchTo('login');
+        return;
+      }
 
-    // Destroy old client and create a fresh one
-    this.gameClient.destroy();
-    this.gameClient = new GameClient();
-
-    const result = await this.gameClient.login(this.pendingUsername);
-
-    if (!result.success) {
+      await this.connectAndEnterGame();
+    } catch {
       this.offlineScreen.setRetrying(false);
-      return;
     }
-
-    this.enterGame();
   }
 
   private enterGame(): void {

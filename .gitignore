@@ -10,5 +10,8 @@ server/dist/
 game-manager/dist/
 *.tsbuildinfo
 
+# Environment files
+.env
+
 # Game state saves
 data/

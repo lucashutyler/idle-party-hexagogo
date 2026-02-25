@@ -48,9 +48,6 @@ export type {
   CombatLogEntry,
   ServerStateMessage,
   ClientMoveMessage,
-  ClientLoginMessage,
-  ServerLoginSuccessMessage,
-  ServerLoginErrorMessage,
   ServerMessage,
   ClientMessage,
 } from './systems/BattleTypes';
