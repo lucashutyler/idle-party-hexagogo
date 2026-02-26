@@ -126,8 +126,18 @@ export class CombatScreen implements Screen {
   private updateLog(log: CombatLogEntry[]): void {
     if (log.length < this.renderedLogLength) {
       // Log was trimmed (entries shifted off the front) — full re-render
-      this.renderedLogLength = 0;
       this.renderLog(log);
+      return;
+    }
+
+    if (log.length === this.renderedLogLength) {
+      // Same length — check if entries cycled (log at max capacity:
+      // server shifts old entries off the front, pushes new to the back)
+      const lastRendered = this.logContainer.lastElementChild;
+      const lastEntry = log[log.length - 1];
+      if (lastEntry && lastRendered && lastRendered.textContent !== lastEntry.text) {
+        this.renderLog(log);
+      }
       return;
     }
 
