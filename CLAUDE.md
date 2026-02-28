@@ -83,6 +83,18 @@ server/                        @idle-party-rpg/server — Node.js game server
 data/                          Player save files (gitignored, created at runtime)
 
 game-manager/                  @idle-party-rpg/game-manager — placeholder
+
+deploy/                        Deployment config files
+├── idle-party-rpg.service     # systemd unit file (Restart=always)
+└── ipr-site.conf.template     # nginx site config template ({{DOMAIN}} placeholder)
+
+.github/
+└── workflows/
+    └── deploy.yml             # GitHub Actions: push to main → SSH deploy + restart
+
+setup-prod.sh                  Production setup (validates deps, prompts for config, installs service)
+setup-dev.sh                   Dev setup for macOS/Linux (validates deps, installs, builds)
+setup-dev.ps1                  Dev setup for Windows PowerShell
 ```
 
 ## Commands

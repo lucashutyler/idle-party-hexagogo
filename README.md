@@ -4,22 +4,73 @@ An idle multiplayer RPG on a hexagonal world map. Characters fight, move, and pr
 
 ## Quick Start (Development)
 
+**macOS / Linux:**
+```bash
+bash setup-dev.sh    # validates node 20+, npm, git — then installs + builds
+npm run dev          # starts client (:3000) + server (:3001) with hot reload
+```
+
+**Windows (PowerShell):**
+```powershell
+.\setup-dev.ps1      # validates node 20+, npm, git — then installs + builds
+npm run dev
+```
+
+**Manual alternative:**
 ```bash
 npm install
 npm run build        # build shared types first (required before first dev run)
-npm run dev          # starts client (:3000) + server (:3001) with hot reload
+npm run dev
 ```
 
 In dev mode, email verification is instant — enter any email, click Verify, choose a username, and you're in.
 
-## Production
+## Production Setup
+
+On an Ubuntu server with Node.js 22+, nginx, and git already installed:
 
 ```bash
-npm run build        # builds shared → client → server (in order)
-npm start            # NODE_ENV=production — serves client + API + WebSocket on one port
+sudo bash setup-prod.sh
 ```
 
-Requires a `.env` file in `server/` — see `server/.env.example` for all keys. In production, sign-in emails are sent via AWS SES.
+The script will:
+1. Validate that node (22+), npm, nginx, and git are installed
+2. Prompt for domain, session secret, AWS SES credentials, and other config
+3. Clone the repo to `/opt/idle-party-rpg` and build
+4. Install and start a systemd service (`idle-party-rpg`)
+5. Configure nginx as a reverse proxy with WebSocket support
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `PORT` | Server port (default: 3001) | No |
+| `SESSION_SECRET` | Session encryption key | Yes |
+| `APP_URL` | Public URL (e.g. `https://play.hexagogo.com`) | Yes |
+| `AWS_ACCESS_KEY_ID` | AWS credentials for SES | Yes |
+| `AWS_SECRET_ACCESS_KEY` | AWS credentials for SES | Yes |
+| `AWS_REGION` | AWS region (default: us-east-1) | No |
+| `SES_FROM_EMAIL` | Email sender address | Yes |
+
+### After Setup
+
+```bash
+sudo systemctl status idle-party-rpg   # check service
+journalctl -u idle-party-rpg -f        # follow logs
+sudo certbot --nginx -d yourdomain.com # add HTTPS
+```
+
+## Auto-Deploy
+
+Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into the server, pulls the latest code, builds, and restarts the service.
+
+**Required GitHub Secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|--------|-------|
+| `SSH_HOST` | Server IP or hostname |
+| `SSH_USER` | User with sudo access |
+| `SSH_KEY` | Private SSH key for that user |
 
 ## Commands
 
@@ -128,3 +179,7 @@ Goal: real-time auto-battle where damage is calculated per tick, HP tracked for 
 - [x] Single `npm run dev` runs all subprojects
 - [x] Test coverage
 - [x] Shared types package between client/server
+- [x] Auto-deploy via GitHub Actions (push to main → deploy)
+- [x] systemd service with auto-restart
+- [x] nginx reverse proxy with WebSocket support
+- [x] Setup scripts (dev + prod)
