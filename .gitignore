@@ -15,3 +15,9 @@ game-manager/dist/
 
 # Game state saves
 data/
+
+# Claude Code
+.claude/
+
+# Misc
+plan.md

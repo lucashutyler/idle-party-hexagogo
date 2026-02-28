@@ -19,10 +19,18 @@ export class ScreenManager {
   switchTo(id: string): void {
     if (this.activeScreenId === id) return;
 
+    // Deactivate the tracked active screen
     const current = this.activeScreenId ? this.screens.get(this.activeScreenId) : undefined;
     if (current) {
       current.element.classList.remove('active');
       current.screen.onDeactivate();
+    }
+
+    // Remove stale active classes from all other screens (e.g. HTML-defined defaults)
+    for (const [screenId, registered] of this.screens) {
+      if (screenId !== id) {
+        registered.element.classList.remove('active');
+      }
     }
 
     const next = this.screens.get(id);
