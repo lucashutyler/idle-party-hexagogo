@@ -101,6 +101,7 @@ NPM_PATH=$(command -v npm)
 if [[ "$NODE_PATH" != /usr/local/bin/* ]]; then
   ln -sf "$NODE_PATH" /usr/local/bin/node
   info "Symlinked node → $NODE_PATH"
+  NODE_PATH=/usr/local/bin/node
 fi
 if [[ "$NPM_PATH" != /usr/local/bin/* ]]; then
   ln -sf "$NPM_PATH" /usr/local/bin/npm
