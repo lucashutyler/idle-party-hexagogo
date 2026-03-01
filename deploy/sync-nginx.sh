@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sync nginx config from repo template to sites-available.
 # Designed to run as the idlerpg user during deploys.
-# Requires: sudo nginx -t, sudo systemctl reload nginx (via sudoers)
+# Requires sudoers entries for: cp, nginx -t, systemctl reload nginx
 set -euo pipefail
 
 INSTALL_DIR="/opt/idle-party-rpg"
@@ -22,17 +22,20 @@ else
   exit 0
 fi
 
-# Generate new config from template
-NEW_CONF=$(sed "s/{{DOMAIN}}/$CURRENT_DOMAIN/g" "$TEMPLATE")
+# Generate new config from template into a temp file
+TMPFILE=$(mktemp)
+sed "s/{{DOMAIN}}/$CURRENT_DOMAIN/g" "$TEMPLATE" > "$TMPFILE"
 
 # Compare with current config
-if [[ -f "$TARGET" ]] && echo "$NEW_CONF" | diff -q - "$TARGET" >/dev/null 2>&1; then
+if diff -q "$TMPFILE" "$TARGET" >/dev/null 2>&1; then
   echo "[sync-nginx] nginx config unchanged"
+  rm "$TMPFILE"
   exit 0
 fi
 
-# Write new config and reload
-echo "$NEW_CONF" | sudo tee "$TARGET" >/dev/null
+# Copy new config and reload
+sudo cp "$TMPFILE" "$TARGET"
+rm "$TMPFILE"
 echo "[sync-nginx] Updated $TARGET"
 
 sudo nginx -t
