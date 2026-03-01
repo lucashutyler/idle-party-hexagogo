@@ -23,6 +23,9 @@ const tokenStore = new TokenStore();
 const gameLoop = new GameLoop(store);
 const { playerManager } = gameLoop;
 
+// Trust first proxy (nginx/Cloudflare) so secure cookies work behind reverse proxy
+app.set('trust proxy', 1);
+
 // --- Session middleware ---
 const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET ?? 'dev-secret',
