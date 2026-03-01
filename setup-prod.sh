@@ -49,35 +49,52 @@ info "git $(git --version | awk '{print $3}')"
 echo ""
 
 # --- Prompt for configuration ---
-echo "=== Configuration ==="
-echo ""
+SKIP_ENV=false
+if [[ -f "$INSTALL_DIR/.env" ]]; then
+  warn "Existing .env found at $INSTALL_DIR/.env"
+  read -rp "Overwrite it? (y/N): " OVERWRITE_ENV
+  if [[ "$OVERWRITE_ENV" != "y" && "$OVERWRITE_ENV" != "Y" ]]; then
+    SKIP_ENV=true
+    info "Keeping existing .env"
+    # Still need DOMAIN for nginx config — extract from existing APP_URL
+    DOMAIN=$(grep '^APP_URL=' "$INSTALL_DIR/.env" | sed 's|APP_URL=https\?://||')
+    [[ -z "$DOMAIN" ]] && read -rp "Domain name (e.g. play.hexagogo.com): " DOMAIN
+    [[ -z "$DOMAIN" ]] && error "Domain is required."
+    info "Using domain: $DOMAIN"
+  fi
+fi
 
-read -rp "Domain name (e.g. play.hexagogo.com): " DOMAIN
-[[ -z "$DOMAIN" ]] && error "Domain is required."
+if [[ "$SKIP_ENV" == "false" ]]; then
+  echo "=== Configuration ==="
+  echo ""
 
-DEFAULT_SECRET=$(openssl rand -hex 32)
-read -rp "Session secret [generated: ${DEFAULT_SECRET:0:16}...]: " SESSION_SECRET
-SESSION_SECRET="${SESSION_SECRET:-$DEFAULT_SECRET}"
+  read -rp "Domain name (e.g. play.hexagogo.com): " DOMAIN
+  [[ -z "$DOMAIN" ]] && error "Domain is required."
 
-DEFAULT_APP_URL="https://$DOMAIN"
-read -rp "App URL [$DEFAULT_APP_URL]: " APP_URL
-APP_URL="${APP_URL:-$DEFAULT_APP_URL}"
+  DEFAULT_SECRET=$(openssl rand -hex 32)
+  read -rp "Session secret [generated: ${DEFAULT_SECRET:0:16}...]: " SESSION_SECRET
+  SESSION_SECRET="${SESSION_SECRET:-$DEFAULT_SECRET}"
 
-read -rp "Server port [3001]: " PORT
-PORT="${PORT:-3001}"
+  DEFAULT_APP_URL="https://$DOMAIN"
+  read -rp "App URL [$DEFAULT_APP_URL]: " APP_URL
+  APP_URL="${APP_URL:-$DEFAULT_APP_URL}"
 
-echo ""
-echo "AWS SES configuration (required for email authentication):"
-read -rp "AWS_ACCESS_KEY_ID: " AWS_ACCESS_KEY_ID
-[[ -z "$AWS_ACCESS_KEY_ID" ]] && error "AWS_ACCESS_KEY_ID is required for production email auth."
-read -rp "AWS_SECRET_ACCESS_KEY: " AWS_SECRET_ACCESS_KEY
-[[ -z "$AWS_SECRET_ACCESS_KEY" ]] && error "AWS_SECRET_ACCESS_KEY is required for production email auth."
-read -rp "SES_FROM_EMAIL (e.g. noreply@hexagogo.com): " SES_FROM_EMAIL
-[[ -z "$SES_FROM_EMAIL" ]] && error "SES_FROM_EMAIL is required for production email auth."
-read -rp "AWS_REGION [us-east-1]: " AWS_REGION
-AWS_REGION="${AWS_REGION:-us-east-1}"
+  read -rp "Server port [3001]: " PORT
+  PORT="${PORT:-3001}"
 
-echo ""
+  echo ""
+  echo "AWS SES configuration (required for email authentication):"
+  read -rp "AWS_ACCESS_KEY_ID: " AWS_ACCESS_KEY_ID
+  [[ -z "$AWS_ACCESS_KEY_ID" ]] && error "AWS_ACCESS_KEY_ID is required for production email auth."
+  read -rp "AWS_SECRET_ACCESS_KEY: " AWS_SECRET_ACCESS_KEY
+  [[ -z "$AWS_SECRET_ACCESS_KEY" ]] && error "AWS_SECRET_ACCESS_KEY is required for production email auth."
+  read -rp "SES_FROM_EMAIL (e.g. noreply@hexagogo.com): " SES_FROM_EMAIL
+  [[ -z "$SES_FROM_EMAIL" ]] && error "SES_FROM_EMAIL is required for production email auth."
+  read -rp "AWS_REGION [us-east-1]: " AWS_REGION
+  AWS_REGION="${AWS_REGION:-us-east-1}"
+
+  echo ""
+fi
 
 # --- Create service user ---
 if ! id "$SERVICE_USER" &>/dev/null; then
@@ -97,7 +114,8 @@ else
 fi
 
 # --- Write .env ---
-cat > "$INSTALL_DIR/.env" <<EOF
+if [[ "$SKIP_ENV" == "false" ]]; then
+  cat > "$INSTALL_DIR/.env" <<EOF
 PORT=$PORT
 SESSION_SECRET=$SESSION_SECRET
 APP_URL=$APP_URL
@@ -106,8 +124,9 @@ AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 AWS_REGION=$AWS_REGION
 SES_FROM_EMAIL=$SES_FROM_EMAIL
 EOF
-chmod 600 "$INSTALL_DIR/.env"
-info "Wrote $INSTALL_DIR/.env"
+  chmod 600 "$INSTALL_DIR/.env"
+  info "Wrote $INSTALL_DIR/.env"
+fi
 
 # --- Install dependencies and build ---
 echo "Installing dependencies and building..."
