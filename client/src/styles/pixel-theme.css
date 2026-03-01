@@ -489,6 +489,53 @@ html, body {
   display: none;
 }
 
+.verify-message {
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.verify-back-link {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--accent-gold);
+  text-decoration: none;
+}
+
+.verify-back-link:hover {
+  text-decoration: underline;
+}
+
+.verify-details {
+  width: 100%;
+  max-width: 360px;
+  margin-top: 8px;
+}
+
+.verify-details summary {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: center;
+}
+
+.verify-debug-pre {
+  margin-top: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-pixel);
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-align: left;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 /* ── Offline Screen ─────────────────────────────────────── */
 
 .offline-content {

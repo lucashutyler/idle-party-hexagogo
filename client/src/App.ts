@@ -130,11 +130,30 @@ export class App {
       }
 
       if (result.success) {
-        if (result.username) {
-          await this.connectAndEnterGame();
-        } else {
-          this.screenManager.switchTo('username');
+        // Validate the session cookie was actually set by calling /auth/session
+        let sessionCheck: Record<string, unknown> | null = null;
+        try {
+          sessionCheck = await getSession() as unknown as Record<string, unknown>;
+        } catch {
+          sessionCheck = { error: 'Failed to reach /auth/session' };
         }
+
+        const debug = {
+          verifyResponse: result as Record<string, unknown>,
+          sessionCheck,
+          cookiesEnabled: navigator.cookieEnabled,
+          documentCookie: document.cookie,
+        };
+
+        const proceed = () => {
+          if (result.username) {
+            this.connectAndEnterGame();
+          } else {
+            this.screenManager.switchTo('username');
+          }
+        };
+
+        this.verifyScreen.showSuccess(debug, proceed);
       } else {
         this.verifyScreen.showError('Verification failed. Please try again.');
       }
