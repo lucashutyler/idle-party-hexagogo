@@ -31,6 +31,14 @@ export class CombatScreen implements Screen {
 
   onActivate(): void {
     this.isActive = true;
+
+    // Render current state immediately (first state may have arrived before subscription)
+    const state = this.gameClient.lastState;
+    if (state) {
+      this.updateVisuals(state);
+      this.lastLog = state.combatLog;
+    }
+
     // Full re-render of log on activate (may have accumulated while inactive)
     this.renderedLogLength = 0;
     this.renderLog(this.lastLog);
