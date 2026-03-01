@@ -69,6 +69,7 @@ server/                        @idle-party-rpg/server — Node.js game server
 │   │   ├── AccountStore.ts    # Email→account JSON persistence (data/accounts.json)
 │   │   ├── TokenStore.ts      # In-memory magic link token store (15m expiry)
 │   │   ├── EmailService.ts    # AWS SES email sending (dev: console log)
+│   │   ├── JsonSessionStore.ts # File-backed express-session store (data/sessions/)
 │   │   ├── authRoutes.ts      # REST endpoints: login, verify, session, username, logout
 │   │   └── session.d.ts       # express-session type augmentation
 │   └── game/
@@ -80,7 +81,10 @@ server/                        @idle-party-rpg/server — Node.js game server
 │       ├── GameStateStore.ts  # GameStateStore interface + PlayerSaveData type
 │       └── JsonFileStore.ts   # JSON-file-based persistence (data/<username>.json)
 
-data/                          Player save files (gitignored, created at runtime)
+data/                          Persistent runtime data (gitignored, created at runtime)
+├── <username>.json            # Per-player game state saves
+├── accounts.json              # Email→account mapping
+└── sessions/                  # Express session files (one .json per session)
 
 game-manager/                  @idle-party-rpg/game-manager — placeholder
 
@@ -114,7 +118,7 @@ npm run typecheck    # tsc --build (all packages)
 
 - **Hex coordinates**: Cube coordinates (q, r, s) where q + r + s = 0, flat-top hexagons, HEX_SIZE = 40px
 - **Multi-screen app shell**: DOM-based screen switching (not Phaser scenes). `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-loads Phaser on first visit.
-- **Email-based magic link auth**: Auth is handled over REST (`/auth/*`), not WebSocket. Flow: enter email → receive magic link (dev: auto-verify) → choose username → game. Sessions use `express-session` with httpOnly cookies (30-day expiry). In dev (`NODE_ENV !== 'production'`), verification is instant. In production, a magic link is emailed via AWS SES. Account data (email, username, verified status) is stored in `data/accounts.json` via `AccountStore`. Magic link tokens are in-memory with 15-minute expiry (`TokenStore`). Username is changeable later.
+- **Email-based magic link auth**: Auth is handled over REST (`/auth/*`), not WebSocket. Flow: enter email → receive magic link (dev: auto-verify) → choose username → game. Sessions use `express-session` with httpOnly cookies (30-day expiry), persisted to disk via `JsonSessionStore` (survives server restarts/deploys). In dev (`NODE_ENV !== 'production'`), verification is instant. In production, a magic link is emailed via AWS SES. Account data (email, username, verified status) is stored in `data/accounts.json` via `AccountStore`. Magic link tokens are in-memory with 15-minute expiry (`TokenStore`). Username is changeable later.
 - **WebSocket auth via session cookie**: WebSocket upgrade requests are authenticated by parsing the session cookie server-side. If no valid session/username, the upgrade is rejected with 401. No login messages are sent over WS — identity comes from the cookie.
 - **Per-player game state**: Each player gets their own `PlayerSession` with independent `ServerParty`, `ServerBattleTimer`, and `UnlockSystem`. Sessions persist when disconnected (battles keep running). `PlayerManager` maps usernames to sessions and WebSockets to usernames. Multiple connections per username are supported (e.g. two browser tabs with the same login both receive state).
 - **GameClient subscriber pattern**: `subscribe(cb)` / `onConnection(cb)` return unsubscribe functions. Multiple screens listen concurrently. `lastState` cache lets late-mounting screens read current state immediately. Connection is deferred until `connect()` is called (after auth).
@@ -145,6 +149,15 @@ When making changes that affect architecture, patterns, file structure, or game 
 2. Update `PlayerSession.toSaveData()` to serialize the new state
 3. Update `PlayerSession.fromSaveData()` to restore the new state
 4. If the state lives in a sub-system (like `UnlockSystem`), ensure that system supports restoration from saved data
+
+## Data Folder Convention
+
+Everything in `data/` is persisted behind a **swappable interface** so the storage backend can be changed from JSON files to a database without modifying consumers:
+- **Game state**: `GameStateStore` interface (`server/src/game/GameStateStore.ts`) → currently `JsonFileStore`
+- **Sessions**: express-session `Store` class → currently `JsonSessionStore` (`server/src/auth/JsonSessionStore.ts`)
+- **Accounts**: `AccountStore` reads/writes `data/accounts.json` directly (should be interfaced when migrating to a DB)
+
+When adding new persistent data to `data/`, always define an interface or extend an existing one. Never read/write files directly from game logic — go through the store abstraction.
 
 ## Code Conventions
 

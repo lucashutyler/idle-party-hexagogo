@@ -12,12 +12,14 @@ import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
+import { JsonSessionStore } from './auth/JsonSessionStore.js';
 
 const app = express();
 const server = createServer(app);
 
 // --- Stores ---
 const store = new JsonFileStore();
+const sessionStore = new JsonSessionStore('data/sessions');
 const accountStore = new AccountStore();
 const tokenStore = new TokenStore();
 const gameLoop = new GameLoop(store);
@@ -28,6 +30,7 @@ app.set('trust proxy', 1);
 
 // --- Session middleware ---
 const sessionMiddleware = session({
+  store: sessionStore,
   secret: process.env.SESSION_SECRET ?? 'dev-secret',
   resave: false,
   saveUninitialized: false,
@@ -154,6 +157,7 @@ const PORT = process.env.PORT ?? 3001;
 async function start() {
   await accountStore.load();
   tokenStore.start();
+  sessionStore.startReap();
   await gameLoop.init();
 
   server.listen(PORT, () => {
@@ -164,6 +168,7 @@ async function start() {
 async function shutdown(signal: string) {
   console.log(`\n${signal} received — shutting down...`);
   tokenStore.stop();
+  sessionStore.stopReap();
   await gameLoop.shutdown();
   process.exit(0);
 }
