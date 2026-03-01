@@ -27,7 +27,16 @@ In dev mode, email verification is instant — enter any email, click Verify, ch
 
 ## Production Setup
 
-On an Ubuntu server with Node.js 22+, nginx, and git already installed:
+On an Ubuntu/Debian server with nginx and git already installed.
+
+**Install Node.js 22 LTS** (system-wide via [NodeSource](https://github.com/nodesource/distributions) — do not use nvm on servers):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+**Run the setup script:**
 
 ```bash
 sudo bash setup-prod.sh

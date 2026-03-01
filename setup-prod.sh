@@ -29,13 +29,12 @@ echo ""
 # --- Validate prerequisites ---
 echo "Checking prerequisites..."
 
-command -v node >/dev/null 2>&1 || error "node is not installed. Install Node.js 22 LTS first."
-NODE_PATH=$(command -v node)
+command -v node >/dev/null 2>&1 || error "node is not installed. Install Node.js 22 LTS via NodeSource (see README)."
 NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
 if [[ "$NODE_VERSION" -lt 22 ]]; then
   error "Node.js 22+ is required (found v$(node -v | sed 's/v//')). Upgrade Node.js first."
 fi
-info "node $(node -v) ($NODE_PATH)"
+info "node $(node -v)"
 
 command -v npm >/dev/null 2>&1 || error "npm is not installed."
 info "npm $(npm -v)"
@@ -96,18 +95,6 @@ if [[ "$SKIP_ENV" == "false" ]]; then
   echo ""
 fi
 
-# --- Symlink node/npm to /usr/local/bin ---
-NPM_PATH=$(command -v npm)
-if [[ "$NODE_PATH" != /usr/local/bin/* ]]; then
-  ln -sf "$NODE_PATH" /usr/local/bin/node
-  info "Symlinked node → $NODE_PATH"
-  NODE_PATH=/usr/local/bin/node
-fi
-if [[ "$NPM_PATH" != /usr/local/bin/* ]]; then
-  ln -sf "$NPM_PATH" /usr/local/bin/npm
-  info "Symlinked npm → $NPM_PATH"
-fi
-
 # --- Create service user ---
 if ! id "$SERVICE_USER" &>/dev/null; then
   useradd --system --create-home --home-dir /home/$SERVICE_USER --shell /bin/bash "$SERVICE_USER"
@@ -160,7 +147,7 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 info "Set ownership to $SERVICE_USER"
 
 # --- Install systemd service ---
-sed "s|{{NODE_PATH}}|$NODE_PATH|g" "$INSTALL_DIR/deploy/idle-party-rpg.service" > "/etc/systemd/system/$SERVICE_NAME.service"
+cp "$INSTALL_DIR/deploy/idle-party-rpg.service" "/etc/systemd/system/$SERVICE_NAME.service"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl start "$SERVICE_NAME"
