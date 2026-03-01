@@ -20,4 +20,5 @@ jobs:
             git pull
             npm install
             npm run build
+            bash deploy/sync-nginx.sh
             sudo systemctl restart idle-party-rpg

@@ -105,11 +105,16 @@ else
   usermod --shell /bin/bash "$SERVICE_USER" 2>/dev/null || true
 fi
 
-# --- Set up sudoers for service restart ---
+# --- Set up sudoers for service restart + nginx sync ---
 SUDOERS_FILE="/etc/sudoers.d/$SERVICE_USER"
-echo "$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart $SERVICE_NAME" > "$SUDOERS_FILE"
+cat > "$SUDOERS_FILE" <<SUDOERS
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart $SERVICE_NAME
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload nginx
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/nginx/sites-available/$NGINX_CONF
+SUDOERS
 chmod 440 "$SUDOERS_FILE"
-info "Sudoers: $SERVICE_USER can restart $SERVICE_NAME without password"
+info "Sudoers: $SERVICE_USER can restart $SERVICE_NAME, sync nginx config, reload nginx"
 
 # --- Clone or update repo ---
 if [[ -d "$INSTALL_DIR/.git" ]]; then
