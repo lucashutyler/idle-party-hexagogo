@@ -85,7 +85,7 @@ data/                          Player save files (gitignored, created at runtime
 game-manager/                  @idle-party-rpg/game-manager — placeholder
 
 deploy/                        Deployment config files
-├── idle-party-rpg.service     # systemd unit file (Restart=always)
+├── idle-party-rpg.service     # systemd unit template ({{NODE_PATH}} placeholder, Restart=always)
 └── ipr-site.conf.template     # nginx site config template ({{DOMAIN}} placeholder)
 
 .github/

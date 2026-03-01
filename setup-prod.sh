@@ -30,11 +30,12 @@ echo ""
 echo "Checking prerequisites..."
 
 command -v node >/dev/null 2>&1 || error "node is not installed. Install Node.js 22 LTS first."
+NODE_PATH=$(command -v node)
 NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
 if [[ "$NODE_VERSION" -lt 22 ]]; then
   error "Node.js 22+ is required (found v$(node -v | sed 's/v//')). Upgrade Node.js first."
 fi
-info "node $(node -v)"
+info "node $(node -v) ($NODE_PATH)"
 
 command -v npm >/dev/null 2>&1 || error "npm is not installed."
 info "npm $(npm -v)"
@@ -120,7 +121,7 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 info "Set ownership to $SERVICE_USER"
 
 # --- Install systemd service ---
-cp "$INSTALL_DIR/deploy/idle-party-rpg.service" "/etc/systemd/system/$SERVICE_NAME.service"
+sed "s|{{NODE_PATH}}|$NODE_PATH|g" "$INSTALL_DIR/deploy/idle-party-rpg.service" > "/etc/systemd/system/$SERVICE_NAME.service"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl start "$SERVICE_NAME"

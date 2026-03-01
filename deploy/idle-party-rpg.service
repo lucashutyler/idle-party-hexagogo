@@ -7,7 +7,7 @@ Type=simple
 User=idlerpg
 Group=idlerpg
 WorkingDirectory=/opt/idle-party-rpg
-ExecStart=/usr/bin/node server/dist/index.js
+ExecStart={{NODE_PATH}} server/dist/index.js
 EnvironmentFile=/opt/idle-party-rpg/.env
 Environment=NODE_ENV=production
 Restart=always
