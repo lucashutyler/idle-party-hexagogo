@@ -57,7 +57,7 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
 
   /**
    * GET /auth/verify?token=...
-   * Verifies the magic link token, creates a session, redirects to app.
+   * Verifies the magic link token, creates a session, returns JSON.
    */
   router.get('/verify', async (req, res) => {
     const { token } = req.query;
@@ -69,7 +69,7 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
 
     const email = tokenStore.verify(token);
     if (!email) {
-      res.status(401).json({ error: 'Invalid or expired token' });
+      res.status(401).json({ error: 'Invalid or expired sign-in link. Please request a new one.' });
       return;
     }
 
@@ -89,8 +89,11 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
         return;
       }
 
-      const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
-      res.redirect(appUrl);
+      res.json({
+        success: true,
+        email,
+        username: account?.username ?? null,
+      });
     });
   });
 

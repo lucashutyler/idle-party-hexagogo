@@ -2,6 +2,7 @@ import { GameClient } from './network/GameClient';
 import { getSession, loginWithEmail, verifyToken, setUsername } from './network/AuthClient';
 import { ScreenManager } from './screens/ScreenManager';
 import { LoginScreen } from './screens/LoginScreen';
+import { VerifyScreen } from './screens/VerifyScreen';
 import { UsernameScreen } from './screens/UsernameScreen';
 import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
@@ -15,6 +16,7 @@ export class App {
   private gameClient!: GameClient;
   private screenManager: ScreenManager;
   private loginScreen!: LoginScreen;
+  private verifyScreen!: VerifyScreen;
   private usernameScreen!: UsernameScreen;
   private offlineScreen!: OfflineScreen;
   private navEl!: HTMLElement;
@@ -31,6 +33,12 @@ export class App {
       this.retryConnection();
     });
     this.screenManager.register('offline', document.getElementById('screen-offline')!, this.offlineScreen);
+
+    // Verify screen (magic link landing)
+    this.verifyScreen = new VerifyScreen('screen-verify', (token) => {
+      this.handleVerify(token);
+    });
+    this.screenManager.register('verify', document.getElementById('screen-verify')!, this.verifyScreen);
 
     // Login screen (now email-based)
     this.loginScreen = new LoginScreen('screen-login', (email) => {
@@ -49,6 +57,12 @@ export class App {
   }
 
   private async checkSession(): Promise<void> {
+    // Magic link landing: /verify?token=...
+    if (window.location.pathname === '/verify') {
+      this.screenManager.switchTo('verify');
+      return;
+    }
+
     try {
       const session = await getSession();
       if (session.authenticated && session.username) {
@@ -81,15 +95,15 @@ export class App {
 
       if (result.mode === 'dev' && result.token) {
         // Dev mode: auto-verify with the returned token
-        const session = await verifyToken(result.token);
-        if (session.authenticated) {
-          if (session.username) {
+        const verify = await verifyToken(result.token);
+        if (verify.success) {
+          if (verify.username) {
             await this.connectAndEnterGame();
           } else {
             this.screenManager.switchTo('username');
           }
         } else {
-          this.loginScreen.showError('Verification failed');
+          this.loginScreen.showError(verify.error ?? 'Verification failed');
           this.loginScreen.setLoading(false);
         }
         return;
@@ -100,6 +114,32 @@ export class App {
     } catch {
       this.loginScreen.showError('Could not connect to server');
       this.loginScreen.setLoading(false);
+    }
+  }
+
+  private async handleVerify(token: string): Promise<void> {
+    try {
+      const result = await verifyToken(token);
+
+      // Clean the URL so /verify?token=... doesn't linger
+      history.replaceState(null, '', '/');
+
+      if (result.error) {
+        this.verifyScreen.showError(result.error);
+        return;
+      }
+
+      if (result.success) {
+        if (result.username) {
+          await this.connectAndEnterGame();
+        } else {
+          this.screenManager.switchTo('username');
+        }
+      } else {
+        this.verifyScreen.showError('Verification failed. Please try again.');
+      }
+    } catch {
+      this.verifyScreen.showError('Could not connect to server.');
     }
   }
 

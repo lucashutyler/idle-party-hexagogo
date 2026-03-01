@@ -19,7 +19,7 @@ function getSesClient(): SESClient {
 
 export async function sendMagicLinkEmail(email: string, token: string): Promise<void> {
   const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
-  const verifyUrl = `${appUrl}/auth/verify?token=${token}`;
+  const verifyUrl = `${appUrl}/verify?token=${token}`;
 
   if (!isProd) {
     console.log(`[EmailService] DEV MODE — magic link for ${email}:`);

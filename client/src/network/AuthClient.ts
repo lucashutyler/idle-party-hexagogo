@@ -43,14 +43,17 @@ export async function loginWithEmail(email: string): Promise<LoginResult> {
   });
 }
 
-export async function verifyToken(token: string): Promise<SessionInfo> {
-  // Verify via GET, then check session state
-  await fetch(`${API_BASE}/verify?token=${encodeURIComponent(token)}`, {
-    credentials: 'include',
-    redirect: 'manual', // don't follow redirect, we just want the cookie set
+export interface VerifyResult {
+  success?: boolean;
+  email?: string;
+  username?: string | null;
+  error?: string;
+}
+
+export async function verifyToken(token: string): Promise<VerifyResult> {
+  return jsonFetch<VerifyResult>(`${API_BASE}/verify?token=${encodeURIComponent(token)}`, {
+    method: 'GET',
   });
-  // After verify sets the cookie, check session
-  return getSession();
 }
 
 export async function setUsername(username: string): Promise<UsernameResult> {
