@@ -96,7 +96,7 @@ function getSessionUsername(req: IncomingMessage): Promise<string | null> {
 server.on('upgrade', async (req, socket, head) => {
   const username = await getSessionUsername(req);
 
-  if (!username) {
+  if (!username || username === 'undefined') {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;

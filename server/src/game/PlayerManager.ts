@@ -151,6 +151,12 @@ export class PlayerManager {
    */
   restoreFromSaveData(saves: PlayerSaveData[]): void {
     for (const data of saves) {
+      // Skip invalid save data
+      if (!data.username || data.username === 'undefined' || !data.position) {
+        console.warn(`[PlayerManager] Skipping invalid save data (username="${data.username}", position=${JSON.stringify(data.position)})`);
+        continue;
+      }
+
       try {
         const session = PlayerSession.fromSaveData(data, this.grid, () => {
           this.sendStateToPlayer(data.username);

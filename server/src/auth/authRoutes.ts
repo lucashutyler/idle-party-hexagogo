@@ -77,22 +77,31 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
     await accountStore.setVerified(email);
     const account = accountStore.findByEmail(email);
 
-    // Set session
-    req.session.email = email;
-    req.session.username = account?.username ?? undefined;
-
-    // Save session before responding
-    req.session.save((err) => {
+    // Regenerate session to prevent fixation and ensure a fresh cookie is set.
+    // This is critical because the verify request comes from a client-side fetch —
+    // express-session doesn't reliably set cookies when save() is called explicitly.
+    req.session.regenerate((err) => {
       if (err) {
-        console.error('[Auth] Session save error:', err);
+        console.error('[Auth] Session regenerate error:', err);
         res.status(500).json({ error: 'Session error' });
         return;
       }
 
-      res.json({
-        success: true,
-        email,
-        username: account?.username ?? null,
+      req.session.email = email;
+      req.session.username = account?.username || undefined;
+
+      req.session.save((err) => {
+        if (err) {
+          console.error('[Auth] Session save error:', err);
+          res.status(500).json({ error: 'Session error' });
+          return;
+        }
+
+        res.json({
+          success: true,
+          email,
+          username: account?.username ?? null,
+        });
       });
     });
   });
