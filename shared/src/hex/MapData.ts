@@ -1,5 +1,5 @@
-import { HexGrid } from './HexGrid';
-import { WORLD_MAP, MapSchema } from './MapSchema';
+import { HexGrid } from './HexGrid.js';
+import { WORLD_MAP, MapSchema } from './MapSchema.js';
 
 /**
  * Generate the world map from the schema.

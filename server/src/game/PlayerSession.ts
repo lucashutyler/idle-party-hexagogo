@@ -6,9 +6,9 @@ import {
   cubeToOffset,
 } from '@idle-party-rpg/shared';
 import type { BattleResult, ServerStateMessage, OtherPlayerState, CombatLogEntry } from '@idle-party-rpg/shared';
-import { ServerParty } from './ServerParty';
-import { ServerBattleTimer } from './ServerBattleTimer';
-import type { PlayerSaveData } from './GameStateStore';
+import { ServerParty } from './ServerParty.js';
+import { ServerBattleTimer } from './ServerBattleTimer.js';
+import type { PlayerSaveData } from './GameStateStore.js';
 
 const MAX_LOG_ENTRIES = 100;
 const MAX_SAVE_LOG_ENTRIES = 1000;

@@ -1,6 +1,6 @@
-import { CubeCoord, cubeDistance, cubeToPixel } from './HexUtils';
-import { HexGrid } from './HexGrid';
-import { HexTile } from './HexTile';
+import { CubeCoord, cubeDistance, cubeToPixel } from './HexUtils.js';
+import { HexGrid } from './HexGrid.js';
+import { HexTile } from './HexTile.js';
 
 interface PathNode {
   tile: HexTile;

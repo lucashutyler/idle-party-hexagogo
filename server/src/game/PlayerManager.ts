@@ -1,8 +1,8 @@
 import { WebSocket } from 'ws';
 import { HexGrid } from '@idle-party-rpg/shared';
 import type { OtherPlayerState } from '@idle-party-rpg/shared';
-import { PlayerSession } from './PlayerSession';
-import type { GameStateStore, PlayerSaveData } from './GameStateStore';
+import { PlayerSession } from './PlayerSession.js';
+import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();

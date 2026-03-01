@@ -1,6 +1,6 @@
 import { generateWorldMap } from '@idle-party-rpg/shared';
-import { PlayerManager } from './PlayerManager';
-import type { GameStateStore } from './GameStateStore';
+import { PlayerManager } from './PlayerManager.js';
+import type { GameStateStore } from './GameStateStore.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
 

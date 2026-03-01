@@ -16,24 +16,24 @@ export {
   HEX_SIZE,
   HEX_WIDTH,
   HEX_HEIGHT,
-} from './hex/HexUtils';
-export type { CubeCoord, OffsetCoord, PixelCoord } from './hex/HexUtils';
+} from './hex/HexUtils.js';
+export type { CubeCoord, OffsetCoord, PixelCoord } from './hex/HexUtils.js';
 
 // Hex tile
-export { TileType, TILE_CONFIGS, HexTile } from './hex/HexTile';
-export type { TileConfig } from './hex/HexTile';
+export { TileType, TILE_CONFIGS, HexTile } from './hex/HexTile.js';
+export type { TileConfig } from './hex/HexTile.js';
 
 // Hex grid & pathfinding
-export { HexGrid } from './hex/HexGrid';
-export { HexPathfinder } from './hex/HexPathfinder';
+export { HexGrid } from './hex/HexGrid.js';
+export { HexPathfinder } from './hex/HexPathfinder.js';
 
 // Map
-export { WORLD_MAP } from './hex/MapSchema';
-export type { MapSchema, TileDefinition } from './hex/MapSchema';
-export { generateWorldMap, getStartingPosition } from './hex/MapData';
+export { WORLD_MAP } from './hex/MapSchema.js';
+export type { MapSchema, TileDefinition } from './hex/MapSchema.js';
+export { generateWorldMap, getStartingPosition } from './hex/MapData.js';
 
 // Systems
-export { UnlockSystem } from './systems/UnlockSystem';
+export { UnlockSystem } from './systems/UnlockSystem.js';
 
 // Battle types & constants
 export type {
@@ -50,7 +50,7 @@ export type {
   ClientMoveMessage,
   ServerMessage,
   ClientMessage,
-} from './systems/BattleTypes';
+} from './systems/BattleTypes.js';
 export {
   BATTLE_DURATION,
   MIN_BATTLE_DURATION,
@@ -58,4 +58,4 @@ export {
   RESULT_PAUSE,
   MOVE_DURATION,
   DEFEAT_CHANCE,
-} from './systems/BattleTypes';
+} from './systems/BattleTypes.js';

@@ -1,4 +1,4 @@
-import { CubeCoord, cubeToPixel, cubeToKey } from './HexUtils';
+import { CubeCoord, cubeToPixel, cubeToKey } from './HexUtils.js';
 
 export enum TileType {
   Plains = 'plains',

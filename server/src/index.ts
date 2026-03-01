@@ -7,11 +7,11 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import type { IncomingMessage } from 'http';
-import { GameLoop } from './game/GameLoop';
-import { JsonFileStore } from './game/JsonFileStore';
-import { AccountStore } from './auth/AccountStore';
-import { TokenStore } from './auth/TokenStore';
-import { createAuthRoutes } from './auth/authRoutes';
+import { GameLoop } from './game/GameLoop.js';
+import { JsonFileStore } from './game/JsonFileStore.js';
+import { AccountStore } from './auth/AccountStore.js';
+import { TokenStore } from './auth/TokenStore.js';
+import { createAuthRoutes } from './auth/authRoutes.js';
 
 const app = express();
 const server = createServer(app);

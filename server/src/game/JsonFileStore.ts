@@ -1,7 +1,7 @@
 import { readFile, writeFile, rename, readdir, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import type { GameStateStore, PlayerSaveData } from './GameStateStore';
+import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 
 const SAVE_DIR = 'data';
 

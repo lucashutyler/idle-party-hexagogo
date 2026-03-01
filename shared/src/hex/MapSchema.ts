@@ -1,4 +1,4 @@
-import { TileType } from './HexTile';
+import { TileType } from './HexTile.js';
 
 /**
  * Schema for defining a map.

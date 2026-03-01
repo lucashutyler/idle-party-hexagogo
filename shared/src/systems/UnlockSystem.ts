@@ -1,5 +1,5 @@
-import { HexTile } from '../hex/HexTile';
-import { HexGrid } from '../hex/HexGrid';
+import { HexTile } from '../hex/HexTile.js';
+import { HexGrid } from '../hex/HexGrid.js';
 
 /**
  * Tracks which tiles have been unlocked by the player.

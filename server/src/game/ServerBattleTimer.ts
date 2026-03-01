@@ -6,7 +6,7 @@ import {
   DEFEAT_CHANCE,
 } from '@idle-party-rpg/shared';
 import type { BattleTimerState, BattleResult, BattleVisual } from '@idle-party-rpg/shared';
-import { ServerParty } from './ServerParty';
+import { ServerParty } from './ServerParty.js';
 
 export interface ServerBattleCallbacks {
   onBattleStart?: () => void;

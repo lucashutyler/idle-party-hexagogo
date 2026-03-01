@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import type { AccountStore } from './AccountStore';
-import type { TokenStore } from './TokenStore';
-import { sendMagicLinkEmail } from './EmailService';
+import type { AccountStore } from './AccountStore.js';
+import type { TokenStore } from './TokenStore.js';
+import { sendMagicLinkEmail } from './EmailService.js';
 
 const isProd = process.env.NODE_ENV === 'production';
 

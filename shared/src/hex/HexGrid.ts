@@ -1,6 +1,6 @@
-import { CubeCoord, cubeToKey, getNeighbors, cubeEquals, offsetToCube } from './HexUtils';
-import { HexTile, TileType } from './HexTile';
-import { MapSchema } from './MapSchema';
+import { CubeCoord, cubeToKey, getNeighbors, cubeEquals, offsetToCube } from './HexUtils.js';
+import { HexTile, TileType } from './HexTile.js';
+import { MapSchema } from './MapSchema.js';
 
 export class HexGrid {
   private tiles: Map<string, HexTile> = new Map();
