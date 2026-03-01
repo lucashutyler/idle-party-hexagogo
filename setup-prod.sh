@@ -96,13 +96,32 @@ if [[ "$SKIP_ENV" == "false" ]]; then
   echo ""
 fi
 
+# --- Symlink node/npm to /usr/local/bin ---
+NPM_PATH=$(command -v npm)
+if [[ "$NODE_PATH" != /usr/local/bin/* ]]; then
+  ln -sf "$NODE_PATH" /usr/local/bin/node
+  info "Symlinked node → $NODE_PATH"
+fi
+if [[ "$NPM_PATH" != /usr/local/bin/* ]]; then
+  ln -sf "$NPM_PATH" /usr/local/bin/npm
+  info "Symlinked npm → $NPM_PATH"
+fi
+
 # --- Create service user ---
 if ! id "$SERVICE_USER" &>/dev/null; then
-  useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
-  info "Created system user: $SERVICE_USER"
+  useradd --system --create-home --home-dir /home/$SERVICE_USER --shell /bin/bash "$SERVICE_USER"
+  info "Created user: $SERVICE_USER (with home dir for SSH)"
 else
   info "User $SERVICE_USER already exists"
+  # Ensure shell is bash (may have been nologin from a previous setup)
+  usermod --shell /bin/bash "$SERVICE_USER" 2>/dev/null || true
 fi
+
+# --- Set up sudoers for service restart ---
+SUDOERS_FILE="/etc/sudoers.d/$SERVICE_USER"
+echo "$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart $SERVICE_NAME" > "$SUDOERS_FILE"
+chmod 440 "$SUDOERS_FILE"
+info "Sudoers: $SERVICE_USER can restart $SERVICE_NAME without password"
 
 # --- Clone or update repo ---
 if [[ -d "$INSTALL_DIR/.git" ]]; then
@@ -180,10 +199,17 @@ echo "  1. Set up HTTPS:"
 echo "     sudo apt install certbot python3-certbot-nginx"
 echo "     sudo certbot --nginx -d $DOMAIN"
 echo ""
-echo "  2. Add GitHub Actions secrets for auto-deploy:"
-echo "     SSH_HOST  = $(hostname -I | awk '{print $1}')"
-echo "     SSH_USER  = (a user with sudo access)"
-echo "     SSH_KEY   = (private SSH key for that user)"
+echo "  2. Set up SSH key for the $SERVICE_USER user:"
+echo "     sudo mkdir -p /home/$SERVICE_USER/.ssh"
+echo "     sudo ssh-keygen -t ed25519 -f /home/$SERVICE_USER/.ssh/id_deploy -N ''"
+echo "     sudo cat /home/$SERVICE_USER/.ssh/id_deploy.pub | sudo tee /home/$SERVICE_USER/.ssh/authorized_keys"
+echo "     sudo chown -R $SERVICE_USER:$SERVICE_USER /home/$SERVICE_USER/.ssh"
+echo "     sudo chmod 700 /home/$SERVICE_USER/.ssh && sudo chmod 600 /home/$SERVICE_USER/.ssh/authorized_keys"
 echo ""
-echo "  3. Test: curl http://$DOMAIN"
+echo "  3. Add GitHub Actions secrets for auto-deploy:"
+echo "     SSH_HOST  = $(hostname -I | awk '{print $1}')"
+echo "     SSH_USER  = $SERVICE_USER"
+echo "     SSH_KEY   = (contents of /home/$SERVICE_USER/.ssh/id_deploy)"
+echo ""
+echo "  4. Test: curl http://$DOMAIN"
 echo ""

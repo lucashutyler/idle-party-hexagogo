@@ -69,8 +69,8 @@ Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into
 | Secret | Value |
 |--------|-------|
 | `SSH_HOST` | Server IP or hostname |
-| `SSH_USER` | User with sudo access |
-| `SSH_KEY` | Private SSH key for that user |
+| `SSH_USER` | `idlerpg` (created by setup script) |
+| `SSH_KEY` | Private SSH key for `idlerpg` user |
 
 ## Commands
 
