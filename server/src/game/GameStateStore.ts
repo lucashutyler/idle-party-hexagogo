@@ -1,4 +1,4 @@
-import type { CombatLogEntry } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, StatName, StatBlock } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -11,6 +11,16 @@ export interface PlayerSaveData {
   position: { col: number; row: number };
   target: { col: number; row: number } | null;
   movementQueue: { col: number; row: number }[];
+  character?: {
+    className: string;
+    level: number;
+    xp: number;
+    gold?: number;
+    stats: StatBlock;
+    priorityStat: StatName | null;
+    inventory?: Record<string, number>;
+    equipment?: Record<string, string | null>;
+  };
 }
 
 /**

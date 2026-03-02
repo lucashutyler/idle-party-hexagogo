@@ -59,12 +59,14 @@ export class HexTile {
   readonly type: TileType;
   readonly config: TileConfig;
   readonly key: string;
+  readonly zone: string;
 
-  constructor(coord: CubeCoord, type: TileType) {
+  constructor(coord: CubeCoord, type: TileType, zone: string = 'friendly_forest') {
     this.coord = coord;
     this.type = type;
     this.config = TILE_CONFIGS[type];
     this.key = cubeToKey(coord);
+    this.zone = zone;
   }
 
   get isTraversable(): boolean {

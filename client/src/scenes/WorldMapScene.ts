@@ -5,12 +5,14 @@ import {
   generateWorldMap,
   HEX_SIZE,
   getHexCorners,
+  getNeighbors,
   pixelToCube,
   offsetToCube,
   cubeToPixel,
   cubeToOffset,
+  getZone,
 } from '@idle-party-rpg/shared';
-import type { ServerStateMessage, OtherPlayerState } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, OtherPlayerState, HexTile } from '@idle-party-rpg/shared';
 import { Party } from '../entities/Party';
 
 const OTHER_PLAYER_COLOR = 0x4a90d9;
@@ -35,8 +37,12 @@ export class WorldMapScene extends Phaser.Scene {
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
+  private zoneBorderGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private highlightGraphics!: Phaser.GameObjects.Graphics;
+
+  // Hover tooltip
+  private tooltipText?: Phaser.GameObjects.Text;
 
   // Tile icons (stored for cleanup on re-render)
   private tileIcons: Phaser.GameObjects.Text[] = [];
@@ -67,8 +73,22 @@ export class WorldMapScene extends Phaser.Scene {
 
     // Create graphics layers
     this.tileGraphics = this.add.graphics();
+    this.zoneBorderGraphics = this.add.graphics();
+    this.zoneBorderGraphics.setDepth(5);
     this.pathGraphics = this.add.graphics();
     this.highlightGraphics = this.add.graphics();
+
+    // Hover tooltip (fixed to camera, above everything)
+    this.tooltipText = this.add.text(0, 0, '', {
+      fontSize: '8px',
+      fontFamily: "'Press Start 2P', monospace",
+      color: '#ffffff',
+      backgroundColor: '#000000aa',
+      padding: { x: 6, y: 4 },
+    });
+    this.tooltipText.setDepth(200);
+    this.tooltipText.setVisible(false);
+    this.tooltipText.setScrollFactor(0); // fixed to screen
 
     // Render the hex grid (all locked initially — server will tell us what's unlocked)
     this.renderGrid();
@@ -230,8 +250,10 @@ export class WorldMapScene extends Phaser.Scene {
       const y = pos.y + this.mapOffsetY;
 
       const isUnlocked = this.unlockedKeys.has(tile.key);
-      const alpha = isUnlocked ? 1 : 0.4;
-      const color = isUnlocked ? tile.color : this.darkenColor(tile.color, 0.5);
+      const isDarkwood = tile.zone === 'darkwood';
+      const alpha = isUnlocked ? 1 : isDarkwood ? 0.25 : 0.4;
+      const darkenFactor = isDarkwood ? 0.35 : 0.5;
+      const color = isUnlocked ? tile.color : this.darkenColor(tile.color, darkenFactor);
 
       // Fill
       this.tileGraphics.fillStyle(color, alpha);
@@ -256,8 +278,11 @@ export class WorldMapScene extends Phaser.Scene {
       this.tileGraphics.strokePath();
 
       // Icons
-      this.drawTileIcon(tile.type, x, y, isUnlocked);
+      this.drawTileIcon(tile.type, x, y, isUnlocked, isDarkwood);
     }
+
+    // Draw zone boundary lines
+    this.renderZoneBorders();
   }
 
   private darkenColor(color: number, factor: number): number {
@@ -267,7 +292,76 @@ export class WorldMapScene extends Phaser.Scene {
     return (r << 16) | (g << 8) | b;
   }
 
-  private drawTileIcon(type: TileType, x: number, y: number, isUnlocked: boolean): void {
+  /**
+   * Draw visible boundary lines where zones meet.
+   * For each tile, checks its 6 neighbors — if a neighbor is in a different zone,
+   * draws a glowing line along that shared hex edge.
+   *
+   * Flat-top hex corner layout (screen coords, Y-down):
+   *   Corner 0 (0°)=right, 1 (60°)=bottom-right, 2 (120°)=bottom-left,
+   *   3 (180°)=left, 4 (240°)=top-left, 5 (300°)=top-right
+   *
+   * Neighbor direction → hex edge (corner pair):
+   *   0 East→[0,1], 1 NE→[5,0], 2 NW→[4,5], 3 West→[3,4], 4 SW→[2,3], 5 SE→[1,2]
+   */
+  private renderZoneBorders(): void {
+    this.zoneBorderGraphics.clear();
+    const corners = getHexCorners(HEX_SIZE);
+
+    // Map from neighbor direction index to the two corner indices forming that edge
+    const EDGE_CORNERS: [number, number][] = [
+      [0, 1], // dir 0 (East)
+      [5, 0], // dir 1 (Northeast)
+      [4, 5], // dir 2 (Northwest)
+      [3, 4], // dir 3 (West)
+      [2, 3], // dir 4 (Southwest)
+      [1, 2], // dir 5 (Southeast)
+    ];
+
+    const processed = new Set<string>();
+
+    for (const tile of this.grid.getAllTiles()) {
+      if (tile.type === TileType.Void) continue;
+
+      const neighbors = getNeighbors(tile.coord);
+      for (let dir = 0; dir < 6; dir++) {
+        const neighborTile = this.grid.getTile(neighbors[dir]);
+
+        if (!neighborTile) continue;
+        if (neighborTile.zone === tile.zone) continue;
+
+        // Only draw each edge once
+        const edgeKey = tile.key < neighborTile.key
+          ? `${tile.key}|${neighborTile.key}`
+          : `${neighborTile.key}|${tile.key}`;
+        if (processed.has(edgeKey)) continue;
+        processed.add(edgeKey);
+
+        const pos = tile.pixelPosition;
+        const x = pos.x + this.mapOffsetX;
+        const y = pos.y + this.mapOffsetY;
+
+        const [ci1, ci2] = EDGE_CORNERS[dir];
+        const c1 = corners[ci1];
+        const c2 = corners[ci2];
+
+        // Glow effect: wider dim line behind, then a bright line on top
+        this.zoneBorderGraphics.lineStyle(4, 0xffaa00, 0.3);
+        this.zoneBorderGraphics.beginPath();
+        this.zoneBorderGraphics.moveTo(x + c1.x, y + c1.y);
+        this.zoneBorderGraphics.lineTo(x + c2.x, y + c2.y);
+        this.zoneBorderGraphics.strokePath();
+
+        this.zoneBorderGraphics.lineStyle(2, 0xffcc44, 0.7);
+        this.zoneBorderGraphics.beginPath();
+        this.zoneBorderGraphics.moveTo(x + c1.x, y + c1.y);
+        this.zoneBorderGraphics.lineTo(x + c2.x, y + c2.y);
+        this.zoneBorderGraphics.strokePath();
+      }
+    }
+  }
+
+  private drawTileIcon(type: TileType, x: number, y: number, isUnlocked: boolean, isDarkwood: boolean = false): void {
     let icon = '';
 
     switch (type) {
@@ -292,7 +386,7 @@ export class WorldMapScene extends Phaser.Scene {
       const text = this.add.text(x, y, icon, { fontSize: '20px' });
       text.setOrigin(0.5);
       text.setDepth(10);
-      text.setAlpha(isUnlocked ? 1 : 0.3);
+      text.setAlpha(isUnlocked ? 1 : isDarkwood ? 0.15 : 0.3);
       this.tileIcons.push(text);
     }
   }
@@ -449,7 +543,10 @@ export class WorldMapScene extends Phaser.Scene {
 
     this.highlightGraphics.clear();
 
-    if (!tile) return;
+    if (!tile) {
+      this.tooltipText?.setVisible(false);
+      return;
+    }
 
     const corners = getHexCorners(HEX_SIZE);
     const pos = tile.pixelPosition;
@@ -465,6 +562,22 @@ export class WorldMapScene extends Phaser.Scene {
     }
     this.highlightGraphics.closePath();
     this.highlightGraphics.strokePath();
+
+    // Update tooltip
+    this.updateTooltip(tile, pointer);
+  }
+
+  private updateTooltip(tile: HexTile, pointer: Phaser.Input.Pointer): void {
+    if (!this.tooltipText) return;
+
+    const zone = getZone(tile.zone);
+    const zoneName = zone ? zone.displayName : tile.zone;
+    const offset = cubeToOffset(tile.coord);
+    const typeName = tile.type.charAt(0).toUpperCase() + tile.type.slice(1);
+
+    this.tooltipText.setText(`${zoneName} - ${typeName} (${offset.col}, ${offset.row})`);
+    this.tooltipText.setPosition(pointer.x + 12, pointer.y - 20);
+    this.tooltipText.setVisible(true);
   }
 
   private flashTile(pos: { x: number; y: number }, color: number): void {
