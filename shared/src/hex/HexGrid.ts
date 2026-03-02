@@ -93,12 +93,12 @@ export class HexGrid {
    * Create a hex grid from a map schema.
    * Only tiles explicitly defined in the schema will exist.
    */
-  static fromSchema(schema: MapSchema): HexGrid {
+  static fromSchema(schema: MapSchema, zone?: string): HexGrid {
     const grid = new HexGrid();
 
     for (const tileDef of schema.tiles) {
       const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
-      const tile = new HexTile(coord, tileDef.type);
+      const tile = new HexTile(coord, tileDef.type, zone);
       grid.addTile(tile);
     }
 
@@ -112,7 +112,8 @@ export class HexGrid {
   static createRectangular(
     width: number,
     height: number,
-    tileGenerator: (col: number, row: number) => TileType
+    tileGenerator: (col: number, row: number) => TileType,
+    zone?: string,
   ): HexGrid {
     const grid = new HexGrid();
 
@@ -124,7 +125,7 @@ export class HexGrid {
         const s = -q - r;
 
         const type = tileGenerator(col, row);
-        const tile = new HexTile({ q, r, s }, type);
+        const tile = new HexTile({ q, r, s }, type, zone);
         grid.addTile(tile);
       }
     }

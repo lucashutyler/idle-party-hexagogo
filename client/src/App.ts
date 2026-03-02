@@ -8,6 +8,8 @@ import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
 import { MapScreen } from './screens/MapScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
+import { PartyScreen } from './screens/PartyScreen';
+import { ItemsScreen } from './screens/ItemsScreen';
 import { BottomNav } from './ui/BottomNav';
 
 const CONNECTION_ERROR = 'Could not connect to server';
@@ -215,8 +217,8 @@ export class App {
   private enterGame(): void {
     const combatScreen = new CombatScreen('screen-combat', this.gameClient);
     const mapScreen = new MapScreen('screen-map', this.gameClient);
-    const partyScreen = new PlaceholderScreen('screen-party', 'Party', '👤');
-    const itemsScreen = new PlaceholderScreen('screen-items', 'Items', '🎒');
+    const partyScreen = new PartyScreen('screen-party', this.gameClient);
+    const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
     const settingsScreen = new PlaceholderScreen('screen-settings', 'Settings', '⚙');
 
     this.screenManager.register('combat', document.getElementById('screen-combat')!, combatScreen);

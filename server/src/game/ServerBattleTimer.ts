@@ -1,12 +1,12 @@
 import {
-  MIN_BATTLE_DURATION,
-  MAX_BATTLE_DURATION,
   RESULT_PAUSE,
   MOVE_DURATION,
-  DEFEAT_CHANCE,
 } from '@idle-party-rpg/shared';
-import type { BattleTimerState, BattleResult, BattleVisual } from '@idle-party-rpg/shared';
+import type { BattleTimerState, BattleResult, BattleVisual, CombatState } from '@idle-party-rpg/shared';
+import { processTick } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
+
+const TICK_INTERVAL = 1000; // 1 second per combat tick
 
 export interface ServerBattleCallbacks {
   onBattleStart?: () => void;
@@ -14,6 +14,7 @@ export interface ServerBattleCallbacks {
   onStateChange?: (state: BattleTimerState) => void;
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
+  onCombatTick?: (state: CombatState, logEntries: string[]) => void;
 }
 
 export class ServerBattleTimer {
@@ -21,20 +22,25 @@ export class ServerBattleTimer {
   private state: BattleTimerState = 'battle';
   private currentVisual: BattleVisual = 'none';
   private currentResult?: BattleResult;
-  private battleDuration: number = MIN_BATTLE_DURATION;
+  private battleDuration: number = 0;
 
-  private battleTimeout?: ReturnType<typeof setTimeout>;
   private resultTimeout?: ReturnType<typeof setTimeout>;
   private moveTimeout?: ReturnType<typeof setTimeout>;
+  private tickInterval?: ReturnType<typeof setInterval>;
+
+  private combatState: CombatState | null = null;
+  private createCombat: () => CombatState;
 
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
+  onCombatTick?: (state: CombatState, logEntries: string[]) => void;
 
-  constructor(party: ServerParty, callbacks?: ServerBattleCallbacks) {
+  constructor(party: ServerParty, createCombat: () => CombatState, callbacks?: ServerBattleCallbacks) {
     this.party = party;
+    this.createCombat = createCombat;
 
     if (callbacks) {
       this.onBattleStart = callbacks.onBattleStart;
@@ -42,6 +48,7 @@ export class ServerBattleTimer {
       this.onStateChange = callbacks.onStateChange;
       this.onMove = callbacks.onMove;
       this.canMoveToNextTile = callbacks.canMoveToNextTile;
+      this.onCombatTick = callbacks.onCombatTick;
     }
 
     // Always fighting — start the loop immediately
@@ -49,23 +56,40 @@ export class ServerBattleTimer {
   }
 
   private triggerBattle(): void {
-    this.battleDuration = MIN_BATTLE_DURATION +
-      Math.floor(Math.random() * (MAX_BATTLE_DURATION - MIN_BATTLE_DURATION));
+    this.combatState = this.createCombat();
+    this.battleDuration = 0;
     this.currentVisual = 'fighting';
     this.party.enterBattle();
 
-    // Add "Battle begins!" log BEFORE the state change broadcast,
-    // so the client sees it in the same message as the 'battle' state transition.
     this.onBattleStart?.();
     this.setState('battle');
 
-    this.battleTimeout = setTimeout(() => this.showBattleResult(), this.battleDuration);
+    // Start the tick loop
+    this.tickInterval = setInterval(() => this.processCombatTick(), TICK_INTERVAL);
   }
 
-  private showBattleResult(): void {
-    const isDefeat = Math.random() < DEFEAT_CHANCE;
-    const result: BattleResult = isDefeat ? 'defeat' : 'victory';
+  private processCombatTick(): void {
+    if (!this.combatState || this.combatState.finished) return;
 
+    const tickResult = processTick(this.combatState);
+    this.battleDuration += TICK_INTERVAL;
+
+    // Notify listeners of the tick (damage log entries, HP updates)
+    this.onCombatTick?.(this.combatState, tickResult.logEntries);
+
+    if (tickResult.finished) {
+      // Clear tick interval
+      if (this.tickInterval) {
+        clearInterval(this.tickInterval);
+        this.tickInterval = undefined;
+      }
+
+      const result: BattleResult = tickResult.result === 'victory' ? 'victory' : 'defeat';
+      this.showBattleResult(result);
+    }
+  }
+
+  private showBattleResult(result: BattleResult): void {
     this.currentResult = result;
     this.currentVisual = result === 'victory' ? 'victory' : 'defeat';
     this.party.exitBattle();
@@ -100,9 +124,9 @@ export class ServerBattleTimer {
   }
 
   private clearTimers(): void {
-    if (this.battleTimeout) {
-      clearTimeout(this.battleTimeout);
-      this.battleTimeout = undefined;
+    if (this.tickInterval) {
+      clearInterval(this.tickInterval);
+      this.tickInterval = undefined;
     }
     if (this.resultTimeout) {
       clearTimeout(this.resultTimeout);
@@ -135,6 +159,10 @@ export class ServerBattleTimer {
 
   get currentDuration(): number {
     return this.battleDuration;
+  }
+
+  get currentCombat(): CombatState | null {
+    return this.combatState;
   }
 
   destroy(): void {

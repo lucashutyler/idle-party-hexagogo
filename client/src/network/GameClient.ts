@@ -149,6 +149,18 @@ export class GameClient {
     this.sendRaw({ type: 'move', col, row });
   }
 
+  sendSetPriorityStat(stat: string | null): void {
+    this.sendRaw({ type: 'set_priority_stat', stat });
+  }
+
+  sendEquipItem(itemId: string): void {
+    this.sendRaw({ type: 'equip_item', itemId });
+  }
+
+  sendUnequipItem(slot: string): void {
+    this.sendRaw({ type: 'unequip_item', slot });
+  }
+
   destroy(): void {
     this.destroyed = true;
     if (this.reconnectTimer) {

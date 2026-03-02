@@ -11,13 +11,15 @@ export class CombatScreen implements Screen {
   private locationLabel!: HTMLElement;
   private connectionDot!: HTMLElement;
   private stage!: HTMLElement;
-  private timerFill!: HTMLElement;
+  private enemySide!: HTMLElement;
+  private hpSection!: HTMLElement;
   private logContainer!: HTMLElement;
   private battleCounter!: HTMLElement;
 
   // Last rendered log length — for incremental DOM updates
   private renderedLogLength = 0;
   private lastLog: CombatLogEntry[] = [];
+  private renderedEnemyCount = 0;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -62,21 +64,17 @@ export class CombatScreen implements Screen {
           <div class="combat-member party"></div>
         </div>
         <div class="combat-vs">⚔</div>
-        <div class="combat-side">
-          <div class="combat-member enemy"></div>
-          <div class="combat-member enemy"></div>
-        </div>
+        <div class="combat-side enemy-side"></div>
       </div>
-      <div class="combat-timer">
-        <div class="combat-timer-fill"></div>
-      </div>
+      <div class="combat-hp-section"></div>
       <div class="combat-log"></div>
     `;
 
     this.locationLabel = this.container.querySelector('.location-label')!;
     this.connectionDot = this.container.querySelector('.connection-dot')!;
     this.stage = this.container.querySelector('.combat-stage')!;
-    this.timerFill = this.container.querySelector('.combat-timer-fill')!;
+    this.enemySide = this.container.querySelector('.enemy-side')!;
+    this.hpSection = this.container.querySelector('.combat-hp-section')!;
     this.logContainer = this.container.querySelector('.combat-log')!;
     this.battleCounter = this.container.querySelector('.battle-counter')!;
   }
@@ -103,7 +101,7 @@ export class CombatScreen implements Screen {
 
   private updateVisuals(state: ServerStateMessage): void {
     // Location label
-    this.locationLabel.textContent = `Tile (${state.party.col}, ${state.party.row})`;
+    this.locationLabel.textContent = `${state.zoneName} (${state.party.col}, ${state.party.row})`;
 
     // Battle counter
     this.battleCounter.textContent = `#${state.battleCount}`;
@@ -114,21 +112,71 @@ export class CombatScreen implements Screen {
       this.stage.classList.add(state.battle.visual);
     }
 
-    // Timer bar — use server-provided battle duration
-    this.timerFill.classList.remove('running', 'victory', 'defeat');
-    if (state.battle.state === 'battle') {
-      const durationSec = (state.battle.duration / 1000).toFixed(1);
-      this.timerFill.style.setProperty('--battle-duration', `${durationSec}s`);
-      // Force reflow to restart the CSS animation
-      this.timerFill.style.animation = 'none';
-      void this.timerFill.offsetHeight;
-      this.timerFill.style.animation = '';
-      this.timerFill.classList.add('running');
-    } else if (state.battle.visual === 'victory') {
-      this.timerFill.classList.add('victory');
-    } else if (state.battle.visual === 'defeat') {
-      this.timerFill.classList.add('defeat');
+    // Update enemy sprites — sync count and dim dead monsters
+    const combat = state.battle.combat;
+    const monsterCount = combat ? combat.monsters.length : 0;
+    if (monsterCount !== this.renderedEnemyCount) {
+      this.enemySide.innerHTML = '';
+      for (let i = 0; i < monsterCount; i++) {
+        const div = document.createElement('div');
+        div.className = 'combat-member enemy';
+        this.enemySide.appendChild(div);
+      }
+      this.renderedEnemyCount = monsterCount;
     }
+    if (combat) {
+      const enemySprites = this.enemySide.children;
+      for (let i = 0; i < combat.monsters.length; i++) {
+        (enemySprites[i] as HTMLElement).classList.toggle('dead', combat.monsters[i].currentHp <= 0);
+      }
+    }
+
+    // HP bars
+    this.updateHpBars(state);
+  }
+
+  private updateHpBars(state: ServerStateMessage): void {
+    const combat = state.battle.combat;
+    if (!combat) {
+      this.hpSection.innerHTML = '';
+      return;
+    }
+
+    const playerName = state.character ? `Lv${state.character.level} ${state.character.className}` : 'Player';
+    const playerPct = Math.max(0, (combat.playerHp / combat.playerMaxHp) * 100);
+    const playerHpClass = playerPct <= 25 ? 'critical' : playerPct <= 50 ? 'low' : '';
+
+    let html = `
+      <div class="combat-hp-group">
+        <div class="combat-hp-label">
+          <span>${playerName}</span>
+          <span>${combat.playerHp}/${combat.playerMaxHp}</span>
+        </div>
+        <div class="combat-hp-bar">
+          <div class="hp-fill ${playerHpClass}" style="width: ${playerPct}%"></div>
+        </div>
+      </div>
+    `;
+
+    for (const monster of combat.monsters) {
+      const dead = monster.currentHp <= 0;
+      const pct = Math.max(0, (monster.currentHp / monster.maxHp) * 100);
+      const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
+
+      html += `
+        <div class="combat-monster-hp ${dead ? 'dead' : ''}">
+          <div class="combat-hp-label">
+            <span>${monster.name} Lv${monster.level}</span>
+            <span>${monster.currentHp}/${monster.maxHp}</span>
+          </div>
+          <div class="combat-hp-bar">
+            <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    this.hpSection.innerHTML = html;
   }
 
   private updateLog(log: CombatLogEntry[]): void {

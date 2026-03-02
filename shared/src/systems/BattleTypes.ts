@@ -1,13 +1,12 @@
+import type { StatName, StatBlock } from './CharacterStats.js';
+import type { EquipSlot } from './ItemTypes.js';
+
 export type BattleTimerState = 'battle' | 'result';
 export type BattleResult = 'victory' | 'defeat';
 export type PartyState = 'idle' | 'moving' | 'in_battle';
 
-export const BATTLE_DURATION = 2000;  // 2 seconds of fighting (legacy, used as default)
-export const MIN_BATTLE_DURATION = 2000;   // Minimum battle duration (ms)
-export const MAX_BATTLE_DURATION = 10000;  // Maximum battle duration (ms)
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const DEFEAT_CHANCE = 0.2;     // 20% chance to lose
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -22,11 +21,39 @@ export interface ServerPartyState {
   path: { col: number; row: number }[];
 }
 
+export interface ClientMonsterState {
+  name: string;
+  currentHp: number;
+  maxHp: number;
+  level: number;
+}
+
+export interface ClientCombatState {
+  playerHp: number;
+  playerMaxHp: number;
+  monsters: ClientMonsterState[];
+  tickCount: number;
+}
+
 export interface ServerBattleState {
   state: BattleTimerState;
   result?: BattleResult;
   visual: BattleVisual;
   duration: number;
+  combat?: ClientCombatState;
+}
+
+export interface ClientCharacterState {
+  className: string;
+  level: number;
+  xp: number;
+  xpForNextLevel: number;
+  maxHp: number;
+  gold: number;
+  stats: StatBlock;
+  priorityStat: StatName | null;
+  inventory: Record<string, number>;
+  equipment: Record<string, string | null>;
 }
 
 export interface OtherPlayerState {
@@ -35,7 +62,7 @@ export interface OtherPlayerState {
   row: number;
 }
 
-export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock';
+export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup';
 
 export interface CombatLogEntry {
   text: string;
@@ -51,6 +78,8 @@ export interface ServerStateMessage {
   otherPlayers: OtherPlayerState[];
   combatLog: CombatLogEntry[];
   battleCount: number;
+  character: ClientCharacterState;
+  zoneName: string;
 }
 
 export interface ClientMoveMessage {
@@ -59,12 +88,32 @@ export interface ClientMoveMessage {
   row: number;
 }
 
-export type ServerMessage =
-  | ServerStateMessage
-  | { type: 'error'; message: string };
-
 export interface ClientRequestStateMessage {
   type: 'request_state';
 }
 
-export type ClientMessage = ClientMoveMessage | ClientRequestStateMessage;
+export interface ClientSetPriorityStatMessage {
+  type: 'set_priority_stat';
+  stat: StatName | null;
+}
+
+export interface ClientEquipItemMessage {
+  type: 'equip_item';
+  itemId: string;
+}
+
+export interface ClientUnequipItemMessage {
+  type: 'unequip_item';
+  slot: EquipSlot;
+}
+
+export type ServerMessage =
+  | ServerStateMessage
+  | { type: 'error'; message: string };
+
+export type ClientMessage =
+  | ClientMoveMessage
+  | ClientRequestStateMessage
+  | ClientSetPriorityStatMessage
+  | ClientEquipItemMessage
+  | ClientUnequipItemMessage;

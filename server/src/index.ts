@@ -141,6 +141,56 @@ wss.on('connection', (ws) => {
         }
         return;
       }
+
+      if (msg.type === 'set_priority_stat') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        const validStats = ['STR', 'INT', 'WIS', 'DEX', 'CON', 'CHA'];
+        const stat = msg.stat;
+        if (stat !== null && !validStats.includes(stat)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid stat' }));
+          return;
+        }
+
+        session.setPriorityStat(stat);
+        return;
+      }
+
+      if (msg.type === 'equip_item' && typeof msg.itemId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        if (!session.handleEquipItem(msg.itemId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
+        }
+        return;
+      }
+
+      if (msg.type === 'unequip_item' && typeof msg.slot === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        const validSlots = ['head', 'chest', 'hand', 'foot'];
+        if (!validSlots.includes(msg.slot)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid slot' }));
+          return;
+        }
+
+        if (!session.handleUnequipItem(msg.slot)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot unequip item' }));
+        }
+        return;
+      }
     } catch {
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
     }

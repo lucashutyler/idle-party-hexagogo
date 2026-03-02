@@ -10,7 +10,7 @@ Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters f
 - **Weak solo, strong together** — every class benefits greatly from partying with any other class
 - **Henchmen** — hireable NPCs for players without friends online yet
 - **Always running** — game state persists and progresses whether connected or not
-- **Always in combat** — the party is never truly idle; combat triggers continuously on every tile (towns, forests, etc.). Each player's battle loop starts on login and runs independently. **Current implementation is a temporary stand-in**: battles use a randomized timer (2-10s) with a coin-flip win/lose outcome. The real combat system will calculate damage per tick, track HP for both sides, and end when either the party or the monsters reach 0 HP. The timer/result-window cadence and movement logic will carry over; only the battle resolution changes.
+- **Always in combat** — the party is never truly idle; combat triggers continuously on every tile (towns, forests, etc.). Each player's battle loop starts on login and runs independently. Combat is tick-based (1s per tick): player attacks first alive monster, then all alive monsters attack player. Battles end when all monsters are dead (victory) or player HP reaches 0 (defeat). The result/movement cadence remains unchanged.
 - **Server authoritative** — combat resolved server-side, updates pushed to clients
 - **Database-driven content** — tiles, monsters, quests stored in DB, managed via game manager
 - **Instanced worlds** — soft-capped at 1000 players; invites allowed beyond cap, no random joins
@@ -29,9 +29,14 @@ shared/                        @idle-party-rpg/shared — pure logic, types, con
 │   │   ├── HexGrid.ts         # Hex grid data structure & algorithms
 │   │   ├── HexPathfinder.ts   # A* pathfinding on hex grid
 │   │   ├── MapSchema.ts       # World map definition (will move to DB)
-│   │   └── MapData.ts         # Map generation from schema
+│   │   └── MapData.ts         # Procedural map generation (seeded PRNG, border ring, zones)
 │   ├── systems/
-│   │   ├── BattleTypes.ts     # Battle state types & constants
+│   │   ├── BattleTypes.ts     # Battle/protocol types & constants
+│   │   ├── CharacterStats.ts  # Character types, XP/leveling, stat allocation
+│   │   ├── CombatEngine.ts    # Pure tick-based combat resolution
+│   │   ├── ItemTypes.ts       # Item definitions, inventory/equipment pure logic
+│   │   ├── MonsterTypes.ts    # Monster definitions, drops & zone-aware encounters
+│   │   ├── ZoneTypes.ts       # Zone definitions, encounter tables, zone lookup
 │   │   └── UnlockSystem.ts    # Tile unlock tracking & progression
 │   └── index.ts               # Barrel export
 └── tests/                     # Vitest tests for shared logic
@@ -45,8 +50,10 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   │   ├── LoginScreen.ts     # Email login screen (shown first)
 │   │   ├── UsernameScreen.ts  # Username choice screen (after email verification)
 │   │   ├── OfflineScreen.ts   # "Server unavailable" screen with retry button
-│   │   ├── CombatScreen.ts    # Primary screen — battle stage, timer, combat log
+│   │   ├── CombatScreen.ts    # Primary screen — battle stage, HP bars, combat log
 │   │   ├── MapScreen.ts       # Phaser wrapper — lazy-loads game, pause/resume
+│   │   ├── PartyScreen.ts     # Character stats, XP bar, priority stat selector
+│   │   ├── ItemsScreen.ts     # Equipment slots + inventory list with equip/unequip
 │   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
 │   ├── scenes/
 │   │   └── WorldMapScene.ts   # Phaser scene — hex rendering, input, camera, other players
@@ -75,8 +82,8 @@ server/                        @idle-party-rpg/server — Node.js game server
 │   └── game/
 │       ├── GameLoop.ts        # Game init, periodic saves, shutdown
 │       ├── PlayerManager.ts   # Maps usernames → sessions, WebSocket routing
-│       ├── PlayerSession.ts   # Per-player state (party, battle timer, unlocks)
-│       ├── ServerBattleTimer.ts # Server battle timer (variable 2-10s duration)
+│       ├── PlayerSession.ts   # Per-player state (party, battle timer, unlocks, character)
+│       ├── ServerBattleTimer.ts # Server battle timer (tick-based combat loop)
 │       ├── ServerParty.ts     # Server party state (no rendering)
 │       ├── GameStateStore.ts  # GameStateStore interface + PlayerSaveData type
 │       └── JsonFileStore.ts   # JSON-file-based persistence (data/<username>.json)
@@ -125,13 +132,19 @@ npm run typecheck    # tsc --build (all packages)
 - **Phaser isolation**: Phaser only runs when the Map tab is active. `game.loop.sleep()`/`wake()` halts/restarts the entire RAF loop. On re-activation, state is snapped (not tweened) so the player sees "where I am now" with no catch-up animation.
 - **Browser tab resume**: On `visibilitychange` → visible, the client sends `request_state` for an immediate server response (no waiting for the next battle cycle). The party position snaps instantly; the camera pans smoothly (500ms).
 - **Event-driven**: Systems use callback properties (`onTileReached`, `onBattleEnd`, `onTilesUnlocked`) — scene subscribes for state sync
-- **State machines**: `ServerBattleTimer` (`battle` | `result`), `ServerParty` (`idle` | `moving` | `in_battle`). Each player's battle loop runs independently and never stops: `battle` → `result` (1s celebration/move window) → `battle` → … Movement happens instantly at the start of the result window; the client animates the tween during the celebration pause. Currently battle duration is a random 2-10s timer (placeholder); will be replaced by real HP-based combat.
-- **Server-side combat log**: `PlayerSession` maintains the last 100 log entries (battle start/end, movement, tile unlocks) with a running `battleCount`. Both are included in every `ServerStateMessage`. The client `CombatScreen` is a pure renderer of the server-provided log — no client-side state-transition tracking.
+- **State machines**: `ServerBattleTimer` (`battle` | `result`), `ServerParty` (`idle` | `moving` | `in_battle`). Each player's battle loop runs independently and never stops: `battle` → `result` (1s celebration/move window) → `battle` → … Movement happens instantly at the start of the result window; the client animates the tween during the celebration pause. Battle duration is determined by tick-based HP combat (1s per tick).
+- **Character & leveling**: Each player has a `CharacterState` (class, level, XP, stats, priority stat). XP is earned on victory (`XP_PER_VICTORY = 10`). XP to next level = `100 * currentLevel`. On level-up, 2 stat points are allocated (to priority stat if set, random otherwise). Max HP = `30 + (level-1)*5 + CON`.
+- **Combat engine**: Pure functions in `CombatEngine.ts`. `createCombatState()` initializes combat, `processTick()` resolves one tick: player attacks first alive monster (STR ± 2, min 1 damage), then all alive monsters attack player. Ends on all monsters dead (victory) or player HP ≤ 0 (defeat).
+- **Zone system**: Each `HexTile` has a `zone` string property. `ZoneTypes.ts` defines `ZoneDefinition` with encounter tables (weighted monster selection). Current zones: `friendly_forest` (Lv1 goblins) and `darkwood` (goblins, wolves, bandits). `createEncounter(zoneId)` uses the zone's encounter table for weighted random monster/count selection. Zone display name is sent to the client in `ServerStateMessage.zoneName`.
+- **Monster system**: `MonsterTypes.ts` defines `MonsterDefinition` catalog (goblin, wolf, bandit) with `drops?: ItemDrop[]` per monster, and `createEncounter(zoneId?)` factory with zone-aware weighted encounters.
+- **Item & equipment system**: `ItemTypes.ts` defines items, rarities (`janky` 40%, `common` 25%), and equipment slots (`head`, `chest`, `hand`, `foot`). Items stack up to 99 in inventory. Equipment modifies combat: `bonusAttackMin/Max` adds to player damage, `damageReductionMin/Max` reduces incoming monster damage. Pure functions handle inventory/equipment operations (`addItemToInventory`, `equipItem`, `unequipItem`, `computeEquipmentBonuses`, `rollDrops`). Drops are rolled per-monster on victory. The `ItemsScreen` shows equipment slots (tap to unequip) and inventory (tap equippable items to equip). Current items: Janky Helmet (head, 0-1 reduction), Rusty Dagger (hand, 1-3 attack), Leather Vest (chest, 1-2 reduction), Mangy Pelt (non-equippable material).
+- **Procedural map generation**: `MapData.ts` uses a seeded PRNG (mulberry32, seed=42) for deterministic world generation. The schema tiles form the "Friendly Forest" starting zone (~170 tiles). A border ring of mountains/water surrounds it with 4 exit gaps (3 tiles wide each). Beyond the border, ~1300 "Darkwood" wilderness tiles fill a ~45x45 offset-coordinate area (-15 to 28). Both server and client generate identical maps from the same seed — no map data is transmitted over the network.
+- **Server-side combat log**: `PlayerSession` maintains the last 100 log entries (battle start/end, damage, level-ups, movement, tile unlocks) with a running `battleCount`. Both are included in every `ServerStateMessage`. The client `CombatScreen` is a pure renderer of the server-provided log — no client-side state-transition tracking.
 - **Other players on map**: Each state message includes `otherPlayers: { username, col, row }[]`. WorldMapScene renders them as smaller blue circles with username labels. Other player movement is tweened (400ms). Positions update on each player's own battle cycle.
 - **Separation of concerns**: Phaser Graphics for rendering, HTML/CSS for all non-map UI (camera-independent), pure logic in shared systems
 - **A* pathfinding**: Hex distance heuristic with cross-track tie-breaker
 - **Visual style**: Pixel/retro RPG — Press Start 2P font, CSS custom properties for theming, CSS keyframe animations for battle states. All UI is vanilla HTML/CSS (no framework).
-- **State persistence**: Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added. Saved state per player: `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`. The store interface is swappable for SQLite/Postgres.
+- **State persistence**: Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added. Saved state per player: `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`, `character` (className, level, xp, stats, priorityStat, inventory, equipment). The `character` field is optional in `PlayerSaveData` — old saves get a fresh Level 1 Adventurer on load. The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment. The store interface is swappable for SQLite/Postgres.
 
 ## Keeping Docs Current
 

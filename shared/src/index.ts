@@ -35,6 +35,83 @@ export { generateWorldMap, getStartingPosition } from './hex/MapData.js';
 // Systems
 export { UnlockSystem } from './systems/UnlockSystem.js';
 
+// Character stats
+export {
+  ALL_STATS,
+  BASE_STATS,
+  XP_PER_VICTORY,
+  STAT_POINTS_PER_LEVEL,
+  BASE_HP,
+  HP_PER_LEVEL,
+  MAX_GOLD,
+  xpForNextLevel,
+  calculateMaxHp,
+  createDefaultCharacter,
+  addXp,
+  addGold,
+  allocateStatPoints,
+} from './systems/CharacterStats.js';
+export type {
+  ClassName,
+  StatName,
+  StatBlock,
+  CharacterState,
+} from './systems/CharacterStats.js';
+
+// Item types
+export {
+  MAX_STACK,
+  RARITY_DROP_RATES,
+  EQUIP_SLOTS,
+  ITEMS,
+  addItemToInventory,
+  removeItemFromInventory,
+  equipItem,
+  unequipItem,
+  computeEquipmentBonuses,
+  getItemEffectText,
+  rollDrops,
+} from './systems/ItemTypes.js';
+export type {
+  ItemRarity,
+  EquipSlot,
+  ItemDefinition,
+  ItemDrop,
+  EquipmentBonuses,
+} from './systems/ItemTypes.js';
+
+// Monster types
+export {
+  MONSTERS,
+  createMonsterInstance,
+  createEncounter,
+} from './systems/MonsterTypes.js';
+export type {
+  MonsterDefinition,
+  MonsterInstance,
+} from './systems/MonsterTypes.js';
+
+// Zone types
+export {
+  ZONES,
+  getZone,
+} from './systems/ZoneTypes.js';
+export type {
+  EncounterTableEntry,
+  ZoneDefinition,
+} from './systems/ZoneTypes.js';
+
+// Combat engine
+export {
+  createCombatState,
+  processTick,
+} from './systems/CombatEngine.js';
+export type {
+  CombatantState,
+  CombatState,
+  TickResult,
+} from './systems/CombatEngine.js';
+
 // Battle types & constants
 export type {
   BattleTimerState,
@@ -42,20 +119,23 @@ export type {
   PartyState,
   BattleVisual,
   ServerPartyState,
+  ClientMonsterState,
+  ClientCombatState,
   ServerBattleState,
+  ClientCharacterState,
   OtherPlayerState,
   CombatLogType,
   CombatLogEntry,
   ServerStateMessage,
   ClientMoveMessage,
+  ClientRequestStateMessage,
+  ClientSetPriorityStatMessage,
+  ClientEquipItemMessage,
+  ClientUnequipItemMessage,
   ServerMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';
 export {
-  BATTLE_DURATION,
-  MIN_BATTLE_DURATION,
-  MAX_BATTLE_DURATION,
   RESULT_PAUSE,
   MOVE_DURATION,
-  DEFEAT_CHANCE,
 } from './systems/BattleTypes.js';

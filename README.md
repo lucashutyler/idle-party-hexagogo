@@ -117,30 +117,34 @@ TypeScript throughout. Vite for client bundling. Express + ws for the server.
 - [x] Camera zoom/pan
 - [ ] Database-driven tile storage (managed via game manager)
 - [ ] Server-driven map state
-- [ ] Multiple regions/zones
+- [x] Multiple regions/zones (Friendly Forest + Darkwood with border ring)
 
 ### Combat
-Goal: real-time auto-battle where damage is calculated per tick, HP tracked for both sides, and combat ends when either the party or the monsters reach 0 HP. Currently using a randomized timer (2-10s) with coin-flip outcomes as a temporary stand-in.
+Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both sides. Combat ends when all monsters die (victory) or player HP reaches 0 (defeat). Encounters vary by zone — Friendly Forest has goblins, Darkwood has wolves and bandits.
 - [x] Auto-battle state machine (server-authoritative, always fighting)
 - [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
-- [ ] HP-based combat (damage per tick, party/monster health pools)
+- [x] HP-based combat (damage per tick, party/monster health pools)
+- [x] Monster definitions (goblin, wolf, bandit catalog, zone-aware encounter system)
 - [ ] Class-based combat (classes weak solo, strong in party)
-- [ ] Monster definitions and balancing
-- [ ] Loot/rewards system
+- [x] Difficulty scaling (zone-based encounters — harder monsters in Darkwood)
+- [x] Loot/rewards system (item drops, inventory, equipment with combat bonuses)
 
 ### Characters & Parties
 - [x] Party entity with movement
-- [ ] Individual character creation (one per player)
+- [x] Individual character creation (one per player, Adventurer class)
+- [x] Character stats (STR, INT, WIS, DEX, CON, CHA)
+- [x] XP and leveling system (10 XP per victory, 100*level XP to next)
+- [x] Stat allocation on level-up (priority stat or random)
+- [x] Party screen (stats, XP bar, priority stat selector)
 - [ ] Class system (weak solo, strong together)
 - [ ] Henchmen (hireable NPCs for solo players)
 - [ ] Party formation and management
-- [ ] Character progression/leveling
 
 ### Towns & Economy
 - [ ] Town interactions (shops, inns, etc.)
 - [ ] Currency system
-- [ ] Item/equipment system
+- [x] Item/equipment system (4 items, 4 equip slots, inventory with stacking)
 - [ ] Trading between players
 
 ### Quests
@@ -170,7 +174,7 @@ Goal: real-time auto-battle where damage is calculated per tick, HP tracked for 
 - [x] Tab-based bottom navigation (Combat, Map, Party, Items, Settings)
 - [x] Mobile-first responsive design
 - [x] Pixel/retro RPG visual style (Press Start 2P font)
-- [x] Combat screen with battle stage, dynamic timer bar, and combat log
+- [x] Combat screen with battle stage, HP bars, and combat log
 - [x] Lazy-loaded Phaser (Map tab only loads on first visit)
 - [x] Nav bar battle status indicators (pulse/flash on combat events)
 - [x] Server unavailable / offline screen with retry
