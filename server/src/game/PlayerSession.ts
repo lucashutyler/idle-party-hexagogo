@@ -33,6 +33,9 @@ import type {
   ClientCharacterState,
   ClientCombatState,
   EquipSlot,
+  ClientSocialState,
+  BlockLevel,
+  ChatMessage,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
@@ -41,6 +44,7 @@ import type { PlayerSaveData } from './GameStateStore.js';
 
 const MAX_LOG_ENTRIES = 100;
 const MAX_SAVE_LOG_ENTRIES = 1000;
+const MAX_CHAT_HISTORY = 1000;
 
 export class PlayerSession {
   username: string;
@@ -51,8 +55,19 @@ export class PlayerSession {
   private combatLog: CombatLogEntry[] = [];
   private battleCount = 0;
   private character: CharacterState;
+  private chatHistory: ChatMessage[] = [];
+  private friends: string[] = [];
+  private blockedUsers: Record<string, BlockLevel> = {};
+  private guildId: string | null = null;
+  private partyId: string | null = null;
 
   private broadcastToPlayer: () => void;
+
+  /** Callback to get social state — set by PlayerManager after construction. */
+  getSocialState?: () => ClientSocialState;
+
+  /** Callback to share XP/loot with party members on victory. Set by PlayerManager. */
+  onShareVictoryWithParty?: (xpGained: number, goldGained: number, drops: string[]) => void;
 
   constructor(username: string, grid: HexGrid, broadcastToPlayer: () => void) {
     this.username = username;
@@ -95,7 +110,7 @@ export class PlayerSession {
     return {
       onBattleStart: () => {
         this.battleCount++;
-        this.addLogEntry(`Battle #${this.battleCount} begins!`, 'battle');
+        this.addLogEntry('Battle begins!', 'battle');
       },
       onStateChange: () => {
         this.broadcastToPlayer();
@@ -111,7 +126,7 @@ export class PlayerSession {
           this.addLogEntry('Victory!', 'victory');
           const unlocked = this.unlockSystem.unlockAdjacentTiles(this.party.tile);
           if (unlocked.length > 0) {
-            this.addLogEntry(`${unlocked.length} new tile${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
+            this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
           }
           // Award XP based on monsters defeated
           const combat = this.battleTimer.currentCombat;
@@ -156,6 +171,21 @@ export class PlayerSession {
               this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
             }
           }
+
+          // Share with party members
+          if (this.onShareVictoryWithParty) {
+            const droppedItems: string[] = [];
+            if (combat) {
+              for (const m of combat.monsters) {
+                const def = MONSTERS[m.id];
+                if (def?.drops) {
+                  const dropped = rollDrops(def.drops);
+                  droppedItems.push(...dropped);
+                }
+              }
+            }
+            this.onShareVictoryWithParty(xpGained, goldGained, droppedItems);
+          }
         } else {
           this.addLogEntry('Defeat...', 'defeat');
         }
@@ -172,6 +202,33 @@ export class PlayerSession {
         return nextTile ? this.unlockSystem.isUnlocked(nextTile) : false;
       },
     };
+  }
+
+  /** Receive shared XP/loot from a party member's victory. */
+  receivePartyShare(xpGained: number, goldGained: number, drops: string[]): void {
+    this.addLogEntry('Party member won a battle!', 'victory');
+
+    if (goldGained > 0) {
+      addGold(this.character, goldGained);
+      this.addLogEntry(`+${goldGained} Gold (shared)`, 'victory');
+    }
+
+    for (const itemId of drops) {
+      const itemDef = ITEMS[itemId];
+      if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
+        this.addLogEntry(`Found ${itemDef.name}! (shared)`, 'victory');
+      }
+    }
+
+    const { leveledUp, levelsGained } = addXp(this.character, xpGained);
+    this.addLogEntry(`+${xpGained} XP (shared)`, 'victory');
+    if (leveledUp) {
+      for (let i = 0; i < levelsGained; i++) {
+        this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
+      }
+    }
+
+    this.broadcastToPlayer();
   }
 
   handleMove(col: number, row: number): boolean {
@@ -223,6 +280,7 @@ export class PlayerSession {
     const zoneName = zone ? zone.displayName : this.party.tile.zone;
 
     return {
+      username: this.username,
       party: this.party.toJSON(),
       battle: {
         state: this.battleTimer.currentState,
@@ -238,12 +296,51 @@ export class PlayerSession {
       battleCount: this.battleCount,
       character: charState,
       zoneName,
+      social: this.getSocialState?.(),
     };
   }
 
   getPosition(): { col: number; row: number } {
     return cubeToOffset(this.party.position);
   }
+
+  getZone(): string {
+    return this.party.tile.zone;
+  }
+
+  // ── Social Accessors ──────────────────────────────────────
+
+  getFriends(): string[] { return this.friends; }
+  setFriends(friends: string[]): void { this.friends = friends; }
+
+  getBlockedUsers(): Record<string, BlockLevel> { return this.blockedUsers; }
+  setBlockedUsers(blocked: Record<string, BlockLevel>): void { this.blockedUsers = blocked; }
+
+  getGuildId(): string | null { return this.guildId; }
+  setGuildId(id: string | null): void { this.guildId = id; }
+
+  getPartyId(): string | null { return this.partyId; }
+  setPartyId(id: string | null): void { this.partyId = id; }
+
+  /** Store a chat message in this player's personal history. */
+  addChatMessage(message: ChatMessage): void {
+    this.chatHistory.push(message);
+    if (this.chatHistory.length > MAX_CHAT_HISTORY) {
+      this.chatHistory = this.chatHistory.slice(-MAX_CHAT_HISTORY);
+    }
+  }
+
+  /** Get chat history, optionally filtered by channel type. */
+  getChatHistory(channelType?: string, channelId?: string): ChatMessage[] {
+    if (!channelType) return this.chatHistory;
+    return this.chatHistory.filter(m => {
+      if (m.channelType !== channelType) return false;
+      if (channelId !== undefined && m.channelId !== channelId) return false;
+      return true;
+    });
+  }
+
+  getLevel(): number { return this.character.level; }
 
   addLogEntry(text: string, type: CombatLogEntry['type']): void {
     this.combatLog.push({ text, type });
@@ -276,6 +373,10 @@ export class PlayerSession {
         inventory: { ...this.character.inventory },
         equipment: { ...this.character.equipment },
       },
+      friends: [...this.friends],
+      blockedUsers: { ...this.blockedUsers },
+      guildId: this.guildId,
+      chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
     };
   }
 
@@ -333,6 +434,13 @@ export class PlayerSession {
     } else {
       session['character'] = createDefaultCharacter();
     }
+
+    // Restore social state
+    session['friends'] = data.friends ? [...data.friends] : [];
+    session['blockedUsers'] = data.blockedUsers ? { ...data.blockedUsers } : {};
+    session['guildId'] = data.guildId ?? null;
+    session['partyId'] = null; // Parties are transient, not restored across restarts
+    session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
 
     // Add server-online log entry
     session['addLogEntry']('Server back online — resuming!', 'battle');

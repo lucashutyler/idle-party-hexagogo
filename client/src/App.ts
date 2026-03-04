@@ -8,8 +8,9 @@ import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
 import { MapScreen } from './screens/MapScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
-import { PartyScreen } from './screens/PartyScreen';
+import { CharacterScreen } from './screens/CharacterScreen';
 import { ItemsScreen } from './screens/ItemsScreen';
+import { SocialScreen } from './screens/SocialScreen';
 import { BottomNav } from './ui/BottomNav';
 
 const CONNECTION_ERROR = 'Could not connect to server';
@@ -217,14 +218,22 @@ export class App {
   private enterGame(): void {
     const combatScreen = new CombatScreen('screen-combat', this.gameClient);
     const mapScreen = new MapScreen('screen-map', this.gameClient);
-    const partyScreen = new PartyScreen('screen-party', this.gameClient);
+    const characterScreen = new CharacterScreen('screen-character', this.gameClient);
     const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
+    const socialScreen = new SocialScreen('screen-social', this.gameClient);
     const settingsScreen = new PlaceholderScreen('screen-settings', 'Settings', '⚙');
+
+    // Wire map chat button to social screen DM
+    mapScreen.setOnChat((username) => {
+      this.screenManager.switchTo('social');
+      socialScreen.startDm(username);
+    });
 
     this.screenManager.register('combat', document.getElementById('screen-combat')!, combatScreen);
     this.screenManager.register('map', document.getElementById('screen-map')!, mapScreen);
-    this.screenManager.register('party', document.getElementById('screen-party')!, partyScreen);
+    this.screenManager.register('character', document.getElementById('screen-character')!, characterScreen);
     this.screenManager.register('items', document.getElementById('screen-items')!, itemsScreen);
+    this.screenManager.register('social', document.getElementById('screen-social')!, socialScreen);
     this.screenManager.register('settings', document.getElementById('screen-settings')!, settingsScreen);
 
     // Show bottom nav
@@ -234,8 +243,9 @@ export class App {
       [
         { id: 'combat', label: 'Combat', icon: '⚔' },
         { id: 'map', label: 'Map', icon: '🗺' },
-        { id: 'party', label: 'Party', icon: '👤' },
+        { id: 'character', label: 'Char', icon: '👤' },
         { id: 'items', label: 'Items', icon: '🎒' },
+        { id: 'social', label: 'Social', icon: '💬' },
         { id: 'settings', label: 'Settings', icon: '⚙' },
       ],
       'combat',

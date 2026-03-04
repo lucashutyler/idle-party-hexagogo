@@ -1,8 +1,10 @@
-import type { ServerStateMessage } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, BlockLevel, ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
 type StateListener = (state: ServerStateMessage) => void;
+type ChatListener = (message: ChatMessage) => void;
+type ChatHistoryListener = (channelType: ChatChannelType, channelId: string, messages: ChatMessage[]) => void;
 type ConnectionListener = (connected: boolean) => void;
 
 export class GameClient {
@@ -14,6 +16,8 @@ export class GameClient {
 
   private stateListeners = new Set<StateListener>();
   private connectionListeners = new Set<ConnectionListener>();
+  private chatListeners = new Set<ChatListener>();
+  private chatHistoryListeners = new Set<ChatHistoryListener>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -100,6 +104,14 @@ export class GameClient {
             listener(msg);
           }
           this.isInitialState = false;
+        } else if (msg.type === 'chat_message') {
+          for (const listener of this.chatListeners) {
+            listener(msg.message);
+          }
+        } else if (msg.type === 'chat_history') {
+          for (const listener of this.chatHistoryListeners) {
+            listener(msg.channelType, msg.channelId, msg.messages);
+          }
         } else if (msg.type === 'error') {
           console.warn('[GameClient] server error:', msg.message);
         }
@@ -161,6 +173,98 @@ export class GameClient {
     this.sendRaw({ type: 'unequip_item', slot });
   }
 
+  // --- Social ---
+
+  sendAddFriend(username: string): void {
+    this.sendRaw({ type: 'add_friend', username });
+  }
+
+  sendRemoveFriend(username: string): void {
+    this.sendRaw({ type: 'remove_friend', username });
+  }
+
+  sendBlockUser(username: string, level: BlockLevel): void {
+    this.sendRaw({ type: 'block_user', username, level });
+  }
+
+  sendUnblockUser(username: string): void {
+    this.sendRaw({ type: 'unblock_user', username });
+  }
+
+  // --- Guild ---
+
+  sendCreateGuild(name: string): void {
+    this.sendRaw({ type: 'create_guild', name });
+  }
+
+  sendJoinGuild(guildId: string): void {
+    this.sendRaw({ type: 'join_guild', guildId });
+  }
+
+  sendLeaveGuild(): void {
+    this.sendRaw({ type: 'leave_guild' });
+  }
+
+  sendInviteGuild(username: string): void {
+    this.sendRaw({ type: 'invite_guild', username });
+  }
+
+  // --- Party ---
+
+  sendCreateParty(): void {
+    this.sendRaw({ type: 'create_party' });
+  }
+
+  sendInviteParty(username: string): void {
+    this.sendRaw({ type: 'invite_party', username });
+  }
+
+  sendLeaveParty(): void {
+    this.sendRaw({ type: 'leave_party' });
+  }
+
+  sendKickPartyMember(username: string): void {
+    this.sendRaw({ type: 'kick_party_member', username });
+  }
+
+  sendSetPartyGridPosition(position: number): void {
+    this.sendRaw({ type: 'set_party_grid_position', position });
+  }
+
+  sendPromotePartyLeader(username: string): void {
+    this.sendRaw({ type: 'promote_party_leader', username });
+  }
+
+  sendAcceptPartyInvite(partyId: string): void {
+    this.sendRaw({ type: 'accept_party_invite', partyId });
+  }
+
+  sendDeclinePartyInvite(partyId: string): void {
+    this.sendRaw({ type: 'decline_party_invite', partyId });
+  }
+
+  // --- Chat ---
+
+  sendChat(channelType: ChatChannelType, channelId: string, text: string): void {
+    this.sendRaw({ type: 'send_chat', channelType, channelId, text });
+  }
+
+  sendRequestChatHistory(channelType: ChatChannelType, channelId: string): void {
+    this.sendRaw({ type: 'request_chat_history', channelType, channelId });
+  }
+
+  /** Subscribe to incoming chat messages. Returns an unsubscribe function. */
+  onChat(listener: ChatListener): () => void {
+    this.chatListeners.add(listener);
+    return () => { this.chatListeners.delete(listener); };
+  }
+
+  /** Subscribe to chat history responses. Returns an unsubscribe function. */
+  onChatHistory(listener: ChatHistoryListener): () => void {
+    this.chatHistoryListeners.add(listener);
+    return () => { this.chatHistoryListeners.delete(listener); };
+  }
+
   destroy(): void {
     this.destroyed = true;
     if (this.reconnectTimer) {
@@ -170,5 +274,7 @@ export class GameClient {
     this.ws = null;
     this.stateListeners.clear();
     this.connectionListeners.clear();
+    this.chatListeners.clear();
+    this.chatHistoryListeners.clear();
   }
 }

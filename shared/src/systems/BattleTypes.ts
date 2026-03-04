@@ -1,5 +1,12 @@
 import type { StatName, StatBlock } from './CharacterStats.js';
 import type { EquipSlot } from './ItemTypes.js';
+import type {
+  ClientSocialState,
+  ClientSocialMessage,
+  ServerSocialStateMessage,
+  ServerChatMessageMessage,
+  ServerChatHistoryMessage,
+} from './SocialTypes.js';
 
 export type BattleTimerState = 'battle' | 'result';
 export type BattleResult = 'victory' | 'defeat';
@@ -60,6 +67,7 @@ export interface OtherPlayerState {
   username: string;
   col: number;
   row: number;
+  zone: string;
 }
 
 export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup';
@@ -71,6 +79,7 @@ export interface CombatLogEntry {
 
 export interface ServerStateMessage {
   type: 'state';
+  username: string;
   party: ServerPartyState;
   battle: ServerBattleState;
   unlocked: string[];
@@ -80,6 +89,7 @@ export interface ServerStateMessage {
   battleCount: number;
   character: ClientCharacterState;
   zoneName: string;
+  social?: ClientSocialState;
 }
 
 export interface ClientMoveMessage {
@@ -109,6 +119,9 @@ export interface ClientUnequipItemMessage {
 
 export type ServerMessage =
   | ServerStateMessage
+  | ServerSocialStateMessage
+  | ServerChatMessageMessage
+  | ServerChatHistoryMessage
   | { type: 'error'; message: string };
 
 export type ClientMessage =
@@ -116,4 +129,5 @@ export type ClientMessage =
   | ClientRequestStateMessage
   | ClientSetPriorityStatMessage
   | ClientEquipItemMessage
-  | ClientUnequipItemMessage;
+  | ClientUnequipItemMessage
+  | ClientSocialMessage;

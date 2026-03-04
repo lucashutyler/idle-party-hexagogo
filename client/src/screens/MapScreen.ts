@@ -1,5 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { Screen } from './ScreenManager';
+import { TileInfoModal } from '../ui/TileInfoModal';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -7,12 +8,19 @@ export class MapScreen implements Screen {
   private game: import('phaser').Game | null = null;
   private unsubscribeState?: () => void;
   private sceneReady = false;
+  private zoomControls?: HTMLElement;
+  private tileModal?: TileInfoModal;
+  private onChatCallback?: (username: string) => void;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
+  }
+
+  setOnChat(cb: (username: string) => void): void {
+    this.onChatCallback = cb;
   }
 
   onActivate(): void {
@@ -71,6 +79,18 @@ export class MapScreen implements Screen {
     this.game.events.once('ready', () => {
       const scene = this.game!.scene.getScene('WorldMapScene') as InstanceType<typeof WorldMapScene>;
       scene.setSendMove((col, row) => this.gameClient.sendMove(col, row));
+
+      // Wire tile click handler for modal
+      this.tileModal = new TileInfoModal(
+        this.container,
+        (col, row) => { this.gameClient.sendMove(col, row); },
+        (username) => { this.gameClient.sendInviteParty(username); },
+        (username) => { this.onChatCallback?.(username); },
+      );
+      scene.setOnTileClick((tileInfo) => {
+        this.tileModal!.show(tileInfo);
+      });
+
       this.sceneReady = true;
 
       // Apply last known state so the map doesn't start blank
@@ -78,8 +98,36 @@ export class MapScreen implements Screen {
         scene.applyServerState(this.gameClient.lastState, true);
       }
 
+      this.createZoomControls();
       this.subscribeToState();
     });
+  }
+
+  private createZoomControls(): void {
+    if (this.zoomControls) return;
+
+    this.zoomControls = document.createElement('div');
+    this.zoomControls.className = 'map-zoom-controls';
+    this.zoomControls.innerHTML = `
+      <button class="map-zoom-btn map-zoom-in">+</button>
+      <button class="map-zoom-btn map-zoom-out">&minus;</button>
+    `;
+    this.container.appendChild(this.zoomControls);
+
+    this.zoomControls.querySelector('.map-zoom-in')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.getScene()?.adjustZoom(0.2);
+    });
+
+    this.zoomControls.querySelector('.map-zoom-out')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.getScene()?.adjustZoom(-0.2);
+    });
+  }
+
+  private getScene(): import('../scenes/WorldMapScene').WorldMapScene | null {
+    if (!this.game) return null;
+    return this.game.scene.getScene('WorldMapScene') as import('../scenes/WorldMapScene').WorldMapScene;
   }
 
   private subscribeToState(): void {

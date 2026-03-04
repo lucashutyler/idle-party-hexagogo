@@ -15,6 +15,19 @@ import {
 import type { ServerStateMessage, OtherPlayerState, HexTile } from '@idle-party-rpg/shared';
 import { Party } from '../entities/Party';
 
+export interface TileClickInfo {
+  col: number;
+  row: number;
+  tileType: string;
+  zoneName: string;
+  zoneId: string;
+  isTraversable: boolean;
+  isUnlocked: boolean;
+  isSameZone: boolean;
+  isCurrentTile: boolean;
+  playersHere: string[];
+}
+
 const OTHER_PLAYER_COLOR = 0x4a90d9;
 const OTHER_PLAYER_RADIUS = 10;
 const OTHER_PLAYER_TWEEN_DURATION = 400;
@@ -32,8 +45,21 @@ export class WorldMapScene extends Phaser.Scene {
   /** Set of tile keys the server says are unlocked. */
   private unlockedKeys = new Set<string>();
 
-  /** Other player markers on the map. */
+  /** Other player markers on the map (same-zone only). */
   private otherParties = new Map<string, OtherPartyMarker>();
+
+  /** Count badges for other-zone tiles with players. */
+  private zoneCounts = new Map<string, Phaser.GameObjects.Text>();
+
+  /** Current player zone for filtering. */
+  private currentZone = '';
+
+  /** Current player position for tile modal context. */
+  private playerCol = 0;
+  private playerRow = 0;
+
+  /** Last known other player list for tile info lookups. */
+  private lastOtherPlayers: OtherPlayerState[] = [];
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
@@ -59,6 +85,9 @@ export class WorldMapScene extends Phaser.Scene {
 
   // External move handler (set by MapScreen)
   private sendMoveFn?: (col: number, row: number) => void;
+
+  // External tile click handler (set by MapScreen for modal)
+  private onTileClickFn?: (tileInfo: TileClickInfo) => void;
 
   // Track initial state for snap vs tween
   private isFirstState = true;
@@ -106,6 +135,16 @@ export class WorldMapScene extends Phaser.Scene {
     this.sendMoveFn = fn;
   }
 
+  setOnTileClick(fn: (tileInfo: TileClickInfo) => void): void {
+    this.onTileClickFn = fn;
+  }
+
+  /** Adjust camera zoom by a delta (clamped 0.5–2). */
+  adjustZoom(delta: number): void {
+    const camera = this.cameras.main;
+    camera.zoom = Phaser.Math.Clamp(camera.zoom + delta, 0.5, 2);
+  }
+
   /** Apply a state update from the server. */
   applyServerState(state: ServerStateMessage, snap?: boolean): void {
     const shouldSnap = snap || this.isFirstState;
@@ -150,6 +189,12 @@ export class WorldMapScene extends Phaser.Scene {
     // Update path display from server-provided path
     this.updatePathFromServer(state.party.path);
 
+    // Track current player position and zone
+    this.playerCol = state.party.col;
+    this.playerRow = state.party.row;
+    const myTile = this.grid.getTile(offsetToCube({ col: state.party.col, row: state.party.row }));
+    this.currentZone = myTile?.zone ?? '';
+
     // Sync other players on the map
     this.syncOtherPlayers(state.otherPlayers);
 
@@ -174,9 +219,24 @@ export class WorldMapScene extends Phaser.Scene {
   // ── Other Players ────────────────────────────────────────
 
   private syncOtherPlayers(others: OtherPlayerState[]): void {
+    this.lastOtherPlayers = others;
     const seen = new Set<string>();
 
+    // Separate players into same-zone (individual markers) and other-zone (count badges)
+    const sameZone: OtherPlayerState[] = [];
+    const otherZoneTiles = new Map<string, number>(); // "col,row" -> count
+
     for (const other of others) {
+      if (this.currentZone && other.zone !== this.currentZone) {
+        const key = `${other.col},${other.row}`;
+        otherZoneTiles.set(key, (otherZoneTiles.get(key) ?? 0) + 1);
+      } else {
+        sameZone.push(other);
+      }
+    }
+
+    // Render same-zone players as individual markers
+    for (const other of sameZone) {
       seen.add(other.username);
       const pixel = cubeToPixel(offsetToCube({ col: other.col, row: other.row }));
       const x = pixel.x + this.mapOffsetX;
@@ -218,13 +278,48 @@ export class WorldMapScene extends Phaser.Scene {
       }
     }
 
-    // Remove markers for players no longer present
+    // Remove markers for players no longer in same zone
     for (const [username, marker] of this.otherParties) {
       if (!seen.has(username)) {
         marker.tween?.stop();
         marker.circle.destroy();
         marker.label.destroy();
         this.otherParties.delete(username);
+      }
+    }
+
+    // Update other-zone count badges
+    const seenTiles = new Set<string>();
+    for (const [key, count] of otherZoneTiles) {
+      seenTiles.add(key);
+      const [col, row] = key.split(',').map(Number);
+      const pixel = cubeToPixel(offsetToCube({ col, row }));
+      const x = pixel.x + this.mapOffsetX;
+      const y = pixel.y + this.mapOffsetY;
+
+      let badge = this.zoneCounts.get(key);
+      if (badge) {
+        badge.setText(`${count}`);
+        badge.setPosition(x, y);
+      } else {
+        badge = this.add.text(x, y, `${count}`, {
+          fontSize: '10px',
+          fontFamily: "'Press Start 2P', monospace",
+          color: '#ffffff',
+          backgroundColor: '#4a90d9',
+          padding: { x: 4, y: 2 },
+        });
+        badge.setOrigin(0.5, 0.5);
+        badge.setDepth(95);
+        this.zoneCounts.set(key, badge);
+      }
+    }
+
+    // Remove stale count badges
+    for (const [key, badge] of this.zoneCounts) {
+      if (!seenTiles.has(key)) {
+        badge.destroy();
+        this.zoneCounts.delete(key);
       }
     }
   }
@@ -528,9 +623,37 @@ export class WorldMapScene extends Phaser.Scene {
       return;
     }
 
-    // Send move command via external handler
     const offset = cubeToOffset(cubeCoord);
-    this.sendMoveFn?.(offset.col, offset.row);
+    const zone = getZone(tile.zone);
+    const isSameZone = tile.zone === this.currentZone;
+    const isCurrentTile = offset.col === this.playerCol && offset.row === this.playerRow;
+
+    // Find players on this tile
+    const playersHere = this.lastOtherPlayers
+      .filter(p => p.col === offset.col && p.row === offset.row)
+      .map(p => p.username);
+
+    if (this.onTileClickFn) {
+      this.onTileClickFn({
+        col: offset.col,
+        row: offset.row,
+        tileType: tile.type === TileType.Town ? 'Town'
+          : tile.type === TileType.Forest ? 'Forest'
+          : tile.type === TileType.Plains ? 'Plains'
+          : tile.type === TileType.Dungeon ? 'Dungeon'
+          : 'Unknown',
+        zoneName: zone?.displayName ?? tile.zone,
+        zoneId: tile.zone,
+        isTraversable: tile.isTraversable,
+        isUnlocked: this.unlockedKeys.has(tile.key),
+        isSameZone,
+        isCurrentTile,
+        playersHere,
+      });
+    } else {
+      // Fallback: direct move
+      this.sendMoveFn?.(offset.col, offset.row);
+    }
   }
 
   private handleHover(pointer: Phaser.Input.Pointer): void {

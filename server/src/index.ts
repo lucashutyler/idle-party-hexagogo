@@ -13,6 +13,7 @@ import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
+import type { ChatMessage } from '@idle-party-rpg/shared';
 
 const app = express();
 const server = createServer(app);
@@ -22,7 +23,7 @@ const store = new JsonFileStore();
 const sessionStore = new JsonSessionStore('data/sessions');
 const accountStore = new AccountStore();
 const tokenStore = new TokenStore();
-const gameLoop = new GameLoop(store);
+const gameLoop = new GameLoop(store, accountStore);
 const { playerManager } = gameLoop;
 
 // Trust first proxy (nginx/Cloudflare) so secure cookies work behind reverse proxy
@@ -135,6 +136,33 @@ wss.on('connection', (ws) => {
           return;
         }
 
+        // If in a party, only leaders can move (and it moves the whole party)
+        const partyId = session.getPartyId();
+        if (partyId) {
+          const party = playerManager.parties.getParty(partyId);
+          if (party) {
+            const member = party.members.find(m => m.username === username);
+            if (!member || member.role !== 'leader') {
+              ws.send(JSON.stringify({ type: 'error', message: 'Only party leaders can move' }));
+              return;
+            }
+            // Move all party members to the same destination
+            const success = session.handleMove(msg.col, msg.row);
+            if (!success) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
+              return;
+            }
+            for (const m of party.members) {
+              if (m.username === username) continue;
+              const memberSession = playerManager.getSessionByUsername(m.username);
+              if (memberSession) {
+                memberSession.handleMove(msg.col, msg.row);
+              }
+            }
+            return;
+          }
+        }
+
         const success = session.handleMove(msg.col, msg.row);
         if (!success) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
@@ -188,6 +216,387 @@ wss.on('connection', (ws) => {
 
         if (!session.handleUnequipItem(msg.slot)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot unequip item' }));
+        }
+        return;
+      }
+
+      // --- Social messages ---
+
+      if (msg.type === 'add_friend' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const target = msg.username;
+        if (!playerManager.getSessionByUsername(target)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
+          return;
+        }
+        playerManager.friends.addFriend(username, target);
+        session.setFriends(playerManager.friends.getFriends(username));
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'remove_friend' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        playerManager.friends.removeFriend(username, msg.username);
+        session.setFriends(playerManager.friends.getFriends(username));
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'block_user' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const validLevels = ['dm', 'all'];
+        if (!validLevels.includes(msg.level)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid block level' }));
+          return;
+        }
+        const blocked = session.getBlockedUsers();
+        blocked[msg.username] = msg.level;
+        session.setBlockedUsers(blocked);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'unblock_user' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const blocked = session.getBlockedUsers();
+        delete blocked[msg.username];
+        session.setBlockedUsers(blocked);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      // --- Guild messages ---
+
+      if (msg.type === 'create_guild' && typeof msg.name === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const result = playerManager.guilds.createGuild(username, msg.name, session.getLevel());
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        session.setGuildId(result.id);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'join_guild' && typeof msg.guildId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const result = playerManager.guilds.joinGuild(username, msg.guildId);
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        session.setGuildId(msg.guildId);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'leave_guild') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const result = playerManager.guilds.leaveGuild(username);
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        session.setGuildId(null);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'invite_guild' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const guildId = session.getGuildId();
+        if (!guildId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'You are not in a guild' }));
+          return;
+        }
+        const targetSession = playerManager.getSessionByUsername(msg.username);
+        if (!targetSession) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
+          return;
+        }
+        const result = playerManager.guilds.joinGuild(msg.username, guildId);
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        targetSession.setGuildId(guildId);
+        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToPlayer(msg.username);
+        return;
+      }
+
+      // --- Chat messages ---
+
+      if (msg.type === 'send_chat' && typeof msg.text === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        const channelType = msg.channelType;
+        const channelId = msg.channelId;
+        const validTypes = ['tile', 'zone', 'party', 'guild', 'dm', 'global'];
+        if (!validTypes.includes(channelType)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid channel type' }));
+          return;
+        }
+
+        // Build recipient list based on channel type
+        const recipients: { username: string; send: (m: any) => void }[] = [];
+        const blockedMap = playerManager.getAllBlockedUsers();
+
+        if (channelType === 'zone') {
+          // All players in the same zone
+          for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
+            if (u === username) continue;
+            if (s.getZone() === channelId) {
+              recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
+            }
+          }
+        } else if (channelType === 'dm') {
+          // Direct message to specific user — account must exist
+          if (!accountStore.findByUsername(channelId)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'User not found' }));
+            return;
+          }
+          recipients.push({ username: channelId, send: (m: any) => playerManager.sendChatToPlayer(channelId, m) });
+        } else if (channelType === 'guild') {
+          // All guild members
+          const guildData = playerManager.guilds.getGuild(channelId);
+          if (guildData) {
+            for (const m of guildData.members) {
+              if (m.username === username) continue;
+              recipients.push({ username: m.username, send: (msg: any) => playerManager.sendChatToPlayer(m.username, msg) });
+            }
+          }
+        } else if (channelType === 'party') {
+          // All party members
+          const partyId = session.getPartyId();
+          if (partyId) {
+            const party = playerManager.parties.getParty(partyId);
+            if (party) {
+              for (const m of party.members) {
+                if (m.username === username) continue;
+                recipients.push({ username: m.username, send: (msg: any) => playerManager.sendChatToPlayer(m.username, msg) });
+              }
+            }
+          }
+        } else if (channelType === 'tile') {
+          // All players on the same tile
+          const pos = session.getPosition();
+          for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
+            if (u === username) continue;
+            const otherPos = s.getPosition();
+            if (otherPos.col === pos.col && otherPos.row === pos.row) {
+              recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
+            }
+          }
+        } else if (channelType === 'global') {
+          // All online players
+          for (const u of playerManager.getOnlinePlayers()) {
+            if (u === username) continue;
+            recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
+          }
+        }
+
+        // Also send back to sender
+        const chatMsg = playerManager.chat.sendMessage(username, channelType, channelId, msg.text, recipients, blockedMap);
+        if (chatMsg) {
+          playerManager.sendChatToPlayer(username, chatMsg);
+        }
+        return;
+      }
+
+      if (msg.type === 'request_chat_history') {
+        const channelType = msg.channelType;
+        const channelId = msg.channelId;
+        const validTypes = ['tile', 'zone', 'party', 'guild', 'dm', 'global'];
+        if (!validTypes.includes(channelType)) return;
+
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        // Return from the player's personal chat history
+        let messages: ChatMessage[];
+        if (channelType === 'dm') {
+          // For DMs, filter by channelType and match either direction
+          messages = session.getChatHistory().filter(m =>
+            m.channelType === 'dm' && (m.channelId === channelId || m.senderUsername === channelId)
+          );
+        } else {
+          messages = session.getChatHistory(channelType);
+        }
+
+        ws.send(JSON.stringify({
+          type: 'chat_history',
+          channelType,
+          channelId,
+          messages,
+        }));
+        return;
+      }
+
+      // --- Party messages ---
+
+      if (msg.type === 'create_party') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const result = playerManager.parties.createParty(
+          username,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+          (u, id) => playerManager.getSessionByUsername(u)?.setPartyId(id ?? null),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'invite_party' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const targetSession = playerManager.getSessionByUsername(msg.username);
+        if (!targetSession) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
+          return;
+        }
+        const result = playerManager.parties.inviteToParty(
+          username,
+          msg.username,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+          (a, b) => playerManager.areSameTile(a, b),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        // Notify the target they have a pending invite
+        playerManager.sendStateToPlayer(msg.username);
+        return;
+      }
+
+      if (msg.type === 'accept_party_invite' && typeof msg.partyId === 'string') {
+        const result = playerManager.parties.acceptInvite(
+          username,
+          msg.partyId,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+          (u, id) => playerManager.getSessionByUsername(u)?.setPartyId(id ?? null),
+          (a, b) => playerManager.areSameTile(a, b),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        // Clean up the old solo party (now empty, already deleted by leaveParty)
+        // Notify all members of the joined party
+        for (const m of result.joined.members) {
+          playerManager.sendStateToPlayer(m.username);
+        }
+        return;
+      }
+
+      if (msg.type === 'decline_party_invite' && typeof msg.partyId === 'string') {
+        playerManager.parties.declineInvite(username, msg.partyId);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'leave_party') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const partyId = session.getPartyId();
+        // Get other members before leaving (to notify them)
+        const party = partyId ? playerManager.parties.getParty(partyId) : null;
+        const otherMembers = party ? party.members.filter(m => m.username !== username) : [];
+
+        const result = playerManager.parties.leaveParty(
+          username,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+          (u, id) => playerManager.getSessionByUsername(u)?.setPartyId(id ?? null),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        // Auto-create a new solo party for the player who left
+        playerManager.ensureParty(username);
+        playerManager.sendStateToPlayer(username);
+        for (const m of otherMembers) {
+          playerManager.sendStateToPlayer(m.username);
+        }
+        return;
+      }
+
+      if (msg.type === 'kick_party_member' && typeof msg.username === 'string') {
+        const result = playerManager.parties.kickMember(
+          username,
+          msg.username,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+          (u, id) => playerManager.getSessionByUsername(u)?.setPartyId(id ?? null),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        // Auto-create a new solo party for the kicked player
+        playerManager.ensureParty(msg.username);
+        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToPlayer(msg.username);
+        return;
+      }
+
+      if (msg.type === 'set_party_grid_position' && typeof msg.position === 'number') {
+        const result = playerManager.parties.setGridPosition(
+          username,
+          msg.position,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        const session = playerManager.getSessionByUsername(username);
+        const partyId = session?.getPartyId();
+        if (partyId) {
+          const party = playerManager.parties.getParty(partyId);
+          if (party) {
+            for (const m of party.members) {
+              playerManager.sendStateToPlayer(m.username);
+            }
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'promote_party_leader' && typeof msg.username === 'string') {
+        const result = playerManager.parties.promoteLeader(
+          username,
+          msg.username,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        const session = playerManager.getSessionByUsername(username);
+        const partyId = session?.getPartyId();
+        if (partyId) {
+          const party = playerManager.parties.getParty(partyId);
+          if (party) {
+            for (const m of party.members) {
+              playerManager.sendStateToPlayer(m.username);
+            }
+          }
         }
         return;
       }

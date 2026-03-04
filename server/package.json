@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-ses": "^3.997.0",
@@ -23,6 +24,7 @@
     "@types/express-session": "^1.18.2",
     "@types/ws": "^8.5.12",
     "tsx": "^4.19.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.0"
   }
 }

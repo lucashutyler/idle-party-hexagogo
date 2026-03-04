@@ -45,6 +45,12 @@ export class AccountStore {
     return this.accounts[email.toLowerCase()] ?? null;
   }
 
+  getAllUsernames(): string[] {
+    return Object.values(this.accounts)
+      .map(a => a.username)
+      .filter((u): u is string => u !== null);
+  }
+
   findByUsername(username: string): Account | null {
     const lower = username.toLowerCase();
     for (const account of Object.values(this.accounts)) {
