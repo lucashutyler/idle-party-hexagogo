@@ -1,0 +1,291 @@
+import type { GamePartyInfo, PartyGridPosition, PartyInvite } from '@idle-party-rpg/shared';
+
+let partyIdCounter = 0;
+
+function generatePartyId(): string {
+  return `party_${Date.now()}_${++partyIdCounter}`;
+}
+
+/**
+ * PartySystem manages game parties (groups of players).
+ * - Every player is always in a party (solo if alone)
+ * - Pending invite flow: invite → accept/decline
+ * - Invites invalidated when inviter leaves the tile
+ * - Multiple leaders supported
+ * - 3x3 grid positioning for combat
+ * - Same-tile requirement for inviting
+ */
+export class PartySystem {
+  private parties = new Map<string, GamePartyInfo>();
+
+  /** Pending invites keyed by target username → list of invites. */
+  private pendingInvites = new Map<string, PartyInvite[]>();
+
+  /** Create a party with the given player as leader. Returns party or error string. */
+  createParty(
+    username: string,
+    getPlayerPartyId: (u: string) => string | null,
+    setPlayerPartyId: (u: string, id: string | null) => void,
+  ): GamePartyInfo | string {
+    if (getPlayerPartyId(username)) {
+      return 'You are already in a party';
+    }
+
+    const id = generatePartyId();
+    const party: GamePartyInfo = {
+      id,
+      members: [{
+        username,
+        role: 'leader',
+        gridPosition: 4 as PartyGridPosition, // Center of 3x3 grid
+      }],
+    };
+
+    this.parties.set(id, party);
+    setPlayerPartyId(username, id);
+    return party;
+  }
+
+  /** Send an invite to a player. Creates a pending invite. Returns true or error string. */
+  inviteToParty(
+    inviterUsername: string,
+    targetUsername: string,
+    getPlayerPartyId: (u: string) => string | null,
+    areSameTile: (a: string, b: string) => boolean,
+  ): true | string {
+    const partyId = getPlayerPartyId(inviterUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    if (!areSameTile(inviterUsername, targetUsername)) {
+      return 'Must be in the same room to invite';
+    }
+
+    if (party.members.length >= 9) {
+      return 'Party is full (max 9)';
+    }
+
+    // Check if already a member of this party
+    if (party.members.some(m => m.username === targetUsername)) {
+      return 'That player is already in your party';
+    }
+
+    // Check if already invited to this party
+    const existing = this.pendingInvites.get(targetUsername) ?? [];
+    if (existing.some(inv => inv.partyId === partyId)) {
+      return 'Already invited';
+    }
+
+    const invite: PartyInvite = {
+      partyId,
+      inviterUsername,
+      targetUsername,
+      timestamp: Date.now(),
+    };
+
+    existing.push(invite);
+    this.pendingInvites.set(targetUsername, existing);
+    return true;
+  }
+
+  /** Accept a pending invite. Leaves current party and joins the invited one. */
+  acceptInvite(
+    username: string,
+    partyId: string,
+    getPlayerPartyId: (u: string) => string | null,
+    setPlayerPartyId: (u: string, id: string | null) => void,
+    areSameTile: (a: string, b: string) => boolean,
+  ): { joined: GamePartyInfo; leftPartyId: string | null } | string {
+    const invites = this.pendingInvites.get(username) ?? [];
+    const invite = invites.find(inv => inv.partyId === partyId);
+    if (!invite) return 'Invite not found or expired';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party no longer exists';
+
+    if (party.members.length >= 9) return 'Party is full';
+
+    // Verify inviter is still on the same tile
+    if (!areSameTile(invite.inviterUsername, username)) {
+      // Remove this invalid invite
+      this.removeInvite(username, partyId);
+      return 'Inviter is no longer in your room';
+    }
+
+    // Leave current party
+    const oldPartyId = getPlayerPartyId(username);
+    if (oldPartyId) {
+      this.leaveParty(username, getPlayerPartyId, setPlayerPartyId);
+    }
+
+    // Join the new party
+    const taken = new Set(party.members.map(m => m.gridPosition));
+    let pos: PartyGridPosition = 0;
+    for (let i = 0; i < 9; i++) {
+      if (!taken.has(i as PartyGridPosition)) {
+        pos = i as PartyGridPosition;
+        break;
+      }
+    }
+
+    party.members.push({
+      username,
+      role: 'member',
+      gridPosition: pos,
+    });
+    setPlayerPartyId(username, partyId);
+
+    // Clear all pending invites for this user
+    this.pendingInvites.delete(username);
+
+    return { joined: party, leftPartyId: oldPartyId };
+  }
+
+  /** Decline a pending invite. */
+  declineInvite(username: string, partyId: string): true | string {
+    const invites = this.pendingInvites.get(username) ?? [];
+    const idx = invites.findIndex(inv => inv.partyId === partyId);
+    if (idx === -1) return 'Invite not found';
+
+    invites.splice(idx, 1);
+    if (invites.length === 0) {
+      this.pendingInvites.delete(username);
+    }
+    return true;
+  }
+
+  /** Get pending invites for a player. */
+  getPendingInvites(username: string): PartyInvite[] {
+    return this.pendingInvites.get(username) ?? [];
+  }
+
+  /** Remove a specific invite. */
+  private removeInvite(username: string, partyId: string): void {
+    const invites = this.pendingInvites.get(username);
+    if (!invites) return;
+    const filtered = invites.filter(inv => inv.partyId !== partyId);
+    if (filtered.length === 0) {
+      this.pendingInvites.delete(username);
+    } else {
+      this.pendingInvites.set(username, filtered);
+    }
+  }
+
+  /** Leave a party. If last member, party is deleted. */
+  leaveParty(
+    username: string,
+    getPlayerPartyId: (u: string) => string | null,
+    setPlayerPartyId: (u: string, id: string | null) => void,
+  ): true | string {
+    const partyId = getPlayerPartyId(username);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    party.members = party.members.filter(m => m.username !== username);
+    setPlayerPartyId(username, null);
+
+    if (party.members.length === 0) {
+      this.parties.delete(partyId);
+    } else {
+      // Ensure at least one leader
+      const hasLeader = party.members.some(m => m.role === 'leader');
+      if (!hasLeader) {
+        party.members[0].role = 'leader';
+      }
+    }
+
+    return true;
+  }
+
+  /** Kick a member from a party (leader only). */
+  kickMember(
+    leaderUsername: string,
+    targetUsername: string,
+    getPlayerPartyId: (u: string) => string | null,
+    setPlayerPartyId: (u: string, id: string | null) => void,
+  ): true | string {
+    const partyId = getPlayerPartyId(leaderUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    const leader = party.members.find(m => m.username === leaderUsername);
+    if (!leader || leader.role !== 'leader') return 'Only leaders can kick members';
+
+    if (leaderUsername === targetUsername) return 'Cannot kick yourself';
+
+    const memberIdx = party.members.findIndex(m => m.username === targetUsername);
+    if (memberIdx === -1) return 'Player is not in your party';
+
+    party.members.splice(memberIdx, 1);
+    setPlayerPartyId(targetUsername, null);
+    return true;
+  }
+
+  /** Set a member's grid position. */
+  setGridPosition(
+    username: string,
+    position: PartyGridPosition,
+    getPlayerPartyId: (u: string) => string | null,
+  ): true | string {
+    if (position < 0 || position > 8) return 'Invalid position';
+
+    const partyId = getPlayerPartyId(username);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    // Check if position is taken
+    const existing = party.members.find(m => m.gridPosition === position);
+    if (existing && existing.username !== username) return 'Position is taken';
+
+    const member = party.members.find(m => m.username === username);
+    if (!member) return 'You are not in this party';
+
+    member.gridPosition = position;
+    return true;
+  }
+
+  /** Promote a member to leader. */
+  promoteLeader(
+    leaderUsername: string,
+    targetUsername: string,
+    getPlayerPartyId: (u: string) => string | null,
+  ): true | string {
+    const partyId = getPlayerPartyId(leaderUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    const leader = party.members.find(m => m.username === leaderUsername);
+    if (!leader || leader.role !== 'leader') return 'Only leaders can promote';
+
+    const target = party.members.find(m => m.username === targetUsername);
+    if (!target) return 'Player is not in your party';
+
+    target.role = 'leader';
+    return true;
+  }
+
+  /** Get party info by ID. */
+  getParty(partyId: string): GamePartyInfo | undefined {
+    return this.parties.get(partyId);
+  }
+
+  /** Get party info for a player. */
+  getPlayerParty(
+    username: string,
+    getPlayerPartyId: (u: string) => string | null,
+  ): GamePartyInfo | null {
+    const partyId = getPlayerPartyId(username);
+    if (!partyId) return null;
+    return this.parties.get(partyId) ?? null;
+  }
+}

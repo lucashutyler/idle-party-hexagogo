@@ -14,6 +14,7 @@ Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters f
 - **Weak solo, strong together** — every class benefits greatly from partying with any other class
 - **Henchmen** — hireable NPCs for players without friends online yet
 - **Always running** — game state persists and progresses whether connected or not
+- **Always in a party** — every player is always in a party, even if solo. A solo party is auto-created on login/restore. Leaving a multi-player party auto-creates a new solo party. Players can always position themselves on the 3x3 grid.
 - **Always in combat** — the party is never truly idle; combat triggers continuously on every tile (towns, forests, etc.). Each player's battle loop starts on login and runs independently. Combat is tick-based (1s per tick): player attacks first alive monster, then all alive monsters attack player. Battles end when all monsters are dead (victory) or player HP reaches 0 (defeat). The result/movement cadence remains unchanged.
 - **Server authoritative** — combat resolved server-side, updates pushed to clients
 - **Database-driven content** — tiles, monsters, quests stored in DB, managed via game manager
@@ -41,7 +42,8 @@ shared/                        @idle-party-rpg/shared — pure logic, types, con
 │   │   ├── ItemTypes.ts       # Item definitions, inventory/equipment pure logic
 │   │   ├── MonsterTypes.ts    # Monster definitions, drops & zone-aware encounters
 │   │   ├── ZoneTypes.ts       # Zone definitions, encounter tables, zone lookup
-│   │   └── UnlockSystem.ts    # Tile unlock tracking & progression
+│   │   ├── UnlockSystem.ts    # Tile unlock tracking & progression
+│   │   └── SocialTypes.ts     # Social types: friends, guild, party, chat, blocking
 │   └── index.ts               # Barrel export
 └── tests/                     # Vitest tests for shared logic
 
@@ -54,20 +56,22 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   │   ├── LoginScreen.ts     # Email login screen (shown first)
 │   │   ├── UsernameScreen.ts  # Username choice screen (after email verification)
 │   │   ├── OfflineScreen.ts   # "Server unavailable" screen with retry button
-│   │   ├── CombatScreen.ts    # Primary screen — battle stage, HP bars, combat log
-│   │   ├── MapScreen.ts       # Phaser wrapper — lazy-loads game, pause/resume
-│   │   ├── PartyScreen.ts     # Character stats, XP bar, priority stat selector
+│   │   ├── CombatScreen.ts    # Primary screen — battle stage, floating HP bars above sprites
+│   │   ├── MapScreen.ts       # Phaser wrapper — lazy-loads game, zoom controls, tile modal
+│   │   ├── CharacterScreen.ts # Character stats, XP bar, priority stat selector
 │   │   ├── ItemsScreen.ts     # Equipment slots + inventory list with equip/unequip
+│   │   ├── SocialScreen.ts    # Social tab — sub-tabs: Users, Friends, Guild, Party, Chat
 │   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
 │   ├── scenes/
-│   │   └── WorldMapScene.ts   # Phaser scene — hex rendering, input, camera, other players
+│   │   └── WorldMapScene.ts   # Phaser scene — hex rendering, input, camera, zone filtering
 │   ├── entities/
 │   │   └── Party.ts           # Client party — sprites, tweens, visuals
 │   ├── network/
 │   │   ├── AuthClient.ts      # REST client for /auth/* endpoints
-│   │   └── GameClient.ts      # WebSocket client — cookie-based auth, subscriber pattern
+│   │   └── GameClient.ts      # WebSocket client — cookie-based auth, subscriber + chat listeners
 │   ├── ui/
-│   │   └── BottomNav.ts       # 5-tab pixel-styled bottom navigation bar
+│   │   ├── BottomNav.ts       # 6-tab pixel-styled bottom navigation bar
+│   │   └── TileInfoModal.ts   # Modal for tile click — shows info, players, invite/chat buttons
 │   └── styles/
 │       └── pixel-theme.css    # Global retro RPG styles, animations, layout
 ├── index.html                 # App shell DOM (login + username + screen containers + nav)
@@ -85,16 +89,25 @@ server/                        @idle-party-rpg/server — Node.js game server
 │   │   └── session.d.ts       # express-session type augmentation
 │   └── game/
 │       ├── GameLoop.ts        # Game init, periodic saves, shutdown
-│       ├── PlayerManager.ts   # Maps usernames → sessions, WebSocket routing
-│       ├── PlayerSession.ts   # Per-player state (party, battle timer, unlocks, character)
+│       ├── PlayerManager.ts   # Maps usernames → sessions, WebSocket routing, social wiring
+│       ├── PlayerSession.ts   # Per-player state (party, battle timer, unlocks, character, social)
 │       ├── ServerBattleTimer.ts # Server battle timer (tick-based combat loop)
 │       ├── ServerParty.ts     # Server party state (no rendering)
 │       ├── GameStateStore.ts  # GameStateStore interface + PlayerSaveData type
-│       └── JsonFileStore.ts   # JSON-file-based persistence (data/<username>.json)
+│       ├── JsonFileStore.ts   # JSON-file-based persistence (data/<username>.json)
+│       └── social/
+│           ├── FriendsSystem.ts # Per-player friend lists (instant add, no request flow)
+│           ├── GuildSystem.ts   # Guild create/join/leave/invite (level 20+ to create)
+│           ├── GuildStore.ts    # Guild persistence (data/guilds.json)
+│           ├── PartySystem.ts   # Party create/invite/accept/decline/leave/kick, 3x3 grid, pending invites
+│           └── ChatSystem.ts    # Chat message creation, routing, block filtering
+└── tests/
+    └── PartySystem.test.ts    # Party system unit tests (vitest)
 
 data/                          Persistent runtime data (gitignored, created at runtime)
-├── <username>.json            # Per-player game state saves
+├── <username>.json            # Per-player game state saves (includes chat history)
 ├── accounts.json              # Email→account mapping
+├── guilds.json                # Guild data
 └── sessions/                  # Express session files (one .json per session)
 
 game-manager/                  @idle-party-rpg/game-manager — placeholder
@@ -144,11 +157,22 @@ npm run typecheck    # tsc --build (all packages)
 - **Item & equipment system**: `ItemTypes.ts` defines items, rarities (`janky` 40%, `common` 25%), and equipment slots (`head`, `chest`, `hand`, `foot`). Items stack up to 99 in inventory. Equipment modifies combat: `bonusAttackMin/Max` adds to player damage, `damageReductionMin/Max` reduces incoming monster damage. Pure functions handle inventory/equipment operations (`addItemToInventory`, `equipItem`, `unequipItem`, `computeEquipmentBonuses`, `rollDrops`). Drops are rolled per-monster on victory. The `ItemsScreen` shows equipment slots (tap to unequip) and inventory (tap equippable items to equip). Current items: Janky Helmet (head, 0-1 reduction), Rusty Dagger (hand, 1-3 attack), Leather Vest (chest, 1-2 reduction), Mangy Pelt (non-equippable material).
 - **Procedural map generation**: `MapData.ts` uses a seeded PRNG (mulberry32, seed=42) for deterministic world generation. The schema tiles form the "Friendly Forest" starting zone (~170 tiles). A border ring of mountains/water surrounds it with 4 exit gaps (3 tiles wide each). Beyond the border, ~1300 "Darkwood" wilderness tiles fill a ~45x45 offset-coordinate area (-15 to 28). Both server and client generate identical maps from the same seed — no map data is transmitted over the network.
 - **Server-side combat log**: `PlayerSession` maintains the last 100 log entries (battle start/end, damage, level-ups, movement, tile unlocks) with a running `battleCount`. Both are included in every `ServerStateMessage`. The client `CombatScreen` is a pure renderer of the server-provided log — no client-side state-transition tracking.
-- **Other players on map**: Each state message includes `otherPlayers: { username, col, row }[]`. WorldMapScene renders them as smaller blue circles with username labels. Other player movement is tweened (400ms). Positions update on each player's own battle cycle.
+- **Other players on map**: Each state message includes `otherPlayers: { username, col, row, zone }[]`. WorldMapScene renders same-zone players as individual markers; other-zone players show as count badges on their tile. Positions update on each player's own battle cycle.
+- **Room info modal**: Clicking a tile on the map opens a modal showing room name, type, players present, and a "Go to room" button. `TileInfoModal` class handles the DOM overlay. (UI calls tiles "rooms"; code still uses "tile" internally.)
+- **Zoom controls**: Mobile-friendly +/- zoom buttons on the map screen, wired to `WorldMapScene.adjustZoom()`.
+- **Floating HP bars**: CombatScreen renders HP bars floating above each combat sprite (player and enemies) inside `.combat-unit` containers. Player label shows username; monster labels show name only (no levels). HP shown as percentage bar only (no numeric values).
+- **Desktop font scaling**: `@media (min-width: 768px)` media query increases font sizes for all UI elements on desktop.
+- **Social system**: Full social tab (6th tab) with 5 sub-tabs:
+  - **Users**: All registered players (not just online) with search, sort (name/status), filter (all/room/zone/friends/guild/party). Online/offline status dots with group headers when sorted by status. Add friend, block/unblock, chat actions per user. Data sourced from `AccountStore.getAllUsernames()`.
+  - **Friends**: Friend list split into online/offline sections. Instant add (no request flow). Persisted per-player in save data.
+  - **Guild**: Create guild (level 20+, 2-20 char name), join, leave, invite members. Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.
+  - **Party**: Every player is always in a party (solo party auto-created). Pending invite flow: leader invites → target sees pending invite with accept/decline → same-room validated on both invite and accept. Same-room players shown in Party sub-tab with invite buttons. Badge indicator on Party tab when invites pending. 3x3 grid positioning for combat formation. Multiple leaders supported. Leader movement moves entire party. On victory, XP/gold/loot shared with all party members. Leaving/kicked auto-creates new solo party.
+  - **Chat**: WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type. 6 channel types: Room (tile), Zone, Party, Guild, Global, DM. Toggle filter pills to show/hide each channel. Channel selector dropdown for sending (Party/Guild disabled when unavailable). DM autocomplete with validation — message input disabled until valid recipient entered. Chat "buttons" throughout social screens and room modal open DM with that user. Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel. Blocking (`dm` or `all` levels) filters messages server-side.
+- **Social state**: `ClientSocialState` is included in every `ServerStateMessage.social`. Contains friends, guild info, guild members, party info, pending party invites, online players list, all registered players list, and blocked users. `PlayerManager` builds this via `getSocialState()` callback on each `PlayerSession`.
 - **Separation of concerns**: Phaser Graphics for rendering, HTML/CSS for all non-map UI (camera-independent), pure logic in shared systems
 - **A* pathfinding**: Hex distance heuristic with cross-track tie-breaker
 - **Visual style**: Pixel/retro RPG — Press Start 2P font, CSS custom properties for theming, CSS keyframe animations for battle states. All UI is vanilla HTML/CSS (no framework).
-- **State persistence**: Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added. Saved state per player: `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`, `character` (className, level, xp, stats, priorityStat, inventory, equipment). The `character` field is optional in `PlayerSaveData` — old saves get a fresh Level 1 Adventurer on load. The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment. The store interface is swappable for SQLite/Postgres.
+- **State persistence**: Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added. Saved state per player: `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`, `character` (className, level, xp, stats, priorityStat, inventory, equipment), `friends`, `blockedUsers`, `guildId`, `chatHistory` (last 1000 messages). The `character` field is optional in `PlayerSaveData` — old saves get a fresh Level 1 Adventurer on load. The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment. Social fields are optional — old saves default to empty. `partyId` is transient (not saved — parties dissolve on restart). Guild data is saved separately in `data/guilds.json`. The store interface is swappable for SQLite/Postgres.
 
 ## Keeping Docs Current
 
@@ -173,6 +197,8 @@ Everything in `data/` is persisted behind a **swappable interface** so the stora
 - **Game state**: `GameStateStore` interface (`server/src/game/GameStateStore.ts`) → currently `JsonFileStore`
 - **Sessions**: express-session `Store` class → currently `JsonSessionStore` (`server/src/auth/JsonSessionStore.ts`)
 - **Accounts**: `AccountStore` reads/writes `data/accounts.json` directly (should be interfaced when migrating to a DB)
+- **Guilds**: `GuildStore` reads/writes `data/guilds.json`
+- **Chat**: Stored per-player in `PlayerSaveData.chatHistory` (saved with each player's JSON file)
 
 When adding new persistent data to `data/`, always define an interface or extend an existing one. Never read/write files directly from game logic — go through the store abstraction.
 
@@ -187,3 +213,4 @@ When adding new persistent data to `data/`, always define an interface or extend
 - **Error handling**: Defensive checks with early returns
 - **README checklists**: The README.md roadmap uses `[x]`/`[ ]` checklists — check items off as they are completed
 - **Tests**: Aim for test coverage on all non-rendering logic (systems, utils, pathfinding, server)
+- **UI terminology**: In all user-facing text (UI labels, error messages, combat log), refer to hex tiles as **"rooms"**. Code internals (variable names, class names, comments) may still use "tile" — the rename is UI-only.

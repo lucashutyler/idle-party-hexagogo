@@ -117,17 +117,17 @@ TypeScript throughout. Vite for client bundling. Express + ws for the server.
 - [x] Camera zoom/pan
 - [ ] Database-driven tile storage (managed via game manager)
 - [ ] Server-driven map state
-- [x] Multiple regions/zones (Friendly Forest + Darkwood with border ring)
+- [x] Multiple regions/zones with border transitions
 
 ### Combat
-Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both sides. Combat ends when all monsters die (victory) or player HP reaches 0 (defeat). Encounters vary by zone — Friendly Forest has goblins, Darkwood has wolves and bandits.
+Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both sides. Combat ends when all monsters die (victory) or player HP reaches 0 (defeat). Encounters are zone-aware — each zone defines its own encounter table.
 - [x] Auto-battle state machine (server-authoritative, always fighting)
 - [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
 - [x] HP-based combat (damage per tick, party/monster health pools)
-- [x] Monster definitions (goblin, wolf, bandit catalog, zone-aware encounter system)
+- [x] Monster definitions (zone-aware encounter system)
 - [ ] Class-based combat (classes weak solo, strong in party)
-- [x] Difficulty scaling (zone-based encounters — harder monsters in Darkwood)
+- [x] Difficulty scaling (zone-based encounters with per-zone difficulty)
 - [x] Loot/rewards system (item drops, inventory, equipment with combat bonuses)
 
 ### Characters & Parties
@@ -136,10 +136,23 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Character stats (STR, INT, WIS, DEX, CON, CHA)
 - [x] XP and leveling system (10 XP per victory, 100*level XP to next)
 - [x] Stat allocation on level-up (priority stat or random)
-- [x] Party screen (stats, XP bar, priority stat selector)
+- [x] Character screen (stats, XP bar, priority stat selector)
 - [ ] Class system (weak solo, strong together)
 - [ ] Henchmen (hireable NPCs for solo players)
-- [ ] Party formation and management
+- [x] Party formation and management (always in a party, join, leave, kick, 3x3 grid)
+- [x] Party movement (leader controls group movement)
+- [x] Party combat sharing (XP, gold, loot shared on victory)
+
+### Social
+- [x] Social tab with sub-tabs (Users, Friends, Guild, Party, Chat)
+- [x] Online player list with search, sort, filter
+- [x] Friends system (instant add, online/offline status)
+- [x] Guild system (create at level 20+, join, leave, invite)
+- [x] Chat system (unified timeline, 6 channels: Room/Zone/Party/Guild/Global/DM, per-user persistent history)
+- [x] User blocking (DM-only or all messages)
+- [x] Unread message indicators
+- [x] DM autocomplete with validation
+- [x] Chat buttons across social screens and room modal
 
 ### Towns & Economy
 - [ ] Town interactions (shops, inns, etc.)
@@ -169,16 +182,18 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 ### UI
 - [x] Login screen with email input + username choice screen
 - [x] Map tab with hex rendering
-- [x] Other players visible on map (blue circles with username labels, tweened movement)
+- [x] Other players visible on map (zone-filtered, count badges for other zones)
 - [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
-- [x] Tab-based bottom navigation (Combat, Map, Party, Items, Settings)
+- [x] Tab-based bottom navigation (Combat, Map, Character, Items, Social, Settings)
 - [x] Mobile-first responsive design
 - [x] Pixel/retro RPG visual style (Press Start 2P font)
-- [x] Combat screen with battle stage, HP bars, and combat log
+- [x] Combat screen with floating HP bars above sprites and combat log
 - [x] Lazy-loaded Phaser (Map tab only loads on first visit)
 - [x] Nav bar battle status indicators (pulse/flash on combat events)
 - [x] Server unavailable / offline screen with retry
-- [ ] Desktop and phone feature parity
+- [x] Desktop font scaling (larger fonts on desktop via media query)
+- [x] Mobile zoom controls (+/- buttons on map)
+- [x] Tile click modal (tile info, "Move here" button, players on tile)
 
 ### Game Manager
 - [ ] Separate admin client

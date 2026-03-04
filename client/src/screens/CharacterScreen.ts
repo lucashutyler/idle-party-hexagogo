@@ -14,7 +14,7 @@ const STAT_TOOLTIPS: Record<string, string> = {
   CHA: 'No effect yet',
 };
 
-export class PartyScreen implements Screen {
+export class CharacterScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
   private isActive = false;
@@ -62,34 +62,30 @@ export class PartyScreen implements Screen {
 
   private buildDOM(): void {
     this.container.innerHTML = `
-      <div class="party-content">
-        <div class="party-group-status">
-          <span class="party-group-badge">Ungrouped</span>
-          <span>Solo adventurer</span>
-        </div>
-        <div class="party-character-card">
-          <div class="party-card-header">
-            <span class="party-class-name">Adventurer</span>
-            <span class="party-level">Lv 1</span>
+      <div class="character-content">
+        <div class="character-card">
+          <div class="character-card-header">
+            <span class="character-class-name">Adventurer</span>
+            <span class="character-level">Lv 1</span>
           </div>
-          <div class="party-xp-section">
-            <div class="party-xp-label">
+          <div class="character-xp-section">
+            <div class="character-xp-label">
               <span>XP</span>
-              <span class="party-xp-numbers">0 / 100</span>
+              <span class="character-xp-numbers">0 / 100</span>
             </div>
-            <div class="party-xp-bar">
-              <div class="party-xp-fill" style="width: 0%"></div>
+            <div class="character-xp-bar">
+              <div class="character-xp-fill" style="width: 0%"></div>
             </div>
           </div>
-          <div class="party-hp-display">
-            HP: <span class="party-hp-value">40</span>
+          <div class="character-hp-display">
+            HP: <span class="character-hp-value">40</span>
           </div>
-          <div class="party-gold-display">
-            Gold: <span class="party-gold-value">0</span> GP
+          <div class="character-gold-display">
+            Gold: <span class="character-gold-value">0</span> GP
           </div>
-          <div class="party-combat-bonuses"></div>
-          <div class="party-stats-table-wrap">
-            <table class="party-stats-table">
+          <div class="character-combat-bonuses"></div>
+          <div class="character-stats-table-wrap">
+            <table class="character-stats-table">
               <thead>
                 <tr>
                   <th></th>
@@ -100,12 +96,12 @@ export class PartyScreen implements Screen {
                   <th>Total</th>
                 </tr>
               </thead>
-              <tbody class="party-stats-tbody"></tbody>
+              <tbody class="character-stats-tbody"></tbody>
             </table>
           </div>
-          <div class="party-priority-section">
-            <span class="party-priority-label">Level-up stat priority</span>
-            <select class="party-priority-select">
+          <div class="character-priority-section">
+            <span class="character-priority-label">Level-up stat priority</span>
+            <select class="character-priority-select">
               <option value="">Random</option>
               <option value="STR">STR</option>
               <option value="INT">INT</option>
@@ -119,15 +115,15 @@ export class PartyScreen implements Screen {
       </div>
     `;
 
-    this.classNameEl = this.container.querySelector('.party-class-name')!;
-    this.levelEl = this.container.querySelector('.party-level')!;
-    this.xpLabel = this.container.querySelector('.party-xp-numbers')!;
-    this.xpFill = this.container.querySelector('.party-xp-fill')!;
-    this.hpDisplay = this.container.querySelector('.party-hp-value')!;
-    this.goldDisplay = this.container.querySelector('.party-gold-value')!;
-    this.combatBonuses = this.container.querySelector('.party-combat-bonuses')!;
-    this.statsTable = this.container.querySelector('.party-stats-tbody')!;
-    this.prioritySelect = this.container.querySelector('.party-priority-select')!;
+    this.classNameEl = this.container.querySelector('.character-class-name')!;
+    this.levelEl = this.container.querySelector('.character-level')!;
+    this.xpLabel = this.container.querySelector('.character-xp-numbers')!;
+    this.xpFill = this.container.querySelector('.character-xp-fill')!;
+    this.hpDisplay = this.container.querySelector('.character-hp-value')!;
+    this.goldDisplay = this.container.querySelector('.character-gold-value')!;
+    this.combatBonuses = this.container.querySelector('.character-combat-bonuses')!;
+    this.statsTable = this.container.querySelector('.character-stats-tbody')!;
+    this.prioritySelect = this.container.querySelector('.character-priority-select')!;
 
     // Wire priority select
     this.prioritySelect.addEventListener('change', () => {
@@ -155,17 +151,17 @@ export class PartyScreen implements Screen {
     const hasAtk = bonuses.bonusAttackMax > 0;
     const hasDef = bonuses.damageReductionMax > 0;
     this.combatBonuses.innerHTML = `
-      <div class="party-bonus-row">
-        <span class="party-bonus-label">Attack bonus</span>
-        <span class="party-bonus-value${hasAtk ? ' active' : ''}">${hasAtk ? `+${bonuses.bonusAttackMin}-${bonuses.bonusAttackMax}` : 'None'}</span>
+      <div class="character-bonus-row">
+        <span class="character-bonus-label">Attack bonus</span>
+        <span class="character-bonus-value${hasAtk ? ' active' : ''}">${hasAtk ? `+${bonuses.bonusAttackMin}-${bonuses.bonusAttackMax}` : 'None'}</span>
       </div>
-      <div class="party-bonus-row">
-        <span class="party-bonus-label">Damage reduction</span>
-        <span class="party-bonus-value${hasDef ? ' active' : ''}">${hasDef ? `${bonuses.damageReductionMin}-${bonuses.damageReductionMax}` : 'None'}</span>
+      <div class="character-bonus-row">
+        <span class="character-bonus-label">Damage reduction</span>
+        <span class="character-bonus-value${hasDef ? ' active' : ''}">${hasDef ? `${bonuses.damageReductionMin}-${bonuses.damageReductionMax}` : 'None'}</span>
       </div>
-      <div class="party-bonus-row">
-        <span class="party-bonus-label">Dodge chance</span>
-        <span class="party-bonus-value${bonuses.dodgeChance > 0 ? ' active' : ''}">${bonuses.dodgeChance > 0 ? `${Math.round(bonuses.dodgeChance * 100)}%` : '0%'}</span>
+      <div class="character-bonus-row">
+        <span class="character-bonus-label">Dodge chance</span>
+        <span class="character-bonus-value${bonuses.dodgeChance > 0 ? ' active' : ''}">${bonuses.dodgeChance > 0 ? `${Math.round(bonuses.dodgeChance * 100)}%` : '0%'}</span>
       </div>
     `;
 
@@ -177,12 +173,12 @@ export class PartyScreen implements Screen {
       const items = 0; // No stat-boosting items yet
       const buffs = 0; // No buff system yet
       return `<tr data-tooltip="${STAT_TOOLTIPS[stat]}">
-        <td class="party-stat-name">${stat}</td>
+        <td class="character-stat-name">${stat}</td>
         <td>${base}</td>
         <td class="${pts > 0 ? 'has-bonus' : ''}">${pts > 0 ? `+${pts}` : '-'}</td>
         <td class="${items > 0 ? 'has-bonus' : ''}">${items > 0 ? `+${items}` : '-'}</td>
         <td class="${buffs > 0 ? 'has-bonus' : ''}">${buffs > 0 ? `+${buffs}` : '-'}</td>
-        <td class="party-stat-total">${total}</td>
+        <td class="character-stat-total">${total}</td>
       </tr>`;
     }).join('');
 
