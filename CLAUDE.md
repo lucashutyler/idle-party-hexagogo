@@ -4,6 +4,10 @@
 
 Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as a monorepo with a web client, game server, and game manager.
 
+## Branch Policy
+
+**`main` is a locked branch.** All changes must go through pull requests — never commit directly to `main`.
+
 ## Game Design Philosophy
 
 - **One character per player** — all mechanics incentivize this
