@@ -237,6 +237,11 @@ html, body {
   height: 48px;
   border: 2px solid var(--border-light);
   transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .combat-member.party {
@@ -347,16 +352,6 @@ html, body {
   color: var(--text-secondary);
   white-space: nowrap;
   text-align: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-}
-
-.combat-class-tag {
-  font-size: 6px;
-  color: var(--accent-gold);
-  opacity: 0.8;
 }
 
 .combat-hp-label.dead {
@@ -1856,7 +1851,6 @@ html, body {
   .character-gold-display { font-size: 10px; }
   .character-bonus-row { font-size: 9px; }
   .character-stats-table { font-size: 9px; }
-  .combat-class-tag { font-size: 7px; }
   .class-card-title { font-size: 12px; }
   .class-card-desc { font-size: 9px; }
   .class-card-stats { font-size: 9px; }
