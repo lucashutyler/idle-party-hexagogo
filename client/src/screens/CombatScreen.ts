@@ -102,6 +102,17 @@ export class CombatScreen implements Screen {
     return items.map(i => i.gridPosition).sort().join(',');
   }
 
+  private static classAbbrev(className: string): string {
+    const map: Record<string, string> = {
+      Knight: 'KNT',
+      Archer: 'ARC',
+      Priest: 'PRS',
+      Mage: 'MAG',
+      Bard: 'BRD',
+    };
+    return map[className] ?? '???';
+  }
+
   private updateVisuals(state: ServerStateMessage): void {
     // Location label
     this.locationLabel.textContent = state.zoneName;
@@ -229,8 +240,9 @@ export class CombatScreen implements Screen {
       const pct = Math.max(0, (p.currentHp / p.maxHp) * 100);
       const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
       const isSelf = p.username === selfUsername;
+      const classTag = CombatScreen.classAbbrev(p.className);
       hpContainer.innerHTML = `
-        <div class="combat-hp-label${isSelf ? ' self' : ''}">${this.escapeHtml(p.username)}</div>
+        <div class="combat-hp-label${isSelf ? ' self' : ''}"><span class="combat-class-tag">${classTag}</span>${this.escapeHtml(p.username)}</div>
         <div class="combat-hp-bar">
           <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
         </div>

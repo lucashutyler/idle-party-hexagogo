@@ -86,7 +86,8 @@ export class ServerBattleTimer {
       }
 
       const result: BattleResult = tickResult.result === 'victory' ? 'victory' : 'defeat';
-      this.showBattleResult(result);
+      // Delay result transition by one tick so the killing blow animation plays first
+      this.resultTimeout = setTimeout(() => this.showBattleResult(result), TICK_INTERVAL);
     }
   }
 

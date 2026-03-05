@@ -34,6 +34,7 @@ export interface ClientPlayerCombatant {
   currentHp: number;
   maxHp: number;
   gridPosition: PartyGridPosition;
+  className: string;
 }
 
 export interface ClientMonsterState {
@@ -142,10 +143,16 @@ export type ServerMessage =
   | ServerChatHistoryMessage
   | { type: 'error'; message: string };
 
+export interface ClientSetClassMessage {
+  type: 'set_class';
+  className: string;
+}
+
 export type ClientMessage =
   | ClientMoveMessage
   | ClientRequestStateMessage
   | ClientSetPriorityStatMessage
   | ClientEquipItemMessage
   | ClientUnequipItemMessage
+  | ClientSetClassMessage
   | ClientSocialMessage;

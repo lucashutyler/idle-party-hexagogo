@@ -267,6 +267,7 @@ export class PartyBattleManager {
         currentHp: p.currentHp,
         maxHp: p.maxHp,
         gridPosition: p.gridPosition,
+        className: p.className,
       })),
       monsters: combat.monsters.map(m => ({
         name: m.name,

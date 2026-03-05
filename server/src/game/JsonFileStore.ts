@@ -33,7 +33,8 @@ export class JsonFileStore implements GameStateStore {
     await this.ensureDir();
     const json = JSON.stringify(data, null, 2);
     const target = this.filePath(data.username);
-    const tmp = `${target}.tmp`;
+    // Use a unique tmp filename to avoid races between concurrent saves
+    const tmp = `${target}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
     // Write to temp file, then atomically rename over the real file.
     // If the process dies mid-write, only the .tmp is corrupted.
     await writeFile(tmp, json, 'utf-8');

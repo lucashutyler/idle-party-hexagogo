@@ -11,6 +11,7 @@ import { PlaceholderScreen } from './screens/PlaceholderScreen';
 import { CharacterScreen } from './screens/CharacterScreen';
 import { ItemsScreen } from './screens/ItemsScreen';
 import { SocialScreen } from './screens/SocialScreen';
+import { ClassSelectScreen } from './screens/ClassSelectScreen';
 import { BottomNav } from './ui/BottomNav';
 
 const CONNECTION_ERROR = 'Could not connect to server';
@@ -194,6 +195,16 @@ export class App {
         return;
       }
       this.screenManager.switchTo('login');
+      return;
+    }
+
+    // Check if player needs to select a class (new player or reset Adventurer)
+    if (this.gameClient.lastState?.character.className === 'Adventurer') {
+      const classScreen = new ClassSelectScreen('screen-class-select', this.gameClient, () => {
+        this.enterGame();
+      });
+      this.screenManager.register('class-select', document.getElementById('screen-class-select')!, classScreen);
+      this.screenManager.switchTo('class-select');
       return;
     }
 

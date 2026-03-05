@@ -165,6 +165,10 @@ export class GameClient {
     this.sendRaw({ type: 'set_priority_stat', stat });
   }
 
+  sendSetClass(className: string): void {
+    this.sendRaw({ type: 'set_class', className });
+  }
+
   sendEquipItem(itemId: string): void {
     this.sendRaw({ type: 'equip_item', itemId });
   }

@@ -39,6 +39,8 @@ export { UnlockSystem } from './systems/UnlockSystem.js';
 export {
   ALL_STATS,
   BASE_STATS,
+  CLASS_DEFINITIONS,
+  ALL_CLASS_NAMES,
   XP_PER_VICTORY,
   STAT_POINTS_PER_LEVEL,
   BASE_HP,
@@ -47,15 +49,18 @@ export {
   xpForNextLevel,
   calculateMaxHp,
   createDefaultCharacter,
+  createCharacter,
   addXp,
   addGold,
   allocateStatPoints,
 } from './systems/CharacterStats.js';
 export type {
   ClassName,
+  DamageType,
   StatName,
   StatBlock,
   CharacterState,
+  ClassDefinition,
 } from './systems/CharacterStats.js';
 
 // Item types
@@ -140,6 +145,7 @@ export type {
   ClientSetPriorityStatMessage,
   ClientEquipItemMessage,
   ClientUnequipItemMessage,
+  ClientSetClassMessage,
   ServerMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';
