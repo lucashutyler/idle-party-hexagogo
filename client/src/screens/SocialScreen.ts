@@ -1,5 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 type SubTab = 'users' | 'friends' | 'guild' | 'party' | 'chat';
@@ -108,7 +109,8 @@ export class SocialScreen implements Screen {
     this.tabBar.innerHTML = SUB_TABS.map(t => {
       const chatUnread = t.id === 'chat' && this.hasUnread && this.activeTab !== 'chat';
       const partyInvites = t.id === 'party' && (this.lastSocial?.pendingInvites?.length ?? 0) > 0;
-      const badge = chatUnread || partyInvites ? ' *' : '';
+      const friendRequests = t.id === 'friends' && (this.lastSocial?.incomingFriendRequests?.length ?? 0) > 0;
+      const badge = chatUnread || partyInvites || friendRequests ? ' *' : '';
       return `<button class="social-tab-btn${t.id === this.activeTab ? ' active' : ''}" data-tab="${t.id}">${t.label}${badge}</button>`;
     }).join('');
 
@@ -130,6 +132,7 @@ export class SocialScreen implements Screen {
     if (active && (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) && this.panelContainer.contains(active)) {
       return;
     }
+    this.renderTabBar();
     this.renderPanel();
   }
 
@@ -158,6 +161,8 @@ export class SocialScreen implements Screen {
     const friends = new Set(social.friends ?? []);
     const blocked = social.blockedUsers ?? {};
     const selfUsername = this.lastState?.username ?? '';
+    const incomingFrom = new Set((social.incomingFriendRequests ?? []).map(r => r.fromUsername));
+    const outgoingTo = new Set((social.outgoingFriendRequests ?? []).map(r => r.toUsername));
 
     // Full player list from all registered accounts (excludes self)
     const allPlayerSet = new Set(social.allPlayers ?? []);
@@ -230,14 +235,14 @@ export class SocialScreen implements Screen {
               <div class="social-group-header">Online (${onlinePlayers.length})</div>
               ${onlinePlayers.length === 0
                 ? '<div class="social-empty">No online users</div>'
-                : onlinePlayers.map(p => this.renderUserRow(p, friends, blocked, onlineSet)).join('')}
+                : onlinePlayers.map(p => this.renderUserRow(p, friends, blocked, onlineSet, incomingFrom, outgoingTo)).join('')}
               <div class="social-group-header">Offline (${offlinePlayers.length})</div>
               ${offlinePlayers.length === 0
                 ? '<div class="social-empty">No offline users</div>'
-                : offlinePlayers.map(p => this.renderUserRow(p, friends, blocked, onlineSet)).join('')}
+                : offlinePlayers.map(p => this.renderUserRow(p, friends, blocked, onlineSet, incomingFrom, outgoingTo)).join('')}
             `;
           }
-          return players.map(p => this.renderUserRow(p, friends, blocked, onlineSet)).join('');
+          return players.map(p => this.renderUserRow(p, friends, blocked, onlineSet, incomingFrom, outgoingTo)).join('');
         })()}
       </div>
     `;
@@ -273,7 +278,10 @@ export class SocialScreen implements Screen {
           const action = btn.getAttribute('data-action');
           switch (action) {
             case 'chat': this.startDm(target); break;
-            case 'add_friend': this.gameClient.sendAddFriend(target); break;
+            case 'send_friend_request': this.gameClient.sendFriendRequest(target); break;
+            case 'accept_friend_request': this.gameClient.sendAcceptFriendRequest(target); break;
+            case 'decline_friend_request': this.gameClient.sendDeclineFriendRequest(target); break;
+            case 'revoke_friend_request': this.gameClient.sendRevokeFriendRequest(target); break;
             case 'remove_friend': this.gameClient.sendRemoveFriend(target); break;
             case 'block': this.gameClient.sendBlockUser(target, 'all'); break;
             case 'unblock': this.gameClient.sendUnblockUser(target); break;
@@ -283,23 +291,40 @@ export class SocialScreen implements Screen {
     }
   }
 
-  private renderUserRow(p: string, friends: Set<string>, blocked: Record<string, unknown>, onlineSet: Set<string>): string {
+  private renderUserRow(p: string, friends: Set<string>, blocked: Record<string, unknown>, onlineSet: Set<string>, incomingFrom: Set<string>, outgoingTo: Set<string>): string {
     const isFriend = friends.has(p);
     const isBlocked = p in blocked;
     const isOnline = onlineSet.has(p);
+    const hasIncoming = incomingFrom.has(p);
+    const hasSentTo = outgoingTo.has(p);
+
+    let friendBtn = '';
+    if (isFriend) {
+      friendBtn = `<button class="social-action-btn remove-friend" data-action="remove_friend">Unfriend</button>`;
+    } else if (hasIncoming) {
+      friendBtn = `<button class="social-action-btn add-friend" data-action="accept_friend_request">Accept</button>`
+        + `<button class="social-action-btn remove-friend" data-action="decline_friend_request">Decline</button>`;
+    } else if (hasSentTo) {
+      friendBtn = `<button class="social-action-btn remove-friend" data-action="revoke_friend_request">Revoke</button>`;
+    } else {
+      friendBtn = `<button class="social-action-btn add-friend" data-action="send_friend_request">Add</button>`;
+    }
+
+    let statusBadge = '';
+    if (isFriend) statusBadge = '<span class="social-badge friend">Friend</span>';
+    else if (hasIncoming) statusBadge = '<span class="social-badge friend">Request</span>';
+    else if (hasSentTo) statusBadge = '<span class="social-badge">Pending</span>';
+
     return `<div class="social-user-row" data-username="${this.escapeHtml(p)}">
       <span class="social-status-dot ${isOnline ? 'online' : 'offline'}"></span>
       <span class="social-user-name">${this.escapeHtml(p)}</span>
       <span class="social-user-badges">
-        ${isFriend ? '<span class="social-badge friend">Friend</span>' : ''}
+        ${statusBadge}
         ${isBlocked ? '<span class="social-badge blocked">Blocked</span>' : ''}
       </span>
       <div class="social-user-actions">
         <button class="social-action-btn social-chat-user-btn" data-action="chat">Chat</button>
-        ${isFriend
-          ? `<button class="social-action-btn remove-friend" data-action="remove_friend">Unfriend</button>`
-          : `<button class="social-action-btn add-friend" data-action="add_friend">Add</button>`
-        }
+        ${friendBtn}
         ${isBlocked
           ? `<button class="social-action-btn unblock" data-action="unblock">Unblock</button>`
           : `<button class="social-action-btn block" data-action="block">Block</button>`
@@ -319,15 +344,31 @@ export class SocialScreen implements Screen {
 
     const friends = social.friends ?? [];
     const onlineSet = new Set(social.onlinePlayers ?? []);
+    const incoming = social.incomingFriendRequests ?? [];
+    const outgoing = social.outgoingFriendRequests ?? [];
 
     const online = friends.filter(f => onlineSet.has(f)).sort();
     const offline = friends.filter(f => !onlineSet.has(f)).sort();
+    const hasContent = incoming.length > 0 || friends.length > 0 || outgoing.length > 0;
 
     this.panelContainer.innerHTML = `
       <div class="social-friends-list">
-        ${friends.length === 0
+        ${!hasContent
           ? '<div class="social-empty">No friends yet. Add friends from the Users tab!</div>'
           : `
+            ${incoming.length > 0 ? `
+              <div class="social-group-header">Friend Requests (${incoming.length})</div>
+              ${incoming.map(r => `
+                <div class="social-user-row" data-username="${this.escapeHtml(r.fromUsername)}">
+                  <span class="social-status-dot ${onlineSet.has(r.fromUsername) ? 'online' : 'offline'}"></span>
+                  <span class="social-user-name">${this.escapeHtml(r.fromUsername)}</span>
+                  <div class="social-user-actions">
+                    <button class="social-action-btn add-friend social-accept-friend" data-username="${this.escapeHtml(r.fromUsername)}">Accept</button>
+                    <button class="social-action-btn remove-friend social-decline-friend" data-username="${this.escapeHtml(r.fromUsername)}">Decline</button>
+                  </div>
+                </div>
+              `).join('')}
+            ` : ''}
             ${online.length > 0 ? `
               <div class="social-group-header">Online (${online.length})</div>
               ${online.map(f => this.renderFriendRow(f, true)).join('')}
@@ -336,13 +377,46 @@ export class SocialScreen implements Screen {
               <div class="social-group-header">Offline (${offline.length})</div>
               ${offline.map(f => this.renderFriendRow(f, false)).join('')}
             ` : ''}
+            ${outgoing.length > 0 ? `
+              <div class="social-group-header">Pending Sent (${outgoing.length})</div>
+              ${outgoing.map(r => `
+                <div class="social-user-row" data-username="${this.escapeHtml(r.toUsername)}">
+                  <span class="social-status-dot ${onlineSet.has(r.toUsername) ? 'online' : 'offline'}"></span>
+                  <span class="social-user-name">${this.escapeHtml(r.toUsername)}</span>
+                  <div class="social-user-actions">
+                    <button class="social-action-btn remove-friend social-revoke-friend" data-username="${this.escapeHtml(r.toUsername)}">Revoke</button>
+                  </div>
+                </div>
+              `).join('')}
+            ` : ''}
           `
         }
       </div>
     `;
 
+    // Wire accept buttons
+    for (const btn of this.panelContainer.querySelectorAll('.social-accept-friend')) {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-username');
+        if (target) this.gameClient.sendAcceptFriendRequest(target);
+      });
+    }
+    // Wire decline buttons
+    for (const btn of this.panelContainer.querySelectorAll('.social-decline-friend')) {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-username');
+        if (target) this.gameClient.sendDeclineFriendRequest(target);
+      });
+    }
+    // Wire revoke buttons
+    for (const btn of this.panelContainer.querySelectorAll('.social-revoke-friend')) {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-username');
+        if (target) this.gameClient.sendRevokeFriendRequest(target);
+      });
+    }
     // Wire remove buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-action-btn.remove-friend')) {
+    for (const btn of this.panelContainer.querySelectorAll('.social-action-btn.remove-friend-btn')) {
       btn.addEventListener('click', () => {
         const target = btn.closest('.social-user-row')?.getAttribute('data-username');
         if (target) this.gameClient.sendRemoveFriend(target);
@@ -363,7 +437,7 @@ export class SocialScreen implements Screen {
       <span class="social-user-name">${this.escapeHtml(username)}</span>
       <div class="social-user-actions">
         <button class="social-action-btn social-chat-user-btn" data-action="chat">Chat</button>
-        <button class="social-action-btn remove-friend" data-action="remove_friend">Remove</button>
+        <button class="social-action-btn remove-friend remove-friend-btn" data-action="remove_friend">Remove</button>
       </div>
     </div>`;
   }
@@ -474,6 +548,11 @@ export class SocialScreen implements Screen {
       return;
     }
 
+    const selfUsername = this.lastState?.username ?? '';
+    const selfMember = party.members.find(m => m.username === selfUsername);
+    const selfRole = selfMember?.role ?? 'member';
+    const isOwner = selfRole === 'owner';
+    const isLeaderOrOwner = selfRole === 'owner' || selfRole === 'leader';
     const isSolo = party.members.length === 1;
     const onlineSet = new Set(social.onlinePlayers ?? []);
     const memberMap = new Map(party.members.map(m => [m.gridPosition, m]));
@@ -503,7 +582,7 @@ export class SocialScreen implements Screen {
       .map(p => p.username)
       .sort();
 
-    const nearbyHtml = `
+    const nearbyHtml = isLeaderOrOwner ? `
       <div class="social-group-header">Nearby Players</div>
       <div class="social-user-list">
         ${sameTilePlayers.length === 0
@@ -518,7 +597,7 @@ export class SocialScreen implements Screen {
             </div>
           `).join('')}
       </div>
-    `;
+    ` : '';
 
     // Render 3x3 grid
     let gridHtml = '<div class="social-party-grid">';
@@ -531,8 +610,10 @@ export class SocialScreen implements Screen {
         const isOnline = onlineSet.has(member.username);
         gridHtml += `<span class="social-status-dot ${isOnline ? 'online' : 'offline'}"></span>`;
         gridHtml += `<span class="social-party-cell-name">${this.escapeHtml(member.username)}</span>`;
-        if (member.role === 'leader') {
-          gridHtml += '<span class="social-badge friend">L</span>';
+        const roleBadge = member.role === 'owner' ? 'O' : member.role === 'leader' ? 'L' : '';
+        const badgeClass = member.role === 'owner' ? 'owner' : 'friend';
+        if (roleBadge) {
+          gridHtml += `<span class="social-badge ${badgeClass}">${roleBadge}</span>`;
         }
       } else {
         gridHtml += '<span class="social-party-cell-empty">Empty</span>';
@@ -540,6 +621,30 @@ export class SocialScreen implements Screen {
       gridHtml += '</div>';
     }
     gridHtml += '</div>';
+
+    // Build member action buttons based on viewer's role
+    const renderMemberActions = (m: { username: string; role: string }): string => {
+      if (m.username === selfUsername) return '';
+      const actions: string[] = [];
+      actions.push(`<button class="social-action-btn social-chat-user-btn" data-action="chat">Chat</button>`);
+
+      if (isOwner) {
+        if (m.role === 'member') {
+          actions.push(`<button class="social-action-btn add-friend social-promote-btn" data-username="${this.escapeHtml(m.username)}">Promote</button>`);
+        }
+        if (m.role === 'leader') {
+          actions.push(`<button class="social-action-btn remove-friend social-demote-btn" data-username="${this.escapeHtml(m.username)}">Demote</button>`);
+        }
+        actions.push(`<button class="social-action-btn add-friend social-transfer-btn" data-username="${this.escapeHtml(m.username)}">Transfer</button>`);
+        actions.push(`<button class="social-action-btn remove-friend social-kick-btn" data-username="${this.escapeHtml(m.username)}">Kick</button>`);
+      } else if (selfRole === 'leader') {
+        if (m.role !== 'owner') {
+          actions.push(`<button class="social-action-btn remove-friend social-kick-btn" data-username="${this.escapeHtml(m.username)}">Kick</button>`);
+        }
+      }
+
+      return actions.join('');
+    };
 
     this.panelContainer.innerHTML = `
       ${invitesHtml}
@@ -551,17 +656,18 @@ export class SocialScreen implements Screen {
         </div>
       ` : ''}
       ${nearbyHtml}
-      <div class="social-group-header">Members (${party.members.length})</div>
+      <div class="social-group-header">Members (${party.members.length}/${MAX_PARTY_SIZE})</div>
       <div class="social-user-list">
         ${party.members.map(m => `
           <div class="social-user-row" data-username="${this.escapeHtml(m.username)}">
             <span class="social-status-dot ${onlineSet.has(m.username) ? 'online' : 'offline'}"></span>
             <span class="social-user-name">${this.escapeHtml(m.username)}</span>
             <span class="social-user-badges">
+              ${m.role === 'owner' ? '<span class="social-badge owner">Owner</span>' : ''}
               ${m.role === 'leader' ? '<span class="social-badge friend">Leader</span>' : ''}
             </span>
             <div class="social-user-actions">
-              <button class="social-action-btn social-chat-user-btn" data-action="chat">Chat</button>
+              ${renderMemberActions(m)}
             </div>
           </div>
         `).join('')}
@@ -612,6 +718,38 @@ export class SocialScreen implements Screen {
       btn.addEventListener('click', () => {
         const target = btn.closest('.social-user-row')?.getAttribute('data-username');
         if (target) this.startDm(target);
+      });
+    }
+
+    // Wire promote buttons (owner only)
+    for (const btn of this.panelContainer.querySelectorAll('.social-promote-btn')) {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-username');
+        if (target) this.gameClient.sendPromotePartyLeader(target);
+      });
+    }
+
+    // Wire demote buttons (owner only)
+    for (const btn of this.panelContainer.querySelectorAll('.social-demote-btn')) {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-username');
+        if (target) this.gameClient.sendDemotePartyMember(target);
+      });
+    }
+
+    // Wire transfer buttons (owner only)
+    for (const btn of this.panelContainer.querySelectorAll('.social-transfer-btn')) {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-username');
+        if (target) this.gameClient.sendTransferPartyOwnership(target);
+      });
+    }
+
+    // Wire kick buttons (owner and leaders)
+    for (const btn of this.panelContainer.querySelectorAll('.social-kick-btn')) {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-username');
+        if (target) this.gameClient.sendKickPartyMember(target);
       });
     }
   }

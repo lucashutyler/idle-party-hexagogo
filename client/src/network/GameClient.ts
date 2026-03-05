@@ -175,8 +175,20 @@ export class GameClient {
 
   // --- Social ---
 
-  sendAddFriend(username: string): void {
-    this.sendRaw({ type: 'add_friend', username });
+  sendFriendRequest(username: string): void {
+    this.sendRaw({ type: 'send_friend_request', username });
+  }
+
+  sendAcceptFriendRequest(username: string): void {
+    this.sendRaw({ type: 'accept_friend_request', username });
+  }
+
+  sendDeclineFriendRequest(username: string): void {
+    this.sendRaw({ type: 'decline_friend_request', username });
+  }
+
+  sendRevokeFriendRequest(username: string): void {
+    this.sendRaw({ type: 'revoke_friend_request', username });
   }
 
   sendRemoveFriend(username: string): void {
@@ -233,6 +245,14 @@ export class GameClient {
 
   sendPromotePartyLeader(username: string): void {
     this.sendRaw({ type: 'promote_party_leader', username });
+  }
+
+  sendDemotePartyMember(username: string): void {
+    this.sendRaw({ type: 'demote_party_member', username });
+  }
+
+  sendTransferPartyOwnership(username: string): void {
+    this.sendRaw({ type: 'transfer_party_ownership', username });
   }
 
   sendAcceptPartyInvite(partyId: string): void {

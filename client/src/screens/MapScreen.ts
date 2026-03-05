@@ -11,6 +11,7 @@ export class MapScreen implements Screen {
   private zoomControls?: HTMLElement;
   private tileModal?: TileInfoModal;
   private onChatCallback?: (username: string) => void;
+  private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -21,6 +22,40 @@ export class MapScreen implements Screen {
 
   setOnChat(cb: (username: string) => void): void {
     this.onChatCallback = cb;
+  }
+
+  /** Check if the current player can move (must be owner or leader). */
+  private canMove(): boolean {
+    const state = this.gameClient.lastState;
+    if (!state?.social?.party) return true; // solo or no data yet — allow
+    const me = state.social.party.members.find(m => m.username === state.username);
+    if (!me) return true; // not found — allow
+    return me.role === 'owner' || me.role === 'leader';
+  }
+
+  /** Try to send a move; show toast if not allowed. */
+  private tryMove(col: number, row: number): void {
+    if (this.canMove()) {
+      this.gameClient.sendMove(col, row);
+    } else {
+      this.showMoveToast('Only the party owner or a leader can move');
+    }
+  }
+
+  private showMoveToast(message: string): void {
+    // Remove existing toast
+    const existing = this.container.querySelector('.map-toast');
+    if (existing) existing.remove();
+    if (this.moveToastTimeout) clearTimeout(this.moveToastTimeout);
+
+    const toast = document.createElement('div');
+    toast.className = 'map-toast';
+    toast.textContent = message;
+    this.container.appendChild(toast);
+
+    this.moveToastTimeout = setTimeout(() => {
+      toast.remove();
+    }, 2000);
   }
 
   onActivate(): void {
@@ -78,12 +113,12 @@ export class MapScreen implements Screen {
     // Wait for scene to be ready before wiring up
     this.game.events.once('ready', () => {
       const scene = this.game!.scene.getScene('WorldMapScene') as InstanceType<typeof WorldMapScene>;
-      scene.setSendMove((col, row) => this.gameClient.sendMove(col, row));
+      scene.setSendMove((col, row) => this.tryMove(col, row));
 
       // Wire tile click handler for modal
       this.tileModal = new TileInfoModal(
         this.container,
-        (col, row) => { this.gameClient.sendMove(col, row); },
+        (col, row) => { this.tryMove(col, row); },
         (username) => { this.gameClient.sendInviteParty(username); },
         (username) => { this.onChatCallback?.(username); },
       );

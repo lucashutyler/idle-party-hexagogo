@@ -1,5 +1,5 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, CombatLogEntry } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, CombatLogEntry, ClientCombatAction } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 export class CombatScreen implements Screen {
@@ -11,14 +11,15 @@ export class CombatScreen implements Screen {
   private locationLabel!: HTMLElement;
   private connectionDot!: HTMLElement;
   private stage!: HTMLElement;
-  private playerHpContainer!: HTMLElement;
+  private playerSide!: HTMLElement;
   private enemySide!: HTMLElement;
   private logContainer!: HTMLElement;
 
   // Last rendered log length — for incremental DOM updates
   private renderedLogLength = 0;
   private lastLog: CombatLogEntry[] = [];
-  private renderedEnemyCount = 0;
+  private renderedPlayerKey = '';
+  private renderedEnemyKey = '';
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -58,14 +59,9 @@ export class CombatScreen implements Screen {
         </div>
       </div>
       <div class="combat-stage">
-        <div class="combat-side">
-          <div class="combat-unit player-unit">
-            <div class="combat-unit-hp"></div>
-            <div class="combat-member party"></div>
-          </div>
-        </div>
-        <div class="combat-vs">⚔</div>
-        <div class="combat-side enemy-side"></div>
+        <div class="combat-side combat-player-side"></div>
+        <div class="combat-vs">\u2694</div>
+        <div class="combat-side combat-enemy-side"></div>
       </div>
       <div class="combat-log"></div>
     `;
@@ -73,8 +69,8 @@ export class CombatScreen implements Screen {
     this.locationLabel = this.container.querySelector('.location-label')!;
     this.connectionDot = this.container.querySelector('.connection-dot')!;
     this.stage = this.container.querySelector('.combat-stage')!;
-    this.playerHpContainer = this.container.querySelector('.player-unit .combat-unit-hp')!;
-    this.enemySide = this.container.querySelector('.enemy-side')!;
+    this.playerSide = this.container.querySelector('.combat-player-side')!;
+    this.enemySide = this.container.querySelector('.combat-enemy-side')!;
     this.logContainer = this.container.querySelector('.combat-log')!;
   }
 
@@ -98,6 +94,14 @@ export class CombatScreen implements Screen {
     this.updateLog(state.combatLog);
   }
 
+  /**
+   * Build a cache key from a grid side's combatants.
+   * We rebuild the DOM only when the set of combatants (count + positions) changes.
+   */
+  private static gridKey(items: { gridPosition: number }[]): string {
+    return items.map(i => i.gridPosition).sort().join(',');
+  }
+
   private updateVisuals(state: ServerStateMessage): void {
     // Location label
     this.locationLabel.textContent = state.zoneName;
@@ -108,72 +112,149 @@ export class CombatScreen implements Screen {
       this.stage.classList.add(state.battle.visual);
     }
 
-    // Update enemy sprites — sync count and dim dead monsters
     const combat = state.battle.combat;
-    const monsterCount = combat ? combat.monsters.length : 0;
-    if (monsterCount !== this.renderedEnemyCount) {
-      this.enemySide.innerHTML = '';
-      for (let i = 0; i < monsterCount; i++) {
-        const unit = document.createElement('div');
-        unit.className = 'combat-unit enemy-unit';
-        unit.innerHTML = `
-          <div class="combat-unit-hp"></div>
-          <div class="combat-member enemy"></div>
-        `;
-        this.enemySide.appendChild(unit);
-      }
-      this.renderedEnemyCount = monsterCount;
+
+    // --- Player side (3-row grid) ---
+    const players = combat?.players ?? [];
+    const playerKey = CombatScreen.gridKey(players);
+    if (playerKey !== this.renderedPlayerKey) {
+      this.playerSide.innerHTML = '';
+      this.renderGridSide(this.playerSide, players.length, players.map(p => p.gridPosition), 'player');
+      this.renderedPlayerKey = playerKey;
     }
+
+    // --- Enemy side (3-row grid) ---
+    const monsters = combat?.monsters ?? [];
+    const enemyKey = CombatScreen.gridKey(monsters);
+    if (enemyKey !== this.renderedEnemyKey) {
+      this.enemySide.innerHTML = '';
+      this.renderGridSide(this.enemySide, monsters.length, monsters.map(m => m.gridPosition), 'enemy');
+      this.renderedEnemyKey = enemyKey;
+    }
+
+    // Dim dead combatants
     if (combat) {
-      const enemyUnits = this.enemySide.querySelectorAll('.enemy-unit');
-      for (let i = 0; i < combat.monsters.length; i++) {
-        const dead = combat.monsters[i].currentHp <= 0;
-        const member = enemyUnits[i]?.querySelector('.combat-member');
-        if (member) member.classList.toggle('dead', dead);
+      for (const p of combat.players) {
+        const el = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"] .combat-member`);
+        if (el) el.classList.toggle('dead', p.currentHp <= 0);
+      }
+      for (const m of combat.monsters) {
+        const el = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"] .combat-member`);
+        if (el) el.classList.toggle('dead', m.currentHp <= 0);
       }
     }
 
-    // HP bars (floating above each unit)
+    // HP bars
     this.updateHpBars(state);
+
+    // Per-turn attack/hit animations
+    this.updateCombatAnimations(combat?.lastAction ?? null, state.battle.visual);
+  }
+
+  /**
+   * Render a 3×3 grid layout for one side (players or enemies).
+   * Each combatant is placed at its actual grid position (0-8).
+   * Empty cells are left as blank space.
+   */
+  private renderGridSide(
+    container: HTMLElement,
+    count: number,
+    positions: number[],
+    type: 'player' | 'enemy',
+  ): void {
+    if (count === 0) return;
+
+    const posSet = new Set(positions);
+
+    // Render all 9 cells (3 rows × 3 cols)
+    for (let pos = 0; pos < 9; pos++) {
+      if (posSet.has(pos)) {
+        const unit = document.createElement('div');
+        unit.className = `combat-unit ${type}-unit`;
+        unit.setAttribute('data-grid', String(pos));
+        unit.innerHTML = `
+          <div class="combat-unit-hp"></div>
+          <div class="combat-member ${type === 'player' ? 'party' : 'enemy'}"></div>
+        `;
+        container.appendChild(unit);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'combat-grid-empty';
+        container.appendChild(empty);
+      }
+    }
+  }
+
+  private updateCombatAnimations(action: ClientCombatAction | null, visual: string): void {
+    // Clear all animation classes
+    for (const el of this.container.querySelectorAll('.attacking, .hit, .dodged')) {
+      el.classList.remove('attacking', 'hit', 'dodged');
+    }
+
+    if (!action || visual !== 'fighting') return;
+
+    // Apply attacking class to the attacker
+    const attackerSide = action.attackerSide === 'player' ? this.playerSide : this.enemySide;
+    const attackerEl = attackerSide.querySelector(`[data-grid="${action.attackerPos}"] .combat-member`);
+    if (attackerEl) {
+      attackerEl.classList.add('attacking');
+    }
+
+    // Apply hit/dodged class to the target
+    if (action.targetPos !== null && action.targetSide) {
+      const targetSide = action.targetSide === 'player' ? this.playerSide : this.enemySide;
+      const targetEl = targetSide.querySelector(`[data-grid="${action.targetPos}"] .combat-member`);
+      if (targetEl) {
+        targetEl.classList.add(action.dodged ? 'dodged' : 'hit');
+      }
+    }
   }
 
   private updateHpBars(state: ServerStateMessage): void {
     const combat = state.battle.combat;
+    if (!combat) {
+      // Clear all HP labels
+      for (const hp of this.playerSide.querySelectorAll('.combat-unit-hp')) {
+        hp.innerHTML = '';
+      }
+      return;
+    }
 
-    // Player HP bar
-    if (combat) {
-      const playerName = state.username || 'Player';
-      const playerPct = Math.max(0, (combat.playerHp / combat.playerMaxHp) * 100);
-      const playerHpClass = playerPct <= 25 ? 'critical' : playerPct <= 50 ? 'low' : '';
+    const selfUsername = state.username;
 
-      this.playerHpContainer.innerHTML = `
-        <div class="combat-hp-label">${playerName}</div>
+    // Player HP bars
+    for (const p of combat.players) {
+      const hpContainer = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"] .combat-unit-hp`);
+      if (!hpContainer) continue;
+      const pct = Math.max(0, (p.currentHp / p.maxHp) * 100);
+      const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
+      const isSelf = p.username === selfUsername;
+      hpContainer.innerHTML = `
+        <div class="combat-hp-label${isSelf ? ' self' : ''}">${this.escapeHtml(p.username)}</div>
         <div class="combat-hp-bar">
-          <div class="hp-fill ${playerHpClass}" style="width: ${playerPct}%"></div>
+          <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
         </div>
       `;
-
-      // Enemy HP bars
-      const enemyUnits = this.enemySide.querySelectorAll('.enemy-unit');
-      for (let i = 0; i < combat.monsters.length; i++) {
-        const monster = combat.monsters[i];
-        const dead = monster.currentHp <= 0;
-        const pct = Math.max(0, (monster.currentHp / monster.maxHp) * 100);
-        const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
-
-        const hpContainer = enemyUnits[i]?.querySelector('.combat-unit-hp');
-        if (hpContainer) {
-          hpContainer.innerHTML = `
-            <div class="combat-hp-label ${dead ? 'dead' : ''}">${monster.name}</div>
-            <div class="combat-hp-bar">
-              <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
-            </div>
-          `;
-        }
-      }
-    } else {
-      this.playerHpContainer.innerHTML = '';
     }
+
+    // Enemy HP bars
+    for (const m of combat.monsters) {
+      const hpContainer = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"] .combat-unit-hp`);
+      if (!hpContainer) continue;
+      const dead = m.currentHp <= 0;
+      const pct = Math.max(0, (m.currentHp / m.maxHp) * 100);
+      const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
+      hpContainer.innerHTML = `
+        <div class="combat-hp-label${dead ? ' dead' : ''}">${this.escapeHtml(m.name)}</div>
+        <div class="combat-hp-bar">
+          <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
+        </div>
+      `;
+    }
+  }
+
+  private escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   private updateLog(log: CombatLogEntry[]): void {

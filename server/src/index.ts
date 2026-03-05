@@ -14,6 +14,7 @@ import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ChatMessage } from '@idle-party-rpg/shared';
+import { canMove } from './game/social/PartySystem.js';
 
 const app = express();
 const server = createServer(app);
@@ -112,6 +113,23 @@ server.on('upgrade', async (req, socket, head) => {
   });
 });
 
+/** Sync friend lists and outgoing requests for both players, then broadcast state. */
+function syncFriendState(a: string, b: string): void {
+  const sessionA = playerManager.getSessionByUsername(a);
+  if (sessionA) {
+    sessionA.setFriends(playerManager.friends.getFriends(a));
+    sessionA.setOutgoingFriendRequests(playerManager.friends.getOutgoingRequests(a));
+  }
+  playerManager.sendStateToPlayer(a);
+
+  const sessionB = playerManager.getSessionByUsername(b);
+  if (sessionB) {
+    sessionB.setFriends(playerManager.friends.getFriends(b));
+    sessionB.setOutgoingFriendRequests(playerManager.friends.getOutgoingRequests(b));
+  }
+  playerManager.sendStateToPlayer(b);
+}
+
 wss.on('connection', (ws) => {
   const username: string = (ws as any)._username;
   console.log(`WebSocket connected for "${username}"`);
@@ -136,34 +154,23 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // If in a party, only leaders can move (and it moves the whole party)
         const partyId = session.getPartyId();
-        if (partyId) {
-          const party = playerManager.parties.getParty(partyId);
-          if (party) {
-            const member = party.members.find(m => m.username === username);
-            if (!member || member.role !== 'leader') {
-              ws.send(JSON.stringify({ type: 'error', message: 'Only party leaders can move' }));
-              return;
-            }
-            // Move all party members to the same destination
-            const success = session.handleMove(msg.col, msg.row);
-            if (!success) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
-              return;
-            }
-            for (const m of party.members) {
-              if (m.username === username) continue;
-              const memberSession = playerManager.getSessionByUsername(m.username);
-              if (memberSession) {
-                memberSession.handleMove(msg.col, msg.row);
-              }
-            }
+        if (!partyId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No party' }));
+          return;
+        }
+
+        // Only owners and leaders can move the party
+        const party = playerManager.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === username);
+          if (!member || !canMove(member.role)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can move' }));
             return;
           }
         }
 
-        const success = session.handleMove(msg.col, msg.row);
+        const success = playerManager.partyBattles.handleMove(partyId, msg.col, msg.row);
         if (!success) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
         }
@@ -222,17 +229,56 @@ wss.on('connection', (ws) => {
 
       // --- Social messages ---
 
-      if (msg.type === 'add_friend' && typeof msg.username === 'string') {
+      if (msg.type === 'send_friend_request' && typeof msg.username === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) return;
         const target = msg.username;
-        if (!playerManager.getSessionByUsername(target)) {
+        if (!accountStore.findByUsername(target)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
           return;
         }
-        playerManager.friends.addFriend(username, target);
-        session.setFriends(playerManager.friends.getFriends(username));
-        playerManager.sendStateToPlayer(username);
+        const result = playerManager.friends.sendRequest(username, target);
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        syncFriendState(username, target);
+        return;
+      }
+
+      if (msg.type === 'accept_friend_request' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const result = playerManager.friends.acceptRequest(username, msg.username);
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        syncFriendState(username, msg.username);
+        return;
+      }
+
+      if (msg.type === 'decline_friend_request' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const result = playerManager.friends.declineRequest(username, msg.username);
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        syncFriendState(username, msg.username);
+        return;
+      }
+
+      if (msg.type === 'revoke_friend_request' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const result = playerManager.friends.revokeRequest(username, msg.username);
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        syncFriendState(username, msg.username);
         return;
       }
 
@@ -240,8 +286,7 @@ wss.on('connection', (ws) => {
         const session = playerManager.getSessionByUsername(username);
         if (!session) return;
         playerManager.friends.removeFriend(username, msg.username);
-        session.setFriends(playerManager.friends.getFriends(username));
-        playerManager.sendStateToPlayer(username);
+        syncFriendState(username, msg.username);
         return;
       }
 
@@ -486,6 +531,9 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'accept_party_invite' && typeof msg.partyId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        const oldPartyId = session?.getPartyId() ?? null;
+
         const result = playerManager.parties.acceptInvite(
           username,
           msg.partyId,
@@ -497,7 +545,8 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
-        // Clean up the old solo party (now empty, already deleted by leaveParty)
+        // Wire party battle join
+        playerManager.handlePartyJoin(username, msg.partyId, oldPartyId);
         // Notify all members of the joined party
         for (const m of result.joined.members) {
           playerManager.sendStateToPlayer(m.username);
@@ -528,8 +577,12 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
-        // Auto-create a new solo party for the player who left
-        playerManager.ensureParty(username);
+        // Handle party battle leave (removes from shared combat, creates solo party)
+        if (partyId) {
+          playerManager.handlePartyLeave(username, partyId);
+        } else {
+          playerManager.ensureParty(username);
+        }
         playerManager.sendStateToPlayer(username);
         for (const m of otherMembers) {
           playerManager.sendStateToPlayer(m.username);
@@ -538,6 +591,10 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'kick_party_member' && typeof msg.username === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        const partyId = session.getPartyId();
+
         const result = playerManager.parties.kickMember(
           username,
           msg.username,
@@ -548,8 +605,12 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
-        // Auto-create a new solo party for the kicked player
-        playerManager.ensureParty(msg.username);
+        // Handle party battle leave for the kicked player
+        if (partyId) {
+          playerManager.handlePartyLeave(msg.username, partyId);
+        } else {
+          playerManager.ensureParty(msg.username);
+        }
         playerManager.sendStateToPlayer(username);
         playerManager.sendStateToPlayer(msg.username);
         return;
@@ -580,6 +641,52 @@ wss.on('connection', (ws) => {
 
       if (msg.type === 'promote_party_leader' && typeof msg.username === 'string') {
         const result = playerManager.parties.promoteLeader(
+          username,
+          msg.username,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        const session = playerManager.getSessionByUsername(username);
+        const partyId = session?.getPartyId();
+        if (partyId) {
+          const party = playerManager.parties.getParty(partyId);
+          if (party) {
+            for (const m of party.members) {
+              playerManager.sendStateToPlayer(m.username);
+            }
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'demote_party_member' && typeof msg.username === 'string') {
+        const result = playerManager.parties.demoteLeader(
+          username,
+          msg.username,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        const session = playerManager.getSessionByUsername(username);
+        const partyId = session?.getPartyId();
+        if (partyId) {
+          const party = playerManager.parties.getParty(partyId);
+          if (party) {
+            for (const m of party.members) {
+              playerManager.sendStateToPlayer(m.username);
+            }
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'transfer_party_ownership' && typeof msg.username === 'string') {
+        const result = playerManager.parties.transferOwnership(
           username,
           msg.username,
           (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,

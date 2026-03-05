@@ -1,6 +1,12 @@
 // ── Social System Types ─────────────────────────────────────
 
 // --- Friend System ---
+export interface FriendRequest {
+  fromUsername: string;
+  toUsername: string;
+  timestamp: number;
+}
+
 export interface FriendEntry {
   username: string;
   addedAt: number;
@@ -21,8 +27,9 @@ export interface GuildMemberEntry {
 }
 
 // --- Party System ---
-export type PartyRole = 'leader' | 'member';
+export type PartyRole = 'owner' | 'leader' | 'member';
 export type PartyGridPosition = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export const MAX_PARTY_SIZE = 5;
 
 export interface GamePartyMember {
   username: string;
@@ -67,6 +74,8 @@ export type BlockLevel = 'dm' | 'all';
 // --- Social State (sent to client) ---
 export interface ClientSocialState {
   friends: string[];
+  incomingFriendRequests: FriendRequest[];
+  outgoingFriendRequests: FriendRequest[];
   guild: GuildInfo | null;
   guildMembers: GuildMemberEntry[];
   party: GamePartyInfo | null;
@@ -77,8 +86,23 @@ export interface ClientSocialState {
 }
 
 // --- Client -> Server messages ---
-export interface ClientAddFriendMessage {
-  type: 'add_friend';
+export interface ClientSendFriendRequestMessage {
+  type: 'send_friend_request';
+  username: string;
+}
+
+export interface ClientAcceptFriendRequestMessage {
+  type: 'accept_friend_request';
+  username: string;
+}
+
+export interface ClientDeclineFriendRequestMessage {
+  type: 'decline_friend_request';
+  username: string;
+}
+
+export interface ClientRevokeFriendRequestMessage {
+  type: 'revoke_friend_request';
   username: string;
 }
 
@@ -134,6 +158,16 @@ export interface ClientPromotePartyLeaderMessage {
   username: string;
 }
 
+export interface ClientDemotePartyMemberMessage {
+  type: 'demote_party_member';
+  username: string;
+}
+
+export interface ClientTransferPartyOwnershipMessage {
+  type: 'transfer_party_ownership';
+  username: string;
+}
+
 export interface ClientAcceptPartyInviteMessage {
   type: 'accept_party_invite';
   partyId: string;
@@ -169,7 +203,10 @@ export interface ClientUnblockUserMessage {
 }
 
 export type ClientSocialMessage =
-  | ClientAddFriendMessage
+  | ClientSendFriendRequestMessage
+  | ClientAcceptFriendRequestMessage
+  | ClientDeclineFriendRequestMessage
+  | ClientRevokeFriendRequestMessage
   | ClientRemoveFriendMessage
   | ClientCreateGuildMessage
   | ClientInviteGuildMessage
@@ -181,6 +218,8 @@ export type ClientSocialMessage =
   | ClientKickPartyMemberMessage
   | ClientSetPartyGridPositionMessage
   | ClientPromotePartyLeaderMessage
+  | ClientDemotePartyMemberMessage
+  | ClientTransferPartyOwnershipMessage
   | ClientAcceptPartyInviteMessage
   | ClientDeclinePartyInviteMessage
   | ClientSendChatMessage

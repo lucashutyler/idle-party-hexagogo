@@ -1,4 +1,5 @@
-import type { GamePartyInfo, PartyGridPosition, PartyInvite } from '@idle-party-rpg/shared';
+import type { GamePartyInfo, PartyGridPosition, PartyInvite, PartyRole } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE } from '@idle-party-rpg/shared';
 
 let partyIdCounter = 0;
 
@@ -6,13 +7,30 @@ function generatePartyId(): string {
   return `party_${Date.now()}_${++partyIdCounter}`;
 }
 
+/** Check if a role can kick members. Owners and leaders can kick. */
+function canKick(role: PartyRole): boolean {
+  return role === 'owner' || role === 'leader';
+}
+
+/** Check if a role can move the party. Owners and leaders can move. */
+export function canMove(role: PartyRole): boolean {
+  return role === 'owner' || role === 'leader';
+}
+
+/** Check if a role can invite. Owners and leaders can invite. */
+function canInvite(role: PartyRole): boolean {
+  return role === 'owner' || role === 'leader';
+}
+
 /**
  * PartySystem manages game parties (groups of players).
  * - Every player is always in a party (solo if alone)
  * - Pending invite flow: invite → accept/decline
  * - Invites invalidated when inviter leaves the tile
- * - Multiple leaders supported
- * - 3x3 grid positioning for combat
+ * - Three-tier roles: owner > leader > member
+ * - Owner can promote/demote leaders, transfer ownership
+ * - Leaders can kick (including other leaders) and move
+ * - Max 5 members, 3x3 grid positioning for combat
  * - Same-tile requirement for inviting
  */
 export class PartySystem {
@@ -21,7 +39,7 @@ export class PartySystem {
   /** Pending invites keyed by target username → list of invites. */
   private pendingInvites = new Map<string, PartyInvite[]>();
 
-  /** Create a party with the given player as leader. Returns party or error string. */
+  /** Create a party with the given player as owner. Returns party or error string. */
   createParty(
     username: string,
     getPlayerPartyId: (u: string) => string | null,
@@ -36,7 +54,7 @@ export class PartySystem {
       id,
       members: [{
         username,
-        role: 'leader',
+        role: 'owner',
         gridPosition: 4 as PartyGridPosition, // Center of 3x3 grid
       }],
     };
@@ -59,12 +77,17 @@ export class PartySystem {
     const party = this.parties.get(partyId);
     if (!party) return 'Party not found';
 
+    const inviter = party.members.find(m => m.username === inviterUsername);
+    if (!inviter || !canInvite(inviter.role)) {
+      return 'Only owners and leaders can invite';
+    }
+
     if (!areSameTile(inviterUsername, targetUsername)) {
       return 'Must be in the same room to invite';
     }
 
-    if (party.members.length >= 9) {
-      return 'Party is full (max 9)';
+    if (party.members.length >= MAX_PARTY_SIZE) {
+      return `Party is full (max ${MAX_PARTY_SIZE})`;
     }
 
     // Check if already a member of this party
@@ -105,7 +128,7 @@ export class PartySystem {
     const party = this.parties.get(partyId);
     if (!party) return 'Party no longer exists';
 
-    if (party.members.length >= 9) return 'Party is full';
+    if (party.members.length >= MAX_PARTY_SIZE) return 'Party is full';
 
     // Verify inviter is still on the same tile
     if (!areSameTile(invite.inviterUsername, username)) {
@@ -185,44 +208,54 @@ export class PartySystem {
     const party = this.parties.get(partyId);
     if (!party) return 'Party not found';
 
+    const leavingMember = party.members.find(m => m.username === username);
+    const wasOwner = leavingMember?.role === 'owner';
+
     party.members = party.members.filter(m => m.username !== username);
     setPlayerPartyId(username, null);
 
     if (party.members.length === 0) {
       this.parties.delete(partyId);
-    } else {
-      // Ensure at least one leader
-      const hasLeader = party.members.some(m => m.role === 'leader');
-      if (!hasLeader) {
-        party.members[0].role = 'leader';
+    } else if (wasOwner) {
+      // Transfer ownership: first leader, then first member
+      const firstLeader = party.members.find(m => m.role === 'leader');
+      if (firstLeader) {
+        firstLeader.role = 'owner';
+      } else {
+        party.members[0].role = 'owner';
       }
     }
 
     return true;
   }
 
-  /** Kick a member from a party (leader only). */
+  /** Kick a member from a party (owner or leader). Leaders can kick other leaders. */
   kickMember(
-    leaderUsername: string,
+    kickerUsername: string,
     targetUsername: string,
     getPlayerPartyId: (u: string) => string | null,
     setPlayerPartyId: (u: string, id: string | null) => void,
   ): true | string {
-    const partyId = getPlayerPartyId(leaderUsername);
+    const partyId = getPlayerPartyId(kickerUsername);
     if (!partyId) return 'You are not in a party';
 
     const party = this.parties.get(partyId);
     if (!party) return 'Party not found';
 
-    const leader = party.members.find(m => m.username === leaderUsername);
-    if (!leader || leader.role !== 'leader') return 'Only leaders can kick members';
+    const kicker = party.members.find(m => m.username === kickerUsername);
+    if (!kicker || !canKick(kicker.role)) return 'Only owners and leaders can kick members';
 
-    if (leaderUsername === targetUsername) return 'Cannot kick yourself';
+    if (kickerUsername === targetUsername) return 'Cannot kick yourself';
 
-    const memberIdx = party.members.findIndex(m => m.username === targetUsername);
-    if (memberIdx === -1) return 'Player is not in your party';
+    const target = party.members.find(m => m.username === targetUsername);
+    if (!target) return 'Player is not in your party';
 
-    party.members.splice(memberIdx, 1);
+    // Leaders cannot kick the owner
+    if (kicker.role === 'leader' && target.role === 'owner') {
+      return 'Cannot kick the party owner';
+    }
+
+    party.members = party.members.filter(m => m.username !== targetUsername);
     setPlayerPartyId(targetUsername, null);
     return true;
   }
@@ -252,26 +285,98 @@ export class PartySystem {
     return true;
   }
 
-  /** Promote a member to leader. */
+  /** Promote a member to leader (owner only). */
   promoteLeader(
-    leaderUsername: string,
+    ownerUsername: string,
     targetUsername: string,
     getPlayerPartyId: (u: string) => string | null,
   ): true | string {
-    const partyId = getPlayerPartyId(leaderUsername);
+    const partyId = getPlayerPartyId(ownerUsername);
     if (!partyId) return 'You are not in a party';
 
     const party = this.parties.get(partyId);
     if (!party) return 'Party not found';
 
-    const leader = party.members.find(m => m.username === leaderUsername);
-    if (!leader || leader.role !== 'leader') return 'Only leaders can promote';
+    const owner = party.members.find(m => m.username === ownerUsername);
+    if (!owner || owner.role !== 'owner') return 'Only the owner can promote members';
 
     const target = party.members.find(m => m.username === targetUsername);
     if (!target) return 'Player is not in your party';
 
+    if (target.role !== 'member') return 'Player is already a leader or owner';
+
     target.role = 'leader';
     return true;
+  }
+
+  /** Demote a leader to member (owner only). */
+  demoteLeader(
+    ownerUsername: string,
+    targetUsername: string,
+    getPlayerPartyId: (u: string) => string | null,
+  ): true | string {
+    const partyId = getPlayerPartyId(ownerUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    const owner = party.members.find(m => m.username === ownerUsername);
+    if (!owner || owner.role !== 'owner') return 'Only the owner can demote leaders';
+
+    const target = party.members.find(m => m.username === targetUsername);
+    if (!target) return 'Player is not in your party';
+
+    if (target.role !== 'leader') return 'Player is not a leader';
+
+    target.role = 'member';
+    return true;
+  }
+
+  /** Transfer ownership to another member (owner only). Old owner becomes leader. */
+  transferOwnership(
+    ownerUsername: string,
+    targetUsername: string,
+    getPlayerPartyId: (u: string) => string | null,
+  ): true | string {
+    const partyId = getPlayerPartyId(ownerUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    const owner = party.members.find(m => m.username === ownerUsername);
+    if (!owner || owner.role !== 'owner') return 'Only the owner can transfer ownership';
+
+    const target = party.members.find(m => m.username === targetUsername);
+    if (!target) return 'Player is not in your party';
+
+    if (target.username === ownerUsername) return 'You are already the owner';
+
+    owner.role = 'leader';
+    target.role = 'owner';
+    return true;
+  }
+
+  /** Restore a party from saved data. Used during server restart. */
+  restoreParty(
+    partyId: string,
+    members: { username: string; role: PartyRole; gridPosition: PartyGridPosition }[],
+    setPlayerPartyId: (u: string, id: string | null) => void,
+  ): GamePartyInfo {
+    const party: GamePartyInfo = {
+      id: partyId,
+      members: members.map(m => ({
+        username: m.username,
+        role: m.role,
+        gridPosition: m.gridPosition,
+      })),
+    };
+    this.parties.set(partyId, party);
+    for (const m of members) {
+      setPlayerPartyId(m.username, partyId);
+    }
+    return party;
   }
 
   /** Get party info by ID. */

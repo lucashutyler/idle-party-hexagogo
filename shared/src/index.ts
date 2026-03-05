@@ -105,11 +105,17 @@ export type {
 export {
   createCombatState,
   processTick,
+  createPartyCombatState,
+  processPartyTick,
+  findTarget,
 } from './systems/CombatEngine.js';
 export type {
   CombatantState,
   CombatState,
   TickResult,
+  PartyCombatant,
+  PartyCombatState,
+  CombatAction,
 } from './systems/CombatEngine.js';
 
 // Battle types & constants
@@ -119,7 +125,9 @@ export type {
   PartyState,
   BattleVisual,
   ServerPartyState,
+  ClientPlayerCombatant,
   ClientMonsterState,
+  ClientCombatAction,
   ClientCombatState,
   ServerBattleState,
   ClientCharacterState,
@@ -141,8 +149,10 @@ export {
 } from './systems/BattleTypes.js';
 
 // Social types
+export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';
 export type {
   FriendEntry,
+  FriendRequest,
   GuildInfo,
   GuildMemberEntry,
   PartyRole,
@@ -154,7 +164,10 @@ export type {
   ChatChannel,
   BlockLevel,
   ClientSocialState,
-  ClientAddFriendMessage,
+  ClientSendFriendRequestMessage,
+  ClientAcceptFriendRequestMessage,
+  ClientDeclineFriendRequestMessage,
+  ClientRevokeFriendRequestMessage,
   ClientRemoveFriendMessage,
   ClientCreateGuildMessage,
   ClientInviteGuildMessage,
@@ -166,6 +179,8 @@ export type {
   ClientKickPartyMemberMessage,
   ClientSetPartyGridPositionMessage,
   ClientPromotePartyLeaderMessage,
+  ClientDemotePartyMemberMessage,
+  ClientTransferPartyOwnershipMessage,
   ClientAcceptPartyInviteMessage,
   ClientDeclinePartyInviteMessage,
   PartyInvite,
