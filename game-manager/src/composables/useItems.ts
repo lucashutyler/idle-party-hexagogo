@@ -3,7 +3,7 @@ import { adminApi } from '../api/adminClient';
 import type { ItemDefinition } from '@idle-party-rpg/shared';
 
 export function useItems() {
-  const items = ref<Record<string, ItemDefinition>>({});
+  const data = ref<Record<string, ItemDefinition>>({});
   const loading = ref(false);
   const error = ref<string | null>(null);
 
@@ -11,7 +11,7 @@ export function useItems() {
     loading.value = true;
     error.value = null;
     try {
-      items.value = await adminApi.getItems();
+      data.value = await adminApi.getItems();
     } catch (e) {
       error.value = (e as Error).message;
     } finally {
@@ -22,7 +22,7 @@ export function useItems() {
   async function save(item: ItemDefinition) {
     try {
       await adminApi.updateItem(item.id, item);
-      items.value[item.id] = item;
+      data.value[item.id] = item;
     } catch (e) {
       error.value = (e as Error).message;
     }
@@ -31,7 +31,7 @@ export function useItems() {
   async function create(item: ItemDefinition) {
     try {
       await adminApi.createItem(item);
-      items.value[item.id] = item;
+      data.value[item.id] = item;
     } catch (e) {
       error.value = (e as Error).message;
     }
@@ -40,11 +40,11 @@ export function useItems() {
   async function remove(id: string) {
     try {
       await adminApi.deleteItem(id);
-      delete items.value[id];
+      delete data.value[id];
     } catch (e) {
       error.value = (e as Error).message;
     }
   }
 
-  return { items, loading, error, load, save, create, remove };
+  return { data, loading, error, load, save, create, remove };
 }

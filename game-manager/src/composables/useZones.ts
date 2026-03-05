@@ -3,7 +3,7 @@ import { adminApi } from '../api/adminClient';
 import type { ZoneDefinition } from '@idle-party-rpg/shared';
 
 export function useZones() {
-  const zones = ref<Record<string, ZoneDefinition>>({});
+  const data = ref<Record<string, ZoneDefinition>>({});
   const loading = ref(false);
   const error = ref<string | null>(null);
 
@@ -11,7 +11,7 @@ export function useZones() {
     loading.value = true;
     error.value = null;
     try {
-      zones.value = await adminApi.getZones();
+      data.value = await adminApi.getZones();
     } catch (e) {
       error.value = (e as Error).message;
     } finally {
@@ -22,7 +22,7 @@ export function useZones() {
   async function save(zone: ZoneDefinition) {
     try {
       await adminApi.updateZone(zone.id, zone);
-      zones.value[zone.id] = zone;
+      data.value[zone.id] = zone;
     } catch (e) {
       error.value = (e as Error).message;
     }
@@ -31,7 +31,7 @@ export function useZones() {
   async function create(zone: ZoneDefinition) {
     try {
       await adminApi.createZone(zone);
-      zones.value[zone.id] = zone;
+      data.value[zone.id] = zone;
     } catch (e) {
       error.value = (e as Error).message;
     }
@@ -40,11 +40,11 @@ export function useZones() {
   async function remove(id: string) {
     try {
       await adminApi.deleteZone(id);
-      delete zones.value[id];
+      delete data.value[id];
     } catch (e) {
       error.value = (e as Error).message;
     }
   }
 
-  return { zones, loading, error, load, save, create, remove };
+  return { data, loading, error, load, save, create, remove };
 }
