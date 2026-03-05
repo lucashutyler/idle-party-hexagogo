@@ -791,8 +791,8 @@ export class SocialScreen implements Screen {
 
   /** Request chat history for a channel if not already loaded. */
   private loadChatHistory(type: ChatChannelType, id: string): void {
-    if (!id) return;
-    const key = `${type}:${id}`;
+    if (!id && type !== 'dm') return;
+    const key = `${type}:${id || '_all'}`;
     if (this.chatHistoryLoaded.has(key)) return;
     this.chatHistoryLoaded.add(key);
     this.gameClient.sendRequestChatHistory(type, id);
@@ -842,9 +842,13 @@ export class SocialScreen implements Screen {
             : filtered.map(m => {
               const ch = SocialScreen.CHAT_CHANNELS.find(c => c.type === m.channelType);
               const tag = ch?.tag ?? '?';
+              const selfName = this.lastState?.username ?? '';
+              // For DMs sent by the current user, show "to: recipient"
+              const dmTo = (m.channelType === 'dm' && m.senderUsername === selfName)
+                ? ` <span class="chat-dm-to">to ${this.escapeHtml(m.channelId)}</span>` : '';
               return `<div class="social-chat-msg">
                 <span class="chat-tag chat-color-${m.channelType}">[${tag}]</span>
-                <span class="social-chat-sender chat-color-${m.channelType}">${this.escapeHtml(m.senderUsername)}</span>
+                <span class="social-chat-sender chat-color-${m.channelType}">${this.escapeHtml(m.senderUsername)}${dmTo}</span>
                 <span class="social-chat-text">${this.escapeHtml(m.text)}</span>
               </div>`;
             }).join('')

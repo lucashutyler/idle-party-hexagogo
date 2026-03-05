@@ -472,10 +472,15 @@ wss.on('connection', (ws) => {
         // Return from the player's personal chat history
         let messages: ChatMessage[];
         if (channelType === 'dm') {
-          // For DMs, filter by channelType and match either direction
-          messages = session.getChatHistory().filter(m =>
-            m.channelType === 'dm' && (m.channelId === channelId || m.senderUsername === channelId)
-          );
+          if (channelId) {
+            // For DMs with a specific target, match either direction
+            messages = session.getChatHistory().filter(m =>
+              m.channelType === 'dm' && (m.channelId === channelId || m.senderUsername === channelId)
+            );
+          } else {
+            // No target specified — return ALL DMs
+            messages = session.getChatHistory().filter(m => m.channelType === 'dm');
+          }
         } else {
           messages = session.getChatHistory(channelType);
         }

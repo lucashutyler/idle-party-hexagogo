@@ -1666,6 +1666,11 @@ html, body {
   margin-right: 6px;
 }
 
+.chat-dm-to {
+  opacity: 0.7;
+  font-size: 7px;
+}
+
 .social-chat-text {
   color: var(--text-primary);
 }
