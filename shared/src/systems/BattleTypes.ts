@@ -135,8 +135,46 @@ export interface ClientUnequipItemMessage {
   slot: EquipSlot;
 }
 
+// --- Map data types ---
+
+export interface SerializedTile {
+  col: number;
+  row: number;
+  type: string;
+  zone: string;
+}
+
+export interface Portal {
+  fromCol: number;
+  fromRow: number;
+  toMapId: string;
+  toCol: number;
+  toRow: number;
+  name?: string;
+  requiresLevel?: number;
+}
+
+export interface MapDefinition {
+  id: string;
+  name: string;
+  type: 'overworld' | 'dungeon';
+  startPosition: { col: number; row: number };
+  tiles: SerializedTile[];
+  portals?: Portal[];
+  seed?: number;
+}
+
+export interface ServerMapDataMessage {
+  type: 'map_data';
+  mapId: string;
+  name: string;
+  tiles: SerializedTile[];
+  portals: Portal[];
+}
+
 export type ServerMessage =
   | ServerStateMessage
+  | ServerMapDataMessage
   | ServerSocialStateMessage
   | ServerChatMessageMessage
   | ServerChatHistoryMessage

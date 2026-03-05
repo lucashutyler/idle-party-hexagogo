@@ -456,7 +456,7 @@ export class WorldMapScene extends Phaser.Scene {
     }
   }
 
-  private drawTileIcon(type: TileType, x: number, y: number, isUnlocked: boolean, isDarkwood: boolean = false): void {
+  private drawTileIcon(type: string, x: number, y: number, isUnlocked: boolean, isDarkwood: boolean = false): void {
     let icon = '';
 
     switch (type) {

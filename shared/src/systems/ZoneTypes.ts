@@ -1,3 +1,5 @@
+import { contentRegistry } from './ContentRegistry.js';
+
 // --- Types ---
 
 export interface EncounterTableEntry {
@@ -36,6 +38,9 @@ export const ZONES: Record<string, ZoneDefinition> = {
     levelRange: [2, 3],
   },
 };
+
+// Register with ContentRegistry for hot-reload support
+contentRegistry.registerZones(ZONES);
 
 // --- Functions ---
 

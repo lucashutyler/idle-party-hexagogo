@@ -304,6 +304,11 @@ export class PlayerManager {
     return others;
   }
 
+  /** Get all session usernames (loaded players). */
+  getSessionUsernames(): string[] {
+    return Array.from(this.sessions.keys());
+  }
+
   get sessionCount(): number {
     return this.sessions.size;
   }

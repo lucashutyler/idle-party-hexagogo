@@ -1,6 +1,7 @@
 import { generateWorldMap } from '@idle-party-rpg/shared';
 import { PlayerManager } from './PlayerManager.js';
 import type { GameStateStore } from './GameStateStore.js';
+import { ContentStore } from './ContentStore.js';
 import { GuildStore } from './social/GuildStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 
@@ -8,11 +9,13 @@ const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
 
 export class GameLoop {
   readonly playerManager: PlayerManager;
+  readonly contentStore: ContentStore;
   private store: GameStateStore;
   private guildStore: GuildStore;
   private saveInterval?: ReturnType<typeof setInterval>;
 
   constructor(store: GameStateStore, accountStore: AccountStore) {
+    this.contentStore = new ContentStore();
     const grid = generateWorldMap();
     this.guildStore = new GuildStore();
     this.playerManager = new PlayerManager(grid, this.guildStore, () => accountStore.getAllUsernames());
@@ -26,6 +29,8 @@ export class GameLoop {
    * Call once after construction, before accepting connections.
    */
   async init(): Promise<void> {
+    // Load custom content from JSON files (falls back to hardcoded defaults)
+    await this.contentStore.load();
     await this.guildStore.load();
 
     const saves = await this.store.loadAll();

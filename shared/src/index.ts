@@ -118,6 +118,9 @@ export type {
   CombatAction,
 } from './systems/CombatEngine.js';
 
+// Content registry
+export { contentRegistry } from './systems/ContentRegistry.js';
+
 // Battle types & constants
 export type {
   BattleTimerState,
@@ -135,6 +138,10 @@ export type {
   CombatLogType,
   CombatLogEntry,
   ServerStateMessage,
+  ServerMapDataMessage,
+  SerializedTile,
+  Portal,
+  MapDefinition,
   ClientMoveMessage,
   ClientRequestStateMessage,
   ClientSetPriorityStatMessage,

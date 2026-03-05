@@ -12,6 +12,7 @@ import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
+import { createAdminRoutes } from './admin/adminRoutes.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ChatMessage } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
@@ -46,7 +47,10 @@ const sessionMiddleware = session({
 
 // --- Express middleware ---
 app.use(cors({
-  origin: process.env.APP_URL ?? 'http://localhost:3000',
+  origin: [
+    process.env.APP_URL ?? 'http://localhost:3000',
+    process.env.ADMIN_URL ?? 'http://localhost:3002',
+  ],
   credentials: true,
 }));
 app.use(express.json());
@@ -68,6 +72,12 @@ app.get('/health', (_req, res) => {
     connections: playerManager.connectionCount,
   });
 });
+
+// --- Admin routes (game manager) ---
+app.use('/admin', createAdminRoutes({
+  contentStore: gameLoop.contentStore,
+  gameLoop,
+}));
 
 // --- Static files (production: serve built client) ---
 if (process.env.NODE_ENV === 'production') {

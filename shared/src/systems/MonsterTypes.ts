@@ -1,3 +1,4 @@
+import { contentRegistry } from './ContentRegistry.js';
 import { getZone } from './ZoneTypes.js';
 import type { EncounterTableEntry } from './ZoneTypes.js';
 import type { ItemDrop } from './ItemTypes.js';
@@ -29,6 +30,7 @@ export interface MonsterInstance {
 }
 
 // --- Monster catalog ---
+// Mutable record — ContentRegistry mutates this in-place for hot-reload.
 
 export const MONSTERS: Record<string, MonsterDefinition> = {
   goblin: {
@@ -73,6 +75,9 @@ export const MONSTERS: Record<string, MonsterDefinition> = {
     ],
   },
 };
+
+// Register with ContentRegistry for hot-reload support
+contentRegistry.registerMonsters(MONSTERS);
 
 // --- Functions ---
 

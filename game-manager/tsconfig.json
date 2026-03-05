@@ -11,13 +11,14 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "composite": true,
-    "declaration": true,
-    "declarationMap": true
+    "noEmit": true,
+    "jsx": "preserve",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@idle-party-rpg/shared": ["../shared/src"]
+    }
   },
-  "include": ["src"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "env.d.ts"],
   "references": [
     { "path": "../shared" }
   ]

@@ -85,9 +85,10 @@ Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Start client (:3000) + server (:3001) concurrently with hot reload |
+| `npm run dev` | Start client (:3000) + server (:3001) + game manager (:3002) concurrently |
 | `npm run dev:client` | Client dev server only |
 | `npm run dev:server` | Game server only (tsx watch) |
+| `npm run dev:admin` | Game manager only |
 | `npm run build` | Build all packages: shared → client → server |
 | `npm start` | Run production server (must `npm run build` first) |
 | `npm run test` | Run all tests (vitest) |
@@ -100,10 +101,10 @@ Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into
 ## Architecture
 
 ```
-shared/           Pure logic, types, constants — compiled first, used by client + server
+shared/           Pure logic, types, constants — compiled first, used by client + server + game manager
 client/           Phaser 3 web client — tab-based UI, mobile-friendly
-server/           Node.js game server — persistent 24/7 game state, auth, WebSocket
-game-manager/     Admin tool for game designers — monsters, areas, quests (placeholder)
+server/           Node.js game server — persistent 24/7 game state, auth, WebSocket, admin API
+game-manager/     Vue 3 admin tool — content editors (monsters, items, zones, tiles, maps)
 ```
 
 TypeScript throughout. Vite for client bundling. Express + ws for the server.
@@ -199,9 +200,14 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Tile click modal (tile info, "Move here" button, players on tile)
 
 ### Game Manager
-- [ ] Separate admin client
-- [ ] Monster editor
-- [ ] Area/zone editor
+- [x] Separate admin client (Vue 3 app on port 3002)
+- [x] Monster editor (CRUD with drop tables)
+- [x] Item editor (CRUD with equipment slots, combat bonuses)
+- [x] Area/zone editor (CRUD with encounter tables)
+- [x] Tile type editor (CRUD with color, traversability)
+- [x] Map editor (SVG hex map with paint/erase/zone/start modes, pan/zoom)
+- [x] Dashboard (server stats, content counts)
+- [x] Player list (online/offline status)
 - [ ] Quest editor
 - [ ] Game designer access only
 

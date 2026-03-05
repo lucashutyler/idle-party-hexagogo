@@ -1,3 +1,5 @@
+import { contentRegistry } from './ContentRegistry.js';
+
 // --- Types ---
 
 export type ItemRarity = 'janky' | 'common';
@@ -78,6 +80,9 @@ export const ITEMS: Record<string, ItemDefinition> = {
     rarity: 'janky',
   },
 };
+
+// Register with ContentRegistry for hot-reload support
+contentRegistry.registerItems(ITEMS);
 
 // --- Pure functions ---
 

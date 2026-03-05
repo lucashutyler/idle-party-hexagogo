@@ -1,6 +1,7 @@
-import { CubeCoord, cubeToKey, getNeighbors, cubeEquals, offsetToCube } from './HexUtils.js';
+import { CubeCoord, cubeToKey, cubeToOffset, getNeighbors, cubeEquals, offsetToCube } from './HexUtils.js';
 import { HexTile, TileType } from './HexTile.js';
 import { MapSchema } from './MapSchema.js';
+import type { MapDefinition, SerializedTile } from '../systems/BattleTypes.js';
 
 export class HexGrid {
   private tiles: Map<string, HexTile> = new Map();
@@ -103,6 +104,36 @@ export class HexGrid {
     }
 
     return grid;
+  }
+
+  /**
+   * Create a hex grid from a MapDefinition (loaded from content store or admin API).
+   */
+  static fromMapDefinition(def: MapDefinition): HexGrid {
+    const grid = new HexGrid();
+    for (const t of def.tiles) {
+      const coord = offsetToCube({ col: t.col, row: t.row });
+      const tile = new HexTile(coord, t.type, t.zone);
+      grid.addTile(tile);
+    }
+    return grid;
+  }
+
+  /**
+   * Serialize the grid to a MapDefinition for persistence or transmission.
+   */
+  toMapDefinition(id: string, name: string, type: 'overworld' | 'dungeon', startPosition: { col: number; row: number }): MapDefinition {
+    const tiles: SerializedTile[] = [];
+    for (const tile of this.tiles.values()) {
+      const offset = cubeToOffset(tile.coord);
+      tiles.push({
+        col: offset.col,
+        row: offset.row,
+        type: tile.type,
+        zone: tile.zone,
+      });
+    }
+    return { id, name, type, startPosition, tiles };
   }
 
   /**

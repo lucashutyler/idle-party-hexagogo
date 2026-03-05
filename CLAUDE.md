@@ -23,7 +23,7 @@ Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters f
 
 ## Monorepo Structure
 
-npm workspaces monorepo. `npm run dev` runs server + client concurrently.
+npm workspaces monorepo. `npm run dev` runs server + client + game manager concurrently.
 
 ```
 shared/                        @idle-party-rpg/shared — pure logic, types, constants
@@ -36,9 +36,10 @@ shared/                        @idle-party-rpg/shared — pure logic, types, con
 │   │   ├── MapSchema.ts       # World map definition (will move to DB)
 │   │   └── MapData.ts         # Procedural map generation (seeded PRNG, border ring, zones)
 │   ├── systems/
-│   │   ├── BattleTypes.ts     # Battle/protocol types & constants
+│   │   ├── BattleTypes.ts     # Battle/protocol types & constants (+ MapDefinition, SerializedTile, Portal)
 │   │   ├── CharacterStats.ts  # Character types, XP/leveling, stat allocation
 │   │   ├── CombatEngine.ts    # Pure tick-based combat resolution (solo + party with grid targeting)
+│   │   ├── ContentRegistry.ts # Mutable singleton registry for all game content (hot-reload support)
 │   │   ├── ItemTypes.ts       # Item definitions, inventory/equipment pure logic
 │   │   ├── MonsterTypes.ts    # Monster definitions, drops & zone-aware encounters
 │   │   ├── ZoneTypes.ts       # Zone definitions, encounter tables, zone lookup
@@ -87,8 +88,11 @@ server/                        @idle-party-rpg/server — Node.js game server
 │   │   ├── JsonSessionStore.ts # File-backed express-session store (data/sessions/)
 │   │   ├── authRoutes.ts      # REST endpoints: login, verify, session, username, logout
 │   │   └── session.d.ts       # express-session type augmentation
+│   ├── admin/
+│   │   └── adminRoutes.ts     # REST API for game content CRUD (/admin/*)
 │   └── game/
-│       ├── GameLoop.ts        # Game init, periodic saves, shutdown
+│       ├── GameLoop.ts        # Game init, periodic saves, shutdown (wires ContentStore)
+│       ├── ContentStore.ts    # JSON file persistence for game content (data/content/*.json)
 │       ├── PlayerManager.ts   # Maps usernames → sessions, WebSocket routing, social wiring
 │       ├── PlayerSession.ts   # Per-player state (character, unlocks, combat log, social)
 │       ├── PartyBattleManager.ts # Shared combat & movement per party (owns ServerParty + ServerBattleTimer)
@@ -110,9 +114,28 @@ data/                          Persistent runtime data (gitignored, created at r
 ├── <username>.json            # Per-player game state saves (includes chat history)
 ├── accounts.json              # Email→account mapping
 ├── guilds.json                # Guild data
+├── content/                   # Game content JSON files (managed via game manager)
+│   ├── monsters.json          # Monster definitions
+│   ├── items.json             # Item definitions
+│   ├── zones.json             # Zone definitions
+│   ├── tile-types.json        # Tile type configs
+│   └── maps.json              # Map definitions (tiles, portals, start positions)
 └── sessions/                  # Express session files (one .json per session)
 
-game-manager/                  @idle-party-rpg/game-manager — placeholder
+game-manager/                  @idle-party-rpg/game-manager — Vue 3 admin tool
+├── src/
+│   ├── main.ts                # Vue entry point
+│   ├── App.vue                # Root layout with sidebar nav
+│   ├── router.ts              # Routes for all editor pages
+│   ├── api/adminClient.ts     # Typed fetch wrappers for /admin/* REST API
+│   ├── styles/admin.css       # Dark admin theme (not pixel-theme)
+│   ├── composables/           # Reactive CRUD state: useMonsters, useItems, useZones, useTileTypes, useMaps
+│   ├── pages/                 # Dashboard, Monsters, Items, Zones, TileTypes, Maps, MapEditor, Players
+│   └── components/
+│       ├── HexMapCanvas.vue   # SVG hex map editor (pan/zoom, paint/erase/zone/start modes)
+│       └── HexTilePalette.vue # Tile type/zone palette sidebar
+├── vite.config.ts             # Port 3002, proxy /admin → :3001
+└── package.json               # Vue 3, vue-router, Vite
 
 deploy/                        Deployment config files
 ├── idle-party-rpg.service     # systemd unit file (Restart=always)
@@ -130,9 +153,10 @@ setup-dev.ps1                  Dev setup for Windows PowerShell
 ## Commands
 
 ```bash
-npm run dev          # Start server (:3001) + client (:3000) concurrently
+npm run dev          # Start server (:3001) + client (:3000) + game manager (:3002) concurrently
 npm run dev:client   # Client only
 npm run dev:server   # Server only
+npm run dev:admin    # Game manager only
 npm run build        # Build shared → client → server
 npm start            # Production: NODE_ENV=production, serves client + WS from one port
 npm run test         # Run all tests (vitest)
@@ -157,6 +181,10 @@ npm run typecheck    # tsc --build (all packages)
 - **Zone system**: Each `HexTile` has a `zone` string property. `ZoneTypes.ts` defines `ZoneDefinition` with encounter tables (weighted monster selection). Current zones: `friendly_forest` (Lv1 goblins) and `darkwood` (goblins, wolves, bandits). `createEncounter(zoneId)` uses the zone's encounter table for weighted random monster/count selection. Zone display name is sent to the client in `ServerStateMessage.zoneName`.
 - **Monster system**: `MonsterTypes.ts` defines `MonsterDefinition` catalog (goblin, wolf, bandit) with `drops?: ItemDrop[]` per monster, and `createEncounter(zoneId?)` factory with zone-aware weighted encounters. Each `MonsterInstance` has a `gridPosition: PartyGridPosition` for combat grid placement.
 - **Item & equipment system**: `ItemTypes.ts` defines items, rarities (`janky` 40%, `common` 25%), and equipment slots (`head`, `chest`, `hand`, `foot`). Items stack up to 99 in inventory. Equipment modifies combat: `bonusAttackMin/Max` adds to player damage, `damageReductionMin/Max` reduces incoming monster damage. Pure functions handle inventory/equipment operations (`addItemToInventory`, `equipItem`, `unequipItem`, `computeEquipmentBonuses`, `rollDrops`). Drops are rolled per-monster on victory. The `ItemsScreen` shows equipment slots (tap to unequip) and inventory (tap equippable items to equip). Current items: Janky Helmet (head, 0-1 reduction), Rusty Dagger (hand, 1-3 attack), Leather Vest (chest, 1-2 reduction), Mangy Pelt (non-equippable material).
+- **Content registry & hot-reload**: `ContentRegistry` is a mutable singleton in shared that holds references to the original `MONSTERS`, `ITEMS`, `ZONES`, `TILE_CONFIGS` record objects. Each system file registers its record at import time. `ContentStore` on the server reads/writes `data/content/*.json` and pushes changes into the registry via `setXxx()` methods that mutate records in-place (clear keys + `Object.assign`). This means all existing `import { MONSTERS }` code works unchanged — the registry mutates the same object reference. Content changes via the game manager apply immediately without server restart.
+- **Admin REST API**: Express Router mounted at `/admin/*` in `server/src/admin/adminRoutes.ts`. Full CRUD for monsters, items, zones, tile-types, and maps (including granular tile editing). Also exposes read-only player list and server stats. CORS allows both client (:3000) and game manager (:3002).
+- **Game manager**: Vue 3 SPA in `game-manager/` workspace (port 3002). Composition API with composables for CRUD state. SVG-based hex map editor with pan/zoom, paint/erase/zone/start modes using shared `HexUtils` math. Vite proxies `/admin` to the game server. Dark admin theme (not pixel-theme).
+- **Map data types**: `MapDefinition` (id, name, type, startPosition, tiles, portals) in `BattleTypes.ts`. `HexGrid.fromMapDefinition()` / `toMapDefinition()` convert between HexGrid and serialized format. `TileType` is extensible — `HexTile.type` is `string` (not enum) so custom tile types can be created via the game manager.
 - **Procedural map generation**: `MapData.ts` uses a seeded PRNG (mulberry32, seed=42) for deterministic world generation. The schema tiles form the "Friendly Forest" starting zone (~170 tiles). A border ring of mountains/water surrounds it with 4 exit gaps (3 tiles wide each). Beyond the border, ~1300 "Darkwood" wilderness tiles fill a ~45x45 offset-coordinate area (-15 to 28). Both server and client generate identical maps from the same seed — no map data is transmitted over the network.
 - **Server-side combat log**: `PlayerSession` maintains the last 100 log entries (battle start/end, damage, level-ups, movement, tile unlocks) with a running `battleCount`. Both are included in every `ServerStateMessage`. The client `CombatScreen` is a pure renderer of the server-provided log — no client-side state-transition tracking.
 - **Other players on map**: Each state message includes `otherPlayers: { username, col, row, zone }[]`. WorldMapScene renders same-zone players as individual markers; other-zone players show as count badges on their tile. Positions update on each player's own battle cycle.
@@ -202,6 +230,7 @@ Everything in `data/` is persisted behind a **swappable interface** so the stora
 - **Accounts**: `AccountStore` reads/writes `data/accounts.json` directly (should be interfaced when migrating to a DB)
 - **Guilds**: `GuildStore` reads/writes `data/guilds.json`
 - **Chat**: Stored per-player in `PlayerSaveData.chatHistory` (saved with each player's JSON file)
+- **Game content**: `ContentStore` reads/writes `data/content/*.json` (monsters, items, zones, tile-types, maps). On load, pushes data into `ContentRegistry`. If files don't exist, hardcoded defaults remain.
 
 When adding new persistent data to `data/`, always define an interface or extend an existing one. Never read/write files directly from game logic — go through the store abstraction.
 
