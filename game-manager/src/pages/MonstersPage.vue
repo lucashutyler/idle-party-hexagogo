@@ -51,11 +51,10 @@
             <label for="monster-id">ID</label>
             <input
               id="monster-id"
-              v-model="form.id"
+              :value="form.id"
               type="text"
-              :readonly="!isNew"
-              :class="{ readonly: !isNew }"
-              required
+              readonly
+              class="readonly"
             />
           </div>
 
@@ -142,6 +141,7 @@
 import { ref, computed, reactive, onMounted } from 'vue';
 import { useMonsters } from '../composables/useMonsters';
 import { useItems } from '../composables/useItems';
+import { nextId } from '../utils/nextId';
 import type { MonsterDefinition, ItemDrop, ItemDefinition } from '@idle-party-rpg/shared';
 
 const monsters = useMonsters();
@@ -187,7 +187,7 @@ function selectMonster(monster: MonsterDefinition) {
 function resetForm() {
   selectedId.value = null;
   isNew.value = true;
-  form.id = '';
+  form.id = nextId(Object.keys(monsters.data));
   form.name = '';
   form.level = 1;
   form.hp = 10;

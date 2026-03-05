@@ -45,11 +45,10 @@
             <label for="zone-id">ID</label>
             <input
               id="zone-id"
-              v-model="form.id"
+              :value="form.id"
               type="text"
-              :readonly="!isNew"
-              :class="{ readonly: !isNew }"
-              required
+              readonly
+              class="readonly"
             />
           </div>
 
@@ -123,6 +122,7 @@
 import { ref, computed, reactive, onMounted } from 'vue';
 import { useZones } from '../composables/useZones';
 import { useMonsters } from '../composables/useMonsters';
+import { nextId } from '../utils/nextId';
 import type { ZoneDefinition, EncounterTableEntry, MonsterDefinition } from '@idle-party-rpg/shared';
 
 const zones = useZones();
@@ -160,7 +160,7 @@ function selectZone(zone: ZoneDefinition) {
 function resetForm() {
   selectedId.value = null;
   isNew.value = true;
-  form.id = '';
+  form.id = nextId(Object.keys(zones.data));
   form.displayName = '';
   form.levelMin = 1;
   form.levelMax = 1;

@@ -51,11 +51,10 @@
             <label for="item-id">ID</label>
             <input
               id="item-id"
-              v-model="form.id"
+              :value="form.id"
               type="text"
-              :readonly="!isNew"
-              :class="{ readonly: !isNew }"
-              required
+              readonly
+              class="readonly"
             />
           </div>
 
@@ -138,6 +137,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue';
 import { useItems } from '../composables/useItems';
+import { nextId } from '../utils/nextId';
 import type { ItemDefinition, EquipSlot } from '@idle-party-rpg/shared';
 
 const items = useItems();
@@ -199,7 +199,7 @@ function selectItem(item: ItemDefinition) {
 function resetForm() {
   selectedId.value = null;
   isNew.value = true;
-  form.id = '';
+  form.id = nextId(Object.keys(items.data));
   form.name = '';
   form.rarity = 'janky';
   form.equipSlot = '';

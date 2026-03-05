@@ -46,11 +46,10 @@
             <label for="tt-type">Type (ID)</label>
             <input
               id="tt-type"
-              v-model="form.type"
+              :value="form.type"
               type="text"
-              :readonly="!isNew"
-              :class="{ readonly: !isNew }"
-              required
+              readonly
+              class="readonly"
             />
           </div>
 
@@ -97,6 +96,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue';
 import { useTileTypes } from '../composables/useTileTypes';
+import { nextId } from '../utils/nextId';
 import type { TileConfig } from '@idle-party-rpg/shared';
 
 const tileTypes = useTileTypes();
@@ -138,7 +138,7 @@ function selectTileType(tt: TileConfig) {
 function resetForm() {
   selectedId.value = null;
   isNew.value = true;
-  form.type = '';
+  form.type = nextId(Object.keys(tileTypes.data));
   form.color = 0x7ec850;
   form.traversable = true;
 }

@@ -15,10 +15,6 @@
       <form @submit.prevent="handleCreate">
         <div class="create-fields">
           <div class="form-group">
-            <label for="new-map-id">ID</label>
-            <input id="new-map-id" v-model="newMap.id" type="text" required />
-          </div>
-          <div class="form-group">
             <label for="new-map-name">Name</label>
             <input id="new-map-name" v-model="newMap.name" type="text" required />
           </div>
@@ -67,6 +63,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue';
 import { adminApi } from '../api/adminClient';
+import { nextId } from '../utils/nextId';
 
 interface MapSummary {
   id: string;
@@ -81,7 +78,6 @@ const error = ref('');
 const showCreateForm = ref(false);
 
 const newMap = reactive({
-  id: '',
   name: '',
   type: 'overworld' as 'overworld' | 'dungeon',
 });
@@ -100,14 +96,14 @@ async function loadMaps() {
 
 async function handleCreate() {
   try {
+    const id = nextId(maps.value.map(m => m.id));
     await adminApi.createMap({
-      id: newMap.id,
+      id,
       name: newMap.name,
       type: newMap.type,
       startPosition: { col: 0, row: 0 },
       tiles: [],
     });
-    newMap.id = '';
     newMap.name = '';
     newMap.type = 'overworld';
     showCreateForm.value = false;
@@ -151,7 +147,7 @@ onMounted(() => {
 
 .create-fields {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr auto;
   gap: 12px;
   align-items: end;
 }
