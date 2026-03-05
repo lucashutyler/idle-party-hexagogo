@@ -42,7 +42,16 @@ export class GameClient {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         this.isInitialState = true;
-        this.sendRaw({ type: 'request_state' });
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          this.sendRaw({ type: 'request_state' });
+        } else if (this.connected && !this.destroyed) {
+          // WebSocket died while in background — reconnect immediately
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = undefined;
+          }
+          this.doConnect();
+        }
       }
     });
   }
