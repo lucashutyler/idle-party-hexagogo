@@ -120,7 +120,7 @@ TypeScript throughout. Vite for client bundling. Express + ws for the server.
 - [x] Multiple regions/zones with border transitions
 
 ### Combat
-Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both sides. Combat ends when all monsters die (victory) or player HP reaches 0 (defeat). Encounters are zone-aware — each zone defines its own encounter table.
+Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both sides. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.
 - [x] Auto-battle state machine (server-authoritative, always fighting)
 - [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
@@ -139,18 +139,21 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Character screen (stats, XP bar, priority stat selector)
 - [ ] Class system (weak solo, strong together)
 - [ ] Henchmen (hireable NPCs for solo players)
-- [x] Party formation and management (always in a party, join, leave, kick, 3x3 grid)
-- [x] Party movement (leader controls group movement)
-- [x] Party combat sharing (XP, gold, loot shared on victory)
+- [x] Party formation and management (always in a party, join, leave, kick, 3x3 grid, max 5 members)
+- [x] Party roles (owner > leader > member, promote/demote, transfer ownership)
+- [x] Party movement (owner/leader controls unified group movement)
+- [x] Shared party combat (all members fight together, grid-based targeting)
+- [x] Party combat rewards (XP, gold, loot per member on victory)
 
 ### Social
 - [x] Social tab with sub-tabs (Users, Friends, Guild, Party, Chat)
 - [x] Online player list with search, sort, filter
-- [x] Friends system (instant add, online/offline status)
+- [x] Friends system (request-based two-way: send/accept/decline/revoke, auto-accept cross-requests)
 - [x] Guild system (create at level 20+, join, leave, invite)
 - [x] Chat system (unified timeline, 6 channels: Room/Zone/Party/Guild/Global/DM, per-user persistent history)
 - [x] User blocking (DM-only or all messages)
 - [x] Unread message indicators
+- [x] Social badge notifications (bottom nav dot + sub-tab badges for friend requests, party invites, unread chat)
 - [x] DM autocomplete with validation
 - [x] Chat buttons across social screens and room modal
 

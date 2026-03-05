@@ -10,6 +10,7 @@ export class BottomNav {
   private container: HTMLElement;
   private tabButtons = new Map<string, HTMLElement>();
   private activeId: string;
+  private hasChatUnread = false;
 
   constructor(
     tabs: NavTabConfig[],
@@ -28,6 +29,7 @@ export class BottomNav {
       button.innerHTML = `
         <span class="nav-icon">${tab.icon}</span>
         <span class="nav-label">${tab.label}</span>
+        <span class="nav-badge"></span>
       `;
 
       button.addEventListener('click', () => {
@@ -52,8 +54,29 @@ export class BottomNav {
     const next = this.tabButtons.get(id);
     if (next) next.classList.add('active');
 
+    // Clear chat unread when switching to social tab
+    if (id === 'social') {
+      this.hasChatUnread = false;
+      this.updateSocialBadge();
+    }
+
     this.activeId = id;
   }
+
+  private updateSocialBadge(): void {
+    const socialTab = this.tabButtons.get('social');
+    if (!socialTab) return;
+    const badge = socialTab.querySelector('.nav-badge');
+    if (!badge) return;
+    badge.classList.toggle('visible', this.hasSocialNotifications);
+  }
+
+  private get hasSocialNotifications(): boolean {
+    return this.hasChatUnread || this._hasPendingInvites || this._hasFriendRequests;
+  }
+
+  private _hasPendingInvites = false;
+  private _hasFriendRequests = false;
 
   private wireStatusIndicators(gameClient: GameClient): void {
     let lastVisual = '';
@@ -81,7 +104,23 @@ export class BottomNav {
         mapTab.classList.toggle('has-path', isMoving);
       }
 
+      // Social badge: friend requests + party invites
+      const social = state.social;
+      if (social) {
+        this._hasFriendRequests = (social.incomingFriendRequests?.length ?? 0) > 0;
+        this._hasPendingInvites = (social.pendingInvites?.length ?? 0) > 0;
+        this.updateSocialBadge();
+      }
+
       lastVisual = visual;
+    });
+
+    // Track unread chat when not on social tab
+    gameClient.onChat(() => {
+      if (this.activeId !== 'social') {
+        this.hasChatUnread = true;
+        this.updateSocialBadge();
+      }
     });
   }
 }

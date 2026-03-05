@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
-import { HexGrid } from '@idle-party-rpg/shared';
-import type { OtherPlayerState, ClientSocialState, ChatMessage, BlockLevel } from '@idle-party-rpg/shared';
+import { HexGrid, offsetToCube } from '@idle-party-rpg/shared';
+import type { OtherPlayerState, ClientSocialState, ChatMessage, BlockLevel, PartyGridPosition, PartyRole } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
@@ -8,6 +8,7 @@ import { GuildSystem } from './social/GuildSystem.js';
 import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem } from './social/PartySystem.js';
+import { PartyBattleManager } from './PartyBattleManager.js';
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
@@ -18,6 +19,7 @@ export class PlayerManager {
   readonly guilds: GuildSystem;
   readonly chat: ChatSystem;
   readonly parties: PartySystem;
+  readonly partyBattles: PartyBattleManager;
   private getAllUsernames: () => string[];
 
   constructor(grid: HexGrid, guildStore: GuildStore, getAllUsernames: () => string[]) {
@@ -27,6 +29,11 @@ export class PlayerManager {
     this.guilds = new GuildSystem(guildStore);
     this.parties = new PartySystem();
     this.getAllUsernames = getAllUsernames;
+    this.partyBattles = new PartyBattleManager(
+      grid,
+      (username) => this.sessions.get(username),
+      (username) => this.sendStateToPlayer(username),
+    );
   }
 
   login(ws: WebSocket, username: string): PlayerSession {
@@ -43,12 +50,10 @@ export class PlayerManager {
     // Create session if it doesn't exist (or resume existing)
     let session = this.sessions.get(username);
     if (!session) {
-      session = new PlayerSession(username, this.grid, () => {
-        this.sendStateToPlayer(username);
-      });
+      session = new PlayerSession(username, this.grid);
       this.sessions.set(username, session);
-      this.friends.initPlayer(username, session.getFriends());
-      this.wireSocialState(session);
+      this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
+      this.wireCallbacks(session);
       this.ensureParty(username);
       console.log(`[PlayerManager] New session for "${username}" (${this.sessions.size} total sessions)`);
     } else {
@@ -174,6 +179,8 @@ export class PlayerManager {
     );
     return {
       friends: this.friends.getFriends(username),
+      incomingFriendRequests: this.friends.getIncomingRequests(username),
+      outgoingFriendRequests: this.friends.getOutgoingRequests(username),
       guild: guildData?.info ?? null,
       guildMembers: guildData?.members ?? [],
       party: partyData,
@@ -184,21 +191,28 @@ export class PlayerManager {
     };
   }
 
-  /** Wire the getSocialState callback onto a session. */
-  private wireSocialState(session: PlayerSession): void {
+  /** Wire all callbacks onto a session (social state, battle state, position). */
+  private wireCallbacks(session: PlayerSession): void {
     session.getSocialState = () => this.getSocialState(session.username);
-    session.onShareVictoryWithParty = (xpGained, goldGained, drops) => {
+    session.getBattleState = () => {
       const partyId = session.getPartyId();
-      if (!partyId) return;
-      const party = this.parties.getParty(partyId);
-      if (!party) return;
-      for (const m of party.members) {
-        if (m.username === session.username) continue;
-        const memberSession = this.sessions.get(m.username);
-        if (memberSession) {
-          memberSession.receivePartyShare(xpGained, goldGained, drops);
-        }
-      }
+      if (!partyId) return null;
+      return this.partyBattles.getBattleState(partyId);
+    };
+    session.getPartyPositionState = () => {
+      const partyId = session.getPartyId();
+      if (!partyId) return null;
+      return this.partyBattles.getPartyState(partyId);
+    };
+    session.getPartyZone = () => {
+      const partyId = session.getPartyId();
+      if (!partyId) return null;
+      return this.partyBattles.getZone(partyId);
+    };
+    session.getPartyPosition = () => {
+      const partyId = session.getPartyId();
+      if (!partyId) return null;
+      return this.partyBattles.getPosition(partyId);
     };
   }
 
@@ -207,14 +221,70 @@ export class PlayerManager {
     const session = this.sessions.get(username);
     if (!session) return;
     if (session.getPartyId()) return; // already in a party
-    this.parties.createParty(
+
+    const result = this.parties.createParty(
       username,
       (u) => this.sessions.get(u)?.getPartyId() ?? null,
       (u, id) => this.sessions.get(u)?.setPartyId(id),
     );
+
+    if (typeof result !== 'string') {
+      // Created a party — now create its battle entry
+      const startTile = session.getStartingTile();
+      this.partyBattles.createEntry(result.id, username, startTile);
+    }
   }
 
-  /** Check if two players are on the same tile. */
+  /** Ensure a player is in a party, creating battle entry at a specific tile. */
+  ensurePartyAtTile(username: string, tile: import('@idle-party-rpg/shared').HexTile): void {
+    const session = this.sessions.get(username);
+    if (!session) return;
+    if (session.getPartyId()) return;
+
+    const result = this.parties.createParty(
+      username,
+      (u) => this.sessions.get(u)?.getPartyId() ?? null,
+      (u, id) => this.sessions.get(u)?.setPartyId(id),
+    );
+
+    if (typeof result !== 'string') {
+      this.partyBattles.createEntry(result.id, username, tile);
+    }
+  }
+
+  /** Handle a player joining a party (after accept invite). */
+  handlePartyJoin(username: string, partyId: string, oldPartyId: string | null): void {
+    // Destroy old solo party battle entry
+    if (oldPartyId) {
+      this.partyBattles.destroyEntry(oldPartyId);
+    }
+
+    // Add to new party's battle
+    this.partyBattles.addMember(partyId, username);
+  }
+
+  /** Handle a player leaving/being kicked from a party. Creates new solo party at current position. */
+  handlePartyLeave(username: string, oldPartyId: string): void {
+    // Remove from party battle
+    this.partyBattles.removeMember(oldPartyId, username);
+
+    // Get the position they were at (from the party they just left, if it still exists)
+    const pos = this.partyBattles.getPosition(oldPartyId);
+    let tile: import('@idle-party-rpg/shared').HexTile | null = null;
+    if (pos) {
+      const coord = offsetToCube(pos);
+      tile = this.grid.getTile(coord) ?? null;
+    }
+
+    // Create new solo party at that position
+    if (tile) {
+      this.ensurePartyAtTile(username, tile);
+    } else {
+      this.ensureParty(username);
+    }
+  }
+
+  /** Check if two players are on the same tile (uses party positions). */
   areSameTile(a: string, b: string): boolean {
     const sa = this.sessions.get(a);
     const sb = this.sessions.get(b);
@@ -252,35 +322,155 @@ export class PlayerManager {
   getAllSaveData(): PlayerSaveData[] {
     const data: PlayerSaveData[] = [];
     for (const session of this.sessions.values()) {
-      data.push(session.toSaveData());
+      const partyId = session.getPartyId();
+      const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
+
+      // Get party role/position info
+      let partyInfo: { role: 'owner' | 'leader' | 'member'; gridPosition: number } | undefined;
+      if (partyId) {
+        const party = this.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === session.username);
+          if (member) {
+            partyInfo = { role: member.role, gridPosition: member.gridPosition };
+          }
+        }
+      }
+
+      data.push(session.toSaveData(movementData ?? undefined, partyInfo));
     }
     return data;
   }
 
   /**
    * Restore sessions from saved data. Called on server startup before any connections.
+   * Groups players by saved partyId to reconstruct multi-player parties.
    */
   restoreFromSaveData(saves: PlayerSaveData[]): void {
+    // Phase 1: Restore all sessions
+    const validSaves: PlayerSaveData[] = [];
     for (const data of saves) {
-      // Skip invalid save data
       if (!data.username || data.username === 'undefined' || !data.position) {
         console.warn(`[PlayerManager] Skipping invalid save data (username="${data.username}", position=${JSON.stringify(data.position)})`);
         continue;
       }
 
       try {
-        const session = PlayerSession.fromSaveData(data, this.grid, () => {
-          this.sendStateToPlayer(data.username);
-        });
+        const session = PlayerSession.fromSaveData(data, this.grid);
         this.sessions.set(data.username, session);
-        this.friends.initPlayer(data.username, session.getFriends());
-        this.wireSocialState(session);
-        this.ensureParty(data.username);
+        this.friends.initPlayer(data.username, session.getFriends(), session.getOutgoingFriendRequests());
+        this.wireCallbacks(session);
+        validSaves.push(data);
         console.log(`[PlayerManager] Restored session for "${data.username}"`);
       } catch (err) {
         console.error(`[PlayerManager] Failed to restore "${data.username}":`, err);
       }
     }
+
+    // Phase 2: Group by saved partyId
+    const partyGroups = new Map<string, PlayerSaveData[]>();
+    const soloSaves: PlayerSaveData[] = [];
+
+    for (const data of validSaves) {
+      if (data.partyId && data.partyRole !== undefined) {
+        const group = partyGroups.get(data.partyId) ?? [];
+        group.push(data);
+        partyGroups.set(data.partyId, group);
+      } else {
+        soloSaves.push(data);
+      }
+    }
+
+    // Phase 3: Restore multi-player parties
+    for (const [savedPartyId, group] of partyGroups) {
+      // If only one member left, treat as solo
+      if (group.length === 1) {
+        soloSaves.push(group[0]);
+        continue;
+      }
+
+      // Use the owner's (or first member's) position/movement data for the party
+      const ownerData = group.find(d => d.partyRole === 'owner') ?? group[0];
+      const coord = offsetToCube(ownerData.position);
+      const currentTile = this.grid.getTile(coord);
+      if (!currentTile) {
+        // Fall back to solo for all members
+        soloSaves.push(...group);
+        continue;
+      }
+
+      let targetTile = null;
+      if (ownerData.target) {
+        targetTile = this.grid.getTile(offsetToCube(ownerData.target)) ?? null;
+      }
+      const movementQueue = ownerData.movementQueue
+        .map(p => this.grid.getTile(offsetToCube(p)))
+        .filter((t): t is NonNullable<typeof t> => t !== null);
+
+      // Restore the party in PartySystem
+      const members = group.map(d => ({
+        username: d.username,
+        role: (d.partyRole ?? 'member') as PartyRole,
+        gridPosition: (d.partyGridPosition ?? 4) as PartyGridPosition,
+      }));
+
+      const party = this.parties.restoreParty(
+        savedPartyId,
+        members,
+        (u, id) => this.sessions.get(u)?.setPartyId(id),
+      );
+
+      // Create battle entry with the first member, then add the rest
+      const firstUsername = members[0].username;
+      this.partyBattles.createEntryFromSave(
+        party.id,
+        firstUsername,
+        currentTile,
+        targetTile,
+        movementQueue,
+      );
+
+      for (let i = 1; i < members.length; i++) {
+        this.partyBattles.addMember(party.id, members[i].username);
+      }
+
+      console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
+    }
+
+    // Phase 4: Restore solo players (no party or single-member groups)
+    for (const data of soloSaves) {
+      const coord = offsetToCube(data.position);
+      const currentTile = this.grid.getTile(coord);
+      if (!currentTile) {
+        console.error(`[PlayerManager] Invalid saved position for "${data.username}": (${data.position.col}, ${data.position.row})`);
+        continue;
+      }
+
+      let targetTile = null;
+      if (data.target) {
+        targetTile = this.grid.getTile(offsetToCube(data.target)) ?? null;
+      }
+      const movementQueue = data.movementQueue
+        .map(p => this.grid.getTile(offsetToCube(p)))
+        .filter((t): t is NonNullable<typeof t> => t !== null);
+
+      const partyResult = this.parties.createParty(
+        data.username,
+        (u) => this.sessions.get(u)?.getPartyId() ?? null,
+        (u, id) => this.sessions.get(u)?.setPartyId(id),
+      );
+
+      if (typeof partyResult !== 'string') {
+        this.partyBattles.createEntryFromSave(
+          partyResult.id,
+          data.username,
+          currentTile,
+          targetTile,
+          movementQueue,
+        );
+      }
+    }
+
     if (saves.length > 0) {
       console.log(`[PlayerManager] Restored ${this.sessions.size} sessions`);
     }

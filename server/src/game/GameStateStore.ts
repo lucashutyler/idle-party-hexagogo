@@ -1,4 +1,4 @@
-import type { CombatLogEntry, StatName, StatBlock, BlockLevel, ChatMessage } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, StatName, StatBlock, BlockLevel, ChatMessage, FriendRequest } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -22,9 +22,12 @@ export interface PlayerSaveData {
     equipment?: Record<string, string | null>;
   };
   friends?: string[];
+  outgoingFriendRequests?: FriendRequest[];
   blockedUsers?: Record<string, BlockLevel>;
   guildId?: string | null;
   partyId?: string | null;
+  partyRole?: 'owner' | 'leader' | 'member';
+  partyGridPosition?: number;
   chatHistory?: ChatMessage[];
 }
 

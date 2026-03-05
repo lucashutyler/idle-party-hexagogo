@@ -142,6 +142,7 @@ html, body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  background: var(--accent-red);
   display: none;
 }
 
@@ -216,10 +217,19 @@ html, body {
 }
 
 .combat-side {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 4px;
+  width: 160px;
+  min-height: 180px;
+  align-items: end;
+  justify-items: center;
+}
+
+/* Empty grid cell — preserves spacing */
+.combat-grid-empty {
+  width: 48px;
 }
 
 .combat-member {
@@ -238,7 +248,7 @@ html, body {
   position: relative;
 }
 
-.combat-member.enemy.dead {
+.combat-member.dead {
   opacity: 0.4;
 }
 
@@ -272,14 +282,28 @@ html, body {
 /* Combat state animations */
 .combat-stage.fighting .combat-member.party {
   background: var(--accent-orange);
-  animation: member-shake 0.15s ease-in-out infinite alternate;
 }
 
-.combat-stage.fighting .combat-member.enemy {
-  animation: member-shake 0.15s ease-in-out infinite alternate-reverse;
+/* Per-turn attack animation — lunge toward the enemy */
+.combat-member.party.attacking {
+  animation: attack-lunge-right 0.4s ease-out;
 }
 
-.combat-stage.fighting .combat-member.enemy.dead {
+.combat-member.enemy.attacking {
+  animation: attack-lunge-left 0.4s ease-out;
+}
+
+/* Per-turn hit animation — flash red and shake */
+.combat-member.hit {
+  animation: hit-flash 0.4s ease-out;
+}
+
+/* Per-turn dodge animation — sidestep */
+.combat-member.dodged {
+  animation: dodge-sidestep 0.4s ease-out;
+}
+
+.combat-stage.fighting .combat-member.dead {
   animation: none;
 }
 
@@ -328,6 +352,10 @@ html, body {
 .combat-hp-label.dead {
   color: var(--text-dim);
   text-decoration: line-through;
+}
+
+.combat-hp-label.self {
+  color: var(--accent-gold);
 }
 
 .combat-hp-bar {
@@ -802,6 +830,29 @@ html, body {
   display: block;
 }
 
+/* Map toast (ephemeral tooltip shown when action is blocked) */
+.map-toast {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: var(--bg-panel-light);
+  border: 2px solid var(--accent-gold);
+  color: var(--accent-gold);
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  white-space: nowrap;
+  z-index: 200;
+  pointer-events: none;
+  animation: toast-fade 2s ease-out forwards;
+}
+
+@keyframes toast-fade {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .map-zoom-controls {
   position: absolute;
   bottom: 16px;
@@ -1162,9 +1213,31 @@ html, body {
   100% { transform: scale(1); }
 }
 
-@keyframes member-shake {
-  0% { transform: translateX(-2px); }
-  100% { transform: translateX(2px); }
+@keyframes attack-lunge-right {
+  0% { transform: translateX(0); }
+  30% { transform: translateX(10px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes attack-lunge-left {
+  0% { transform: translateX(0); }
+  30% { transform: translateX(-10px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes hit-flash {
+  0% { transform: translateX(0); filter: brightness(1); }
+  15% { transform: translateX(-3px); filter: brightness(2); }
+  30% { transform: translateX(3px); filter: brightness(1); }
+  45% { transform: translateX(-2px); }
+  60% { transform: translateX(2px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes dodge-sidestep {
+  0% { transform: translateY(0); opacity: 1; }
+  30% { transform: translateY(-8px); opacity: 0.5; }
+  100% { transform: translateY(0); opacity: 1; }
 }
 
 @keyframes member-bounce {
@@ -1334,6 +1407,11 @@ html, body {
 
 .social-badge.blocked {
   background: var(--accent-red);
+  color: #000;
+}
+
+.social-badge.owner {
+  background: var(--accent-gold);
   color: #000;
 }
 

@@ -1,45 +1,42 @@
 import {
   HexGrid,
+  HexTile,
   UnlockSystem,
   getStartingPosition,
   offsetToCube,
-  cubeToOffset,
   createDefaultCharacter,
   addXp,
   addGold,
   calculateMaxHp,
   xpForNextLevel,
-  XP_PER_VICTORY,
   MONSTERS,
   ITEMS,
-  createCombatState,
-  createEncounter,
-  getZone,
   computeEquipmentBonuses,
   rollDrops,
   addItemToInventory,
   equipItem,
   unequipItem,
   EQUIP_SLOTS,
+  getZone,
 } from '@idle-party-rpg/shared';
 import type {
-  BattleResult,
   ServerStateMessage,
+  ServerBattleState,
+  ServerPartyState,
   OtherPlayerState,
   CombatLogEntry,
   CharacterState,
   StatName,
-  CombatState,
+  PartyCombatState,
+  PartyCombatant,
   ClientCharacterState,
-  ClientCombatState,
   EquipSlot,
   ClientSocialState,
   BlockLevel,
   ChatMessage,
+  PartyGridPosition,
+  FriendRequest,
 } from '@idle-party-rpg/shared';
-import { ServerParty } from './ServerParty.js';
-import { ServerBattleTimer } from './ServerBattleTimer.js';
-import type { ServerBattleCallbacks } from './ServerBattleTimer.js';
 import type { PlayerSaveData } from './GameStateStore.js';
 
 const MAX_LOG_ENTRIES = 100;
@@ -49,30 +46,35 @@ const MAX_CHAT_HISTORY = 1000;
 export class PlayerSession {
   username: string;
   private grid: HexGrid;
-  private party: ServerParty;
-  private battleTimer: ServerBattleTimer;
   private unlockSystem: UnlockSystem;
   private combatLog: CombatLogEntry[] = [];
   private battleCount = 0;
   private character: CharacterState;
   private chatHistory: ChatMessage[] = [];
   private friends: string[] = [];
+  private outgoingFriendRequests: FriendRequest[] = [];
   private blockedUsers: Record<string, BlockLevel> = {};
   private guildId: string | null = null;
   private partyId: string | null = null;
 
-  private broadcastToPlayer: () => void;
-
   /** Callback to get social state — set by PlayerManager after construction. */
   getSocialState?: () => ClientSocialState;
 
-  /** Callback to share XP/loot with party members on victory. Set by PlayerManager. */
-  onShareVictoryWithParty?: (xpGained: number, goldGained: number, drops: string[]) => void;
+  /** Callback to get battle state — set by PlayerManager. */
+  getBattleState?: () => ServerBattleState | null;
 
-  constructor(username: string, grid: HexGrid, broadcastToPlayer: () => void) {
+  /** Callback to get party movement state — set by PlayerManager. */
+  getPartyPositionState?: () => ServerPartyState | null;
+
+  /** Callback to get zone — set by PlayerManager. */
+  getPartyZone?: () => string | null;
+
+  /** Callback to get position — set by PlayerManager. */
+  getPartyPosition?: () => { col: number; row: number } | null;
+
+  constructor(username: string, grid: HexGrid) {
     this.username = username;
     this.grid = grid;
-    this.broadcastToPlayer = broadcastToPlayer;
 
     const startPos = getStartingPosition();
     const startCoord = offsetToCube(startPos);
@@ -84,184 +86,102 @@ export class PlayerSession {
 
     this.character = createDefaultCharacter();
     this.unlockSystem = new UnlockSystem(this.grid, startTile);
-    this.party = new ServerParty(this.grid, startTile);
-
-    this.battleTimer = new ServerBattleTimer(
-      this.party,
-      () => this.createCombat(),
-      this.createBattleCallbacks(),
-    );
   }
 
-  private createCombat(): CombatState {
+  /** Get combat info for the party combat system. */
+  getCombatInfo(): PartyCombatant {
     const maxHp = calculateMaxHp(this.character.level, this.character.stats.CON);
     const equipBonuses = computeEquipmentBonuses(this.character.equipment);
-    return createCombatState(
-      this.username,
-      this.character.level,
-      this.character.stats,
-      maxHp,
-      createEncounter(this.party.tile.zone),
-      equipBonuses,
-    );
-  }
 
-  private createBattleCallbacks(): ServerBattleCallbacks {
+    // Get grid position from party info via social state
+    let gridPosition: PartyGridPosition = 4;
+    const social = this.getSocialState?.();
+    if (social?.party) {
+      const member = social.party.members.find(m => m.username === this.username);
+      if (member) gridPosition = member.gridPosition;
+    }
+
     return {
-      onBattleStart: () => {
-        this.battleCount++;
-        this.addLogEntry('Battle begins!', 'battle');
-      },
-      onStateChange: () => {
-        this.broadcastToPlayer();
-      },
-      onCombatTick: (_state: CombatState, logEntries: string[]) => {
-        for (const entry of logEntries) {
-          this.addLogEntry(entry, 'damage');
-        }
-        this.broadcastToPlayer();
-      },
-      onBattleEnd: (result: BattleResult) => {
-        if (result === 'victory') {
-          this.addLogEntry('Victory!', 'victory');
-          const unlocked = this.unlockSystem.unlockAdjacentTiles(this.party.tile);
-          if (unlocked.length > 0) {
-            this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
-          }
-          // Award XP based on monsters defeated
-          const combat = this.battleTimer.currentCombat;
-          const xpGained = combat
-            ? combat.monsters.reduce((sum, m) => sum + m.xp, 0)
-            : XP_PER_VICTORY;
-          // Award gold based on monsters defeated
-          let goldGained = 0;
-          if (combat) {
-            for (const m of combat.monsters) {
-              const def = MONSTERS[m.id];
-              if (def) {
-                goldGained += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
-              }
-            }
-          }
-          if (goldGained > 0) {
-            addGold(this.character, goldGained);
-            this.addLogEntry(`+${goldGained} Gold`, 'victory');
-          }
-
-          // Roll item drops per monster
-          if (combat) {
-            for (const m of combat.monsters) {
-              const def = MONSTERS[m.id];
-              if (def?.drops) {
-                const dropped = rollDrops(def.drops);
-                for (const itemId of dropped) {
-                  const itemDef = ITEMS[itemId];
-                  if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
-                    this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
-                  }
-                }
-              }
-            }
-          }
-
-          const { leveledUp, levelsGained } = addXp(this.character, xpGained);
-          this.addLogEntry(`+${xpGained} XP`, 'victory');
-          if (leveledUp) {
-            for (let i = 0; i < levelsGained; i++) {
-              this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
-            }
-          }
-
-          // Share with party members
-          if (this.onShareVictoryWithParty) {
-            const droppedItems: string[] = [];
-            if (combat) {
-              for (const m of combat.monsters) {
-                const def = MONSTERS[m.id];
-                if (def?.drops) {
-                  const dropped = rollDrops(def.drops);
-                  droppedItems.push(...dropped);
-                }
-              }
-            }
-            this.onShareVictoryWithParty(xpGained, goldGained, droppedItems);
-          }
-        } else {
-          this.addLogEntry('Defeat...', 'defeat');
-        }
-        this.broadcastToPlayer();
-      },
-      onMove: () => {
-        const pos = this.getPosition();
-        const zone = getZone(this.party.tile.zone);
-        const zName = zone ? zone.displayName : this.party.tile.zone;
-        this.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
-      },
-      canMoveToNextTile: () => {
-        const nextTile = this.party.nextTile;
-        return nextTile ? this.unlockSystem.isUnlocked(nextTile) : false;
-      },
+      username: this.username,
+      maxHp,
+      currentHp: maxHp,
+      stats: { ...this.character.stats },
+      equipBonuses,
+      gridPosition,
     };
   }
 
-  /** Receive shared XP/loot from a party member's victory. */
-  receivePartyShare(xpGained: number, goldGained: number, drops: string[]): void {
-    this.addLogEntry('Party member won a battle!', 'victory');
+  /** Handle victory rewards (called by PartyBattleManager). */
+  handleVictory(combat: PartyCombatState | null, tile: HexTile): void {
+    this.addLogEntry('Victory!', 'victory');
 
-    if (goldGained > 0) {
-      addGold(this.character, goldGained);
-      this.addLogEntry(`+${goldGained} Gold (shared)`, 'victory');
+    const unlocked = this.unlockSystem.unlockAdjacentTiles(tile);
+    if (unlocked.length > 0) {
+      this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
     }
 
-    for (const itemId of drops) {
-      const itemDef = ITEMS[itemId];
-      if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
-        this.addLogEntry(`Found ${itemDef.name}! (shared)`, 'victory');
+    // Award XP based on monsters defeated
+    const xpGained = combat
+      ? combat.monsters.reduce((sum, m) => sum + m.xp, 0)
+      : 10;
+
+    // Award gold based on monsters defeated
+    let goldGained = 0;
+    if (combat) {
+      for (const m of combat.monsters) {
+        const def = MONSTERS[m.id];
+        if (def) {
+          goldGained += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
+        }
+      }
+    }
+    if (goldGained > 0) {
+      addGold(this.character, goldGained);
+      this.addLogEntry(`+${goldGained} Gold`, 'victory');
+    }
+
+    // Roll item drops per monster
+    if (combat) {
+      for (const m of combat.monsters) {
+        const def = MONSTERS[m.id];
+        if (def?.drops) {
+          const dropped = rollDrops(def.drops);
+          for (const itemId of dropped) {
+            const itemDef = ITEMS[itemId];
+            if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
+              this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
+            }
+          }
+        }
       }
     }
 
     const { leveledUp, levelsGained } = addXp(this.character, xpGained);
-    this.addLogEntry(`+${xpGained} XP (shared)`, 'victory');
+    this.addLogEntry(`+${xpGained} XP`, 'victory');
     if (leveledUp) {
       for (let i = 0; i < levelsGained; i++) {
         this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
       }
     }
-
-    this.broadcastToPlayer();
   }
 
-  handleMove(col: number, row: number): boolean {
-    const coord = offsetToCube({ col, row });
-    const tile = this.grid.getTile(coord);
+  /** Check if a tile is unlocked for this player. */
+  isTileUnlocked(tile: HexTile): boolean {
+    return this.unlockSystem.isUnlocked(tile);
+  }
 
-    if (!tile || !tile.isTraversable) {
-      return false;
-    }
-
-    const success = this.party.setDestination(tile);
-    this.broadcastToPlayer();
-    return success;
+  incrementBattleCount(): void {
+    this.battleCount++;
   }
 
   setPriorityStat(stat: StatName | null): void {
     this.character.priorityStat = stat;
-    this.broadcastToPlayer();
   }
 
   getState(otherPlayers: OtherPlayerState[]): Omit<ServerStateMessage, 'type'> {
-    const combat = this.battleTimer.currentCombat;
-    const clientCombat: ClientCombatState | undefined = combat ? {
-      playerHp: combat.player.currentHp,
-      playerMaxHp: combat.player.maxHp,
-      monsters: combat.monsters.map(m => ({
-        name: m.name,
-        currentHp: m.currentHp,
-        maxHp: m.maxHp,
-        level: m.level,
-      })),
-      tickCount: combat.tickCount,
-    } : undefined;
+    const battleState = this.getBattleState?.();
+    const partyState = this.getPartyPositionState?.();
+    const partyZone = this.getPartyZone?.();
 
     const charState: ClientCharacterState = {
       className: this.character.className,
@@ -276,19 +196,13 @@ export class PlayerSession {
       equipment: { ...this.character.equipment },
     };
 
-    const zone = getZone(this.party.tile.zone);
-    const zoneName = zone ? zone.displayName : this.party.tile.zone;
+    const zone = partyZone ? getZone(partyZone) : null;
+    const zoneName = zone ? zone.displayName : (partyZone ?? 'Unknown');
 
     return {
       username: this.username,
-      party: this.party.toJSON(),
-      battle: {
-        state: this.battleTimer.currentState,
-        result: this.battleTimer.lastResult,
-        visual: this.battleTimer.visual,
-        duration: this.battleTimer.currentDuration,
-        combat: clientCombat,
-      },
+      party: partyState ?? { col: 0, row: 0, state: 'idle', path: [] },
+      battle: battleState ?? { state: 'battle', visual: 'none', duration: 0 },
       unlocked: this.unlockSystem.getUnlockedKeys(),
       mapSize: this.grid.size,
       otherPlayers,
@@ -301,17 +215,20 @@ export class PlayerSession {
   }
 
   getPosition(): { col: number; row: number } {
-    return cubeToOffset(this.party.position);
+    return this.getPartyPosition?.() ?? { col: 0, row: 0 };
   }
 
   getZone(): string {
-    return this.party.tile.zone;
+    return this.getPartyZone?.() ?? 'friendly_forest';
   }
 
   // ── Social Accessors ──────────────────────────────────────
 
   getFriends(): string[] { return this.friends; }
   setFriends(friends: string[]): void { this.friends = friends; }
+
+  getOutgoingFriendRequests(): FriendRequest[] { return this.outgoingFriendRequests; }
+  setOutgoingFriendRequests(requests: FriendRequest[]): void { this.outgoingFriendRequests = requests; }
 
   getBlockedUsers(): Record<string, BlockLevel> { return this.blockedUsers; }
   setBlockedUsers(blocked: Record<string, BlockLevel>): void { this.blockedUsers = blocked; }
@@ -349,9 +266,27 @@ export class PlayerSession {
     }
   }
 
-  toSaveData(): PlayerSaveData {
-    const pos = this.getPosition();
-    const partyJSON = this.party.toJSON();
+  getStartingTile(): HexTile {
+    const startPos = getStartingPosition();
+    const startCoord = offsetToCube(startPos);
+    const tile = this.grid.getTile(startCoord);
+    if (!tile) throw new Error('Invalid starting position');
+    return tile;
+  }
+
+  getUnlockedKeys(): string[] {
+    return this.unlockSystem.getUnlockedKeys();
+  }
+
+  toSaveData(movementData?: {
+    position: { col: number; row: number };
+    target: { col: number; row: number } | null;
+    movementQueue: { col: number; row: number }[];
+  }, partyInfo?: {
+    role: 'owner' | 'leader' | 'member';
+    gridPosition: number;
+  }): PlayerSaveData {
+    const pos = movementData?.position ?? this.getPosition();
 
     return {
       username: this.username,
@@ -359,10 +294,8 @@ export class PlayerSession {
       combatLog: this.combatLog.slice(-MAX_SAVE_LOG_ENTRIES),
       unlockedKeys: this.unlockSystem.getUnlockedKeys(),
       position: { col: pos.col, row: pos.row },
-      target: partyJSON.targetCol !== undefined && partyJSON.targetRow !== undefined
-        ? { col: partyJSON.targetCol, row: partyJSON.targetRow }
-        : null,
-      movementQueue: partyJSON.path,
+      target: movementData?.target ?? null,
+      movementQueue: movementData?.movementQueue ?? [],
       character: {
         className: this.character.className,
         level: this.character.level,
@@ -374,48 +307,31 @@ export class PlayerSession {
         equipment: { ...this.character.equipment },
       },
       friends: [...this.friends],
+      outgoingFriendRequests: [...this.outgoingFriendRequests],
       blockedUsers: { ...this.blockedUsers },
       guildId: this.guildId,
+      partyId: this.partyId,
+      partyRole: partyInfo?.role,
+      partyGridPosition: partyInfo?.gridPosition,
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
     };
   }
 
   /**
    * Restore a PlayerSession from saved data.
-   * Battle timer starts fresh; a "Server back online" log entry is added.
+   * Battle timer is NOT started here — PartyBattleManager handles that.
    */
   static fromSaveData(
     data: PlayerSaveData,
     grid: HexGrid,
-    broadcastToPlayer: () => void,
   ): PlayerSession {
-    const coord = offsetToCube(data.position);
-    const currentTile = grid.getTile(coord);
-    if (!currentTile) {
-      throw new Error(`Invalid saved position for "${data.username}": (${data.position.col}, ${data.position.row})`);
-    }
-
-    // Resolve target tile
-    let targetTile = null;
-    if (data.target) {
-      const targetCoord = offsetToCube(data.target);
-      targetTile = grid.getTile(targetCoord) ?? null;
-    }
-
-    // Resolve movement queue
-    const movementQueue = data.movementQueue
-      .map(p => grid.getTile(offsetToCube(p)))
-      .filter((t): t is NonNullable<typeof t> => t !== null);
-
     // Build session via Object.create to bypass constructor
     const session = Object.create(PlayerSession.prototype) as PlayerSession;
     (session as { username: string }).username = data.username;
     session['grid'] = grid;
-    session['broadcastToPlayer'] = broadcastToPlayer;
     session['battleCount'] = data.battleCount;
     session['combatLog'] = data.combatLog.slice(-MAX_LOG_ENTRIES);
     session['unlockSystem'] = UnlockSystem.fromKeys(grid, data.unlockedKeys);
-    session['party'] = ServerParty.restore(grid, currentTile, targetTile, movementQueue);
 
     // Restore character (default to fresh character for old saves)
     if (data.character) {
@@ -437,6 +353,7 @@ export class PlayerSession {
 
     // Restore social state
     session['friends'] = data.friends ? [...data.friends] : [];
+    session['outgoingFriendRequests'] = data.outgoingFriendRequests ? [...data.outgoingFriendRequests] : [];
     session['blockedUsers'] = data.blockedUsers ? { ...data.blockedUsers } : {};
     session['guildId'] = data.guildId ?? null;
     session['partyId'] = null; // Parties are transient, not restored across restarts
@@ -444,13 +361,6 @@ export class PlayerSession {
 
     // Add server-online log entry
     session['addLogEntry']('Server back online — resuming!', 'battle');
-
-    // Start battle timer fresh (no resume of previous battle state)
-    session['battleTimer'] = new ServerBattleTimer(
-      session['party'],
-      () => session['createCombat'](),
-      session['createBattleCallbacks'](),
-    );
 
     return session;
   }
@@ -460,9 +370,6 @@ export class PlayerSession {
     if (!def || !def.equipSlot) return false;
 
     const result = equipItem(this.character.inventory, this.character.equipment, itemId);
-    if (result.success) {
-      this.broadcastToPlayer();
-    }
     return result.success;
   }
 
@@ -470,13 +377,6 @@ export class PlayerSession {
     if (!EQUIP_SLOTS.includes(slot)) return false;
 
     const result = unequipItem(this.character.inventory, this.character.equipment, slot);
-    if (result.success) {
-      this.broadcastToPlayer();
-    }
     return result.success;
-  }
-
-  destroy(): void {
-    this.battleTimer.destroy();
   }
 }

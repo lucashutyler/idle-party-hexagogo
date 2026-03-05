@@ -1,6 +1,7 @@
 import { getZone } from './ZoneTypes.js';
 import type { EncounterTableEntry } from './ZoneTypes.js';
 import type { ItemDrop } from './ItemTypes.js';
+import type { PartyGridPosition } from './SocialTypes.js';
 
 // --- Types ---
 
@@ -24,6 +25,7 @@ export interface MonsterInstance {
   currentHp: number;
   damage: number;
   xp: number;
+  gridPosition: PartyGridPosition;
 }
 
 // --- Monster catalog ---
@@ -74,8 +76,11 @@ export const MONSTERS: Record<string, MonsterDefinition> = {
 
 // --- Functions ---
 
+/** Grid positions used to distribute monsters across the 3x3 grid. */
+const MONSTER_GRID_POSITIONS: PartyGridPosition[] = [4, 1, 7, 3, 5, 0, 2, 6, 8];
+
 /** Create a live monster instance from a definition. */
-export function createMonsterInstance(def: MonsterDefinition): MonsterInstance {
+export function createMonsterInstance(def: MonsterDefinition, gridPosition: PartyGridPosition = 4): MonsterInstance {
   return {
     id: def.id,
     name: def.name,
@@ -84,6 +89,7 @@ export function createMonsterInstance(def: MonsterDefinition): MonsterInstance {
     currentHp: def.hp,
     damage: def.damage,
     xp: def.xp,
+    gridPosition,
   };
 }
 
@@ -108,16 +114,16 @@ function pickWeightedEntry(table: EncounterTableEntry[]): EncounterTableEntry {
 export function createEncounter(zoneId?: string): MonsterInstance[] {
   if (!zoneId) {
     return [
-      createMonsterInstance(MONSTERS.goblin),
-      createMonsterInstance(MONSTERS.goblin),
+      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[0]),
+      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[1]),
     ];
   }
 
   const zone = getZone(zoneId);
   if (!zone) {
     return [
-      createMonsterInstance(MONSTERS.goblin),
-      createMonsterInstance(MONSTERS.goblin),
+      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[0]),
+      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[1]),
     ];
   }
 
@@ -125,15 +131,15 @@ export function createEncounter(zoneId?: string): MonsterInstance[] {
   const def = MONSTERS[entry.monsterId];
   if (!def) {
     return [
-      createMonsterInstance(MONSTERS.goblin),
-      createMonsterInstance(MONSTERS.goblin),
+      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[0]),
+      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[1]),
     ];
   }
 
   const count = entry.minCount + Math.floor(Math.random() * (entry.maxCount - entry.minCount + 1));
   const monsters: MonsterInstance[] = [];
   for (let i = 0; i < count; i++) {
-    monsters.push(createMonsterInstance(def));
+    monsters.push(createMonsterInstance(def, MONSTER_GRID_POSITIONS[i % MONSTER_GRID_POSITIONS.length]));
   }
   return monsters;
 }

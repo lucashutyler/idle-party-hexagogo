@@ -1,5 +1,6 @@
 import type { StatName, StatBlock } from './CharacterStats.js';
 import type { EquipSlot } from './ItemTypes.js';
+import type { PartyGridPosition } from './SocialTypes.js';
 import type {
   ClientSocialState,
   ClientSocialMessage,
@@ -28,18 +29,35 @@ export interface ServerPartyState {
   path: { col: number; row: number }[];
 }
 
+export interface ClientPlayerCombatant {
+  username: string;
+  currentHp: number;
+  maxHp: number;
+  gridPosition: PartyGridPosition;
+}
+
 export interface ClientMonsterState {
   name: string;
   currentHp: number;
   maxHp: number;
   level: number;
+  gridPosition: PartyGridPosition;
+}
+
+export interface ClientCombatAction {
+  attackerSide: 'player' | 'monster';
+  attackerPos: PartyGridPosition;
+  targetPos: PartyGridPosition | null;
+  targetSide: 'player' | 'monster' | null;
+  dodged: boolean;
 }
 
 export interface ClientCombatState {
-  playerHp: number;
-  playerMaxHp: number;
+  players: ClientPlayerCombatant[];
   monsters: ClientMonsterState[];
   tickCount: number;
+  /** The action that occurred on the most recent tick. */
+  lastAction?: ClientCombatAction;
 }
 
 export interface ServerBattleState {

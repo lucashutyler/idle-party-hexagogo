@@ -2,8 +2,9 @@ import {
   RESULT_PAUSE,
   MOVE_DURATION,
 } from '@idle-party-rpg/shared';
-import type { BattleTimerState, BattleResult, BattleVisual, CombatState } from '@idle-party-rpg/shared';
-import { processTick } from '@idle-party-rpg/shared';
+import type { BattleTimerState, BattleResult, BattleVisual } from '@idle-party-rpg/shared';
+import type { PartyCombatState } from '@idle-party-rpg/shared';
+import { processPartyTick } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 
 const TICK_INTERVAL = 1000; // 1 second per combat tick
@@ -14,7 +15,7 @@ export interface ServerBattleCallbacks {
   onStateChange?: (state: BattleTimerState) => void;
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
-  onCombatTick?: (state: CombatState, logEntries: string[]) => void;
+  onCombatTick?: (state: PartyCombatState, logEntries: string[]) => void;
 }
 
 export class ServerBattleTimer {
@@ -28,17 +29,17 @@ export class ServerBattleTimer {
   private moveTimeout?: ReturnType<typeof setTimeout>;
   private tickInterval?: ReturnType<typeof setInterval>;
 
-  private combatState: CombatState | null = null;
-  private createCombat: () => CombatState;
+  private combatState: PartyCombatState | null = null;
+  private createCombat: () => PartyCombatState;
 
   onBattleStart?: () => void;
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
-  onCombatTick?: (state: CombatState, logEntries: string[]) => void;
+  onCombatTick?: (state: PartyCombatState, logEntries: string[]) => void;
 
-  constructor(party: ServerParty, createCombat: () => CombatState, callbacks?: ServerBattleCallbacks) {
+  constructor(party: ServerParty, createCombat: () => PartyCombatState, callbacks?: ServerBattleCallbacks) {
     this.party = party;
     this.createCombat = createCombat;
 
@@ -71,7 +72,7 @@ export class ServerBattleTimer {
   private processCombatTick(): void {
     if (!this.combatState || this.combatState.finished) return;
 
-    const tickResult = processTick(this.combatState);
+    const tickResult = processPartyTick(this.combatState);
     this.battleDuration += TICK_INTERVAL;
 
     // Notify listeners of the tick (damage log entries, HP updates)
@@ -161,7 +162,7 @@ export class ServerBattleTimer {
     return this.battleDuration;
   }
 
-  get currentCombat(): CombatState | null {
+  get currentCombat(): PartyCombatState | null {
     return this.combatState;
   }
 
