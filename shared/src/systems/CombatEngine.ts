@@ -1,4 +1,5 @@
-import type { StatBlock } from './CharacterStats.js';
+import { ALL_STATS, CLASS_DEFINITIONS, calculateMaxHp } from './CharacterStats.js';
+import type { StatBlock, ClassName } from './CharacterStats.js';
 import type { MonsterInstance } from './MonsterTypes.js';
 import type { EquipmentBonuses } from './ItemTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
@@ -40,6 +41,8 @@ export interface PartyCombatant {
   stats: StatBlock;
   equipBonuses?: EquipmentBonuses;
   gridPosition: PartyGridPosition;
+  className: ClassName;
+  level: number;
 }
 
 export interface CombatAction {
@@ -244,12 +247,35 @@ export function createPartyCombatState(
   monsters: MonsterInstance[],
 ): PartyCombatState {
   // Sort players: front-to-back (high col first), then top-to-bottom (low row first)
-  const sortedPlayers = players.map(p => ({ ...p, currentHp: p.maxHp }))
-    .sort((a, b) => {
-      const colDiff = getCol(b.gridPosition) - getCol(a.gridPosition); // high col first
-      if (colDiff !== 0) return colDiff;
-      return getRow(a.gridPosition) - getRow(b.gridPosition); // low row first
-    });
+  const sortedPlayers = players.map(p => ({
+    ...p,
+    stats: { ...p.stats },
+    currentHp: p.maxHp,
+  })).sort((a, b) => {
+    const colDiff = getCol(b.gridPosition) - getCol(a.gridPosition); // high col first
+    if (colDiff !== 0) return colDiff;
+    return getRow(a.gridPosition) - getRow(b.gridPosition); // low row first
+  });
+
+  // Apply Bard stat buff: +bardStatMultiplierPerMember * partySize to all players
+  const partySize = sortedPlayers.length;
+  let totalBardMultiplier = 0;
+  for (const p of sortedPlayers) {
+    const def = CLASS_DEFINITIONS[p.className];
+    if (def.bardStatMultiplierPerMember > 0) {
+      totalBardMultiplier += def.bardStatMultiplierPerMember * partySize;
+    }
+  }
+  if (totalBardMultiplier > 0) {
+    for (const p of sortedPlayers) {
+      for (const stat of ALL_STATS) {
+        p.stats[stat] = Math.floor(p.stats[stat] * (1 + totalBardMultiplier));
+      }
+      // Recalculate maxHp with buffed CON
+      p.maxHp = calculateMaxHp(p.level, p.stats.CON, p.className);
+      p.currentHp = p.maxHp;
+    }
+  }
 
   // Sort monsters: front-to-back (low col first), then top-to-bottom (low row first)
   const sortedMonsters = [...monsters]
@@ -301,7 +327,8 @@ export function processPartyTick(state: PartyCombatState): TickResult {
 
       const target = findTarget(player.gridPosition, state.monsters, false);
       if (target) {
-        const baseDamage = player.stats.STR;
+        const classDef = CLASS_DEFINITIONS[player.className];
+        const baseDamage = classDef.attackStat ? player.stats[classDef.attackStat] : 0;
         const variance = Math.floor(Math.random() * 5) - 2;
         let attackBonus = 0;
         if (player.equipBonuses && player.equipBonuses.bonusAttackMax > 0) {
@@ -349,10 +376,29 @@ export function processPartyTick(state: PartyCombatState): TickResult {
           logEntries.push(`${target.username} dodges ${monster.name}'s attack!`);
         } else {
           let reduction = 0;
-          if (target.equipBonuses && target.equipBonuses.damageReductionMax > 0) {
-            const { damageReductionMin, damageReductionMax } = target.equipBonuses;
-            reduction = damageReductionMin + Math.floor(Math.random() * (damageReductionMax - damageReductionMin + 1));
+
+          if (monster.damageType === 'physical') {
+            // Equipment reduction applies to physical damage only
+            if (target.equipBonuses && target.equipBonuses.damageReductionMax > 0) {
+              const { damageReductionMin, damageReductionMax } = target.equipBonuses;
+              reduction = damageReductionMin + Math.floor(Math.random() * (damageReductionMax - damageReductionMin + 1));
+            }
+            // Knight class physical damage reduction (target only)
+            const targetDef = CLASS_DEFINITIONS[target.className];
+            if (targetDef.physicalReductionBase > 0 || targetDef.physicalReductionPerLevel > 0) {
+              reduction += targetDef.physicalReductionBase + targetDef.physicalReductionPerLevel * target.level;
+            }
+          } else {
+            // Magical damage: Priest party-wide magical reduction from all alive Priests
+            for (const p of state.players) {
+              if (p.currentHp <= 0) continue;
+              const pDef = CLASS_DEFINITIONS[p.className];
+              if (pDef.partyMagicalReductionBase > 0 || pDef.partyMagicalReductionPerLevel > 0) {
+                reduction += pDef.partyMagicalReductionBase + pDef.partyMagicalReductionPerLevel * p.level;
+              }
+            }
           }
+
           const damage = Math.max(0, monster.damage - reduction);
           target.currentHp = Math.max(0, target.currentHp - damage);
           logEntries.push(`${monster.name} hits ${target.username} for ${damage} damage`);

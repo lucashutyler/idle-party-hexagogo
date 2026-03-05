@@ -1,17 +1,17 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage } from '@idle-party-rpg/shared';
-import { computeEquipmentBonuses, BASE_STATS } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClassName } from '@idle-party-rpg/shared';
+import { computeEquipmentBonuses, CLASS_DEFINITIONS } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 const STAT_NAMES = ['STR', 'INT', 'WIS', 'DEX', 'CON', 'CHA'] as const;
 
 const STAT_TOOLTIPS: Record<string, string> = {
-  STR: '+1 attack damage per point',
-  INT: 'No effect yet',
-  WIS: 'No effect yet',
-  DEX: 'No effect yet',
+  STR: 'Strength',
+  INT: 'Magic damage (Mage)',
+  WIS: 'Wisdom',
+  DEX: 'Physical damage (Archer)',
   CON: '+1 max HP per point',
-  CHA: 'No effect yet',
+  CHA: 'Charisma',
 };
 
 export class CharacterScreen implements Screen {
@@ -28,7 +28,7 @@ export class CharacterScreen implements Screen {
   private goldDisplay!: HTMLElement;
   private statsTable!: HTMLElement;
   private combatBonuses!: HTMLElement;
-  private prioritySelect!: HTMLSelectElement;
+  private classPassiveEl!: HTMLElement;
 
   private unsubscribe?: () => void;
 
@@ -84,32 +84,17 @@ export class CharacterScreen implements Screen {
             Gold: <span class="character-gold-value">0</span> GP
           </div>
           <div class="character-combat-bonuses"></div>
+          <div class="character-class-passive"></div>
           <div class="character-stats-table-wrap">
             <table class="character-stats-table">
               <thead>
                 <tr>
                   <th></th>
-                  <th>Base</th>
-                  <th>Pts</th>
-                  <th>Items</th>
-                  <th>Buffs</th>
                   <th>Total</th>
                 </tr>
               </thead>
               <tbody class="character-stats-tbody"></tbody>
             </table>
-          </div>
-          <div class="character-priority-section">
-            <span class="character-priority-label">Level-up stat priority</span>
-            <select class="character-priority-select">
-              <option value="">Random</option>
-              <option value="STR">STR</option>
-              <option value="INT">INT</option>
-              <option value="WIS">WIS</option>
-              <option value="DEX">DEX</option>
-              <option value="CON">CON</option>
-              <option value="CHA">CHA</option>
-            </select>
           </div>
         </div>
       </div>
@@ -122,14 +107,8 @@ export class CharacterScreen implements Screen {
     this.hpDisplay = this.container.querySelector('.character-hp-value')!;
     this.goldDisplay = this.container.querySelector('.character-gold-value')!;
     this.combatBonuses = this.container.querySelector('.character-combat-bonuses')!;
+    this.classPassiveEl = this.container.querySelector('.character-class-passive')!;
     this.statsTable = this.container.querySelector('.character-stats-tbody')!;
-    this.prioritySelect = this.container.querySelector('.character-priority-select')!;
-
-    // Wire priority select
-    this.prioritySelect.addEventListener('change', () => {
-      const value = this.prioritySelect.value || null;
-      this.gameClient.sendSetPriorityStat(value);
-    });
   }
 
   private updateFromState(state: ServerStateMessage): void {
@@ -165,27 +144,35 @@ export class CharacterScreen implements Screen {
       </div>
     `;
 
-    // Stats breakdown table
+    // Class passive info
+    const classDef = CLASS_DEFINITIONS[char.className as ClassName];
+    if (classDef) {
+      let passiveText = '';
+      if (classDef.physicalReductionBase > 0 || classDef.physicalReductionPerLevel > 0) {
+        const val = classDef.physicalReductionBase + classDef.physicalReductionPerLevel * char.level;
+        passiveText = `Physical damage reduction: ${val}`;
+      } else if (classDef.partyMagicalReductionBase > 0 || classDef.partyMagicalReductionPerLevel > 0) {
+        const val = classDef.partyMagicalReductionBase + classDef.partyMagicalReductionPerLevel * char.level;
+        passiveText = `Party magic resistance: ${val}`;
+      } else if (classDef.bardStatMultiplierPerMember > 0) {
+        passiveText = `Party stat buff: +${Math.round(classDef.bardStatMultiplierPerMember * 100)}% per member`;
+      }
+      if (classDef.attackStat) {
+        const atkVal = char.stats[classDef.attackStat];
+        passiveText += (passiveText ? ' | ' : '') + `Attack: ${classDef.attackStat} (${atkVal})`;
+      } else {
+        passiveText += (passiveText ? ' | ' : '') + 'Attack: None';
+      }
+      this.classPassiveEl.textContent = passiveText;
+    }
+
+    // Stats table (simplified — stats are fixed per class)
     this.statsTable.innerHTML = STAT_NAMES.map(stat => {
-      const base = BASE_STATS[stat];
       const total = char.stats[stat];
-      const pts = total - base;
-      const items = 0; // No stat-boosting items yet
-      const buffs = 0; // No buff system yet
       return `<tr data-tooltip="${STAT_TOOLTIPS[stat]}">
         <td class="character-stat-name">${stat}</td>
-        <td>${base}</td>
-        <td class="${pts > 0 ? 'has-bonus' : ''}">${pts > 0 ? `+${pts}` : '-'}</td>
-        <td class="${items > 0 ? 'has-bonus' : ''}">${items > 0 ? `+${items}` : '-'}</td>
-        <td class="${buffs > 0 ? 'has-bonus' : ''}">${buffs > 0 ? `+${buffs}` : '-'}</td>
         <td class="character-stat-total">${total}</td>
       </tr>`;
     }).join('');
-
-    // Sync priority select without triggering change event
-    const currentValue = char.priorityStat ?? '';
-    if (this.prioritySelect.value !== currentValue) {
-      this.prioritySelect.value = currentValue;
-    }
   }
 }

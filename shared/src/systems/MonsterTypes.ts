@@ -1,6 +1,7 @@
 import { getZone } from './ZoneTypes.js';
 import type { EncounterTableEntry } from './ZoneTypes.js';
 import type { ItemDrop } from './ItemTypes.js';
+import type { DamageType } from './CharacterStats.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 
 // --- Types ---
@@ -11,6 +12,7 @@ export interface MonsterDefinition {
   level: number;
   hp: number;
   damage: number;
+  damageType: DamageType;
   xp: number;
   goldMin: number;
   goldMax: number;
@@ -24,6 +26,7 @@ export interface MonsterInstance {
   maxHp: number;
   currentHp: number;
   damage: number;
+  damageType: DamageType;
   xp: number;
   gridPosition: PartyGridPosition;
 }
@@ -37,6 +40,7 @@ export const MONSTERS: Record<string, MonsterDefinition> = {
     level: 1,
     hp: 15,
     damage: 4,
+    damageType: 'physical',
     xp: 5,
     goldMin: 1,
     goldMax: 2,
@@ -51,6 +55,7 @@ export const MONSTERS: Record<string, MonsterDefinition> = {
     level: 2,
     hp: 20,
     damage: 6,
+    damageType: 'magical',
     xp: 10,
     goldMin: 3,
     goldMax: 5,
@@ -64,6 +69,7 @@ export const MONSTERS: Record<string, MonsterDefinition> = {
     level: 3,
     hp: 30,
     damage: 5,
+    damageType: 'physical',
     xp: 15,
     goldMin: 2,
     goldMax: 5,
@@ -88,6 +94,7 @@ export function createMonsterInstance(def: MonsterDefinition, gridPosition: Part
     maxHp: def.hp,
     currentHp: def.hp,
     damage: def.damage,
+    damageType: def.damageType,
     xp: def.xp,
     gridPosition,
   };

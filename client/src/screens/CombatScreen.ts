@@ -102,6 +102,17 @@ export class CombatScreen implements Screen {
     return items.map(i => i.gridPosition).sort().join(',');
   }
 
+  private static classIcon(className: string): string {
+    const map: Record<string, string> = {
+      Knight: '\uD83D\uDEE1\uFE0F',  // shield
+      Archer: '\uD83C\uDFF9',  // bow
+      Priest: '\u2625\uFE0F',  // ankh
+      Mage: '\uD83E\uDE84',    // magic wand
+      Bard: '\uD83C\uDFB5',    // musical note
+    };
+    return map[className] ?? '\u2753';
+  }
+
   private updateVisuals(state: ServerStateMessage): void {
     // Location label
     this.locationLabel.textContent = state.zoneName;
@@ -132,11 +143,14 @@ export class CombatScreen implements Screen {
       this.renderedEnemyKey = enemyKey;
     }
 
-    // Dim dead combatants
+    // Update combatant sprites: class icons for players, dim dead
     if (combat) {
       for (const p of combat.players) {
         const el = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"] .combat-member`);
-        if (el) el.classList.toggle('dead', p.currentHp <= 0);
+        if (el) {
+          el.textContent = CombatScreen.classIcon(p.className);
+          el.classList.toggle('dead', p.currentHp <= 0);
+        }
       }
       for (const m of combat.monsters) {
         const el = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"] .combat-member`);

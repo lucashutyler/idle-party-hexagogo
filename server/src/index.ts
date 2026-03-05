@@ -13,7 +13,8 @@ import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
-import type { ChatMessage } from '@idle-party-rpg/shared';
+import type { ChatMessage, ClassName } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
 const app = express();
@@ -192,6 +193,24 @@ wss.on('connection', (ws) => {
         }
 
         session.setPriorityStat(stat);
+        return;
+      }
+
+      if (msg.type === 'set_class' && typeof msg.className === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        if (!ALL_CLASS_NAMES.includes(msg.className as ClassName)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid class' }));
+          return;
+        }
+        if (!session.setClass(msg.className as ClassName)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot change class' }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
         return;
       }
 

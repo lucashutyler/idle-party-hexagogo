@@ -5,6 +5,8 @@ import {
   getStartingPosition,
   offsetToCube,
   createDefaultCharacter,
+  createCharacter,
+  ALL_CLASS_NAMES,
   addXp,
   addGold,
   calculateMaxHp,
@@ -26,6 +28,7 @@ import type {
   OtherPlayerState,
   CombatLogEntry,
   CharacterState,
+  ClassName,
   StatName,
   PartyCombatState,
   PartyCombatant,
@@ -90,7 +93,7 @@ export class PlayerSession {
 
   /** Get combat info for the party combat system. */
   getCombatInfo(): PartyCombatant {
-    const maxHp = calculateMaxHp(this.character.level, this.character.stats.CON);
+    const maxHp = calculateMaxHp(this.character.level, this.character.stats.CON, this.character.className);
     const equipBonuses = computeEquipmentBonuses(this.character.equipment);
 
     // Get grid position from party info via social state
@@ -108,6 +111,8 @@ export class PlayerSession {
       stats: { ...this.character.stats },
       equipBonuses,
       gridPosition,
+      className: this.character.className,
+      level: this.character.level,
     };
   }
 
@@ -188,7 +193,7 @@ export class PlayerSession {
       level: this.character.level,
       xp: this.character.xp,
       xpForNextLevel: xpForNextLevel(this.character.level),
-      maxHp: calculateMaxHp(this.character.level, this.character.stats.CON),
+      maxHp: calculateMaxHp(this.character.level, this.character.stats.CON, this.character.className),
       gold: this.character.gold,
       stats: { ...this.character.stats },
       priorityStat: this.character.priorityStat,
@@ -258,6 +263,15 @@ export class PlayerSession {
   }
 
   getLevel(): number { return this.character.level; }
+
+  getClassName(): ClassName { return this.character.className; }
+
+  /** Set class for a new character. Only works if className is still Adventurer. */
+  setClass(className: ClassName): boolean {
+    if (this.character.className !== 'Adventurer') return false;
+    this.character = createCharacter(className);
+    return true;
+  }
 
   addLogEntry(text: string, type: CombatLogEntry['type']): void {
     this.combatLog.push({ text, type });
@@ -333,10 +347,13 @@ export class PlayerSession {
     session['combatLog'] = data.combatLog.slice(-MAX_LOG_ENTRIES);
     session['unlockSystem'] = UnlockSystem.fromKeys(grid, data.unlockedKeys);
 
-    // Restore character (default to fresh character for old saves)
-    if (data.character) {
+    // Restore character — reset to fresh Adventurer if class is invalid/legacy
+    const savedClassName = data.character?.className;
+    const isValidClass = savedClassName && ALL_CLASS_NAMES.includes(savedClassName as ClassName);
+
+    if (data.character && isValidClass) {
       session['character'] = {
-        className: data.character.className as 'Adventurer',
+        className: savedClassName as ClassName,
         level: data.character.level,
         xp: data.character.xp,
         gold: data.character.gold ?? 0,
@@ -348,6 +365,7 @@ export class PlayerSession {
           : { head: null, chest: null, hand: null, foot: null },
       };
     } else {
+      // Invalid or legacy class — reset to Adventurer (will force class selection on login)
       session['character'] = createDefaultCharacter();
     }
 
