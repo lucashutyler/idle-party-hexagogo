@@ -250,6 +250,8 @@ export class App {
     // Show bottom nav
     this.navEl.style.display = '';
 
+    const savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';
+
     new BottomNav(
       [
         { id: 'combat', label: 'Combat', icon: '⚔' },
@@ -259,12 +261,12 @@ export class App {
         { id: 'social', label: 'Social', icon: '💬' },
         { id: 'settings', label: 'Settings', icon: '⚙' },
       ],
-      'combat',
+      savedScreen,
       (tabId) => this.screenManager.switchTo(tabId),
       this.gameClient,
     );
 
-    // Switch to combat screen
-    this.screenManager.switchTo('combat');
+    // Switch to saved screen (or combat by default)
+    this.screenManager.switchTo(savedScreen);
   }
 }

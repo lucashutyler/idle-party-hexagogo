@@ -179,9 +179,20 @@ export class PartySystem {
     return true;
   }
 
-  /** Get pending invites for a player. */
+  /** Get pending invites for a player (invites they have received). */
   getPendingInvites(username: string): PartyInvite[] {
     return this.pendingInvites.get(username) ?? [];
+  }
+
+  /** Get usernames this player has pending outgoing invites for. */
+  getOutgoingInvites(inviterUsername: string): string[] {
+    const result: string[] = [];
+    for (const [targetUsername, invites] of this.pendingInvites) {
+      if (invites.some(inv => inv.inviterUsername === inviterUsername)) {
+        result.push(targetUsername);
+      }
+    }
+    return result;
   }
 
   /** Remove a specific invite. */

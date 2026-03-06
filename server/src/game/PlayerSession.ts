@@ -39,6 +39,7 @@ import type {
   ChatMessage,
   PartyGridPosition,
   FriendRequest,
+  ChatChannelType,
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
 
@@ -59,6 +60,8 @@ export class PlayerSession {
   private blockedUsers: Record<string, BlockLevel> = {};
   private guildId: string | null = null;
   private partyId: string | null = null;
+  private chatSendChannel: ChatChannelType = 'zone';
+  private chatDmTarget = '';
 
   /** Callback to get social state — set by PlayerManager after construction. */
   getSocialState?: () => ClientSocialState;
@@ -244,6 +247,11 @@ export class PlayerSession {
   getPartyId(): string | null { return this.partyId; }
   setPartyId(id: string | null): void { this.partyId = id; }
 
+  getChatSendChannel(): ChatChannelType { return this.chatSendChannel; }
+  setChatSendChannel(channel: ChatChannelType): void { this.chatSendChannel = channel; }
+  getChatDmTarget(): string { return this.chatDmTarget; }
+  setChatDmTarget(target: string): void { this.chatDmTarget = target; }
+
   /** Store a chat message in this player's personal history. */
   addChatMessage(message: ChatMessage): void {
     this.chatHistory.push(message);
@@ -328,6 +336,8 @@ export class PlayerSession {
       partyRole: partyInfo?.role,
       partyGridPosition: partyInfo?.gridPosition,
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
+      chatSendChannel: this.chatSendChannel,
+      chatDmTarget: this.chatDmTarget,
     };
   }
 
@@ -376,6 +386,8 @@ export class PlayerSession {
     session['guildId'] = data.guildId ?? null;
     session['partyId'] = null; // Parties are transient, not restored across restarts
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
+    session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
+    session['chatDmTarget'] = data.chatDmTarget ?? '';
 
     // Add server-online log entry
     session['addLogEntry']('Server back online — resuming!', 'battle');

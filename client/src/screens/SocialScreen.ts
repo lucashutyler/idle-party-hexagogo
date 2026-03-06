@@ -17,7 +17,7 @@ export class SocialScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
   private isActive = false;
-  private activeTab: SubTab = 'users';
+  private activeTab: SubTab = (sessionStorage.getItem('socialSubTab') as SubTab) || 'users';
   private unsubscribe?: () => void;
   private unsubChat?: () => void;
   private unsubChatHistory?: () => void;
@@ -40,6 +40,7 @@ export class SocialScreen implements Screen {
   private hasUnread = false;
   private chatHistoryLoaded = new Set<string>();
   private chatFocusAfterRender = false;
+  private chatPrefsInitialized = false;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -57,11 +58,12 @@ export class SocialScreen implements Screen {
     });
     this.unsubChat = this.gameClient.onChat((msg) => {
       // Add to unified timeline (dedupe by id)
-      if (!this.chatMessages.some(m => m.id === msg.id)) {
+      const isNew = !this.chatMessages.some(m => m.id === msg.id);
+      if (isNew) {
         this.chatMessages.push(msg);
       }
       if (this.isActive && this.activeTab === 'chat') {
-        this.renderChatPanel();
+        if (isNew) this.appendChatMessage(msg);
       } else {
         this.hasUnread = true;
       }
@@ -76,6 +78,11 @@ export class SocialScreen implements Screen {
       }
       this.chatMessages.sort((a, b) => a.timestamp - b.timestamp);
       if (this.isActive && this.activeTab === 'chat') {
+        // Skip re-render if user is typing in chat input
+        const active = document.activeElement;
+        if (active && active instanceof HTMLInputElement && this.panelContainer.contains(active)) {
+          return;
+        }
         this.renderChatPanel();
       }
     });
@@ -117,6 +124,7 @@ export class SocialScreen implements Screen {
     for (const btn of this.tabBar.querySelectorAll('.social-tab-btn')) {
       btn.addEventListener('click', () => {
         this.activeTab = btn.getAttribute('data-tab') as SubTab;
+        sessionStorage.setItem('socialSubTab', this.activeTab);
         if (this.activeTab === 'chat') this.hasUnread = false;
         this.renderTabBar();
         this.renderPanel();
@@ -127,6 +135,12 @@ export class SocialScreen implements Screen {
   private updateFromState(state: ServerStateMessage): void {
     this.lastSocial = state.social ?? null;
     this.lastState = state;
+    // Initialize chat preferences from server on first state received
+    if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
+      this.chatSendChannel = state.social.chatPreferences.sendChannel;
+      this.chatDmTarget = state.social.chatPreferences.dmTarget;
+      this.chatPrefsInitialized = true;
+    }
     // Skip re-render if user is interacting with an input or select (state updates would steal focus / close dropdowns)
     const active = document.activeElement;
     if (active && (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) && this.panelContainer.contains(active)) {
@@ -581,21 +595,24 @@ export class SocialScreen implements Screen {
       .filter(p => !partyMembers.has(p.username))
       .map(p => p.username)
       .sort();
+    const outgoingInvites = new Set(social.outgoingPartyInvites ?? []);
 
     const nearbyHtml = isLeaderOrOwner ? `
       <div class="social-group-header">Nearby Players</div>
       <div class="social-user-list">
         ${sameTilePlayers.length === 0
           ? '<div class="social-empty">No other players in this room</div>'
-          : sameTilePlayers.map(p => `
+          : sameTilePlayers.map(p => {
+            const alreadyInvited = outgoingInvites.has(p);
+            return `
             <div class="social-user-row" data-username="${this.escapeHtml(p)}">
               <span class="social-status-dot online"></span>
               <span class="social-user-name">${this.escapeHtml(p)}</span>
               <div class="social-user-actions">
-                <button class="social-action-btn add-friend social-nearby-invite" data-username="${this.escapeHtml(p)}">Invite</button>
+                <button class="social-action-btn add-friend social-nearby-invite" data-username="${this.escapeHtml(p)}"${alreadyInvited ? ' disabled' : ''}>${alreadyInvited ? 'Invited' : 'Invite'}</button>
               </div>
             </div>
-          `).join('')}
+          `;}).join('')}
       </div>
     ` : '';
 
@@ -936,6 +953,7 @@ export class SocialScreen implements Screen {
         dmSuggestions.innerHTML = '';
       }
       updateDmState();
+      this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
     });
 
     // Wire DM autocomplete
@@ -971,6 +989,7 @@ export class SocialScreen implements Screen {
         updateDmState();
         chatInput.focus();
         this.loadChatHistory('dm', username);
+        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
       }
     });
 
@@ -1004,6 +1023,40 @@ export class SocialScreen implements Screen {
     if (this.chatFocusAfterRender) {
       this.chatFocusAfterRender = false;
       chatInput.focus();
+    }
+  }
+
+  /** Append a single chat message to the existing DOM without full re-render. */
+  private appendChatMessage(msg: ChatMessage): void {
+    if (!this.chatFilters.has(msg.channelType)) return;
+
+    const msgContainer = this.panelContainer.querySelector('.social-chat-messages');
+    if (!msgContainer) return;
+
+    // Remove "No messages yet" placeholder if present
+    const emptyEl = msgContainer.querySelector('.social-empty');
+    if (emptyEl) emptyEl.remove();
+
+    // Check if user was scrolled to bottom before appending
+    const wasAtBottom = msgContainer.scrollTop + msgContainer.clientHeight >= msgContainer.scrollHeight - 20;
+
+    const ch = SocialScreen.CHAT_CHANNELS.find(c => c.type === msg.channelType);
+    const tag = ch?.tag ?? '?';
+    const selfName = this.lastState?.username ?? '';
+    const dmTo = (msg.channelType === 'dm' && msg.senderUsername === selfName)
+      ? ` <span class="chat-dm-to">to ${this.escapeHtml(msg.channelId)}</span>` : '';
+
+    const div = document.createElement('div');
+    div.className = 'social-chat-msg';
+    div.innerHTML = `
+      <span class="chat-tag chat-color-${msg.channelType}">[${tag}]</span>
+      <span class="social-chat-sender chat-color-${msg.channelType}">${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
+      <span class="social-chat-text">${this.escapeHtml(msg.text)}</span>
+    `;
+    msgContainer.appendChild(div);
+
+    if (wasAtBottom) {
+      msgContainer.scrollTop = msgContainer.scrollHeight;
     }
   }
 

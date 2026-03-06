@@ -80,9 +80,16 @@ export interface ClientSocialState {
   guildMembers: GuildMemberEntry[];
   party: GamePartyInfo | null;
   pendingInvites: PartyInvite[];
+  outgoingPartyInvites: string[];
   onlinePlayers: string[];
   allPlayers: string[];
   blockedUsers: Record<string, BlockLevel>;
+  chatPreferences?: ChatPreferences;
+}
+
+export interface ChatPreferences {
+  sendChannel: ChatChannelType;
+  dmTarget: string;
 }
 
 // --- Client -> Server messages ---
@@ -202,6 +209,12 @@ export interface ClientUnblockUserMessage {
   username: string;
 }
 
+export interface ClientSetChatPreferencesMessage {
+  type: 'set_chat_preferences';
+  sendChannel: ChatChannelType;
+  dmTarget: string;
+}
+
 export type ClientSocialMessage =
   | ClientSendFriendRequestMessage
   | ClientAcceptFriendRequestMessage
@@ -225,7 +238,8 @@ export type ClientSocialMessage =
   | ClientSendChatMessage
   | ClientRequestChatHistoryMessage
   | ClientBlockUserMessage
-  | ClientUnblockUserMessage;
+  | ClientUnblockUserMessage
+  | ClientSetChatPreferencesMessage;
 
 // --- Server -> Client messages ---
 export interface ServerSocialStateMessage {
