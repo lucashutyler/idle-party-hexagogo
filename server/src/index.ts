@@ -315,6 +315,15 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      if (msg.type === 'set_chat_preferences' && typeof msg.sendChannel === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (session) {
+          session.setChatSendChannel(msg.sendChannel);
+          session.setChatDmTarget(msg.dmTarget ?? '');
+        }
+        return;
+      }
+
       // --- Guild messages ---
 
       if (msg.type === 'create_guild' && typeof msg.name === 'string') {
@@ -532,6 +541,8 @@ wss.on('connection', (ws) => {
         }
         // Notify the target they have a pending invite
         playerManager.sendStateToPlayer(msg.username);
+        // Also update the inviter so outgoingPartyInvites reflects the sent invite
+        playerManager.sendStateToPlayer(username);
         return;
       }
 

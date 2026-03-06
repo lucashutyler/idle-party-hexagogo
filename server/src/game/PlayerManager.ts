@@ -185,9 +185,14 @@ export class PlayerManager {
       guildMembers: guildData?.members ?? [],
       party: partyData,
       pendingInvites: this.parties.getPendingInvites(username),
+      outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: this.getOnlinePlayers(),
       allPlayers: this.getAllUsernames(),
       blockedUsers: session?.getBlockedUsers() ?? {},
+      chatPreferences: {
+        sendChannel: session?.getChatSendChannel() ?? 'zone',
+        dmTarget: session?.getChatDmTarget() ?? '',
+      },
     };
   }
 

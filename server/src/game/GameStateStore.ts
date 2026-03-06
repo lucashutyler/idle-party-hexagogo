@@ -29,6 +29,8 @@ export interface PlayerSaveData {
   partyRole?: 'owner' | 'leader' | 'member';
   partyGridPosition?: number;
   chatHistory?: ChatMessage[];
+  chatSendChannel?: string;
+  chatDmTarget?: string;
 }
 
 /**

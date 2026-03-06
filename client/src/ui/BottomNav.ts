@@ -34,6 +34,7 @@ export class BottomNav {
 
       button.addEventListener('click', () => {
         this.setActive(tab.id);
+        sessionStorage.setItem('activeScreen', tab.id);
         onTabChange(tab.id);
       });
 

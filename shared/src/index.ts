@@ -188,6 +188,8 @@ export type {
   ClientRequestChatHistoryMessage,
   ClientBlockUserMessage,
   ClientUnblockUserMessage,
+  ClientSetChatPreferencesMessage,
+  ChatPreferences,
   ClientSocialMessage,
   ServerSocialStateMessage,
   ServerChatMessageMessage,
