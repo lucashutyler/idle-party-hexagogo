@@ -6,6 +6,8 @@ import {
   createPartyCombatState,
   createEncounter,
   getZone,
+  MONSTERS,
+  rollDrops,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -350,13 +352,57 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return;
 
-    for (const username of entry.members) {
-      const session = this.getSession(username);
-      if (!session) continue;
+    if (result === 'victory') {
+      const combat = entry.battleTimer.currentCombat;
+      const members = Array.from(entry.members);
+      const partySize = members.length;
 
-      if (result === 'victory') {
-        session.handleVictory(entry.battleTimer.currentCombat, entry.serverParty.tile);
-      } else {
+      // Compute total XP and gold once, then split
+      const totalXp = combat
+        ? combat.monsters.reduce((sum, m) => sum + m.xp, 0)
+        : 10;
+      let totalGold = 0;
+      if (combat) {
+        for (const m of combat.monsters) {
+          const def = MONSTERS[m.id];
+          if (def) {
+            totalGold += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
+          }
+        }
+      }
+
+      const splitXp = Math.ceil(totalXp / partySize);
+      const splitGold = Math.ceil(totalGold / partySize);
+
+      // Roll item drops once, randomly assign each to a party member
+      const memberItems: Map<string, string[]> = new Map();
+      for (const u of members) memberItems.set(u, []);
+
+      if (combat) {
+        for (const m of combat.monsters) {
+          const def = MONSTERS[m.id];
+          if (def?.drops) {
+            const dropped = rollDrops(def.drops);
+            for (const itemId of dropped) {
+              const recipient = members[Math.floor(Math.random() * partySize)];
+              memberItems.get(recipient)!.push(itemId);
+            }
+          }
+        }
+      }
+
+      for (const username of members) {
+        const session = this.getSession(username);
+        if (!session) continue;
+        session.handleVictory(
+          { xp: splitXp, gold: splitGold, items: memberItems.get(username)! },
+          entry.serverParty.tile,
+        );
+      }
+    } else {
+      for (const username of entry.members) {
+        const session = this.getSession(username);
+        if (!session) continue;
         session.addLogEntry('Defeat...', 'defeat');
       }
     }
