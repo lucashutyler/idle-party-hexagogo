@@ -11,10 +11,8 @@ import {
   addGold,
   calculateMaxHp,
   xpForNextLevel,
-  MONSTERS,
   ITEMS,
   computeEquipmentBonuses,
-  rollDrops,
   addItemToInventory,
   equipItem,
   unequipItem,
@@ -30,7 +28,6 @@ import type {
   CharacterState,
   ClassName,
   StatName,
-  PartyCombatState,
   PartyCombatant,
   ClientCharacterState,
   EquipSlot,
@@ -116,8 +113,8 @@ export class PlayerSession {
     };
   }
 
-  /** Handle victory rewards (called by PartyBattleManager). */
-  handleVictory(combat: PartyCombatState | null, tile: HexTile): void {
+  /** Handle victory rewards (called by PartyBattleManager with pre-split rewards). */
+  handleVictory(rewards: { xp: number; gold: number; items: string[] }, tile: HexTile): void {
     this.addLogEntry('Victory!', 'victory');
 
     const unlocked = this.unlockSystem.unlockAdjacentTiles(tile);
@@ -125,44 +122,20 @@ export class PlayerSession {
       this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
     }
 
-    // Award XP based on monsters defeated
-    const xpGained = combat
-      ? combat.monsters.reduce((sum, m) => sum + m.xp, 0)
-      : 10;
-
-    // Award gold based on monsters defeated
-    let goldGained = 0;
-    if (combat) {
-      for (const m of combat.monsters) {
-        const def = MONSTERS[m.id];
-        if (def) {
-          goldGained += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
-        }
-      }
-    }
-    if (goldGained > 0) {
-      addGold(this.character, goldGained);
-      this.addLogEntry(`+${goldGained} Gold`, 'victory');
+    if (rewards.gold > 0) {
+      addGold(this.character, rewards.gold);
+      this.addLogEntry(`+${rewards.gold} Gold`, 'victory');
     }
 
-    // Roll item drops per monster
-    if (combat) {
-      for (const m of combat.monsters) {
-        const def = MONSTERS[m.id];
-        if (def?.drops) {
-          const dropped = rollDrops(def.drops);
-          for (const itemId of dropped) {
-            const itemDef = ITEMS[itemId];
-            if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
-              this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
-            }
-          }
-        }
+    for (const itemId of rewards.items) {
+      const itemDef = ITEMS[itemId];
+      if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
+        this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
       }
     }
 
-    const { leveledUp, levelsGained } = addXp(this.character, xpGained);
-    this.addLogEntry(`+${xpGained} XP`, 'victory');
+    const { leveledUp, levelsGained } = addXp(this.character, rewards.xp);
+    this.addLogEntry(`+${rewards.xp} XP`, 'victory');
     if (leveledUp) {
       for (let i = 0; i < levelsGained; i++) {
         this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
