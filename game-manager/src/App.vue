@@ -2,7 +2,7 @@
   <div class="admin-layout">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h1>Game Manager</h1>
+        <h1>World Manager</h1>
         <span class="sidebar-subtitle">Idle Party RPG</span>
       </div>
       <nav class="sidebar-nav">

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as a monorepo with a web client, game server, and game manager.
+Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as a monorepo with a web client, game server, and world manager.
 
 ## Branch Policy
 
@@ -17,13 +17,13 @@ Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters f
 - **Always in a party** — every player is always in a party, even if solo. A solo party is auto-created on login/restore. Leaving a multi-player party auto-creates a new solo party. Players can always position themselves on the 3x3 grid.
 - **Always in combat** — the party is never truly idle; combat triggers continuously on every tile (towns, forests, etc.). Combat is shared per-party — all members fight the same monsters together. Combat is tick-based (1s per tick): each alive player attacks a target monster, then each alive monster attacks a target player, using grid-based targeting (same row first, front-line preference, scan up before down). Battles end when all monsters are dead (victory) or all players reach 0 HP (defeat). The result/movement cadence remains unchanged.
 - **Server authoritative** — combat resolved server-side, updates pushed to clients
-- **Database-driven content** — tiles, monsters, quests stored in DB, managed via game manager
+- **Database-driven content** — tiles, monsters, quests stored in DB, managed via world manager
 - **Instanced worlds** — soft-capped at 1000 players; invites allowed beyond cap, no random joins
 - **Web-first** — mobile-friendly is the primary use case, desktop fully supported
 
 ## Monorepo Structure
 
-npm workspaces monorepo. `npm run dev` runs server + client + game manager concurrently.
+npm workspaces monorepo. `npm run dev` runs server + client + world manager concurrently.
 
 ```
 shared/                        @idle-party-rpg/shared — pure logic, types, constants
@@ -114,7 +114,7 @@ data/                          Persistent runtime data (gitignored, created at r
 ├── <username>.json            # Per-player game state saves (includes chat history)
 ├── accounts.json              # Email→account mapping
 ├── guilds.json                # Guild data
-├── content/                   # Game content JSON files (managed via game manager)
+├── content/                   # Game content JSON files (managed via world manager)
 │   ├── monsters.json          # Monster definitions
 │   ├── items.json             # Item definitions
 │   ├── zones.json             # Zone definitions
@@ -153,10 +153,10 @@ setup-dev.ps1                  Dev setup for Windows PowerShell
 ## Commands
 
 ```bash
-npm run dev          # Start server (:3001) + client (:3000) + game manager (:3002) concurrently
+npm run dev          # Start server (:3001) + client (:3000) + world manager (:3002) concurrently
 npm run dev:client   # Client only
 npm run dev:server   # Server only
-npm run dev:admin    # Game manager only
+npm run dev:admin    # World manager only
 npm run build        # Build shared → client → server
 npm start            # Production: NODE_ENV=production, serves client + WS from one port
 npm run test         # Run all tests (vitest)
@@ -181,10 +181,10 @@ npm run typecheck    # tsc --build (all packages)
 - **Zone system**: Each `HexTile` has a `zone` string property. `ZoneTypes.ts` defines `ZoneDefinition` with encounter tables (weighted monster selection). Current zones: `friendly_forest` (Lv1 goblins) and `darkwood` (goblins, wolves, bandits). `createEncounter(zoneId)` uses the zone's encounter table for weighted random monster/count selection. Zone display name is sent to the client in `ServerStateMessage.zoneName`.
 - **Monster system**: `MonsterTypes.ts` defines `MonsterDefinition` catalog (goblin, wolf, bandit) with `drops?: ItemDrop[]` per monster, and `createEncounter(zoneId?)` factory with zone-aware weighted encounters. Each `MonsterInstance` has a `gridPosition: PartyGridPosition` for combat grid placement.
 - **Item & equipment system**: `ItemTypes.ts` defines items, rarities (`janky` 40%, `common` 25%), and equipment slots (`head`, `chest`, `hand`, `foot`). Items stack up to 99 in inventory. Equipment modifies combat: `bonusAttackMin/Max` adds to player damage, `damageReductionMin/Max` reduces incoming monster damage. Pure functions handle inventory/equipment operations (`addItemToInventory`, `equipItem`, `unequipItem`, `computeEquipmentBonuses`, `rollDrops`). Drops are rolled per-monster on victory. The `ItemsScreen` shows equipment slots (tap to unequip) and inventory (tap equippable items to equip). Current items: Janky Helmet (head, 0-1 reduction), Rusty Dagger (hand, 1-3 attack), Leather Vest (chest, 1-2 reduction), Mangy Pelt (non-equippable material).
-- **Content registry & hot-reload**: `ContentRegistry` is a mutable singleton in shared that holds references to the original `MONSTERS`, `ITEMS`, `ZONES`, `TILE_CONFIGS` record objects. Each system file registers its record at import time. `ContentStore` on the server reads/writes `data/content/*.json` and pushes changes into the registry via `setXxx()` methods that mutate records in-place (clear keys + `Object.assign`). This means all existing `import { MONSTERS }` code works unchanged — the registry mutates the same object reference. Content changes via the game manager apply immediately without server restart.
-- **Admin REST API**: Express Router mounted at `/admin/*` in `server/src/admin/adminRoutes.ts`. Full CRUD for monsters, items, zones, tile-types, and maps (including granular tile editing). Also exposes read-only player list and server stats. CORS allows both client (:3000) and game manager (:3002).
-- **Game manager**: Vue 3 SPA in `game-manager/` workspace (port 3002). Composition API with composables for CRUD state. SVG-based hex map editor with pan/zoom, paint/erase/zone/start modes using shared `HexUtils` math. Vite proxies `/admin` to the game server. Dark admin theme (not pixel-theme).
-- **Map data types**: `MapDefinition` (id, name, type, startPosition, tiles, portals) in `BattleTypes.ts`. `HexGrid.fromMapDefinition()` / `toMapDefinition()` convert between HexGrid and serialized format. `TileType` is extensible — `HexTile.type` is `string` (not enum) so custom tile types can be created via the game manager.
+- **Content registry & hot-reload**: `ContentRegistry` is a mutable singleton in shared that holds references to the original `MONSTERS`, `ITEMS`, `ZONES`, `TILE_CONFIGS` record objects. Each system file registers its record at import time. `ContentStore` on the server reads/writes `data/content/*.json` and pushes changes into the registry via `setXxx()` methods that mutate records in-place (clear keys + `Object.assign`). This means all existing `import { MONSTERS }` code works unchanged — the registry mutates the same object reference. Content changes via the world manager apply immediately without server restart.
+- **Admin REST API**: Express Router mounted at `/admin/*` in `server/src/admin/adminRoutes.ts`. Full CRUD for monsters, items, zones, tile-types, and maps (including granular tile editing). Also exposes read-only player list and server stats. CORS allows both client (:3000) and world manager (:3002).
+- **World manager**: Vue 3 SPA in `game-manager/` workspace (port 3002). Composition API with composables for CRUD state. SVG-based hex map editor with pan/zoom, paint/erase/zone/start modes using shared `HexUtils` math. Vite proxies `/admin` to the game server. Dark admin theme (not pixel-theme).
+- **Map data types**: `MapDefinition` (id, name, type, startPosition, tiles, portals) in `BattleTypes.ts`. `HexGrid.fromMapDefinition()` / `toMapDefinition()` convert between HexGrid and serialized format. `TileType` is extensible — `HexTile.type` is `string` (not enum) so custom tile types can be created via the world manager.
 - **Procedural map generation**: `MapData.ts` uses a seeded PRNG (mulberry32, seed=42) for deterministic world generation. The schema tiles form the "Friendly Forest" starting zone (~170 tiles). A border ring of mountains/water surrounds it with 4 exit gaps (3 tiles wide each). Beyond the border, ~1300 "Darkwood" wilderness tiles fill a ~45x45 offset-coordinate area (-15 to 28). Both server and client generate identical maps from the same seed — no map data is transmitted over the network.
 - **Server-side combat log**: `PlayerSession` maintains the last 100 log entries (battle start/end, damage, level-ups, movement, tile unlocks) with a running `battleCount`. Both are included in every `ServerStateMessage`. The client `CombatScreen` is a pure renderer of the server-provided log — no client-side state-transition tracking.
 - **Other players on map**: Each state message includes `otherPlayers: { username, col, row, zone }[]`. WorldMapScene renders same-zone players as individual markers; other-zone players show as count badges on their tile. Positions update on each player's own battle cycle.

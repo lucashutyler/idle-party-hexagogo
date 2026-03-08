@@ -73,7 +73,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// --- Admin routes (game manager) ---
+// --- Admin routes (world manager) ---
 app.use('/admin', createAdminRoutes({
   contentStore: gameLoop.contentStore,
   gameLoop,
