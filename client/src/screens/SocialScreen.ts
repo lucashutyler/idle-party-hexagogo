@@ -843,7 +843,8 @@ export class SocialScreen implements Screen {
 
     // Capture scroll position before re-render
     const oldMsgContainer = this.panelContainer.querySelector('.social-chat-messages');
-    const wasAtBottom = !oldMsgContainer || (oldMsgContainer.scrollTop + oldMsgContainer.clientHeight >= oldMsgContainer.scrollHeight - 20);
+    const oldScrollTop = oldMsgContainer ? oldMsgContainer.scrollTop : 0;
+    const wasAtBottom = !oldMsgContainer || (oldScrollTop + oldMsgContainer.clientHeight >= oldMsgContainer.scrollHeight - 20);
 
     this.panelContainer.innerHTML = `
       <div class="social-chat-container">
@@ -886,10 +887,14 @@ export class SocialScreen implements Screen {
       </div>
     `;
 
-    // Auto-scroll only if user was already at the bottom
+    // Restore scroll position: auto-scroll to bottom if user was there, otherwise preserve position
     const msgContainer = this.panelContainer.querySelector('.social-chat-messages');
-    if (msgContainer && wasAtBottom) {
-      msgContainer.scrollTop = msgContainer.scrollHeight;
+    if (msgContainer) {
+      if (wasAtBottom) {
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+      } else {
+        msgContainer.scrollTop = oldScrollTop;
+      }
     }
 
     // Wire filter toggles
