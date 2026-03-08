@@ -19,11 +19,11 @@ function getSesClient(): SESClient {
 
 export async function sendMagicLinkEmail(email: string, token: string): Promise<void> {
   const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
-  const verifyUrl = `${appUrl}/verify?token=${token}`;
+  const approveUrl = `${appUrl}/approve?token=${token}`;
 
   if (!isProd) {
     console.log(`[EmailService] DEV MODE — magic link for ${email}:`);
-    console.log(`  ${verifyUrl}`);
+    console.log(`  ${approveUrl}`);
     return;
   }
 
@@ -44,7 +44,7 @@ export async function sendMagicLinkEmail(email: string, token: string): Promise<
             <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
               <h2>Sign in to Idle Party RPG</h2>
               <p>Click the button below to sign in. This link expires in 15 minutes.</p>
-              <a href="${verifyUrl}" style="display: inline-block; padding: 12px 24px; background: #d4a017; color: #1a0a2e; text-decoration: none; border-radius: 4px; font-weight: bold;">
+              <a href="${approveUrl}" style="display: inline-block; padding: 12px 24px; background: #d4a017; color: #1a0a2e; text-decoration: none; border-radius: 4px; font-weight: bold;">
                 Sign In
               </a>
               <p style="margin-top: 24px; font-size: 12px; color: #888;">
@@ -54,7 +54,7 @@ export async function sendMagicLinkEmail(email: string, token: string): Promise<
           `,
         },
         Text: {
-          Data: `Sign in to Idle Party RPG:\n\n${verifyUrl}\n\nThis link expires in 15 minutes. If you didn't request this, you can safely ignore this email.`,
+          Data: `Sign in to Idle Party RPG:\n\n${approveUrl}\n\nThis link expires in 15 minutes. If you didn't request this, you can safely ignore this email.`,
         },
       },
     },

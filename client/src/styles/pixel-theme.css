@@ -1110,6 +1110,28 @@ html, body {
   text-decoration: underline;
 }
 
+.approve-close-hint {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-top: 8px;
+}
+
+.login-cancel-link {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--accent-gold);
+  text-decoration: none;
+  display: block;
+  text-align: center;
+  margin-top: 12px;
+}
+
+.login-cancel-link:hover {
+  text-decoration: underline;
+}
+
 .verify-details {
   width: 100%;
   max-width: 360px;

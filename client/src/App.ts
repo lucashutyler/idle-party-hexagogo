@@ -1,8 +1,9 @@
 import { GameClient } from './network/GameClient';
-import { getSession, loginWithEmail, verifyToken, setUsername } from './network/AuthClient';
+import { getSession, loginWithEmail, verifyToken, pollLoginStatus, setUsername } from './network/AuthClient';
 import { ScreenManager } from './screens/ScreenManager';
 import { LoginScreen } from './screens/LoginScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
+import { ApproveScreen } from './screens/ApproveScreen';
 import { UsernameScreen } from './screens/UsernameScreen';
 import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
@@ -24,6 +25,7 @@ export class App {
   private usernameScreen!: UsernameScreen;
   private offlineScreen!: OfflineScreen;
   private navEl!: HTMLElement;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.screenManager = new ScreenManager();
@@ -61,7 +63,15 @@ export class App {
   }
 
   private async checkSession(): Promise<void> {
-    // Magic link landing: /verify?token=...
+    // Magic link approval landing: /approve?token=...
+    if (window.location.pathname === '/approve') {
+      const approveScreen = new ApproveScreen('screen-approve');
+      this.screenManager.register('approve', document.getElementById('screen-approve')!, approveScreen);
+      this.screenManager.switchTo('approve');
+      return;
+    }
+
+    // Legacy verify landing (dev mode): /verify?token=...
     if (window.location.pathname === '/verify') {
       this.screenManager.switchTo('verify');
       return;
@@ -113,8 +123,14 @@ export class App {
         return;
       }
 
-      // Production mode: email sent, show "check your email" message
-      this.loginScreen.showCheckEmail();
+      // Production mode: email sent, poll for approval
+      if (result.loginId) {
+        this.loginScreen.showCheckEmail(() => {
+          this.stopPolling();
+          this.loginScreen.onActivate();
+        });
+        this.startPolling(result.loginId);
+      }
     } catch {
       this.loginScreen.showError('Could not connect to server');
       this.loginScreen.setLoading(false);
@@ -223,6 +239,41 @@ export class App {
       await this.connectAndEnterGame();
     } catch {
       this.offlineScreen.setRetrying(false);
+    }
+  }
+
+  private startPolling(loginId: string): void {
+    this.stopPolling();
+
+    this.pollTimer = setInterval(async () => {
+      try {
+        const result = await pollLoginStatus(loginId);
+
+        if (result.status === 'approved') {
+          this.stopPolling();
+          if (result.username) {
+            await this.connectAndEnterGame();
+          } else {
+            this.screenManager.switchTo('username');
+          }
+          return;
+        }
+
+        if (result.status === 'expired') {
+          this.stopPolling();
+          this.loginScreen.showExpired();
+          return;
+        }
+      } catch {
+        // Network error during poll: keep trying silently
+      }
+    }, 2000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
     }
   }
 
