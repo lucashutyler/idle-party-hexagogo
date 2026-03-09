@@ -33,15 +33,14 @@ shared/                        @idle-party-rpg/shared — pure logic, types, con
 │   │   ├── HexTile.ts         # Tile types, configs, HexTile class
 │   │   ├── HexGrid.ts         # Hex grid data structure & algorithms
 │   │   ├── HexPathfinder.ts   # A* pathfinding on hex grid
-│   │   ├── MapSchema.ts       # World map definition (will move to DB)
-│   │   └── MapData.ts         # Procedural map generation (seeded PRNG, border ring, zones)
+│   │   └── MapSchema.ts       # World/tile types (WorldTileDefinition, WorldData), seed data constants
 │   ├── systems/
 │   │   ├── BattleTypes.ts     # Battle/protocol types & constants
 │   │   ├── CharacterStats.ts  # Character types, XP/leveling, stat allocation
 │   │   ├── CombatEngine.ts    # Pure tick-based combat resolution (solo + party with grid targeting)
-│   │   ├── ItemTypes.ts       # Item definitions, inventory/equipment pure logic
-│   │   ├── MonsterTypes.ts    # Monster definitions, drops & zone-aware encounters
-│   │   ├── ZoneTypes.ts       # Zone definitions, encounter tables, zone lookup
+│   │   ├── ItemTypes.ts       # Item types, seed data (SEED_ITEMS), inventory/equipment pure logic (parameterized)
+│   │   ├── MonsterTypes.ts    # Monster types, seed data (SEED_MONSTERS), encounter factory (parameterized)
+│   │   ├── ZoneTypes.ts       # Zone types, seed data (SEED_ZONES), zone lookup (parameterized)
 │   │   ├── UnlockSystem.ts    # Tile unlock tracking & progression
 │   │   └── SocialTypes.ts     # Social types: friends, guild, party, chat, blocking
 │   └── index.ts               # Barrel export
@@ -66,14 +65,15 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
 │   ├── admin/
 │   │   ├── main.ts            # Admin entry point — imports CSS, creates AdminApp
-│   │   └── AdminApp.ts        # World Manager dashboard (accounts, monsters, items, zones, map viewer)
+│   │   └── AdminApp.ts        # World Manager dashboard (fetches from /api/admin/content, map viewer)
 │   ├── scenes/
 │   │   └── WorldMapScene.ts   # Phaser scene — hex rendering, input, camera, zone filtering
 │   ├── entities/
 │   │   └── Party.ts           # Client party — sprites, tweens, visuals
 │   ├── network/
 │   │   ├── AuthClient.ts      # REST client for /auth/* endpoints
-│   │   └── GameClient.ts      # WebSocket client — cookie-based auth, subscriber + chat listeners
+│   │   ├── GameClient.ts      # WebSocket client — cookie-based auth, subscriber + chat listeners
+│   │   └── WorldCache.ts      # Client world data cache (from GET /api/world), unlock-based fog of war
 │   ├── ui/
 │   │   ├── BottomNav.ts       # 6-tab pixel-styled bottom navigation bar
 │   │   └── TileInfoModal.ts   # Modal for tile click — shows info, players, invite/chat buttons
@@ -81,14 +81,14 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │       └── pixel-theme.css    # Global retro RPG styles, animations, layout
 ├── index.html                 # App shell DOM (login + username + screen containers + nav)
 ├── admin.html                 # World Manager entry HTML (separate from game client)
-└── vite.config.ts             # Vite config with multi-page build + /auth, /api/admin proxies
+└── vite.config.ts             # Vite config with multi-page build + /auth, /api proxies
 
 server/                        @idle-party-rpg/server — Node.js game server
 ├── src/
 │   ├── index.ts               # Express + WS server, session middleware, auth + admin routes
 │   ├── admin/
 │   │   ├── adminMiddleware.ts # Admin auth middleware (checks ADMIN_EMAILS env var)
-│   │   └── adminRoutes.ts     # Admin API routes: /api/admin/overview, /api/admin/accounts
+│   │   └── adminRoutes.ts     # Admin API routes: /api/admin/overview, /api/admin/accounts, /api/admin/content
 │   ├── auth/
 │   │   ├── AccountStore.ts    # Email→account JSON persistence (data/accounts.json)
 │   │   ├── TokenStore.ts      # In-memory magic link token store (15m expiry)
@@ -97,7 +97,8 @@ server/                        @idle-party-rpg/server — Node.js game server
 │   │   ├── authRoutes.ts      # REST endpoints: login, verify, session, username, logout
 │   │   └── session.d.ts       # express-session type augmentation
 │   └── game/
-│       ├── GameLoop.ts        # Game init, periodic saves, shutdown
+│       ├── ContentStore.ts     # Loads/saves game content JSON (data/monsters|items|zones|world.json), seeds defaults
+│       ├── GameLoop.ts        # Game init (ContentStore + grid + PlayerManager), periodic saves, shutdown
 │       ├── PlayerManager.ts   # Maps usernames → sessions, WebSocket routing, social wiring
 │       ├── PlayerSession.ts   # Per-player state (character, unlocks, combat log, social)
 │       ├── PartyBattleManager.ts # Shared combat & movement per party (owns ServerParty + ServerBattleTimer)
@@ -119,6 +120,10 @@ data/                          Persistent runtime data (gitignored, created at r
 ├── <username>.json            # Per-player game state saves (includes chat history)
 ├── accounts.json              # Email→account mapping
 ├── guilds.json                # Guild data
+├── monsters.json              # Monster definitions (loaded by ContentStore, auto-seeded)
+├── items.json                 # Item definitions (loaded by ContentStore, auto-seeded)
+├── zones.json                 # Zone definitions (loaded by ContentStore, auto-seeded)
+├── world.json                 # World map tile definitions (loaded by ContentStore, auto-seeded)
 └── sessions/                  # Express session files (one .json per session)
 
 deploy/                        Deployment config files
@@ -165,17 +170,21 @@ npm run typecheck    # tsc --build (all packages)
 - **Damage types**: Monsters have `damageType: 'physical' | 'magical'` (goblin/bandit = physical, wolf = magical). Knight's physical reduction applies only to physical damage (target only). Priest's magical reduction applies party-wide to magical damage. Equipment damage reduction applies to physical damage only.
 - **Character & leveling**: Each player has a `CharacterState` (class, level, XP, stats). XP is earned on victory (`XP_PER_VICTORY = 10`). XP to next level = `100 * currentLevel`. Stats do not increase on level-up. Max HP = `floor((30 + (level-1)*5 + CON) * hpMultiplier)`.
 - **Combat engine**: Pure functions in `CombatEngine.ts`. Solo: `createCombatState()`/`processTick()` — player attacks first alive monster (attackStat ± 2, min 1), then all alive monsters attack player. Party: `createPartyCombatState()`/`processPartyTick()` — all alive players attack targets, then all alive monsters attack targets. Player damage uses class `attackStat` (null = baseDamage 0, only variance + equip, min 1). Monster damage is reduced by Knight physical reduction or Priest magical reduction depending on `damageType`. Bard stat buff is applied at combat state creation time. `findTarget()` implements grid-based targeting on the 3x3 grid (positions 0-8): row = floor(pos/3), col = pos%3. Same row first; players prefer low-column monsters (front), monsters prefer high-column players (front); if no same-row target, scan up (lower row) then down (higher row). Equipment bonuses (`bonusAttackMin/Max`, `damageReductionMin/Max`) apply per-combatant.
-- **Zone system**: Each `HexTile` has a `zone` string property. `ZoneTypes.ts` defines `ZoneDefinition` with encounter tables (weighted monster selection). Current zones: `friendly_forest` (Lv1 goblins) and `darkwood` (goblins, wolves, bandits). `createEncounter(zoneId)` uses the zone's encounter table for weighted random monster/count selection. Zone display name is sent to the client in `ServerStateMessage.zoneName`.
-- **Monster system**: `MonsterTypes.ts` defines `MonsterDefinition` catalog (goblin, wolf, bandit) with `drops?: ItemDrop[]` and `damageType: DamageType` per monster, and `createEncounter(zoneId?)` factory with zone-aware weighted encounters. Each `MonsterInstance` has a `gridPosition: PartyGridPosition` for combat grid placement and inherits `damageType` from its definition.
-- **Item & equipment system**: `ItemTypes.ts` defines items, rarities (`janky` 40%, `common` 25%), and equipment slots (`head`, `chest`, `hand`, `foot`). Items stack up to 99 in inventory. Equipment modifies combat: `bonusAttackMin/Max` adds to player damage, `damageReductionMin/Max` reduces incoming monster damage. Pure functions handle inventory/equipment operations (`addItemToInventory`, `equipItem`, `unequipItem`, `computeEquipmentBonuses`, `rollDrops`). Drops are rolled per-monster on victory. The `ItemsScreen` shows equipment slots (tap to unequip) and inventory (tap equippable items to equip). Current items: Janky Helmet (head, 0-1 reduction), Rusty Dagger (hand, 1-3 attack), Leather Vest (chest, 1-2 reduction), Mangy Pelt (non-equippable material).
-- **Procedural map generation**: `MapData.ts` uses a seeded PRNG (mulberry32, seed=42) for deterministic world generation. The schema tiles form the "Friendly Forest" starting zone (~170 tiles). A border ring of mountains/water surrounds it with 4 exit gaps (3 tiles wide each). Beyond the border, ~1300 "Darkwood" wilderness tiles fill a ~45x45 offset-coordinate area (-15 to 28). Both server and client generate identical maps from the same seed — no map data is transmitted over the network.
+- **Data-driven content (ContentStore)**: Game content (monsters, items, zones, world map) is stored in `data/*.json` files, loaded at startup by `ContentStore` (`server/src/game/ContentStore.ts`). If files are missing, ContentStore seeds them with defaults from `SEED_MONSTERS`, `SEED_ITEMS`, `SEED_ZONES`, and a hand-crafted world map. ContentStore follows the `GuildStore` pattern (in-memory Maps + atomic JSON persistence). Content is NOT exposed via a public API — instead, the server sends only what each player needs.
+- **Parameterized shared functions**: Pure functions in shared that previously referenced module-level constants (`ITEMS`, `MONSTERS`, `ZONES`) now accept explicit data parameters. This allows the server to pass runtime-loaded content from ContentStore. E.g., `createEncounter(zoneId, monsters, zones)`, `equipItem(inv, equip, id, items)`, `computeEquipmentBonuses(equip, items)`, `getZone(zoneId, zones)`. The old constants are renamed to `SEED_*` and serve as seed data / test fixtures.
+- **Zone system**: Each `HexTile` has a `zone` string property. `ZoneTypes.ts` defines `ZoneDefinition` with encounter tables (weighted monster selection). Current zones: `hatchetmill` (Lv1 goblins, starting village), `darkwood` (goblins, wolves, bandits), and `crystal_caves` (goblins, wolves, bandits). `createEncounter(zoneId, monsters, zones)` uses the zone's encounter table for weighted random monster/count selection. Zone display name is sent to the client in `ServerStateMessage.zoneName`.
+- **Monster system**: `MonsterTypes.ts` defines `MonsterDefinition` type and `SEED_MONSTERS` catalog (goblin, wolf, bandit) with `drops?: ItemDrop[]` and `damageType: DamageType` per monster, and `createEncounter(zoneId, monsters, zones)` factory with zone-aware weighted encounters. Each `MonsterInstance` has a `gridPosition: PartyGridPosition` for combat grid placement and inherits `damageType` from its definition.
+- **Item & equipment system**: `ItemTypes.ts` defines items, rarities (`janky` 40%, `common` 25%), and equipment slots (`head`, `chest`, `hand`, `foot`). Items stack up to 99 in inventory. Equipment modifies combat: `bonusAttackMin/Max` adds to player damage, `damageReductionMin/Max` reduces incoming monster damage. Pure functions handle inventory/equipment operations (`addItemToInventory`, `equipItem`, `unequipItem`, `computeEquipmentBonuses`, `rollDrops`) — all accept explicit `items: Record<string, ItemDefinition>` parameter. Drops are rolled per-monster on victory. The `ItemsScreen` uses item definitions from `ServerStateMessage.itemDefinitions` (only items the player owns). Current seed items: Janky Helmet (head, 0-1 reduction), Rusty Dagger (hand, 1-3 attack), Leather Vest (chest, 1-2 reduction), Mangy Pelt (non-equippable material).
+- **World map & room names**: The world map is defined in `data/world.json` as an array of `WorldTileDefinition` objects, each with `col`, `row`, `type` (TileType), `zone` (zone ID), and `name` (room name, required). Every tile has an evocative room name (e.g., "Town Square", "Blacksmith", "Thick Trees"). The server loads this via `ContentStore` and builds the `HexGrid` at startup. The client receives ALL tiles via `GET /api/world` (auth'd) on login; fog of war rendering is determined client-side from `state.unlocked`.
+- **Fog of war (unlock-based)**: Fog of war is driven entirely by the existing `unlockedKeys` from `UnlockSystem` — no separate discovery tracking. The server sends all tiles to the client; the client determines visibility from `state.unlocked` (sent every tick). Three-tier rendering: **unlocked tiles** (full brightness, real icons, room name visible on click), **zone-unlocked tiles** (zone has at least one unlocked tile — dimmed, real tile type icons shown, room name hidden), **foggy tiles** (zone not yet unlocked — very dim, cloud icons: ☁️ for traversable, 🌑 for non-traversable). Zone names are always visible on all tiles. Players can click and attempt to travel to any visible tile regardless of fog state. Zone unlock is computed client-side by `WorldCache.updateUnlocked()` from the unlock keys.
+- **WorldCache (client)**: `WorldCache` (`client/src/network/WorldCache.ts`) is the client-side cache for world data. Loaded once from `GET /api/world` on login (in parallel with WS connect). Stores all tiles, start position, and computes unlock state from `state.unlocked` cube keys each tick. `updateUnlocked(cubeKeys)` converts cube→offset coordinates, tracks which tiles and zones are unlocked, and returns whether the set changed (triggering re-render). The `WorldMapScene` builds its `HexGrid` from WorldCache data.
 - **Server-side combat log**: `PlayerSession` maintains the last 100 log entries (battle start/end, damage, level-ups, movement, tile unlocks) with a running `battleCount`. Both are included in every `ServerStateMessage`. The client `CombatScreen` is a pure renderer of the server-provided log — no client-side state-transition tracking.
 - **Other players on map**: Each state message includes `otherPlayers: { username, col, row, zone }[]`. WorldMapScene renders same-zone players as individual markers; other-zone players show as count badges on their tile. Positions update on each player's own battle cycle.
 - **Room info modal**: Clicking a tile on the map opens a modal showing room name, type, players present, and a "Go to room" button. `TileInfoModal` class handles the DOM overlay. (UI calls tiles "rooms"; code still uses "tile" internally.)
 - **Zoom controls**: Mobile-friendly +/- zoom buttons on the map screen, wired to `WorldMapScene.adjustZoom()`.
 - **Floating HP bars**: CombatScreen renders HP bars floating above each combat sprite (players and enemies) arranged in grid formation rows (3 rows based on `gridPosition`). Player labels show username (current player highlighted in gold); monster labels show name only. HP shown as percentage bar only. Dead combatants are dimmed.
 - **Desktop font scaling**: `@media (min-width: 768px)` media query increases font sizes for all UI elements on desktop.
-- **World Manager (admin dashboard)**: Separate client page at `/admin` (dev: `/admin.html`) for viewing server data and game content. Admin auth uses `ADMIN_EMAILS` env var (comma-separated emails). Server-side middleware checks session email against the list (401 if unauthenticated, 403 if not admin). API endpoints at `/api/admin/*` return runtime data (overview stats, accounts with online status). Game content (monsters, items, zones) and the map are imported directly from `@idle-party-rpg/shared` on the client — no server API needed since they're deterministic constants. The map viewer uses HTML5 Canvas with pan/zoom, rendering tiles via `generateWorldMap()` + `cubeToPixel()` + `getHexCorners()`. Built as a separate Vite entry point (`admin.html`) isolated from the game client.
+- **World Manager (admin dashboard)**: Separate client page at `/admin` (dev: `/admin.html`) for viewing server data and game content. Admin auth uses `ADMIN_EMAILS` env var (comma-separated emails). Server-side middleware checks session email against the list (401 if unauthenticated, 403 if not admin). API endpoints at `/api/admin/*` return runtime data (overview stats, accounts with online status) and full unfiltered game content (`GET /api/admin/content` returns all monsters, items, zones, and world data). The map viewer uses HTML5 Canvas with pan/zoom, rendering tiles from the content API. Room names are shown on all tiles (admin sees everything, no fog of war). Built as a separate Vite entry point (`admin.html`) isolated from the game client.
 - **Social system**: Full social tab (6th tab) with 5 sub-tabs:
   - **Users**: All registered players (not just online) with search, sort (name/status), filter (all/room/zone/friends/guild/party). Online/offline status dots with group headers when sorted by status. Friend request (Add/Revoke/Accept/Decline based on request state), block/unblock, chat actions per user. Data sourced from `AccountStore.getAllUsernames()`.
   - **Friends**: Request-based two-way friend system. Sections: Incoming requests (Accept/Decline), Online friends, Offline friends, Pending sent (Revoke). Outgoing requests persisted per-player; incoming index rebuilt on player init. Cross-requests auto-accept. Unfriending is symmetric (removes from both players).
@@ -187,7 +196,7 @@ npm run typecheck    # tsc --build (all packages)
 - **Separation of concerns**: Phaser Graphics for rendering, HTML/CSS for all non-map UI (camera-independent), pure logic in shared systems
 - **A* pathfinding**: Hex distance heuristic with cross-track tie-breaker
 - **Visual style**: Pixel/retro RPG — Press Start 2P font, CSS custom properties for theming, CSS keyframe animations for battle states. All UI is vanilla HTML/CSS (no framework).
-- **State persistence**: Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added. Saved state per player: `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`, `character` (className, level, xp, stats, priorityStat, inventory, equipment), `friends`, `outgoingFriendRequests`, `blockedUsers`, `guildId`, `partyId`, `partyRole`, `partyGridPosition`, `chatHistory` (last 1000 messages), `chatSendChannel`, `chatDmTarget`. The `character` field is optional in `PlayerSaveData` — old saves get a fresh Level 1 Adventurer on load. The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment. Social fields are optional — old saves default to empty. Party state (`partyId`, `partyRole`, `partyGridPosition`) is saved and restored — multi-player parties survive server restarts. Guild data is saved separately in `data/guilds.json`. The store interface is swappable for SQLite/Postgres.
+- **State persistence**: Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added. Saved state per player: `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`, `character` (className, level, xp, stats, priorityStat, inventory, equipment), `friends`, `outgoingFriendRequests`, `blockedUsers`, `guildId`, `partyId`, `partyRole`, `partyGridPosition`, `chatHistory` (last 1000 messages), `chatSendChannel`, `chatDmTarget`. The `character` field is optional in `PlayerSaveData` — old saves get a fresh Level 1 Adventurer on load. The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment. Social fields are optional — old saves default to empty. Party state (`partyId`, `partyRole`, `partyGridPosition`) is saved and restored — multi-player parties survive server restarts. Guild data is saved separately in `data/guilds.json`. Game content is saved separately in `data/monsters.json`, `data/items.json`, `data/zones.json`, `data/world.json` via `ContentStore`. The store interface is swappable for SQLite/Postgres.
 - **Client UI state persistence**: Active screen and social sub-tab are saved to `sessionStorage` so browser refreshes restore the user's last view. Chat channel preference (send channel + DM target) is persisted server-side so it syncs across devices. Incoming chat messages are appended to the DOM without re-rendering the entire chat panel, preserving input focus and typed text.
 
 ## Keeping Docs Current
@@ -214,6 +223,7 @@ Everything in `data/` is persisted behind a **swappable interface** so the stora
 - **Sessions**: express-session `Store` class → currently `JsonSessionStore` (`server/src/auth/JsonSessionStore.ts`)
 - **Accounts**: `AccountStore` reads/writes `data/accounts.json` directly (should be interfaced when migrating to a DB)
 - **Guilds**: `GuildStore` reads/writes `data/guilds.json`
+- **Game content**: `ContentStore` reads/writes `data/monsters.json`, `data/items.json`, `data/zones.json`, `data/world.json`. Auto-seeds from `SEED_*` constants if files missing.
 - **Chat**: Stored per-player in `PlayerSaveData.chatHistory` (saved with each player's JSON file)
 
 When adding new persistent data to `data/`, always define an interface or extend an existing one. Never read/write files directly from game logic — go through the store abstraction.

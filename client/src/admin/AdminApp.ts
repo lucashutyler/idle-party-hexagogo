@@ -1,15 +1,20 @@
 import {
-  MONSTERS,
-  ITEMS,
-  ZONES,
-  generateWorldMap,
+  HexGrid,
+  HexTile,
+  offsetToCube,
   cubeToPixel,
   cubeToOffset,
   getHexCorners,
   TILE_CONFIGS,
   HEX_SIZE,
 } from '@idle-party-rpg/shared';
-import type { HexTile } from '@idle-party-rpg/shared';
+import type {
+  MonsterDefinition,
+  ItemDefinition,
+  ZoneDefinition,
+  WorldTileDefinition,
+  WorldData,
+} from '@idle-party-rpg/shared';
 
 interface OverviewData {
   onlinePlayers: number;
@@ -25,6 +30,13 @@ interface AccountData {
   verified: boolean;
   createdAt: string;
   isOnline: boolean;
+}
+
+interface ContentData {
+  monsters: Record<string, MonsterDefinition>;
+  items: Record<string, ItemDefinition>;
+  zones: Record<string, ZoneDefinition>;
+  world: WorldData;
 }
 
 type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'zones' | 'map';
@@ -49,13 +61,17 @@ export class AdminApp {
   private activeTab: TabId = 'overview';
   private overview: OverviewData | null = null;
   private accounts: AccountData[] = [];
+  private content: ContentData | null = null;
   private mapTiles: HexTile[] = [];
+
+  /** World tile definitions for room name lookups. */
+  private worldTileDefs = new Map<string, WorldTileDefinition>();
 
   // Map canvas state
   private mapCanvas: HTMLCanvasElement | null = null;
   private mapCtx: CanvasRenderingContext2D | null = null;
   private mapOffset = { x: 0, y: 0 };
-  private mapZoom = 0.4;
+  private mapZoom = 1.0;
   private isDragging = false;
   private dragStart = { x: 0, y: 0 };
   private dragOffsetStart = { x: 0, y: 0 };
@@ -85,16 +101,25 @@ export class AdminApp {
 
     // Fetch admin data
     try {
-      const [overview, accountsData] = await Promise.all([
+      const [overview, accountsData, contentData] = await Promise.all([
         this.fetchAdmin<OverviewData>('/api/admin/overview'),
         this.fetchAdmin<{ accounts: AccountData[] }>('/api/admin/accounts'),
+        this.fetchAdmin<ContentData>('/api/admin/content'),
       ]);
 
       this.overview = overview;
       this.accounts = accountsData.accounts;
+      this.content = contentData;
 
-      // Generate map client-side (deterministic, same as server)
-      const grid = generateWorldMap();
+      // Build hex grid from content world data
+      const grid = new HexGrid();
+      this.worldTileDefs.clear();
+      for (const tileDef of contentData.world.tiles) {
+        const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
+        const tile = new HexTile(coord, tileDef.type, tileDef.zone);
+        grid.addTile(tile);
+        this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
+      }
       this.mapTiles = grid.getAllTiles();
 
       // Restore last active tab from sessionStorage
@@ -334,10 +359,13 @@ export class AdminApp {
   }
 
   private renderMonsters(): string {
-    const monsters = Object.values(MONSTERS);
+    if (!this.content) return '<div class="admin-page-empty">No data</div>';
+    const monsters = Object.values(this.content.monsters);
+    const items = this.content.items;
+
     const rows = monsters.map(m => {
       const drops = m.drops?.map(d => {
-        const item = ITEMS[d.itemId];
+        const item = items[d.itemId];
         return `${item?.name ?? d.itemId} (${Math.round(d.chance * 100)}%)`;
       }).join(', ') ?? 'None';
 
@@ -380,7 +408,9 @@ export class AdminApp {
   }
 
   private renderItems(): string {
-    const items = Object.values(ITEMS);
+    if (!this.content) return '<div class="admin-page-empty">No data</div>';
+    const items = Object.values(this.content.items);
+
     const rows = items.map(i => {
       const effects: string[] = [];
       if (i.bonusAttackMin != null && i.bonusAttackMax != null && i.bonusAttackMax > 0) {
@@ -424,10 +454,13 @@ export class AdminApp {
   }
 
   private renderZones(): string {
-    const zones = Object.values(ZONES);
+    if (!this.content) return '<div class="admin-page-empty">No data</div>';
+    const zones = Object.values(this.content.zones);
+    const monsters = this.content.monsters;
+
     const rows = zones.map(z => {
       const encounters = z.encounterTable.map(e => {
-        const monster = MONSTERS[e.monsterId];
+        const monster = monsters[e.monsterId];
         return `${monster?.name ?? e.monsterId} (w:${e.weight}, ${e.minCount}-${e.maxCount})`;
       }).join(', ');
 
@@ -505,13 +538,12 @@ export class AdminApp {
     if (!this.mapCanvas) return;
     this.mapCtx = this.mapCanvas.getContext('2d');
 
-    // Resize canvas to fill container
     const resizeCanvas = () => {
       if (!this.mapCanvas) return;
       const wrap = this.mapCanvas.parentElement;
       if (wrap) {
         this.mapCanvas.width = wrap.clientWidth;
-        this.mapCanvas.height = wrap.clientHeight - 40; // leave room for controls
+        this.mapCanvas.height = wrap.clientHeight - 40;
         if (!this.mapInitialized) {
           this.mapOffset = { x: this.mapCanvas.width / 2, y: this.mapCanvas.height / 2 };
           this.mapInitialized = true;
@@ -586,7 +618,7 @@ export class AdminApp {
       this.drawMap();
     });
     document.getElementById('map-reset')?.addEventListener('click', () => {
-      this.mapZoom = 0.4;
+      this.mapZoom = 1.0;
       this.mapOffset = {
         x: this.mapCanvas!.width / 2,
         y: this.mapCanvas!.height / 2,
@@ -631,7 +663,7 @@ export class AdminApp {
       ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
       ctx.fill();
 
-      ctx.strokeStyle = tile.zone === 'darkwood' ? '#1a1a2e' : '#2a2a3e';
+      ctx.strokeStyle = '#2a2a3e';
       ctx.lineWidth = 0.5;
       ctx.stroke();
     }
@@ -660,7 +692,9 @@ export class AdminApp {
 
     if (closest) {
       const offset = cubeToOffset(closest.coord);
-      infoEl.textContent = `${closest.type} (${offset.col}, ${offset.row}) — ${closest.zone}`;
+      const tileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
+      const roomName = tileDef?.name ? ` — ${tileDef.name}` : '';
+      infoEl.textContent = `${closest.type} (${offset.col}, ${offset.row}) — ${closest.zone}${roomName}`;
     } else {
       infoEl.textContent = '';
     }

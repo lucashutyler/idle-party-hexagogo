@@ -6,7 +6,6 @@ import {
   createPartyCombatState,
   createEncounter,
   getZone,
-  MONSTERS,
   rollDrops,
 } from '@idle-party-rpg/shared';
 import type {
@@ -20,6 +19,7 @@ import type {
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
 import type { PlayerSession } from './PlayerSession.js';
+import type { ContentStore } from './ContentStore.js';
 
 interface PartyBattleEntry {
   partyId: string;
@@ -31,15 +31,18 @@ interface PartyBattleEntry {
 export class PartyBattleManager {
   private entries = new Map<string, PartyBattleEntry>();
   private grid: HexGrid;
+  private content: ContentStore;
   private getSession: (username: string) => PlayerSession | undefined;
   private broadcastToMember: (username: string) => void;
 
   constructor(
     grid: HexGrid,
+    content: ContentStore,
     getSession: (username: string) => PlayerSession | undefined,
     broadcastToMember: (username: string) => void,
   ) {
     this.grid = grid;
+    this.content = content;
     this.getSession = getSession;
     this.broadcastToMember = broadcastToMember;
   }
@@ -90,7 +93,8 @@ export class PartyBattleManager {
             const s = this.getSession(m);
             if (s) {
               const pos = cubeToOffset(serverParty.position);
-              const zone = getZone(serverParty.tile.zone);
+              const allZones = this.content.getAllZones();
+              const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
               s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
             }
@@ -164,7 +168,8 @@ export class PartyBattleManager {
             const s = this.getSession(m);
             if (s) {
               const pos = cubeToOffset(serverParty.position);
-              const zone = getZone(serverParty.tile.zone);
+              const allZones = this.content.getAllZones();
+              const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
               s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
             }
@@ -329,9 +334,12 @@ export class PartyBattleManager {
 
   private createCombatForParty(partyId: string): PartyCombatState {
     const entry = this.entries.get(partyId);
+    const allMonsters = this.content.getAllMonsters();
+    const allZones = this.content.getAllZones();
+
     if (!entry) {
       // Fallback: empty combat
-      return createPartyCombatState([], createEncounter());
+      return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones));
     }
 
     const players: PartyCombatant[] = [];
@@ -343,7 +351,7 @@ export class PartyBattleManager {
     }
 
     const zone = entry.serverParty.tile.zone;
-    const monsters = createEncounter(zone);
+    const monsters = createEncounter(zone, allMonsters, allZones);
 
     return createPartyCombatState(players, monsters);
   }
@@ -364,7 +372,7 @@ export class PartyBattleManager {
       let totalGold = 0;
       if (combat) {
         for (const m of combat.monsters) {
-          const def = MONSTERS[m.id];
+          const def = this.content.getMonster(m.id);
           if (def) {
             totalGold += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
           }
@@ -380,7 +388,7 @@ export class PartyBattleManager {
 
       if (combat) {
         for (const m of combat.monsters) {
-          const def = MONSTERS[m.id];
+          const def = this.content.getMonster(m.id);
           if (def?.drops) {
             const dropped = rollDrops(def.drops);
             for (const itemId of dropped) {

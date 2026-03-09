@@ -1,5 +1,5 @@
 import type { StatName, StatBlock } from './CharacterStats.js';
-import type { EquipSlot } from './ItemTypes.js';
+import type { EquipSlot, ItemDefinition } from './ItemTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type {
   ClientSocialState,
@@ -8,6 +8,7 @@ import type {
   ServerChatMessageMessage,
   ServerChatHistoryMessage,
 } from './SocialTypes.js';
+
 
 export type BattleTimerState = 'battle' | 'result';
 export type BattleResult = 'victory' | 'defeat';
@@ -109,6 +110,8 @@ export interface ServerStateMessage {
   character: ClientCharacterState;
   zoneName: string;
   social?: ClientSocialState;
+  /** Item definitions for items the player currently owns (inventory + equipment). */
+  itemDefinitions: Record<string, ItemDefinition>;
 }
 
 export interface ClientMoveMessage {

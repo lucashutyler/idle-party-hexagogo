@@ -1,4 +1,5 @@
 import { GameClient } from './network/GameClient';
+import { WorldCache } from './network/WorldCache';
 import { getSession, loginWithEmail, verifyToken, pollLoginStatus, setUsername } from './network/AuthClient';
 import { ScreenManager } from './screens/ScreenManager';
 import { LoginScreen } from './screens/LoginScreen';
@@ -19,6 +20,7 @@ const CONNECTION_ERROR = 'Could not connect to server';
 
 export class App {
   private gameClient!: GameClient;
+  private worldCache = new WorldCache();
   private screenManager: ScreenManager;
   private loginScreen!: LoginScreen;
   private verifyScreen!: VerifyScreen;
@@ -203,10 +205,17 @@ export class App {
 
   private async connectAndEnterGame(): Promise<void> {
     this.gameClient = new GameClient();
-    const result = await this.gameClient.connect();
 
-    if (!result.success) {
-      if (result.error === CONNECTION_ERROR) {
+    // Load world data (per-player filtered) and connect WS in parallel
+    const [connectResult] = await Promise.all([
+      this.gameClient.connect(),
+      this.worldCache.loadWorld().catch(err => {
+        console.warn('[App] Failed to load world data:', err);
+      }),
+    ]);
+
+    if (!connectResult.success) {
+      if (connectResult.error === CONNECTION_ERROR) {
         this.screenManager.switchTo('offline');
         return;
       }
@@ -279,7 +288,7 @@ export class App {
 
   private enterGame(): void {
     const combatScreen = new CombatScreen('screen-combat', this.gameClient);
-    const mapScreen = new MapScreen('screen-map', this.gameClient);
+    const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const characterScreen = new CharacterScreen('screen-character', this.gameClient);
     const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
     const socialScreen = new SocialScreen('screen-social', this.gameClient);

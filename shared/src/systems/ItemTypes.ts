@@ -40,7 +40,7 @@ export const RARITY_DROP_RATES: Record<ItemRarity, number> = {
 
 export const EQUIP_SLOTS: EquipSlot[] = ['head', 'chest', 'hand', 'foot'];
 
-export const ITEMS: Record<string, ItemDefinition> = {
+export const SEED_ITEMS: Record<string, ItemDefinition> = {
   janky_helmet: {
     id: 'janky_helmet',
     name: 'Janky Helmet',
@@ -110,8 +110,9 @@ export function equipItem(
   inventory: Record<string, number>,
   equipment: Record<string, string | null>,
   itemId: string,
+  items: Record<string, ItemDefinition>,
 ): { success: boolean; unequippedItemId?: string } {
-  const def = ITEMS[itemId];
+  const def = items[itemId];
   if (!def || !def.equipSlot) return { success: false };
 
   // Must have the item in inventory
@@ -156,7 +157,10 @@ export function unequipItem(
 }
 
 /** Compute combined equipment bonuses across all equipped items. */
-export function computeEquipmentBonuses(equipment: Record<string, string | null>): EquipmentBonuses {
+export function computeEquipmentBonuses(
+  equipment: Record<string, string | null>,
+  items: Record<string, ItemDefinition>,
+): EquipmentBonuses {
   const bonuses: EquipmentBonuses = {
     bonusAttackMin: 0,
     bonusAttackMax: 0,
@@ -167,7 +171,7 @@ export function computeEquipmentBonuses(equipment: Record<string, string | null>
 
   for (const itemId of Object.values(equipment)) {
     if (!itemId) continue;
-    const def = ITEMS[itemId];
+    const def = items[itemId];
     if (!def) continue;
     bonuses.bonusAttackMin += def.bonusAttackMin ?? 0;
     bonuses.bonusAttackMax += def.bonusAttackMax ?? 0;

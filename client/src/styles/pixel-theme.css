@@ -929,13 +929,12 @@ html, body {
   color: var(--text-dim);
 }
 
-.tile-modal-type {
-  font-size: 8px;
-  color: var(--text-secondary);
+.tile-modal-room-name {
+  font-size: 9px;
+  color: #ffffff;
 }
 
-.tile-modal-desc {
-  font-size: 7px;
+.tile-modal-room-unexplored {
   color: var(--text-dim);
   font-style: italic;
 }

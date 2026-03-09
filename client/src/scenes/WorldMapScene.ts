@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import {
   HexGrid,
+  HexTile,
   TileType,
-  generateWorldMap,
   HEX_SIZE,
   getHexCorners,
   getNeighbors,
@@ -10,9 +10,9 @@ import {
   offsetToCube,
   cubeToPixel,
   cubeToOffset,
-  getZone,
 } from '@idle-party-rpg/shared';
-import type { ServerStateMessage, OtherPlayerState, HexTile } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, OtherPlayerState, WorldTileDefinition } from '@idle-party-rpg/shared';
+import type { WorldCache } from '../network/WorldCache';
 import { Party } from '../entities/Party';
 
 export interface TileClickInfo {
@@ -20,6 +20,7 @@ export interface TileClickInfo {
   row: number;
   tileType: string;
   zoneName: string;
+  roomName: string;
   zoneId: string;
   isTraversable: boolean;
   isUnlocked: boolean;
@@ -40,10 +41,11 @@ interface OtherPartyMarker {
 
 export class WorldMapScene extends Phaser.Scene {
   private grid!: HexGrid;
+  private worldCache: WorldCache;
   private party?: Party;
 
-  /** Set of tile keys the server says are unlocked. */
-  private unlockedKeys = new Set<string>();
+  /** World tile definitions keyed by "col,row" for room name lookups. */
+  private worldTileDefs = new Map<string, WorldTileDefinition>();
 
   /** Other player markers on the map (same-zone only). */
   private otherParties = new Map<string, OtherPartyMarker>();
@@ -92,13 +94,14 @@ export class WorldMapScene extends Phaser.Scene {
   // Track initial state for snap vs tween
   private isFirstState = true;
 
-  constructor() {
+  constructor(worldCache: WorldCache) {
     super({ key: 'WorldMapScene' });
+    this.worldCache = worldCache;
   }
 
   create(): void {
-    // Generate the map from schema (used for rendering / tile lookup only)
-    this.grid = generateWorldMap();
+    // Build grid from world cache data
+    this.grid = this.buildGridFromCache();
 
     // Create graphics layers
     this.tileGraphics = this.add.graphics();
@@ -119,7 +122,7 @@ export class WorldMapScene extends Phaser.Scene {
     this.tooltipText.setVisible(false);
     this.tooltipText.setScrollFactor(0); // fixed to screen
 
-    // Render the hex grid (all locked initially — server will tell us what's unlocked)
+    // Render the hex grid
     this.renderGrid();
 
     // Set up camera + input
@@ -149,10 +152,10 @@ export class WorldMapScene extends Phaser.Scene {
   applyServerState(state: ServerStateMessage, snap?: boolean): void {
     const shouldSnap = snap || this.isFirstState;
 
-    // Update unlocked set & re-render if changed
-    const newKeys = new Set(state.unlocked);
-    if (newKeys.size !== this.unlockedKeys.size || !this.setsEqual(newKeys, this.unlockedKeys)) {
-      this.unlockedKeys = newKeys;
+    // Update unlock state from server; re-render if changed or on snap
+    const unlockedChanged = this.worldCache.updateUnlocked(state.unlocked);
+    if (unlockedChanged || shouldSnap) {
+      this.grid = this.buildGridFromCache();
       this.renderGrid();
     }
 
@@ -209,11 +212,20 @@ export class WorldMapScene extends Phaser.Scene {
     }
   }
 
-  private setsEqual(a: Set<string>, b: Set<string>): boolean {
-    for (const key of a) {
-      if (!b.has(key)) return false;
+  // ── Grid Building ─────────────────────────────────────────
+
+  private buildGridFromCache(): HexGrid {
+    const grid = new HexGrid();
+    this.worldTileDefs.clear();
+
+    for (const tileDef of this.worldCache.getTiles()) {
+      const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
+      const tile = new HexTile(coord, tileDef.type, tileDef.zone);
+      grid.addTile(tile);
+      this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }
-    return true;
+
+    return grid;
   }
 
   // ── Other Players ────────────────────────────────────────
@@ -224,7 +236,7 @@ export class WorldMapScene extends Phaser.Scene {
 
     // Separate players into same-zone (individual markers) and other-zone (count badges)
     const sameZone: OtherPlayerState[] = [];
-    const otherZoneTiles = new Map<string, number>(); // "col,row" -> count
+    const otherZoneTiles = new Map<string, number>();
 
     for (const other of others) {
       if (this.currentZone && other.zone !== this.currentZone) {
@@ -244,7 +256,6 @@ export class WorldMapScene extends Phaser.Scene {
 
       let marker = this.otherParties.get(other.username);
       if (marker) {
-        // Tween to new position if it changed
         if (marker.circle.x !== x || marker.circle.y !== y) {
           const m = marker;
           m.tween?.stop();
@@ -260,7 +271,6 @@ export class WorldMapScene extends Phaser.Scene {
           });
         }
       } else {
-        // Create new marker
         const circle = this.add.circle(x, y, OTHER_PLAYER_RADIUS, OTHER_PLAYER_COLOR);
         circle.setStrokeStyle(2, 0xffffff);
         circle.setDepth(90);
@@ -344,10 +354,13 @@ export class WorldMapScene extends Phaser.Scene {
       const x = pos.x + this.mapOffsetX;
       const y = pos.y + this.mapOffsetY;
 
-      const isUnlocked = this.unlockedKeys.has(tile.key);
-      const isDarkwood = tile.zone === 'darkwood';
-      const alpha = isUnlocked ? 1 : isDarkwood ? 0.25 : 0.4;
-      const darkenFactor = isDarkwood ? 0.35 : 0.5;
+      const offset = cubeToOffset(tile.coord);
+      const isUnlocked = this.worldCache.isUnlocked(offset.col, offset.row);
+      const isZoneUnlocked = this.worldCache.isZoneUnlocked(tile.zone);
+
+      // Visibility: unlocked tiles are bright, zone-unlocked tiles are dimmed, foggy tiles are very dim
+      const alpha = isUnlocked ? 1 : isZoneUnlocked ? 0.6 : 0.3;
+      const darkenFactor = isUnlocked ? 1 : isZoneUnlocked ? 0.7 : 0.4;
       const color = isUnlocked ? tile.color : this.darkenColor(tile.color, darkenFactor);
 
       // Fill
@@ -372,8 +385,8 @@ export class WorldMapScene extends Phaser.Scene {
       this.tileGraphics.closePath();
       this.tileGraphics.strokePath();
 
-      // Icons
-      this.drawTileIcon(tile.type, x, y, isUnlocked, isDarkwood);
+      // Icons: show real type if zone unlocked, clouds if zone still in fog
+      this.drawTileIcon(tile.type, tile.isTraversable, isZoneUnlocked, isUnlocked, x, y);
     }
 
     // Draw zone boundary lines
@@ -387,30 +400,12 @@ export class WorldMapScene extends Phaser.Scene {
     return (r << 16) | (g << 8) | b;
   }
 
-  /**
-   * Draw visible boundary lines where zones meet.
-   * For each tile, checks its 6 neighbors — if a neighbor is in a different zone,
-   * draws a glowing line along that shared hex edge.
-   *
-   * Flat-top hex corner layout (screen coords, Y-down):
-   *   Corner 0 (0°)=right, 1 (60°)=bottom-right, 2 (120°)=bottom-left,
-   *   3 (180°)=left, 4 (240°)=top-left, 5 (300°)=top-right
-   *
-   * Neighbor direction → hex edge (corner pair):
-   *   0 East→[0,1], 1 NE→[5,0], 2 NW→[4,5], 3 West→[3,4], 4 SW→[2,3], 5 SE→[1,2]
-   */
   private renderZoneBorders(): void {
     this.zoneBorderGraphics.clear();
     const corners = getHexCorners(HEX_SIZE);
 
-    // Map from neighbor direction index to the two corner indices forming that edge
     const EDGE_CORNERS: [number, number][] = [
-      [0, 1], // dir 0 (East)
-      [5, 0], // dir 1 (Northeast)
-      [4, 5], // dir 2 (Northwest)
-      [3, 4], // dir 3 (West)
-      [2, 3], // dir 4 (Southwest)
-      [1, 2], // dir 5 (Southeast)
+      [0, 1], [5, 0], [4, 5], [3, 4], [2, 3], [1, 2],
     ];
 
     const processed = new Set<string>();
@@ -425,7 +420,6 @@ export class WorldMapScene extends Phaser.Scene {
         if (!neighborTile) continue;
         if (neighborTile.zone === tile.zone) continue;
 
-        // Only draw each edge once
         const edgeKey = tile.key < neighborTile.key
           ? `${tile.key}|${neighborTile.key}`
           : `${neighborTile.key}|${tile.key}`;
@@ -440,7 +434,6 @@ export class WorldMapScene extends Phaser.Scene {
         const c1 = corners[ci1];
         const c2 = corners[ci2];
 
-        // Glow effect: wider dim line behind, then a bright line on top
         this.zoneBorderGraphics.lineStyle(4, 0xffaa00, 0.3);
         this.zoneBorderGraphics.beginPath();
         this.zoneBorderGraphics.moveTo(x + c1.x, y + c1.y);
@@ -456,32 +449,45 @@ export class WorldMapScene extends Phaser.Scene {
     }
   }
 
-  private drawTileIcon(type: TileType, x: number, y: number, isUnlocked: boolean, isDarkwood: boolean = false): void {
+  private drawTileIcon(
+    type: TileType,
+    isTraversable: boolean,
+    isZoneUnlocked: boolean,
+    isUnlocked: boolean,
+    x: number,
+    y: number,
+  ): void {
     let icon = '';
 
-    switch (type) {
-      case TileType.Town:
-        icon = '🏠';
-        break;
-      case TileType.Dungeon:
-        icon = '🕳️';
-        break;
-      case TileType.Mountain:
-        icon = '⛰️';
-        break;
-      case TileType.Forest:
-        icon = '🌲';
-        break;
-      case TileType.Water:
-        icon = '🌊';
-        break;
+    if (!isZoneUnlocked) {
+      // Zone not unlocked — show cloud icons
+      icon = isTraversable ? '☁️' : '🌑';
+    } else {
+      // Zone unlocked — show real tile type
+      switch (type) {
+        case TileType.Town:
+          icon = '🏠';
+          break;
+        case TileType.Dungeon:
+          icon = '🕳️';
+          break;
+        case TileType.Mountain:
+          icon = '⛰️';
+          break;
+        case TileType.Forest:
+          icon = '🌲';
+          break;
+        case TileType.Water:
+          icon = '🌊';
+          break;
+      }
     }
 
     if (icon) {
       const text = this.add.text(x, y, icon, { fontSize: '20px' });
       text.setOrigin(0.5);
       text.setDepth(10);
-      text.setAlpha(isUnlocked ? 1 : isDarkwood ? 0.15 : 0.3);
+      text.setAlpha(isUnlocked ? 1 : isZoneUnlocked ? 0.5 : 0.4);
       this.tileIcons.push(text);
     }
   }
@@ -507,7 +513,6 @@ export class WorldMapScene extends Phaser.Scene {
       this.pathGraphics.fillPath();
     }
 
-    // Destination marker
     const dest = path[path.length - 1];
     const destPixel = cubeToPixel(offsetToCube({ col: dest.col, row: dest.row }));
     this.pathGraphics.fillStyle(0x00ff00, 0.6);
@@ -624,9 +629,15 @@ export class WorldMapScene extends Phaser.Scene {
     }
 
     const offset = cubeToOffset(cubeCoord);
-    const zone = getZone(tile.zone);
+    const worldTileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
+    const isUnlocked = this.worldCache.isUnlocked(offset.col, offset.row);
     const isSameZone = tile.zone === this.currentZone;
     const isCurrentTile = offset.col === this.playerCol && offset.row === this.playerRow;
+
+    // Zone display name from world tile def
+    const zoneName = worldTileDef?.zoneName ?? worldTileDef?.zone ?? tile.zone;
+    // Room name: only show if unlocked
+    const roomName = isUnlocked && worldTileDef?.name ? worldTileDef.name : '';
 
     // Find players on this tile
     const playersHere = this.lastOtherPlayers
@@ -642,16 +653,16 @@ export class WorldMapScene extends Phaser.Scene {
           : tile.type === TileType.Plains ? 'Plains'
           : tile.type === TileType.Dungeon ? 'Dungeon'
           : 'Unknown',
-        zoneName: zone?.displayName ?? tile.zone,
+        zoneName,
+        roomName,
         zoneId: tile.zone,
         isTraversable: tile.isTraversable,
-        isUnlocked: this.unlockedKeys.has(tile.key),
+        isUnlocked,
         isSameZone,
         isCurrentTile,
         playersHere,
       });
     } else {
-      // Fallback: direct move
       this.sendMoveFn?.(offset.col, offset.row);
     }
   }
@@ -686,19 +697,18 @@ export class WorldMapScene extends Phaser.Scene {
     this.highlightGraphics.closePath();
     this.highlightGraphics.strokePath();
 
-    // Update tooltip
+    // Tooltip shows zone name only on hover
     this.updateTooltip(tile, pointer);
   }
 
   private updateTooltip(tile: HexTile, pointer: Phaser.Input.Pointer): void {
     if (!this.tooltipText) return;
 
-    const zone = getZone(tile.zone);
-    const zoneName = zone ? zone.displayName : tile.zone;
     const offset = cubeToOffset(tile.coord);
-    const typeName = tile.type.charAt(0).toUpperCase() + tile.type.slice(1);
+    const worldTileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
+    const zoneName = worldTileDef?.zoneName ?? worldTileDef?.zone ?? tile.zone;
 
-    this.tooltipText.setText(`${zoneName} - ${typeName} (${offset.col}, ${offset.row})`);
+    this.tooltipText.setText(zoneName);
     this.tooltipText.setPosition(pointer.x + 12, pointer.y - 20);
     this.tooltipText.setVisible(true);
   }

@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
-import { ITEMS, EQUIP_SLOTS, getItemEffectText } from '@idle-party-rpg/shared';
+import { EQUIP_SLOTS, getItemEffectText } from '@idle-party-rpg/shared';
 import type { EquipSlot } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
@@ -72,10 +72,12 @@ export class ItemsScreen implements Screen {
     const char = state.character;
     if (!char) return;
 
+    const itemDefs = state.itemDefinitions ?? {};
+
     // Render equipment slots
     this.slotsContainer.innerHTML = EQUIP_SLOTS.map(slot => {
       const itemId = char.equipment[slot];
-      const def = itemId ? ITEMS[itemId] : null;
+      const def = itemId ? itemDefs[itemId] : null;
       const name = def ? def.name : 'Empty';
       const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '';
       const emptyClass = def ? '' : ' empty';
@@ -105,7 +107,7 @@ export class ItemsScreen implements Screen {
     }
 
     this.inventoryList.innerHTML = entries.map(([itemId, count]) => {
-      const def = ITEMS[itemId];
+      const def = itemDefs[itemId];
       if (!def) return '';
       const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
       const equippable = def.equipSlot ? ' equippable' : '';

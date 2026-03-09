@@ -126,7 +126,7 @@ export class CharacterScreen implements Screen {
     this.goldDisplay.textContent = char.gold.toLocaleString();
 
     // Equipment combat bonuses
-    const bonuses = computeEquipmentBonuses(char.equipment);
+    const bonuses = computeEquipmentBonuses(char.equipment, state.itemDefinitions ?? {});
     const hasAtk = bonuses.bonusAttackMax > 0;
     const hasDef = bonuses.damageReductionMax > 0;
     this.combatBonuses.innerHTML = `
