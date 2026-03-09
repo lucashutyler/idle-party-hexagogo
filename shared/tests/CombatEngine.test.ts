@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createCombatState, processTick, findTarget, createPartyCombatState, processPartyTick } from '../src/systems/CombatEngine';
 import type { PartyCombatant } from '../src/systems/CombatEngine';
-import { createEncounter, createMonsterInstance, MONSTERS } from '../src/systems/MonsterTypes';
+import { createEncounter, createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes';
+import { SEED_ZONES } from '../src/systems/ZoneTypes';
 import { BASE_STATS, CLASS_DEFINITIONS, calculateMaxHp } from '../src/systems/CharacterStats';
 import type { StatBlock, ClassName } from '../src/systems/CharacterStats';
 import type { PartyGridPosition } from '../src/systems/SocialTypes';
@@ -13,7 +14,7 @@ function makeStats(overrides: Partial<StatBlock> = {}): StatBlock {
 describe('CombatEngine', () => {
   describe('createCombatState', () => {
     it('creates initial combat state', () => {
-      const monsters = createEncounter();
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
       const state = createCombatState('Hero', 1, makeStats(), 40, monsters);
       expect(state.player.name).toBe('Hero');
       expect(state.player.currentHp).toBe(40);
@@ -27,13 +28,13 @@ describe('CombatEngine', () => {
 
   describe('processTick', () => {
     it('increments tick count', () => {
-      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter());
+      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
       processTick(state);
       expect(state.tickCount).toBe(1);
     });
 
     it('player deals damage to first alive monster', () => {
-      const monsters = createEncounter();
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
       const state = createCombatState('Hero', 1, makeStats(), 40, monsters);
       processTick(state);
       // Monster should have taken damage (STR 10 ± 2, min 1 → 8-12 damage)
@@ -41,7 +42,7 @@ describe('CombatEngine', () => {
     });
 
     it('monsters deal damage to player', () => {
-      const monsters = createEncounter();
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
       const state = createCombatState('Hero', 1, makeStats(), 40, monsters);
       processTick(state);
       // Each alive goblin deals 4 damage. After first tick, second goblin might still be alive
@@ -49,7 +50,7 @@ describe('CombatEngine', () => {
     });
 
     it('generates log entries for damage', () => {
-      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter());
+      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
       const result = processTick(state);
       expect(result.logEntries.length).toBeGreaterThan(0);
       expect(result.logEntries[0]).toContain('Hero hits');
@@ -58,8 +59,8 @@ describe('CombatEngine', () => {
     it('retargets to second monster when first dies', () => {
       // Give player high STR to one-shot the goblin
       const monsters = [
-        createMonsterInstance(MONSTERS.goblin), // 15 HP
-        createMonsterInstance(MONSTERS.goblin),
+        createMonsterInstance(SEED_MONSTERS.goblin), // 15 HP
+        createMonsterInstance(SEED_MONSTERS.goblin),
       ];
       const state = createCombatState('Hero', 1, makeStats({ STR: 20 }), 200, monsters);
 
@@ -75,7 +76,7 @@ describe('CombatEngine', () => {
 
     it('returns victory when all monsters die', () => {
       // High STR to quickly kill monsters
-      const monsters = [createMonsterInstance(MONSTERS.goblin)];
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin)];
       const state = createCombatState('Hero', 1, makeStats({ STR: 30 }), 200, monsters);
 
       const result = processTick(state);
@@ -86,7 +87,7 @@ describe('CombatEngine', () => {
 
     it('returns defeat when player HP reaches 0', () => {
       // Low HP so monsters kill the player
-      const monsters = createEncounter(); // 2 goblins × 4 damage = 8/tick
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES); // 2 goblins × 4 damage = 8/tick
       const state = createCombatState('Hero', 1, makeStats({ STR: 1 }), 5, monsters);
 
       const result = processTick(state);
@@ -96,7 +97,7 @@ describe('CombatEngine', () => {
     });
 
     it('does nothing on already-finished combat', () => {
-      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter());
+      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
       state.finished = true;
       state.result = 'victory';
 
@@ -107,7 +108,7 @@ describe('CombatEngine', () => {
 
     it('player damage is clamped to minimum 1', () => {
       // STR=1, worst roll = 1 + (-2) = -1, clamped to 1
-      const monsters = [createMonsterInstance(MONSTERS.goblin)];
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin)];
       const state = createCombatState('Hero', 1, makeStats({ STR: 1 }), 200, monsters);
 
       // Run many ticks to ensure damage is always ≥ 1
@@ -122,8 +123,8 @@ describe('CombatEngine', () => {
 
     it('dead monsters do not attack', () => {
       const monsters = [
-        createMonsterInstance(MONSTERS.goblin),
-        createMonsterInstance(MONSTERS.goblin),
+        createMonsterInstance(SEED_MONSTERS.goblin),
+        createMonsterInstance(SEED_MONSTERS.goblin),
       ];
       // Kill first monster manually
       monsters[0].currentHp = 0;
@@ -138,7 +139,7 @@ describe('CombatEngine', () => {
 
   describe('full battle simulation', () => {
     it('typical Lv1 battle ends in about 4 ticks with victory', () => {
-      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter());
+      const state = createCombatState('Hero', 1, makeStats(), 40, createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
 
       let ticks = 0;
       while (!state.finished && ticks < 20) {
@@ -269,7 +270,7 @@ describe('Party Combat', () => {
   describe('createPartyCombatState', () => {
     it('creates party combat with multiple players', () => {
       const players = [makePlayer('Alice', 0), makePlayer('Bob', 4)];
-      const monsters = createEncounter();
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
       const state = createPartyCombatState(players, monsters);
 
       expect(state.players).toHaveLength(2);
@@ -283,14 +284,14 @@ describe('Party Combat', () => {
     it('resets players to full HP', () => {
       const player = makePlayer('Alice', 4, { hp: 100 });
       player.currentHp = 50;
-      const state = createPartyCombatState([player], createEncounter());
+      const state = createPartyCombatState([player], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
       expect(state.players[0].currentHp).toBe(100);
     });
   });
 
   describe('class-aware combat', () => {
     it('Archer uses DEX for damage', () => {
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)]; // 15 HP
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)]; // 15 HP
       const archer = makePlayer('Legolas', 0, { className: 'Archer', stats: { DEX: 16 } });
       const state = createPartyCombatState([archer], monsters);
 
@@ -302,7 +303,7 @@ describe('Party Combat', () => {
     });
 
     it('Mage uses INT for damage', () => {
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)]; // 15 HP
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)]; // 15 HP
       const mage = makePlayer('Gandalf', 0, { className: 'Mage', stats: { INT: 20 } });
       const state = createPartyCombatState([mage], monsters);
 
@@ -312,7 +313,7 @@ describe('Party Combat', () => {
     });
 
     it('Knight has null attackStat — does minimal damage', () => {
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)]; // 15 HP
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)]; // 15 HP
       const knight = makePlayer('Arthur', 0, { className: 'Knight', hp: 200 });
       const state = createPartyCombatState([knight], monsters);
 
@@ -324,7 +325,7 @@ describe('Party Combat', () => {
 
     it('Knight reduces physical damage taken', () => {
       // Wolf does magical damage, goblin does physical
-      const goblin = createMonsterInstance(MONSTERS.goblin, 4); // 4 physical damage
+      const goblin = createMonsterInstance(SEED_MONSTERS.goblin, 4); // 4 physical damage
       const knight = makePlayer('Arthur', 2, { className: 'Knight', level: 1, hp: 200 });
       const state = createPartyCombatState([knight], [goblin]);
 
@@ -338,7 +339,7 @@ describe('Party Combat', () => {
     });
 
     it('Knight physical reduction scales with level', () => {
-      const goblin = createMonsterInstance(MONSTERS.goblin, 4); // 4 physical damage
+      const goblin = createMonsterInstance(SEED_MONSTERS.goblin, 4); // 4 physical damage
       const knight = makePlayer('Arthur', 2, { className: 'Knight', level: 5, hp: 200 });
       const state = createPartyCombatState([knight], [goblin]);
 
@@ -351,7 +352,7 @@ describe('Party Combat', () => {
     });
 
     it('Priest provides party-wide magical damage reduction', () => {
-      const wolf = createMonsterInstance(MONSTERS.wolf, 4); // magical damage, 6 dmg
+      const wolf = createMonsterInstance(SEED_MONSTERS.wolf, 4); // magical damage, 6 dmg
       const priest = makePlayer('Cleric', 0, { className: 'Priest', level: 1, hp: 200 });
       const archer = makePlayer('Legolas', 2, { className: 'Archer', level: 1, hp: 200 });
       const state = createPartyCombatState([priest, archer], [wolf]);
@@ -369,7 +370,7 @@ describe('Party Combat', () => {
     });
 
     it('equipment reduction does NOT apply to magical damage', () => {
-      const wolf = createMonsterInstance(MONSTERS.wolf, 4); // 6 magical damage
+      const wolf = createMonsterInstance(SEED_MONSTERS.wolf, 4); // 6 magical damage
       const archer = makePlayer('Legolas', 2, { className: 'Archer', level: 1, hp: 200 });
       archer.equipBonuses = { bonusAttackMin: 0, bonusAttackMax: 0, damageReductionMin: 5, damageReductionMax: 5, dodgeChance: 0 };
       const state = createPartyCombatState([archer], [wolf]);
@@ -384,7 +385,7 @@ describe('Party Combat', () => {
     it('Bard buffs all stats in party', () => {
       const bard = makePlayer('Melodist', 0, { className: 'Bard', level: 1, stats: { CHA: 16 } });
       const archer = makePlayer('Legolas', 2, { className: 'Archer', level: 1, stats: { DEX: 16 } });
-      const monsters = createEncounter();
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
       const state = createPartyCombatState([bard, archer], monsters);
 
       // Bard multiplier = 0.20 * 2 members = 0.40
@@ -400,7 +401,7 @@ describe('Party Combat', () => {
     it('Bard buff recalculates maxHp', () => {
       const bard = makePlayer('Melodist', 0, { className: 'Bard', level: 1 });
       const archer = makePlayer('Legolas', 2, { className: 'Archer', level: 1 });
-      const monsters = createEncounter();
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
       const state = createPartyCombatState([bard, archer], monsters);
 
       // Archer CON=10 by default (from BASE_STATS), with 40% buff → floor(10*1.4)=14
@@ -413,13 +414,13 @@ describe('Party Combat', () => {
 
   describe('processPartyTick (turn-based)', () => {
     it('increments tick count', () => {
-      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter());
+      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
       processPartyTick(state);
       expect(state.tickCount).toBe(1);
     });
 
     it('only one combatant acts per tick', () => {
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)]; // 15 HP
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)]; // 15 HP
       const state = createPartyCombatState(
         [makePlayer('Alice', 0, { str: 10, hp: 200 }), makePlayer('Bob', 3, { str: 10, hp: 200 })],
         monsters,
@@ -440,7 +441,7 @@ describe('Party Combat', () => {
 
     it('players act before monsters, then cycle wraps', () => {
       // 1 player, 1 monster — turn order: [player, monster]
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)];
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)];
       const state = createPartyCombatState(
         [makePlayer('Alice', 0, { str: 1, hp: 200 })], // low STR so goblin survives
         monsters,
@@ -460,7 +461,7 @@ describe('Party Combat', () => {
     });
 
     it('skips dead combatants', () => {
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)];
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)];
       const state = createPartyCombatState(
         [makePlayer('Alice', 0, { hp: 200, stats: { DEX: 30 } })], // high DEX to one-shot (Archer uses DEX)
         monsters,
@@ -473,7 +474,7 @@ describe('Party Combat', () => {
     });
 
     it('victory when all monsters die', () => {
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)]; // 15 HP
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)]; // 15 HP
       const state = createPartyCombatState(
         [makePlayer('Alice', 0, { hp: 200, stats: { DEX: 30 } })], // high DEX to one-shot (Archer uses DEX)
         monsters,
@@ -484,7 +485,7 @@ describe('Party Combat', () => {
     });
 
     it('defeat when all players die', () => {
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)]; // 4 damage
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)]; // 4 damage
       const state = createPartyCombatState(
         [makePlayer('Alice', 0, { str: 1, hp: 1 })], // 1 HP
         monsters,
@@ -501,7 +502,7 @@ describe('Party Combat', () => {
     });
 
     it('does nothing on already-finished combat', () => {
-      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter());
+      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
       state.finished = true;
       state.result = 'victory';
 
@@ -512,7 +513,7 @@ describe('Party Combat', () => {
 
     it('full battle with turns resolves correctly', () => {
       // 1 player vs 1 goblin — should take multiple turns to resolve
-      const monsters = [createMonsterInstance(MONSTERS.goblin, 4)];
+      const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)];
       const state = createPartyCombatState(
         [makePlayer('Alice', 0, { str: 10, hp: 40 })],
         monsters,

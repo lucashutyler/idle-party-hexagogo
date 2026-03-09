@@ -12,6 +12,7 @@ import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
+import { createAdminRoutes } from './admin/adminRoutes.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ChatMessage, ClassName } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
@@ -25,8 +26,9 @@ const store = new JsonFileStore();
 const sessionStore = new JsonSessionStore('data/sessions');
 const accountStore = new AccountStore();
 const tokenStore = new TokenStore();
-const gameLoop = new GameLoop(store, accountStore);
-const { playerManager } = gameLoop;
+const gameLoop = new GameLoop(store);
+// playerManager is set during init(), use gameLoop.playerManager after init
+let playerManager: typeof gameLoop.playerManager;
 
 // Trust first proxy (nginx/Cloudflare) so secure cookies work behind reverse proxy
 app.set('trust proxy', 1);
@@ -62,6 +64,31 @@ app.use('/auth', createAuthRoutes({
   },
 }));
 
+// Auth middleware for game API endpoints
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (!req.session?.username) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  next();
+}
+
+// World data (all tiles, client handles fog of war via state.unlocked)
+app.get('/api/world', requireAuth, (req, res) => {
+  const session = playerManager.getSessionByUsername(req.session!.username!);
+  if (!session) {
+    res.status(404).json({ error: 'No session' });
+    return;
+  }
+  res.json(session.getWorldData());
+});
+
+app.use('/api/admin', createAdminRoutes({
+  playerManager: () => playerManager,
+  accountStore,
+  contentStore: () => gameLoop.contentStore,
+}));
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -75,9 +102,13 @@ if (process.env.NODE_ENV === 'production') {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const clientDist = path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
-  // SPA fallback — serve index.html for any non-API route
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(clientDist, 'index.html'));
+  // SPA fallback — serve the correct HTML for admin vs game routes
+  app.get('*', (req, res) => {
+    if (req.path.startsWith('/admin')) {
+      res.sendFile(path.join(clientDist, 'admin.html'));
+    } else {
+      res.sendFile(path.join(clientDist, 'index.html'));
+    }
   });
 }
 
@@ -759,7 +790,8 @@ async function start() {
   await accountStore.load();
   tokenStore.start();
   sessionStore.startReap();
-  await gameLoop.init();
+  await gameLoop.init(accountStore);
+  playerManager = gameLoop.playerManager;
 
   server.listen(PORT, () => {
     console.log(`Game server listening on port ${PORT}`);

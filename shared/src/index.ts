@@ -29,7 +29,7 @@ export { HexPathfinder } from './hex/HexPathfinder.js';
 
 // Map
 export { WORLD_MAP } from './hex/MapSchema.js';
-export type { MapSchema, TileDefinition } from './hex/MapSchema.js';
+export type { MapSchema, TileDefinition, WorldTileDefinition, WorldData } from './hex/MapSchema.js';
 export { generateWorldMap, getStartingPosition } from './hex/MapData.js';
 
 // Systems
@@ -68,7 +68,7 @@ export {
   MAX_STACK,
   RARITY_DROP_RATES,
   EQUIP_SLOTS,
-  ITEMS,
+  SEED_ITEMS,
   addItemToInventory,
   removeItemFromInventory,
   equipItem,
@@ -87,7 +87,7 @@ export type {
 
 // Monster types
 export {
-  MONSTERS,
+  SEED_MONSTERS,
   createMonsterInstance,
   createEncounter,
 } from './systems/MonsterTypes.js';
@@ -98,7 +98,7 @@ export type {
 
 // Zone types
 export {
-  ZONES,
+  SEED_ZONES,
   getZone,
 } from './systems/ZoneTypes.js';
 export type {

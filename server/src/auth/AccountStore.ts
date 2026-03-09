@@ -45,6 +45,10 @@ export class AccountStore {
     return this.accounts[email.toLowerCase()] ?? null;
   }
 
+  getAllAccounts(): Account[] {
+    return Object.values(this.accounts);
+  }
+
   getAllUsernames(): string[] {
     return Object.values(this.accounts)
       .map(a => a.username)

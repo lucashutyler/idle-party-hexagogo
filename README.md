@@ -100,10 +100,10 @@ Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into
 ## Architecture
 
 ```
-shared/           Pure logic, types, constants — compiled first, used by client + server
-client/           Phaser 3 web client — tab-based UI, mobile-friendly
-server/           Node.js game server — persistent 24/7 game state, auth, WebSocket
-game-manager/     Admin tool for game designers — monsters, areas, quests (placeholder)
+shared/           Pure logic, types, seed data — compiled first, used by client + server
+client/           Phaser 3 web client — tab-based UI, mobile-friendly, admin dashboard
+server/           Node.js game server — persistent 24/7 game state, auth, WebSocket, ContentStore
+data/             Runtime JSON content files (monsters, items, zones, world map — auto-seeded)
 ```
 
 TypeScript throughout. Vite for client bundling. Express + ws for the server.
@@ -115,8 +115,8 @@ TypeScript throughout. Vite for client bundling. Express + ws for the server.
 - [x] A* pathfinding
 - [x] Tile unlocking on victory (fog of war)
 - [x] Camera zoom/pan
-- [ ] Database-driven tile storage (managed via game manager)
-- [ ] Server-driven map state
+- [x] Data-driven content (ContentStore: monsters, items, zones, world in JSON files)
+- [x] Server-driven map state (per-player fog of war, room names, tile discovery)
 - [x] Multiple regions/zones with border transitions
 
 ### Combat
@@ -199,7 +199,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Tile click modal (tile info, "Move here" button, players on tile)
 
 ### Game Manager
-- [ ] Separate admin client
+- [x] Separate admin client (World Manager dashboard at /admin)
 - [ ] Monster editor
 - [ ] Area/zone editor
 - [ ] Quest editor

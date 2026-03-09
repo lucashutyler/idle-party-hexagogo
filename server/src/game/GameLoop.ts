@@ -1,31 +1,47 @@
-import { generateWorldMap } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube } from '@idle-party-rpg/shared';
 import { PlayerManager } from './PlayerManager.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
+import { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
 
 export class GameLoop {
-  readonly playerManager: PlayerManager;
+  readonly playerManager!: PlayerManager;
+  readonly contentStore: ContentStore;
   private store: GameStateStore;
   private guildStore: GuildStore;
   private saveInterval?: ReturnType<typeof setInterval>;
+  private grid!: HexGrid;
 
-  constructor(store: GameStateStore, accountStore: AccountStore) {
-    const grid = generateWorldMap();
+  constructor(store: GameStateStore) {
+    this.contentStore = new ContentStore();
     this.guildStore = new GuildStore();
-    this.playerManager = new PlayerManager(grid, this.guildStore, () => accountStore.getAllUsernames());
     this.store = store;
-
-    console.log(`Game loop started. Map: ${grid.size} tiles`);
   }
 
   /**
-   * Load all saved sessions and start periodic saving.
+   * Load content, build grid, init player manager, restore saves, start periodic saving.
    * Call once after construction, before accepting connections.
    */
-  async init(): Promise<void> {
+  async init(accountStore: AccountStore): Promise<void> {
+    // Load game content from data/*.json (seeds defaults if files missing)
+    await this.contentStore.load();
+
+    // Build hex grid from content store world data
+    this.grid = this.buildGridFromContent();
+
+    // Create player manager now that grid + content are ready
+    (this as { playerManager: PlayerManager }).playerManager = new PlayerManager(
+      this.grid,
+      this.contentStore,
+      this.guildStore,
+      () => accountStore.getAllUsernames(),
+    );
+
+    console.log(`[GameLoop] Map: ${this.grid.size} tiles`);
+
     await this.guildStore.load();
 
     const saves = await this.store.loadAll();
@@ -53,6 +69,7 @@ export class GameLoop {
       console.log(`[GameLoop] Saved ${count} session(s)`);
     }
     await this.guildStore.save();
+    await this.contentStore.save();
   }
 
   /**
@@ -67,5 +84,21 @@ export class GameLoop {
     this.playerManager.addShutdownLog();
     await this.saveAll();
     console.log('[GameLoop] State saved on shutdown');
+  }
+
+  /**
+   * Build a HexGrid from the content store's world data.
+   */
+  private buildGridFromContent(): HexGrid {
+    const grid = new HexGrid();
+    const world = this.contentStore.getWorld();
+
+    for (const tileDef of world.tiles) {
+      const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
+      const tile = new HexTile(coord, tileDef.type, tileDef.zone);
+      grid.addTile(tile);
+    }
+
+    return grid;
   }
 }
