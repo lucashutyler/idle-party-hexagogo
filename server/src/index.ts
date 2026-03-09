@@ -12,6 +12,7 @@ import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
+import { createAdminRoutes } from './admin/adminRoutes.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ChatMessage, ClassName } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
@@ -62,6 +63,11 @@ app.use('/auth', createAuthRoutes({
   },
 }));
 
+app.use('/api/admin', createAdminRoutes({
+  playerManager,
+  accountStore,
+}));
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -75,9 +81,13 @@ if (process.env.NODE_ENV === 'production') {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const clientDist = path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
-  // SPA fallback — serve index.html for any non-API route
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(clientDist, 'index.html'));
+  // SPA fallback — serve the correct HTML for admin vs game routes
+  app.get('*', (req, res) => {
+    if (req.path.startsWith('/admin')) {
+      res.sendFile(path.join(clientDist, 'admin.html'));
+    } else {
+      res.sendFile(path.join(clientDist, 'index.html'));
+    }
   });
 }
 

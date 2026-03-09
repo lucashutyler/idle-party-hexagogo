@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as a monorepo with a web client, game server, and game manager.
+Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as a monorepo with a web client, game server, and world manager (admin dashboard).
 
 ## Branch Policy
 
@@ -64,6 +64,9 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   │   ├── ItemsScreen.ts     # Equipment slots + inventory list with equip/unequip
 │   │   ├── SocialScreen.ts    # Social tab — sub-tabs: Users, Friends, Guild, Party, Chat
 │   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
+│   ├── admin/
+│   │   ├── main.ts            # Admin entry point — imports CSS, creates AdminApp
+│   │   └── AdminApp.ts        # World Manager dashboard (accounts, monsters, items, zones, map viewer)
 │   ├── scenes/
 │   │   └── WorldMapScene.ts   # Phaser scene — hex rendering, input, camera, zone filtering
 │   ├── entities/
@@ -77,11 +80,15 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   └── styles/
 │       └── pixel-theme.css    # Global retro RPG styles, animations, layout
 ├── index.html                 # App shell DOM (login + username + screen containers + nav)
-└── vite.config.ts             # Vite config with /auth proxy to server
+├── admin.html                 # World Manager entry HTML (separate from game client)
+└── vite.config.ts             # Vite config with multi-page build + /auth, /api/admin proxies
 
 server/                        @idle-party-rpg/server — Node.js game server
 ├── src/
-│   ├── index.ts               # Express + WS server, session middleware, auth routes
+│   ├── index.ts               # Express + WS server, session middleware, auth + admin routes
+│   ├── admin/
+│   │   ├── adminMiddleware.ts # Admin auth middleware (checks ADMIN_EMAILS env var)
+│   │   └── adminRoutes.ts     # Admin API routes: /api/admin/overview, /api/admin/accounts
 │   ├── auth/
 │   │   ├── AccountStore.ts    # Email→account JSON persistence (data/accounts.json)
 │   │   ├── TokenStore.ts      # In-memory magic link token store (15m expiry)
@@ -113,8 +120,6 @@ data/                          Persistent runtime data (gitignored, created at r
 ├── accounts.json              # Email→account mapping
 ├── guilds.json                # Guild data
 └── sessions/                  # Express session files (one .json per session)
-
-game-manager/                  @idle-party-rpg/game-manager — placeholder
 
 deploy/                        Deployment config files
 ├── idle-party-rpg.service     # systemd unit file (Restart=always)
@@ -170,6 +175,7 @@ npm run typecheck    # tsc --build (all packages)
 - **Zoom controls**: Mobile-friendly +/- zoom buttons on the map screen, wired to `WorldMapScene.adjustZoom()`.
 - **Floating HP bars**: CombatScreen renders HP bars floating above each combat sprite (players and enemies) arranged in grid formation rows (3 rows based on `gridPosition`). Player labels show username (current player highlighted in gold); monster labels show name only. HP shown as percentage bar only. Dead combatants are dimmed.
 - **Desktop font scaling**: `@media (min-width: 768px)` media query increases font sizes for all UI elements on desktop.
+- **World Manager (admin dashboard)**: Separate client page at `/admin` (dev: `/admin.html`) for viewing server data and game content. Admin auth uses `ADMIN_EMAILS` env var (comma-separated emails). Server-side middleware checks session email against the list (401 if unauthenticated, 403 if not admin). API endpoints at `/api/admin/*` return runtime data (overview stats, accounts with online status). Game content (monsters, items, zones) and the map are imported directly from `@idle-party-rpg/shared` on the client — no server API needed since they're deterministic constants. The map viewer uses HTML5 Canvas with pan/zoom, rendering tiles via `generateWorldMap()` + `cubeToPixel()` + `getHexCorners()`. Built as a separate Vite entry point (`admin.html`) isolated from the game client.
 - **Social system**: Full social tab (6th tab) with 5 sub-tabs:
   - **Users**: All registered players (not just online) with search, sort (name/status), filter (all/room/zone/friends/guild/party). Online/offline status dots with group headers when sorted by status. Friend request (Add/Revoke/Accept/Decline based on request state), block/unblock, chat actions per user. Data sourced from `AccountStore.getAllUsernames()`.
   - **Friends**: Request-based two-way friend system. Sections: Incoming requests (Accept/Decline), Online friends, Offline friends, Pending sent (Revoke). Outgoing requests persisted per-player; incoming index rebuilt on player init. Cross-requests auto-accept. Unfriending is symmetric (removes from both players).
