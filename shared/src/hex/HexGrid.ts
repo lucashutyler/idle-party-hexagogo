@@ -13,6 +13,13 @@ export class HexGrid {
   }
 
   /**
+   * Remove all tiles from the grid.
+   */
+  clear(): void {
+    this.tiles.clear();
+  }
+
+  /**
    * Get a tile by its cube coordinates.
    */
   getTile(coord: CubeCoord): HexTile | undefined {
@@ -87,6 +94,34 @@ export class HexGrid {
    */
   get size(): number {
     return this.tiles.size;
+  }
+
+  /**
+   * BFS from a starting tile to find all reachable traversable tiles.
+   * Returns a Set of tile keys that are reachable.
+   */
+  getReachableTiles(start: CubeCoord): Set<string> {
+    const startTile = this.getTile(start);
+    if (!startTile || !startTile.isTraversable) return new Set();
+
+    const visited = new Set<string>();
+    const queue: CubeCoord[] = [start];
+    visited.add(cubeToKey(start));
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const neighbor of getNeighbors(current)) {
+        const key = cubeToKey(neighbor);
+        if (visited.has(key)) continue;
+        const tile = this.getTile(neighbor);
+        if (tile && tile.isTraversable) {
+          visited.add(key);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    return visited;
   }
 
   /**

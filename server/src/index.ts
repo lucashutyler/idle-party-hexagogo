@@ -1,6 +1,13 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load .env from project root (npm workspaces set CWD to server/)
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config(); // Also check server/.env (does not override existing vars)
 import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
@@ -87,6 +94,9 @@ app.use('/api/admin', createAdminRoutes({
   playerManager: () => playerManager,
   accountStore,
   contentStore: () => gameLoop.contentStore,
+  versionStore: () => gameLoop.versionStore,
+  rebuildGrid: () => gameLoop.rebuildGridAndRelocate(),
+  deployVersion: (versionId) => gameLoop.deployVersion(versionId),
 }));
 
 app.get('/health', (_req, res) => {
@@ -99,7 +109,6 @@ app.get('/health', (_req, res) => {
 
 // --- Static files (production: serve built client) ---
 if (process.env.NODE_ENV === 'production') {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const clientDist = path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
   // SPA fallback — serve the correct HTML for admin vs game routes
@@ -240,6 +249,11 @@ wss.on('connection', (ws) => {
         if (!session.setClass(msg.className as ClassName)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot change class' }));
           return;
+        }
+        // Restart the current battle so combat uses the new class data
+        const classPartyId = session.getPartyId();
+        if (classPartyId) {
+          playerManager.partyBattles.restartBattle(classPartyId);
         }
         playerManager.sendStateToPlayer(username);
         return;

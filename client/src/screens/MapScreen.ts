@@ -27,6 +27,19 @@ export class MapScreen implements Screen {
     this.onChatCallback = cb;
   }
 
+  /** Refresh the map from updated WorldCache data. */
+  refreshWorld(): void {
+    const scene = this.getScene();
+    if (scene) {
+      scene.rebuildFromCache();
+      // Re-apply current state (party position, other players, etc.)
+      if (this.gameClient.lastState) {
+        scene.applyServerState(this.gameClient.lastState, true);
+      }
+    }
+    // If scene doesn't exist yet, next createPhaserGame() will build from current cache
+  }
+
   /** Check if the current player can move (must be owner or leader). */
   private canMove(): boolean {
     const state = this.gameClient.lastState;

@@ -167,6 +167,12 @@ export class ServerBattleTimer {
     return this.combatState;
   }
 
+  /** Restart the current battle (e.g., after a player changes class). */
+  restartBattle(): void {
+    this.clearTimers();
+    this.triggerBattle();
+  }
+
   destroy(): void {
     this.clearTimers();
   }
