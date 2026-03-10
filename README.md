@@ -108,6 +108,14 @@ data/             Runtime JSON content files (monsters, items, zones, world map 
 
 TypeScript throughout. Vite for client bundling. Express + ws for the server.
 
+## Content Versioning
+
+Admin content changes (monsters, items, zones, world map tiles) go through a **draft → publish → deploy** pipeline managed from the Versions tab in the World Manager admin panel. Edits are made freely against a draft version — nothing affects the live game until the admin explicitly publishes and deploys.
+
+Publishing a draft creates an **immutable snapshot** of all content at that point in time. Published versions cannot be edited; to make further changes the admin creates a new draft. This gives a clear history of every content release and makes rollbacks straightforward.
+
+**Deploying** a published version swaps it into the live game. The server hot-reloads the new content so players see updated zones, monsters, and map tiles without a restart. If a deployed version removes tiles that players are currently standing on, those players are automatically relocated to the nearest valid tile.
+
 ## Roadmap
 
 ### World Map
@@ -198,15 +206,16 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Mobile zoom controls (+/- buttons on map)
 - [x] Tile click modal (tile info, "Move here" button, players on tile)
 
-### Game Manager
+### World Manager
 - [x] Separate admin client (World Manager dashboard at /admin)
+- [x] Content versioning (draft→publish→deploy pipeline with immutable snapshots)
 - [ ] Monster editor
 - [ ] Area/zone editor
 - [ ] Quest editor
 - [ ] Game designer access only
 
 ### Infrastructure
-- [x] Monorepo structure (client/, server/, game-manager/)
+- [x] Monorepo structure (client/, server/)
 - [x] Single `npm run dev` runs all subprojects
 - [x] Test coverage
 - [x] Shared types package between client/server

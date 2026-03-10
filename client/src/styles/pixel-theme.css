@@ -2098,12 +2098,19 @@ html, body {
 }
 
 /* Map */
-.admin-map-wrap {
+.admin-map-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.admin-map-canvas-area {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  padding: 0 24px 24px;
+  min-width: 0;
+  padding: 0 12px 12px 24px;
 }
 
 .admin-map-controls {
@@ -2112,6 +2119,12 @@ html, body {
   align-items: center;
   padding: 12px 0;
   flex-shrink: 0;
+}
+
+.admin-map-tile-count {
+  font-size: 9px;
+  color: var(--text-primary);
+  margin-right: 8px;
 }
 
 .admin-map-info {
@@ -2130,6 +2143,127 @@ html, body {
 
 #admin-map-canvas:active {
   cursor: grabbing;
+}
+
+/* Map sidebar (tile editor) */
+.admin-map-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-left: 2px solid var(--border-pixel);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.admin-map-sidebar-header {
+  font-size: 10px;
+  color: var(--accent-gold);
+  padding: 14px 14px 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid var(--border-pixel);
+}
+
+.admin-map-sidebar-placeholder {
+  font-size: 8px;
+  color: var(--text-dim);
+  padding: 24px 14px;
+  line-height: 2;
+  text-align: center;
+}
+
+.admin-map-sidebar-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  flex: 1;
+}
+
+.admin-map-sidebar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-map-sidebar-field label {
+  font-size: 7px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.admin-map-sidebar-field input,
+.admin-map-sidebar-field select {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-pixel);
+  outline: none;
+}
+
+.admin-map-sidebar-field input:focus,
+.admin-map-sidebar-field select:focus {
+  border-color: var(--accent-gold);
+}
+
+.admin-map-sidebar-coords {
+  font-size: 9px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+
+.admin-map-sidebar-spacer {
+  flex: 1;
+  min-height: 16px;
+}
+
+.admin-map-start-btn {
+  font-size: 8px;
+  padding: 6px 10px;
+  color: var(--accent-gold);
+  border-color: var(--accent-gold);
+}
+
+.admin-map-start-btn:hover {
+  background: rgba(255, 200, 69, 0.1);
+}
+
+.admin-map-sidebar-start-badge {
+  font-size: 9px;
+  color: var(--accent-gold);
+  padding: 6px 0;
+}
+
+.admin-map-delete-btn {
+  font-size: 8px;
+  padding: 6px 10px;
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+.admin-map-delete-btn:hover:not(:disabled) {
+  background: rgba(255, 82, 82, 0.1);
+}
+
+.admin-map-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.admin-map-sidebar-hint {
+  font-size: 7px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.admin-map-sidebar-error {
+  font-size: 8px;
+  color: var(--accent-red);
+  min-height: 16px;
 }
 
 /* ── Desktop Font Scaling ────────────────────────────────── */
@@ -2160,4 +2294,97 @@ html, body {
   .social-search { font-size: 10px; }
   .social-user-name { font-size: 10px; }
   .social-action-btn { font-size: 8px; }
+}
+
+/* === Version System === */
+
+.version-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.version-badge-draft {
+  background: #1e3a5f;
+  color: #6db3f2;
+}
+
+.version-badge-published {
+  background: #1e4d2b;
+  color: #6fdc8c;
+}
+
+.version-badge-active {
+  background: #4d3600;
+  color: #ffc845;
+}
+
+.version-actions-cell {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.admin-btn-danger {
+  background: #3d1111;
+  color: #f87171;
+  border-color: #5a1e1e;
+}
+
+.admin-btn-danger:hover {
+  background: #5a1e1e;
+}
+
+.version-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.version-bar-draft {
+  background: #1e3a5f;
+  border: 1px solid #2a5a8f;
+  color: #6db3f2;
+}
+
+.version-bar-readonly {
+  background: #1e4d2b;
+  border: 1px solid #2a6f3f;
+  color: #6fdc8c;
+}
+
+.version-readonly-label {
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.version-status {
+  font-size: 11px;
+  padding: 0 4px;
+  min-height: 20px;
+}
+
+.version-status-error {
+  color: #f87171;
+}
+
+.version-status-success {
+  color: #6fdc8c;
+}
+
+.admin-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }

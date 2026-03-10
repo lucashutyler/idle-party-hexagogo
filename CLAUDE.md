@@ -106,6 +106,7 @@ server/                        @idle-party-rpg/server — Node.js game server
 │       ├── ServerParty.ts     # Server party state (no rendering)
 │       ├── GameStateStore.ts  # GameStateStore interface + PlayerSaveData type
 │       ├── JsonFileStore.ts   # JSON-file-based persistence (data/<username>.json)
+│       ├── VersionStore.ts    # Content version snapshots (data/versions/)
 │       └── social/
 │           ├── FriendsSystem.ts # Friend request system (send/accept/decline/revoke, two-way)
 │           ├── GuildSystem.ts   # Guild create/join/leave/invite (level 20+ to create)
@@ -124,6 +125,7 @@ data/                          Persistent runtime data (gitignored, created at r
 ├── items.json                 # Item definitions (loaded by ContentStore, auto-seeded)
 ├── zones.json                 # Zone definitions (loaded by ContentStore, auto-seeded)
 ├── world.json                 # World map tile definitions (loaded by ContentStore, auto-seeded)
+├── versions/                  # Version snapshots
 └── sessions/                  # Express session files (one .json per session)
 
 deploy/                        Deployment config files
@@ -225,8 +227,13 @@ Everything in `data/` is persisted behind a **swappable interface** so the stora
 - **Guilds**: `GuildStore` reads/writes `data/guilds.json`
 - **Game content**: `ContentStore` reads/writes `data/monsters.json`, `data/items.json`, `data/zones.json`, `data/world.json`. Auto-seeds from `SEED_*` constants if files missing.
 - **Chat**: Stored per-player in `PlayerSaveData.chatHistory` (saved with each player's JSON file)
+- **Versions**: `VersionStore` reads/writes `data/versions/manifest.json` + `data/versions/{id}.json`
 
 When adding new persistent data to `data/`, always define an interface or extend an existing one. Never read/write files directly from game logic — go through the store abstraction.
+
+## Content Versioning
+
+- **Content versioning**: Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, and relocates parties on unreachable tiles. When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.
 
 ## Code Conventions
 

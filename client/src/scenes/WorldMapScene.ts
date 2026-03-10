@@ -214,6 +214,12 @@ export class WorldMapScene extends Phaser.Scene {
 
   // ── Grid Building ─────────────────────────────────────────
 
+  /** Rebuild the grid from updated WorldCache data and re-render. */
+  rebuildFromCache(): void {
+    this.grid = this.buildGridFromCache();
+    this.renderGrid();
+  }
+
   private buildGridFromCache(): HexGrid {
     const grid = new HexGrid();
     this.worldTileDefs.clear();

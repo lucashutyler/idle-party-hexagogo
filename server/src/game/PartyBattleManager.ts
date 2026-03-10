@@ -208,6 +208,13 @@ export class PartyBattleManager {
     }
   }
 
+  /** Restart the current battle for a party (e.g., after a member changes class). */
+  restartBattle(partyId: string): void {
+    const entry = this.entries.get(partyId);
+    if (!entry) return;
+    entry.battleTimer.restartBattle();
+  }
+
   /** Destroy a party battle entry and stop its timers. */
   destroyEntry(partyId: string): void {
     const entry = this.entries.get(partyId);
@@ -328,6 +335,40 @@ export class PartyBattleManager {
     const posA = cubeToOffset(a.serverParty.position);
     const posB = cubeToOffset(b.serverParty.position);
     return posA.col === posB.col && posA.row === posB.row;
+  }
+
+  /** Get all party IDs. */
+  getAllPartyIds(): string[] {
+    return Array.from(this.entries.keys());
+  }
+
+  /** Get members of a party. */
+  getMembers(partyId: string): Set<string> | undefined {
+    return this.entries.get(partyId)?.members;
+  }
+
+  /** Relocate a party to a new tile, restarting its battle. */
+  relocateParty(partyId: string, newTile: HexTile): void {
+    const entry = this.entries.get(partyId);
+    if (!entry) return;
+    entry.serverParty.relocateTo(newTile);
+    entry.battleTimer.restartBattle();
+  }
+
+  /**
+   * After a grid rebuild, re-resolve all parties' tile references.
+   * The grid object is the same but tiles inside it are new instances.
+   */
+  refreshAllPartyTiles(grid: HexGrid): void {
+    for (const entry of this.entries.values()) {
+      const pos = cubeToOffset(entry.serverParty.position);
+      const coord = offsetToCube(pos);
+      const freshTile = grid.getTile(coord);
+      if (freshTile) {
+        // Re-set to the same position but with fresh tile reference
+        entry.serverParty.relocateTo(freshTile);
+      }
+    }
   }
 
   // --- Private ---

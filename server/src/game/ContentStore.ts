@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, TILE_CONFIGS } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -76,6 +76,77 @@ export class ContentStore {
 
   getStartTile(): { col: number; row: number } {
     return this.world.startTile;
+  }
+
+  // --- Tile CRUD ---
+
+  async addOrUpdateTile(tile: WorldTileDefinition): Promise<void> {
+    const idx = this.world.tiles.findIndex(t => t.col === tile.col && t.row === tile.row);
+    if (idx >= 0) {
+      this.world.tiles[idx] = tile;
+    } else {
+      this.world.tiles.push(tile);
+    }
+    await this.save();
+  }
+
+  async deleteTile(col: number, row: number): Promise<{ success: boolean; error?: string }> {
+    const { startTile } = this.world;
+    if (startTile.col === col && startTile.row === row) {
+      return { success: false, error: 'Cannot delete the start tile. Assign a different start tile first.' };
+    }
+
+    const idx = this.world.tiles.findIndex(t => t.col === col && t.row === row);
+    if (idx < 0) {
+      return { success: false, error: 'Tile not found.' };
+    }
+
+    this.world.tiles.splice(idx, 1);
+    await this.save();
+    return { success: true };
+  }
+
+  async setStartTile(col: number, row: number): Promise<{ success: boolean; error?: string }> {
+    const tile = this.world.tiles.find(t => t.col === col && t.row === row);
+    if (!tile) {
+      return { success: false, error: 'Tile not found.' };
+    }
+    const config = TILE_CONFIGS[tile.type];
+    if (!config || !config.traversable) {
+      return { success: false, error: 'Start tile must be traversable.' };
+    }
+    this.world.startTile = { col, row };
+    await this.save();
+    return { success: true };
+  }
+
+  // --- Snapshot ---
+
+  /** Export current live state as a ContentSnapshot. */
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; world: WorldData } {
+    return {
+      monsters: Array.from(this.monsters.values()),
+      items: Array.from(this.items.values()),
+      zones: Array.from(this.zones.values()),
+      world: JSON.parse(JSON.stringify(this.world)),
+    };
+  }
+
+  /** Bulk-replace all content from a snapshot (used for deploy). */
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; world: WorldData }): Promise<void> {
+    this.monsters.clear();
+    for (const m of snapshot.monsters) this.monsters.set(m.id, m);
+
+    this.items.clear();
+    for (const i of snapshot.items) this.items.set(i.id, i);
+
+    this.zones.clear();
+    for (const z of snapshot.zones) this.zones.set(z.id, z);
+
+    this.world = snapshot.world;
+
+    await this.save();
+    console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.world.tiles.length} tiles`);
   }
 
   // --- Private ---

@@ -306,6 +306,15 @@ export class PlayerSession {
     }
   }
 
+  /** Force-unlock a tile and its adjacent tiles (for relocation after deploy). */
+  forceUnlockTileArea(tile: HexTile): void {
+    this.unlockSystem.forceUnlock(tile);
+    const neighbors = this.grid.getTraversableNeighbors(tile.coord);
+    for (const neighbor of neighbors) {
+      this.unlockSystem.forceUnlock(neighbor);
+    }
+  }
+
   getStartingTile(): HexTile {
     const startPos = this.content.getStartTile();
     const startCoord = offsetToCube(startPos);

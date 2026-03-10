@@ -80,6 +80,13 @@ export class UnlockSystem {
   }
 
   /**
+   * Force-unlock a tile (no event, idempotent). Used for relocation after deploy.
+   */
+  forceUnlock(tile: HexTile): void {
+    this.unlockedKeys.add(tile.key);
+  }
+
+  /**
    * Get all unlocked tiles.
    */
   getUnlockedTiles(): HexTile[] {

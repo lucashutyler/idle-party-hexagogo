@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
-import { HexGrid, offsetToCube } from '@idle-party-rpg/shared';
-import type { OtherPlayerState, ClientSocialState, ChatMessage, BlockLevel, PartyGridPosition, PartyRole } from '@idle-party-rpg/shared';
+import { HexGrid, offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
+import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, BlockLevel, PartyGridPosition, PartyRole } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
@@ -164,6 +164,18 @@ export class PlayerManager {
     for (const ws of wsSet) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(state);
+      }
+    }
+  }
+
+  /** Broadcast a message to all connected clients. */
+  broadcastToAll(message: Record<string, unknown>): void {
+    const payload = JSON.stringify(message);
+    for (const wsSet of this.playerConnections.values()) {
+      for (const ws of wsSet) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(payload);
+        }
       }
     }
   }
@@ -511,6 +523,64 @@ export class PlayerManager {
         movementQueue,
       );
     }
+  }
+
+  /**
+   * After a deploy, find all parties on unreachable tiles and relocate them.
+   * Returns the number of parties relocated.
+   */
+  relocateDisplacedParties(grid: HexGrid, content: ContentStore): number {
+    const startPos = content.getStartTile();
+    const startCoord = offsetToCube(startPos);
+    const reachable = grid.getReachableTiles(startCoord);
+
+    let relocated = 0;
+
+    for (const partyId of this.partyBattles.getAllPartyIds()) {
+      const tile = this.partyBattles.getTile(partyId);
+      if (!tile) continue;
+
+      const tileKey = cubeToKey(tile.coord);
+      if (reachable.has(tileKey)) continue;
+
+      // Find nearest reachable tile
+      let bestTile: HexTile | null = null;
+      let bestDist = Infinity;
+      for (const key of reachable) {
+        const candidate = grid.getTileByKey(key);
+        if (!candidate) continue;
+        const dist = cubeDistance(tile.coord, candidate.coord);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestTile = candidate;
+        }
+      }
+
+      if (!bestTile) {
+        // Fallback to start tile
+        bestTile = grid.getTile(startCoord) ?? null;
+        if (!bestTile) continue;
+      }
+
+      // Relocate the party
+      this.partyBattles.relocateParty(partyId, bestTile);
+
+      // Unlock the area for all members and log
+      const members = this.partyBattles.getMembers(partyId);
+      if (members) {
+        for (const username of members) {
+          const session = this.sessions.get(username);
+          if (session) {
+            session.forceUnlockTileArea(bestTile);
+            session.addLogEntry('World updated — relocated to a safe room.', 'move');
+          }
+        }
+      }
+
+      relocated++;
+    }
+
+    return relocated;
   }
 
   /**

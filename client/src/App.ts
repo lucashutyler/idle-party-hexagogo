@@ -300,6 +300,13 @@ export class App {
       socialScreen.startDm(username);
     });
 
+    // Listen for world content updates (admin deployed a new version)
+    this.gameClient.onWorldUpdate(async () => {
+      console.log('[App] World updated — reloading world data');
+      await this.worldCache.loadWorld();
+      mapScreen.refreshWorld();
+    });
+
     this.screenManager.register('combat', document.getElementById('screen-combat')!, combatScreen);
     this.screenManager.register('map', document.getElementById('screen-map')!, mapScreen);
     this.screenManager.register('character', document.getElementById('screen-character')!, characterScreen);
