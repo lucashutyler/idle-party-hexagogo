@@ -109,7 +109,87 @@ export class SocialScreen implements Screen {
     `;
     this.tabBar = this.container.querySelector('.social-tab-bar')!;
     this.panelContainer = this.container.querySelector('.social-panel')!;
+    this.wireDelegatedClicks();
     this.renderTabBar();
+  }
+
+  /** Single delegated click handler on panelContainer — survives innerHTML replacements. */
+  private wireDelegatedClicks(): void {
+    this.panelContainer.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const btn = target.closest('button');
+      if (!btn) return;
+
+      const username = btn.getAttribute('data-username')
+        || btn.closest('.social-user-row')?.getAttribute('data-username')
+        || null;
+      const partyId = btn.getAttribute('data-party-id') || null;
+
+      // Party actions
+      if (btn.matches('.social-promote-btn') && username) { this.gameClient.sendPromotePartyLeader(username); return; }
+      if (btn.matches('.social-demote-btn') && username) { this.gameClient.sendDemotePartyMember(username); return; }
+      if (btn.matches('.social-transfer-btn') && username) { this.gameClient.sendTransferPartyOwnership(username); return; }
+      if (btn.matches('.social-kick-btn') && username) { this.gameClient.sendKickPartyMember(username); return; }
+      if (btn.matches('.social-party-leave-btn')) { this.gameClient.sendLeaveParty(); return; }
+      if (btn.matches('.social-accept-invite') && partyId) { this.gameClient.sendAcceptPartyInvite(partyId); return; }
+      if (btn.matches('.social-decline-invite') && partyId) { this.gameClient.sendDeclinePartyInvite(partyId); return; }
+      if (btn.matches('.social-nearby-invite') && username) {
+        this.gameClient.sendInviteParty(username);
+        btn.textContent = 'Invited';
+        (btn as HTMLButtonElement).disabled = true;
+        return;
+      }
+
+      // Friend actions
+      if (btn.matches('.social-accept-friend') && username) { this.gameClient.sendAcceptFriendRequest(username); return; }
+      if (btn.matches('.social-decline-friend') && username) { this.gameClient.sendDeclineFriendRequest(username); return; }
+      if (btn.matches('.social-revoke-friend') && username) { this.gameClient.sendRevokeFriendRequest(username); return; }
+      if (btn.matches('.remove-friend-btn') && username) { this.gameClient.sendRemoveFriend(username); return; }
+
+      // Guild actions
+      if (btn.matches('.social-guild-leave-btn')) { this.gameClient.sendLeaveGuild(); return; }
+
+      // Guild invite button
+      if (btn.matches('.social-guild-invite-btn')) {
+        const input = this.panelContainer.querySelector('.social-guild-invite-input') as HTMLInputElement | null;
+        const name = input?.value.trim();
+        if (name) { this.gameClient.sendInviteGuild(name); input!.value = ''; }
+        return;
+      }
+      if (btn.matches('.social-guild-create-btn')) {
+        const input = this.panelContainer.querySelector('.social-guild-name-input') as HTMLInputElement | null;
+        const name = input?.value.trim();
+        if (name) this.gameClient.sendCreateGuild(name);
+        return;
+      }
+
+      // Users panel data-action buttons
+      const action = btn.getAttribute('data-action');
+      if (action && username) {
+        switch (action) {
+          case 'chat': this.startDm(username); break;
+          case 'send_friend_request': this.gameClient.sendFriendRequest(username); break;
+          case 'accept_friend_request': this.gameClient.sendAcceptFriendRequest(username); break;
+          case 'decline_friend_request': this.gameClient.sendDeclineFriendRequest(username); break;
+          case 'revoke_friend_request': this.gameClient.sendRevokeFriendRequest(username); break;
+          case 'remove_friend': this.gameClient.sendRemoveFriend(username); break;
+          case 'block': this.gameClient.sendBlockUser(username, 'all'); break;
+          case 'unblock': this.gameClient.sendUnblockUser(username); break;
+        }
+        return;
+      }
+
+      // Chat (just the DM shortcut; chat input wiring stays in renderChatPanel)
+      if (btn.matches('.social-chat-user-btn') && username) { this.startDm(username); return; }
+    });
+
+    // Grid cell clicks for party position
+    this.panelContainer.addEventListener('click', (e) => {
+      const cell = (e.target as HTMLElement).closest('.social-party-cell:not(.occupied)');
+      if (!cell) return;
+      const pos = parseInt(cell.getAttribute('data-pos')!, 10);
+      this.gameClient.sendSetPartyGridPosition(pos);
+    });
   }
 
   private renderTabBar(): void {
@@ -117,8 +197,8 @@ export class SocialScreen implements Screen {
       const chatUnread = t.id === 'chat' && this.hasUnread && this.activeTab !== 'chat';
       const partyInvites = t.id === 'party' && (this.lastSocial?.pendingInvites?.length ?? 0) > 0;
       const friendRequests = t.id === 'friends' && (this.lastSocial?.incomingFriendRequests?.length ?? 0) > 0;
-      const badge = chatUnread || partyInvites || friendRequests ? ' *' : '';
-      return `<button class="social-tab-btn${t.id === this.activeTab ? ' active' : ''}" data-tab="${t.id}">${t.label}${badge}</button>`;
+      const hasBadge = chatUnread || partyInvites || friendRequests;
+      return `<button class="social-tab-btn${t.id === this.activeTab ? ' active' : ''}" data-tab="${t.id}">${t.label}${hasBadge ? '<span class="social-tab-badge"></span>' : ''}</button>`;
     }).join('');
 
     for (const btn of this.tabBar.querySelectorAll('.social-tab-btn')) {
@@ -283,26 +363,7 @@ export class SocialScreen implements Screen {
       this.renderUsersPanel();
     });
 
-    // Wire user action buttons
-    for (const row of this.panelContainer.querySelectorAll('.social-user-row')) {
-      const target = row.getAttribute('data-username')!;
-      for (const btn of row.querySelectorAll('.social-action-btn')) {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const action = btn.getAttribute('data-action');
-          switch (action) {
-            case 'chat': this.startDm(target); break;
-            case 'send_friend_request': this.gameClient.sendFriendRequest(target); break;
-            case 'accept_friend_request': this.gameClient.sendAcceptFriendRequest(target); break;
-            case 'decline_friend_request': this.gameClient.sendDeclineFriendRequest(target); break;
-            case 'revoke_friend_request': this.gameClient.sendRevokeFriendRequest(target); break;
-            case 'remove_friend': this.gameClient.sendRemoveFriend(target); break;
-            case 'block': this.gameClient.sendBlockUser(target, 'all'); break;
-            case 'unblock': this.gameClient.sendUnblockUser(target); break;
-          }
-        });
-      }
-    }
+    // Action buttons (chat, friend, block) are handled by delegated click handler
   }
 
   private renderUserRow(p: string, friends: Set<string>, blocked: Record<string, unknown>, onlineSet: Set<string>, incomingFrom: Set<string>, outgoingTo: Set<string>): string {
@@ -408,41 +469,7 @@ export class SocialScreen implements Screen {
       </div>
     `;
 
-    // Wire accept buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-accept-friend')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) this.gameClient.sendAcceptFriendRequest(target);
-      });
-    }
-    // Wire decline buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-decline-friend')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) this.gameClient.sendDeclineFriendRequest(target);
-      });
-    }
-    // Wire revoke buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-revoke-friend')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) this.gameClient.sendRevokeFriendRequest(target);
-      });
-    }
-    // Wire remove buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-action-btn.remove-friend-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.closest('.social-user-row')?.getAttribute('data-username');
-        if (target) this.gameClient.sendRemoveFriend(target);
-      });
-    }
-    // Wire chat buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-chat-user-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.closest('.social-user-row')?.getAttribute('data-username');
-        if (target) this.startDm(target);
-      });
-    }
+    // Action buttons (accept, decline, revoke, remove, chat) handled by delegated click handler
   }
 
   private renderFriendRow(username: string, isOnline: boolean): string {
@@ -481,12 +508,7 @@ export class SocialScreen implements Screen {
         </div>
       `;
 
-      const input = this.panelContainer.querySelector('.social-guild-name-input') as HTMLInputElement;
-      const createBtn = this.panelContainer.querySelector('.social-guild-create-btn')!;
-      createBtn.addEventListener('click', () => {
-        const name = input.value.trim();
-        if (name) this.gameClient.sendCreateGuild(name);
-      });
+      // Create button handled by delegated click handler
       return;
     }
 
@@ -522,28 +544,7 @@ export class SocialScreen implements Screen {
       </div>
     `;
 
-    // Wire leave button
-    this.panelContainer.querySelector('.social-guild-leave-btn')?.addEventListener('click', () => {
-      this.gameClient.sendLeaveGuild();
-    });
-
-    // Wire invite
-    const inviteInput = this.panelContainer.querySelector('.social-guild-invite-input') as HTMLInputElement;
-    this.panelContainer.querySelector('.social-guild-invite-btn')?.addEventListener('click', () => {
-      const target = inviteInput.value.trim();
-      if (target) {
-        this.gameClient.sendInviteGuild(target);
-        inviteInput.value = '';
-      }
-    });
-
-    // Wire chat buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-chat-user-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.closest('.social-user-row')?.getAttribute('data-username');
-        if (target) this.startDm(target);
-      });
-    }
+    // Leave, invite, and chat buttons handled by delegated click handler
   }
 
   // ── Party Panel ─────────────────────────────────────────────
@@ -655,6 +656,9 @@ export class SocialScreen implements Screen {
         actions.push(`<button class="social-action-btn add-friend social-transfer-btn" data-username="${this.escapeHtml(m.username)}">Transfer</button>`);
         actions.push(`<button class="social-action-btn remove-friend social-kick-btn" data-username="${this.escapeHtml(m.username)}">Kick</button>`);
       } else if (selfRole === 'leader') {
+        if (m.role === 'member') {
+          actions.push(`<button class="social-action-btn add-friend social-promote-btn" data-username="${this.escapeHtml(m.username)}">Promote</button>`);
+        }
         if (m.role !== 'owner') {
           actions.push(`<button class="social-action-btn remove-friend social-kick-btn" data-username="${this.escapeHtml(m.username)}">Kick</button>`);
         }
@@ -672,7 +676,6 @@ export class SocialScreen implements Screen {
           <button class="social-action-btn remove-friend social-party-leave-btn">Leave Party</button>
         </div>
       ` : ''}
-      ${nearbyHtml}
       <div class="social-group-header">Members (${party.members.length}/${MAX_PARTY_SIZE})</div>
       <div class="social-user-list">
         ${party.members.map(m => `
@@ -689,86 +692,11 @@ export class SocialScreen implements Screen {
           </div>
         `).join('')}
       </div>
+      ${nearbyHtml}
     `;
 
-    // Wire leave
-    this.panelContainer.querySelector('.social-party-leave-btn')?.addEventListener('click', () => {
-      this.gameClient.sendLeaveParty();
-    });
-
-    // Wire accept/decline invite buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-accept-invite')) {
-      btn.addEventListener('click', () => {
-        const partyId = btn.getAttribute('data-party-id');
-        if (partyId) this.gameClient.sendAcceptPartyInvite(partyId);
-      });
-    }
-    for (const btn of this.panelContainer.querySelectorAll('.social-decline-invite')) {
-      btn.addEventListener('click', () => {
-        const partyId = btn.getAttribute('data-party-id');
-        if (partyId) this.gameClient.sendDeclinePartyInvite(partyId);
-      });
-    }
-
-    // Wire nearby invite buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-nearby-invite')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) {
-          this.gameClient.sendInviteParty(target);
-          btn.textContent = 'Invited';
-          (btn as HTMLButtonElement).disabled = true;
-        }
-      });
-    }
-
-    // Wire grid cell click to set position
-    for (const cell of this.panelContainer.querySelectorAll('.social-party-cell:not(.occupied)')) {
-      cell.addEventListener('click', () => {
-        const pos = parseInt(cell.getAttribute('data-pos')!, 10);
-        this.gameClient.sendSetPartyGridPosition(pos);
-      });
-    }
-
-    // Wire chat buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-chat-user-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.closest('.social-user-row')?.getAttribute('data-username');
-        if (target) this.startDm(target);
-      });
-    }
-
-    // Wire promote buttons (owner only)
-    for (const btn of this.panelContainer.querySelectorAll('.social-promote-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) this.gameClient.sendPromotePartyLeader(target);
-      });
-    }
-
-    // Wire demote buttons (owner only)
-    for (const btn of this.panelContainer.querySelectorAll('.social-demote-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) this.gameClient.sendDemotePartyMember(target);
-      });
-    }
-
-    // Wire transfer buttons (owner only)
-    for (const btn of this.panelContainer.querySelectorAll('.social-transfer-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) this.gameClient.sendTransferPartyOwnership(target);
-      });
-    }
-
-    // Wire kick buttons (owner and leaders)
-    for (const btn of this.panelContainer.querySelectorAll('.social-kick-btn')) {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-username');
-        if (target) this.gameClient.sendKickPartyMember(target);
-      });
-    }
+    // All party buttons (leave, accept/decline invite, nearby invite, promote, demote,
+    // transfer, kick, chat, grid position) handled by delegated click handler
   }
 
   // ── Chat Panel ───────────────────────────────────────────────
