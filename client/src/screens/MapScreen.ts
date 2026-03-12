@@ -1,10 +1,12 @@
 import type { GameClient } from '../network/GameClient';
+import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
 import { TileInfoModal } from '../ui/TileInfoModal';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
+  private worldCache: WorldCache;
   private game: import('phaser').Game | null = null;
   private unsubscribeState?: () => void;
   private sceneReady = false;
@@ -13,15 +15,29 @@ export class MapScreen implements Screen {
   private onChatCallback?: (username: string) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
-  constructor(containerId: string, gameClient: GameClient) {
+  constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
+    this.worldCache = worldCache;
   }
 
   setOnChat(cb: (username: string) => void): void {
     this.onChatCallback = cb;
+  }
+
+  /** Refresh the map from updated WorldCache data. */
+  refreshWorld(): void {
+    const scene = this.getScene();
+    if (scene) {
+      scene.rebuildFromCache();
+      // Re-apply current state (party position, other players, etc.)
+      if (this.gameClient.lastState) {
+        scene.applyServerState(this.gameClient.lastState, true);
+      }
+    }
+    // If scene doesn't exist yet, next createPhaserGame() will build from current cache
   }
 
   /** Check if the current player can move (must be owner or leader). */
@@ -97,13 +113,16 @@ export class MapScreen implements Screen {
     const Phaser = await import('phaser');
     const { WorldMapScene } = await import('../scenes/WorldMapScene');
 
+    // Create a scene instance with the world cache injected
+    const sceneInstance = new WorldMapScene(this.worldCache);
+
     this.game = new Phaser.Game({
       type: Phaser.AUTO,
       width: this.container.clientWidth,
       height: this.container.clientHeight,
       parent: 'game-container',
       backgroundColor: '#2d2d44',
-      scene: [WorldMapScene],
+      scene: [sceneInstance],
       scale: {
         mode: Phaser.Scale.RESIZE,
         autoCenter: Phaser.Scale.CENTER_BOTH,

@@ -2,8 +2,7 @@
   "references": [
     { "path": "./shared" },
     { "path": "./client" },
-    { "path": "./server" },
-    { "path": "./game-manager" }
+    { "path": "./server" }
   ],
   "files": []
 }

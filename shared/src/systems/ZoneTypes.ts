@@ -14,12 +14,12 @@ export interface ZoneDefinition {
   levelRange: [number, number];
 }
 
-// --- Zone definitions ---
+// --- Seed data (used as defaults when data files don't exist) ---
 
-export const ZONES: Record<string, ZoneDefinition> = {
-  friendly_forest: {
-    id: 'friendly_forest',
-    displayName: 'Friendly Forest',
+export const SEED_ZONES: Record<string, ZoneDefinition> = {
+  hatchetmill: {
+    id: 'hatchetmill',
+    displayName: 'Hatchetmill',
     encounterTable: [
       { monsterId: 'goblin', weight: 1, minCount: 1, maxCount: 2 },
     ],
@@ -35,11 +35,20 @@ export const ZONES: Record<string, ZoneDefinition> = {
     ],
     levelRange: [2, 3],
   },
+  crystal_caves: {
+    id: 'crystal_caves',
+    displayName: 'Crystal Caves',
+    encounterTable: [
+      { monsterId: 'goblin', weight: 2, minCount: 1, maxCount: 2 },
+      { monsterId: 'wolf', weight: 3, minCount: 1, maxCount: 2 },
+    ],
+    levelRange: [1, 2],
+  },
 };
 
 // --- Functions ---
 
 /** Look up a zone by ID. Returns undefined if not found. */
-export function getZone(zoneId: string): ZoneDefinition | undefined {
-  return ZONES[zoneId];
+export function getZone(zoneId: string, zones: Record<string, ZoneDefinition>): ZoneDefinition | undefined {
+  return zones[zoneId];
 }

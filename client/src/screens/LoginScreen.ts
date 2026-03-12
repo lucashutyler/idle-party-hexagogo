@@ -6,6 +6,7 @@ export class LoginScreen implements Screen {
   private button!: HTMLButtonElement;
   private errorEl!: HTMLElement;
   private subtitleEl!: HTMLElement;
+  private cancelLink!: HTMLAnchorElement;
   private onLoginCallback: (email: string) => void;
 
   constructor(containerId: string, onLogin: (email: string) => void) {
@@ -38,12 +39,30 @@ export class LoginScreen implements Screen {
     this.button.textContent = loading ? 'Verifying...' : 'Verify';
   }
 
-  showCheckEmail(): void {
+  showCheckEmail(onCancel?: () => void): void {
     this.subtitleEl.textContent = 'Check your email for a sign-in link!';
     this.subtitleEl.style.display = 'block';
     this.input.style.display = 'none';
     this.button.style.display = 'none';
     this.errorEl.style.display = 'none';
+
+    if (onCancel) {
+      this.cancelLink.style.display = 'block';
+      this.cancelLink.onclick = (e) => {
+        e.preventDefault();
+        onCancel();
+      };
+    }
+  }
+
+  showExpired(): void {
+    this.subtitleEl.textContent = 'Sign-in link expired. Please try again.';
+    this.subtitleEl.style.display = 'block';
+    this.input.style.display = '';
+    this.button.style.display = '';
+    this.cancelLink.style.display = 'none';
+    this.errorEl.style.display = 'none';
+    this.setLoading(false);
   }
 
   private reset(): void {
@@ -51,6 +70,7 @@ export class LoginScreen implements Screen {
     this.button.style.display = '';
     this.subtitleEl.style.display = 'none';
     this.errorEl.style.display = 'none';
+    this.cancelLink.style.display = 'none';
     this.setLoading(false);
   }
 
@@ -64,6 +84,7 @@ export class LoginScreen implements Screen {
           <button class="login-button">Verify</button>
           <div class="login-error"></div>
         </div>
+        <a href="#" class="login-cancel-link" style="display:none">Try a different email</a>
       </div>
     `;
 
@@ -71,6 +92,7 @@ export class LoginScreen implements Screen {
     this.button = this.container.querySelector('.login-button')!;
     this.errorEl = this.container.querySelector('.login-error')!;
     this.subtitleEl = this.container.querySelector('.login-subtitle')!;
+    this.cancelLink = this.container.querySelector('.login-cancel-link')!;
   }
 
   private wireEvents(): void {

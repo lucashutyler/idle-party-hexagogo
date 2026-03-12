@@ -45,10 +45,11 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
       return;
     }
 
-    // Production: send magic link email
+    // Production: create login + send magic link email
+    const { token: loginToken, loginId } = tokenStore.createLogin(trimmed);
     try {
-      await sendMagicLinkEmail(trimmed, token);
-      res.json({ mode: 'prod', sent: true });
+      await sendMagicLinkEmail(trimmed, loginToken);
+      res.json({ mode: 'prod', loginId, sent: true });
     } catch (err) {
       console.error('[Auth] Failed to send magic link:', err);
       res.status(500).json({ error: 'Failed to send verification email' });
@@ -99,6 +100,87 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
 
         res.json({
           success: true,
+          email,
+          username: account?.username ?? null,
+        });
+      });
+    });
+  });
+
+  /**
+   * POST /auth/approve — { token }
+   * Approves a pending login via magic link token. No session is created on this device.
+   */
+  router.post('/approve', async (req, res) => {
+    const { token } = req.body;
+
+    if (!token || typeof token !== 'string') {
+      res.status(400).json({ error: 'Token is required' });
+      return;
+    }
+
+    const email = tokenStore.approve(token);
+    if (!email) {
+      res.status(401).json({ error: 'Invalid or expired sign-in link. Please request a new one.' });
+      return;
+    }
+
+    await accountStore.setVerified(email);
+    res.json({ success: true });
+  });
+
+  /**
+   * GET /auth/login-status?loginId=...
+   * Polls the status of a pending login. On approval, creates a session on the polling device.
+   */
+  router.get('/login-status', async (req, res) => {
+    const { loginId } = req.query;
+
+    if (!loginId || typeof loginId !== 'string') {
+      res.status(400).json({ error: 'loginId is required' });
+      return;
+    }
+
+    const status = tokenStore.checkLogin(loginId);
+
+    if (status.status === 'expired') {
+      res.json({ status: 'expired' });
+      return;
+    }
+
+    if (status.status === 'pending') {
+      res.json({ status: 'pending' });
+      return;
+    }
+
+    // Approved: consume the login and create session on this device
+    const email = tokenStore.consumeLogin(loginId);
+    if (!email) {
+      res.json({ status: 'expired' });
+      return;
+    }
+
+    const account = accountStore.findByEmail(email);
+
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error('[Auth] Session regenerate error:', err);
+        res.status(500).json({ error: 'Session error' });
+        return;
+      }
+
+      req.session.email = email;
+      req.session.username = account?.username || undefined;
+
+      req.session.save((err) => {
+        if (err) {
+          console.error('[Auth] Session save error:', err);
+          res.status(500).json({ error: 'Session error' });
+          return;
+        }
+
+        res.json({
+          status: 'approved',
           email,
           username: account?.username ?? null,
         });

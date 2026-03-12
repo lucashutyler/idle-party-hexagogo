@@ -104,6 +104,13 @@ export class ServerParty {
     return true;
   }
 
+  /** Force-relocate the party to a new tile, clearing all movement state. */
+  relocateTo(tile: HexTile): void {
+    this.currentTile = tile;
+    this.targetTile = null;
+    this.movementQueue = [];
+  }
+
   enterBattle(): void {
     this.setState('in_battle');
   }

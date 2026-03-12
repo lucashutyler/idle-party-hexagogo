@@ -2,7 +2,6 @@ import {
   HexGrid,
   HexTile,
   UnlockSystem,
-  getStartingPosition,
   offsetToCube,
   createDefaultCharacter,
   createCharacter,
@@ -11,10 +10,7 @@ import {
   addGold,
   calculateMaxHp,
   xpForNextLevel,
-  MONSTERS,
-  ITEMS,
   computeEquipmentBonuses,
-  rollDrops,
   addItemToInventory,
   equipItem,
   unequipItem,
@@ -30,7 +26,6 @@ import type {
   CharacterState,
   ClassName,
   StatName,
-  PartyCombatState,
   PartyCombatant,
   ClientCharacterState,
   EquipSlot,
@@ -39,8 +34,11 @@ import type {
   ChatMessage,
   PartyGridPosition,
   FriendRequest,
+  ChatChannelType,
+  ItemDefinition,
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
+import type { ContentStore } from './ContentStore.js';
 
 const MAX_LOG_ENTRIES = 100;
 const MAX_SAVE_LOG_ENTRIES = 1000;
@@ -49,6 +47,7 @@ const MAX_CHAT_HISTORY = 1000;
 export class PlayerSession {
   username: string;
   private grid: HexGrid;
+  private content: ContentStore;
   private unlockSystem: UnlockSystem;
   private combatLog: CombatLogEntry[] = [];
   private battleCount = 0;
@@ -59,6 +58,8 @@ export class PlayerSession {
   private blockedUsers: Record<string, BlockLevel> = {};
   private guildId: string | null = null;
   private partyId: string | null = null;
+  private chatSendChannel: ChatChannelType = 'zone';
+  private chatDmTarget = '';
 
   /** Callback to get social state — set by PlayerManager after construction. */
   getSocialState?: () => ClientSocialState;
@@ -75,11 +76,12 @@ export class PlayerSession {
   /** Callback to get position — set by PlayerManager. */
   getPartyPosition?: () => { col: number; row: number } | null;
 
-  constructor(username: string, grid: HexGrid) {
+  constructor(username: string, grid: HexGrid, content: ContentStore) {
     this.username = username;
     this.grid = grid;
+    this.content = content;
 
-    const startPos = getStartingPosition();
+    const startPos = content.getStartTile();
     const startCoord = offsetToCube(startPos);
     const startTile = this.grid.getTile(startCoord);
 
@@ -94,7 +96,7 @@ export class PlayerSession {
   /** Get combat info for the party combat system. */
   getCombatInfo(): PartyCombatant {
     const maxHp = calculateMaxHp(this.character.level, this.character.stats.CON, this.character.className);
-    const equipBonuses = computeEquipmentBonuses(this.character.equipment);
+    const equipBonuses = computeEquipmentBonuses(this.character.equipment, this.content.getAllItems());
 
     // Get grid position from party info via social state
     let gridPosition: PartyGridPosition = 4;
@@ -116,8 +118,8 @@ export class PlayerSession {
     };
   }
 
-  /** Handle victory rewards (called by PartyBattleManager). */
-  handleVictory(combat: PartyCombatState | null, tile: HexTile): void {
+  /** Handle victory rewards (called by PartyBattleManager with pre-split rewards). */
+  handleVictory(rewards: { xp: number; gold: number; items: string[] }, tile: HexTile): void {
     this.addLogEntry('Victory!', 'victory');
 
     const unlocked = this.unlockSystem.unlockAdjacentTiles(tile);
@@ -125,44 +127,20 @@ export class PlayerSession {
       this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
     }
 
-    // Award XP based on monsters defeated
-    const xpGained = combat
-      ? combat.monsters.reduce((sum, m) => sum + m.xp, 0)
-      : 10;
-
-    // Award gold based on monsters defeated
-    let goldGained = 0;
-    if (combat) {
-      for (const m of combat.monsters) {
-        const def = MONSTERS[m.id];
-        if (def) {
-          goldGained += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
-        }
-      }
-    }
-    if (goldGained > 0) {
-      addGold(this.character, goldGained);
-      this.addLogEntry(`+${goldGained} Gold`, 'victory');
+    if (rewards.gold > 0) {
+      addGold(this.character, rewards.gold);
+      this.addLogEntry(`+${rewards.gold} Gold`, 'victory');
     }
 
-    // Roll item drops per monster
-    if (combat) {
-      for (const m of combat.monsters) {
-        const def = MONSTERS[m.id];
-        if (def?.drops) {
-          const dropped = rollDrops(def.drops);
-          for (const itemId of dropped) {
-            const itemDef = ITEMS[itemId];
-            if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
-              this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
-            }
-          }
-        }
+    for (const itemId of rewards.items) {
+      const itemDef = this.content.getItem(itemId);
+      if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
+        this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
       }
     }
 
-    const { leveledUp, levelsGained } = addXp(this.character, xpGained);
-    this.addLogEntry(`+${xpGained} XP`, 'victory');
+    const { leveledUp, levelsGained } = addXp(this.character, rewards.xp);
+    this.addLogEntry(`+${rewards.xp} XP`, 'victory');
     if (leveledUp) {
       for (let i = 0; i < levelsGained; i++) {
         this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
@@ -183,6 +161,47 @@ export class PlayerSession {
     this.character.priorityStat = stat;
   }
 
+  /**
+   * Get all world tiles with zone display names populated.
+   * Client determines fog of war rendering using state.unlocked.
+   */
+  getWorldData(): {
+    startTile: { col: number; row: number };
+    tiles: import('@idle-party-rpg/shared').WorldTileDefinition[];
+  } {
+    const world = this.content.getWorld();
+    const allZones = this.content.getAllZones();
+
+    return {
+      startTile: world.startTile,
+      tiles: world.tiles.map(wt => {
+        const zone = getZone(wt.zone, allZones);
+        return { ...wt, zoneName: zone?.displayName ?? wt.zone };
+      }),
+    };
+  }
+
+  /** Build item definitions for items the player currently owns (inventory + equipment). */
+  private getOwnedItemDefinitions(): Record<string, ItemDefinition> {
+    const defs: Record<string, ItemDefinition> = {};
+
+    // Inventory items
+    for (const itemId of Object.keys(this.character.inventory)) {
+      const def = this.content.getItem(itemId);
+      if (def) defs[itemId] = def;
+    }
+
+    // Equipment items
+    for (const itemId of Object.values(this.character.equipment)) {
+      if (itemId) {
+        const def = this.content.getItem(itemId);
+        if (def) defs[itemId] = def;
+      }
+    }
+
+    return defs;
+  }
+
   getState(otherPlayers: OtherPlayerState[]): Omit<ServerStateMessage, 'type'> {
     const battleState = this.getBattleState?.();
     const partyState = this.getPartyPositionState?.();
@@ -201,7 +220,8 @@ export class PlayerSession {
       equipment: { ...this.character.equipment },
     };
 
-    const zone = partyZone ? getZone(partyZone) : null;
+    const allZones = this.content.getAllZones();
+    const zone = partyZone ? getZone(partyZone, allZones) : null;
     const zoneName = zone ? zone.displayName : (partyZone ?? 'Unknown');
 
     return {
@@ -216,6 +236,7 @@ export class PlayerSession {
       character: charState,
       zoneName,
       social: this.getSocialState?.(),
+      itemDefinitions: this.getOwnedItemDefinitions(),
     };
   }
 
@@ -224,7 +245,7 @@ export class PlayerSession {
   }
 
   getZone(): string {
-    return this.getPartyZone?.() ?? 'friendly_forest';
+    return this.getPartyZone?.() ?? 'hatchetmill';
   }
 
   // ── Social Accessors ──────────────────────────────────────
@@ -243,6 +264,11 @@ export class PlayerSession {
 
   getPartyId(): string | null { return this.partyId; }
   setPartyId(id: string | null): void { this.partyId = id; }
+
+  getChatSendChannel(): ChatChannelType { return this.chatSendChannel; }
+  setChatSendChannel(channel: ChatChannelType): void { this.chatSendChannel = channel; }
+  getChatDmTarget(): string { return this.chatDmTarget; }
+  setChatDmTarget(target: string): void { this.chatDmTarget = target; }
 
   /** Store a chat message in this player's personal history. */
   addChatMessage(message: ChatMessage): void {
@@ -280,8 +306,17 @@ export class PlayerSession {
     }
   }
 
+  /** Force-unlock a tile and its adjacent tiles (for relocation after deploy). */
+  forceUnlockTileArea(tile: HexTile): void {
+    this.unlockSystem.forceUnlock(tile);
+    const neighbors = this.grid.getTraversableNeighbors(tile.coord);
+    for (const neighbor of neighbors) {
+      this.unlockSystem.forceUnlock(neighbor);
+    }
+  }
+
   getStartingTile(): HexTile {
-    const startPos = getStartingPosition();
+    const startPos = this.content.getStartTile();
     const startCoord = offsetToCube(startPos);
     const tile = this.grid.getTile(startCoord);
     if (!tile) throw new Error('Invalid starting position');
@@ -328,6 +363,8 @@ export class PlayerSession {
       partyRole: partyInfo?.role,
       partyGridPosition: partyInfo?.gridPosition,
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
+      chatSendChannel: this.chatSendChannel,
+      chatDmTarget: this.chatDmTarget,
     };
   }
 
@@ -338,11 +375,13 @@ export class PlayerSession {
   static fromSaveData(
     data: PlayerSaveData,
     grid: HexGrid,
+    content: ContentStore,
   ): PlayerSession {
     // Build session via Object.create to bypass constructor
     const session = Object.create(PlayerSession.prototype) as PlayerSession;
     (session as { username: string }).username = data.username;
     session['grid'] = grid;
+    session['content'] = content;
     session['battleCount'] = data.battleCount;
     session['combatLog'] = data.combatLog.slice(-MAX_LOG_ENTRIES);
     session['unlockSystem'] = UnlockSystem.fromKeys(grid, data.unlockedKeys);
@@ -376,6 +415,8 @@ export class PlayerSession {
     session['guildId'] = data.guildId ?? null;
     session['partyId'] = null; // Parties are transient, not restored across restarts
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
+    session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
+    session['chatDmTarget'] = data.chatDmTarget ?? '';
 
     // Add server-online log entry
     session['addLogEntry']('Server back online — resuming!', 'battle');
@@ -384,10 +425,10 @@ export class PlayerSession {
   }
 
   handleEquipItem(itemId: string): boolean {
-    const def = ITEMS[itemId];
+    const def = this.content.getItem(itemId);
     if (!def || !def.equipSlot) return false;
 
-    const result = equipItem(this.character.inventory, this.character.equipment, itemId);
+    const result = equipItem(this.character.inventory, this.character.equipment, itemId, this.content.getAllItems());
     return result.success;
   }
 

@@ -9,7 +9,20 @@ export interface SessionInfo {
 export interface LoginResult {
   mode: 'dev' | 'prod';
   token?: string;
+  loginId?: string;
   sent?: boolean;
+  error?: string;
+}
+
+export interface LoginStatusResult {
+  status: 'pending' | 'approved' | 'expired';
+  email?: string;
+  username?: string | null;
+  error?: string;
+}
+
+export interface ApproveResult {
+  success?: boolean;
   error?: string;
 }
 
@@ -60,6 +73,19 @@ export async function setUsername(username: string): Promise<UsernameResult> {
   return jsonFetch<UsernameResult>(`${API_BASE}/username`, {
     method: 'POST',
     body: JSON.stringify({ username }),
+  });
+}
+
+export async function pollLoginStatus(loginId: string): Promise<LoginStatusResult> {
+  return jsonFetch<LoginStatusResult>(
+    `${API_BASE}/login-status?loginId=${encodeURIComponent(loginId)}`
+  );
+}
+
+export async function approveLogin(token: string): Promise<ApproveResult> {
+  return jsonFetch<ApproveResult>(`${API_BASE}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
   });
 }
 

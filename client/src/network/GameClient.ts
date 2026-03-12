@@ -6,6 +6,7 @@ type StateListener = (state: ServerStateMessage) => void;
 type ChatListener = (message: ChatMessage) => void;
 type ChatHistoryListener = (channelType: ChatChannelType, channelId: string, messages: ChatMessage[]) => void;
 type ConnectionListener = (connected: boolean) => void;
+type WorldUpdateListener = () => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -18,6 +19,7 @@ export class GameClient {
   private connectionListeners = new Set<ConnectionListener>();
   private chatListeners = new Set<ChatListener>();
   private chatHistoryListeners = new Set<ChatHistoryListener>();
+  private worldUpdateListeners = new Set<WorldUpdateListener>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -120,6 +122,10 @@ export class GameClient {
         } else if (msg.type === 'chat_history') {
           for (const listener of this.chatHistoryListeners) {
             listener(msg.channelType, msg.channelId, msg.messages);
+          }
+        } else if (msg.type === 'world_update') {
+          for (const listener of this.worldUpdateListeners) {
+            listener();
           }
         } else if (msg.type === 'error') {
           console.warn('[GameClient] server error:', msg.message);
@@ -286,6 +292,10 @@ export class GameClient {
     this.sendRaw({ type: 'request_chat_history', channelType, channelId });
   }
 
+  sendSetChatPreferences(sendChannel: string, dmTarget: string): void {
+    this.sendRaw({ type: 'set_chat_preferences', sendChannel, dmTarget });
+  }
+
   /** Subscribe to incoming chat messages. Returns an unsubscribe function. */
   onChat(listener: ChatListener): () => void {
     this.chatListeners.add(listener);
@@ -296,6 +306,12 @@ export class GameClient {
   onChatHistory(listener: ChatHistoryListener): () => void {
     this.chatHistoryListeners.add(listener);
     return () => { this.chatHistoryListeners.delete(listener); };
+  }
+
+  /** Subscribe to world update notifications. Returns an unsubscribe function. */
+  onWorldUpdate(listener: WorldUpdateListener): () => void {
+    this.worldUpdateListeners.add(listener);
+    return () => { this.worldUpdateListeners.delete(listener); };
   }
 
   destroy(): void {
@@ -309,5 +325,6 @@ export class GameClient {
     this.connectionListeners.clear();
     this.chatListeners.clear();
     this.chatHistoryListeners.clear();
+    this.worldUpdateListeners.clear();
   }
 }

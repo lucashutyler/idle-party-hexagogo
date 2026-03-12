@@ -1,24 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { ZONES, getZone } from '../src/systems/ZoneTypes';
-import { MONSTERS, createEncounter } from '../src/systems/MonsterTypes';
+import { SEED_ZONES, getZone } from '../src/systems/ZoneTypes';
+import { SEED_MONSTERS, createEncounter } from '../src/systems/MonsterTypes';
 
 describe('ZoneTypes', () => {
-  describe('ZONES', () => {
-    it('has friendly_forest and darkwood zones', () => {
-      expect(ZONES.friendly_forest).toBeDefined();
-      expect(ZONES.darkwood).toBeDefined();
+  describe('SEED_ZONES', () => {
+    it('has hatchetmill, darkwood, and crystal_caves zones', () => {
+      expect(SEED_ZONES.hatchetmill).toBeDefined();
+      expect(SEED_ZONES.darkwood).toBeDefined();
+      expect(SEED_ZONES.crystal_caves).toBeDefined();
     });
 
     it('every encounter table entry references a valid monster', () => {
-      for (const zone of Object.values(ZONES)) {
+      for (const zone of Object.values(SEED_ZONES)) {
         for (const entry of zone.encounterTable) {
-          expect(MONSTERS[entry.monsterId]).toBeDefined();
+          expect(SEED_MONSTERS[entry.monsterId]).toBeDefined();
         }
       }
     });
 
     it('encounter table entries have valid counts', () => {
-      for (const zone of Object.values(ZONES)) {
+      for (const zone of Object.values(SEED_ZONES)) {
         for (const entry of zone.encounterTable) {
           expect(entry.minCount).toBeGreaterThanOrEqual(1);
           expect(entry.maxCount).toBeGreaterThanOrEqual(entry.minCount);
@@ -30,29 +31,29 @@ describe('ZoneTypes', () => {
 
   describe('getZone', () => {
     it('returns zone for valid ID', () => {
-      const zone = getZone('friendly_forest');
+      const zone = getZone('hatchetmill', SEED_ZONES);
       expect(zone).toBeDefined();
-      expect(zone!.displayName).toBe('Friendly Forest');
+      expect(zone!.displayName).toBe('Hatchetmill');
     });
 
     it('returns undefined for unknown ID', () => {
-      expect(getZone('nonexistent')).toBeUndefined();
+      expect(getZone('nonexistent', SEED_ZONES)).toBeUndefined();
     });
   });
 
   describe('createEncounter with zones', () => {
-    it('returns monsters for friendly_forest', () => {
-      const monsters = createEncounter('friendly_forest');
+    it('returns monsters for hatchetmill', () => {
+      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES);
       expect(monsters.length).toBeGreaterThanOrEqual(1);
       expect(monsters.length).toBeLessThanOrEqual(2);
-      // friendly_forest only has goblins
+      // hatchetmill only has goblins
       for (const m of monsters) {
         expect(m.id).toBe('goblin');
       }
     });
 
     it('returns monsters for darkwood', () => {
-      const monsters = createEncounter('darkwood');
+      const monsters = createEncounter('darkwood', SEED_MONSTERS, SEED_ZONES);
       expect(monsters.length).toBeGreaterThanOrEqual(1);
       expect(monsters.length).toBeLessThanOrEqual(3);
       // darkwood has goblins, wolves, or bandits
@@ -62,14 +63,14 @@ describe('ZoneTypes', () => {
     });
 
     it('falls back to 2 goblins with no zone', () => {
-      const monsters = createEncounter();
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
       expect(monsters).toHaveLength(2);
       expect(monsters[0].id).toBe('goblin');
       expect(monsters[1].id).toBe('goblin');
     });
 
     it('falls back to 2 goblins for unknown zone', () => {
-      const monsters = createEncounter('nonexistent');
+      const monsters = createEncounter('nonexistent', SEED_MONSTERS, SEED_ZONES);
       expect(monsters).toHaveLength(2);
       expect(monsters[0].id).toBe('goblin');
     });

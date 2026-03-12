@@ -48,22 +48,17 @@ export class TileInfoModal {
         </div>`
       : '';
 
-    const description = info.isUnlocked
-      ? `<div class="tile-modal-desc">No description yet.</div>`
-      : '';
-
-    const viewInfo = info.isSameZone && !info.isUnlocked
-      ? playerList
-      : info.isUnlocked
-        ? `${description}${playerList}`
-        : '<div class="tile-modal-desc">Unexplored room</div>';
+    // Room name subheader — discovered = white with name, unexplored = gray placeholder
+    const roomNameHtml = info.roomName
+      ? `<div class="tile-modal-room-name">${this.escapeHtml(info.roomName)}</div>`
+      : `<div class="tile-modal-room-name tile-modal-room-unexplored">Unexplored room</div>`;
 
     this.modal.innerHTML = `
       <div class="tile-modal-header">
-        <span class="tile-modal-title">${info.zoneName}</span>
+        <span class="tile-modal-title">${this.escapeHtml(info.zoneName)}</span>
       </div>
-      <div class="tile-modal-type">${info.tileType}</div>
-      ${viewInfo}
+      ${roomNameHtml}
+      ${playerList}
       <div class="tile-modal-actions">
         <button class="tile-modal-btn tile-modal-move">Go to room</button>
         <button class="tile-modal-btn tile-modal-close">Close</button>

@@ -17,6 +17,28 @@ export interface TileDefinition {
 }
 
 /**
+ * World tile definition — extends TileDefinition with zone and room name.
+ * Used in data/world.json for the data-driven world map.
+ */
+export interface WorldTileDefinition {
+  col: number;
+  row: number;
+  type: TileType;
+  zone: string;
+  name: string;
+  /** Zone display name — populated by server when sending to clients, not stored in world.json. */
+  zoneName?: string;
+}
+
+/**
+ * World data — the full world definition loaded from data/world.json.
+ */
+export interface WorldData {
+  startTile: { col: number; row: number };
+  tiles: WorldTileDefinition[];
+}
+
+/**
  * Helper to create tile definitions more concisely.
  */
 function t(col: number, row: number, type: TileType): TileDefinition {

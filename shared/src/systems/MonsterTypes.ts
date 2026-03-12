@@ -1,5 +1,4 @@
-import { getZone } from './ZoneTypes.js';
-import type { EncounterTableEntry } from './ZoneTypes.js';
+import type { EncounterTableEntry, ZoneDefinition } from './ZoneTypes.js';
 import type { ItemDrop } from './ItemTypes.js';
 import type { DamageType } from './CharacterStats.js';
 import type { PartyGridPosition } from './SocialTypes.js';
@@ -31,9 +30,9 @@ export interface MonsterInstance {
   gridPosition: PartyGridPosition;
 }
 
-// --- Monster catalog ---
+// --- Seed data (used as defaults when data files don't exist) ---
 
-export const MONSTERS: Record<string, MonsterDefinition> = {
+export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
   goblin: {
     id: 'goblin',
     name: 'Goblin',
@@ -116,37 +115,44 @@ function pickWeightedEntry(table: EncounterTableEntry[]): EncounterTableEntry {
 /**
  * Create an encounter for the given zone.
  * Uses the zone's encounter table for weighted random monster selection.
- * Falls back to 2x goblins if no zone is provided or zone is unknown.
+ * Falls back to first available monster if zone or monster not found.
  */
-export function createEncounter(zoneId?: string): MonsterInstance[] {
+export function createEncounter(
+  zoneId: string | undefined,
+  monsters: Record<string, MonsterDefinition>,
+  zones: Record<string, ZoneDefinition>,
+): MonsterInstance[] {
+  const fallbackDef = monsters['goblin'] ?? Object.values(monsters)[0];
+  if (!fallbackDef) return [];
+
   if (!zoneId) {
     return [
-      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[0]),
-      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[1]),
+      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[0]),
+      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[1]),
     ];
   }
 
-  const zone = getZone(zoneId);
+  const zone = zones[zoneId];
   if (!zone) {
     return [
-      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[0]),
-      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[1]),
+      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[0]),
+      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[1]),
     ];
   }
 
   const entry = pickWeightedEntry(zone.encounterTable);
-  const def = MONSTERS[entry.monsterId];
+  const def = monsters[entry.monsterId];
   if (!def) {
     return [
-      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[0]),
-      createMonsterInstance(MONSTERS.goblin, MONSTER_GRID_POSITIONS[1]),
+      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[0]),
+      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[1]),
     ];
   }
 
   const count = entry.minCount + Math.floor(Math.random() * (entry.maxCount - entry.minCount + 1));
-  const monsters: MonsterInstance[] = [];
+  const result: MonsterInstance[] = [];
   for (let i = 0; i < count; i++) {
-    monsters.push(createMonsterInstance(def, MONSTER_GRID_POSITIONS[i % MONSTER_GRID_POSITIONS.length]));
+    result.push(createMonsterInstance(def, MONSTER_GRID_POSITIONS[i % MONSTER_GRID_POSITIONS.length]));
   }
-  return monsters;
+  return result;
 }

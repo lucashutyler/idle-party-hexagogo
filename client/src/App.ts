@@ -1,8 +1,10 @@
 import { GameClient } from './network/GameClient';
-import { getSession, loginWithEmail, verifyToken, setUsername } from './network/AuthClient';
+import { WorldCache } from './network/WorldCache';
+import { getSession, loginWithEmail, verifyToken, pollLoginStatus, setUsername } from './network/AuthClient';
 import { ScreenManager } from './screens/ScreenManager';
 import { LoginScreen } from './screens/LoginScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
+import { ApproveScreen } from './screens/ApproveScreen';
 import { UsernameScreen } from './screens/UsernameScreen';
 import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
@@ -18,12 +20,14 @@ const CONNECTION_ERROR = 'Could not connect to server';
 
 export class App {
   private gameClient!: GameClient;
+  private worldCache = new WorldCache();
   private screenManager: ScreenManager;
   private loginScreen!: LoginScreen;
   private verifyScreen!: VerifyScreen;
   private usernameScreen!: UsernameScreen;
   private offlineScreen!: OfflineScreen;
   private navEl!: HTMLElement;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.screenManager = new ScreenManager();
@@ -61,7 +65,15 @@ export class App {
   }
 
   private async checkSession(): Promise<void> {
-    // Magic link landing: /verify?token=...
+    // Magic link approval landing: /approve?token=...
+    if (window.location.pathname === '/approve') {
+      const approveScreen = new ApproveScreen('screen-approve');
+      this.screenManager.register('approve', document.getElementById('screen-approve')!, approveScreen);
+      this.screenManager.switchTo('approve');
+      return;
+    }
+
+    // Legacy verify landing (dev mode): /verify?token=...
     if (window.location.pathname === '/verify') {
       this.screenManager.switchTo('verify');
       return;
@@ -113,8 +125,14 @@ export class App {
         return;
       }
 
-      // Production mode: email sent, show "check your email" message
-      this.loginScreen.showCheckEmail();
+      // Production mode: email sent, poll for approval
+      if (result.loginId) {
+        this.loginScreen.showCheckEmail(() => {
+          this.stopPolling();
+          this.loginScreen.onActivate();
+        });
+        this.startPolling(result.loginId);
+      }
     } catch {
       this.loginScreen.showError('Could not connect to server');
       this.loginScreen.setLoading(false);
@@ -187,10 +205,17 @@ export class App {
 
   private async connectAndEnterGame(): Promise<void> {
     this.gameClient = new GameClient();
-    const result = await this.gameClient.connect();
 
-    if (!result.success) {
-      if (result.error === CONNECTION_ERROR) {
+    // Load world data (per-player filtered) and connect WS in parallel
+    const [connectResult] = await Promise.all([
+      this.gameClient.connect(),
+      this.worldCache.loadWorld().catch(err => {
+        console.warn('[App] Failed to load world data:', err);
+      }),
+    ]);
+
+    if (!connectResult.success) {
+      if (connectResult.error === CONNECTION_ERROR) {
         this.screenManager.switchTo('offline');
         return;
       }
@@ -226,9 +251,44 @@ export class App {
     }
   }
 
+  private startPolling(loginId: string): void {
+    this.stopPolling();
+
+    this.pollTimer = setInterval(async () => {
+      try {
+        const result = await pollLoginStatus(loginId);
+
+        if (result.status === 'approved') {
+          this.stopPolling();
+          if (result.username) {
+            await this.connectAndEnterGame();
+          } else {
+            this.screenManager.switchTo('username');
+          }
+          return;
+        }
+
+        if (result.status === 'expired') {
+          this.stopPolling();
+          this.loginScreen.showExpired();
+          return;
+        }
+      } catch {
+        // Network error during poll: keep trying silently
+      }
+    }, 2000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
   private enterGame(): void {
     const combatScreen = new CombatScreen('screen-combat', this.gameClient);
-    const mapScreen = new MapScreen('screen-map', this.gameClient);
+    const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const characterScreen = new CharacterScreen('screen-character', this.gameClient);
     const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
     const socialScreen = new SocialScreen('screen-social', this.gameClient);
@@ -238,6 +298,13 @@ export class App {
     mapScreen.setOnChat((username) => {
       this.screenManager.switchTo('social');
       socialScreen.startDm(username);
+    });
+
+    // Listen for world content updates (admin deployed a new version)
+    this.gameClient.onWorldUpdate(async () => {
+      console.log('[App] World updated — reloading world data');
+      await this.worldCache.loadWorld();
+      mapScreen.refreshWorld();
     });
 
     this.screenManager.register('combat', document.getElementById('screen-combat')!, combatScreen);
@@ -250,6 +317,8 @@ export class App {
     // Show bottom nav
     this.navEl.style.display = '';
 
+    const savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';
+
     new BottomNav(
       [
         { id: 'combat', label: 'Combat', icon: '⚔' },
@@ -259,12 +328,12 @@ export class App {
         { id: 'social', label: 'Social', icon: '💬' },
         { id: 'settings', label: 'Settings', icon: '⚙' },
       ],
-      'combat',
+      savedScreen,
       (tabId) => this.screenManager.switchTo(tabId),
       this.gameClient,
     );
 
-    // Switch to combat screen
-    this.screenManager.switchTo('combat');
+    // Switch to saved screen (or combat by default)
+    this.screenManager.switchTo(savedScreen);
   }
 }

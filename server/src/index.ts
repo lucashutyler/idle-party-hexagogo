@@ -1,6 +1,13 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load .env from project root (npm workspaces set CWD to server/)
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config(); // Also check server/.env (does not override existing vars)
 import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
@@ -12,6 +19,7 @@ import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
+import { createAdminRoutes } from './admin/adminRoutes.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ChatMessage, ClassName } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
@@ -25,8 +33,9 @@ const store = new JsonFileStore();
 const sessionStore = new JsonSessionStore('data/sessions');
 const accountStore = new AccountStore();
 const tokenStore = new TokenStore();
-const gameLoop = new GameLoop(store, accountStore);
-const { playerManager } = gameLoop;
+const gameLoop = new GameLoop(store);
+// playerManager is set during init(), use gameLoop.playerManager after init
+let playerManager: typeof gameLoop.playerManager;
 
 // Trust first proxy (nginx/Cloudflare) so secure cookies work behind reverse proxy
 app.set('trust proxy', 1);
@@ -62,6 +71,34 @@ app.use('/auth', createAuthRoutes({
   },
 }));
 
+// Auth middleware for game API endpoints
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (!req.session?.username) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  next();
+}
+
+// World data (all tiles, client handles fog of war via state.unlocked)
+app.get('/api/world', requireAuth, (req, res) => {
+  const session = playerManager.getSessionByUsername(req.session!.username!);
+  if (!session) {
+    res.status(404).json({ error: 'No session' });
+    return;
+  }
+  res.json(session.getWorldData());
+});
+
+app.use('/api/admin', createAdminRoutes({
+  playerManager: () => playerManager,
+  accountStore,
+  contentStore: () => gameLoop.contentStore,
+  versionStore: () => gameLoop.versionStore,
+  rebuildGrid: () => gameLoop.rebuildGridAndRelocate(),
+  deployVersion: (versionId) => gameLoop.deployVersion(versionId),
+}));
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -72,12 +109,15 @@ app.get('/health', (_req, res) => {
 
 // --- Static files (production: serve built client) ---
 if (process.env.NODE_ENV === 'production') {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const clientDist = path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
-  // SPA fallback — serve index.html for any non-API route
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(clientDist, 'index.html'));
+  // SPA fallback — serve the correct HTML for admin vs game routes
+  app.get('*', (req, res) => {
+    if (req.path.startsWith('/admin')) {
+      res.sendFile(path.join(clientDist, 'admin.html'));
+    } else {
+      res.sendFile(path.join(clientDist, 'index.html'));
+    }
   });
 }
 
@@ -210,6 +250,11 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot change class' }));
           return;
         }
+        // Restart the current battle so combat uses the new class data
+        const classPartyId = session.getPartyId();
+        if (classPartyId) {
+          playerManager.partyBattles.restartBattle(classPartyId);
+        }
         playerManager.sendStateToPlayer(username);
         return;
       }
@@ -331,6 +376,15 @@ wss.on('connection', (ws) => {
         delete blocked[msg.username];
         session.setBlockedUsers(blocked);
         playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'set_chat_preferences' && typeof msg.sendChannel === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (session) {
+          session.setChatSendChannel(msg.sendChannel);
+          session.setChatDmTarget(msg.dmTarget ?? '');
+        }
         return;
       }
 
@@ -551,6 +605,8 @@ wss.on('connection', (ws) => {
         }
         // Notify the target they have a pending invite
         playerManager.sendStateToPlayer(msg.username);
+        // Also update the inviter so outgoingPartyInvites reflects the sent invite
+        playerManager.sendStateToPlayer(username);
         return;
       }
 
@@ -748,7 +804,8 @@ async function start() {
   await accountStore.load();
   tokenStore.start();
   sessionStore.startReap();
-  await gameLoop.init();
+  await gameLoop.init(accountStore);
+  playerManager = gameLoop.playerManager;
 
   server.listen(PORT, () => {
     console.log(`Game server listening on port ${PORT}`);

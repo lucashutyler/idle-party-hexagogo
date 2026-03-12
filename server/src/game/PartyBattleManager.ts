@@ -6,6 +6,7 @@ import {
   createPartyCombatState,
   createEncounter,
   getZone,
+  rollDrops,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -18,6 +19,7 @@ import type {
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
 import type { PlayerSession } from './PlayerSession.js';
+import type { ContentStore } from './ContentStore.js';
 
 interface PartyBattleEntry {
   partyId: string;
@@ -29,15 +31,18 @@ interface PartyBattleEntry {
 export class PartyBattleManager {
   private entries = new Map<string, PartyBattleEntry>();
   private grid: HexGrid;
+  private content: ContentStore;
   private getSession: (username: string) => PlayerSession | undefined;
   private broadcastToMember: (username: string) => void;
 
   constructor(
     grid: HexGrid,
+    content: ContentStore,
     getSession: (username: string) => PlayerSession | undefined,
     broadcastToMember: (username: string) => void,
   ) {
     this.grid = grid;
+    this.content = content;
     this.getSession = getSession;
     this.broadcastToMember = broadcastToMember;
   }
@@ -88,7 +93,8 @@ export class PartyBattleManager {
             const s = this.getSession(m);
             if (s) {
               const pos = cubeToOffset(serverParty.position);
-              const zone = getZone(serverParty.tile.zone);
+              const allZones = this.content.getAllZones();
+              const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
               s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
             }
@@ -162,7 +168,8 @@ export class PartyBattleManager {
             const s = this.getSession(m);
             if (s) {
               const pos = cubeToOffset(serverParty.position);
-              const zone = getZone(serverParty.tile.zone);
+              const allZones = this.content.getAllZones();
+              const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
               s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
             }
@@ -199,6 +206,13 @@ export class PartyBattleManager {
     if (entry.members.size === 0) {
       this.destroyEntry(partyId);
     }
+  }
+
+  /** Restart the current battle for a party (e.g., after a member changes class). */
+  restartBattle(partyId: string): void {
+    const entry = this.entries.get(partyId);
+    if (!entry) return;
+    entry.battleTimer.restartBattle();
   }
 
   /** Destroy a party battle entry and stop its timers. */
@@ -323,13 +337,50 @@ export class PartyBattleManager {
     return posA.col === posB.col && posA.row === posB.row;
   }
 
+  /** Get all party IDs. */
+  getAllPartyIds(): string[] {
+    return Array.from(this.entries.keys());
+  }
+
+  /** Get members of a party. */
+  getMembers(partyId: string): Set<string> | undefined {
+    return this.entries.get(partyId)?.members;
+  }
+
+  /** Relocate a party to a new tile, restarting its battle. */
+  relocateParty(partyId: string, newTile: HexTile): void {
+    const entry = this.entries.get(partyId);
+    if (!entry) return;
+    entry.serverParty.relocateTo(newTile);
+    entry.battleTimer.restartBattle();
+  }
+
+  /**
+   * After a grid rebuild, re-resolve all parties' tile references.
+   * The grid object is the same but tiles inside it are new instances.
+   */
+  refreshAllPartyTiles(grid: HexGrid): void {
+    for (const entry of this.entries.values()) {
+      const pos = cubeToOffset(entry.serverParty.position);
+      const coord = offsetToCube(pos);
+      const freshTile = grid.getTile(coord);
+      if (freshTile) {
+        // Re-set to the same position but with fresh tile reference
+        entry.serverParty.relocateTo(freshTile);
+      }
+    }
+  }
+
   // --- Private ---
 
   private createCombatForParty(partyId: string): PartyCombatState {
     const entry = this.entries.get(partyId);
+    const allMonsters = this.content.getAllMonsters();
+    const allZones = this.content.getAllZones();
+
     if (!entry) {
       // Fallback: empty combat
-      return createPartyCombatState([], createEncounter());
+      return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones));
     }
 
     const players: PartyCombatant[] = [];
@@ -341,7 +392,7 @@ export class PartyBattleManager {
     }
 
     const zone = entry.serverParty.tile.zone;
-    const monsters = createEncounter(zone);
+    const monsters = createEncounter(zone, allMonsters, allZones);
 
     return createPartyCombatState(players, monsters);
   }
@@ -350,13 +401,57 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return;
 
-    for (const username of entry.members) {
-      const session = this.getSession(username);
-      if (!session) continue;
+    if (result === 'victory') {
+      const combat = entry.battleTimer.currentCombat;
+      const members = Array.from(entry.members);
+      const partySize = members.length;
 
-      if (result === 'victory') {
-        session.handleVictory(entry.battleTimer.currentCombat, entry.serverParty.tile);
-      } else {
+      // Compute total XP and gold once, then split
+      const totalXp = combat
+        ? combat.monsters.reduce((sum, m) => sum + m.xp, 0)
+        : 10;
+      let totalGold = 0;
+      if (combat) {
+        for (const m of combat.monsters) {
+          const def = this.content.getMonster(m.id);
+          if (def) {
+            totalGold += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
+          }
+        }
+      }
+
+      const splitXp = Math.ceil(totalXp / partySize);
+      const splitGold = Math.ceil(totalGold / partySize);
+
+      // Roll item drops once, randomly assign each to a party member
+      const memberItems: Map<string, string[]> = new Map();
+      for (const u of members) memberItems.set(u, []);
+
+      if (combat) {
+        for (const m of combat.monsters) {
+          const def = this.content.getMonster(m.id);
+          if (def?.drops) {
+            const dropped = rollDrops(def.drops);
+            for (const itemId of dropped) {
+              const recipient = members[Math.floor(Math.random() * partySize)];
+              memberItems.get(recipient)!.push(itemId);
+            }
+          }
+        }
+      }
+
+      for (const username of members) {
+        const session = this.getSession(username);
+        if (!session) continue;
+        session.handleVictory(
+          { xp: splitXp, gold: splitGold, items: memberItems.get(username)! },
+          entry.serverParty.tile,
+        );
+      }
+    } else {
+      for (const username of entry.members) {
+        const session = this.getSession(username);
+        if (!session) continue;
         session.addLogEntry('Defeat...', 'defeat');
       }
     }
