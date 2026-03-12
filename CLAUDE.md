@@ -247,3 +247,4 @@ When adding new persistent data to `data/`, always define an interface or extend
 - **README checklists**: The README.md roadmap uses `[x]`/`[ ]` checklists — check items off as they are completed
 - **Tests**: Aim for test coverage on all non-rendering logic (systems, utils, pathfinding, server)
 - **UI terminology**: In all user-facing text (UI labels, error messages, combat log), refer to hex tiles as **"rooms"**. Code internals (variable names, class names, comments) may still use "tile" — the rename is UI-only.
+- **Fix all bugs encountered**: Any bug or error you encounter — whether pre-existing or introduced by the current change — should be resolved. Do not ignore issues just because they existed before your work. If you see it, fix it.
