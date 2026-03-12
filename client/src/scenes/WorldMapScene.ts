@@ -26,6 +26,7 @@ export interface TileClickInfo {
   isSameZone: boolean;
   isCurrentTile: boolean;
   playersHere: string[];
+  partyMemberUsernames: string[];
 }
 
 const OTHER_PLAYER_COLOR = 0x4a90d9;
@@ -60,6 +61,9 @@ export class WorldMapScene extends Phaser.Scene {
 
   /** Last known other player list for tile info lookups. */
   private lastOtherPlayers: OtherPlayerState[] = [];
+
+  /** Usernames of players in the current player's party. */
+  private partyMemberUsernames: string[] = [];
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
@@ -194,6 +198,9 @@ export class WorldMapScene extends Phaser.Scene {
     this.playerRow = state.party.row;
     const myTile = this.grid.getTile(offsetToCube({ col: state.party.col, row: state.party.row }));
     this.currentZone = myTile?.zone ?? '';
+
+    // Track party members for tile modal filtering
+    this.partyMemberUsernames = (state.social?.party?.members ?? []).map(m => m.username);
 
     // Sync other players on the map
     this.syncOtherPlayers(state.otherPlayers);
@@ -649,6 +656,7 @@ export class WorldMapScene extends Phaser.Scene {
         isSameZone,
         isCurrentTile,
         playersHere,
+        partyMemberUsernames: this.partyMemberUsernames,
       });
     } else {
       // Fallback: direct move

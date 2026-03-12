@@ -388,7 +388,7 @@ describe('PartySystem', () => {
       expect(party.members.find(m => m.username === 'alice')!.role).toBe('owner');
     });
 
-    it('non-owner cannot promote', () => {
+    it('leader can promote a member', () => {
       const result = system.createParty('alice', state.getPartyId, state.setPartyId);
       if (typeof result === 'string') throw new Error(result);
       const partyId = result.id;
@@ -405,7 +405,28 @@ describe('PartySystem', () => {
       system.promoteLeader('alice', 'bob', state.getPartyId);
 
       const promoteResult = system.promoteLeader('bob', 'charlie', state.getPartyId);
-      expect(promoteResult).toBe('Only the owner can promote members');
+      expect(promoteResult).toBe(true);
+
+      const party = system.getParty(partyId)!;
+      expect(party.members.find(m => m.username === 'charlie')!.role).toBe('leader');
+    });
+
+    it('regular member cannot promote', () => {
+      const result = system.createParty('alice', state.getPartyId, state.setPartyId);
+      if (typeof result === 'string') throw new Error(result);
+      const partyId = result.id;
+
+      state.setPosition('alice', 0, 0);
+      state.setPosition('bob', 0, 0);
+      state.setPosition('charlie', 0, 0);
+
+      system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+      system.acceptInvite('bob', partyId, state.getPartyId, state.setPartyId, state.areSameTile);
+      system.inviteToParty('alice', 'charlie', state.getPartyId, state.areSameTile);
+      system.acceptInvite('charlie', partyId, state.getPartyId, state.setPartyId, state.areSameTile);
+
+      const promoteResult = system.promoteLeader('bob', 'charlie', state.getPartyId);
+      expect(promoteResult).toBe('Only the owner or a leader can promote members');
     });
 
     it('owner can demote a leader to member', () => {

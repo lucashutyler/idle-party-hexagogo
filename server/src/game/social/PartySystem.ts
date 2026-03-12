@@ -285,20 +285,20 @@ export class PartySystem {
     return true;
   }
 
-  /** Promote a member to leader (owner only). */
+  /** Promote a member to leader (owner or leader). */
   promoteLeader(
-    ownerUsername: string,
+    callerUsername: string,
     targetUsername: string,
     getPlayerPartyId: (u: string) => string | null,
   ): true | string {
-    const partyId = getPlayerPartyId(ownerUsername);
+    const partyId = getPlayerPartyId(callerUsername);
     if (!partyId) return 'You are not in a party';
 
     const party = this.parties.get(partyId);
     if (!party) return 'Party not found';
 
-    const owner = party.members.find(m => m.username === ownerUsername);
-    if (!owner || owner.role !== 'owner') return 'Only the owner can promote members';
+    const caller = party.members.find(m => m.username === callerUsername);
+    if (!caller || (caller.role !== 'owner' && caller.role !== 'leader')) return 'Only the owner or a leader can promote members';
 
     const target = party.members.find(m => m.username === targetUsername);
     if (!target) return 'Player is not in your party';

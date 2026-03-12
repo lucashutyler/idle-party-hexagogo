@@ -42,7 +42,7 @@ export class TileInfoModal {
             <div class="tile-modal-player-row">
               <span class="tile-modal-player">${this.escapeHtml(p)}</span>
               ${this.onChat ? `<button class="tile-modal-btn tile-modal-chat" data-username="${this.escapeHtml(p)}">Chat</button>` : ''}
-              ${this.onInvite && info.isCurrentTile ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p)}">Invite</button>` : ''}
+              ${this.onInvite && info.isCurrentTile && !info.partyMemberUsernames.includes(p) ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p)}">Invite</button>` : ''}
             </div>
           `).join('')}
         </div>`
