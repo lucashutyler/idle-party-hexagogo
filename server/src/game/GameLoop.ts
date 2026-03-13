@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { HexGrid, HexTile, offsetToCube } from '@idle-party-rpg/shared';
 import { PlayerManager } from './PlayerManager.js';
 import type { GameStateStore } from './GameStateStore.js';
@@ -108,8 +109,22 @@ export class GameLoop {
     if (!version) return { success: false, error: 'Version not found.' };
     if (version.status !== 'published') return { success: false, error: 'Only published versions can be deployed.' };
 
-    // 1. Load snapshot and replace live content
+    // 1. Load snapshot and preserve live GUIDs where tiles match by (col,row).
+    //    This keeps player unlock data valid after deploying an old snapshot.
     const snapshot = await this.versionStore.loadSnapshot(versionId);
+    const liveWorld = this.contentStore.getWorld();
+    const liveGuidByPos = new Map<string, string>();
+    for (const t of liveWorld.tiles) {
+      if (t.id) liveGuidByPos.set(`${t.col},${t.row}`, t.id);
+    }
+    for (const tile of snapshot.world.tiles) {
+      const liveGuid = liveGuidByPos.get(`${tile.col},${tile.row}`);
+      if (liveGuid) {
+        tile.id = liveGuid; // Preserve live GUID so player unlocks stay valid
+      } else if (!tile.id) {
+        tile.id = crypto.randomUUID(); // New tile — fresh GUID
+      }
+    }
     await this.contentStore.replaceAll(snapshot);
 
     // 2. Rebuild grid, refresh party tiles, relocate displaced parties
