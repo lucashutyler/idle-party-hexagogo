@@ -222,7 +222,7 @@ export class WorldMapScene extends Phaser.Scene {
 
     for (const tileDef of this.worldCache.getTiles()) {
       const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
-      const tile = new HexTile(coord, tileDef.type, tileDef.zone);
+      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id);
       grid.addTile(tile);
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }
@@ -235,10 +235,12 @@ export class WorldMapScene extends Phaser.Scene {
   private syncOtherPlayers(others: OtherPlayerState[]): void {
     this.lastOtherPlayers = others;
 
-    // Count same-zone players per tile (ignore other zones entirely)
+    // Count same-zone players per tile (ignore other zones and own party members)
+    const partySet = new Set(this.partyMemberUsernames);
     const tileCounts = new Map<string, number>();
     for (const other of others) {
       if (!this.currentZone || other.zone !== this.currentZone) continue;
+      if (partySet.has(other.username)) continue;
       const key = `${other.col},${other.row}`;
       tileCounts.set(key, (tileCounts.get(key) ?? 0) + 1);
     }
@@ -300,12 +302,16 @@ export class WorldMapScene extends Phaser.Scene {
       const y = pos.y + this.mapOffsetY;
 
       const offset = cubeToOffset(tile.coord);
-      const isUnlocked = this.worldCache.isUnlocked(offset.col, offset.row);
-      const isZoneUnlocked = this.worldCache.isZoneUnlocked(tile.zone);
+
+      // Non-traversable tiles (mountains, water) are always darkened and never respond to unlock state
+      const isNonTraversable = !tile.isTraversable;
+      const isUnlocked = isNonTraversable ? false : this.worldCache.isUnlocked(offset.col, offset.row);
+      const isZoneUnlocked = isNonTraversable ? false : this.worldCache.isZoneUnlocked(tile.zone);
 
       // Visibility: unlocked tiles are bright, zone-unlocked tiles are dimmed, foggy tiles are very dim
-      const alpha = isUnlocked ? 1 : isZoneUnlocked ? 0.6 : 0.3;
-      const darkenFactor = isUnlocked ? 1 : isZoneUnlocked ? 0.7 : 0.4;
+      // Non-traversable tiles always use the dimmed style
+      const alpha = isNonTraversable ? 0.6 : isUnlocked ? 1 : isZoneUnlocked ? 0.6 : 0.3;
+      const darkenFactor = isNonTraversable ? 0.7 : isUnlocked ? 1 : isZoneUnlocked ? 0.7 : 0.4;
       const color = isUnlocked ? tile.color : this.darkenColor(tile.color, darkenFactor);
 
       // Fill
@@ -330,8 +336,9 @@ export class WorldMapScene extends Phaser.Scene {
       this.tileGraphics.closePath();
       this.tileGraphics.strokePath();
 
-      // Icons: show real type if zone unlocked, clouds if zone still in fog
-      this.drawTileIcon(tile.type, tile.isTraversable, isZoneUnlocked, isUnlocked, x, y);
+      // Icons: non-traversable tiles always show their terrain icon,
+      // traversable tiles show real type if zone unlocked, clouds if still in fog
+      this.drawTileIcon(tile.type, tile.isTraversable, isNonTraversable || isZoneUnlocked, isUnlocked, x, y);
     }
 
     // Draw zone boundary lines
@@ -649,6 +656,17 @@ export class WorldMapScene extends Phaser.Scene {
 
   private updateTooltip(tile: HexTile, pointer: Phaser.Input.Pointer): void {
     if (!this.tooltipText) return;
+
+    // Non-traversable tiles always show their terrain type name
+    if (!tile.isTraversable) {
+      const typeLabel = tile.type === TileType.Mountain ? 'Mountain'
+        : tile.type === TileType.Water ? 'Water'
+        : tile.type.charAt(0).toUpperCase() + tile.type.slice(1);
+      this.tooltipText.setText(typeLabel);
+      this.tooltipText.setPosition(pointer.x + 12, pointer.y - 20);
+      this.tooltipText.setVisible(true);
+      return;
+    }
 
     const offset = cubeToOffset(tile.coord);
     const worldTileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);

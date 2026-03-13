@@ -21,6 +21,8 @@ export interface TileDefinition {
  * Used in data/world.json for the data-driven world map.
  */
 export interface WorldTileDefinition {
+  /** Stable GUID — survives admin saves, only changes when a tile is deleted & re-created. */
+  id: string;
   col: number;
   row: number;
   type: TileType;

@@ -384,7 +384,18 @@ export class PlayerSession {
     session['content'] = content;
     session['battleCount'] = data.battleCount;
     session['combatLog'] = data.combatLog.slice(-MAX_LOG_ENTRIES);
-    session['unlockSystem'] = UnlockSystem.fromKeys(grid, data.unlockedKeys);
+    // Migrate old cube-key-based unlocks ("q,r,s") to tile GUIDs
+    let unlockedKeys = data.unlockedKeys;
+    if (unlockedKeys.length > 0 && unlockedKeys[0].split(',').length === 3) {
+      // Old format: cube coordinate keys — map to tile GUIDs via grid lookup
+      const migrated: string[] = [];
+      for (const cubeKey of unlockedKeys) {
+        const tile = grid.getTileByKey(cubeKey);
+        if (tile) migrated.push(tile.id);
+      }
+      unlockedKeys = migrated;
+    }
+    session['unlockSystem'] = UnlockSystem.fromKeys(grid, unlockedKeys);
 
     // Restore character — reset to fresh Adventurer if class is invalid/legacy
     const savedClassName = data.character?.className;

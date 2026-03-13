@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
@@ -71,15 +72,17 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const snapshot = await versions.loadSnapshot(versionId);
       const idx = snapshot.world.tiles.findIndex(t => t.col === col && t.row === row);
       if (idx >= 0) {
-        snapshot.world.tiles[idx] = { col, row, type, zone, name };
+        // Preserve existing GUID on update
+        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name };
       } else {
-        snapshot.world.tiles.push({ col, row, type, zone, name });
+        // New tile — generate a GUID
+        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name });
       }
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ col, row, type, zone, name });
+      await content.addOrUpdateTile({ id: '', col, row, type, zone, name });
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }

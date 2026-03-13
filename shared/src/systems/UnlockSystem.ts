@@ -5,6 +5,8 @@ import { HexGrid } from '../hex/HexGrid.js';
  * Tracks which tiles have been unlocked by the player.
  * Players can only move to unlocked tiles.
  * Winning a battle on a tile unlocks adjacent tiles.
+ *
+ * Keys are tile GUIDs (WorldTileDefinition.id), not cube coordinates.
  */
 export class UnlockSystem {
   private unlockedKeys: Set<string> = new Set();
@@ -22,7 +24,7 @@ export class UnlockSystem {
   }
 
   /**
-   * Restore an UnlockSystem from a previously saved set of tile keys.
+   * Restore an UnlockSystem from a previously saved set of tile IDs.
    */
   static fromKeys(grid: HexGrid, keys: string[]): UnlockSystem {
     // Use Object.create to skip the constructor's auto-unlock logic
@@ -36,11 +38,11 @@ export class UnlockSystem {
    * Check if a tile is unlocked.
    */
   isUnlocked(tile: HexTile): boolean {
-    return this.unlockedKeys.has(tile.key);
+    return this.unlockedKeys.has(tile.id);
   }
 
   /**
-   * Check if a tile is unlocked by key.
+   * Check if a tile is unlocked by its ID.
    */
   isUnlockedByKey(key: string): boolean {
     return this.unlockedKeys.has(key);
@@ -50,10 +52,10 @@ export class UnlockSystem {
    * Unlock a specific tile.
    */
   unlockTile(tile: HexTile): boolean {
-    if (this.unlockedKeys.has(tile.key)) {
+    if (this.unlockedKeys.has(tile.id)) {
       return false; // Already unlocked
     }
-    this.unlockedKeys.add(tile.key);
+    this.unlockedKeys.add(tile.id);
     return true;
   }
 
@@ -66,8 +68,8 @@ export class UnlockSystem {
     const newlyUnlocked: HexTile[] = [];
 
     for (const neighbor of neighbors) {
-      if (neighbor.isTraversable && !this.unlockedKeys.has(neighbor.key)) {
-        this.unlockedKeys.add(neighbor.key);
+      if (neighbor.isTraversable && !this.unlockedKeys.has(neighbor.id)) {
+        this.unlockedKeys.add(neighbor.id);
         newlyUnlocked.push(neighbor);
       }
     }
@@ -83,7 +85,7 @@ export class UnlockSystem {
    * Force-unlock a tile (no event, idempotent). Used for relocation after deploy.
    */
   forceUnlock(tile: HexTile): void {
-    this.unlockedKeys.add(tile.key);
+    this.unlockedKeys.add(tile.id);
   }
 
   /**
@@ -92,7 +94,7 @@ export class UnlockSystem {
   getUnlockedTiles(): HexTile[] {
     const tiles: HexTile[] = [];
     for (const key of this.unlockedKeys) {
-      const tile = this.grid.getTileByKey(key);
+      const tile = this.grid.getTileById(key);
       if (tile) {
         tiles.push(tile);
       }
@@ -101,7 +103,7 @@ export class UnlockSystem {
   }
 
   /**
-   * Get all unlocked tile keys.
+   * Get all unlocked tile IDs.
    */
   getUnlockedKeys(): string[] {
     return Array.from(this.unlockedKeys);

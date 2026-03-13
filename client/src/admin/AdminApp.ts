@@ -2011,6 +2011,7 @@ export class AdminApp {
     if (defaultZone === 'unknown') defaultZone = fallbackZone;
 
     const newTile: WorldTileDefinition = {
+      id: '',
       col: slot.col,
       row: slot.row,
       type: TileType.Plains,
@@ -2032,7 +2033,8 @@ export class AdminApp {
         return;
       }
       this.updateDisplayWorld(data.world);
-      this.selectedTile = newTile;
+      // Use the server-returned tile (which has the assigned GUID)
+      this.selectedTile = this.worldTileDefs.get(`${newTile.col},${newTile.row}`) ?? newTile;
       this.drawMap();
       this.updateMapTileCount();
       this.renderSidebar(true);
