@@ -137,7 +137,22 @@ export class VersionStore {
 
   async loadSnapshot(id: string): Promise<ContentSnapshot> {
     const raw = await fs.readFile(this.snapshotPath(id), 'utf-8');
-    return JSON.parse(raw);
+    const snapshot: ContentSnapshot = JSON.parse(raw);
+
+    // Migrate: assign GUIDs to any tiles missing an id
+    let migrated = 0;
+    for (const tile of snapshot.world.tiles) {
+      if (!tile.id) {
+        tile.id = crypto.randomUUID();
+        migrated++;
+      }
+    }
+    if (migrated > 0) {
+      await this.saveSnapshot(id, snapshot);
+      console.log(`[VersionStore] Assigned GUIDs to ${migrated} tiles in version ${id}`);
+    }
+
+    return snapshot;
   }
 
   async saveSnapshot(id: string, snapshot: ContentSnapshot): Promise<void> {
