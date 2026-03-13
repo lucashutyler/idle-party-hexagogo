@@ -154,7 +154,7 @@ export class GameLoop {
     const world = this.contentStore.getWorld();
     for (const tileDef of world.tiles) {
       const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
-      const tile = new HexTile(coord, tileDef.type, tileDef.zone);
+      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id);
       this.grid.addTile(tile);
     }
     console.log(`[GameLoop] Grid rebuilt: ${this.grid.size} tiles`);
@@ -169,7 +169,7 @@ export class GameLoop {
 
     for (const tileDef of world.tiles) {
       const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
-      const tile = new HexTile(coord, tileDef.type, tileDef.zone);
+      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id);
       grid.addTile(tile);
     }
 

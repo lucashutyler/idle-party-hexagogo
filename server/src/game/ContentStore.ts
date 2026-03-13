@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition } from '@idle-party-rpg/shared';
 import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, TILE_CONFIGS } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
@@ -83,8 +84,12 @@ export class ContentStore {
   async addOrUpdateTile(tile: WorldTileDefinition): Promise<void> {
     const idx = this.world.tiles.findIndex(t => t.col === tile.col && t.row === tile.row);
     if (idx >= 0) {
+      // Preserve existing GUID on update
+      tile.id = this.world.tiles[idx].id;
       this.world.tiles[idx] = tile;
     } else {
+      // New tile — generate a GUID
+      tile.id = crypto.randomUUID();
       this.world.tiles.push(tile);
     }
     await this.save();
@@ -230,6 +235,19 @@ export class ContentStore {
 
       this.world = JSON.parse(worldRaw);
 
+      // Migrate: assign GUIDs to any tiles missing an id
+      let migrated = 0;
+      for (const tile of this.world.tiles) {
+        if (!tile.id) {
+          tile.id = crypto.randomUUID();
+          migrated++;
+        }
+      }
+      if (migrated > 0) {
+        console.log(`[ContentStore] Assigned GUIDs to ${migrated} tiles (migration)`);
+        await this.save();
+      }
+
       console.log(`[ContentStore] Loaded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.world.tiles.length} tiles`);
       return true;
     } catch {
@@ -282,25 +300,25 @@ export class ContentStore {
       startTile: { col: 2, row: 2 },
       tiles: [
         // Hatchetmill
-        { col: 2, row: 2, type: TileType.Plains, zone: 'hatchetmill', name: 'Town Square' },
-        { col: 1, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'Blacksmith' },
-        { col: 3, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'General Store' },
-        { col: 2, row: 1, type: TileType.Town, zone: 'hatchetmill', name: "Healer's Hut" },
-        { col: 1, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Dirt Road' },
-        { col: 3, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Village Green' },
-        { col: 2, row: 3, type: TileType.Plains, zone: 'hatchetmill', name: 'Old Well' },
+        { id: crypto.randomUUID(), col: 2, row: 2, type: TileType.Plains, zone: 'hatchetmill', name: 'Town Square' },
+        { id: crypto.randomUUID(), col: 1, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'Blacksmith' },
+        { id: crypto.randomUUID(), col: 3, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'General Store' },
+        { id: crypto.randomUUID(), col: 2, row: 1, type: TileType.Town, zone: 'hatchetmill', name: "Healer's Hut" },
+        { id: crypto.randomUUID(), col: 1, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Dirt Road' },
+        { id: crypto.randomUUID(), col: 3, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Village Green' },
+        { id: crypto.randomUUID(), col: 2, row: 3, type: TileType.Plains, zone: 'hatchetmill', name: 'Old Well' },
 
         // Darkwood
-        { col: 4, row: 2, type: TileType.Plains, zone: 'darkwood', name: 'Woodland Edge' },
-        { col: 5, row: 2, type: TileType.Forest, zone: 'darkwood', name: 'Forest Path' },
-        { col: 5, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Thick Trees' },
-        { col: 4, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Mossy Clearing' },
-        { col: 4, row: 3, type: TileType.Plains, zone: 'darkwood', name: 'Overgrown Trail' },
+        { id: crypto.randomUUID(), col: 4, row: 2, type: TileType.Plains, zone: 'darkwood', name: 'Woodland Edge' },
+        { id: crypto.randomUUID(), col: 5, row: 2, type: TileType.Forest, zone: 'darkwood', name: 'Forest Path' },
+        { id: crypto.randomUUID(), col: 5, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Thick Trees' },
+        { id: crypto.randomUUID(), col: 4, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Mossy Clearing' },
+        { id: crypto.randomUUID(), col: 4, row: 3, type: TileType.Plains, zone: 'darkwood', name: 'Overgrown Trail' },
 
         // Crystal Caves
-        { col: 5, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Cave Entrance' },
-        { col: 6, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Glittering Tunnel' },
-        { col: 6, row: 2, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Crystal Chamber' },
+        { id: crypto.randomUUID(), col: 5, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Cave Entrance' },
+        { id: crypto.randomUUID(), col: 6, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Glittering Tunnel' },
+        { id: crypto.randomUUID(), col: 6, row: 2, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Crystal Chamber' },
       ],
     };
 

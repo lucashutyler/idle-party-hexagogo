@@ -4,12 +4,15 @@ import { MapSchema } from './MapSchema.js';
 
 export class HexGrid {
   private tiles: Map<string, HexTile> = new Map();
+  /** Reverse index: tile.id → tile (for GUID-based lookups). */
+  private tilesById: Map<string, HexTile> = new Map();
 
   /**
    * Add a tile to the grid.
    */
   addTile(tile: HexTile): void {
     this.tiles.set(tile.key, tile);
+    this.tilesById.set(tile.id, tile);
   }
 
   /**
@@ -17,6 +20,7 @@ export class HexGrid {
    */
   clear(): void {
     this.tiles.clear();
+    this.tilesById.clear();
   }
 
   /**
@@ -27,10 +31,17 @@ export class HexGrid {
   }
 
   /**
-   * Get a tile by its key string.
+   * Get a tile by its key string (cube coordinate key).
    */
   getTileByKey(key: string): HexTile | undefined {
     return this.tiles.get(key);
+  }
+
+  /**
+   * Get a tile by its GUID (WorldTileDefinition.id).
+   */
+  getTileById(id: string): HexTile | undefined {
+    return this.tilesById.get(id);
   }
 
   /**

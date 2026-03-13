@@ -9,6 +9,9 @@ export class WorldCache {
   private tiles = new Map<string, WorldTileDefinition>();
   private startTile: { col: number; row: number } = { col: 0, row: 0 };
 
+  /** Tile GUID → offset key ("col,row") for fast unlock lookups. */
+  private idToOffsetKey = new Map<string, string>();
+
   /** Offset-format keys ("col,row") for unlocked tiles. */
   private unlockedOffsetKeys = new Set<string>();
 
@@ -30,31 +33,31 @@ export class WorldCache {
 
     this.startTile = data.startTile;
     this.tiles.clear();
+    this.idToOffsetKey.clear();
     for (const tile of data.tiles) {
-      this.tiles.set(`${tile.col},${tile.row}`, tile);
+      const offsetKey = `${tile.col},${tile.row}`;
+      this.tiles.set(offsetKey, tile);
+      this.idToOffsetKey.set(tile.id, offsetKey);
     }
   }
 
   /**
-   * Update the unlocked tile set from state.unlocked (cube keys).
+   * Update the unlocked tile set from state.unlocked (tile GUIDs).
    * Returns true if the set changed (caller should re-render).
    */
-  updateUnlocked(cubeKeys: string[]): boolean {
-    if (cubeKeys.length === this.lastUnlockedCount) return false;
-    this.lastUnlockedCount = cubeKeys.length;
+  updateUnlocked(tileIds: string[]): boolean {
+    if (tileIds.length === this.lastUnlockedCount) return false;
+    this.lastUnlockedCount = tileIds.length;
 
     this.unlockedOffsetKeys.clear();
     this.unlockedZones.clear();
 
-    for (const cubeKey of cubeKeys) {
-      const [q, r] = cubeKey.split(',').map(Number);
-      // cubeToOffset: col = q, row = r + floor((q - (q & 1)) / 2)
-      const col = q;
-      const row = r + Math.floor((q - (q & 1)) / 2);
-      const offsetKey = `${col},${row}`;
+    for (const id of tileIds) {
+      const offsetKey = this.idToOffsetKey.get(id);
+      if (!offsetKey) continue; // Unknown tile ID (stale save or deleted tile)
+
       this.unlockedOffsetKeys.add(offsetKey);
 
-      // Track which zones have unlocked tiles
       const tile = this.tiles.get(offsetKey);
       if (tile) {
         this.unlockedZones.add(tile.zone);

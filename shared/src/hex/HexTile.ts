@@ -60,13 +60,16 @@ export class HexTile {
   readonly config: TileConfig;
   readonly key: string;
   readonly zone: string;
+  /** Stable GUID from WorldTileDefinition — used as unlock key. */
+  readonly id: string;
 
-  constructor(coord: CubeCoord, type: TileType, zone: string = 'friendly_forest') {
+  constructor(coord: CubeCoord, type: TileType, zone: string = 'friendly_forest', id?: string) {
     this.coord = coord;
     this.type = type;
     this.config = TILE_CONFIGS[type];
     this.key = cubeToKey(coord);
     this.zone = zone;
+    this.id = id ?? this.key; // Fallback to cube key for legacy/test usage
   }
 
   get isTraversable(): boolean {
