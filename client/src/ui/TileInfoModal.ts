@@ -35,17 +35,29 @@ export class TileInfoModal {
   }
 
   show(info: TileClickInfo): void {
+    const otherPlayers = info.playersHere.filter(p => !info.partyMemberUsernames.includes(p));
+    const partyPlayers = info.playersHere.filter(p => info.partyMemberUsernames.includes(p));
+
+    const renderPlayerRows = (players: string[], showInvite: boolean) => players.map(p => `
+      <div class="tile-modal-player-row">
+        <span class="tile-modal-player">${this.escapeHtml(p)}</span>
+        ${this.onChat ? `<button class="tile-modal-btn tile-modal-chat" data-username="${this.escapeHtml(p)}">Chat</button>` : ''}
+        ${this.onInvite && showInvite && info.isCurrentTile ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p)}">Invite</button>` : ''}
+      </div>
+    `).join('');
+
+    const otherSection = otherPlayers.length > 0
+      ? `<span class="tile-modal-players-label">Other players:</span>${renderPlayerRows(otherPlayers, true)}`
+      : '';
+
+    const partySection = partyPlayers.length > 0
+      ? `<span class="tile-modal-players-label">Party members:</span>${renderPlayerRows(partyPlayers, false)}`
+      : '';
+
+    const divider = otherPlayers.length > 0 && partyPlayers.length > 0 ? '<hr class="tile-modal-divider">' : '';
+
     const playerList = info.playersHere.length > 0
-      ? `<div class="tile-modal-players">
-          <span class="tile-modal-players-label">Players in this room:</span>
-          ${info.playersHere.map(p => `
-            <div class="tile-modal-player-row">
-              <span class="tile-modal-player">${this.escapeHtml(p)}</span>
-              ${this.onChat ? `<button class="tile-modal-btn tile-modal-chat" data-username="${this.escapeHtml(p)}">Chat</button>` : ''}
-              ${this.onInvite && info.isCurrentTile && !info.partyMemberUsernames.includes(p) ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p)}">Invite</button>` : ''}
-            </div>
-          `).join('')}
-        </div>`
+      ? `<div class="tile-modal-players">${otherSection}${divider}${partySection}</div>`
       : '';
 
     // Room name subheader — discovered = white with name, unexplored = gray placeholder

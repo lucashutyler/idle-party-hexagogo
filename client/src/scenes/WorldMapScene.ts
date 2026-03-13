@@ -30,15 +30,7 @@ export interface TileClickInfo {
   partyMemberUsernames: string[];
 }
 
-const OTHER_PLAYER_COLOR = 0x4a90d9;
-const OTHER_PLAYER_RADIUS = 10;
-const OTHER_PLAYER_TWEEN_DURATION = 400;
-
-interface OtherPartyMarker {
-  circle: Phaser.GameObjects.Arc;
-  label: Phaser.GameObjects.Text;
-  tween?: Phaser.Tweens.Tween;
-}
+const PLAYER_COUNT_BADGE_COLOR = '#4a90d9';
 
 export class WorldMapScene extends Phaser.Scene {
   private grid!: HexGrid;
@@ -48,11 +40,8 @@ export class WorldMapScene extends Phaser.Scene {
   /** World tile definitions keyed by "col,row" for room name lookups. */
   private worldTileDefs = new Map<string, WorldTileDefinition>();
 
-  /** Other player markers on the map (same-zone only). */
-  private otherParties = new Map<string, OtherPartyMarker>();
-
-  /** Count badges for other-zone tiles with players. */
-  private zoneCounts = new Map<string, Phaser.GameObjects.Text>();
+  /** Count badges for same-zone tiles with players. */
+  private playerCounts = new Map<string, Phaser.GameObjects.Text>();
 
   /** Current player zone for filtering. */
   private currentZone = '';
@@ -245,82 +234,25 @@ export class WorldMapScene extends Phaser.Scene {
 
   private syncOtherPlayers(others: OtherPlayerState[]): void {
     this.lastOtherPlayers = others;
-    const seen = new Set<string>();
 
-    // Separate players into same-zone (individual markers) and other-zone (count badges)
-    const sameZone: OtherPlayerState[] = [];
-    const otherZoneTiles = new Map<string, number>();
-
+    // Count same-zone players per tile (ignore other zones entirely)
+    const tileCounts = new Map<string, number>();
     for (const other of others) {
-      if (this.currentZone && other.zone !== this.currentZone) {
-        const key = `${other.col},${other.row}`;
-        otherZoneTiles.set(key, (otherZoneTiles.get(key) ?? 0) + 1);
-      } else {
-        sameZone.push(other);
-      }
+      if (!this.currentZone || other.zone !== this.currentZone) continue;
+      const key = `${other.col},${other.row}`;
+      tileCounts.set(key, (tileCounts.get(key) ?? 0) + 1);
     }
 
-    // Render same-zone players as individual markers
-    for (const other of sameZone) {
-      seen.add(other.username);
-      const pixel = cubeToPixel(offsetToCube({ col: other.col, row: other.row }));
-      const x = pixel.x + this.mapOffsetX;
-      const y = pixel.y + this.mapOffsetY;
-
-      let marker = this.otherParties.get(other.username);
-      if (marker) {
-        if (marker.circle.x !== x || marker.circle.y !== y) {
-          const m = marker;
-          m.tween?.stop();
-          m.tween = this.tweens.add({
-            targets: m.circle,
-            x, y,
-            duration: OTHER_PLAYER_TWEEN_DURATION,
-            ease: 'Quad.easeInOut',
-            onUpdate: () => {
-              m.label.setPosition(m.circle.x, m.circle.y + OTHER_PLAYER_RADIUS + 8);
-            },
-            onComplete: () => { m.tween = undefined; },
-          });
-        }
-      } else {
-        const circle = this.add.circle(x, y, OTHER_PLAYER_RADIUS, OTHER_PLAYER_COLOR);
-        circle.setStrokeStyle(2, 0xffffff);
-        circle.setDepth(90);
-
-        const label = this.add.text(x, y + OTHER_PLAYER_RADIUS + 8, other.username, {
-          fontSize: '8px',
-          fontFamily: "'Press Start 2P', monospace",
-          color: '#ffffff',
-        });
-        label.setOrigin(0.5, 0);
-        label.setDepth(90);
-
-        marker = { circle, label };
-        this.otherParties.set(other.username, marker);
-      }
-    }
-
-    // Remove markers for players no longer in same zone
-    for (const [username, marker] of this.otherParties) {
-      if (!seen.has(username)) {
-        marker.tween?.stop();
-        marker.circle.destroy();
-        marker.label.destroy();
-        this.otherParties.delete(username);
-      }
-    }
-
-    // Update other-zone count badges
+    // Update count badges for same-zone tiles
     const seenTiles = new Set<string>();
-    for (const [key, count] of otherZoneTiles) {
+    for (const [key, count] of tileCounts) {
       seenTiles.add(key);
       const [col, row] = key.split(',').map(Number);
       const pixel = cubeToPixel(offsetToCube({ col, row }));
       const x = pixel.x + this.mapOffsetX;
       const y = pixel.y + this.mapOffsetY;
 
-      let badge = this.zoneCounts.get(key);
+      let badge = this.playerCounts.get(key);
       if (badge) {
         badge.setText(`${count}`);
         badge.setPosition(x, y);
@@ -329,20 +261,20 @@ export class WorldMapScene extends Phaser.Scene {
           fontSize: '10px',
           fontFamily: "'Press Start 2P', monospace",
           color: '#ffffff',
-          backgroundColor: '#4a90d9',
+          backgroundColor: PLAYER_COUNT_BADGE_COLOR,
           padding: { x: 4, y: 2 },
         });
         badge.setOrigin(0.5, 0.5);
         badge.setDepth(95);
-        this.zoneCounts.set(key, badge);
+        this.playerCounts.set(key, badge);
       }
     }
 
     // Remove stale count badges
-    for (const [key, badge] of this.zoneCounts) {
+    for (const [key, badge] of this.playerCounts) {
       if (!seenTiles.has(key)) {
         badge.destroy();
-        this.zoneCounts.delete(key);
+        this.playerCounts.delete(key);
       }
     }
   }
@@ -721,8 +653,19 @@ export class WorldMapScene extends Phaser.Scene {
     const offset = cubeToOffset(tile.coord);
     const worldTileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
     const zoneName = worldTileDef?.zoneName ?? worldTileDef?.zone ?? tile.zone;
+    const isSameZone = tile.zone === this.currentZone;
 
-    this.tooltipText.setText(zoneName);
+    let label = zoneName;
+    if (isSameZone) {
+      const isUnlocked = this.worldCache.isUnlocked(offset.col, offset.row);
+      if (isUnlocked && worldTileDef?.name) {
+        label = worldTileDef.name;
+      } else {
+        label = 'Undiscovered';
+      }
+    }
+
+    this.tooltipText.setText(label);
     this.tooltipText.setPosition(pointer.x + 12, pointer.y - 20);
     this.tooltipText.setVisible(true);
   }
