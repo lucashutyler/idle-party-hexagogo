@@ -154,7 +154,7 @@ npm run test:shared  # Shared package tests only
 npm run typecheck    # tsc --build (all packages)
 ```
 
-**Worktree setup**: Git worktrees need their own `node_modules`. Without it, workspace symlinks resolve through the main repo's `node_modules` to its stale `shared/dist/` types, causing false type errors. **Always run `npm install` immediately after entering a worktree** (before build, typecheck, or any other commands).
+**Worktree build quirk**: The worktree has no `node_modules` — npm workspace symlinks resolve through the main repo's `node_modules`, which points to the main repo's `shared/dist/`. If the worktree's shared source has diverged from main, `tsc` will see stale types and report false errors. The shared build script auto-detects worktrees and copies `dist/` to the main repo after `tsc`, so `npm run build` handles this automatically.
 
 ## Architecture & Patterns
 

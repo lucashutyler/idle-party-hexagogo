@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"const p=require('path'),c=require('child_process'),g=c.execSync('git rev-parse --git-common-dir',{encoding:'utf8'}).trim(),d=c.execSync('git rev-parse --git-dir',{encoding:'utf8'}).trim();if(p.resolve(g)!==p.resolve(d)){const t=p.join(p.resolve(g),'..','shared','dist');require('fs').cpSync('dist',t,{recursive:true});console.log('[shared] Worktree detected — synced dist to main repo')}\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },

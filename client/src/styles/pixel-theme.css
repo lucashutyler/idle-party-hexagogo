@@ -2405,3 +2405,104 @@ html, body {
   justify-content: space-between;
   gap: 12px;
 }
+
+/* Monster form */
+.monster-form {
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.monster-form h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.monster-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.monster-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  color: #aaa;
+}
+
+.monster-form-grid input,
+.monster-form-grid select {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: 3px;
+}
+
+.monster-form-grid input:disabled {
+  opacity: 0.5;
+}
+
+.monster-form-drops h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monster-drop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.monster-drop-row select,
+.monster-drop-row input {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 3px 5px;
+  font-size: 11px;
+  font-family: inherit;
+  border-radius: 3px;
+}
+
+.monster-drop-row select { flex: 1; }
+.monster-drop-row input { width: 50px; }
+
+.zf-enc-inline {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #aaa;
+}
+.zf-enc-inline input { width: 42px; }
+
+.monster-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.admin-btn-secondary {
+  background: #333;
+  color: #ccc;
+  border-color: #555;
+}
+
+.admin-btn-secondary:hover {
+  background: #444;
+}
+
+.monster-actions-cell {
+  display: flex;
+  gap: 4px;
+}
