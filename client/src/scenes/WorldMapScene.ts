@@ -26,17 +26,9 @@ export interface TileClickInfo {
   isSameZone: boolean;
   isCurrentTile: boolean;
   playersHere: string[];
+  partyMembersHere: string[];
 }
 
-const OTHER_PLAYER_COLOR = 0x4a90d9;
-const OTHER_PLAYER_RADIUS = 10;
-const OTHER_PLAYER_TWEEN_DURATION = 400;
-
-interface OtherPartyMarker {
-  circle: Phaser.GameObjects.Arc;
-  label: Phaser.GameObjects.Text;
-  tween?: Phaser.Tweens.Tween;
-}
 
 export class WorldMapScene extends Phaser.Scene {
   private grid!: HexGrid;
@@ -45,11 +37,8 @@ export class WorldMapScene extends Phaser.Scene {
   /** Set of tile keys the server says are unlocked. */
   private unlockedKeys = new Set<string>();
 
-  /** Other player markers on the map (same-zone only). */
-  private otherParties = new Map<string, OtherPartyMarker>();
-
-  /** Count badges for other-zone tiles with players. */
-  private zoneCounts = new Map<string, Phaser.GameObjects.Text>();
+  /** Count badges for same-zone tiles with players. */
+  private playerCounts = new Map<string, Phaser.GameObjects.Text>();
 
   /** Current player zone for filtering. */
   private currentZone = '';
@@ -60,6 +49,9 @@ export class WorldMapScene extends Phaser.Scene {
 
   /** Last known other player list for tile info lookups. */
   private lastOtherPlayers: OtherPlayerState[] = [];
+
+  /** Usernames of current party members (excluding self). */
+  private partyMemberUsernames = new Set<string>();
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
@@ -195,6 +187,16 @@ export class WorldMapScene extends Phaser.Scene {
     const myTile = this.grid.getTile(offsetToCube({ col: state.party.col, row: state.party.row }));
     this.currentZone = myTile?.zone ?? '';
 
+    // Track party members (excluding self) for filtering
+    this.partyMemberUsernames.clear();
+    if (state.social?.party) {
+      for (const m of state.social.party.members) {
+        if (m.username !== state.username) {
+          this.partyMemberUsernames.add(m.username);
+        }
+      }
+    }
+
     // Sync other players on the map
     this.syncOtherPlayers(state.otherPlayers);
 
@@ -220,84 +222,28 @@ export class WorldMapScene extends Phaser.Scene {
 
   private syncOtherPlayers(others: OtherPlayerState[]): void {
     this.lastOtherPlayers = others;
-    const seen = new Set<string>();
 
-    // Separate players into same-zone (individual markers) and other-zone (count badges)
-    const sameZone: OtherPlayerState[] = [];
-    const otherZoneTiles = new Map<string, number>(); // "col,row" -> count
-
+    // Count same-zone, non-party-member players per tile
+    const tileCounts = new Map<string, number>();
     for (const other of others) {
-      if (this.currentZone && other.zone !== this.currentZone) {
-        const key = `${other.col},${other.row}`;
-        otherZoneTiles.set(key, (otherZoneTiles.get(key) ?? 0) + 1);
-      } else {
-        sameZone.push(other);
-      }
+      // Skip other-zone players and party members
+      if (this.currentZone && other.zone !== this.currentZone) continue;
+      if (this.partyMemberUsernames.has(other.username)) continue;
+
+      const key = `${other.col},${other.row}`;
+      tileCounts.set(key, (tileCounts.get(key) ?? 0) + 1);
     }
 
-    // Render same-zone players as individual markers
-    for (const other of sameZone) {
-      seen.add(other.username);
-      const pixel = cubeToPixel(offsetToCube({ col: other.col, row: other.row }));
-      const x = pixel.x + this.mapOffsetX;
-      const y = pixel.y + this.mapOffsetY;
-
-      let marker = this.otherParties.get(other.username);
-      if (marker) {
-        // Tween to new position if it changed
-        if (marker.circle.x !== x || marker.circle.y !== y) {
-          const m = marker;
-          m.tween?.stop();
-          m.tween = this.tweens.add({
-            targets: m.circle,
-            x, y,
-            duration: OTHER_PLAYER_TWEEN_DURATION,
-            ease: 'Quad.easeInOut',
-            onUpdate: () => {
-              m.label.setPosition(m.circle.x, m.circle.y + OTHER_PLAYER_RADIUS + 8);
-            },
-            onComplete: () => { m.tween = undefined; },
-          });
-        }
-      } else {
-        // Create new marker
-        const circle = this.add.circle(x, y, OTHER_PLAYER_RADIUS, OTHER_PLAYER_COLOR);
-        circle.setStrokeStyle(2, 0xffffff);
-        circle.setDepth(90);
-
-        const label = this.add.text(x, y + OTHER_PLAYER_RADIUS + 8, other.username, {
-          fontSize: '8px',
-          fontFamily: "'Press Start 2P', monospace",
-          color: '#ffffff',
-        });
-        label.setOrigin(0.5, 0);
-        label.setDepth(90);
-
-        marker = { circle, label };
-        this.otherParties.set(other.username, marker);
-      }
-    }
-
-    // Remove markers for players no longer in same zone
-    for (const [username, marker] of this.otherParties) {
-      if (!seen.has(username)) {
-        marker.tween?.stop();
-        marker.circle.destroy();
-        marker.label.destroy();
-        this.otherParties.delete(username);
-      }
-    }
-
-    // Update other-zone count badges
+    // Update count badges
     const seenTiles = new Set<string>();
-    for (const [key, count] of otherZoneTiles) {
+    for (const [key, count] of tileCounts) {
       seenTiles.add(key);
       const [col, row] = key.split(',').map(Number);
       const pixel = cubeToPixel(offsetToCube({ col, row }));
       const x = pixel.x + this.mapOffsetX;
       const y = pixel.y + this.mapOffsetY;
 
-      let badge = this.zoneCounts.get(key);
+      let badge = this.playerCounts.get(key);
       if (badge) {
         badge.setText(`${count}`);
         badge.setPosition(x, y);
@@ -311,15 +257,15 @@ export class WorldMapScene extends Phaser.Scene {
         });
         badge.setOrigin(0.5, 0.5);
         badge.setDepth(95);
-        this.zoneCounts.set(key, badge);
+        this.playerCounts.set(key, badge);
       }
     }
 
     // Remove stale count badges
-    for (const [key, badge] of this.zoneCounts) {
+    for (const [key, badge] of this.playerCounts) {
       if (!seenTiles.has(key)) {
         badge.destroy();
-        this.zoneCounts.delete(key);
+        this.playerCounts.delete(key);
       }
     }
   }
@@ -628,9 +574,14 @@ export class WorldMapScene extends Phaser.Scene {
     const isSameZone = tile.zone === this.currentZone;
     const isCurrentTile = offset.col === this.playerCol && offset.row === this.playerRow;
 
-    // Find players on this tile
-    const playersHere = this.lastOtherPlayers
-      .filter(p => p.col === offset.col && p.row === offset.row)
+    // Find players on this tile, split into other players and party members
+    const allHere = this.lastOtherPlayers
+      .filter(p => p.col === offset.col && p.row === offset.row);
+    const playersHere = allHere
+      .filter(p => !this.partyMemberUsernames.has(p.username))
+      .map(p => p.username);
+    const partyMembersHere = allHere
+      .filter(p => this.partyMemberUsernames.has(p.username))
       .map(p => p.username);
 
     if (this.onTileClickFn) {
@@ -649,6 +600,7 @@ export class WorldMapScene extends Phaser.Scene {
         isSameZone,
         isCurrentTile,
         playersHere,
+        partyMembersHere,
       });
     } else {
       // Fallback: direct move
@@ -696,9 +648,20 @@ export class WorldMapScene extends Phaser.Scene {
     const zone = getZone(tile.zone);
     const zoneName = zone ? zone.displayName : tile.zone;
     const offset = cubeToOffset(tile.coord);
-    const typeName = tile.type.charAt(0).toUpperCase() + tile.type.slice(1);
+    const isSameZone = tile.zone === this.currentZone;
 
-    this.tooltipText.setText(`${zoneName} - ${typeName} (${offset.col}, ${offset.row})`);
+    let text: string;
+    if (isSameZone) {
+      const isUnlocked = this.unlockedKeys.has(tile.key);
+      const roomName = isUnlocked
+        ? tile.type.charAt(0).toUpperCase() + tile.type.slice(1)
+        : 'Undiscovered';
+      text = `${roomName} - ${zoneName} (${offset.col}, ${offset.row})`;
+    } else {
+      text = zoneName;
+    }
+
+    this.tooltipText.setText(text);
     this.tooltipText.setPosition(pointer.x + 12, pointer.y - 20);
     this.tooltipText.setVisible(true);
   }

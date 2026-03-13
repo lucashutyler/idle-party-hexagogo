@@ -970,6 +970,12 @@ html, body {
   padding: 2px 6px;
 }
 
+.tile-modal-separator {
+  border: none;
+  border-top: 1px solid var(--border-color, #555);
+  margin: 6px 0;
+}
+
 .tile-modal-actions {
   display: flex;
   gap: 8px;

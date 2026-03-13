@@ -35,7 +35,7 @@ export class TileInfoModal {
   }
 
   show(info: TileClickInfo): void {
-    const playerList = info.playersHere.length > 0
+    const otherPlayersList = info.playersHere.length > 0
       ? `<div class="tile-modal-players">
           <span class="tile-modal-players-label">Players in this room:</span>
           ${info.playersHere.map(p => `
@@ -47,6 +47,21 @@ export class TileInfoModal {
           `).join('')}
         </div>`
       : '';
+
+    const partyMembersList = info.partyMembersHere.length > 0
+      ? `${info.playersHere.length > 0 ? '<hr class="tile-modal-separator">' : ''}
+        <div class="tile-modal-players">
+          <span class="tile-modal-players-label">Party members:</span>
+          ${info.partyMembersHere.map(p => `
+            <div class="tile-modal-player-row">
+              <span class="tile-modal-player">${this.escapeHtml(p)}</span>
+              ${this.onChat ? `<button class="tile-modal-btn tile-modal-chat" data-username="${this.escapeHtml(p)}">Chat</button>` : ''}
+            </div>
+          `).join('')}
+        </div>`
+      : '';
+
+    const playerList = otherPlayersList + partyMembersList;
 
     const description = info.isUnlocked
       ? `<div class="tile-modal-desc">No description yet.</div>`
