@@ -58,6 +58,7 @@ export class WorldMapScene extends Phaser.Scene {
 
   // Graphics layers
   private tileGraphics!: Phaser.GameObjects.Graphics;
+  private zoneOverlayGraphics!: Phaser.GameObjects.Graphics;
   private zoneBorderGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private highlightGraphics!: Phaser.GameObjects.Graphics;
@@ -98,6 +99,8 @@ export class WorldMapScene extends Phaser.Scene {
 
     // Create graphics layers
     this.tileGraphics = this.add.graphics();
+    this.zoneOverlayGraphics = this.add.graphics();
+    this.zoneOverlayGraphics.setDepth(15);
     this.zoneBorderGraphics = this.add.graphics();
     this.zoneBorderGraphics.setDepth(5);
     this.pathGraphics = this.add.graphics();
@@ -196,6 +199,9 @@ export class WorldMapScene extends Phaser.Scene {
 
     // Sync other players on the map
     this.syncOtherPlayers(state.otherPlayers);
+
+    // Draw zone overlay (needs currentZone to be set)
+    this.renderZoneOverlay();
 
     this.isFirstState = false;
   }
@@ -343,6 +349,32 @@ export class WorldMapScene extends Phaser.Scene {
 
     // Draw zone boundary lines
     this.renderZoneBorders();
+  }
+
+  private renderZoneOverlay(): void {
+    this.zoneOverlayGraphics.clear();
+    if (!this.currentZone) return;
+
+    const corners = getHexCorners(HEX_SIZE);
+
+    for (const tile of this.grid.getAllTiles()) {
+      if (tile.type === TileType.Void) continue;
+      if (!tile.isTraversable) continue;
+      if (tile.zone === this.currentZone) continue;
+
+      const pos = tile.pixelPosition;
+      const x = pos.x + this.mapOffsetX;
+      const y = pos.y + this.mapOffsetY;
+
+      this.zoneOverlayGraphics.fillStyle(0x000000, 0.4);
+      this.zoneOverlayGraphics.beginPath();
+      this.zoneOverlayGraphics.moveTo(x + corners[0].x, y + corners[0].y);
+      for (let i = 1; i < 6; i++) {
+        this.zoneOverlayGraphics.lineTo(x + corners[i].x, y + corners[i].y);
+      }
+      this.zoneOverlayGraphics.closePath();
+      this.zoneOverlayGraphics.fillPath();
+    }
   }
 
   private darkenColor(color: number, factor: number): number {
@@ -591,10 +623,12 @@ export class WorldMapScene extends Phaser.Scene {
     // Room name: only show if unlocked
     const roomName = isUnlocked && worldTileDef?.name ? worldTileDef.name : '';
 
-    // Find players on this tile
-    const playersHere = this.lastOtherPlayers
-      .filter(p => p.col === offset.col && p.row === offset.row)
-      .map(p => p.username);
+    // Find players on this tile (only visible in same zone)
+    const playersHere = isSameZone
+      ? this.lastOtherPlayers
+        .filter(p => p.col === offset.col && p.row === offset.row)
+        .map(p => p.username)
+      : [];
 
     if (this.onTileClickFn) {
       this.onTileClickFn({
@@ -677,9 +711,9 @@ export class WorldMapScene extends Phaser.Scene {
     if (isSameZone) {
       const isUnlocked = this.worldCache.isUnlocked(offset.col, offset.row);
       if (isUnlocked && worldTileDef?.name) {
-        label = worldTileDef.name;
+        label = `${zoneName}\n${worldTileDef.name}`;
       } else {
-        label = 'Undiscovered';
+        label = `${zoneName}\nUndiscovered`;
       }
     }
 
