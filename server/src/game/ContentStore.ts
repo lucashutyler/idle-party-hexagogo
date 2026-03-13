@@ -209,6 +209,13 @@ export class ContentStore {
 
     this.world = snapshot.world;
 
+    // Safety net: ensure every tile has a GUID
+    for (const tile of this.world.tiles) {
+      if (!tile.id) {
+        tile.id = crypto.randomUUID();
+      }
+    }
+
     await this.save();
     console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.world.tiles.length} tiles`);
   }
