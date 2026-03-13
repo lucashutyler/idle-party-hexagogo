@@ -120,6 +120,65 @@ export class ContentStore {
     return { success: true };
   }
 
+  // --- Monster CRUD ---
+
+  async addOrUpdateMonster(monster: MonsterDefinition): Promise<void> {
+    this.monsters.set(monster.id, monster);
+    await this.save();
+  }
+
+  async deleteMonster(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.monsters.has(id)) {
+      return { success: false, error: 'Monster not found.' };
+    }
+    this.monsters.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
+  // --- Item CRUD ---
+
+  async addOrUpdateItem(item: ItemDefinition): Promise<void> {
+    this.items.set(item.id, item);
+    await this.save();
+  }
+
+  async deleteItem(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.items.has(id)) {
+      return { success: false, error: 'Item not found.' };
+    }
+    // Check if any monster references this item in its drops
+    for (const monster of this.monsters.values()) {
+      if (monster.drops?.some(d => d.itemId === id)) {
+        return { success: false, error: `Cannot delete: item is referenced in ${monster.name}'s drop table.` };
+      }
+    }
+    this.items.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
+  // --- Zone CRUD ---
+
+  async addOrUpdateZone(zone: ZoneDefinition): Promise<void> {
+    this.zones.set(zone.id, zone);
+    await this.save();
+  }
+
+  async deleteZone(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.zones.has(id)) {
+      return { success: false, error: 'Zone not found.' };
+    }
+    // Check if any world tile references this zone
+    const referencingTile = this.world.tiles.find(t => t.zone === id);
+    if (referencingTile) {
+      return { success: false, error: `Cannot delete: zone is used by tile "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` };
+    }
+    this.zones.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */

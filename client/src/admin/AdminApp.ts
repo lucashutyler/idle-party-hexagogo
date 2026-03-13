@@ -16,6 +16,7 @@ import type {
   MonsterDefinition,
   ItemDefinition,
   ZoneDefinition,
+  EncounterTableEntry,
   WorldTileDefinition,
   WorldData,
   CubeCoord,
@@ -310,12 +311,15 @@ export class AdminApp {
         break;
       case 'monsters':
         content.innerHTML = this.renderMonsters();
+        this.wireMonsterEvents();
         break;
       case 'items':
         content.innerHTML = this.renderItems();
+        this.wireItemEvents();
         break;
       case 'zones':
         content.innerHTML = this.renderZones();
+        this.wireZoneEvents();
         break;
       case 'map':
         content.innerHTML = this.renderMapSection();
@@ -443,6 +447,7 @@ export class AdminApp {
     if (!displayContent) return '<div class="admin-page-empty">No data</div>';
     const monsters = Object.values(displayContent.monsters);
     const items = displayContent.items;
+    const readOnly = this.isReadOnly();
 
     const rows = monsters.map(m => {
       const drops = m.drops?.map(d => {
@@ -450,9 +455,16 @@ export class AdminApp {
         return `${item?.name ?? d.itemId} (${Math.round(d.chance * 100)}%)`;
       }).join(', ') ?? 'None';
 
+      const actions = readOnly ? '' : `
+        <td class="monster-actions-cell">
+          <button class="admin-btn admin-btn-sm monster-edit-btn" data-id="${m.id}">Edit</button>
+          <button class="admin-btn admin-btn-sm admin-btn-danger monster-delete-btn" data-id="${m.id}">Del</button>
+        </td>
+      `;
+
       return `
         <tr>
-          <td>${m.name}</td>
+          <td>${this.escapeHtml(m.name)}</td>
           <td>${m.level}</td>
           <td>${m.hp}</td>
           <td>${m.damage}</td>
@@ -460,13 +472,23 @@ export class AdminApp {
           <td>${m.xp}</td>
           <td>${m.goldMin}-${m.goldMax}</td>
           <td>${drops}</td>
+          ${actions}
         </tr>
       `;
     }).join('');
 
+    const versionBar = this.renderVersionBar();
+    const addBtn = readOnly ? '' : '<button class="admin-btn" id="monster-add-btn">+ Add Monster</button>';
+    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+
     return `
       <div class="admin-page">
-        <div class="admin-page-header"><h2>Monsters (${monsters.length})</h2></div>
+        <div class="admin-page-header">
+          <h2>Monsters (${monsters.length})</h2>
+          ${addBtn}
+        </div>
+        ${versionBar}
+        <div id="monster-form-area"></div>
         <div class="admin-table-wrap pixel-panel">
           <table class="admin-table">
             <thead>
@@ -479,6 +501,7 @@ export class AdminApp {
                 <th>XP</th>
                 <th>Gold</th>
                 <th>Drops</th>
+                ${actionsHeader}
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -488,10 +511,221 @@ export class AdminApp {
     `;
   }
 
+  private wireMonsterEvents(): void {
+    document.getElementById('monster-add-btn')?.addEventListener('click', () => {
+      this.showMonsterForm(null);
+    });
+
+    document.querySelectorAll('.monster-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const displayContent = this.getDisplayContent();
+        if (!displayContent) return;
+        const monster = displayContent.monsters[id];
+        if (monster) this.showMonsterForm(monster);
+      });
+    });
+
+    document.querySelectorAll('.monster-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.deleteMonster(id);
+      });
+    });
+
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
+    });
+  }
+
+  private showMonsterForm(monster: MonsterDefinition | null): void {
+    const area = document.getElementById('monster-form-area');
+    if (!area) return;
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+
+    const isNew = !monster;
+    const m = monster ?? { id: '', name: '', level: 1, hp: 10, damage: 3, damageType: 'physical' as const, xp: 5, goldMin: 1, goldMax: 2, drops: [] };
+    const items = Object.values(displayContent.items);
+
+    const dropRows = (m.drops ?? []).map((d, i) => this.renderDropRow(i, d.itemId, d.chance, items)).join('');
+
+    area.innerHTML = `
+      <div class="pixel-panel monster-form">
+        <h3>${isNew ? 'Add Monster' : `Edit: ${this.escapeHtml(m.name)}`}</h3>
+        <div class="monster-form-grid">
+          <label>ID<input type="text" id="mf-id" value="${this.escapeHtml(m.id)}" ${isNew ? '' : 'disabled'}></label>
+          <label>Name<input type="text" id="mf-name" value="${this.escapeHtml(m.name)}"></label>
+          <label>Level<input type="number" id="mf-level" value="${m.level}" min="1"></label>
+          <label>HP<input type="number" id="mf-hp" value="${m.hp}" min="1"></label>
+          <label>Damage<input type="number" id="mf-damage" value="${m.damage}" min="0"></label>
+          <label>Type
+            <select id="mf-damageType">
+              <option value="physical" ${m.damageType === 'physical' ? 'selected' : ''}>Physical</option>
+              <option value="magical" ${m.damageType === 'magical' ? 'selected' : ''}>Magical</option>
+            </select>
+          </label>
+          <label>XP<input type="number" id="mf-xp" value="${m.xp}" min="0"></label>
+          <label>Gold Min<input type="number" id="mf-goldMin" value="${m.goldMin}" min="0"></label>
+          <label>Gold Max<input type="number" id="mf-goldMax" value="${m.goldMax}" min="0"></label>
+        </div>
+        <div class="monster-form-drops">
+          <h4>Drops <button class="admin-btn admin-btn-sm" id="mf-add-drop">+ Drop</button></h4>
+          <div id="mf-drops-list">${dropRows}</div>
+        </div>
+        <div class="monster-form-actions">
+          <button class="admin-btn" id="mf-save">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="mf-cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    this.wireMonsterFormEvents(items);
+  }
+
+  private renderDropRow(index: number, itemId: string, chance: number, items: ItemDefinition[]): string {
+    const options = items.map(i =>
+      `<option value="${i.id}" ${i.id === itemId ? 'selected' : ''}>${this.escapeHtml(i.name)}</option>`
+    ).join('');
+
+    return `
+      <div class="monster-drop-row" data-index="${index}">
+        <select class="mf-drop-item">${options}</select>
+        <input type="number" class="mf-drop-chance" value="${Math.round(chance * 100)}" min="1" max="100" step="1">
+        <span>%</span>
+        <button class="admin-btn admin-btn-sm admin-btn-danger mf-drop-remove">X</button>
+      </div>
+    `;
+  }
+
+  private wireMonsterFormEvents(items: ItemDefinition[]): void {
+    document.getElementById('mf-cancel')?.addEventListener('click', () => {
+      const area = document.getElementById('monster-form-area');
+      if (area) area.innerHTML = '';
+    });
+
+    document.getElementById('mf-add-drop')?.addEventListener('click', () => {
+      const list = document.getElementById('mf-drops-list');
+      if (!list || items.length === 0) return;
+      const index = list.querySelectorAll('.monster-drop-row').length;
+      const html = this.renderDropRow(index, items[0].id, 0.1, items);
+      list.insertAdjacentHTML('beforeend', html);
+      this.wireDropRemoveButtons();
+    });
+
+    this.wireDropRemoveButtons();
+
+    document.getElementById('mf-save')?.addEventListener('click', () => {
+      this.saveMonsterForm();
+    });
+
+    // Auto-generate ID from name for new monsters
+    const idInput = document.getElementById('mf-id') as HTMLInputElement | null;
+    const nameInput = document.getElementById('mf-name') as HTMLInputElement | null;
+    if (idInput && nameInput && !idInput.disabled) {
+      nameInput.addEventListener('input', () => {
+        idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      });
+    }
+  }
+
+  private wireDropRemoveButtons(): void {
+    document.querySelectorAll('.mf-drop-remove').forEach(btn => {
+      btn.replaceWith(btn.cloneNode(true));
+    });
+    document.querySelectorAll('.mf-drop-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        (btn as HTMLElement).closest('.monster-drop-row')?.remove();
+      });
+    });
+  }
+
+  private async saveMonsterForm(): Promise<void> {
+    const id = (document.getElementById('mf-id') as HTMLInputElement)?.value.trim();
+    const name = (document.getElementById('mf-name') as HTMLInputElement)?.value.trim();
+    const level = parseInt((document.getElementById('mf-level') as HTMLInputElement)?.value);
+    const hp = parseInt((document.getElementById('mf-hp') as HTMLInputElement)?.value);
+    const damage = parseInt((document.getElementById('mf-damage') as HTMLInputElement)?.value);
+    const damageType = (document.getElementById('mf-damageType') as HTMLSelectElement)?.value;
+    const xp = parseInt((document.getElementById('mf-xp') as HTMLInputElement)?.value);
+    const goldMin = parseInt((document.getElementById('mf-goldMin') as HTMLInputElement)?.value);
+    const goldMax = parseInt((document.getElementById('mf-goldMax') as HTMLInputElement)?.value);
+
+    if (!id || !name) {
+      alert('ID and Name are required.');
+      return;
+    }
+
+    const drops: { itemId: string; chance: number }[] = [];
+    document.querySelectorAll('.monster-drop-row').forEach(row => {
+      const itemId = (row.querySelector('.mf-drop-item') as HTMLSelectElement)?.value;
+      const chance = parseInt((row.querySelector('.mf-drop-chance') as HTMLInputElement)?.value) / 100;
+      if (itemId && chance > 0) drops.push({ itemId, chance });
+    });
+
+    const monster: MonsterDefinition = {
+      id, name, level, hp, damage,
+      damageType: damageType as 'physical' | 'magical',
+      xp, goldMin, goldMax,
+      drops: drops.length > 0 ? drops : undefined,
+    };
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/monsters/${encodeURIComponent(id)}${qp}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(monster),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save monster');
+        return;
+      }
+      this.updateDisplayMonsters(data.monsters);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not save monster');
+    }
+  }
+
+  private async deleteMonster(monsterId: string): Promise<void> {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const monster = displayContent.monsters[monsterId];
+    if (!monster) return;
+    if (!confirm(`Delete monster "${monster.name}"?`)) return;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/monsters/${encodeURIComponent(monsterId)}${qp}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete monster');
+        return;
+      }
+      this.updateDisplayMonsters(data.monsters);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not delete monster');
+    }
+  }
+
+  private updateDisplayMonsters(monsters: Record<string, MonsterDefinition>): void {
+    if (this.versionContent) {
+      this.versionContent.monsters = monsters;
+    }
+  }
+
   private renderItems(): string {
     const displayContent = this.getDisplayContent();
     if (!displayContent) return '<div class="admin-page-empty">No data</div>';
     const items = Object.values(displayContent.items);
+    const readOnly = this.isReadOnly();
 
     const rows = items.map(i => {
       const effects: string[] = [];
@@ -505,19 +739,36 @@ export class AdminApp {
         effects.push(`${Math.round(i.dodgeChance * 100)}% Dodge`);
       }
 
+      const actions = readOnly ? '' : `
+        <td class="monster-actions-cell">
+          <button class="admin-btn admin-btn-sm item-edit-btn" data-id="${i.id}">Edit</button>
+          <button class="admin-btn admin-btn-sm admin-btn-danger item-delete-btn" data-id="${i.id}">Del</button>
+        </td>
+      `;
+
       return `
         <tr>
-          <td>${i.name}</td>
+          <td>${this.escapeHtml(i.name)}</td>
           <td><span class="rarity-${i.rarity}">${i.rarity}</span></td>
           <td>${i.equipSlot ?? '-'}</td>
           <td>${effects.length > 0 ? effects.join(', ') : 'Material'}</td>
+          ${actions}
         </tr>
       `;
     }).join('');
 
+    const versionBar = this.renderVersionBar();
+    const addBtn = readOnly ? '' : '<button class="admin-btn" id="item-add-btn">+ Add Item</button>';
+    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+
     return `
       <div class="admin-page">
-        <div class="admin-page-header"><h2>Items (${items.length})</h2></div>
+        <div class="admin-page-header">
+          <h2>Items (${items.length})</h2>
+          ${addBtn}
+        </div>
+        ${versionBar}
+        <div id="item-form-area"></div>
         <div class="admin-table-wrap pixel-panel">
           <table class="admin-table">
             <thead>
@@ -526,6 +777,7 @@ export class AdminApp {
                 <th>Rarity</th>
                 <th>Slot</th>
                 <th>Effects</th>
+                ${actionsHeader}
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -535,11 +787,166 @@ export class AdminApp {
     `;
   }
 
+  private wireItemEvents(): void {
+    document.getElementById('item-add-btn')?.addEventListener('click', () => {
+      this.showItemForm(null);
+    });
+
+    document.querySelectorAll('.item-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const displayContent = this.getDisplayContent();
+        if (!displayContent) return;
+        const item = displayContent.items[id];
+        if (item) this.showItemForm(item);
+      });
+    });
+
+    document.querySelectorAll('.item-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.deleteItem(id);
+      });
+    });
+
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
+    });
+  }
+
+  private showItemForm(item: ItemDefinition | null): void {
+    const area = document.getElementById('item-form-area');
+    if (!area) return;
+
+    const isNew = !item;
+    const i = item ?? { id: '', name: '', rarity: 'common' as const };
+
+    const rarityOptions = ['janky', 'common'].map(r =>
+      `<option value="${r}" ${i.rarity === r ? 'selected' : ''}>${r}</option>`
+    ).join('');
+
+    const slotOptions = ['', 'head', 'chest', 'hand', 'foot'].map(s =>
+      `<option value="${s}" ${(i.equipSlot ?? '') === s ? 'selected' : ''}>${s || '(none - material)'}</option>`
+    ).join('');
+
+    area.innerHTML = `
+      <div class="pixel-panel monster-form">
+        <h3>${isNew ? 'Add Item' : `Edit: ${this.escapeHtml(i.name)}`}</h3>
+        <div class="monster-form-grid">
+          <label>ID<input type="text" id="if-id" value="${this.escapeHtml(i.id)}" ${isNew ? '' : 'disabled'}></label>
+          <label>Name<input type="text" id="if-name" value="${this.escapeHtml(i.name)}"></label>
+          <label>Rarity<select id="if-rarity">${rarityOptions}</select></label>
+          <label>Equip Slot<select id="if-equipSlot">${slotOptions}</select></label>
+          <label>Attack Min<input type="number" id="if-atkMin" value="${i.bonusAttackMin ?? 0}" min="0"></label>
+          <label>Attack Max<input type="number" id="if-atkMax" value="${i.bonusAttackMax ?? 0}" min="0"></label>
+          <label>DR Min<input type="number" id="if-drMin" value="${i.damageReductionMin ?? 0}" min="0"></label>
+          <label>DR Max<input type="number" id="if-drMax" value="${i.damageReductionMax ?? 0}" min="0"></label>
+          <label>Dodge %<input type="number" id="if-dodge" value="${i.dodgeChance != null ? Math.round(i.dodgeChance * 100) : 0}" min="0" max="100" step="1"></label>
+        </div>
+        <div class="monster-form-actions">
+          <button class="admin-btn" id="if-save">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="if-cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('if-cancel')?.addEventListener('click', () => {
+      area.innerHTML = '';
+    });
+
+    document.getElementById('if-save')?.addEventListener('click', () => {
+      this.saveItemForm();
+    });
+
+    // Auto-generate ID from name for new items
+    const idInput = document.getElementById('if-id') as HTMLInputElement | null;
+    const nameInput = document.getElementById('if-name') as HTMLInputElement | null;
+    if (idInput && nameInput && !idInput.disabled) {
+      nameInput.addEventListener('input', () => {
+        idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      });
+    }
+  }
+
+  private async saveItemForm(): Promise<void> {
+    const id = (document.getElementById('if-id') as HTMLInputElement)?.value.trim();
+    const name = (document.getElementById('if-name') as HTMLInputElement)?.value.trim();
+    const rarity = (document.getElementById('if-rarity') as HTMLSelectElement)?.value;
+    const equipSlot = (document.getElementById('if-equipSlot') as HTMLSelectElement)?.value || undefined;
+    const bonusAttackMin = parseInt((document.getElementById('if-atkMin') as HTMLInputElement)?.value) || 0;
+    const bonusAttackMax = parseInt((document.getElementById('if-atkMax') as HTMLInputElement)?.value) || 0;
+    const damageReductionMin = parseInt((document.getElementById('if-drMin') as HTMLInputElement)?.value) || 0;
+    const damageReductionMax = parseInt((document.getElementById('if-drMax') as HTMLInputElement)?.value) || 0;
+    const dodgeChance = (parseInt((document.getElementById('if-dodge') as HTMLInputElement)?.value) || 0) / 100;
+
+    if (!id || !name) {
+      alert('ID and Name are required.');
+      return;
+    }
+
+    const item: ItemDefinition = { id, name, rarity: rarity as 'janky' | 'common' };
+    if (equipSlot) item.equipSlot = equipSlot as 'head' | 'chest' | 'hand' | 'foot';
+    if (bonusAttackMin > 0 || bonusAttackMax > 0) { item.bonusAttackMin = bonusAttackMin; item.bonusAttackMax = bonusAttackMax; }
+    if (damageReductionMin > 0 || damageReductionMax > 0) { item.damageReductionMin = damageReductionMin; item.damageReductionMax = damageReductionMax; }
+    if (dodgeChance > 0) item.dodgeChance = dodgeChance;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/items/${encodeURIComponent(id)}${qp}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(item),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save item');
+        return;
+      }
+      this.updateDisplayItems(data.items);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not save item');
+    }
+  }
+
+  private async deleteItem(itemId: string): Promise<void> {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const item = displayContent.items[itemId];
+    if (!item) return;
+    if (!confirm(`Delete item "${item.name}"?`)) return;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/items/${encodeURIComponent(itemId)}${qp}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete item');
+        return;
+      }
+      this.updateDisplayItems(data.items);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not delete item');
+    }
+  }
+
+  private updateDisplayItems(items: Record<string, ItemDefinition>): void {
+    if (this.versionContent) {
+      this.versionContent.items = items;
+    }
+  }
+
   private renderZones(): string {
     const displayContent = this.getDisplayContent();
     if (!displayContent) return '<div class="admin-page-empty">No data</div>';
     const zones = Object.values(displayContent.zones);
     const monsters = displayContent.monsters;
+    const readOnly = this.isReadOnly();
 
     const rows = zones.map(z => {
       const encounters = z.encounterTable.map(e => {
@@ -547,18 +954,35 @@ export class AdminApp {
         return `${monster?.name ?? e.monsterId} (w:${e.weight}, ${e.minCount}-${e.maxCount})`;
       }).join(', ');
 
+      const actions = readOnly ? '' : `
+        <td class="monster-actions-cell">
+          <button class="admin-btn admin-btn-sm zone-edit-btn" data-id="${z.id}">Edit</button>
+          <button class="admin-btn admin-btn-sm admin-btn-danger zone-delete-btn" data-id="${z.id}">Del</button>
+        </td>
+      `;
+
       return `
         <tr>
-          <td>${z.displayName}</td>
+          <td>${this.escapeHtml(z.displayName)}</td>
           <td>${z.levelRange[0]}-${z.levelRange[1]}</td>
           <td>${encounters}</td>
+          ${actions}
         </tr>
       `;
     }).join('');
 
+    const versionBar = this.renderVersionBar();
+    const addBtn = readOnly ? '' : '<button class="admin-btn" id="zone-add-btn">+ Add Zone</button>';
+    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+
     return `
       <div class="admin-page">
-        <div class="admin-page-header"><h2>Zones (${zones.length})</h2></div>
+        <div class="admin-page-header">
+          <h2>Zones (${zones.length})</h2>
+          ${addBtn}
+        </div>
+        ${versionBar}
+        <div id="zone-form-area"></div>
         <div class="admin-table-wrap pixel-panel">
           <table class="admin-table">
             <thead>
@@ -566,6 +990,7 @@ export class AdminApp {
                 <th>Name</th>
                 <th>Level Range</th>
                 <th>Encounters (weight, count range)</th>
+                ${actionsHeader}
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -573,6 +998,204 @@ export class AdminApp {
         </div>
       </div>
     `;
+  }
+
+  private wireZoneEvents(): void {
+    document.getElementById('zone-add-btn')?.addEventListener('click', () => {
+      this.showZoneForm(null);
+    });
+
+    document.querySelectorAll('.zone-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const displayContent = this.getDisplayContent();
+        if (!displayContent) return;
+        const zone = displayContent.zones[id];
+        if (zone) this.showZoneForm(zone);
+      });
+    });
+
+    document.querySelectorAll('.zone-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.deleteZone(id);
+      });
+    });
+
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
+    });
+  }
+
+  private showZoneForm(zone: ZoneDefinition | null): void {
+    const area = document.getElementById('zone-form-area');
+    if (!area) return;
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+
+    const isNew = !zone;
+    const z = zone ?? { id: '', displayName: '', levelRange: [1, 1] as [number, number], encounterTable: [] };
+    const monsterList = Object.values(displayContent.monsters);
+
+    const encounterRows = z.encounterTable.map((e, i) => this.renderEncounterRow(i, e, monsterList)).join('');
+
+    area.innerHTML = `
+      <div class="pixel-panel monster-form">
+        <h3>${isNew ? 'Add Zone' : `Edit: ${this.escapeHtml(z.displayName)}`}</h3>
+        <div class="monster-form-grid">
+          <label>ID<input type="text" id="zf-id" value="${this.escapeHtml(z.id)}" ${isNew ? '' : 'disabled'}></label>
+          <label>Display Name<input type="text" id="zf-name" value="${this.escapeHtml(z.displayName)}"></label>
+          <label>Level Min<input type="number" id="zf-levelMin" value="${z.levelRange[0]}" min="1"></label>
+          <label>Level Max<input type="number" id="zf-levelMax" value="${z.levelRange[1]}" min="1"></label>
+        </div>
+        <div class="monster-form-drops">
+          <h4>Encounter Table <button class="admin-btn admin-btn-sm" id="zf-add-encounter">+ Encounter</button></h4>
+          <div id="zf-encounters-list">${encounterRows}</div>
+        </div>
+        <div class="monster-form-actions">
+          <button class="admin-btn" id="zf-save">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="zf-cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    this.wireZoneFormEvents(monsterList);
+  }
+
+  private renderEncounterRow(index: number, entry: EncounterTableEntry, monsters: MonsterDefinition[]): string {
+    const options = monsters.map(m =>
+      `<option value="${m.id}" ${m.id === entry.monsterId ? 'selected' : ''}>${this.escapeHtml(m.name)}</option>`
+    ).join('');
+
+    return `
+      <div class="monster-drop-row" data-index="${index}">
+        <select class="zf-enc-monster">${options}</select>
+        <label class="zf-enc-inline">W<input type="number" class="zf-enc-weight" value="${entry.weight}" min="1" step="1"></label>
+        <label class="zf-enc-inline">Min<input type="number" class="zf-enc-min" value="${entry.minCount}" min="1" step="1"></label>
+        <label class="zf-enc-inline">Max<input type="number" class="zf-enc-max" value="${entry.maxCount}" min="1" step="1"></label>
+        <button class="admin-btn admin-btn-sm admin-btn-danger zf-enc-remove">X</button>
+      </div>
+    `;
+  }
+
+  private wireZoneFormEvents(monsters: MonsterDefinition[]): void {
+    document.getElementById('zf-cancel')?.addEventListener('click', () => {
+      const area = document.getElementById('zone-form-area');
+      if (area) area.innerHTML = '';
+    });
+
+    document.getElementById('zf-add-encounter')?.addEventListener('click', () => {
+      const list = document.getElementById('zf-encounters-list');
+      if (!list || monsters.length === 0) return;
+      const index = list.querySelectorAll('.monster-drop-row').length;
+      const html = this.renderEncounterRow(index, { monsterId: monsters[0].id, weight: 1, minCount: 1, maxCount: 1 }, monsters);
+      list.insertAdjacentHTML('beforeend', html);
+      this.wireEncounterRemoveButtons();
+    });
+
+    this.wireEncounterRemoveButtons();
+
+    document.getElementById('zf-save')?.addEventListener('click', () => {
+      this.saveZoneForm();
+    });
+
+    // Auto-generate ID from name for new zones
+    const idInput = document.getElementById('zf-id') as HTMLInputElement | null;
+    const nameInput = document.getElementById('zf-name') as HTMLInputElement | null;
+    if (idInput && nameInput && !idInput.disabled) {
+      nameInput.addEventListener('input', () => {
+        idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      });
+    }
+  }
+
+  private wireEncounterRemoveButtons(): void {
+    document.querySelectorAll('.zf-enc-remove').forEach(btn => {
+      btn.replaceWith(btn.cloneNode(true));
+    });
+    document.querySelectorAll('.zf-enc-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        (btn as HTMLElement).closest('.monster-drop-row')?.remove();
+      });
+    });
+  }
+
+  private async saveZoneForm(): Promise<void> {
+    const id = (document.getElementById('zf-id') as HTMLInputElement)?.value.trim();
+    const displayName = (document.getElementById('zf-name') as HTMLInputElement)?.value.trim();
+    const levelMin = parseInt((document.getElementById('zf-levelMin') as HTMLInputElement)?.value) || 1;
+    const levelMax = parseInt((document.getElementById('zf-levelMax') as HTMLInputElement)?.value) || 1;
+
+    if (!id || !displayName) {
+      alert('ID and Display Name are required.');
+      return;
+    }
+
+    const encounterTable: EncounterTableEntry[] = [];
+    document.querySelectorAll('#zf-encounters-list .monster-drop-row').forEach(row => {
+      const monsterId = (row.querySelector('.zf-enc-monster') as HTMLSelectElement)?.value;
+      const weight = parseInt((row.querySelector('.zf-enc-weight') as HTMLInputElement)?.value) || 1;
+      const minCount = parseInt((row.querySelector('.zf-enc-min') as HTMLInputElement)?.value) || 1;
+      const maxCount = parseInt((row.querySelector('.zf-enc-max') as HTMLInputElement)?.value) || 1;
+      if (monsterId) encounterTable.push({ monsterId, weight, minCount, maxCount });
+    });
+
+    const zone: ZoneDefinition = {
+      id,
+      displayName,
+      levelRange: [levelMin, levelMax],
+      encounterTable,
+    };
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/zones/${encodeURIComponent(id)}${qp}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(zone),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save zone');
+        return;
+      }
+      this.updateDisplayZones(data.zones);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not save zone');
+    }
+  }
+
+  private async deleteZone(zoneId: string): Promise<void> {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const zone = displayContent.zones[zoneId];
+    if (!zone) return;
+    if (!confirm(`Delete zone "${zone.displayName}"?`)) return;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/zones/${encodeURIComponent(zoneId)}${qp}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete zone');
+        return;
+      }
+      this.updateDisplayZones(data.zones);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not delete zone');
+    }
+  }
+
+  private updateDisplayZones(zones: Record<string, ZoneDefinition>): void {
+    if (this.versionContent) {
+      this.versionContent.zones = zones;
+    }
   }
 
   // --- Versions ---
@@ -1141,6 +1764,7 @@ export class AdminApp {
       ctx.lineWidth = 0.5;
       ctx.stroke();
 
+      this.drawNonTraversableMarker(ctx, tile, sx, sy, zoom);
       this.drawStartMarker(ctx, tile, sx, sy, zoom);
     }
 
@@ -1211,6 +1835,7 @@ export class AdminApp {
       ctx.lineWidth = 0.5;
       ctx.stroke();
 
+      this.drawNonTraversableMarker(ctx, tile, sx, sy, zoom);
       this.drawStartMarker(ctx, tile, sx, sy, zoom);
     }
 
@@ -1284,8 +1909,26 @@ export class AdminApp {
         ctx.stroke();
       }
 
+      this.drawNonTraversableMarker(ctx, selectedHexTile, sx, sy, zoom);
       this.drawStartMarker(ctx, selectedHexTile, sx, sy, zoom);
     }
+  }
+
+  /** Draw a red X on non-traversable tiles. */
+  private drawNonTraversableMarker(ctx: CanvasRenderingContext2D, tile: HexTile, sx: number, sy: number, zoom: number): void {
+    if (TILE_CONFIGS[tile.type]?.traversable !== false) return;
+    const size = Math.max(5, 10 * zoom);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 60, 60, 0.7)';
+    ctx.lineWidth = Math.max(1.5, 2.5 * zoom);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sx - size, sy - size);
+    ctx.lineTo(sx + size, sy + size);
+    ctx.moveTo(sx + size, sy - size);
+    ctx.lineTo(sx - size, sy + size);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** Draw the star marker if this tile is the start tile. */
@@ -1524,9 +2167,11 @@ export class AdminApp {
     const isTraversable = TILE_CONFIGS[tile.type]?.traversable ?? false;
     const disabled = readOnly ? ' disabled' : '';
 
-    const typeOptions = EDITABLE_TILE_TYPES.map(t =>
-      `<option value="${t}"${t === tile.type ? ' selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
-    ).join('');
+    const typeOptions = EDITABLE_TILE_TYPES.map(t => {
+      const label = t.charAt(0).toUpperCase() + t.slice(1);
+      const prefix = TILE_CONFIGS[t]?.traversable === false ? '(X) ' : '';
+      return `<option value="${t}"${t === tile.type ? ' selected' : ''}>${prefix}${label}</option>`;
+    }).join('');
 
     const zoneOptions = zones.map(z =>
       `<option value="${z.id}"${z.id === tile.zone ? ' selected' : ''}>${z.displayName}</option>`
