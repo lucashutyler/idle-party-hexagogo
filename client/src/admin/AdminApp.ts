@@ -49,6 +49,8 @@ interface AccountData {
   verified: boolean;
   createdAt: string;
   isOnline: boolean;
+  className: string | null;
+  level: number | null;
 }
 
 interface ContentData {
@@ -417,15 +419,25 @@ export class AdminApp {
   }
 
   private renderAccounts(): string {
-    const rows = this.accounts.map(a => `
-      <tr>
-        <td>${a.username ?? '<em>none</em>'}</td>
-        <td>${a.email}</td>
-        <td>${a.isOnline ? '<span class="status-online">Online</span>' : '<span class="status-offline">Offline</span>'}</td>
-        <td>${a.verified ? 'Yes' : 'No'}</td>
-        <td>${new Date(a.createdAt).toLocaleDateString()}</td>
-      </tr>
-    `).join('');
+    const classes = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'];
+    const rows = this.accounts.map(a => {
+      const classCell = a.username && a.className
+        ? `<select class="account-class-select" data-username="${this.escapeHtml(a.username)}">
+            ${classes.map(c => `<option value="${c}"${c === a.className ? ' selected' : ''}>${c}</option>`).join('')}
+           </select>`
+        : (a.className ?? '—');
+
+      return `
+        <tr>
+          <td>${a.username ?? '<em>none</em>'}</td>
+          <td>${a.email}</td>
+          <td>${a.isOnline ? '<span class="status-online">Online</span>' : '<span class="status-offline">Offline</span>'}</td>
+          <td>${a.level ?? '—'}</td>
+          <td>${classCell}</td>
+          <td>${new Date(a.createdAt).toLocaleDateString()}</td>
+        </tr>
+      `;
+    }).join('');
 
     return `
       <div class="admin-page">
@@ -437,7 +449,8 @@ export class AdminApp {
                 <th>Username</th>
                 <th>Email</th>
                 <th>Status</th>
-                <th>Verified</th>
+                <th>Lv</th>
+                <th>Class</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -454,6 +467,38 @@ export class AdminApp {
   }
 
   private wireAccountEvents(): void {
+    document.querySelectorAll('.account-class-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const select = sel as HTMLSelectElement;
+        const username = select.dataset.username!;
+        const className = select.value;
+        if (!confirm(`Change ${username}'s class to ${className}? Their equipment will be unequipped.`)) {
+          // Revert select to previous value
+          const account = this.accounts.find(a => a.username === username);
+          if (account?.className) select.value = account.className;
+          return;
+        }
+        try {
+          const res = await fetch(`/api/admin/players/${encodeURIComponent(username)}/class`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ className }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            alert(data.error || 'Failed to change class');
+            const account = this.accounts.find(a => a.username === username);
+            if (account?.className) select.value = account.className;
+            return;
+          }
+          await this.refresh();
+        } catch {
+          alert('Network error — could not change class');
+        }
+      });
+    });
+
     document.getElementById('master-reset-btn')?.addEventListener('click', async () => {
       const input = prompt('Type "IT ALL MUST END" to confirm master reset:');
       if (input !== 'IT ALL MUST END') return;

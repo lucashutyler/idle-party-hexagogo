@@ -4,6 +4,8 @@ import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
+import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
+import type { ClassName } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
 
 interface AdminRouteOptions {
@@ -34,13 +36,18 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   router.get('/accounts', (_req, res) => {
     const pm = getPlayerManager();
     const onlineSet = new Set(pm.getOnlinePlayers());
-    const accounts = accountStore.getAllAccounts().map(a => ({
-      email: a.email,
-      username: a.username,
-      verified: a.verified,
-      createdAt: a.createdAt,
-      isOnline: a.username ? onlineSet.has(a.username) : false,
-    }));
+    const accounts = accountStore.getAllAccounts().map(a => {
+      const session = a.username ? pm.getSessionByUsername(a.username) : undefined;
+      return {
+        email: a.email,
+        username: a.username,
+        verified: a.verified,
+        createdAt: a.createdAt,
+        isOnline: a.username ? onlineSet.has(a.username) : false,
+        className: session?.getClassName() ?? null,
+        level: session?.getLevel() ?? null,
+      };
+    });
     res.json({ accounts });
   });
 
@@ -481,6 +488,28 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const count = pm.masterReset();
     console.log(`[Admin] Master reset executed: ${count} players reset`);
     res.json({ success: true, playersReset: count });
+  });
+
+  /** Change a player's class (admin). Resets character to level 1 with the new class. */
+  router.post('/players/:username/class', (req, res) => {
+    const { username } = req.params;
+    const { className } = req.body as { className?: string };
+
+    if (!className || !ALL_CLASS_NAMES.includes(className as ClassName)) {
+      res.status(400).json({ error: `Invalid class. Valid classes: ${ALL_CLASS_NAMES.join(', ')}` });
+      return;
+    }
+
+    const pm = getPlayerManager();
+    const session = pm.getSessionByUsername(username);
+    if (!session) {
+      res.status(404).json({ error: `Player "${username}" not found` });
+      return;
+    }
+
+    session.forceSetClass(className as ClassName);
+    console.log(`[Admin] Changed "${username}" class to ${className}`);
+    res.json({ success: true, className, level: session.getLevel() });
   });
 
   /** Deploy a published version to the live game. */
