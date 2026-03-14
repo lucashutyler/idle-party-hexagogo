@@ -310,6 +310,7 @@ export class AdminApp {
         break;
       case 'accounts':
         content.innerHTML = this.renderAccounts();
+        this.wireAccountEvents();
         break;
       case 'monsters':
         content.innerHTML = this.renderMonsters();
@@ -443,8 +444,38 @@ export class AdminApp {
             <tbody>${rows}</tbody>
           </table>
         </div>
+        <div style="margin-top: 24px; padding: 16px; border: 2px solid var(--danger, #c0392b); border-radius: 4px;">
+          <h3 style="margin: 0 0 8px; color: var(--danger, #c0392b);">Danger Zone</h3>
+          <p style="margin: 0 0 12px; font-size: 0.85em;">Reset ALL players to Level 1, 0 XP, starting room. Classes are kept.</p>
+          <button id="master-reset-btn" class="admin-btn admin-btn-danger">Master Reset</button>
+        </div>
       </div>
     `;
+  }
+
+  private wireAccountEvents(): void {
+    document.getElementById('master-reset-btn')?.addEventListener('click', async () => {
+      const input = prompt('Type "IT ALL MUST END" to confirm master reset:');
+      if (input !== 'IT ALL MUST END') return;
+
+      try {
+        const res = await fetch('/api/admin/master-reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ confirmation: input }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || 'Master reset failed');
+          return;
+        }
+        alert(`Master reset complete: ${data.playersReset} players reset`);
+        await this.refresh();
+      } catch (err) {
+        alert('Master reset failed: ' + (err instanceof Error ? err.message : err));
+      }
+    });
   }
 
   private renderMonsters(): string {
@@ -558,8 +589,8 @@ export class AdminApp {
     area.innerHTML = `
       <div class="pixel-panel monster-form">
         <h3>${isNew ? 'Add Monster' : `Edit: ${this.escapeHtml(m.name)}`}</h3>
+        <input type="hidden" id="mf-id" value="${this.escapeHtml(m.id)}">
         <div class="monster-form-grid">
-          <label>ID<input type="text" id="mf-id" value="${this.escapeHtml(m.id)}" ${isNew ? '' : 'disabled'}></label>
           <label>Name<input type="text" id="mf-name" value="${this.escapeHtml(m.name)}"></label>
           <label>Level<input type="number" id="mf-level" value="${m.level}" min="1"></label>
           <label>HP<input type="number" id="mf-hp" value="${m.hp}" min="1"></label>
@@ -623,15 +654,6 @@ export class AdminApp {
     document.getElementById('mf-save')?.addEventListener('click', () => {
       this.saveMonsterForm();
     });
-
-    // Auto-generate ID from name for new monsters
-    const idInput = document.getElementById('mf-id') as HTMLInputElement | null;
-    const nameInput = document.getElementById('mf-name') as HTMLInputElement | null;
-    if (idInput && nameInput && !idInput.disabled) {
-      nameInput.addEventListener('input', () => {
-        idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-      });
-    }
   }
 
   private wireDropRemoveButtons(): void {
@@ -646,7 +668,7 @@ export class AdminApp {
   }
 
   private async saveMonsterForm(): Promise<void> {
-    const id = (document.getElementById('mf-id') as HTMLInputElement)?.value.trim();
+    const existingId = (document.getElementById('mf-id') as HTMLInputElement)?.value.trim();
     const name = (document.getElementById('mf-name') as HTMLInputElement)?.value.trim();
     const level = parseInt((document.getElementById('mf-level') as HTMLInputElement)?.value);
     const hp = parseInt((document.getElementById('mf-hp') as HTMLInputElement)?.value);
@@ -656,10 +678,22 @@ export class AdminApp {
     const goldMin = parseInt((document.getElementById('mf-goldMin') as HTMLInputElement)?.value);
     const goldMax = parseInt((document.getElementById('mf-goldMax') as HTMLInputElement)?.value);
 
-    if (!id || !name) {
-      alert('ID and Name are required.');
+    if (!name) {
+      alert('Name is required.');
       return;
     }
+
+    // Validate name uniqueness
+    const displayContent = this.getDisplayContent();
+    if (displayContent) {
+      const duplicate = Object.values(displayContent.monsters).find(m => m.name === name && m.id !== existingId);
+      if (duplicate) {
+        alert(`A monster named "${name}" already exists.`);
+        return;
+      }
+    }
+
+    const id = existingId || crypto.randomUUID();
 
     const drops: { itemId: string; chance: number }[] = [];
     document.querySelectorAll('.monster-drop-row').forEach(row => {
@@ -837,8 +871,8 @@ export class AdminApp {
     area.innerHTML = `
       <div class="pixel-panel monster-form">
         <h3>${isNew ? 'Add Item' : `Edit: ${this.escapeHtml(i.name)}`}</h3>
+        <input type="hidden" id="if-id" value="${this.escapeHtml(i.id)}">
         <div class="monster-form-grid">
-          <label>ID<input type="text" id="if-id" value="${this.escapeHtml(i.id)}" ${isNew ? '' : 'disabled'}></label>
           <label>Name<input type="text" id="if-name" value="${this.escapeHtml(i.name)}"></label>
           <label>Rarity<select id="if-rarity">${rarityOptions}</select></label>
           <label>Equip Slot<select id="if-equipSlot">${slotOptions}</select></label>
@@ -862,19 +896,10 @@ export class AdminApp {
     document.getElementById('if-save')?.addEventListener('click', () => {
       this.saveItemForm();
     });
-
-    // Auto-generate ID from name for new items
-    const idInput = document.getElementById('if-id') as HTMLInputElement | null;
-    const nameInput = document.getElementById('if-name') as HTMLInputElement | null;
-    if (idInput && nameInput && !idInput.disabled) {
-      nameInput.addEventListener('input', () => {
-        idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-      });
-    }
   }
 
   private async saveItemForm(): Promise<void> {
-    const id = (document.getElementById('if-id') as HTMLInputElement)?.value.trim();
+    const existingId = (document.getElementById('if-id') as HTMLInputElement)?.value.trim();
     const name = (document.getElementById('if-name') as HTMLInputElement)?.value.trim();
     const rarity = (document.getElementById('if-rarity') as HTMLSelectElement)?.value;
     const equipSlot = (document.getElementById('if-equipSlot') as HTMLSelectElement)?.value || undefined;
@@ -884,10 +909,22 @@ export class AdminApp {
     const damageReductionMax = parseInt((document.getElementById('if-drMax') as HTMLInputElement)?.value) || 0;
     const dodgeChance = (parseInt((document.getElementById('if-dodge') as HTMLInputElement)?.value) || 0) / 100;
 
-    if (!id || !name) {
-      alert('ID and Name are required.');
+    if (!name) {
+      alert('Name is required.');
       return;
     }
+
+    // Validate name uniqueness
+    const displayContent = this.getDisplayContent();
+    if (displayContent) {
+      const duplicate = Object.values(displayContent.items).find(i => i.name === name && i.id !== existingId);
+      if (duplicate) {
+        alert(`An item named "${name}" already exists.`);
+        return;
+      }
+    }
+
+    const id = existingId || crypto.randomUUID();
 
     const item: ItemDefinition = { id, name, rarity: rarity as 'janky' | 'common' };
     if (equipSlot) item.equipSlot = equipSlot as 'head' | 'chest' | 'hand' | 'foot';
@@ -1047,8 +1084,8 @@ export class AdminApp {
     area.innerHTML = `
       <div class="pixel-panel monster-form">
         <h3>${isNew ? 'Add Zone' : `Edit: ${this.escapeHtml(z.displayName)}`}</h3>
+        <input type="hidden" id="zf-id" value="${this.escapeHtml(z.id)}">
         <div class="monster-form-grid">
-          <label>ID<input type="text" id="zf-id" value="${this.escapeHtml(z.id)}" ${isNew ? '' : 'disabled'}></label>
           <label>Display Name<input type="text" id="zf-name" value="${this.escapeHtml(z.displayName)}"></label>
           <label>Level Min<input type="number" id="zf-levelMin" value="${z.levelRange[0]}" min="1"></label>
           <label>Level Max<input type="number" id="zf-levelMax" value="${z.levelRange[1]}" min="1"></label>
@@ -1103,15 +1140,6 @@ export class AdminApp {
     document.getElementById('zf-save')?.addEventListener('click', () => {
       this.saveZoneForm();
     });
-
-    // Auto-generate ID from name for new zones
-    const idInput = document.getElementById('zf-id') as HTMLInputElement | null;
-    const nameInput = document.getElementById('zf-name') as HTMLInputElement | null;
-    if (idInput && nameInput && !idInput.disabled) {
-      nameInput.addEventListener('input', () => {
-        idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-      });
-    }
   }
 
   private wireEncounterRemoveButtons(): void {
@@ -1126,15 +1154,27 @@ export class AdminApp {
   }
 
   private async saveZoneForm(): Promise<void> {
-    const id = (document.getElementById('zf-id') as HTMLInputElement)?.value.trim();
+    const existingId = (document.getElementById('zf-id') as HTMLInputElement)?.value.trim();
     const displayName = (document.getElementById('zf-name') as HTMLInputElement)?.value.trim();
     const levelMin = parseInt((document.getElementById('zf-levelMin') as HTMLInputElement)?.value) || 1;
     const levelMax = parseInt((document.getElementById('zf-levelMax') as HTMLInputElement)?.value) || 1;
 
-    if (!id || !displayName) {
-      alert('ID and Display Name are required.');
+    if (!displayName) {
+      alert('Display Name is required.');
       return;
     }
+
+    // Validate name uniqueness
+    const displayContent = this.getDisplayContent();
+    if (displayContent) {
+      const duplicate = Object.values(displayContent.zones).find(z => z.displayName === displayName && z.id !== existingId);
+      if (duplicate) {
+        alert(`A zone named "${displayName}" already exists.`);
+        return;
+      }
+    }
+
+    const id = existingId || crypto.randomUUID();
 
     const encounterTable: EncounterTableEntry[] = [];
     document.querySelectorAll('#zf-encounters-list .monster-drop-row').forEach(row => {

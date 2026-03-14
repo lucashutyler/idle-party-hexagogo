@@ -404,4 +404,10 @@ export class PartySystem {
     if (!partyId) return null;
     return this.parties.get(partyId) ?? null;
   }
+
+  /** Disband all parties and clear all pending invites. */
+  disbandAll(): void {
+    this.parties.clear();
+    this.pendingInvites.clear();
+  }
 }

@@ -418,7 +418,14 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       return;
     }
     const snapshot = await versions.loadSnapshot(req.params.id);
-    res.json(snapshot);
+    // Convert arrays to records keyed by ID (client expects Record<string, T>)
+    const monstersRecord: Record<string, (typeof snapshot.monsters)[0]> = {};
+    for (const m of snapshot.monsters) monstersRecord[m.id] = m;
+    const itemsRecord: Record<string, (typeof snapshot.items)[0]> = {};
+    for (const i of snapshot.items) itemsRecord[i.id] = i;
+    const zonesRecord: Record<string, (typeof snapshot.zones)[0]> = {};
+    for (const z of snapshot.zones) zonesRecord[z.id] = z;
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */
@@ -460,6 +467,20 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       return;
     }
     res.json({ success: true, version: result.version });
+  });
+
+  /** Master reset: reset all players to level 1, 0 XP, start tile (keep class). */
+  router.post('/master-reset', (req, res) => {
+    const { confirmation } = req.body as { confirmation?: string };
+    if (confirmation !== 'IT ALL MUST END') {
+      res.status(400).json({ error: 'Invalid confirmation' });
+      return;
+    }
+
+    const pm = getPlayerManager();
+    const count = pm.masterReset();
+    console.log(`[Admin] Master reset executed: ${count} players reset`);
+    res.json({ success: true, playersReset: count });
   });
 
   /** Deploy a published version to the live game. */

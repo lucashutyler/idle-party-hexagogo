@@ -315,6 +315,27 @@ export class PlayerSession {
     }
   }
 
+  /**
+   * Master reset: reset character to level 1 with 0 XP (keeping class),
+   * clear inventory/equipment, move to start tile, reset unlocks and combat log.
+   */
+  resetForMasterReset(startTile: HexTile): void {
+    const className = this.character.className;
+    // Keep the chosen class, but if still Adventurer, stay Adventurer
+    if (className === 'Adventurer') {
+      this.character = createDefaultCharacter();
+    } else {
+      this.character = createCharacter(className);
+    }
+
+    this.battleCount = 0;
+    this.combatLog = [];
+    this.unlockSystem = new UnlockSystem(this.grid, startTile);
+    this.partyId = null;
+
+    this.addLogEntry('The world has been reset! Starting fresh...', 'battle');
+  }
+
   getStartingTile(): HexTile {
     const startPos = this.content.getStartTile();
     const startCoord = offsetToCube(startPos);
