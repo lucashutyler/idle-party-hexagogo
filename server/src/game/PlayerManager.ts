@@ -584,6 +584,39 @@ export class PlayerManager {
   }
 
   /**
+   * Master reset: reset all players to level 1, 0 XP, start tile, keeping their chosen class.
+   * Disbands all parties and restarts everyone as solo at the start tile.
+   * Returns the number of players reset.
+   */
+  masterReset(): number {
+    const startPos = this.content.getStartTile();
+    const startCoord = offsetToCube(startPos);
+    const startTile = this.grid.getTile(startCoord);
+    if (!startTile) throw new Error('Invalid starting position for master reset');
+
+    // Destroy all party battle entries
+    for (const partyId of this.partyBattles.getAllPartyIds()) {
+      this.partyBattles.destroyEntry(partyId);
+    }
+
+    // Disband all parties
+    this.parties.disbandAll();
+
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      session.resetForMasterReset(startTile);
+      this.wireCallbacks(session);
+
+      // Create a fresh solo party at start tile
+      this.createSoloPartyAtTile(session.username, startTile, null, []);
+      count++;
+    }
+
+    console.log(`[PlayerManager] Master reset: ${count} players reset to start`);
+    return count;
+  }
+
+  /**
    * Save all sessions to the store.
    */
   async saveAll(store: GameStateStore): Promise<void> {
