@@ -11,6 +11,7 @@ import {
   TILE_CONFIGS,
   HEX_SIZE,
   TileType,
+  xpForNextLevel,
 } from '@idle-party-rpg/shared';
 import type {
   MonsterDefinition,
@@ -67,7 +68,7 @@ interface ContentVersion {
   publishedAt: string | null;
 }
 
-type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'zones' | 'map' | 'versions';
+type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'zones' | 'map' | 'versions' | 'xp-table';
 
 interface TabDef {
   id: TabId;
@@ -83,6 +84,7 @@ const TABS: TabDef[] = [
   { id: 'zones', label: 'Zones', icon: '#' },
   { id: 'map', label: 'Map', icon: '*' },
   { id: 'versions', label: 'Versions', icon: 'V' },
+  { id: 'xp-table', label: 'XP Table', icon: 'X' },
 ];
 
 /** Tile types available in the editor dropdown (excludes Void). */
@@ -329,6 +331,9 @@ export class AdminApp {
       case 'versions':
         content.innerHTML = this.renderVersions();
         this.wireVersionEvents();
+        break;
+      case 'xp-table':
+        content.innerHTML = this.renderXpTable();
         break;
     }
   }
@@ -1462,6 +1467,79 @@ export class AdminApp {
       if (version?.status === 'draft') return `?versionId=${this.selectedVersionId}`;
     }
     return '';
+  }
+
+  // --- XP Table ---
+
+  private renderXpTable(): string {
+    const rows: string[] = [];
+    let cumulativeXp = 0;
+    let cumulativeDays = 0;
+
+    for (let level = 1; level <= 50; level++) {
+      const xpNeeded = xpForNextLevel(level);
+      cumulativeXp += xpNeeded;
+
+      // Estimated daily income: solo 57,600 at L1, party at 557,000 at L10, doubling every 10 levels after
+      let dailyIncome: number;
+      if (level < 10) {
+        // Interpolate from solo (57,600) to party (557,000) over levels 1-9
+        const t = (level - 1) / 9;
+        dailyIncome = 57600 + t * (557000 - 57600);
+      } else {
+        // Doubles every 10 levels from the L10 baseline
+        dailyIncome = 557000 * Math.pow(2, (level - 10) / 10);
+      }
+
+      const daysToLevel = xpNeeded / dailyIncome;
+      cumulativeDays += daysToLevel;
+      const ratePerDay = xpNeeded / daysToLevel;
+      const ratePerHour = ratePerDay / 24;
+      const ratePerMinute = ratePerHour / 60;
+
+      const daysStr = daysToLevel < 1
+        ? `${(daysToLevel * 24).toFixed(1)}h`
+        : `${daysToLevel.toFixed(1)}d`;
+
+      rows.push(`
+        <tr${level % 10 === 0 ? ' class="xp-table-milestone"' : ''}>
+          <td>${level}</td>
+          <td>${xpNeeded.toLocaleString()}</td>
+          <td>${cumulativeXp.toLocaleString()}</td>
+          <td>${daysStr}</td>
+          <td>${cumulativeDays.toFixed(1)}d</td>
+          <td>${Math.round(dailyIncome).toLocaleString()}</td>
+          <td>${Math.round(ratePerHour).toLocaleString()}</td>
+          <td>${Math.round(ratePerMinute).toLocaleString()}</td>
+        </tr>
+      `);
+    }
+
+    return `
+      <div class="admin-page">
+        <div class="admin-page-header">
+          <h2>XP Table</h2>
+          <p class="admin-page-subtitle">Formula: floor(18000 &times; L<sup>1.2</sup> &times; 1.06<sup>L</sup>) &mdash; Income model: 57.6k/day solo L1, 557k/day party L10, 2x per 10 levels</p>
+        </div>
+        <div class="admin-table-wrap pixel-panel">
+          <table class="admin-table xp-table">
+            <thead>
+              <tr>
+                <th>Level</th>
+                <th>XP to Level</th>
+                <th>Cumulative XP</th>
+                <th>Est. Time</th>
+                <th>Cumulative Time</th>
+                <th>Rate/Day</th>
+                <th>Rate/Hour</th>
+                <th>Rate/Min</th>
+              </tr>
+            </thead>
+            <tbody>${rows.join('')}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
   }
 
   // --- Map ---

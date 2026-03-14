@@ -134,7 +134,6 @@ export const CLASS_DEFINITIONS: Record<ClassName, ClassDefinition> = {
 /** Playable class names (excludes legacy Adventurer). */
 export const ALL_CLASS_NAMES: ClassName[] = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'];
 
-export const XP_PER_VICTORY = 10;
 export const STAT_POINTS_PER_LEVEL = 2;
 export const BASE_HP = 30;
 export const HP_PER_LEVEL = 5;
@@ -144,7 +143,7 @@ export const MAX_GOLD = 999_999_999;
 
 /** XP required to advance from `level` to `level + 1`. */
 export function xpForNextLevel(level: number): number {
-  return 100 * level;
+  return Math.floor(18000 * Math.pow(level, 1.2) * Math.pow(1.06, level));
 }
 
 /** Max HP = floor((30 + (level-1)*5 + CON) * hpMultiplier). */

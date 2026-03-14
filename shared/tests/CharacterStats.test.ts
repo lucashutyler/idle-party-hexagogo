@@ -9,7 +9,6 @@ import {
   ALL_STATS,
   ALL_CLASS_NAMES,
   CLASS_DEFINITIONS,
-  XP_PER_VICTORY,
   BASE_HP,
   HP_PER_LEVEL,
   STAT_POINTS_PER_LEVEL,
@@ -18,10 +17,10 @@ import type { ClassName } from '../src/systems/CharacterStats';
 
 describe('CharacterStats', () => {
   describe('xpForNextLevel', () => {
-    it('returns 100 * level', () => {
-      expect(xpForNextLevel(1)).toBe(100);
-      expect(xpForNextLevel(2)).toBe(200);
-      expect(xpForNextLevel(5)).toBe(500);
+    it('returns floor(18000 * L^1.2 * 1.06^L)', () => {
+      expect(xpForNextLevel(1)).toBe(19080);
+      expect(xpForNextLevel(2)).toBe(46464);
+      expect(xpForNextLevel(5)).toBe(166175);
     });
   });
 
@@ -139,16 +138,17 @@ describe('CharacterStats', () => {
   describe('addXp', () => {
     it('adds XP without leveling up', () => {
       const char = createDefaultCharacter();
-      const result = addXp(char, 50);
-      expect(char.xp).toBe(50);
+      const result = addXp(char, 1000);
+      expect(char.xp).toBe(1000);
       expect(char.level).toBe(1);
       expect(result.leveledUp).toBe(false);
       expect(result.levelsGained).toBe(0);
     });
 
-    it('levels up at exactly 100 XP', () => {
+    it('levels up at exactly xpForNextLevel(1)', () => {
       const char = createDefaultCharacter();
-      const result = addXp(char, 100);
+      const needed = xpForNextLevel(1);
+      const result = addXp(char, needed);
       expect(char.level).toBe(2);
       expect(char.xp).toBe(0);
       expect(result.leveledUp).toBe(true);
@@ -157,15 +157,16 @@ describe('CharacterStats', () => {
 
     it('carries over excess XP', () => {
       const char = createDefaultCharacter();
-      addXp(char, 130);
+      const needed = xpForNextLevel(1);
+      addXp(char, needed + 500);
       expect(char.level).toBe(2);
-      expect(char.xp).toBe(30);
+      expect(char.xp).toBe(500);
     });
 
     it('multi-level-up from large XP gain', () => {
       const char = createDefaultCharacter();
-      // Lv1→2 needs 100, Lv2→3 needs 200 = 300 total
-      const result = addXp(char, 300);
+      const needed = xpForNextLevel(1) + xpForNextLevel(2);
+      const result = addXp(char, needed);
       expect(char.level).toBe(3);
       expect(char.xp).toBe(0);
       expect(result.levelsGained).toBe(2);
@@ -174,20 +175,10 @@ describe('CharacterStats', () => {
     it('does NOT allocate stat points on level up', () => {
       const char = createCharacter('Knight');
       const statsBefore = { ...char.stats };
-      addXp(char, 100); // 1 level up
-      // Stats should remain unchanged (no stat allocation on level-up)
+      addXp(char, xpForNextLevel(1));
       for (const stat of ALL_STATS) {
         expect(char.stats[stat]).toBe(statsBefore[stat]);
       }
-    });
-
-    it('10 victories at XP_PER_VICTORY levels from 1 to 2', () => {
-      const char = createDefaultCharacter();
-      for (let i = 0; i < 10; i++) {
-        addXp(char, XP_PER_VICTORY);
-      }
-      expect(char.level).toBe(2);
-      expect(char.xp).toBe(0);
     });
   });
 

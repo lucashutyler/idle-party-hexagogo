@@ -2406,6 +2406,26 @@ html, body {
   gap: 12px;
 }
 
+.admin-page-subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 2px 0 0;
+}
+
+.xp-table td {
+  text-align: right;
+}
+
+.xp-table td:first-child {
+  text-align: center;
+  font-weight: bold;
+}
+
+.xp-table-milestone td {
+  border-bottom: 2px solid rgba(83, 52, 131, 0.5);
+  color: var(--text-primary);
+}
+
 /* Monster form */
 .monster-form {
   margin-bottom: 12px;
