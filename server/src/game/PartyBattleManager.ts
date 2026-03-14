@@ -392,7 +392,9 @@ export class PartyBattleManager {
     }
 
     const zone = entry.serverParty.tile.zone;
-    const monsters = createEncounter(zone, allMonsters, allZones);
+    const tileId = entry.serverParty.tile.id;
+    const tileDef = this.content.getTileById(tileId);
+    const monsters = createEncounter(zone, allMonsters, allZones, tileDef?.encounterTable);
 
     return createPartyCombatState(players, monsters);
   }

@@ -1,4 +1,5 @@
 import { TileType } from './HexTile.js';
+import type { EncounterTableEntry } from '../systems/ZoneTypes.js';
 
 /**
  * Schema for defining a map.
@@ -30,6 +31,8 @@ export interface WorldTileDefinition {
   name: string;
   /** Zone display name — populated by server when sending to clients, not stored in world.json. */
   zoneName?: string;
+  /** Optional per-room encounter table — overrides the zone's default encounters. */
+  encounterTable?: EncounterTableEntry[];
 }
 
 /**

@@ -79,6 +79,10 @@ export class ContentStore {
     return this.world.startTile;
   }
 
+  getTileById(id: string): WorldTileDefinition | undefined {
+    return this.world.tiles.find(t => t.id === id);
+  }
+
   // --- Tile CRUD ---
 
   async addOrUpdateTile(tile: WorldTileDefinition): Promise<void> {

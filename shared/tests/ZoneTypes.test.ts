@@ -74,5 +74,23 @@ describe('ZoneTypes', () => {
       expect(monsters).toHaveLength(2);
       expect(monsters[0].id).toBe('goblin');
     });
+
+    it('uses room encounter table override when provided', () => {
+      const roomTable = [{ monsterId: 'wolf', weight: 1, minCount: 2, maxCount: 2 }];
+      // Even though zone is hatchetmill (goblins only), room override should produce wolves
+      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES, roomTable);
+      expect(monsters).toHaveLength(2);
+      for (const m of monsters) {
+        expect(m.id).toBe('wolf');
+      }
+    });
+
+    it('falls back to zone table when room encounter table is empty', () => {
+      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES, []);
+      expect(monsters.length).toBeGreaterThanOrEqual(1);
+      for (const m of monsters) {
+        expect(m.id).toBe('goblin');
+      }
+    });
   });
 });

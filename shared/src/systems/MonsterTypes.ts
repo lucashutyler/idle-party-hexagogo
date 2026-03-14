@@ -113,34 +113,36 @@ function pickWeightedEntry(table: EncounterTableEntry[]): EncounterTableEntry {
 }
 
 /**
- * Create an encounter for the given zone.
- * Uses the zone's encounter table for weighted random monster selection.
- * Falls back to first available monster if zone or monster not found.
+ * Create an encounter for the given zone, with optional room-level override.
+ * Priority: roomEncounterTable → zone's encounterTable → goblin fallback.
  */
 export function createEncounter(
   zoneId: string | undefined,
   monsters: Record<string, MonsterDefinition>,
   zones: Record<string, ZoneDefinition>,
+  roomEncounterTable?: EncounterTableEntry[],
 ): MonsterInstance[] {
   const fallbackDef = monsters['goblin'] ?? Object.values(monsters)[0];
   if (!fallbackDef) return [];
 
-  if (!zoneId) {
+  // Determine which encounter table to use: room override → zone default
+  let encounterTable: EncounterTableEntry[] | undefined = roomEncounterTable?.length ? roomEncounterTable : undefined;
+
+  if (!encounterTable && zoneId) {
+    const zone = zones[zoneId];
+    if (zone) {
+      encounterTable = zone.encounterTable;
+    }
+  }
+
+  if (!encounterTable || encounterTable.length === 0) {
     return [
       createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[0]),
       createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[1]),
     ];
   }
 
-  const zone = zones[zoneId];
-  if (!zone) {
-    return [
-      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[0]),
-      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[1]),
-    ];
-  }
-
-  const entry = pickWeightedEntry(zone.encounterTable);
+  const entry = pickWeightedEntry(encounterTable);
   const def = monsters[entry.monsterId];
   if (!def) {
     return [
