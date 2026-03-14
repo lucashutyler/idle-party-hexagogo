@@ -1786,6 +1786,13 @@ html, body {
   margin-right: 6px;
 }
 
+.chat-clickable {
+  cursor: pointer;
+}
+.chat-clickable:hover {
+  text-decoration: underline;
+}
+
 .chat-dm-to {
   opacity: 0.7;
   font-size: 7px;
