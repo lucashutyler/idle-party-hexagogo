@@ -472,7 +472,7 @@ export class AdminApp {
         const select = sel as HTMLSelectElement;
         const username = select.dataset.username!;
         const className = select.value;
-        if (!confirm(`Change ${username}'s class to ${className}? This resets them to Level 1.`)) {
+        if (!confirm(`Change ${username}'s class to ${className}? Their equipment will be unequipped.`)) {
           // Revert select to previous value
           const account = this.accounts.find(a => a.username === username);
           if (account?.className) select.value = account.className;

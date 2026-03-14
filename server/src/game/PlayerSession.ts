@@ -6,6 +6,7 @@ import {
   createDefaultCharacter,
   createCharacter,
   ALL_CLASS_NAMES,
+  CLASS_DEFINITIONS,
   addXp,
   addGold,
   calculateMaxHp,
@@ -299,10 +300,20 @@ export class PlayerSession {
     return true;
   }
 
-  /** Admin: force-change class, resetting character to level 1 with the new class. */
+  /** Admin: force-change class, keeping level, XP, gold, and inventory. Unequips all gear. */
   forceSetClass(className: ClassName): void {
-    this.character = createCharacter(className);
-    this.addLogEntry(`Class changed to ${className}. Starting fresh!`, 'battle');
+    const def = CLASS_DEFINITIONS[className];
+    // Unequip all gear back to inventory
+    for (const slot of EQUIP_SLOTS) {
+      const itemId = this.character.equipment[slot];
+      if (itemId) {
+        this.character.inventory[itemId] = (this.character.inventory[itemId] ?? 0) + 1;
+        this.character.equipment[slot] = null;
+      }
+    }
+    this.character.className = className;
+    this.character.stats = { ...def.baseStats };
+    this.addLogEntry(`Class changed to ${className}!`, 'battle');
   }
 
   addLogEntry(text: string, type: CombatLogEntry['type']): void {
