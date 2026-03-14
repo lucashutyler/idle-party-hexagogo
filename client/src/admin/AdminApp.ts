@@ -2214,6 +2214,15 @@ export class AdminApp {
           <label>Coordinates</label>
           <div class="admin-map-sidebar-coords">(${tile.col}, ${tile.row})</div>
         </div>
+        <div class="admin-map-sidebar-field">
+          <label>
+            <input type="checkbox" id="sidebar-custom-encounters" ${tile.encounterTable?.length ? 'checked' : ''}${disabled} />
+            Custom Encounters
+          </label>
+        </div>
+        <div id="sidebar-encounters-section" style="${tile.encounterTable?.length ? '' : 'display:none'}">
+          ${this.renderSidebarEncounterRows(tile, displayContent ? Object.values(displayContent.monsters) : [], readOnly)}
+        </div>
         ${startBtnHtml}
         <div class="admin-map-sidebar-spacer"></div>
         ${deleteBtnHtml}
@@ -2249,6 +2258,28 @@ export class AdminApp {
       }
     });
 
+    const customEncCheck = document.getElementById('sidebar-custom-encounters') as HTMLInputElement;
+    customEncCheck?.addEventListener('change', () => {
+      const section = document.getElementById('sidebar-encounters-section');
+      if (section && this.selectedTile) {
+        if (customEncCheck.checked) {
+          if (!this.selectedTile.encounterTable || this.selectedTile.encounterTable.length === 0) {
+            this.selectedTile.encounterTable = [];
+          }
+          section.style.display = '';
+          const displayContent = this.getDisplayContent();
+          section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, displayContent ? Object.values(displayContent.monsters) : [], this.isReadOnly());
+          this.wireSidebarEncounterEvents();
+        } else {
+          delete this.selectedTile.encounterTable;
+          section.style.display = 'none';
+          this.scheduleSave();
+        }
+      }
+    });
+
+    this.wireSidebarEncounterEvents();
+
     document.getElementById('sidebar-set-start')?.addEventListener('click', () => {
       this.setAsStartTile();
     });
@@ -2261,6 +2292,101 @@ export class AdminApp {
       nameInput.focus();
       nameInput.select();
     }
+  }
+
+  private renderSidebarEncounterRows(tile: WorldTileDefinition, monsters: MonsterDefinition[], readOnly: boolean): string {
+    const disabled = readOnly ? ' disabled' : '';
+    const entries = tile.encounterTable ?? [];
+    const rows = entries.map((e, i) => {
+      const options = monsters.map(m =>
+        `<option value="${m.id}" ${m.id === e.monsterId ? 'selected' : ''}>${this.escapeHtml(m.name)}</option>`
+      ).join('');
+      return `
+        <div class="monster-drop-row sidebar-enc-row" data-index="${i}">
+          <select class="sidebar-enc-monster"${disabled}>${options}</select>
+          <label class="zf-enc-inline">W<input type="number" class="sidebar-enc-weight" value="${e.weight}" min="1" step="1"${disabled}></label>
+          <label class="zf-enc-inline">Min<input type="number" class="sidebar-enc-min" value="${e.minCount}" min="1" step="1"${disabled}></label>
+          <label class="zf-enc-inline">Max<input type="number" class="sidebar-enc-max" value="${e.maxCount}" min="1" step="1"${disabled}></label>
+          ${readOnly ? '' : '<button class="admin-btn admin-btn-sm admin-btn-danger sidebar-enc-remove">X</button>'}
+        </div>
+      `;
+    }).join('');
+
+    const addBtn = readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="sidebar-add-encounter">+ Encounter</button>';
+    return `${addBtn}<div id="sidebar-encounters-list">${rows}</div>`;
+  }
+
+  private wireSidebarEncounterEvents(): void {
+    document.getElementById('sidebar-add-encounter')?.addEventListener('click', () => {
+      if (!this.selectedTile) return;
+      const displayContent = this.getDisplayContent();
+      const monsters = displayContent ? Object.values(displayContent.monsters) : [];
+      if (monsters.length === 0) return;
+
+      if (!this.selectedTile.encounterTable) this.selectedTile.encounterTable = [];
+      this.selectedTile.encounterTable.push({ monsterId: monsters[0].id, weight: 1, minCount: 1, maxCount: 1 });
+      this.scheduleSave();
+
+      // Re-render encounter section
+      const section = document.getElementById('sidebar-encounters-section');
+      if (section) {
+        section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, monsters, this.isReadOnly());
+        this.wireSidebarEncounterEvents();
+      }
+    });
+
+    // Wire remove buttons
+    document.querySelectorAll('.sidebar-enc-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!this.selectedTile?.encounterTable) return;
+        const row = (btn as HTMLElement).closest('.sidebar-enc-row');
+        const index = parseInt(row?.getAttribute('data-index') ?? '-1');
+        if (index >= 0) {
+          this.selectedTile.encounterTable.splice(index, 1);
+          this.scheduleSave();
+          const section = document.getElementById('sidebar-encounters-section');
+          const displayContent = this.getDisplayContent();
+          if (section) {
+            section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, displayContent ? Object.values(displayContent.monsters) : [], this.isReadOnly());
+            this.wireSidebarEncounterEvents();
+          }
+        }
+      });
+    });
+
+    // Wire change events on all encounter inputs
+    document.querySelectorAll('.sidebar-enc-row').forEach(row => {
+      const index = parseInt(row.getAttribute('data-index') ?? '-1');
+      if (index < 0) return;
+
+      row.querySelector('.sidebar-enc-monster')?.addEventListener('change', (e) => {
+        if (this.selectedTile?.encounterTable?.[index]) {
+          this.selectedTile.encounterTable[index].monsterId = (e.target as HTMLSelectElement).value;
+          this.scheduleSave();
+        }
+      });
+
+      row.querySelector('.sidebar-enc-weight')?.addEventListener('input', (e) => {
+        if (this.selectedTile?.encounterTable?.[index]) {
+          this.selectedTile.encounterTable[index].weight = parseInt((e.target as HTMLInputElement).value) || 1;
+          this.scheduleSave();
+        }
+      });
+
+      row.querySelector('.sidebar-enc-min')?.addEventListener('input', (e) => {
+        if (this.selectedTile?.encounterTable?.[index]) {
+          this.selectedTile.encounterTable[index].minCount = parseInt((e.target as HTMLInputElement).value) || 1;
+          this.scheduleSave();
+        }
+      });
+
+      row.querySelector('.sidebar-enc-max')?.addEventListener('input', (e) => {
+        if (this.selectedTile?.encounterTable?.[index]) {
+          this.selectedTile.encounterTable[index].maxCount = parseInt((e.target as HTMLInputElement).value) || 1;
+          this.scheduleSave();
+        }
+      });
+    });
   }
 
   private showSidebarError(message: string): void {
