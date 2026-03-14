@@ -793,8 +793,8 @@ export class SocialScreen implements Screen {
               const dmTo = (m.channelType === 'dm' && m.senderUsername === selfName)
                 ? ` <span class="chat-dm-to">to ${this.escapeHtml(m.channelId)}</span>` : '';
               return `<div class="social-chat-msg">
-                <span class="chat-tag chat-color-${m.channelType}">[${tag}]</span>
-                <span class="social-chat-sender chat-color-${m.channelType}">${this.escapeHtml(m.senderUsername)}${dmTo}</span>
+                <span class="chat-tag chat-color-${m.channelType} chat-clickable" data-switch-channel="${m.channelType}">[${tag}]</span>
+                <span class="social-chat-sender chat-color-${m.channelType} chat-clickable" data-dm-user="${this.escapeHtml(m.senderUsername)}">${this.escapeHtml(m.senderUsername)}${dmTo}</span>
                 <span class="social-chat-text">${this.escapeHtml(m.text)}</span>
               </div>`;
             }).join('')
@@ -934,6 +934,50 @@ export class SocialScreen implements Screen {
     // Initialize disabled state
     updateDmState();
 
+    // Wire clickable usernames (start DM) and channel tags (switch channel) in messages
+    const msgContainerEl = this.panelContainer.querySelector('.social-chat-messages');
+    if (msgContainerEl) {
+      msgContainerEl.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+
+        // Click on username → start DM with that user
+        const dmUser = target.closest('[data-dm-user]')?.getAttribute('data-dm-user');
+        if (dmUser && dmUser.toLowerCase() !== selfUsername.toLowerCase()) {
+          this.chatSendChannel = 'dm';
+          this.chatDmTarget = dmUser;
+          selectEl.value = 'dm';
+          dmWrapper.classList.remove('hidden');
+          dmInput.value = dmUser;
+          dmSuggestions.innerHTML = '';
+          updateDmState();
+          this.loadChatHistory('dm', dmUser);
+          this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
+          chatInput.focus();
+          return;
+        }
+
+        // Click on channel tag → switch send channel
+        const switchChannel = target.closest('[data-switch-channel]')?.getAttribute('data-switch-channel') as ChatChannelType | null;
+        if (switchChannel) {
+          // Check if channel is disabled
+          const opt = sendOptions.find(o => o.type === switchChannel);
+          if (opt?.disabled) return;
+          this.chatSendChannel = switchChannel;
+          selectEl.value = switchChannel;
+          if (switchChannel === 'dm') {
+            dmWrapper.classList.remove('hidden');
+            dmInput.focus();
+          } else {
+            dmWrapper.classList.add('hidden');
+            dmSuggestions.innerHTML = '';
+            chatInput.focus();
+          }
+          updateDmState();
+          this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
+        }
+      });
+    }
+
     // Wire send
     const doSend = () => {
       if (chatInput.disabled || sendBtn.disabled) return;
@@ -982,8 +1026,8 @@ export class SocialScreen implements Screen {
     const div = document.createElement('div');
     div.className = 'social-chat-msg';
     div.innerHTML = `
-      <span class="chat-tag chat-color-${msg.channelType}">[${tag}]</span>
-      <span class="social-chat-sender chat-color-${msg.channelType}">${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
+      <span class="chat-tag chat-color-${msg.channelType} chat-clickable" data-switch-channel="${msg.channelType}">[${tag}]</span>
+      <span class="social-chat-sender chat-color-${msg.channelType} chat-clickable" data-dm-user="${this.escapeHtml(msg.senderUsername)}">${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
       <span class="social-chat-text">${this.escapeHtml(msg.text)}</span>
     `;
     msgContainer.appendChild(div);
