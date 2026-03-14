@@ -299,6 +299,12 @@ export class PlayerSession {
     return true;
   }
 
+  /** Admin: force-change class, resetting character to level 1 with the new class. */
+  forceSetClass(className: ClassName): void {
+    this.character = createCharacter(className);
+    this.addLogEntry(`Class changed to ${className}. Starting fresh!`, 'battle');
+  }
+
   addLogEntry(text: string, type: CombatLogEntry['type']): void {
     this.combatLog.push({ text, type });
     if (this.combatLog.length > MAX_LOG_ENTRIES) {
