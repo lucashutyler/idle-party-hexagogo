@@ -1006,6 +1006,14 @@ html, body {
   color: var(--accent-blue);
 }
 
+.tile-modal-player-clickable {
+  cursor: pointer;
+}
+
+.tile-modal-player-clickable:hover {
+  color: var(--accent-gold);
+}
+
 .tile-modal-divider {
   border: none;
   border-top: 1px solid var(--border-color);
@@ -2589,9 +2597,9 @@ html, body {
 
 .user-popup-menu {
   position: absolute;
-  background: var(--bg-card);
+  background: var(--bg-input);
   border: 2px solid var(--border-pixel);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
   min-width: 160px;
   max-width: 220px;
   display: flex;

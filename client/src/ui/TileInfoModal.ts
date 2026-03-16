@@ -6,17 +6,17 @@ export class TileInfoModal {
   private modal: HTMLElement;
   private onMove: (col: number, row: number) => void;
   private onInvite?: (username: string) => void;
-  private onChat?: (username: string) => void;
+  private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
   constructor(
     parent: HTMLElement,
     onMove: (col: number, row: number) => void,
     onInvite?: (username: string) => void,
-    onChat?: (username: string) => void,
+    onUserClick?: (username: string, anchor: HTMLElement) => void,
   ) {
     this.onMove = onMove;
     this.onInvite = onInvite;
-    this.onChat = onChat;
+    this.onUserClick = onUserClick;
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'tile-modal-overlay';
@@ -46,8 +46,7 @@ export class TileInfoModal {
 
     const renderPlayerRows = (players: { username: string; className?: string }[], showInvite: boolean) => players.map(p => `
       <div class="tile-modal-player-row">
-        <span class="tile-modal-player">${TileInfoModal.classIcon(p.className)} ${this.escapeHtml(p.username)}</span>
-        ${this.onChat ? `<button class="tile-modal-btn tile-modal-chat" data-username="${this.escapeHtml(p.username)}">Chat</button>` : ''}
+        <span class="tile-modal-player tile-modal-player-clickable" data-username="${this.escapeHtml(p.username)}">${TileInfoModal.classIcon(p.className)} ${this.escapeHtml(p.username)}</span>
         ${this.onInvite && showInvite && info.isCurrentTile ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p.username)}">Invite</button>` : ''}
       </div>
     `).join('');
@@ -92,13 +91,12 @@ export class TileInfoModal {
       this.hide();
     });
 
-    // Wire chat buttons
-    for (const btn of this.modal.querySelectorAll('.tile-modal-chat')) {
-      btn.addEventListener('click', () => {
-        const username = btn.getAttribute('data-username');
-        if (username && this.onChat) {
-          this.onChat(username);
-          this.hide();
+    // Wire clickable usernames to open popup
+    for (const el of this.modal.querySelectorAll('.tile-modal-player-clickable')) {
+      el.addEventListener('click', () => {
+        const username = el.getAttribute('data-username');
+        if (username && this.onUserClick) {
+          this.onUserClick(username, el as HTMLElement);
         }
       });
     }

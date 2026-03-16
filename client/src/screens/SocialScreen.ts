@@ -238,7 +238,7 @@ export class SocialScreen implements Screen {
 
   // ── User Popup Menu ──────────────────────────────────────────
 
-  private showUserPopup(username: string, anchor: HTMLElement): void {
+  showUserPopup(username: string, anchor: HTMLElement): void {
     this.dismissPopup();
 
     const social = this.lastSocial;
