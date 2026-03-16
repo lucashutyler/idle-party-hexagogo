@@ -62,6 +62,10 @@ export class PlayerSession {
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
 
+  /** XP rate tracking — in-memory only, resets on server restart. */
+  private xpRateStartTime = Date.now();
+  private xpRateXpTotal = 0;
+
   /** Callback to get social state — set by PlayerManager after construction. */
   getSocialState?: () => ClientSocialState;
 
@@ -141,6 +145,7 @@ export class PlayerSession {
     }
 
     const { leveledUp, levelsGained } = addXp(this.character, rewards.xp);
+    this.xpRateXpTotal += rewards.xp;
     this.addLogEntry(`+${rewards.xp} XP`, 'victory');
     if (leveledUp) {
       for (let i = 0; i < levelsGained; i++) {
@@ -160,6 +165,11 @@ export class PlayerSession {
 
   setPriorityStat(stat: StatName | null): void {
     this.character.priorityStat = stat;
+  }
+
+  resetXpRate(): void {
+    this.xpRateStartTime = Date.now();
+    this.xpRateXpTotal = 0;
   }
 
   /**
@@ -219,6 +229,7 @@ export class PlayerSession {
       priorityStat: this.character.priorityStat,
       inventory: { ...this.character.inventory },
       equipment: { ...this.character.equipment },
+      xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
     };
 
     const allZones = this.content.getAllZones();

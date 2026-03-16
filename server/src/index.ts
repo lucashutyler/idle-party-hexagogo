@@ -259,6 +259,15 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      if (msg.type === 'reset_xp_rate') {
+        const session = playerManager.getSessionByUsername(username);
+        if (session) {
+          session.resetXpRate();
+          playerManager.sendStateToPlayer(username);
+        }
+        return;
+      }
+
       if (msg.type === 'equip_item' && typeof msg.itemId === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) {

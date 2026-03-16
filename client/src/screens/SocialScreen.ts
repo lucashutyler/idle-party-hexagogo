@@ -848,6 +848,11 @@ export class SocialScreen implements Screen {
     return `${h}:${m}`;
   }
 
+  private static formatDateFull(ts: number): string {
+    const d = new Date(ts);
+    return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  }
+
   private renderChatMsgHtml(msg: ChatMessage): string {
     const ch = SocialScreen.CHAT_CHANNELS.find(c => c.type === msg.channelType);
     const tag = ch?.tag ?? '?';
@@ -855,8 +860,9 @@ export class SocialScreen implements Screen {
     const dmTo = (msg.channelType === 'dm' && msg.senderUsername === selfName)
       ? ` <span class="chat-dm-to">to ${this.escapeHtml(msg.channelId)}</span>` : '';
     const time = SocialScreen.formatTimestamp(msg.timestamp);
+    const dateFull = SocialScreen.formatDateFull(msg.timestamp);
     return `<div class="social-chat-msg">
-      <span class="chat-timestamp">${time}</span>
+      <span class="chat-timestamp" title="${dateFull}">${time}</span>
       <span class="chat-tag chat-color-${msg.channelType} chat-clickable" data-switch-channel="${msg.channelType}">[${tag}]</span>
       <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}" data-dm-user="${this.escapeHtml(msg.senderUsername)}">${this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
       <span class="social-chat-text">${this.escapeHtml(msg.text)}</span>

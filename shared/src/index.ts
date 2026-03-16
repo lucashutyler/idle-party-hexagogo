@@ -147,6 +147,7 @@ export type {
   ClientEquipItemMessage,
   ClientUnequipItemMessage,
   ClientSetClassMessage,
+  ClientResetXpRateMessage,
   ServerMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';
