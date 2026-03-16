@@ -192,6 +192,10 @@ export class GameClient {
     this.sendRaw({ type: 'unequip_item', slot });
   }
 
+  resetXpRate(): void {
+    this.sendRaw({ type: 'reset_xp_rate' });
+  }
+
   // --- Social ---
 
   sendFriendRequest(username: string): void {

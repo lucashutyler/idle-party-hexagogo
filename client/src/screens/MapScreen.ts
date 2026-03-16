@@ -12,7 +12,7 @@ export class MapScreen implements Screen {
   private sceneReady = false;
   private zoomControls?: HTMLElement;
   private tileModal?: TileInfoModal;
-  private onChatCallback?: (username: string) => void;
+  private onUserClickCallback?: (username: string, anchor: HTMLElement) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
@@ -23,8 +23,8 @@ export class MapScreen implements Screen {
     this.worldCache = worldCache;
   }
 
-  setOnChat(cb: (username: string) => void): void {
-    this.onChatCallback = cb;
+  setOnUserClick(cb: (username: string, anchor: HTMLElement) => void): void {
+    this.onUserClickCallback = cb;
   }
 
   /** Refresh the map from updated WorldCache data. */
@@ -139,7 +139,7 @@ export class MapScreen implements Screen {
         this.container,
         (col, row) => { this.tryMove(col, row); },
         (username) => { this.gameClient.sendInviteParty(username); },
-        (username) => { this.onChatCallback?.(username); },
+        (username, anchor) => { this.onUserClickCallback?.(username, anchor); },
       );
       scene.setOnTileClick((tileInfo) => {
         this.tileModal!.show(tileInfo);

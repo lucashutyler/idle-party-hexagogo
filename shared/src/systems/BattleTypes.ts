@@ -81,6 +81,12 @@ export interface ClientCharacterState {
   priorityStat: StatName | null;
   inventory: Record<string, number>;
   equipment: Record<string, string | null>;
+  /** XP rate tracking — in-memory only, resets on server restart. */
+  xpRate: { startTime: number; totalXp: number };
+}
+
+export interface ClientResetXpRateMessage {
+  type: 'reset_xp_rate';
 }
 
 export interface OtherPlayerState {
@@ -159,4 +165,5 @@ export type ClientMessage =
   | ClientEquipItemMessage
   | ClientUnequipItemMessage
   | ClientSetClassMessage
+  | ClientResetXpRateMessage
   | ClientSocialMessage;

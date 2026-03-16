@@ -294,10 +294,9 @@ export class App {
     const socialScreen = new SocialScreen('screen-social', this.gameClient);
     const settingsScreen = new PlaceholderScreen('screen-settings', 'Settings', '⚙');
 
-    // Wire map chat button to social screen DM
-    mapScreen.setOnChat((username) => {
-      this.screenManager.switchTo('social');
-      socialScreen.startDm(username);
+    // Wire map username click to social screen popup
+    mapScreen.setOnUserClick((username, anchor) => {
+      socialScreen.showUserPopup(username, anchor);
     });
 
     // Listen for world content updates (admin deployed a new version)
