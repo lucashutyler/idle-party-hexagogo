@@ -123,20 +123,12 @@ export class CharacterScreen implements Screen {
     this.xpRateEl = this.container.querySelector('.character-xp-rate-value')!;
 
     // Wire XP rate reset icon with confirmation
-    const resetIcon = this.container.querySelector('.character-xp-rate-reset')!;
-    resetIcon.addEventListener('click', () => {
-      if (resetIcon.classList.contains('confirming')) {
-        // Second click — perform reset
-        resetIcon.classList.remove('confirming');
-        this.xpRateStartTime = Date.now();
-        this.xpRateTotal = 0;
-        this.lastTotalXp = -1;
-        this.xpRateEl.textContent = '0/hr';
-        return;
-      }
-      // First click — enter confirmation state
-      resetIcon.classList.add('confirming');
-      setTimeout(() => resetIcon.classList.remove('confirming'), 3000);
+    this.container.querySelector('.character-xp-rate-reset')!.addEventListener('click', () => {
+      if (!confirm('Reset XP rate counter?')) return;
+      this.xpRateStartTime = Date.now();
+      this.xpRateTotal = 0;
+      this.lastTotalXp = -1;
+      this.xpRateEl.textContent = '0/hr';
     });
   }
 
