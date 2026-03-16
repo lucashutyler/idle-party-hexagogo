@@ -88,6 +88,7 @@ export interface OtherPlayerState {
   col: number;
   row: number;
   zone: string;
+  className?: string;
 }
 
 export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup';

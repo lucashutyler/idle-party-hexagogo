@@ -1,5 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, CombatLogEntry, ClientCombatAction } from '@idle-party-rpg/shared';
+import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 export class CombatScreen implements Screen {
@@ -103,14 +104,7 @@ export class CombatScreen implements Screen {
   }
 
   private static classIcon(className: string): string {
-    const map: Record<string, string> = {
-      Knight: '\uD83D\uDEE1\uFE0F',  // shield
-      Archer: '\uD83C\uDFF9',  // bow
-      Priest: '\u2625\uFE0F',  // ankh
-      Mage: '\uD83E\uDE84',    // magic wand
-      Bard: '\uD83C\uDFB5',    // musical note
-    };
-    return map[className] ?? '\u2753';
+    return CLASS_ICONS[className] ?? UNKNOWN_CLASS_ICON;
   }
 
   private updateVisuals(state: ServerStateMessage): void {

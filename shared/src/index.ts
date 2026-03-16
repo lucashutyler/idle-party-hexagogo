@@ -40,6 +40,8 @@ export {
   ALL_STATS,
   BASE_STATS,
   CLASS_DEFINITIONS,
+  CLASS_ICONS,
+  UNKNOWN_CLASS_ICON,
   ALL_CLASS_NAMES,
   STAT_POINTS_PER_LEVEL,
   BASE_HP,
@@ -156,6 +158,7 @@ export {
 // Social types
 export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';
 export type {
+  PlayerListEntry,
   FriendEntry,
   FriendRequest,
   GuildInfo,

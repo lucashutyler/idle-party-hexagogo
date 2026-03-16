@@ -1,4 +1,5 @@
 import type { TileClickInfo } from '../scenes/WorldMapScene';
+import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
 
 export class TileInfoModal {
   private overlay: HTMLElement;
@@ -34,15 +35,20 @@ export class TileInfoModal {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  show(info: TileClickInfo): void {
-    const otherPlayers = info.playersHere.filter(p => !info.partyMemberUsernames.includes(p));
-    const partyPlayers = info.playersHere.filter(p => info.partyMemberUsernames.includes(p));
+  private static classIcon(className?: string): string {
+    if (!className) return UNKNOWN_CLASS_ICON;
+    return CLASS_ICONS[className] ?? UNKNOWN_CLASS_ICON;
+  }
 
-    const renderPlayerRows = (players: string[], showInvite: boolean) => players.map(p => `
+  show(info: TileClickInfo): void {
+    const otherPlayers = info.playersHere.filter(p => !info.partyMemberUsernames.includes(p.username));
+    const partyPlayers = info.playersHere.filter(p => info.partyMemberUsernames.includes(p.username));
+
+    const renderPlayerRows = (players: { username: string; className?: string }[], showInvite: boolean) => players.map(p => `
       <div class="tile-modal-player-row">
-        <span class="tile-modal-player">${this.escapeHtml(p)}</span>
-        ${this.onChat ? `<button class="tile-modal-btn tile-modal-chat" data-username="${this.escapeHtml(p)}">Chat</button>` : ''}
-        ${this.onInvite && showInvite && info.isCurrentTile ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p)}">Invite</button>` : ''}
+        <span class="tile-modal-player">${TileInfoModal.classIcon(p.className)} ${this.escapeHtml(p.username)}</span>
+        ${this.onChat ? `<button class="tile-modal-btn tile-modal-chat" data-username="${this.escapeHtml(p.username)}">Chat</button>` : ''}
+        ${this.onInvite && showInvite && info.isCurrentTile ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p.username)}">Invite</button>` : ''}
       </div>
     `).join('');
 

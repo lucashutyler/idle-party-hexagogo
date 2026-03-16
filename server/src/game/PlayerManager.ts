@@ -203,7 +203,10 @@ export class PlayerManager {
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: this.getOnlinePlayers(),
-      allPlayers: this.getAllUsernames(),
+      allPlayers: this.getAllUsernames().map(u => ({
+        username: u,
+        className: this.sessions.get(u)?.getClassName(),
+      })),
       blockedUsers: session?.getBlockedUsers() ?? {},
       chatPreferences: {
         sendChannel: session?.getChatSendChannel() ?? 'zone',
@@ -320,7 +323,7 @@ export class PlayerManager {
     for (const [username, session] of this.sessions) {
       if (username === excludeUsername) continue;
       const pos = session.getPosition();
-      others.push({ username, col: pos.col, row: pos.row, zone: session.getZone() });
+      others.push({ username, col: pos.col, row: pos.row, zone: session.getZone(), className: session.getClassName() });
     }
     return others;
   }
