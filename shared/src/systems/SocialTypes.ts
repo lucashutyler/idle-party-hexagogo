@@ -72,6 +72,11 @@ export interface ChatChannel {
 export type BlockLevel = 'dm' | 'all';
 
 // --- Social State (sent to client) ---
+export interface PlayerListEntry {
+  username: string;
+  className?: string;
+}
+
 export interface ClientSocialState {
   friends: string[];
   incomingFriendRequests: FriendRequest[];
@@ -82,7 +87,7 @@ export interface ClientSocialState {
   pendingInvites: PartyInvite[];
   outgoingPartyInvites: string[];
   onlinePlayers: string[];
-  allPlayers: string[];
+  allPlayers: PlayerListEntry[];
   blockedUsers: Record<string, BlockLevel>;
   chatPreferences?: ChatPreferences;
 }

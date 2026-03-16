@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ClassName } from '@idle-party-rpg/shared';
-import { computeEquipmentBonuses, CLASS_DEFINITIONS } from '@idle-party-rpg/shared';
+import { computeEquipmentBonuses, CLASS_DEFINITIONS, CLASS_ICONS, UNKNOWN_CLASS_ICON, xpForNextLevel } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 const STAT_NAMES = ['STR', 'INT', 'WIS', 'DEX', 'CON', 'CHA'] as const;
@@ -24,11 +24,17 @@ export class CharacterScreen implements Screen {
   private levelEl!: HTMLElement;
   private xpLabel!: HTMLElement;
   private xpFill!: HTMLElement;
+  private xpRateEl!: HTMLElement;
   private hpDisplay!: HTMLElement;
   private goldDisplay!: HTMLElement;
   private statsTable!: HTMLElement;
   private combatBonuses!: HTMLElement;
   private classPassiveEl!: HTMLElement;
+
+  // XP rate tracking
+  private xpRateStartTime = Date.now();
+  private xpRateTotal = 0;
+  private lastTotalXp = -1; // -1 = not initialized
 
   private unsubscribe?: () => void;
 
@@ -76,6 +82,10 @@ export class CharacterScreen implements Screen {
             <div class="character-xp-bar">
               <div class="character-xp-fill" style="width: 0%"></div>
             </div>
+            <div class="character-xp-rate">
+              <span class="character-xp-rate-value">0/hr</span>
+              <button class="character-xp-rate-reset" title="Reset XP rate counter">Reset</button>
+            </div>
           </div>
           <div class="character-hp-display">
             HP: <span class="character-hp-value">40</span>
@@ -109,18 +119,59 @@ export class CharacterScreen implements Screen {
     this.combatBonuses = this.container.querySelector('.character-combat-bonuses')!;
     this.classPassiveEl = this.container.querySelector('.character-class-passive')!;
     this.statsTable = this.container.querySelector('.character-stats-tbody')!;
+    this.xpRateEl = this.container.querySelector('.character-xp-rate-value')!;
+
+    // Wire XP rate reset button
+    this.container.querySelector('.character-xp-rate-reset')!.addEventListener('click', () => {
+      this.xpRateStartTime = Date.now();
+      this.xpRateTotal = 0;
+      this.lastTotalXp = -1;
+      this.xpRateEl.textContent = '0/hr';
+    });
+  }
+
+  /** Compute cumulative total XP earned across all levels. */
+  private static computeTotalXp(level: number, xp: number): number {
+    // Sum of XP thresholds for levels 1..level-1: sum(100*i for i=1..level-1)
+    let total = 0;
+    for (let i = 1; i < level; i++) {
+      total += xpForNextLevel(i);
+    }
+    return total + xp;
+  }
+
+  private static formatXpRate(rate: number): string {
+    if (rate < 1000) return `${Math.round(rate)}/hr`;
+    if (rate < 1_000_000) return `${(rate / 1_000).toFixed(1)}k/hr`;
+    if (rate < 1_000_000_000) return `${(rate / 1_000_000).toFixed(1)}m/hr`;
+    if (rate < 1_000_000_000_000) return `${(rate / 1_000_000_000).toFixed(1)}b/hr`;
+    if (rate < 1_000_000_000_000_000) return `${(rate / 1_000_000_000_000).toFixed(1)}t/hr`;
+    return '?/hr';
   }
 
   private updateFromState(state: ServerStateMessage): void {
     const char = state.character;
     if (!char) return;
 
-    this.classNameEl.textContent = char.className;
+    const icon = CLASS_ICONS[char.className] ?? UNKNOWN_CLASS_ICON;
+    this.classNameEl.textContent = `${icon} ${char.className}`;
     this.levelEl.textContent = `Lv ${char.level}`;
     this.xpLabel.textContent = `${char.xp} / ${char.xpForNextLevel}`;
 
     const xpPct = char.xpForNextLevel > 0 ? (char.xp / char.xpForNextLevel) * 100 : 0;
     this.xpFill.style.width = `${xpPct}%`;
+
+    // XP rate tracking
+    const totalXp = CharacterScreen.computeTotalXp(char.level, char.xp);
+    if (this.lastTotalXp >= 0) {
+      const delta = totalXp - this.lastTotalXp;
+      if (delta > 0) this.xpRateTotal += delta;
+    }
+    this.lastTotalXp = totalXp;
+
+    const elapsedHours = (Date.now() - this.xpRateStartTime) / 3_600_000;
+    const rate = elapsedHours > 0 ? this.xpRateTotal / elapsedHours : 0;
+    this.xpRateEl.textContent = CharacterScreen.formatXpRate(rate);
 
     this.hpDisplay.textContent = `${char.maxHp}`;
     this.goldDisplay.textContent = char.gold.toLocaleString();

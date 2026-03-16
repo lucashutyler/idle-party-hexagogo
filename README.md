@@ -154,16 +154,17 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Party combat rewards (XP, gold, loot per member on victory)
 
 ### Social
-- [x] Social tab with sub-tabs (Users, Friends, Guild, Party, Chat)
+- [x] Social tab with sub-tabs (Users, Guild, Party, Chat)
 - [x] Online player list with search, sort, filter
 - [x] Friends system (request-based two-way: send/accept/decline/revoke, auto-accept cross-requests)
 - [x] Guild system (create at level 20+, join, leave, invite)
-- [x] Chat system (unified timeline, 6 channels: Room/Zone/Party/Guild/Global/DM, per-user persistent history)
+- [x] Chat system (unified timeline, 6 channels: Room/Zone/Party/Guild/Global/DM, per-user persistent history, timestamps)
 - [x] User blocking (DM-only or all messages)
 - [x] Unread message indicators
 - [x] Social badge notifications (bottom nav dot + sub-tab badges for friend requests, party invites, unread chat)
-- [x] DM autocomplete with validation
-- [x] Chat buttons across social screens and room modal
+- [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Block)
+- [x] Class icons next to usernames everywhere
+- [x] XP rate calculator (trip counter on Character tab)
 
 ### Towns & Economy
 - [ ] Town interactions (shops, inns, etc.)
@@ -209,10 +210,10 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 ### World Manager
 - [x] Separate admin client (World Manager dashboard at /admin)
 - [x] Content versioning (draft→publish→deploy pipeline with immutable snapshots)
-- [ ] Monster editor
-- [ ] Area/zone editor
+- [x] Monster editor
+- [x] Area/zone editor
 - [ ] Quest editor
-- [ ] Game designer access only
+- [x] Game designer access only
 
 ### Infrastructure
 - [x] Monorepo structure (client/, server/)

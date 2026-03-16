@@ -26,7 +26,7 @@ export interface TileClickInfo {
   isUnlocked: boolean;
   isSameZone: boolean;
   isCurrentTile: boolean;
-  playersHere: string[];
+  playersHere: { username: string; className?: string }[];
   partyMemberUsernames: string[];
 }
 
@@ -627,7 +627,7 @@ export class WorldMapScene extends Phaser.Scene {
     const playersHere = isSameZone
       ? this.lastOtherPlayers
         .filter(p => p.col === offset.col && p.row === offset.row)
-        .map(p => p.username)
+        .map(p => ({ username: p.username, className: p.className }))
       : [];
 
     if (this.onTileClickFn) {

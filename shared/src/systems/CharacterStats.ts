@@ -45,6 +45,15 @@ export interface CharacterState {
 
 // --- Constants ---
 
+export const CLASS_ICONS: Record<string, string> = {
+  Knight: '\uD83D\uDEE1\uFE0F',  // 🛡️ shield
+  Archer: '\uD83C\uDFF9',          // 🏹 bow
+  Priest: '\u2625\uFE0F',          // ☥ ankh
+  Mage: '\uD83E\uDE84',            // 🪄 magic wand
+  Bard: '\uD83C\uDFB5',            // 🎵 musical note
+};
+export const UNKNOWN_CLASS_ICON = '\u2753'; // ❓
+
 export const ALL_STATS: StatName[] = ['STR', 'INT', 'WIS', 'DEX', 'CON', 'CHA'];
 
 export const BASE_STATS: Readonly<StatBlock> = {
