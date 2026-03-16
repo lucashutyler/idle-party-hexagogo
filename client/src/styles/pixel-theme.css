@@ -1925,6 +1925,11 @@ html, body {
   min-width: 0;
 }
 
+.social-chat-dm-target {
+  flex: 0 0 auto !important;
+  width: 80px;
+}
+
 .social-chat-input:disabled,
 .social-chat-send-btn:disabled {
   opacity: 0.4;
@@ -2596,7 +2601,7 @@ html, body {
 }
 
 .user-popup-menu {
-  position: absolute;
+  position: fixed;
   background: var(--bg-input);
   border: 2px solid var(--border-pixel);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
@@ -2616,6 +2621,12 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.user-popup-labels {
+  font-size: 6px;
+  color: var(--text-secondary);
+  margin-left: 4px;
 }
 
 .user-popup-item {

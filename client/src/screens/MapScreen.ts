@@ -138,7 +138,6 @@ export class MapScreen implements Screen {
       this.tileModal = new TileInfoModal(
         this.container,
         (col, row) => { this.tryMove(col, row); },
-        (username) => { this.gameClient.sendInviteParty(username); },
         (username, anchor) => { this.onUserClickCallback?.(username, anchor); },
       );
       scene.setOnTileClick((tileInfo) => {

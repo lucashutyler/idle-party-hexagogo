@@ -5,17 +5,14 @@ export class TileInfoModal {
   private overlay: HTMLElement;
   private modal: HTMLElement;
   private onMove: (col: number, row: number) => void;
-  private onInvite?: (username: string) => void;
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
   constructor(
     parent: HTMLElement,
     onMove: (col: number, row: number) => void,
-    onInvite?: (username: string) => void,
     onUserClick?: (username: string, anchor: HTMLElement) => void,
   ) {
     this.onMove = onMove;
-    this.onInvite = onInvite;
     this.onUserClick = onUserClick;
 
     this.overlay = document.createElement('div');
@@ -44,19 +41,18 @@ export class TileInfoModal {
     const otherPlayers = info.playersHere.filter(p => !info.partyMemberUsernames.includes(p.username));
     const partyPlayers = info.playersHere.filter(p => info.partyMemberUsernames.includes(p.username));
 
-    const renderPlayerRows = (players: { username: string; className?: string }[], showInvite: boolean) => players.map(p => `
+    const renderPlayerRows = (players: { username: string; className?: string }[]) => players.map(p => `
       <div class="tile-modal-player-row">
         <span class="tile-modal-player tile-modal-player-clickable" data-username="${this.escapeHtml(p.username)}">${TileInfoModal.classIcon(p.className)} ${this.escapeHtml(p.username)}</span>
-        ${this.onInvite && showInvite && info.isCurrentTile ? `<button class="tile-modal-btn tile-modal-invite" data-username="${this.escapeHtml(p.username)}">Invite</button>` : ''}
       </div>
     `).join('');
 
     const otherSection = otherPlayers.length > 0
-      ? `<span class="tile-modal-players-label">Other players:</span>${renderPlayerRows(otherPlayers, true)}`
+      ? `<span class="tile-modal-players-label">Other players:</span>${renderPlayerRows(otherPlayers)}`
       : '';
 
     const partySection = partyPlayers.length > 0
-      ? `<span class="tile-modal-players-label">Party members:</span>${renderPlayerRows(partyPlayers, false)}`
+      ? `<span class="tile-modal-players-label">Party members:</span>${renderPlayerRows(partyPlayers)}`
       : '';
 
     const divider = otherPlayers.length > 0 && partyPlayers.length > 0 ? '<hr class="tile-modal-divider">' : '';
@@ -97,18 +93,6 @@ export class TileInfoModal {
         const username = el.getAttribute('data-username');
         if (username && this.onUserClick) {
           this.onUserClick(username, el as HTMLElement);
-        }
-      });
-    }
-
-    // Wire invite buttons
-    for (const btn of this.modal.querySelectorAll('.tile-modal-invite')) {
-      btn.addEventListener('click', () => {
-        const username = btn.getAttribute('data-username');
-        if (username && this.onInvite) {
-          this.onInvite(username);
-          btn.textContent = 'Invited';
-          (btn as HTMLButtonElement).disabled = true;
         }
       });
     }

@@ -258,41 +258,48 @@ export class SocialScreen implements Screen {
     const myRow = this.lastState?.party.row;
     const sameRoom = otherPlayers.some(p => p.username === username && p.col === myCol && p.row === myRow);
 
+    // Build header with relationship labels
+    const isFriend = friends.has(username);
+    const isGuildMember = guildMembers.has(username);
+    const isPartyMember = partyMembers.has(username);
+    const isBlocked = username in blocked;
+    const labels: string[] = [];
+    if (isFriend) labels.push('Friend');
+    if (isGuildMember) labels.push('Guild');
+    if (isPartyMember) labels.push('Party');
+    const labelHtml = labels.length > 0
+      ? ` <span class="user-popup-labels">${labels.join(' · ')}</span>`
+      : '';
+
     const items: string[] = [];
 
     // Chat
     items.push(`<button class="user-popup-item" data-popup-action="chat">Chat</button>`);
 
-    // Guild invite
-    if (social.guild) {
-      if (guildMembers.has(username)) {
-        items.push(`<button class="user-popup-item disabled" disabled>In Guild</button>`);
+    // Guild invite — only show if not already in guild
+    if (social.guild && !isGuildMember) {
+      items.push(`<button class="user-popup-item" data-popup-action="guild_invite">Invite to Guild</button>`);
+    }
+
+    // Friend — only show if not already friends
+    if (!isFriend) {
+      if (incomingFrom.has(username)) {
+        items.push(`<button class="user-popup-item" data-popup-action="accept_friend">Accept Friend</button>`);
+        items.push(`<button class="user-popup-item" data-popup-action="decline_friend">Decline Friend</button>`);
+      } else if (outgoingTo.has(username)) {
+        items.push(`<button class="user-popup-item" data-popup-action="revoke_friend">Revoke Request</button>`);
       } else {
-        items.push(`<button class="user-popup-item" data-popup-action="guild_invite">Invite to Guild</button>`);
+        items.push(`<button class="user-popup-item" data-popup-action="add_friend">Add Friend</button>`);
       }
     }
 
-    // Friend
-    const isFriend = friends.has(username);
-    const isBlocked = username in blocked;
-    if (isFriend) {
-      items.push(`<button class="user-popup-item disabled" disabled>Friends</button>`);
-    } else if (incomingFrom.has(username)) {
-      items.push(`<button class="user-popup-item" data-popup-action="accept_friend">Accept Friend</button>`);
-      items.push(`<button class="user-popup-item" data-popup-action="decline_friend">Decline Friend</button>`);
-    } else if (outgoingTo.has(username)) {
-      items.push(`<button class="user-popup-item" data-popup-action="revoke_friend">Revoke Request</button>`);
-    } else {
-      items.push(`<button class="user-popup-item" data-popup-action="add_friend">Add Friend</button>`);
-    }
-
-    // Party invite
-    if (partyMembers.has(username)) {
-      items.push(`<button class="user-popup-item disabled" disabled>In Party</button>`);
-    } else if (!sameRoom) {
-      items.push(`<button class="user-popup-item disabled" disabled>Different Room</button>`);
-    } else {
-      items.push(`<button class="user-popup-item" data-popup-action="party_invite">Invite to Party</button>`);
+    // Party invite — only show if not already in party
+    if (!isPartyMember) {
+      if (!sameRoom) {
+        items.push(`<button class="user-popup-item disabled" disabled title="You must be in the same room to invite a player to your party">Invite to Party</button>`);
+      } else {
+        items.push(`<button class="user-popup-item" data-popup-action="party_invite">Invite to Party</button>`);
+      }
     }
 
     // Block
@@ -306,17 +313,14 @@ export class SocialScreen implements Screen {
     const popup = document.createElement('div');
     popup.className = 'user-popup-menu';
     popup.innerHTML = `
-      <div class="user-popup-header">${this.classIcon(this.getPlayerClassName(username))} ${this.escapeHtml(username)}</div>
+      <div class="user-popup-header">${this.classIcon(this.getPlayerClassName(username))} ${this.escapeHtml(username)}${labelHtml}</div>
       ${items.join('')}
     `;
 
-    // Position near anchor
+    // Position near anchor using fixed positioning (viewport-relative)
     const rect = anchor.getBoundingClientRect();
-    const containerRect = this.container.getBoundingClientRect();
-    popup.style.position = 'absolute';
-    popup.style.left = `${rect.left - containerRect.left}px`;
-    popup.style.top = `${rect.bottom - containerRect.top + 4}px`;
-    popup.style.zIndex = '1000';
+    popup.style.left = `${rect.left}px`;
+    popup.style.top = `${rect.bottom + 4}px`;
 
     // Wire actions
     popup.addEventListener('click', (e) => {
@@ -337,24 +341,23 @@ export class SocialScreen implements Screen {
       this.dismissPopup();
     });
 
-    // Overlay to dismiss on outside click
+    // Overlay to dismiss on outside click (fixed, covers viewport)
     const overlay = document.createElement('div');
     overlay.className = 'user-popup-overlay';
     overlay.addEventListener('click', () => this.dismissPopup());
 
-    this.container.style.position = 'relative';
-    this.container.appendChild(overlay);
-    this.container.appendChild(popup);
+    document.body.appendChild(overlay);
+    document.body.appendChild(popup);
     this.popupOverlay = overlay;
 
     // Adjust if popup goes off-screen
     requestAnimationFrame(() => {
       const popupRect = popup.getBoundingClientRect();
       if (popupRect.right > window.innerWidth) {
-        popup.style.left = `${Math.max(0, rect.right - containerRect.left - popupRect.width)}px`;
+        popup.style.left = `${Math.max(0, rect.right - popupRect.width)}px`;
       }
       if (popupRect.bottom > window.innerHeight) {
-        popup.style.top = `${rect.top - containerRect.top - popupRect.height - 4}px`;
+        popup.style.top = `${rect.top - popupRect.height - 4}px`;
       }
     });
   }
@@ -925,6 +928,7 @@ export class SocialScreen implements Screen {
           <select class="chat-send-select">
             ${sendOptions.map(ch => `<option value="${ch.type}"${ch.type === this.chatSendChannel ? ' selected' : ''}${ch.disabled ? ' disabled' : ''}>${ch.label}</option>`).join('')}
           </select>
+          <input class="social-search social-chat-dm-target" type="text" placeholder="Username..." value="${this.escapeHtml(this.chatDmTarget)}" style="display:${this.chatSendChannel === 'dm' ? 'block' : 'none'}" />
           <input class="social-search social-chat-input" type="text" placeholder="Type a message..." maxlength="500" />
           <button class="social-action-btn add-friend social-chat-send-btn">Send</button>
         </div>
@@ -959,15 +963,18 @@ export class SocialScreen implements Screen {
 
     // Wire channel selector
     const selectEl = this.panelContainer.querySelector('.chat-send-select') as HTMLSelectElement;
+    const dmTargetInput = this.panelContainer.querySelector('.social-chat-dm-target') as HTMLInputElement;
     const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement;
     const sendBtn = this.panelContainer.querySelector('.social-chat-send-btn') as HTMLButtonElement;
 
-    // DM state: when DM channel selected but no target, disable input
+    // DM state: show/hide DM target input, disable message input if no target
     const updateDmState = () => {
-      if (this.chatSendChannel === 'dm' && !this.chatDmTarget) {
+      const isDm = this.chatSendChannel === 'dm';
+      dmTargetInput.style.display = isDm ? 'block' : 'none';
+      if (isDm && !this.chatDmTarget) {
         chatInput.disabled = true;
         sendBtn.disabled = true;
-        chatInput.placeholder = 'Select a user to DM first';
+        chatInput.placeholder = 'Enter a username above first';
       } else {
         chatInput.disabled = false;
         sendBtn.disabled = false;
@@ -975,10 +982,18 @@ export class SocialScreen implements Screen {
       }
     };
 
+    // Wire DM target input
+    dmTargetInput.addEventListener('input', () => {
+      this.chatDmTarget = dmTargetInput.value.trim();
+      updateDmState();
+      this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
+    });
+
     selectEl.addEventListener('change', () => {
       this.chatSendChannel = selectEl.value as ChatChannelType;
       updateDmState();
       this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
+      if (this.chatSendChannel === 'dm') dmTargetInput.focus();
     });
 
     updateDmState();
