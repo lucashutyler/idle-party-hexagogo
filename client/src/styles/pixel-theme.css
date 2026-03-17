@@ -1851,10 +1851,10 @@ html, body {
 
 /* Tilt-and-slide animation when moving to a new cell */
 @keyframes party-grid-move {
-  0% { transform: rotate(0deg) translate(0, 0); }
-  30% { transform: rotate(var(--tilt)) translate(0, 0); }
-  80% { transform: rotate(var(--tilt)) translate(var(--move-x), var(--move-y)); }
-  100% { transform: rotate(0deg) translate(var(--move-x), var(--move-y)); opacity: 0; }
+  0% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(0, 0) rotate(var(--tilt)); }
+  80% { transform: translate(var(--move-x), var(--move-y)) rotate(var(--tilt)); }
+  100% { transform: translate(var(--move-x), var(--move-y)) rotate(0deg); opacity: 0; }
 }
 
 .social-party-cell.grid-move-anim {
