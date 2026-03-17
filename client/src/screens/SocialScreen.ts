@@ -52,6 +52,7 @@ export class SocialScreen implements Screen {
   private gridDragSourcePos: number | null = null;
   private gridDragGhost: HTMLElement | null = null;
   private gridDragHoverCell: HTMLElement | null = null;
+  private gridAnimating = false;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -252,6 +253,8 @@ export class SocialScreen implements Screen {
       return;
     }
     this.renderTabBar();
+    // Skip party panel re-render while grid animation or drag is in progress
+    if (this.activeTab === 'party' && (this.gridAnimating || this.gridDragging)) return;
     this.renderPanel();
   }
 
@@ -1149,6 +1152,7 @@ export class SocialScreen implements Screen {
     sourceCell.style.setProperty('--move-x', `${dx}px`);
     sourceCell.style.setProperty('--move-y', `${dy}px`);
 
+    this.gridAnimating = true;
     void sourceCell.offsetWidth;
     sourceCell.classList.add('grid-move-anim');
 
@@ -1157,6 +1161,7 @@ export class SocialScreen implements Screen {
       sourceCell.style.removeProperty('--tilt');
       sourceCell.style.removeProperty('--move-x');
       sourceCell.style.removeProperty('--move-y');
+      this.gridAnimating = false;
     }, { once: true });
   }
 
