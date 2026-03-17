@@ -1135,18 +1135,20 @@ export class SocialScreen implements Screen {
     const grid = this.panelContainer.querySelector('.social-party-grid');
     if (!grid) return;
     const sourceCell = grid.querySelector(`.social-party-cell[data-pos="${srcPos}"]`) as HTMLElement | null;
-    if (!sourceCell) return;
+    const targetCell = grid.querySelector(`.social-party-cell[data-pos="${targetPos}"]`) as HTMLElement | null;
+    if (!sourceCell || !targetCell) return;
 
-    const srcRow = Math.floor(srcPos / 3);
+    // Use actual bounding rects for precise pixel offset
+    const srcRect = sourceCell.getBoundingClientRect();
+    const dstRect = targetCell.getBoundingClientRect();
+    const dx = dstRect.left - srcRect.left;
+    const dy = dstRect.top - srcRect.top;
+
     const srcCol = srcPos % 3;
-    const dstRow = Math.floor(targetPos / 3);
     const dstCol = targetPos % 3;
+    const srcRow = Math.floor(srcPos / 3);
+    const dstRow = Math.floor(targetPos / 3);
     const tiltDeg = (dstCol - srcCol) * 8 + (dstRow - srcRow) * 4;
-
-    // Compute cell size from actual rendered dimensions
-    const cellRect = sourceCell.getBoundingClientRect();
-    const dx = (dstCol - srcCol) * (cellRect.width + 4); // 4px gap
-    const dy = (dstRow - srcRow) * (cellRect.height + 4);
 
     sourceCell.style.setProperty('--tilt', `${tiltDeg}deg`);
     sourceCell.style.setProperty('--move-x', `${dx}px`);
@@ -1161,6 +1163,13 @@ export class SocialScreen implements Screen {
       sourceCell.style.removeProperty('--tilt');
       sourceCell.style.removeProperty('--move-x');
       sourceCell.style.removeProperty('--move-y');
+      // Optimistic UI: swap cell contents so player appears at new position immediately
+      const srcHtml = sourceCell.innerHTML;
+      const srcOccupied = sourceCell.classList.contains('occupied');
+      sourceCell.innerHTML = targetCell.innerHTML;
+      sourceCell.classList.toggle('occupied', targetCell.classList.contains('occupied'));
+      targetCell.innerHTML = srcHtml;
+      targetCell.classList.toggle('occupied', srcOccupied);
       this.gridAnimating = false;
     }, { once: true });
   }
