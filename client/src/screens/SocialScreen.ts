@@ -128,6 +128,12 @@ export class SocialScreen implements Screen {
           this.showUserPopup(username, nameEl);
           return;
         }
+        // Clicking own name on a DM you sent → start DM with the recipient
+        const dmTarget = nameEl.getAttribute('data-dm-target');
+        if (username && dmTarget) {
+          this.startDm(dmTarget);
+          return;
+        }
       }
 
       const btn = target.closest('button') as HTMLButtonElement | null;
@@ -860,14 +866,16 @@ export class SocialScreen implements Screen {
     const ch = SocialScreen.CHAT_CHANNELS.find(c => c.type === msg.channelType);
     const tag = ch?.tag ?? '?';
     const selfName = this.lastState?.username ?? '';
-    const dmTo = (msg.channelType === 'dm' && msg.senderUsername === selfName)
+    const isSelfDm = msg.channelType === 'dm' && msg.senderUsername === selfName;
+    const dmTo = isSelfDm
       ? ` <span class="chat-dm-to">to ${this.escapeHtml(msg.channelId)}</span>` : '';
+    const dmTargetAttr = isSelfDm ? ` data-dm-target="${this.escapeHtml(msg.channelId)}"` : '';
     const time = SocialScreen.formatTimestamp(msg.timestamp);
     const dateFull = SocialScreen.formatDateFull(msg.timestamp);
     return `<div class="social-chat-msg">
       <span class="chat-timestamp" title="${dateFull}">${time}</span>
       <span class="chat-tag chat-color-${msg.channelType} chat-clickable" data-switch-channel="${msg.channelType}">[${tag}]</span>
-      <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}" data-dm-user="${this.escapeHtml(msg.senderUsername)}">${this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
+      <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}"${dmTargetAttr}>${this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
       <span class="social-chat-text">${this.escapeHtml(msg.text)}</span>
     </div>`;
   }
