@@ -51,6 +51,7 @@ export class SocialScreen implements Screen {
   private gridDragging = false;
   private gridDragSourcePos: number | null = null;
   private gridDragGhost: HTMLElement | null = null;
+  private gridDragHoverCell: HTMLElement | null = null;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -1185,9 +1186,6 @@ export class SocialScreen implements Screen {
     const { clientX, clientY } = this.getPointerXY(e);
     ghost.style.left = `${clientX - 20}px`;
     ghost.style.top = `${clientY - 16}px`;
-
-    // Dim the original
-    target.style.opacity = '0.4';
   }
 
   private onGridDragMove(e: MouseEvent | TouchEvent): void {
@@ -1196,6 +1194,29 @@ export class SocialScreen implements Screen {
     const { clientX, clientY } = this.getPointerXY(e);
     this.gridDragGhost.style.left = `${clientX - 20}px`;
     this.gridDragGhost.style.top = `${clientY - 16}px`;
+
+    // Update hover throb on cells under cursor
+    const elUnder = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    const cell = elUnder?.closest('.social-party-cell[data-pos]') as HTMLElement | null;
+    const validCell = cell && cell !== this.gridDragHoverCell
+      && parseInt(cell.getAttribute('data-pos')!, 10) !== this.gridDragSourcePos
+      ? cell : (cell && parseInt(cell.getAttribute('data-pos')!, 10) === this.gridDragSourcePos ? null : cell);
+
+    if (validCell !== this.gridDragHoverCell) {
+      // Remove old hover
+      if (this.gridDragHoverCell) {
+        this.gridDragHoverCell.classList.remove('drag-hover-green', 'drag-hover-red');
+        this.gridDragHoverCell = null;
+      }
+      // Add new hover if valid target (not source)
+      if (validCell) {
+        const pos = parseInt(validCell.getAttribute('data-pos')!, 10);
+        if (!isNaN(pos) && pos !== this.gridDragSourcePos) {
+          this.gridDragHoverCell = validCell;
+          validCell.classList.add(validCell.classList.contains('occupied') ? 'drag-hover-red' : 'drag-hover-green');
+        }
+      }
+    }
   }
 
   private onGridDragEnd(e: MouseEvent | TouchEvent): void {
@@ -1208,11 +1229,10 @@ export class SocialScreen implements Screen {
       this.gridDragGhost = null;
     }
 
-    // Restore original opacity
-    if (this.gridDragSourcePos !== null) {
-      const grid = this.panelContainer.querySelector('.social-party-grid');
-      const sourceCell = grid?.querySelector(`.social-party-cell[data-pos="${this.gridDragSourcePos}"]`) as HTMLElement | null;
-      if (sourceCell) sourceCell.style.opacity = '';
+    // Clear hover throb
+    if (this.gridDragHoverCell) {
+      this.gridDragHoverCell.classList.remove('drag-hover-green', 'drag-hover-red');
+      this.gridDragHoverCell = null;
     }
 
     // Determine drop target
@@ -1230,7 +1250,8 @@ export class SocialScreen implements Screen {
       // Dropped on another player → flash red
       this.flashGridCell(cell);
     } else {
-      // Dropped on empty cell → move
+      // Dropped on empty cell → animate then move
+      this.animateGridMove(pos);
       this.gameClient.sendSetPartyGridPosition(pos);
     }
 
