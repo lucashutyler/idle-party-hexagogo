@@ -765,8 +765,10 @@ html, body {
 
 .items-equip-slot {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   padding: 8px;
   background: var(--bg-panel);
   border: 2px solid var(--border-pixel);
@@ -851,11 +853,123 @@ html, body {
   margin-left: 8px;
 }
 
+.items-slot-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.items-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.items-destroy-btn {
+  background: transparent;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  font-family: 'Press Start 2P', monospace;
+  font-size: 6px;
+  padding: 3px 5px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  line-height: 1;
+}
+
+.items-destroy-btn:hover,
+.items-destroy-btn:active {
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+
 .items-empty {
   font-size: 8px;
   color: var(--text-dim);
   padding: 12px;
   text-align: center;
+}
+
+/* Item destroy / equip-blocked modal */
+.items-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.items-modal {
+  background: var(--bg-panel);
+  border: 2px solid var(--border-pixel);
+  padding: 16px;
+  min-width: 200px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.items-modal-title {
+  font-size: 10px;
+  color: var(--accent-gold);
+}
+
+.items-modal-text {
+  font-size: 8px;
+  color: var(--text-secondary);
+}
+
+.items-modal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.items-modal-btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  padding: 6px 10px;
+  border: 2px solid var(--border-pixel);
+  background: var(--bg-darker);
+  color: var(--text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.items-modal-btn:active {
+  border-color: var(--accent-gold);
+}
+
+.items-modal-confirm {
+  color: #e74c3c;
+  border-color: #e74c3c;
+}
+
+.items-modal-cancel {
+  color: var(--text-dim);
+}
+
+.items-modal-count-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.items-modal-count-value {
+  font-size: 10px;
+  color: var(--text-primary);
+  min-width: 30px;
+  text-align: center;
+}
+
+.items-modal-minus,
+.items-modal-plus,
+.items-modal-max {
+  font-size: 8px;
+  padding: 4px 8px;
 }
 
 /* ── Map Screen ──────────────────────────────────────────── */

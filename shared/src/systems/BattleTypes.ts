@@ -146,11 +146,35 @@ export interface ClientUnequipItemMessage {
   slot: EquipSlot;
 }
 
+export interface ClientDestroyItemsMessage {
+  type: 'destroy_items';
+  itemId: string;
+  count: number;
+}
+
+export interface ClientDestroyEquippedMessage {
+  type: 'destroy_equipped';
+  slot: EquipSlot;
+}
+
+export interface ClientEquipItemForceDestroyMessage {
+  type: 'equip_item_force_destroy';
+  itemId: string;
+}
+
+export interface ServerEquipBlockedMessage {
+  type: 'equip_blocked';
+  itemId: string;
+  blockedByItemId: string;
+  blockedBySlot: EquipSlot;
+}
+
 export type ServerMessage =
   | ServerStateMessage
   | ServerSocialStateMessage
   | ServerChatMessageMessage
   | ServerChatHistoryMessage
+  | ServerEquipBlockedMessage
   | { type: 'error'; message: string };
 
 export interface ClientSetClassMessage {
@@ -164,6 +188,9 @@ export type ClientMessage =
   | ClientSetPriorityStatMessage
   | ClientEquipItemMessage
   | ClientUnequipItemMessage
+  | ClientDestroyItemsMessage
+  | ClientDestroyEquippedMessage
+  | ClientEquipItemForceDestroyMessage
   | ClientSetClassMessage
   | ClientResetXpRateMessage
   | ClientSocialMessage;
