@@ -202,10 +202,6 @@ export class GameClient {
     this.sendRaw({ type: 'destroy_items', itemId, count });
   }
 
-  sendDestroyEquipped(slot: string): void {
-    this.sendRaw({ type: 'destroy_equipped', slot });
-  }
-
   sendEquipItemForceDestroy(itemId: string): void {
     this.sendRaw({ type: 'equip_item_force_destroy', itemId });
   }

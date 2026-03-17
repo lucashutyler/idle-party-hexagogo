@@ -223,16 +223,6 @@ export function destroyItems(
   return { success: true, removed };
 }
 
-/** Destroy an equipped item without returning it to inventory. */
-export function destroyEquippedItem(
-  equipment: Record<string, string | null>,
-  slot: EquipSlot,
-): { success: boolean } {
-  if (!equipment[slot]) return { success: false };
-  equipment[slot] = null;
-  return { success: true };
-}
-
 /**
  * Equip an item, destroying the currently equipped item instead of returning it to inventory.
  * Use when normal equipItem fails due to full inventory.

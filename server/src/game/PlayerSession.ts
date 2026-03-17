@@ -16,7 +16,6 @@ import {
   equipItem,
   unequipItem,
   destroyItems,
-  destroyEquippedItem,
   equipItemForceDestroy,
   EQUIP_SLOTS,
   getZone,
@@ -538,9 +537,4 @@ export class PlayerSession {
     return result.success;
   }
 
-  handleDestroyEquippedItem(slot: EquipSlot): boolean {
-    if (!EQUIP_SLOTS.includes(slot)) return false;
-    const result = destroyEquippedItem(this.character.equipment, slot);
-    return result.success;
-  }
 }

@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   destroyItems,
-  destroyEquippedItem,
   equipItemForceDestroy,
   MAX_STACK,
   SEED_ITEMS,
@@ -46,21 +45,6 @@ describe('destroyItems', () => {
     const inv: Record<string, number> = { rusty_dagger: 5 };
     const result = destroyItems(inv, 'rusty_dagger', -1);
     expect(result).toEqual({ success: false, removed: 0 });
-  });
-});
-
-describe('destroyEquippedItem', () => {
-  it('destroys an equipped item', () => {
-    const equip: Record<string, string | null> = { hand: 'rusty_dagger', head: null, chest: null, foot: null };
-    const result = destroyEquippedItem(equip, 'hand');
-    expect(result).toEqual({ success: true });
-    expect(equip.hand).toBeNull();
-  });
-
-  it('fails for empty slot', () => {
-    const equip: Record<string, string | null> = { hand: null, head: null, chest: null, foot: null };
-    const result = destroyEquippedItem(equip, 'hand');
-    expect(result).toEqual({ success: false });
   });
 });
 

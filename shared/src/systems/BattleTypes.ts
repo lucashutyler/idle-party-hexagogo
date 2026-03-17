@@ -152,11 +152,6 @@ export interface ClientDestroyItemsMessage {
   count: number;
 }
 
-export interface ClientDestroyEquippedMessage {
-  type: 'destroy_equipped';
-  slot: EquipSlot;
-}
-
 export interface ClientEquipItemForceDestroyMessage {
   type: 'equip_item_force_destroy';
   itemId: string;
@@ -189,7 +184,6 @@ export type ClientMessage =
   | ClientEquipItemMessage
   | ClientUnequipItemMessage
   | ClientDestroyItemsMessage
-  | ClientDestroyEquippedMessage
   | ClientEquipItemForceDestroyMessage
   | ClientSetClassMessage
   | ClientResetXpRateMessage

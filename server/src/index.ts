@@ -339,25 +339,6 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      if (msg.type === 'destroy_equipped' && typeof msg.slot === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
-          return;
-        }
-
-        const validSlots = ['head', 'chest', 'hand', 'foot'];
-        if (!validSlots.includes(msg.slot)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid slot' }));
-          return;
-        }
-
-        if (!session.handleDestroyEquippedItem(msg.slot)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot destroy equipped item' }));
-        }
-        return;
-      }
-
       // --- Social messages ---
 
       if (msg.type === 'send_friend_request' && typeof msg.username === 'string') {
