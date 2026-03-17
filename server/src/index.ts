@@ -276,6 +276,30 @@ wss.on('connection', (ws) => {
         }
 
         if (!session.handleEquipItem(msg.itemId)) {
+          // Check if blocked by full inventory for the equipped item
+          const blockInfo = session.getEquipBlockInfo(msg.itemId);
+          if (blockInfo) {
+            ws.send(JSON.stringify({
+              type: 'equip_blocked',
+              itemId: msg.itemId,
+              blockedByItemId: blockInfo.blockedByItemId,
+              blockedBySlot: blockInfo.blockedBySlot,
+            }));
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'equip_item_force_destroy' && typeof msg.itemId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        if (!session.handleEquipItemForceDestroy(msg.itemId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
         }
         return;
@@ -296,6 +320,38 @@ wss.on('connection', (ws) => {
 
         if (!session.handleUnequipItem(msg.slot)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot unequip item' }));
+        }
+        return;
+      }
+
+      if (msg.type === 'destroy_items' && typeof msg.itemId === 'string' && typeof msg.count === 'number') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        if (!session.handleDestroyItems(msg.itemId, msg.count)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot destroy item' }));
+        }
+        return;
+      }
+
+      if (msg.type === 'destroy_equipped' && typeof msg.slot === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        const validSlots = ['head', 'chest', 'hand', 'foot'];
+        if (!validSlots.includes(msg.slot)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid slot' }));
+          return;
+        }
+
+        if (!session.handleDestroyEquippedItem(msg.slot)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot destroy equipped item' }));
         }
         return;
       }

@@ -15,6 +15,9 @@ import {
   addItemToInventory,
   equipItem,
   unequipItem,
+  destroyItems,
+  destroyEquippedItem,
+  equipItemForceDestroy,
   EQUIP_SLOTS,
   getZone,
 } from '@idle-party-rpg/shared';
@@ -500,6 +503,44 @@ export class PlayerSession {
     if (!EQUIP_SLOTS.includes(slot)) return false;
 
     const result = unequipItem(this.character.inventory, this.character.equipment, slot);
+    return result.success;
+  }
+
+  /** Check why equip failed — returns the blocking item info if inventory full. */
+  getEquipBlockInfo(itemId: string): { blockedByItemId: string; blockedBySlot: EquipSlot } | null {
+    const def = this.content.getItem(itemId);
+    if (!def || !def.equipSlot) return null;
+
+    const slot = def.equipSlot;
+    const currentEquipped = this.character.equipment[slot];
+    if (!currentEquipped) return null;
+
+    // Check if the old item's stack is at max
+    const current = this.character.inventory[currentEquipped] ?? 0;
+    if (current >= 99) {
+      return { blockedByItemId: currentEquipped, blockedBySlot: slot };
+    }
+    return null;
+  }
+
+  handleEquipItemForceDestroy(itemId: string): boolean {
+    const def = this.content.getItem(itemId);
+    if (!def || !def.equipSlot) return false;
+
+    const result = equipItemForceDestroy(
+      this.character.inventory, this.character.equipment, itemId, this.content.getAllItems()
+    );
+    return result.success;
+  }
+
+  handleDestroyItems(itemId: string, count: number): boolean {
+    const result = destroyItems(this.character.inventory, itemId, count);
+    return result.success;
+  }
+
+  handleDestroyEquippedItem(slot: EquipSlot): boolean {
+    if (!EQUIP_SLOTS.includes(slot)) return false;
+    const result = destroyEquippedItem(this.character.equipment, slot);
     return result.success;
   }
 }

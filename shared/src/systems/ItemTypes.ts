@@ -201,6 +201,63 @@ export function getItemEffectText(def: ItemDefinition): string {
   return parts.join(', ');
 }
 
+/**
+ * Destroy (remove) items from inventory.
+ * Returns { success, removed } where removed is the actual number destroyed.
+ */
+export function destroyItems(
+  inventory: Record<string, number>,
+  itemId: string,
+  count: number,
+): { success: boolean; removed: number } {
+  if (count <= 0) return { success: false, removed: 0 };
+  const current = inventory[itemId] ?? 0;
+  if (current <= 0) return { success: false, removed: 0 };
+
+  const removed = Math.min(count, current);
+  if (removed >= current) {
+    delete inventory[itemId];
+  } else {
+    inventory[itemId] = current - removed;
+  }
+  return { success: true, removed };
+}
+
+/** Destroy an equipped item without returning it to inventory. */
+export function destroyEquippedItem(
+  equipment: Record<string, string | null>,
+  slot: EquipSlot,
+): { success: boolean } {
+  if (!equipment[slot]) return { success: false };
+  equipment[slot] = null;
+  return { success: true };
+}
+
+/**
+ * Equip an item, destroying the currently equipped item instead of returning it to inventory.
+ * Use when normal equipItem fails due to full inventory.
+ */
+export function equipItemForceDestroy(
+  inventory: Record<string, number>,
+  equipment: Record<string, string | null>,
+  itemId: string,
+  items: Record<string, ItemDefinition>,
+): { success: boolean; destroyedItemId?: string } {
+  const def = items[itemId];
+  if (!def || !def.equipSlot) return { success: false };
+  if ((inventory[itemId] ?? 0) <= 0) return { success: false };
+
+  const slot = def.equipSlot;
+  const currentEquipped = equipment[slot];
+
+  // Destroy old item (just clear the slot)
+  // Remove new item from inventory and equip it
+  removeItemFromInventory(inventory, itemId);
+  equipment[slot] = itemId;
+
+  return { success: true, destroyedItemId: currentEquipped ?? undefined };
+}
+
 /** Roll drops for a list of possible drops. Returns item IDs that dropped. */
 export function rollDrops(drops: ItemDrop[]): string[] {
   const result: string[] = [];
