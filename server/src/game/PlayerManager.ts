@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
-import { HexGrid, offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, BlockLevel, PartyGridPosition, PartyRole } from '@idle-party-rpg/shared';
+import { HexGrid, offsetToCube, cubeDistance, cubeToKey, CLASS_ICONS } from '@idle-party-rpg/shared';
+import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, BlockLevel, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
@@ -137,6 +137,15 @@ export class PlayerManager {
     for (const ws of wsSet) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }
+  }
+
+  /** Broadcast a global welcome message when a new player picks their class. */
+  broadcastWelcome(username: string, className: ClassName): void {
+    const icon = CLASS_ICONS[className] ?? '';
+    const text = `Welcome our new ${className}, ${username}, to the world! ${icon}`;
+    const recipients = this.getOnlinePlayers()
+      .map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
+    this.chat.sendMessage('Server', 'global', 'global', text, recipients, this.getAllBlockedUsers());
   }
 
   /** Get all blocked users map for chat filtering. */

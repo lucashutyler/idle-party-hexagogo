@@ -1846,7 +1846,72 @@ html, body {
 
 .social-party-cell.occupied {
   border-color: var(--border-light);
-  cursor: default;
+  cursor: grab;
+}
+
+/* Tilt-and-slide animation when moving to a new cell */
+@keyframes party-grid-move {
+  0% { transform: rotate(0deg) translate(0, 0); }
+  30% { transform: rotate(var(--tilt)) translate(0, 0); }
+  80% { transform: rotate(var(--tilt)) translate(var(--move-x), var(--move-y)); }
+  100% { transform: rotate(0deg) translate(var(--move-x), var(--move-y)); opacity: 0; }
+}
+
+.social-party-cell.grid-move-anim {
+  animation: party-grid-move 0.42s ease-in-out forwards;
+  pointer-events: none;
+}
+
+/* Flash red when clicking an occupied cell */
+@keyframes party-grid-flash-red {
+  0% { border-color: var(--border-light); }
+  25% { border-color: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+  50% { border-color: var(--border-light); }
+  75% { border-color: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+  100% { border-color: var(--border-light); box-shadow: none; }
+}
+
+.social-party-cell.grid-flash-red {
+  animation: party-grid-flash-red 0.4s ease-out;
+}
+
+/* Drag hover: throb green on empty cell */
+@keyframes party-grid-throb-green {
+  0%, 100% { border-color: var(--border-pixel); box-shadow: none; }
+  50% { border-color: #4caf50; box-shadow: 0 0 8px #4caf50; }
+}
+
+.social-party-cell.drag-hover-green {
+  animation: party-grid-throb-green 0.6s ease-in-out infinite;
+}
+
+/* Drag hover: throb red on occupied cell */
+@keyframes party-grid-throb-red {
+  0%, 100% { border-color: var(--border-light); box-shadow: none; }
+  50% { border-color: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+}
+
+.social-party-cell.drag-hover-red {
+  animation: party-grid-throb-red 0.6s ease-in-out infinite;
+}
+
+/* Drag ghost that follows cursor during grid repositioning */
+.party-drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-primary);
 }
 
 .social-party-cell-name {

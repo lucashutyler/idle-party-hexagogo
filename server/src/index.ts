@@ -256,6 +256,8 @@ wss.on('connection', (ws) => {
           playerManager.partyBattles.restartBattle(classPartyId);
         }
         playerManager.sendStateToPlayer(username);
+        // Broadcast welcome message to all online players
+        playerManager.broadcastWelcome(username, msg.className as ClassName);
         return;
       }
 
