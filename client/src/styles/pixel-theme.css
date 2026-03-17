@@ -227,11 +227,9 @@ html, body {
   justify-items: center;
 }
 
-/* Empty grid cell — preserves spacing; clickable for repositioning */
+/* Empty grid cell — preserves spacing */
 .combat-grid-empty {
   width: 48px;
-  min-height: 48px;
-  cursor: pointer;
 }
 
 .combat-member {
@@ -1412,42 +1410,6 @@ html, body {
   100% { width: 100%; }
 }
 
-/* Grid reposition: tilt-and-slide animation */
-@keyframes grid-move {
-  0% { transform: rotate(0deg) translate(0, 0); }
-  30% { transform: rotate(var(--tilt)) translate(0, 0); }
-  80% { transform: rotate(var(--tilt)) translate(var(--move-x), var(--move-y)); }
-  100% { transform: rotate(0deg) translate(var(--move-x), var(--move-y)); opacity: 0; }
-}
-
-.combat-member.grid-move-anim {
-  animation: grid-move 0.35s ease-in-out forwards;
-  pointer-events: none;
-}
-
-/* Grid reposition: flash red when clicking occupied cell */
-@keyframes grid-flash-red {
-  0% { border-color: var(--border-light); }
-  25% { border-color: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
-  50% { border-color: var(--border-light); }
-  75% { border-color: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
-  100% { border-color: var(--border-light); box-shadow: none; }
-}
-
-.combat-member.grid-flash-red {
-  animation: grid-flash-red 0.4s ease-out;
-}
-
-/* Drag ghost that follows cursor */
-.combat-drag-ghost {
-  position: fixed;
-  z-index: 9999;
-  pointer-events: none;
-  opacity: 0.8;
-  transform: scale(1.1);
-  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
-}
-
 /* ── Social Screen ──────────────────────────────────────── */
 
 .social-content {
@@ -1770,7 +1732,52 @@ html, body {
 
 .social-party-cell.occupied {
   border-color: var(--border-light);
-  cursor: default;
+  cursor: grab;
+}
+
+/* Tilt-and-slide animation when moving to a new cell */
+@keyframes party-grid-move {
+  0% { transform: rotate(0deg) translate(0, 0); }
+  30% { transform: rotate(var(--tilt)) translate(0, 0); }
+  80% { transform: rotate(var(--tilt)) translate(var(--move-x), var(--move-y)); }
+  100% { transform: rotate(0deg) translate(var(--move-x), var(--move-y)); opacity: 0; }
+}
+
+.social-party-cell.grid-move-anim {
+  animation: party-grid-move 0.35s ease-in-out forwards;
+  pointer-events: none;
+}
+
+/* Flash red when clicking an occupied cell */
+@keyframes party-grid-flash-red {
+  0% { border-color: var(--border-light); }
+  25% { border-color: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+  50% { border-color: var(--border-light); }
+  75% { border-color: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+  100% { border-color: var(--border-light); box-shadow: none; }
+}
+
+.social-party-cell.grid-flash-red {
+  animation: party-grid-flash-red 0.4s ease-out;
+}
+
+/* Drag ghost that follows cursor during grid repositioning */
+.party-drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-primary);
 }
 
 .social-party-cell-name {

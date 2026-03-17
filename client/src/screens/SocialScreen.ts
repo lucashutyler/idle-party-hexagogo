@@ -47,6 +47,11 @@ export class SocialScreen implements Screen {
   // User popup
   private popupOverlay: HTMLElement | null = null;
 
+  // Grid drag-to-reposition state
+  private gridDragging = false;
+  private gridDragSourcePos: number | null = null;
+  private gridDragGhost: HTMLElement | null = null;
+
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
@@ -171,11 +176,36 @@ export class SocialScreen implements Screen {
 
     // Grid cell clicks for party position
     this.panelContainer.addEventListener('click', (e) => {
-      const cell = (e.target as HTMLElement).closest('.social-party-cell:not(.occupied)');
+      if (this.gridDragging) return;
+      const target = e.target as HTMLElement;
+      const cell = target.closest('.social-party-cell') as HTMLElement | null;
       if (!cell) return;
       const pos = parseInt(cell.getAttribute('data-pos')!, 10);
-      this.gameClient.sendSetPartyGridPosition(pos);
+      if (isNaN(pos)) return;
+
+      if (cell.classList.contains('occupied')) {
+        // Occupied by another player → flash red
+        const selfUsername = this.lastState?.username;
+        const party = this.lastSocial?.party;
+        if (!party) return;
+        const occupant = party.members.find(m => m.gridPosition === pos);
+        if (occupant && occupant.username !== selfUsername) {
+          this.flashGridCell(cell);
+        }
+      } else {
+        // Empty cell → animate self to that position
+        this.animateGridMove(pos);
+        this.gameClient.sendSetPartyGridPosition(pos);
+      }
     });
+
+    // Grid drag handlers
+    this.panelContainer.addEventListener('mousedown', (e) => this.onGridDragStart(e));
+    this.panelContainer.addEventListener('touchstart', (e) => this.onGridDragStart(e), { passive: false });
+    document.addEventListener('mousemove', (e) => this.onGridDragMove(e));
+    document.addEventListener('touchmove', (e) => this.onGridDragMove(e), { passive: false });
+    document.addEventListener('mouseup', (e) => this.onGridDragEnd(e));
+    document.addEventListener('touchend', (e) => this.onGridDragEnd(e));
   }
 
   private renderTabBar(): void {
@@ -1075,5 +1105,143 @@ export class SocialScreen implements Screen {
 
   private escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── Party grid repositioning ──────────────────────────────
+
+  /** Flash a party grid cell red to indicate it's occupied. */
+  private flashGridCell(cell: HTMLElement): void {
+    cell.classList.remove('grid-flash-red');
+    void cell.offsetWidth;
+    cell.classList.add('grid-flash-red');
+    cell.addEventListener('animationend', () => {
+      cell.classList.remove('grid-flash-red');
+    }, { once: true });
+  }
+
+  /** Animate the current player's cell tilting and sliding toward targetPos. */
+  private animateGridMove(targetPos: number): void {
+    const party = this.lastSocial?.party;
+    const selfUsername = this.lastState?.username;
+    if (!party || !selfUsername) return;
+    const self = party.members.find(m => m.username === selfUsername);
+    if (!self || self.gridPosition === undefined) return;
+
+    const srcPos = self.gridPosition as number;
+    const grid = this.panelContainer.querySelector('.social-party-grid');
+    if (!grid) return;
+    const sourceCell = grid.querySelector(`.social-party-cell[data-pos="${srcPos}"]`) as HTMLElement | null;
+    if (!sourceCell) return;
+
+    const srcRow = Math.floor(srcPos / 3);
+    const srcCol = srcPos % 3;
+    const dstRow = Math.floor(targetPos / 3);
+    const dstCol = targetPos % 3;
+    const tiltDeg = (dstCol - srcCol) * 8 + (dstRow - srcRow) * 4;
+
+    // Compute cell size from actual rendered dimensions
+    const cellRect = sourceCell.getBoundingClientRect();
+    const dx = (dstCol - srcCol) * (cellRect.width + 4); // 4px gap
+    const dy = (dstRow - srcRow) * (cellRect.height + 4);
+
+    sourceCell.style.setProperty('--tilt', `${tiltDeg}deg`);
+    sourceCell.style.setProperty('--move-x', `${dx}px`);
+    sourceCell.style.setProperty('--move-y', `${dy}px`);
+
+    void sourceCell.offsetWidth;
+    sourceCell.classList.add('grid-move-anim');
+
+    sourceCell.addEventListener('animationend', () => {
+      sourceCell.classList.remove('grid-move-anim');
+      sourceCell.style.removeProperty('--tilt');
+      sourceCell.style.removeProperty('--move-x');
+      sourceCell.style.removeProperty('--move-y');
+    }, { once: true });
+  }
+
+  private onGridDragStart(e: MouseEvent | TouchEvent): void {
+    const target = (e.target as HTMLElement).closest('.social-party-cell.occupied[data-pos]') as HTMLElement | null;
+    if (!target) return;
+
+    const pos = parseInt(target.getAttribute('data-pos')!, 10);
+    const party = this.lastSocial?.party;
+    const selfUsername = this.lastState?.username;
+    if (!party || !selfUsername) return;
+
+    const member = party.members.find(m => m.gridPosition === pos);
+    if (!member || member.username !== selfUsername) return; // can only drag self
+
+    e.preventDefault();
+    this.gridDragging = true;
+    this.gridDragSourcePos = pos;
+
+    // Create ghost
+    const ghost = document.createElement('div');
+    ghost.className = 'party-drag-ghost';
+    ghost.textContent = `${this.classIcon(this.getPlayerClassName(selfUsername))} ${selfUsername}`;
+    document.body.appendChild(ghost);
+    this.gridDragGhost = ghost;
+
+    const { clientX, clientY } = this.getPointerXY(e);
+    ghost.style.left = `${clientX - 20}px`;
+    ghost.style.top = `${clientY - 16}px`;
+
+    // Dim the original
+    target.style.opacity = '0.4';
+  }
+
+  private onGridDragMove(e: MouseEvent | TouchEvent): void {
+    if (!this.gridDragging || !this.gridDragGhost) return;
+    e.preventDefault();
+    const { clientX, clientY } = this.getPointerXY(e);
+    this.gridDragGhost.style.left = `${clientX - 20}px`;
+    this.gridDragGhost.style.top = `${clientY - 16}px`;
+  }
+
+  private onGridDragEnd(e: MouseEvent | TouchEvent): void {
+    if (!this.gridDragging) return;
+    this.gridDragging = false;
+
+    // Remove ghost
+    if (this.gridDragGhost) {
+      this.gridDragGhost.remove();
+      this.gridDragGhost = null;
+    }
+
+    // Restore original opacity
+    if (this.gridDragSourcePos !== null) {
+      const grid = this.panelContainer.querySelector('.social-party-grid');
+      const sourceCell = grid?.querySelector(`.social-party-cell[data-pos="${this.gridDragSourcePos}"]`) as HTMLElement | null;
+      if (sourceCell) sourceCell.style.opacity = '';
+    }
+
+    // Determine drop target
+    const { clientX, clientY } = this.getPointerXY(e);
+    const dropEl = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    if (!dropEl) { this.gridDragSourcePos = null; return; }
+
+    const cell = dropEl.closest('.social-party-cell[data-pos]') as HTMLElement | null;
+    if (!cell) { this.gridDragSourcePos = null; return; }
+
+    const pos = parseInt(cell.getAttribute('data-pos')!, 10);
+    if (isNaN(pos) || pos === this.gridDragSourcePos) { this.gridDragSourcePos = null; return; }
+
+    if (cell.classList.contains('occupied')) {
+      // Dropped on another player → flash red
+      this.flashGridCell(cell);
+    } else {
+      // Dropped on empty cell → move
+      this.gameClient.sendSetPartyGridPosition(pos);
+    }
+
+    this.gridDragSourcePos = null;
+  }
+
+  private getPointerXY(e: MouseEvent | TouchEvent): { clientX: number; clientY: number } {
+    if ('touches' in e) {
+      const t = e.changedTouches?.[0] ?? e.touches?.[0];
+      return t ? { clientX: t.clientX, clientY: t.clientY } : { clientX: 0, clientY: 0 };
+    }
+    return { clientX: (e as MouseEvent).clientX, clientY: (e as MouseEvent).clientY };
   }
 }
