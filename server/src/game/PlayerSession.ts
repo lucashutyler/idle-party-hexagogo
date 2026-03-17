@@ -478,6 +478,10 @@ export class PlayerSession {
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
 
+    // XP rate tracking — auto-start from session restore time
+    session['xpRateStartTime'] = Date.now();
+    session['xpRateXpTotal'] = 0;
+
     // Add server-online log entry
     session['addLogEntry']('Server back online — resuming!', 'battle');
 
