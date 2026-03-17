@@ -1,4 +1,4 @@
-import type { ServerStateMessage, BlockLevel, ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerEquipBlockedMessage, BlockLevel, ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
@@ -7,6 +7,7 @@ type ChatListener = (message: ChatMessage) => void;
 type ChatHistoryListener = (channelType: ChatChannelType, channelId: string, messages: ChatMessage[]) => void;
 type ConnectionListener = (connected: boolean) => void;
 type WorldUpdateListener = () => void;
+type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -20,6 +21,7 @@ export class GameClient {
   private chatListeners = new Set<ChatListener>();
   private chatHistoryListeners = new Set<ChatHistoryListener>();
   private worldUpdateListeners = new Set<WorldUpdateListener>();
+  private equipBlockedListeners = new Set<EquipBlockedListener>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -127,6 +129,10 @@ export class GameClient {
           for (const listener of this.worldUpdateListeners) {
             listener();
           }
+        } else if (msg.type === 'equip_blocked') {
+          for (const listener of this.equipBlockedListeners) {
+            listener(msg);
+          }
         } else if (msg.type === 'error') {
           console.warn('[GameClient] server error:', msg.message);
         }
@@ -190,6 +196,24 @@ export class GameClient {
 
   sendUnequipItem(slot: string): void {
     this.sendRaw({ type: 'unequip_item', slot });
+  }
+
+  sendDestroyItems(itemId: string, count: number): void {
+    this.sendRaw({ type: 'destroy_items', itemId, count });
+  }
+
+  sendDestroyEquipped(slot: string): void {
+    this.sendRaw({ type: 'destroy_equipped', slot });
+  }
+
+  sendEquipItemForceDestroy(itemId: string): void {
+    this.sendRaw({ type: 'equip_item_force_destroy', itemId });
+  }
+
+  /** Subscribe to equip_blocked messages. Returns an unsubscribe function. */
+  onEquipBlocked(listener: EquipBlockedListener): () => void {
+    this.equipBlockedListeners.add(listener);
+    return () => { this.equipBlockedListeners.delete(listener); };
   }
 
   resetXpRate(): void {
