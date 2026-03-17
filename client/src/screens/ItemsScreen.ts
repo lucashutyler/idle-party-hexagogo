@@ -106,35 +106,16 @@ export class ItemsScreen implements Screen {
           <span class="items-slot-item" style="${def ? `color: ${color}` : ''}">${name}</span>
           ${effect ? `<span class="items-slot-effect">${effect}</span>` : ''}
         </div>
-        ${def ? `<button class="items-destroy-btn" data-destroy-slot="${slot}" title="Destroy">X</button>` : ''}
       </div>`;
     }).join('');
 
-    // Wire slot tap → unequip (but not on destroy button)
+    // Wire slot tap → unequip
     for (const slotEl of this.slotsContainer.querySelectorAll('.items-equip-slot')) {
-      slotEl.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        if (target.classList.contains('items-destroy-btn')) return;
+      slotEl.addEventListener('click', () => {
         const slot = slotEl.getAttribute('data-slot');
         if (slot && char.equipment[slot]) {
           this.gameClient.sendUnequipItem(slot);
         }
-      });
-    }
-
-    // Wire destroy buttons on equipment
-    for (const btn of this.slotsContainer.querySelectorAll('.items-destroy-btn')) {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const slot = (btn as HTMLElement).getAttribute('data-destroy-slot');
-        if (!slot) return;
-        const itemId = char.equipment[slot];
-        const def = itemId ? this.itemDefs[itemId] : null;
-        this.showConfirmModal(
-          `Destroy ${def?.name ?? 'item'}?`,
-          'This item will be permanently lost.',
-          () => { this.gameClient.sendDestroyEquipped(slot); this.hideModal(); }
-        );
       });
     }
 
