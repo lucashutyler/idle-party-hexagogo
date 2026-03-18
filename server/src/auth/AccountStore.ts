@@ -7,6 +7,7 @@ export interface Account {
   username: string | null;
   verified: boolean;
   createdAt: string;
+  lastActiveAt: string | null;
 }
 
 interface AccountsData {
@@ -73,6 +74,7 @@ export class AccountStore {
       username: null,
       verified: false,
       createdAt: new Date().toISOString(),
+      lastActiveAt: null,
     };
     this.accounts[key] = account;
     await this.save();
@@ -105,5 +107,12 @@ export class AccountStore {
 
   getOldUsername(email: string): string | null {
     return this.accounts[email.toLowerCase()]?.username ?? null;
+  }
+
+  async updateLastActive(username: string): Promise<void> {
+    const account = this.findByUsername(username);
+    if (!account) return;
+    account.lastActiveAt = new Date().toISOString();
+    await this.save();
   }
 }

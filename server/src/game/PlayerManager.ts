@@ -10,6 +10,7 @@ import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem } from './social/PartySystem.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
 import type { ContentStore } from './ContentStore.js';
+import type { AccountStore } from '../auth/AccountStore.js';
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
@@ -17,6 +18,7 @@ export class PlayerManager {
   private playerConnections = new Map<string, Set<WebSocket>>();
   private grid: HexGrid;
   private content: ContentStore;
+  private accountStore: AccountStore;
   readonly friends: FriendsSystem;
   readonly guilds: GuildSystem;
   readonly chat: ChatSystem;
@@ -24,14 +26,15 @@ export class PlayerManager {
   readonly partyBattles: PartyBattleManager;
   private getAllUsernames: () => string[];
 
-  constructor(grid: HexGrid, content: ContentStore, guildStore: GuildStore, getAllUsernames: () => string[]) {
+  constructor(grid: HexGrid, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore) {
     this.grid = grid;
     this.content = content;
+    this.accountStore = accountStore;
     this.friends = new FriendsSystem();
     this.chat = new ChatSystem();
     this.guilds = new GuildSystem(guildStore);
     this.parties = new PartySystem();
-    this.getAllUsernames = getAllUsernames;
+    this.getAllUsernames = () => accountStore.getAllUsernames();
     this.partyBattles = new PartyBattleManager(
       grid,
       content,
@@ -50,6 +53,9 @@ export class PlayerManager {
       this.playerConnections.set(username, wsSet);
     }
     wsSet.add(ws);
+
+    // Record last activity timestamp
+    this.accountStore.updateLastActive(username).catch(() => {});
 
     // Create session if it doesn't exist (or resume existing)
     let session = this.sessions.get(username);

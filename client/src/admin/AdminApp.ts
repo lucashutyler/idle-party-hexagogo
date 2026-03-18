@@ -48,10 +48,14 @@ interface AccountData {
   username: string | null;
   verified: boolean;
   createdAt: string;
+  lastActiveAt: string | null;
   isOnline: boolean;
   className: string | null;
   level: number | null;
 }
+
+type AccountSortColumn = 'username' | 'email' | 'status' | 'level' | 'class' | 'created' | 'lastActive';
+type SortDirection = 'asc' | 'desc';
 
 interface ContentData {
   monsters: Record<string, MonsterDefinition>;
@@ -111,6 +115,8 @@ export class AdminApp {
   private activeTab: TabId = 'overview';
   private overview: OverviewData | null = null;
   private accounts: AccountData[] = [];
+  private accountSortColumn: AccountSortColumn = 'lastActive';
+  private accountSortDir: SortDirection = 'desc';
   private activeVersionId: string | null = null;
   private mapTiles: HexTile[] = [];
 
@@ -418,9 +424,64 @@ export class AdminApp {
     `;
   }
 
+  private getSortedAccounts(): AccountData[] {
+    const sorted = [...this.accounts];
+    const dir = this.accountSortDir === 'asc' ? 1 : -1;
+    sorted.sort((a, b) => {
+      let cmp = 0;
+      switch (this.accountSortColumn) {
+        case 'username':
+          cmp = (a.username ?? '').localeCompare(b.username ?? '');
+          break;
+        case 'email':
+          cmp = a.email.localeCompare(b.email);
+          break;
+        case 'status':
+          cmp = (a.isOnline ? 1 : 0) - (b.isOnline ? 1 : 0);
+          break;
+        case 'level':
+          cmp = (a.level ?? 0) - (b.level ?? 0);
+          break;
+        case 'class':
+          cmp = (a.className ?? '').localeCompare(b.className ?? '');
+          break;
+        case 'created':
+          cmp = (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+          break;
+        case 'lastActive':
+          cmp = (a.lastActiveAt ?? '').localeCompare(b.lastActiveAt ?? '');
+          break;
+      }
+      return cmp * dir;
+    });
+    return sorted;
+  }
+
+  private formatRelativeTime(iso: string | null): string {
+    if (!iso) return '—';
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 0) return 'just now';
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    const months = Math.floor(days / 30);
+    return `${months}mo ago`;
+  }
+
+  private sortIndicator(col: AccountSortColumn): string {
+    if (this.accountSortColumn !== col) return '';
+    return this.accountSortDir === 'asc' ? ' ▲' : ' ▼';
+  }
+
   private renderAccounts(): string {
     const classes = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'];
-    const rows = this.accounts.map(a => {
+    const sorted = this.getSortedAccounts();
+    const rows = sorted.map(a => {
       const classCell = a.username && a.className
         ? `<select class="account-class-select" data-username="${this.escapeHtml(a.username)}">
             ${classes.map(c => `<option value="${c}"${c === a.className ? ' selected' : ''}>${c}</option>`).join('')}
@@ -435,6 +496,7 @@ export class AdminApp {
           <td>${a.level ?? '—'}</td>
           <td>${classCell}</td>
           <td>${new Date(a.createdAt).toLocaleDateString()}</td>
+          <td title="${a.lastActiveAt ? new Date(a.lastActiveAt).toLocaleString() : ''}">${this.formatRelativeTime(a.lastActiveAt)}</td>
         </tr>
       `;
     }).join('');
@@ -443,15 +505,16 @@ export class AdminApp {
       <div class="admin-page">
         <div class="admin-page-header"><h2>Accounts (${this.accounts.length})</h2></div>
         <div class="admin-table-wrap pixel-panel">
-          <table class="admin-table">
+          <table class="admin-table admin-table-sortable">
             <thead>
               <tr>
-                <th>Username</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Lv</th>
-                <th>Class</th>
-                <th>Created</th>
+                <th data-sort="username">Username${this.sortIndicator('username')}</th>
+                <th data-sort="email">Email${this.sortIndicator('email')}</th>
+                <th data-sort="status">Status${this.sortIndicator('status')}</th>
+                <th data-sort="level">Lv${this.sortIndicator('level')}</th>
+                <th data-sort="class">Class${this.sortIndicator('class')}</th>
+                <th data-sort="created">Created${this.sortIndicator('created')}</th>
+                <th data-sort="lastActive">Last Active${this.sortIndicator('lastActive')}</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -467,6 +530,20 @@ export class AdminApp {
   }
 
   private wireAccountEvents(): void {
+    // Sortable headers
+    document.querySelectorAll('.admin-table-sortable th[data-sort]').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = (th as HTMLElement).dataset.sort as AccountSortColumn;
+        if (this.accountSortColumn === col) {
+          this.accountSortDir = this.accountSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          this.accountSortColumn = col;
+          this.accountSortDir = 'asc';
+        }
+        this.renderTabContent();
+      });
+    });
+
     document.querySelectorAll('.account-class-select').forEach(sel => {
       sel.addEventListener('change', async () => {
         const select = sel as HTMLSelectElement;
