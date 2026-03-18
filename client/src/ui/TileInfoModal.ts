@@ -5,12 +5,12 @@ export class TileInfoModal {
   private overlay: HTMLElement;
   private modal: HTMLElement;
   private onMove: (col: number, row: number) => void;
-  private onUserClick?: (username: string, anchor: HTMLElement) => void;
+  private onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void;
 
   constructor(
     parent: HTMLElement,
     onMove: (col: number, row: number) => void,
-    onUserClick?: (username: string, anchor: HTMLElement) => void,
+    onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void,
   ) {
     this.onMove = onMove;
     this.onUserClick = onUserClick;
@@ -92,7 +92,7 @@ export class TileInfoModal {
       el.addEventListener('click', () => {
         const username = el.getAttribute('data-username');
         if (username && this.onUserClick) {
-          this.onUserClick(username, el as HTMLElement);
+          this.onUserClick(username, el as HTMLElement, info.col, info.row);
         }
       });
     }

@@ -12,7 +12,7 @@ export class MapScreen implements Screen {
   private sceneReady = false;
   private zoomControls?: HTMLElement;
   private tileModal?: TileInfoModal;
-  private onUserClickCallback?: (username: string, anchor: HTMLElement) => void;
+  private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
@@ -23,7 +23,7 @@ export class MapScreen implements Screen {
     this.worldCache = worldCache;
   }
 
-  setOnUserClick(cb: (username: string, anchor: HTMLElement) => void): void {
+  setOnUserClick(cb: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void): void {
     this.onUserClickCallback = cb;
   }
 
@@ -138,7 +138,7 @@ export class MapScreen implements Screen {
       this.tileModal = new TileInfoModal(
         this.container,
         (col, row) => { this.tryMove(col, row); },
-        (username, anchor) => { this.onUserClickCallback?.(username, anchor); },
+        (username, anchor, tileCol, tileRow) => { this.onUserClickCallback?.(username, anchor, tileCol, tileRow); },
       );
       scene.setOnTileClick((tileInfo) => {
         this.tileModal!.show(tileInfo);
