@@ -560,7 +560,7 @@ export class SocialScreen implements Screen {
 
   // ── User Popup Menu ──────────────────────────────────────────
 
-  showUserPopup(username: string, anchor: HTMLElement): void {
+  showUserPopup(username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number): void {
     this.dismissPopup();
 
     const social = this.lastSocial;
@@ -578,7 +578,10 @@ export class SocialScreen implements Screen {
     const otherPlayers = this.lastState?.otherPlayers ?? [];
     const myCol = this.lastState?.party.col;
     const myRow = this.lastState?.party.row;
-    const sameRoom = otherPlayers.some(p => p.username === username && p.col === myCol && p.row === myRow);
+    // If opened from tile modal, use tile coords for a reliable same-room check
+    const sameRoom = tileCol !== undefined && tileRow !== undefined
+      ? (myCol === tileCol && myRow === tileRow)
+      : otherPlayers.some(p => p.username === username && p.col === myCol && p.row === myRow);
 
     // Build header with relationship labels
     const isFriend = friends.has(username);
@@ -617,7 +620,18 @@ export class SocialScreen implements Screen {
 
     // Party invite — only show if not already in party
     if (!isPartyMember) {
-      if (!sameRoom) {
+      const selfMember = social.party?.members.find(m => m.username === selfUsername);
+      const isLeaderOrOwner = selfMember?.role === 'owner' || selfMember?.role === 'leader';
+      const partyFull = (social.party?.members.length ?? 1) >= MAX_PARTY_SIZE;
+      const alreadyInvited = (social.outgoingPartyInvites ?? []).includes(username);
+
+      if (!isLeaderOrOwner) {
+        items.push(`<button class="user-popup-item disabled" disabled title="Only the party owner or a leader can invite">Invite to Party</button>`);
+      } else if (partyFull) {
+        items.push(`<button class="user-popup-item disabled" disabled title="Party is full (${MAX_PARTY_SIZE}/${MAX_PARTY_SIZE})">Invite to Party</button>`);
+      } else if (alreadyInvited) {
+        items.push(`<button class="user-popup-item disabled" disabled title="Already invited to your party">Invited to Party</button>`);
+      } else if (!sameRoom) {
         items.push(`<button class="user-popup-item disabled" disabled title="You must be in the same room to invite a player to your party">Invite to Party</button>`);
       } else {
         items.push(`<button class="user-popup-item" data-popup-action="party_invite">Invite to Party</button>`);

@@ -296,8 +296,8 @@ export class App {
     const settingsScreen = new PlaceholderScreen('screen-settings', 'Settings', '⚙');
 
     // Wire map username click to social screen popup
-    mapScreen.setOnUserClick((username, anchor) => {
-      socialScreen.showUserPopup(username, anchor);
+    mapScreen.setOnUserClick((username, anchor, tileCol, tileRow) => {
+      socialScreen.showUserPopup(username, anchor, tileCol, tileRow);
     });
 
     // Listen for world content updates (admin deployed a new version)
