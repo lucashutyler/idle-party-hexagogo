@@ -143,7 +143,7 @@ export class PlayerManager {
   broadcastWelcome(username: string, className: ClassName): void {
     const icon = CLASS_ICONS[className] ?? '';
     const text = `Welcome our new ${className}, ${username}, to the world! ${icon}`;
-    const recipients = this.getOnlinePlayers()
+    const recipients = Array.from(this.sessions.keys())
       .map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
     this.chat.sendMessage('Server', 'global', 'global', text, recipients, this.getAllBlockedUsers());
   }

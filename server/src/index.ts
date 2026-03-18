@@ -566,8 +566,8 @@ wss.on('connection', (ws) => {
             }
           }
         } else if (channelType === 'global') {
-          // All online players
-          for (const u of playerManager.getOnlinePlayers()) {
+          // All players (online and offline — offline get it stored in chat history)
+          for (const [u] of Array.from(playerManager['sessions'] as Map<string, any>)) {
             if (u === username) continue;
             recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
           }
