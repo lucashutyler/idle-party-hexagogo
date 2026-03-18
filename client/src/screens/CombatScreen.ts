@@ -137,18 +137,22 @@ export class CombatScreen implements Screen {
       this.renderedEnemyKey = enemyKey;
     }
 
-    // Update combatant sprites: class icons for players, dim dead
+    // Update combatant sprites: class icons for players, dim dead, stun indicator
     if (combat) {
       for (const p of combat.players) {
         const el = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"] .combat-member`);
         if (el) {
           el.textContent = CombatScreen.classIcon(p.className);
           el.classList.toggle('dead', p.currentHp <= 0);
+          el.classList.toggle('stunned', !!(p.stunTurns && p.stunTurns > 0));
         }
       }
       for (const m of combat.monsters) {
         const el = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"] .combat-member`);
-        if (el) el.classList.toggle('dead', m.currentHp <= 0);
+        if (el) {
+          el.classList.toggle('dead', m.currentHp <= 0);
+          el.classList.toggle('stunned', !!(m.stunTurns && m.stunTurns > 0));
+        }
       }
     }
 

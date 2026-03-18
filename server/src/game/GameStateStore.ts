@@ -1,4 +1,4 @@
-import type { CombatLogEntry, StatName, StatBlock, BlockLevel, ChatMessage, FriendRequest } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -16,10 +16,13 @@ export interface PlayerSaveData {
     level: number;
     xp: number;
     gold?: number;
-    stats: StatBlock;
-    priorityStat: StatName | null;
     inventory?: Record<string, number>;
     equipment?: Record<string, string | null>;
+    skillLoadout?: SkillLoadout;
+    skillPoints?: number;
+    // Legacy fields (ignored on load, kept for backward compat with old saves)
+    stats?: Record<string, number>;
+    priorityStat?: string | null;
   };
   friends?: string[];
   outgoingFriendRequests?: FriendRequest[];

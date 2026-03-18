@@ -2,16 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   xpForNextLevel,
   calculateMaxHp,
+  calculateBaseDamage,
   createDefaultCharacter,
   createCharacter,
   addXp,
-  allocateStatPoints,
-  ALL_STATS,
   ALL_CLASS_NAMES,
   CLASS_DEFINITIONS,
-  BASE_HP,
-  HP_PER_LEVEL,
-  STAT_POINTS_PER_LEVEL,
 } from '../src/systems/CharacterStats';
 import type { ClassName } from '../src/systems/CharacterStats';
 
@@ -25,46 +21,66 @@ describe('CharacterStats', () => {
   });
 
   describe('calculateMaxHp', () => {
-    it('Lv1 CON10 Adventurer = 40 HP', () => {
-      expect(calculateMaxHp(1, 10)).toBe(BASE_HP + 10); // 30 + 10 = 40
+    it('Knight Lv1 = 50 HP', () => {
+      expect(calculateMaxHp(1, 'Knight')).toBe(50);
     });
 
-    it('Lv2 CON10 Adventurer = 45 HP', () => {
-      expect(calculateMaxHp(2, 10)).toBe(BASE_HP + HP_PER_LEVEL + 10); // 30 + 5 + 10 = 45
+    it('Knight Lv5 = 50 + 4*5 = 70 HP', () => {
+      expect(calculateMaxHp(5, 'Knight')).toBe(70);
     });
 
-    it('Lv5 CON15 Adventurer = 65 HP', () => {
-      expect(calculateMaxHp(5, 15)).toBe(BASE_HP + 4 * HP_PER_LEVEL + 15); // 30 + 20 + 15 = 65
+    it('Archer Lv1 = 8 HP', () => {
+      expect(calculateMaxHp(1, 'Archer')).toBe(8);
     });
 
-    it('Knight Lv1 applies 0.6x HP multiplier', () => {
-      // Knight CON=20: base = 30 + 0 + 20 = 50, * 0.6 = 30
-      expect(calculateMaxHp(1, 20, 'Knight')).toBe(30);
+    it('Priest Lv1 = 20 HP', () => {
+      expect(calculateMaxHp(1, 'Priest')).toBe(20);
     });
 
-    it('Archer Lv1 applies 0.2x HP multiplier', () => {
-      // Archer CON=4: base = 30 + 0 + 4 = 34, * 0.2 = 6 (floor)
-      expect(calculateMaxHp(1, 4, 'Archer')).toBe(6);
+    it('Mage Lv1 = 8 HP', () => {
+      expect(calculateMaxHp(1, 'Mage')).toBe(8);
     });
 
-    it('Mage Lv1 applies 0.2x HP multiplier', () => {
-      // Mage CON=4: base = 30 + 0 + 4 = 34, * 0.2 = 6
-      expect(calculateMaxHp(1, 4, 'Mage')).toBe(6);
+    it('Bard Lv1 = 10 HP', () => {
+      expect(calculateMaxHp(1, 'Bard')).toBe(10);
     });
 
-    it('Priest Lv1 applies 0.5x HP multiplier', () => {
-      // Priest CON=10: base = 30 + 0 + 10 = 40, * 0.5 = 20
-      expect(calculateMaxHp(1, 10, 'Priest')).toBe(20);
+    it('all classes follow baseHp + (level-1) * hpPerLevel', () => {
+      for (const cn of ALL_CLASS_NAMES) {
+        const def = CLASS_DEFINITIONS[cn];
+        expect(calculateMaxHp(1, cn)).toBe(def.baseHp);
+        expect(calculateMaxHp(10, cn)).toBe(def.baseHp + 9 * def.hpPerLevel);
+      }
+    });
+  });
+
+  describe('calculateBaseDamage', () => {
+    it('Knight Lv1 = 1 damage', () => {
+      expect(calculateBaseDamage(1, 'Knight')).toBe(1);
     });
 
-    it('Bard Lv1 applies 0.3x HP multiplier', () => {
-      // Bard CON=6: base = 30 + 0 + 6 = 36, * 0.3 = 10 (floor)
-      expect(calculateMaxHp(1, 6, 'Bard')).toBe(10);
+    it('Archer Lv1 = 15 damage', () => {
+      expect(calculateBaseDamage(1, 'Archer')).toBe(15);
     });
 
-    it('HP multiplier scales with level', () => {
-      // Knight Lv5 CON=20: base = 30 + 20 + 20 = 70, * 0.6 = 42
-      expect(calculateMaxHp(5, 20, 'Knight')).toBe(42);
+    it('Mage Lv1 = 15 damage', () => {
+      expect(calculateBaseDamage(1, 'Mage')).toBe(15);
+    });
+
+    it('Priest Lv1 = 3 damage', () => {
+      expect(calculateBaseDamage(1, 'Priest')).toBe(3);
+    });
+
+    it('Bard Lv1 = 1 damage', () => {
+      expect(calculateBaseDamage(1, 'Bard')).toBe(1);
+    });
+
+    it('all classes follow baseDamage + (level-1) * damagePerLevel', () => {
+      for (const cn of ALL_CLASS_NAMES) {
+        const def = CLASS_DEFINITIONS[cn];
+        expect(calculateBaseDamage(1, cn)).toBe(def.baseDamage);
+        expect(calculateBaseDamage(10, cn)).toBe(def.baseDamage + 9 * def.damagePerLevel);
+      }
     });
   });
 
@@ -74,63 +90,42 @@ describe('CharacterStats', () => {
       expect(char.className).toBe('Adventurer');
       expect(char.level).toBe(1);
       expect(char.xp).toBe(0);
-      expect(char.priorityStat).toBeNull();
     });
 
-    it('has all stats at 10', () => {
+    it('has empty skill loadout and 0 skill points', () => {
       const char = createDefaultCharacter();
-      for (const stat of ALL_STATS) {
-        expect(char.stats[stat]).toBe(10);
-      }
+      expect(char.skillLoadout.unlockedSkills).toHaveLength(0);
+      expect(char.skillPoints).toBe(0);
     });
   });
 
   describe('createCharacter', () => {
-    it('creates a Knight with Knight base stats', () => {
+    it('creates a Knight with correct class', () => {
       const char = createCharacter('Knight');
       expect(char.className).toBe('Knight');
       expect(char.level).toBe(1);
       expect(char.xp).toBe(0);
-      expect(char.stats.STR).toBe(16);
-      expect(char.stats.CON).toBe(20);
-      expect(char.stats.INT).toBe(8);
     });
 
-    it('creates an Archer with DEX base stats', () => {
-      const char = createCharacter('Archer');
-      expect(char.className).toBe('Archer');
-      expect(char.stats.DEX).toBe(16);
-      expect(char.stats.CON).toBe(4);
+    it('initializes skill loadout with first passive unlocked and equipped', () => {
+      const char = createCharacter('Knight');
+      expect(char.skillLoadout.unlockedSkills).toEqual(['knight_guard']);
+      expect(char.skillLoadout.equippedSkills).toEqual(['knight_guard', null, null]);
     });
 
-    it('creates a Mage with INT base stats', () => {
-      const char = createCharacter('Mage');
-      expect(char.className).toBe('Mage');
-      expect(char.stats.INT).toBe(20);
-      expect(char.stats.CON).toBe(4);
-    });
-
-    it('creates a Priest with WIS base stats', () => {
-      const char = createCharacter('Priest');
-      expect(char.className).toBe('Priest');
-      expect(char.stats.WIS).toBe(16);
-      expect(char.stats.CON).toBe(10);
-    });
-
-    it('creates a Bard with CHA base stats', () => {
-      const char = createCharacter('Bard');
-      expect(char.className).toBe('Bard');
-      expect(char.stats.CHA).toBe(16);
-      expect(char.stats.CON).toBe(6);
-    });
-
-    it('all playable classes have correct base stats from definitions', () => {
+    it('all playable classes get first skill auto-unlocked', () => {
+      const expectedFirstSkills: Record<string, string> = {
+        Knight: 'knight_guard',
+        Archer: 'archer_pierce',
+        Priest: 'priest_bless',
+        Mage: 'mage_burn',
+        Bard: 'bard_rally',
+      };
       for (const cn of ALL_CLASS_NAMES) {
         const char = createCharacter(cn);
-        const def = CLASS_DEFINITIONS[cn];
-        for (const stat of ALL_STATS) {
-          expect(char.stats[stat]).toBe(def.baseStats[stat]);
-        }
+        expect(char.skillLoadout.unlockedSkills).toEqual([expectedFirstSkills[cn]]);
+        expect(char.skillLoadout.equippedSkills[0]).toBe(expectedFirstSkills[cn]);
+        expect(char.skillPoints).toBe(0);
       }
     });
   });
@@ -172,68 +167,61 @@ describe('CharacterStats', () => {
       expect(result.levelsGained).toBe(2);
     });
 
-    it('does NOT allocate stat points on level up', () => {
+    it('grants 1 skill point at level 5', () => {
       const char = createCharacter('Knight');
-      const statsBefore = { ...char.stats };
-      addXp(char, xpForNextLevel(1));
-      for (const stat of ALL_STATS) {
-        expect(char.stats[stat]).toBe(statsBefore[stat]);
-      }
-    });
-  });
-
-  describe('allocateStatPoints', () => {
-    it('with priorityStat, all points go to that stat', () => {
-      const char = createDefaultCharacter();
-      char.priorityStat = 'STR';
-      allocateStatPoints(char, 5);
-      expect(char.stats.STR).toBe(15);
-      // Other stats unchanged
-      expect(char.stats.INT).toBe(10);
-      expect(char.stats.CON).toBe(10);
+      // Leveling from 4 → 5 should grant a skill point
+      char.level = 4;
+      char.xp = 0;
+      addXp(char, xpForNextLevel(4));
+      expect(char.level).toBe(5);
+      expect(char.skillPoints).toBe(1);
     });
 
-    it('without priorityStat, total stat points increase by amount', () => {
-      const char = createDefaultCharacter();
-      const totalBefore = ALL_STATS.reduce((sum, s) => sum + char.stats[s], 0);
-      allocateStatPoints(char, 4);
-      const totalAfter = ALL_STATS.reduce((sum, s) => sum + char.stats[s], 0);
-      expect(totalAfter).toBe(totalBefore + 4);
+    it('grants skill points every 5 levels', () => {
+      const char = createCharacter('Knight');
+      // Fast-forward to level 9
+      char.level = 9;
+      char.xp = 0;
+      char.skillPoints = 1; // already got one at level 5
+      addXp(char, xpForNextLevel(9));
+      expect(char.level).toBe(10);
+      expect(char.skillPoints).toBe(2);
+    });
+
+    it('does NOT grant skill point at non-5 boundaries', () => {
+      const char = createCharacter('Knight');
+      char.level = 2;
+      char.xp = 0;
+      addXp(char, xpForNextLevel(2));
+      expect(char.level).toBe(3);
+      expect(char.skillPoints).toBe(0);
     });
   });
 
   describe('CLASS_DEFINITIONS', () => {
-    it('Knight has null attackStat and physical reduction', () => {
-      const def = CLASS_DEFINITIONS.Knight;
-      expect(def.attackStat).toBeNull();
-      expect(def.physicalReductionBase).toBe(2);
-      expect(def.physicalReductionPerLevel).toBe(1);
+    it('Knight has physical damage type', () => {
+      expect(CLASS_DEFINITIONS.Knight.damageType).toBe('physical');
     });
 
-    it('Archer has DEX attackStat', () => {
-      expect(CLASS_DEFINITIONS.Archer.attackStat).toBe('DEX');
+    it('Priest has holy damage type', () => {
+      expect(CLASS_DEFINITIONS.Priest.damageType).toBe('holy');
     });
 
-    it('Mage has INT attackStat', () => {
-      expect(CLASS_DEFINITIONS.Mage.attackStat).toBe('INT');
-    });
-
-    it('Priest has null attackStat and party magical reduction', () => {
-      const def = CLASS_DEFINITIONS.Priest;
-      expect(def.attackStat).toBeNull();
-      expect(def.partyMagicalReductionBase).toBe(2);
-      expect(def.partyMagicalReductionPerLevel).toBe(1);
-    });
-
-    it('Bard has null attackStat and stat multiplier', () => {
-      const def = CLASS_DEFINITIONS.Bard;
-      expect(def.attackStat).toBeNull();
-      expect(def.bardStatMultiplierPerMember).toBe(0.20);
+    it('Mage has magical damage type', () => {
+      expect(CLASS_DEFINITIONS.Mage.damageType).toBe('magical');
     });
 
     it('ALL_CLASS_NAMES excludes Adventurer', () => {
       expect(ALL_CLASS_NAMES).not.toContain('Adventurer');
       expect(ALL_CLASS_NAMES).toHaveLength(5);
+    });
+
+    it('all classes have positive baseHp and baseDamage', () => {
+      for (const cn of ALL_CLASS_NAMES) {
+        const def = CLASS_DEFINITIONS[cn];
+        expect(def.baseHp).toBeGreaterThan(0);
+        expect(def.baseDamage).toBeGreaterThan(0);
+      }
     });
   });
 });

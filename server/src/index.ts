@@ -218,21 +218,40 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      if (msg.type === 'set_priority_stat') {
+      if (msg.type === 'unlock_skill' && typeof msg.skillId === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) {
           ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
           return;
         }
+        if (!session.handleUnlockSkill(msg.skillId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot unlock skill' }));
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
 
-        const validStats = ['STR', 'INT', 'WIS', 'DEX', 'CON', 'CHA'];
-        const stat = msg.stat;
-        if (stat !== null && !validStats.includes(stat)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid stat' }));
+      if (msg.type === 'equip_skill' && typeof msg.skillId === 'string' && typeof msg.slotIndex === 'number') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
           return;
         }
+        if (!session.handleEquipSkill(msg.skillId, msg.slotIndex)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip skill' }));
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
 
-        session.setPriorityStat(stat);
+      if (msg.type === 'unequip_skill' && typeof msg.slotIndex === 'number') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        session.handleUnequipSkill(msg.slotIndex);
+        playerManager.sendStateToPlayer(username);
         return;
       }
 

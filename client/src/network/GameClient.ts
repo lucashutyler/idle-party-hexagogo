@@ -182,8 +182,16 @@ export class GameClient {
     this.sendRaw({ type: 'move', col, row });
   }
 
-  sendSetPriorityStat(stat: string | null): void {
-    this.sendRaw({ type: 'set_priority_stat', stat });
+  sendUnlockSkill(skillId: string): void {
+    this.sendRaw({ type: 'unlock_skill', skillId });
+  }
+
+  sendEquipSkill(skillId: string, slotIndex: number): void {
+    this.sendRaw({ type: 'equip_skill', skillId, slotIndex });
+  }
+
+  sendUnequipSkill(slotIndex: number): void {
+    this.sendRaw({ type: 'unequip_skill', slotIndex });
   }
 
   sendSetClass(className: string): void {

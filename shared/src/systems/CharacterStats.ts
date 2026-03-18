@@ -1,35 +1,20 @@
+import type { SkillLoadout } from './SkillTypes.js';
+import { createDefaultSkillLoadout } from './SkillTypes.js';
+
 // --- Types ---
 
 export type ClassName = 'Adventurer' | 'Knight' | 'Archer' | 'Priest' | 'Mage' | 'Bard';
 
-export type DamageType = 'physical' | 'magical';
-
-export type StatName = 'STR' | 'INT' | 'WIS' | 'DEX' | 'CON' | 'CHA';
-
-export interface StatBlock {
-  STR: number;
-  INT: number;
-  WIS: number;
-  DEX: number;
-  CON: number;
-  CHA: number;
-}
+export type DamageType = 'physical' | 'magical' | 'holy';
 
 export interface ClassDefinition {
   displayName: string;
   description: string;
-  baseStats: Readonly<StatBlock>;
-  hpMultiplier: number;
-  /** Which stat drives attack damage. null = no stat scaling (base damage 0). */
-  attackStat: StatName | null;
-  /** Flat physical damage reduction for this player. */
-  physicalReductionBase: number;
-  physicalReductionPerLevel: number;
-  /** Party-wide magical damage reduction (from each alive player of this class). */
-  partyMagicalReductionBase: number;
-  partyMagicalReductionPerLevel: number;
-  /** Bard: percentage buff to all stats per party member. 0 for non-bards. */
-  bardStatMultiplierPerMember: number;
+  baseHp: number;
+  hpPerLevel: number;
+  baseDamage: number;
+  damagePerLevel: number;
+  damageType: DamageType;
 }
 
 export interface CharacterState {
@@ -37,10 +22,10 @@ export interface CharacterState {
   level: number;
   xp: number;
   gold: number;
-  stats: StatBlock;
-  priorityStat: StatName | null;
   inventory: Record<string, number>;
   equipment: Record<string, string | null>;
+  skillLoadout: SkillLoadout;
+  skillPoints: number;
 }
 
 // --- Constants ---
@@ -55,139 +40,112 @@ export const CLASS_ICONS: Record<string, string> = {
 export const UNKNOWN_CLASS_ICON = '\u2753'; // ❓
 export const SERVER_ICON = '\uD83D\uDDA5\uFE0F'; // 🖥️
 
-export const ALL_STATS: StatName[] = ['STR', 'INT', 'WIS', 'DEX', 'CON', 'CHA'];
-
-export const BASE_STATS: Readonly<StatBlock> = {
-  STR: 10,
-  INT: 10,
-  WIS: 10,
-  DEX: 10,
-  CON: 10,
-  CHA: 10,
-};
-
 export const CLASS_DEFINITIONS: Record<ClassName, ClassDefinition> = {
   Adventurer: {
     displayName: 'Adventurer',
     description: 'Legacy class. Pick a real class!',
-    baseStats: { ...BASE_STATS },
-    hpMultiplier: 1.0,
-    attackStat: 'STR',
-    physicalReductionBase: 0,
-    physicalReductionPerLevel: 0,
-    partyMagicalReductionBase: 0,
-    partyMagicalReductionPerLevel: 0,
-    bardStatMultiplierPerMember: 0,
+    baseHp: 30,
+    hpPerLevel: 5,
+    baseDamage: 5,
+    damagePerLevel: 1,
+    damageType: 'physical',
   },
   Knight: {
     displayName: 'Knight',
-    description: 'Full defense, very little damage, high HP. Passive physical damage reduction scales with level.',
-    baseStats: { STR: 16, INT: 8, WIS: 8, DEX: 8, CON: 20, CHA: 8 },
-    hpMultiplier: 0.6,
-    attackStat: null,
-    physicalReductionBase: 2,
-    physicalReductionPerLevel: 1,
-    partyMagicalReductionBase: 0,
-    partyMagicalReductionPerLevel: 0,
-    bardStatMultiplierPerMember: 0,
+    description: 'Massive HP pool, low damage. Guard reduces physical damage taken.',
+    baseHp: 50,
+    hpPerLevel: 5,
+    baseDamage: 1,
+    damagePerLevel: 1,
+    damageType: 'physical',
   },
   Archer: {
     displayName: 'Archer',
-    description: 'Full physical offense, extremely weak HP. DEX-based damage.',
-    baseStats: { STR: 4, INT: 8, WIS: 8, DEX: 16, CON: 4, CHA: 8 },
-    hpMultiplier: 0.2,
-    attackStat: 'DEX',
-    physicalReductionBase: 0,
-    physicalReductionPerLevel: 0,
-    partyMagicalReductionBase: 0,
-    partyMagicalReductionPerLevel: 0,
-    bardStatMultiplierPerMember: 0,
+    description: 'High physical damage, very low HP. Pierce gives critical hits.',
+    baseHp: 8,
+    hpPerLevel: 1,
+    baseDamage: 15,
+    damagePerLevel: 2,
+    damageType: 'physical',
   },
   Priest: {
     displayName: 'Priest',
-    description: 'Passive magical damage reduction for the entire party, scales with level. Mid HP.',
-    baseStats: { STR: 8, INT: 8, WIS: 16, DEX: 8, CON: 10, CHA: 8 },
-    hpMultiplier: 0.5,
-    attackStat: null,
-    physicalReductionBase: 0,
-    physicalReductionPerLevel: 0,
-    partyMagicalReductionBase: 2,
-    partyMagicalReductionPerLevel: 1,
-    bardStatMultiplierPerMember: 0,
+    description: 'Holy damage, moderate HP. Bless reduces magical damage for the party.',
+    baseHp: 20,
+    hpPerLevel: 2,
+    baseDamage: 3,
+    damagePerLevel: 1,
+    damageType: 'holy',
   },
   Mage: {
     displayName: 'Mage',
-    description: 'Full magic damage, extremely weak HP. INT-based damage.',
-    baseStats: { STR: 4, INT: 20, WIS: 8, DEX: 8, CON: 4, CHA: 8 },
-    hpMultiplier: 0.2,
-    attackStat: 'INT',
-    physicalReductionBase: 0,
-    physicalReductionPerLevel: 0,
-    partyMagicalReductionBase: 0,
-    partyMagicalReductionPerLevel: 0,
-    bardStatMultiplierPerMember: 0,
+    description: 'High magical damage, very low HP. Burn increases damage per level.',
+    baseHp: 8,
+    hpPerLevel: 1,
+    baseDamage: 15,
+    damagePerLevel: 2,
+    damageType: 'magical',
   },
   Bard: {
     displayName: 'Bard',
-    description: 'Increases all stats of the party by 20% per member. Weak alone, godlike in groups.',
-    baseStats: { STR: 8, INT: 8, WIS: 8, DEX: 8, CON: 6, CHA: 16 },
-    hpMultiplier: 0.3,
-    attackStat: null,
-    physicalReductionBase: 0,
-    physicalReductionPerLevel: 0,
-    partyMagicalReductionBase: 0,
-    partyMagicalReductionPerLevel: 0,
-    bardStatMultiplierPerMember: 0.20,
+    description: 'Low stats, but Rally boosts party damage by 20% per member.',
+    baseHp: 10,
+    hpPerLevel: 1,
+    baseDamage: 1,
+    damagePerLevel: 1,
+    damageType: 'physical',
   },
 };
 
 /** Playable class names (excludes legacy Adventurer). */
 export const ALL_CLASS_NAMES: ClassName[] = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'];
 
-export const STAT_POINTS_PER_LEVEL = 2;
-export const BASE_HP = 30;
-export const HP_PER_LEVEL = 5;
 export const MAX_GOLD = 999_999_999;
 
 // --- Pure functions ---
+
+/** Max HP = baseHp + (level - 1) * hpPerLevel. */
+export function calculateMaxHp(level: number, className: ClassName): number {
+  const def = CLASS_DEFINITIONS[className];
+  return def.baseHp + (level - 1) * def.hpPerLevel;
+}
+
+/** Base damage = baseDamage + (level - 1) * damagePerLevel. */
+export function calculateBaseDamage(level: number, className: ClassName): number {
+  const def = CLASS_DEFINITIONS[className];
+  return def.baseDamage + (level - 1) * def.damagePerLevel;
+}
 
 /** XP required to advance from `level` to `level + 1`. */
 export function xpForNextLevel(level: number): number {
   return Math.floor(18000 * Math.pow(level, 1.2) * Math.pow(1.06, level));
 }
 
-/** Max HP = floor((30 + (level-1)*5 + CON) * hpMultiplier). */
-export function calculateMaxHp(level: number, con: number, className: ClassName = 'Adventurer'): number {
-  const base = BASE_HP + (level - 1) * HP_PER_LEVEL + con;
-  return Math.floor(base * CLASS_DEFINITIONS[className].hpMultiplier);
-}
-
-/** Create a fresh Level 1 Adventurer with base stats (legacy, for backward compat). */
+/** Create a fresh Level 1 Adventurer (legacy, for backward compat). */
 export function createDefaultCharacter(): CharacterState {
   return {
     className: 'Adventurer',
     level: 1,
     xp: 0,
     gold: 0,
-    stats: { ...BASE_STATS },
-    priorityStat: null,
     inventory: {},
     equipment: { head: null, chest: null, hand: null, foot: null },
+    skillLoadout: { unlockedSkills: [], equippedSkills: [null, null, null] },
+    skillPoints: 0,
   };
 }
 
 /** Create a fresh Level 1 character of the given class. */
 export function createCharacter(className: ClassName): CharacterState {
-  const def = CLASS_DEFINITIONS[className];
   return {
     className,
     level: 1,
     xp: 0,
     gold: 0,
-    stats: { ...def.baseStats },
-    priorityStat: null,
     inventory: {},
     equipment: { head: null, chest: null, hand: null, foot: null },
+    skillLoadout: createDefaultSkillLoadout(className),
+    skillPoints: 0,
   };
 }
 
@@ -201,33 +159,24 @@ export function addGold(char: CharacterState, amount: number): number {
 /**
  * Add XP to a character, leveling up as needed.
  * Mutates `char` in place. Returns info about level-ups.
+ * Grants 1 skill point every 5 levels.
  */
 export function addXp(char: CharacterState, amount: number): { leveledUp: boolean; levelsGained: number } {
   char.xp += amount;
   let levelsGained = 0;
+  const LEVELS_PER_SKILL_POINT = 5;
 
   while (char.xp >= xpForNextLevel(char.level)) {
     char.xp -= xpForNextLevel(char.level);
+    const oldLevel = char.level;
     char.level++;
     levelsGained++;
-    // Stats no longer increase on level-up. Class passives scale with level instead.
+
+    // Grant skill point if crossing a 5-level boundary
+    if (Math.floor(char.level / LEVELS_PER_SKILL_POINT) > Math.floor(oldLevel / LEVELS_PER_SKILL_POINT)) {
+      char.skillPoints++;
+    }
   }
 
   return { leveledUp: levelsGained > 0, levelsGained };
-}
-
-/**
- * Allocate stat points to a character.
- * If `priorityStat` is set, all points go there.
- * Otherwise, points are distributed randomly among all stats.
- */
-export function allocateStatPoints(char: CharacterState, points: number): void {
-  for (let i = 0; i < points; i++) {
-    if (char.priorityStat) {
-      char.stats[char.priorityStat]++;
-    } else {
-      const stat = ALL_STATS[Math.floor(Math.random() * ALL_STATS.length)];
-      char.stats[stat]++;
-    }
-  }
 }

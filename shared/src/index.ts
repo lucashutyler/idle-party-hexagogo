@@ -37,33 +37,53 @@ export { UnlockSystem } from './systems/UnlockSystem.js';
 
 // Character stats
 export {
-  ALL_STATS,
-  BASE_STATS,
   CLASS_DEFINITIONS,
   CLASS_ICONS,
   UNKNOWN_CLASS_ICON,
   SERVER_ICON,
   ALL_CLASS_NAMES,
-  STAT_POINTS_PER_LEVEL,
-  BASE_HP,
-  HP_PER_LEVEL,
   MAX_GOLD,
   xpForNextLevel,
   calculateMaxHp,
+  calculateBaseDamage,
   createDefaultCharacter,
   createCharacter,
   addXp,
   addGold,
-  allocateStatPoints,
 } from './systems/CharacterStats.js';
 export type {
   ClassName,
   DamageType,
-  StatName,
-  StatBlock,
   CharacterState,
   ClassDefinition,
 } from './systems/CharacterStats.js';
+
+// Skill types
+export {
+  SKILL_SLOTS,
+  SKILL_TREES,
+  LEVELS_PER_SKILL_POINT,
+  getSkillPointsForLevel,
+  getAvailableSkillPoints,
+  canUnlockSkill,
+  unlockSkill,
+  canEquipSkill,
+  equipSkillInSlot,
+  unequipSkillFromSlot,
+  createDefaultSkillLoadout,
+  getSkillById,
+} from './systems/SkillTypes.js';
+export type {
+  SkillSlotType,
+  SkillId,
+  SkillSlot,
+  PassiveEffectKind,
+  PassiveEffect,
+  ActiveEffectKind,
+  ActiveEffect,
+  SkillDefinition,
+  SkillLoadout,
+} from './systems/SkillTypes.js';
 
 // Item types
 export {
@@ -112,15 +132,11 @@ export type {
 
 // Combat engine
 export {
-  createCombatState,
-  processTick,
   createPartyCombatState,
   processPartyTick,
   findTarget,
 } from './systems/CombatEngine.js';
 export type {
-  CombatantState,
-  CombatState,
   TickResult,
   PartyCombatant,
   PartyCombatState,
@@ -146,7 +162,6 @@ export type {
   ServerStateMessage,
   ClientMoveMessage,
   ClientRequestStateMessage,
-  ClientSetPriorityStatMessage,
   ClientEquipItemMessage,
   ClientUnequipItemMessage,
   ClientDestroyItemsMessage,
@@ -154,6 +169,9 @@ export type {
   ServerEquipBlockedMessage,
   ClientSetClassMessage,
   ClientResetXpRateMessage,
+  ClientUnlockSkillMessage,
+  ClientEquipSkillMessage,
+  ClientUnequipSkillMessage,
   ServerMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';
