@@ -1,6 +1,6 @@
 import type { Screen } from './ScreenManager';
 import type { GameClient } from '../network/GameClient';
-import { ALL_CLASS_NAMES, CLASS_DEFINITIONS } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, CLASS_DEFINITIONS, SKILL_TREES } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 
 const CLASS_ICONS: Record<string, string> = {
@@ -41,20 +41,9 @@ export class ClassSelectScreen implements Screen {
   private buildDOM(): void {
     const cards = ALL_CLASS_NAMES.map(cn => {
       const def = CLASS_DEFINITIONS[cn];
-      const stats = def.baseStats;
-      const atkLabel = def.attackStat
-        ? `${def.attackStat} ${stats[def.attackStat]}`
-        : 'None';
-      const hpLabel = `${def.hpMultiplier}x`;
-
-      let passiveText = 'No passive';
-      if (def.physicalReductionBase > 0 || def.physicalReductionPerLevel > 0) {
-        passiveText = `Physical reduction: ${def.physicalReductionBase}+${def.physicalReductionPerLevel}/lv`;
-      } else if (def.partyMagicalReductionBase > 0 || def.partyMagicalReductionPerLevel > 0) {
-        passiveText = `Party magic resist: ${def.partyMagicalReductionBase}+${def.partyMagicalReductionPerLevel}/lv`;
-      } else if (def.bardStatMultiplierPerMember > 0) {
-        passiveText = `+${Math.round(def.bardStatMultiplierPerMember * 100)}% stats/member`;
-      }
+      const tree = SKILL_TREES[cn] ?? [];
+      const startingSkill = tree.find(s => s.treeOrder === 0);
+      const skillText = startingSkill ? `${startingSkill.name}: ${startingSkill.description}` : 'No starting skill';
 
       return `
         <div class="class-card" data-class="${cn}">
@@ -64,11 +53,10 @@ export class ClassSelectScreen implements Screen {
           </div>
           <div class="class-card-desc">${def.description}</div>
           <div class="class-card-stats">
-            <span>ATK: ${atkLabel}</span>
-            <span>HP: ${hpLabel}</span>
-            <span>CON: ${stats.CON}</span>
+            <span>HP: ${def.baseHp} +${def.hpPerLevel}/lv</span>
+            <span>DMG: ${def.baseDamage} +${def.damagePerLevel}/lv (${def.damageType})</span>
           </div>
-          <div class="class-card-passive">${passiveText}</div>
+          <div class="class-card-passive">${skillText}</div>
         </div>
       `;
     }).join('');

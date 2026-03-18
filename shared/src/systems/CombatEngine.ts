@@ -1,27 +1,10 @@
-import { ALL_STATS, CLASS_DEFINITIONS, calculateMaxHp } from './CharacterStats.js';
-import type { StatBlock, ClassName } from './CharacterStats.js';
+import type { ClassName, DamageType } from './CharacterStats.js';
 import type { MonsterInstance } from './MonsterTypes.js';
 import type { EquipmentBonuses } from './ItemTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
+import type { SkillDefinition } from './SkillTypes.js';
 
 // --- Types ---
-
-export interface CombatantState {
-  name: string;
-  level: number;
-  maxHp: number;
-  currentHp: number;
-}
-
-export interface CombatState {
-  player: CombatantState;
-  monsters: MonsterInstance[];
-  stats: StatBlock;
-  equipBonuses?: EquipmentBonuses;
-  tickCount: number;
-  finished: boolean;
-  result: 'victory' | 'defeat' | null;
-}
 
 export interface TickResult {
   /** Log lines generated this tick (damage dealt, kills, etc.). */
@@ -38,11 +21,18 @@ export interface PartyCombatant {
   username: string;
   maxHp: number;
   currentHp: number;
-  stats: StatBlock;
+  baseDamage: number;
+  playerDamageType: DamageType;
   equipBonuses?: EquipmentBonuses;
   gridPosition: PartyGridPosition;
   className: ClassName;
   level: number;
+  /** Resolved equipped skill definitions (indexed by slot). */
+  equippedSkills: (SkillDefinition | null)[];
+  /** Number of attacks this combatant has made (for cooldown tracking). */
+  attackCount: number;
+  /** Remaining stun turns (0 = not stunned). */
+  stunTurns: number;
 }
 
 export interface CombatAction {
@@ -56,6 +46,14 @@ export interface CombatAction {
   targetSide: 'player' | 'monster' | null;
   /** Whether the target dodged */
   dodged: boolean;
+  /** Name of the skill used (if any) */
+  skillName?: string;
+  /** Whether a stun was applied */
+  stunApplied?: boolean;
+  /** Amount healed (if any) */
+  healAmount?: number;
+  /** Username of the heal target */
+  healTarget?: string;
 }
 
 export interface PartyCombatState {
@@ -70,6 +68,8 @@ export interface PartyCombatState {
   turnOrderSize: number;
   /** The action that occurred on the most recent tick (null before first tick). */
   lastAction: CombatAction | null;
+  /** Bard Rally damage multiplier (precomputed at combat start). */
+  rallyMultiplier: number;
 }
 
 // --- Grid Targeting ---
@@ -139,99 +139,91 @@ function pickByCol<T extends { gridPosition: PartyGridPosition }>(
   });
 }
 
-// --- Single-player combat (legacy, kept for compatibility) ---
-
-/** Create initial combat state for a battle. */
-export function createCombatState(
-  playerName: string,
-  level: number,
-  stats: StatBlock,
-  maxHp: number,
-  monsters: MonsterInstance[],
-  equipBonuses?: EquipmentBonuses,
-): CombatState {
-  return {
-    player: {
-      name: playerName,
-      level,
-      maxHp,
-      currentHp: maxHp,
-    },
-    monsters,
-    stats,
-    equipBonuses,
-    tickCount: 0,
-    finished: false,
-    result: null,
-  };
+/** Find the target with the lowest current HP (for Cut Down). */
+function findLowestHpTarget<T extends { currentHp: number }>(targets: T[]): T | null {
+  const alive = targets.filter(t => t.currentHp > 0);
+  if (alive.length === 0) return null;
+  return alive.reduce((lowest, t) => t.currentHp < lowest.currentHp ? t : lowest);
 }
 
-/**
- * Process one combat tick (1 second of combat).
- * Mutates `state` in place.
- *
- * Order: player attacks first alive monster, then all alive monsters attack player.
- */
-export function processTick(state: CombatState): TickResult {
-  if (state.finished) {
-    return { logEntries: [], finished: true, result: state.result };
-  }
+/** Find the ally with the lowest HP percentage (for Minor Heal). */
+function findLowestPercentHpAlly(players: PartyCombatant[]): PartyCombatant | null {
+  const alive = players.filter(p => p.currentHp > 0);
+  if (alive.length === 0) return null;
+  return alive.reduce((lowest, p) => {
+    const lowestPct = lowest.currentHp / lowest.maxHp;
+    const pPct = p.currentHp / p.maxHp;
+    return pPct < lowestPct ? p : lowest;
+  });
+}
 
-  state.tickCount++;
-  const logEntries: string[] = [];
+// --- Passive Helpers ---
 
-  // --- Player attacks ---
-  const target = state.monsters.find(m => m.currentHp > 0);
-  if (target) {
-    const baseDamage = state.stats.STR;
-    const variance = Math.floor(Math.random() * 5) - 2; // -2 to +2
-    let attackBonus = 0;
-    if (state.equipBonuses && state.equipBonuses.bonusAttackMax > 0) {
-      const { bonusAttackMin, bonusAttackMax } = state.equipBonuses;
-      attackBonus = bonusAttackMin + Math.floor(Math.random() * (bonusAttackMax - bonusAttackMin + 1));
-    }
-    const damage = Math.max(1, baseDamage + variance + attackBonus);
-    target.currentHp = Math.max(0, target.currentHp - damage);
-    logEntries.push(`${state.player.name} hits ${target.name} for ${damage} damage`);
-
-    if (target.currentHp <= 0) {
-      logEntries.push(`${target.name} defeated!`);
+/** Get total physical damage reduction for a target from Knight Guard passives. */
+function getPhysicalReduction(target: PartyCombatant, _allPlayers: PartyCombatant[]): number {
+  // Knight Guard is self-only physical reduction
+  if (target.currentHp <= 0) return 0;
+  let reduction = 0;
+  // Only the target's own Guard applies (self-only)
+  for (const skill of target.equippedSkills) {
+    if (skill && skill.passiveEffect?.kind === 'physical_reduction') {
+      reduction += (skill.passiveEffect.valuePerLevel ?? 0) * target.level;
     }
   }
+  return reduction;
+}
 
-  // Check for victory
-  if (state.monsters.every(m => m.currentHp <= 0)) {
-    state.finished = true;
-    state.result = 'victory';
-    return { logEntries, finished: true, result: 'victory' };
-  }
-
-  // --- Monsters attack ---
-  for (const monster of state.monsters) {
-    if (monster.currentHp <= 0) continue;
-    // Dodge check
-    if (state.equipBonuses && state.equipBonuses.dodgeChance > 0 && Math.random() < state.equipBonuses.dodgeChance) {
-      logEntries.push(`${state.player.name} dodges ${monster.name}'s attack!`);
-      continue;
+/** Get total magical/holy damage reduction from all alive Priests with Bless (party-wide). */
+function getMagicalReduction(allPlayers: PartyCombatant[]): number {
+  let reduction = 0;
+  for (const p of allPlayers) {
+    if (p.currentHp <= 0) continue;
+    for (const skill of p.equippedSkills) {
+      if (skill && skill.passiveEffect?.kind === 'magical_reduction_party') {
+        reduction += (skill.passiveEffect.valuePerLevel ?? 0) * p.level;
+      }
     }
-    let reduction = 0;
-    if (state.equipBonuses && state.equipBonuses.damageReductionMax > 0) {
-      const { damageReductionMin, damageReductionMax } = state.equipBonuses;
-      reduction = damageReductionMin + Math.floor(Math.random() * (damageReductionMax - damageReductionMin + 1));
+  }
+  return reduction;
+}
+
+/** Get crit chance from equipped passives. */
+function getCritChance(player: PartyCombatant): number {
+  let chance = 0;
+  for (const skill of player.equippedSkills) {
+    if (skill && skill.passiveEffect?.kind === 'crit_chance') {
+      chance += skill.passiveEffect.flatValue ?? 0;
     }
-    const damage = Math.max(0, monster.damage - reduction);
-    state.player.currentHp = Math.max(0, state.player.currentHp - damage);
-    logEntries.push(`${monster.name} hits ${state.player.name} for ${damage} damage`);
   }
+  return chance;
+}
 
-  // Check for defeat
-  if (state.player.currentHp <= 0) {
-    state.finished = true;
-    state.result = 'defeat';
-    return { logEntries, finished: true, result: 'defeat' };
+/** Compute rally multiplier from all Bards with Rally equipped. */
+function computeRallyMultiplier(players: PartyCombatant[]): number {
+  const partySize = players.length;
+  let totalMult = 0;
+  for (const p of players) {
+    for (const skill of p.equippedSkills) {
+      if (skill && skill.passiveEffect?.kind === 'party_damage_mult' && skill.passiveEffect.perPartyMember) {
+        totalMult += (skill.passiveEffect.flatValue ?? 0) * partySize;
+      }
+    }
   }
+  return totalMult;
+}
 
-  return { logEntries, finished: false, result: null };
+// --- Combat Helpers ---
+
+function computeAttackBonus(equipBonuses?: EquipmentBonuses): number {
+  if (!equipBonuses || equipBonuses.bonusAttackMax <= 0) return 0;
+  const { bonusAttackMin, bonusAttackMax } = equipBonuses;
+  return bonusAttackMin + Math.floor(Math.random() * (bonusAttackMax - bonusAttackMin + 1));
+}
+
+function computeEquipReduction(equipBonuses?: EquipmentBonuses): number {
+  if (!equipBonuses || equipBonuses.damageReductionMax <= 0) return 0;
+  const { damageReductionMin, damageReductionMax } = equipBonuses;
+  return damageReductionMin + Math.floor(Math.random() * (damageReductionMax - damageReductionMin + 1));
 }
 
 // --- Party Combat ---
@@ -239,8 +231,6 @@ export function processTick(state: CombatState): TickResult {
 /**
  * Create initial party combat state.
  * Players and monsters are sorted into turn order: front-to-back, top-to-bottom.
- * - Players: high column first (front line), then low row first (top)
- * - Monsters: low column first (front line), then low row first (top)
  */
 export function createPartyCombatState(
   players: PartyCombatant[],
@@ -249,40 +239,34 @@ export function createPartyCombatState(
   // Sort players: front-to-back (high col first), then top-to-bottom (low row first)
   const sortedPlayers = players.map(p => ({
     ...p,
-    stats: { ...p.stats },
+    equippedSkills: [...p.equippedSkills],
     currentHp: p.maxHp,
+    attackCount: 0,
+    stunTurns: 0,
   })).sort((a, b) => {
-    const colDiff = getCol(b.gridPosition) - getCol(a.gridPosition); // high col first
+    const colDiff = getCol(b.gridPosition) - getCol(a.gridPosition);
     if (colDiff !== 0) return colDiff;
-    return getRow(a.gridPosition) - getRow(b.gridPosition); // low row first
+    return getRow(a.gridPosition) - getRow(b.gridPosition);
   });
 
-  // Apply Bard stat buff: +bardStatMultiplierPerMember * partySize to all players
-  const partySize = sortedPlayers.length;
-  let totalBardMultiplier = 0;
+  // Apply Mage Burn bonus damage at combat start
   for (const p of sortedPlayers) {
-    const def = CLASS_DEFINITIONS[p.className];
-    if (def.bardStatMultiplierPerMember > 0) {
-      totalBardMultiplier += def.bardStatMultiplierPerMember * partySize;
-    }
-  }
-  if (totalBardMultiplier > 0) {
-    for (const p of sortedPlayers) {
-      for (const stat of ALL_STATS) {
-        p.stats[stat] = Math.floor(p.stats[stat] * (1 + totalBardMultiplier));
+    for (const skill of p.equippedSkills) {
+      if (skill && skill.passiveEffect?.kind === 'bonus_damage') {
+        p.baseDamage += (skill.passiveEffect.valuePerLevel ?? 0) * p.level;
       }
-      // Recalculate maxHp with buffed CON
-      p.maxHp = calculateMaxHp(p.level, p.stats.CON, p.className);
-      p.currentHp = p.maxHp;
     }
   }
 
+  // Compute Bard Rally multiplier
+  const rallyMultiplier = computeRallyMultiplier(sortedPlayers);
+
   // Sort monsters: front-to-back (low col first), then top-to-bottom (low row first)
-  const sortedMonsters = [...monsters]
+  const sortedMonsters = monsters.map(m => ({ ...m, stunTurns: m.stunTurns ?? 0 }))
     .sort((a, b) => {
-      const colDiff = getCol(a.gridPosition) - getCol(b.gridPosition); // low col first
+      const colDiff = getCol(a.gridPosition) - getCol(b.gridPosition);
       if (colDiff !== 0) return colDiff;
-      return getRow(a.gridPosition) - getRow(b.gridPosition); // low row first
+      return getRow(a.gridPosition) - getRow(b.gridPosition);
     });
 
   return {
@@ -294,15 +278,172 @@ export function createPartyCombatState(
     turnIndex: 0,
     turnOrderSize: sortedPlayers.length + sortedMonsters.length,
     lastAction: null,
+    rallyMultiplier,
   };
+}
+
+/**
+ * Execute a player's active skill.
+ * Returns log entries generated by the skill.
+ */
+function executeActiveSkill(
+  player: PartyCombatant,
+  skill: SkillDefinition,
+  state: PartyCombatState,
+): { logEntries: string[]; action: CombatAction } {
+  const logEntries: string[] = [];
+  const effect = skill.activeEffect!;
+
+  switch (effect.kind) {
+    case 'stun_single': {
+      // Knight Bash: normal damage + chance to stun target
+      const target = findTarget(player.gridPosition, state.monsters, false);
+      if (!target) {
+        return {
+          logEntries,
+          action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: null, targetSide: null, dodged: false, skillName: skill.name },
+        };
+      }
+
+      const damage = computePlayerDamage(player, state.rallyMultiplier);
+      target.currentHp = Math.max(0, target.currentHp - damage);
+      logEntries.push(`${player.username} uses ${skill.name} on ${target.name} for ${damage} damage`);
+
+      let stunApplied = false;
+      if (target.currentHp > 0 && Math.random() < (effect.stunChance ?? 0)) {
+        target.stunTurns = 1;
+        stunApplied = true;
+        logEntries.push(`${target.name} is stunned!`);
+      }
+
+      if (target.currentHp <= 0) {
+        logEntries.push(`${target.name} defeated!`);
+      }
+
+      return {
+        logEntries,
+        action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: target.gridPosition, targetSide: 'monster', dodged: false, skillName: skill.name, stunApplied },
+      };
+    }
+
+    case 'stun_aoe': {
+      // Bard Drumroll: chance to stun each alive enemy, no damage
+      let anyStunned = false;
+      for (const monster of state.monsters) {
+        if (monster.currentHp <= 0) continue;
+        if (Math.random() < (effect.stunChance ?? 0)) {
+          monster.stunTurns = 1;
+          anyStunned = true;
+          logEntries.push(`${player.username}'s ${skill.name} stuns ${monster.name}!`);
+        }
+      }
+      if (!anyStunned) {
+        logEntries.push(`${player.username} uses ${skill.name} but no enemies are stunned`);
+      }
+
+      return {
+        logEntries,
+        action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: null, targetSide: null, dodged: false, skillName: skill.name, stunApplied: anyStunned },
+      };
+    }
+
+    case 'heal_lowest': {
+      // Priest Minor Heal: heal lowest % HP ally
+      const healTarget = findLowestPercentHpAlly(state.players);
+      if (!healTarget) {
+        return {
+          logEntries,
+          action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: null, targetSide: null, dodged: false, skillName: skill.name },
+        };
+      }
+
+      const healAmount = Math.min(
+        player.level * (effect.healMultiplier ?? 4),
+        healTarget.maxHp - healTarget.currentHp,
+      );
+      healTarget.currentHp += healAmount;
+      logEntries.push(`${player.username} uses ${skill.name} on ${healTarget.username} for ${healAmount} HP`);
+
+      return {
+        logEntries,
+        action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: healTarget.gridPosition, targetSide: 'player', dodged: false, skillName: skill.name, healAmount, healTarget: healTarget.username },
+      };
+    }
+
+    case 'multi_hit': {
+      // Mage Magic Missile: multiple hits at % damage
+      const hitCount = effect.hitCount ?? 4;
+      const pct = effect.damagePercent ?? 0.30;
+      const rawDamage = computePlayerDamage(player, state.rallyMultiplier);
+      const perHitDamage = Math.max(1, Math.floor(rawDamage * pct));
+
+      let lastTarget: MonsterInstance | null = null;
+      for (let i = 0; i < hitCount; i++) {
+        const target = findTarget(player.gridPosition, state.monsters, false);
+        if (!target) break;
+        lastTarget = target;
+        target.currentHp = Math.max(0, target.currentHp - perHitDamage);
+        logEntries.push(`${player.username}'s ${skill.name} hits ${target.name} for ${perHitDamage} damage`);
+        if (target.currentHp <= 0) {
+          logEntries.push(`${target.name} defeated!`);
+        }
+      }
+
+      return {
+        logEntries,
+        action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: lastTarget?.gridPosition ?? null, targetSide: lastTarget ? 'monster' : null, dodged: false, skillName: skill.name },
+      };
+    }
+
+    case 'target_lowest_hp': {
+      // Archer Cut Down: normal damage but targets lowest HP enemy
+      const target = findLowestHpTarget(state.monsters);
+      if (!target) {
+        return {
+          logEntries,
+          action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: null, targetSide: null, dodged: false, skillName: skill.name },
+        };
+      }
+
+      const damage = computePlayerDamage(player, state.rallyMultiplier);
+      target.currentHp = Math.max(0, target.currentHp - damage);
+      logEntries.push(`${player.username} uses ${skill.name} on ${target.name} for ${damage} damage`);
+
+      if (target.currentHp <= 0) {
+        logEntries.push(`${target.name} defeated!`);
+      }
+
+      return {
+        logEntries,
+        action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: target.gridPosition, targetSide: 'monster', dodged: false, skillName: skill.name },
+      };
+    }
+  }
+}
+
+/** Compute damage for a player's normal attack (base + equipment + variance + rally + crit). */
+function computePlayerDamage(player: PartyCombatant, rallyMultiplier: number): number {
+  const variance = Math.floor(Math.random() * 5) - 2;
+  const attackBonus = computeAttackBonus(player.equipBonuses);
+  let damage = Math.max(1, player.baseDamage + variance + attackBonus);
+
+  // Apply rally multiplier
+  if (rallyMultiplier > 0) {
+    damage = Math.max(1, Math.floor(damage * (1 + rallyMultiplier)));
+  }
+
+  // Apply crit
+  const critChance = getCritChance(player);
+  if (critChance > 0 && Math.random() < critChance) {
+    damage *= 2;
+  }
+
+  return damage;
 }
 
 /**
  * Process one party combat tick — one combatant acts per tick.
  * Mutates `state` in place.
- *
- * Turn order: players first (sorted by grid position), then monsters (sorted by grid position).
- * Dead combatants are skipped. After the last combatant, wraps back to the first.
  */
 export function processPartyTick(state: PartyCombatState): TickResult {
   if (state.finished) {
@@ -312,7 +453,6 @@ export function processPartyTick(state: PartyCombatState): TickResult {
   state.tickCount++;
   const logEntries: string[] = [];
 
-  // Build turn order: players by grid position, then monsters by grid position
   const totalCombatants = state.turnOrderSize;
 
   // Find the next alive combatant (scan up to a full cycle to skip dead ones)
@@ -325,32 +465,10 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       const player = state.players[idx];
       if (player.currentHp <= 0) continue;
 
-      const target = findTarget(player.gridPosition, state.monsters, false);
-      if (target) {
-        const classDef = CLASS_DEFINITIONS[player.className];
-        const baseDamage = classDef.attackStat ? player.stats[classDef.attackStat] : 0;
-        const variance = Math.floor(Math.random() * 5) - 2;
-        let attackBonus = 0;
-        if (player.equipBonuses && player.equipBonuses.bonusAttackMax > 0) {
-          const { bonusAttackMin, bonusAttackMax } = player.equipBonuses;
-          attackBonus = bonusAttackMin + Math.floor(Math.random() * (bonusAttackMax - bonusAttackMin + 1));
-        }
-        const damage = Math.max(1, baseDamage + variance + attackBonus);
-        target.currentHp = Math.max(0, target.currentHp - damage);
-        logEntries.push(`${player.username} hits ${target.name} for ${damage} damage`);
-
-        if (target.currentHp <= 0) {
-          logEntries.push(`${target.name} defeated!`);
-        }
-
-        state.lastAction = {
-          attackerSide: 'player',
-          attackerPos: player.gridPosition,
-          targetPos: target.gridPosition,
-          targetSide: 'monster',
-          dodged: false,
-        };
-      } else {
+      // Check stun
+      if (player.stunTurns > 0) {
+        player.stunTurns--;
+        logEntries.push(`${player.username} is stunned!`);
         state.lastAction = {
           attackerSide: 'player',
           attackerPos: player.gridPosition,
@@ -358,6 +476,55 @@ export function processPartyTick(state: PartyCombatState): TickResult {
           targetSide: null,
           dodged: false,
         };
+        state.turnIndex = (idx + 1) % totalCombatants;
+        acted = true;
+        break;
+      }
+
+      player.attackCount++;
+
+      // Check if an active skill should trigger (every Nth attack)
+      let usedSkill = false;
+      for (const skill of player.equippedSkills) {
+        if (skill && skill.type === 'active' && skill.cooldown && skill.activeEffect) {
+          if (player.attackCount % skill.cooldown === 0) {
+            const result = executeActiveSkill(player, skill, state);
+            logEntries.push(...result.logEntries);
+            state.lastAction = result.action;
+            usedSkill = true;
+            break;
+          }
+        }
+      }
+
+      if (!usedSkill) {
+        // Normal attack
+        const target = findTarget(player.gridPosition, state.monsters, false);
+        if (target) {
+          const damage = computePlayerDamage(player, state.rallyMultiplier);
+          target.currentHp = Math.max(0, target.currentHp - damage);
+          logEntries.push(`${player.username} hits ${target.name} for ${damage} damage`);
+
+          if (target.currentHp <= 0) {
+            logEntries.push(`${target.name} defeated!`);
+          }
+
+          state.lastAction = {
+            attackerSide: 'player',
+            attackerPos: player.gridPosition,
+            targetPos: target.gridPosition,
+            targetSide: 'monster',
+            dodged: false,
+          };
+        } else {
+          state.lastAction = {
+            attackerSide: 'player',
+            attackerPos: player.gridPosition,
+            targetPos: null,
+            targetSide: null,
+            dodged: false,
+          };
+        }
       }
 
       state.turnIndex = (idx + 1) % totalCombatants;
@@ -367,6 +534,22 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       // Monster turn
       const monster = state.monsters[idx - state.players.length];
       if (monster.currentHp <= 0) continue;
+
+      // Check stun
+      if (monster.stunTurns > 0) {
+        monster.stunTurns--;
+        logEntries.push(`${monster.name} is stunned!`);
+        state.lastAction = {
+          attackerSide: 'monster',
+          attackerPos: monster.gridPosition,
+          targetPos: null,
+          targetSide: null,
+          dodged: false,
+        };
+        state.turnIndex = (idx + 1) % totalCombatants;
+        acted = true;
+        break;
+      }
 
       const target = findTarget(monster.gridPosition, state.players, true);
       if (target) {
@@ -378,25 +561,13 @@ export function processPartyTick(state: PartyCombatState): TickResult {
           let reduction = 0;
 
           if (monster.damageType === 'physical') {
-            // Equipment reduction applies to physical damage only
-            if (target.equipBonuses && target.equipBonuses.damageReductionMax > 0) {
-              const { damageReductionMin, damageReductionMax } = target.equipBonuses;
-              reduction = damageReductionMin + Math.floor(Math.random() * (damageReductionMax - damageReductionMin + 1));
-            }
-            // Knight class physical damage reduction (target only)
-            const targetDef = CLASS_DEFINITIONS[target.className];
-            if (targetDef.physicalReductionBase > 0 || targetDef.physicalReductionPerLevel > 0) {
-              reduction += targetDef.physicalReductionBase + targetDef.physicalReductionPerLevel * target.level;
-            }
+            // Equipment reduction applies to physical damage
+            reduction += computeEquipReduction(target.equipBonuses);
+            // Knight Guard physical damage reduction (target only)
+            reduction += getPhysicalReduction(target, state.players);
           } else {
-            // Magical damage: Priest party-wide magical reduction from all alive Priests
-            for (const p of state.players) {
-              if (p.currentHp <= 0) continue;
-              const pDef = CLASS_DEFINITIONS[p.className];
-              if (pDef.partyMagicalReductionBase > 0 || pDef.partyMagicalReductionPerLevel > 0) {
-                reduction += pDef.partyMagicalReductionBase + pDef.partyMagicalReductionPerLevel * p.level;
-              }
-            }
+            // Magical/holy damage: Priest Bless party-wide magical reduction
+            reduction += getMagicalReduction(state.players);
           }
 
           const damage = Math.max(0, monster.damage - reduction);
@@ -428,7 +599,6 @@ export function processPartyTick(state: PartyCombatState): TickResult {
   }
 
   if (!acted) {
-    // Shouldn't happen — means everyone is dead
     state.finished = true;
     state.result = 'defeat';
     return { logEntries, finished: true, result: 'defeat' };

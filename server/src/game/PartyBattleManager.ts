@@ -282,6 +282,7 @@ export class PartyBattleManager {
         maxHp: p.maxHp,
         gridPosition: p.gridPosition,
         className: p.className,
+        stunTurns: p.stunTurns > 0 ? p.stunTurns : undefined,
       })),
       monsters: combat.monsters.map(m => ({
         name: m.name,
@@ -289,6 +290,7 @@ export class PartyBattleManager {
         maxHp: m.maxHp,
         level: m.level,
         gridPosition: m.gridPosition,
+        stunTurns: m.stunTurns > 0 ? m.stunTurns : undefined,
       })),
       tickCount: combat.tickCount,
       lastAction: combat.lastAction ? {
@@ -297,6 +299,10 @@ export class PartyBattleManager {
         targetPos: combat.lastAction.targetPos,
         targetSide: combat.lastAction.targetSide,
         dodged: combat.lastAction.dodged,
+        skillName: combat.lastAction.skillName,
+        stunApplied: combat.lastAction.stunApplied,
+        healAmount: combat.lastAction.healAmount,
+        healTarget: combat.lastAction.healTarget,
       } : undefined,
     } : undefined;
 

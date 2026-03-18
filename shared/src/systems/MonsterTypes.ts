@@ -28,6 +28,8 @@ export interface MonsterInstance {
   damageType: DamageType;
   xp: number;
   gridPosition: PartyGridPosition;
+  /** Remaining stun turns (0 = not stunned). */
+  stunTurns: number;
 }
 
 // --- Seed data (used as defaults when data files don't exist) ---
@@ -96,6 +98,7 @@ export function createMonsterInstance(def: MonsterDefinition, gridPosition: Part
     damageType: def.damageType,
     xp: def.xp,
     gridPosition,
+    stunTurns: 0,
   };
 }
 

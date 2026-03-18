@@ -1,4 +1,3 @@
-import type { StatName, StatBlock } from './CharacterStats.js';
 import type { EquipSlot, ItemDefinition } from './ItemTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type {
@@ -8,6 +7,7 @@ import type {
   ServerChatMessageMessage,
   ServerChatHistoryMessage,
 } from './SocialTypes.js';
+import type { SkillLoadout } from './SkillTypes.js';
 
 
 export type BattleTimerState = 'battle' | 'result';
@@ -36,6 +36,8 @@ export interface ClientPlayerCombatant {
   maxHp: number;
   gridPosition: PartyGridPosition;
   className: string;
+  /** Remaining stun turns (0 or undefined = not stunned). */
+  stunTurns?: number;
 }
 
 export interface ClientMonsterState {
@@ -44,6 +46,8 @@ export interface ClientMonsterState {
   maxHp: number;
   level: number;
   gridPosition: PartyGridPosition;
+  /** Remaining stun turns (0 or undefined = not stunned). */
+  stunTurns?: number;
 }
 
 export interface ClientCombatAction {
@@ -52,6 +56,14 @@ export interface ClientCombatAction {
   targetPos: PartyGridPosition | null;
   targetSide: 'player' | 'monster' | null;
   dodged: boolean;
+  /** Name of the skill used (if any). */
+  skillName?: string;
+  /** Whether a stun was applied. */
+  stunApplied?: boolean;
+  /** Amount healed (if any). */
+  healAmount?: number;
+  /** Username of the heal target. */
+  healTarget?: string;
 }
 
 export interface ClientCombatState {
@@ -77,8 +89,10 @@ export interface ClientCharacterState {
   xpForNextLevel: number;
   maxHp: number;
   gold: number;
-  stats: StatBlock;
-  priorityStat: StatName | null;
+  baseDamage: number;
+  damageType: string;
+  skillLoadout: SkillLoadout;
+  skillPoints: number;
   inventory: Record<string, number>;
   equipment: Record<string, string | null>;
   /** XP rate tracking — in-memory only, resets on server restart. */
@@ -131,11 +145,6 @@ export interface ClientRequestStateMessage {
   type: 'request_state';
 }
 
-export interface ClientSetPriorityStatMessage {
-  type: 'set_priority_stat';
-  stat: StatName | null;
-}
-
 export interface ClientEquipItemMessage {
   type: 'equip_item';
   itemId: string;
@@ -164,6 +173,22 @@ export interface ServerEquipBlockedMessage {
   blockedBySlot: EquipSlot;
 }
 
+export interface ClientUnlockSkillMessage {
+  type: 'unlock_skill';
+  skillId: string;
+}
+
+export interface ClientEquipSkillMessage {
+  type: 'equip_skill';
+  skillId: string;
+  slotIndex: number;
+}
+
+export interface ClientUnequipSkillMessage {
+  type: 'unequip_skill';
+  slotIndex: number;
+}
+
 export type ServerMessage =
   | ServerStateMessage
   | ServerSocialStateMessage
@@ -180,11 +205,13 @@ export interface ClientSetClassMessage {
 export type ClientMessage =
   | ClientMoveMessage
   | ClientRequestStateMessage
-  | ClientSetPriorityStatMessage
   | ClientEquipItemMessage
   | ClientUnequipItemMessage
   | ClientDestroyItemsMessage
   | ClientEquipItemForceDestroyMessage
   | ClientSetClassMessage
   | ClientResetXpRateMessage
+  | ClientUnlockSkillMessage
+  | ClientEquipSkillMessage
+  | ClientUnequipSkillMessage
   | ClientSocialMessage;

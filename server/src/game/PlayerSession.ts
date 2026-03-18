@@ -10,6 +10,7 @@ import {
   addXp,
   addGold,
   calculateMaxHp,
+  calculateBaseDamage,
   xpForNextLevel,
   computeEquipmentBonuses,
   addItemToInventory,
@@ -19,6 +20,12 @@ import {
   equipItemForceDestroy,
   EQUIP_SLOTS,
   getZone,
+  createDefaultSkillLoadout,
+  getSkillPointsForLevel,
+  unlockSkill,
+  equipSkillInSlot,
+  unequipSkillFromSlot,
+  getSkillById,
 } from '@idle-party-rpg/shared';
 import type {
   ServerStateMessage,
@@ -28,7 +35,6 @@ import type {
   CombatLogEntry,
   CharacterState,
   ClassName,
-  StatName,
   PartyCombatant,
   ClientCharacterState,
   EquipSlot,
@@ -39,6 +45,8 @@ import type {
   FriendRequest,
   ChatChannelType,
   ItemDefinition,
+  SkillDefinition,
+  SkillLoadout,
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
@@ -102,8 +110,15 @@ export class PlayerSession {
 
   /** Get combat info for the party combat system. */
   getCombatInfo(): PartyCombatant {
-    const maxHp = calculateMaxHp(this.character.level, this.character.stats.CON, this.character.className);
+    const maxHp = calculateMaxHp(this.character.level, this.character.className);
+    let baseDamage = calculateBaseDamage(this.character.level, this.character.className);
     const equipBonuses = computeEquipmentBonuses(this.character.equipment, this.content.getAllItems());
+    const playerDamageType = CLASS_DEFINITIONS[this.character.className].damageType;
+
+    // Resolve equipped skill definitions
+    const equippedSkills: (SkillDefinition | null)[] = this.character.skillLoadout.equippedSkills.map(
+      id => id ? getSkillById(id) ?? null : null
+    );
 
     // Get grid position from party info via social state
     let gridPosition: PartyGridPosition = 4;
@@ -117,11 +132,15 @@ export class PlayerSession {
       username: this.username,
       maxHp,
       currentHp: maxHp,
-      stats: { ...this.character.stats },
+      baseDamage,
+      playerDamageType,
       equipBonuses,
       gridPosition,
       className: this.character.className,
       level: this.character.level,
+      equippedSkills,
+      attackCount: 0,
+      stunTurns: 0,
     };
   }
 
@@ -163,10 +182,6 @@ export class PlayerSession {
 
   incrementBattleCount(): void {
     this.battleCount++;
-  }
-
-  setPriorityStat(stat: StatName | null): void {
-    this.character.priorityStat = stat;
   }
 
   resetXpRate(): void {
@@ -225,10 +240,12 @@ export class PlayerSession {
       level: this.character.level,
       xp: this.character.xp,
       xpForNextLevel: xpForNextLevel(this.character.level),
-      maxHp: calculateMaxHp(this.character.level, this.character.stats.CON, this.character.className),
+      maxHp: calculateMaxHp(this.character.level, this.character.className),
       gold: this.character.gold,
-      stats: { ...this.character.stats },
-      priorityStat: this.character.priorityStat,
+      baseDamage: calculateBaseDamage(this.character.level, this.character.className),
+      damageType: CLASS_DEFINITIONS[this.character.className].damageType,
+      skillLoadout: this.character.skillLoadout,
+      skillPoints: this.character.skillPoints,
       inventory: { ...this.character.inventory },
       equipment: { ...this.character.equipment },
       xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
@@ -315,7 +332,6 @@ export class PlayerSession {
 
   /** Admin: force-change class, keeping level, XP, gold, and inventory. Unequips all gear. */
   forceSetClass(className: ClassName): void {
-    const def = CLASS_DEFINITIONS[className];
     // Unequip all gear back to inventory
     for (const slot of EQUIP_SLOTS) {
       const itemId = this.character.equipment[slot];
@@ -325,8 +341,52 @@ export class PlayerSession {
       }
     }
     this.character.className = className;
-    this.character.stats = { ...def.baseStats };
+    this.character.skillLoadout = createDefaultSkillLoadout(className);
+    this.character.skillPoints = getSkillPointsForLevel(this.character.level);
     this.addLogEntry(`Class changed to ${className}!`, 'battle');
+  }
+
+  // ── Skill System ──────────────────────────────────────
+
+  handleUnlockSkill(skillId: string): boolean {
+    const result = unlockSkill(
+      skillId,
+      this.character.className,
+      this.character.level,
+      this.character.skillLoadout.unlockedSkills,
+    );
+    if (!result) return false;
+
+    const skill = getSkillById(skillId);
+    if (!skill) return false;
+
+    // First passive (treeOrder 0) is free, rest cost 1 point
+    if (skill.treeOrder > 0) {
+      if (this.character.skillPoints <= 0) return false;
+      this.character.skillPoints--;
+    }
+
+    this.character.skillLoadout.unlockedSkills = result;
+    return true;
+  }
+
+  handleEquipSkill(skillId: string, slotIndex: number): boolean {
+    const result = equipSkillInSlot(
+      skillId,
+      slotIndex,
+      this.character.className,
+      this.character.level,
+      this.character.skillLoadout,
+    );
+    if (!result) return false;
+    this.character.skillLoadout.equippedSkills = result;
+    return true;
+  }
+
+  handleUnequipSkill(slotIndex: number): boolean {
+    const newEquipped = unequipSkillFromSlot(slotIndex, this.character.skillLoadout.equippedSkills);
+    this.character.skillLoadout.equippedSkills = newEquipped;
+    return true;
   }
 
   addLogEntry(text: string, type: CombatLogEntry['type']): void {
@@ -401,10 +461,10 @@ export class PlayerSession {
         level: this.character.level,
         xp: this.character.xp,
         gold: this.character.gold,
-        stats: { ...this.character.stats },
-        priorityStat: this.character.priorityStat,
         inventory: { ...this.character.inventory },
         equipment: { ...this.character.equipment },
+        skillLoadout: { ...this.character.skillLoadout },
+        skillPoints: this.character.skillPoints,
       },
       friends: [...this.friends],
       outgoingFriendRequests: [...this.outgoingFriendRequests],
@@ -453,17 +513,29 @@ export class PlayerSession {
     const isValidClass = savedClassName && ALL_CLASS_NAMES.includes(savedClassName as ClassName);
 
     if (data.character && isValidClass) {
+      const className = savedClassName as ClassName;
+
+      // Migrate skill loadout from old saves
+      const skillLoadout: SkillLoadout = data.character.skillLoadout
+        ? { ...data.character.skillLoadout }
+        : createDefaultSkillLoadout(className);
+
+      // Migrate skill points: if old save has no skillPoints, compute from level
+      const skillPoints = data.character.skillPoints !== undefined
+        ? data.character.skillPoints
+        : Math.max(0, getSkillPointsForLevel(data.character.level) - Math.max(0, skillLoadout.unlockedSkills.length - 1));
+
       session['character'] = {
-        className: savedClassName as ClassName,
+        className,
         level: data.character.level,
         xp: data.character.xp,
         gold: data.character.gold ?? 0,
-        stats: { ...data.character.stats },
-        priorityStat: data.character.priorityStat,
         inventory: data.character.inventory ? { ...data.character.inventory } : {},
         equipment: data.character.equipment
           ? { ...data.character.equipment }
           : { head: null, chest: null, hand: null, foot: null },
+        skillLoadout,
+        skillPoints,
       };
     } else {
       // Invalid or legacy class — reset to Adventurer (will force class selection on login)
