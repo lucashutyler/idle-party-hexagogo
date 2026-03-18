@@ -43,6 +43,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         username: a.username,
         verified: a.verified,
         createdAt: a.createdAt,
+        lastActiveAt: a.lastActiveAt ?? null,
         isOnline: a.username ? onlineSet.has(a.username) : false,
         className: session?.getClassName() ?? null,
         level: session?.getLevel() ?? null,

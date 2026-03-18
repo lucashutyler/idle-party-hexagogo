@@ -2328,6 +2328,15 @@ html, body {
   white-space: nowrap;
 }
 
+.admin-table-sortable th[data-sort] {
+  cursor: pointer;
+  user-select: none;
+}
+
+.admin-table-sortable th[data-sort]:hover {
+  color: var(--accent-gold);
+}
+
 .admin-table td {
   padding: 6px 10px;
   color: var(--text-secondary);

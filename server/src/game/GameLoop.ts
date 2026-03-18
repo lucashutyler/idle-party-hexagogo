@@ -51,7 +51,7 @@ export class GameLoop {
       this.grid,
       this.contentStore,
       this.guildStore,
-      () => accountStore.getAllUsernames(),
+      accountStore,
     );
 
     console.log(`[GameLoop] Map: ${this.grid.size} tiles`);
