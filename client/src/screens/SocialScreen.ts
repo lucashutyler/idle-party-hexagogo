@@ -97,7 +97,17 @@ export class SocialScreen implements Screen {
       }
     });
     const state = this.gameClient.lastState;
-    if (state) this.updateFromState(state);
+    if (state) {
+      this.lastSocial = state.social ?? null;
+      this.lastState = state;
+      if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
+        this.chatSendChannel = state.social.chatPreferences.sendChannel;
+        this.chatDmTarget = state.social.chatPreferences.dmTarget;
+        this.chatPrefsInitialized = true;
+      }
+      this.renderTabBar();
+      this.renderPanel();
+    }
   }
 
   onDeactivate(): void {
