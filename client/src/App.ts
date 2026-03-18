@@ -206,13 +206,9 @@ export class App {
   private async connectAndEnterGame(): Promise<void> {
     this.gameClient = new GameClient();
 
-    // Load world data (per-player filtered) and connect WS in parallel
-    const [connectResult] = await Promise.all([
-      this.gameClient.connect(),
-      this.worldCache.loadWorld().catch(err => {
-        console.warn('[App] Failed to load world data:', err);
-      }),
-    ]);
+    // Connect WS first (creates PlayerSession server-side), then load world data
+    // (world endpoint requires the player session to exist)
+    const connectResult = await this.gameClient.connect();
 
     if (!connectResult.success) {
       if (connectResult.error === CONNECTION_ERROR) {
@@ -222,6 +218,11 @@ export class App {
       this.screenManager.switchTo('login');
       return;
     }
+
+    // Load world data now that the player session exists server-side
+    await this.worldCache.loadWorld().catch(err => {
+      console.warn('[App] Failed to load world data:', err);
+    });
 
     // Check if player needs to select a class (new player or reset Adventurer)
     if (this.gameClient.lastState?.character.className === 'Adventurer') {
