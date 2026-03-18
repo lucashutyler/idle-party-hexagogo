@@ -26,8 +26,6 @@ export class SocialScreen implements Screen {
 
   private tabBar!: HTMLElement;
   private panelContainer!: HTMLElement;
-  private searchInput!: HTMLInputElement;
-
   private lastSocial: ClientSocialState | null = null;
   private lastState: ServerStateMessage | null = null;
   private searchQuery = '';
@@ -53,6 +51,11 @@ export class SocialScreen implements Screen {
   private gridDragGhost: HTMLElement | null = null;
   private gridDragHoverCell: HTMLElement | null = null;
   private gridAnimating = false;
+
+  // Structural change detection keys — only re-render when these change
+  private lastRenderedUsersKey = '';
+  private lastRenderedGuildKey = '';
+  private lastRenderedPartyKey = '';
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -118,7 +121,27 @@ export class SocialScreen implements Screen {
     this.tabBar = this.container.querySelector('.social-tab-bar')!;
     this.panelContainer = this.container.querySelector('.social-panel')!;
     this.wireDelegatedClicks();
+    this.wireTabBarDelegation();
     this.renderTabBar();
+  }
+
+  /** Delegated click handler on tabBar — survives innerHTML replacements. */
+  private wireTabBarDelegation(): void {
+    this.tabBar.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.social-tab-btn') as HTMLElement | null;
+      if (!btn) return;
+      const tab = btn.getAttribute('data-tab') as SubTab;
+      if (!tab) return;
+      this.activeTab = tab;
+      sessionStorage.setItem('socialSubTab', this.activeTab);
+      if (this.activeTab === 'chat') this.hasUnread = false;
+      // Invalidate all keys so panels render fresh on switch
+      this.lastRenderedUsersKey = '';
+      this.lastRenderedGuildKey = '';
+      this.lastRenderedPartyKey = '';
+      this.renderTabBar();
+      this.renderPanel();
+    });
   }
 
   /** Single delegated click handler on panelContainer — survives innerHTML replacements. */
@@ -174,6 +197,57 @@ export class SocialScreen implements Screen {
         if (name) this.gameClient.sendCreateGuild(name);
         return;
       }
+
+      // Users panel — filter buttons
+      if (btn.matches('.social-filter-btn')) {
+        this.filterBy = btn.getAttribute('data-filter') as typeof this.filterBy;
+        this.renderUserRows();
+        for (const b of this.panelContainer.querySelectorAll('.social-filter-btn')) {
+          b.classList.toggle('active', b.getAttribute('data-filter') === this.filterBy);
+        }
+        return;
+      }
+
+      // Users panel — sort button
+      if (btn.matches('.social-sort-btn')) {
+        this.sortBy = this.sortBy === 'name' ? 'status' : 'name';
+        btn.textContent = this.sortBy === 'name' ? '\u25B2 A-Z' : '\u25BC Status';
+        this.renderUserRows();
+        return;
+      }
+
+      // Users panel — friend request accept/decline
+      if (btn.matches('[data-action="accept_friend_request"]')) {
+        const uname = btn.getAttribute('data-username');
+        if (uname) this.gameClient.sendAcceptFriendRequest(uname);
+        return;
+      }
+      if (btn.matches('[data-action="decline_friend_request"]')) {
+        const uname = btn.getAttribute('data-username');
+        if (uname) this.gameClient.sendDeclineFriendRequest(uname);
+        return;
+      }
+
+      // Chat panel — filter toggles
+      if (btn.matches('.chat-filter-btn')) {
+        const type = btn.getAttribute('data-channel') as ChatChannelType;
+        if (this.chatFilters.has(type)) {
+          this.chatFilters.delete(type);
+        } else {
+          this.chatFilters.add(type);
+          const id = this.resolveChatChannelId(type);
+          this.loadChatHistory(type, id);
+        }
+        btn.classList.toggle('active');
+        this.renderChatMessages();
+        return;
+      }
+
+      // Chat panel — send button
+      if (btn.matches('.social-chat-send-btn')) {
+        this.doChatSend();
+        return;
+      }
     });
 
     // Grid cell clicks for party position
@@ -201,6 +275,62 @@ export class SocialScreen implements Screen {
       }
     });
 
+    // Delegated input handler for search + chat inputs
+    this.panelContainer.addEventListener('input', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.matches('.social-search:not(.social-chat-input):not(.social-chat-dm-target):not(.social-guild-name-input)')) {
+        this.searchQuery = (target as HTMLInputElement).value;
+        this.renderUserRows();
+      }
+      if (target.matches('.social-chat-dm-target')) {
+        this.chatDmTarget = (target as HTMLInputElement).value.trim();
+        this.updateChatDmState();
+        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
+      }
+    });
+
+    // Delegated change handler for chat channel select
+    this.panelContainer.addEventListener('change', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.matches('.chat-send-select')) {
+        this.chatSendChannel = (target as HTMLSelectElement).value as ChatChannelType;
+        this.updateChatDmState();
+        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
+        if (this.chatSendChannel === 'dm') {
+          const dmInput = this.panelContainer.querySelector('.social-chat-dm-target') as HTMLInputElement | null;
+          dmInput?.focus();
+        }
+      }
+    });
+
+    // Delegated keydown handler for chat input Enter
+    this.panelContainer.addEventListener('keydown', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.matches('.social-chat-input') && (e as KeyboardEvent).key === 'Enter') {
+        this.doChatSend();
+      }
+    });
+
+    // Delegated click for channel tag switching in chat messages
+    this.panelContainer.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const switchChannel = target.closest('[data-switch-channel]')?.getAttribute('data-switch-channel') as ChatChannelType | null;
+      if (switchChannel) {
+        const social = this.lastSocial;
+        let disabled = false;
+        if (switchChannel === 'party') disabled = (social?.party?.members.length ?? 0) <= 1;
+        if (switchChannel === 'guild') disabled = !social?.guild;
+        if (disabled) return;
+        this.chatSendChannel = switchChannel;
+        const selectEl = this.panelContainer.querySelector('.chat-send-select') as HTMLSelectElement | null;
+        if (selectEl) selectEl.value = switchChannel;
+        this.updateChatDmState();
+        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
+        const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
+        chatInput?.focus();
+      }
+    });
+
     // Grid drag handlers
     this.panelContainer.addEventListener('mousedown', (e) => this.onGridDragStart(e));
     this.panelContainer.addEventListener('touchstart', (e) => this.onGridDragStart(e), { passive: false });
@@ -219,15 +349,30 @@ export class SocialScreen implements Screen {
       const hasBadge = chatUnread || partyInvites || usersBadge;
       return `<button class="social-tab-btn${t.id === this.activeTab ? ' active' : ''}" data-tab="${t.id}">${t.label}${hasBadge ? '<span class="social-tab-badge"></span>' : ''}</button>`;
     }).join('');
+    // Click handlers are delegated via wireTabBarDelegation() — no per-button wiring needed.
+  }
+
+  /** Lightweight badge-only update — toggles badge spans without touching innerHTML. */
+  private updateTabBadges(): void {
+    const social = this.lastSocial;
+    const friendRequests = (social?.incomingFriendRequests?.length ?? 0) > 0;
+    const partyInvites = (social?.pendingInvites?.length ?? 0) > 0;
+    const chatUnread = this.hasUnread && this.activeTab !== 'chat';
 
     for (const btn of this.tabBar.querySelectorAll('.social-tab-btn')) {
-      btn.addEventListener('click', () => {
-        this.activeTab = btn.getAttribute('data-tab') as SubTab;
-        sessionStorage.setItem('socialSubTab', this.activeTab);
-        if (this.activeTab === 'chat') this.hasUnread = false;
-        this.renderTabBar();
-        this.renderPanel();
-      });
+      const tab = btn.getAttribute('data-tab');
+      const needsBadge =
+        (tab === 'users' && friendRequests) ||
+        (tab === 'party' && partyInvites) ||
+        (tab === 'chat' && chatUnread);
+      const badge = btn.querySelector('.social-tab-badge');
+      if (needsBadge && !badge) {
+        const span = document.createElement('span');
+        span.className = 'social-tab-badge';
+        btn.appendChild(span);
+      } else if (!needsBadge && badge) {
+        badge.remove();
+      }
     }
   }
 
@@ -240,22 +385,20 @@ export class SocialScreen implements Screen {
       this.chatDmTarget = state.social.chatPreferences.dmTarget;
       this.chatPrefsInitialized = true;
     }
-    // Skip full re-render if user is interacting with an input or select — do partial updates instead
-    const active = document.activeElement;
-    if (active && (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) && this.panelContainer.contains(active)) {
-      // Partial update: refresh just the data-driven parts without touching inputs/filters
-      this.renderTabBar();
-      if (this.activeTab === 'users') {
-        this.renderUserRows();
-      } else if (this.activeTab === 'chat') {
-        this.renderChatMessages();
-      }
-      return;
-    }
-    this.renderTabBar();
-    // Skip party panel re-render while grid animation or drag is in progress
+
+    // Lightweight badge update — never rebuilds tab bar DOM
+    this.updateTabBadges();
+
+    // Skip party panel updates while grid animation or drag is in progress
     if (this.activeTab === 'party' && (this.gridAnimating || this.gridDragging)) return;
-    this.renderPanel();
+
+    // Per-tab targeted updates — only touch specific elements that changed
+    switch (this.activeTab) {
+      case 'users': this.updateUsersPanel(); break;
+      case 'guild': this.updateGuildPanel(); break;
+      case 'party': this.updatePartyPanel(); break;
+      case 'chat': break; // Chat uses incremental appendChatMessage — no tick rebuild needed
+    }
   }
 
   private renderPanel(): void {
@@ -266,6 +409,145 @@ export class SocialScreen implements Screen {
       case 'guild': this.renderGuildPanel(); break;
       case 'party': this.renderPartyPanel(); break;
       case 'chat': this.renderChatPanel(); break;
+    }
+  }
+
+  /** Send a chat message from the current input state. */
+  private doChatSend(): void {
+    const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
+    const sendBtn = this.panelContainer.querySelector('.social-chat-send-btn') as HTMLButtonElement | null;
+    if (!chatInput || chatInput.disabled || sendBtn?.disabled) return;
+    const text = chatInput.value.trim();
+    if (!text) return;
+    const channelId = this.resolveChatChannelId(this.chatSendChannel);
+    if (!channelId) return;
+    this.gameClient.sendChat(this.chatSendChannel, channelId, text);
+    chatInput.value = '';
+    chatInput.focus();
+  }
+
+  /** Update DM-related input state (show/hide target input, enable/disable send). */
+  private updateChatDmState(): void {
+    const dmInput = this.panelContainer.querySelector('.social-chat-dm-target') as HTMLInputElement | null;
+    const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
+    const sendBtn = this.panelContainer.querySelector('.social-chat-send-btn') as HTMLButtonElement | null;
+    if (!dmInput || !chatInput || !sendBtn) return;
+    const isDm = this.chatSendChannel === 'dm';
+    dmInput.style.display = isDm ? 'block' : 'none';
+    if (isDm && !this.chatDmTarget) {
+      chatInput.disabled = true;
+      sendBtn.disabled = true;
+      chatInput.placeholder = 'Enter a username above first';
+    } else {
+      chatInput.disabled = false;
+      sendBtn.disabled = false;
+      chatInput.placeholder = 'Type a message...';
+    }
+  }
+
+  // ── Targeted per-tab tick updates (no innerHTML rebuilds) ──
+
+  /** Update status dots + structural changes on Users panel. */
+  private updateUsersPanel(): void {
+    const social = this.lastSocial;
+    if (!social) return;
+
+    const onlineSet = new Set(social.onlinePlayers ?? []);
+
+    // Update status dots on existing rows
+    for (const row of this.panelContainer.querySelectorAll('.social-user-row[data-username]')) {
+      const username = row.getAttribute('data-username')!;
+      const dot = row.querySelector('.social-status-dot');
+      if (dot) {
+        const isOnline = onlineSet.has(username);
+        dot.classList.toggle('online', isOnline);
+        dot.classList.toggle('offline', !isOnline);
+      }
+    }
+
+    // Detect structural changes that require a row rebuild
+    const incoming = social.incomingFriendRequests ?? [];
+    const key = JSON.stringify({
+      players: (social.allPlayers ?? []).map(p => p.username),
+      friends: social.friends ?? [],
+      inReq: incoming.map(r => r.fromUsername),
+      outReq: (social.outgoingFriendRequests ?? []).map(r => r.toUsername),
+      blocked: Object.keys(social.blockedUsers ?? {}),
+    });
+    if (key !== this.lastRenderedUsersKey) {
+      this.lastRenderedUsersKey = key;
+      // Rebuild friend requests section + user rows, but keep toolbar intact
+      this.renderUserRows();
+      this.renderFriendRequests();
+    }
+  }
+
+  /** Update status dots + structural changes on Guild panel. */
+  private updateGuildPanel(): void {
+    const social = this.lastSocial;
+    if (!social) return;
+
+    const onlineSet = new Set(social.onlinePlayers ?? []);
+
+    // Update status dots on existing rows
+    for (const row of this.panelContainer.querySelectorAll('.social-user-row[data-username]')) {
+      const username = row.getAttribute('data-username')!;
+      const dot = row.querySelector('.social-status-dot');
+      if (dot) {
+        const isOnline = onlineSet.has(username);
+        dot.classList.toggle('online', isOnline);
+        dot.classList.toggle('offline', !isOnline);
+      }
+    }
+
+    // Detect structural changes
+    const members = social.guildMembers ?? [];
+    const key = JSON.stringify({
+      guildId: social.guild?.id ?? null,
+      leader: social.guild?.leaderUsername ?? null,
+      members: members.map(m => `${m.username}:${m.role}`),
+    });
+    if (key !== this.lastRenderedGuildKey) {
+      this.lastRenderedGuildKey = key;
+      this.renderGuildPanel();
+    }
+  }
+
+  /** Update status dots + structural changes on Party panel. */
+  private updatePartyPanel(): void {
+    const social = this.lastSocial;
+    if (!social) return;
+
+    const onlineSet = new Set(social.onlinePlayers ?? []);
+
+    // Update status dots on existing rows and grid cells
+    for (const row of this.panelContainer.querySelectorAll('[data-username]')) {
+      const username = row.getAttribute('data-username')!;
+      const dot = row.querySelector('.social-status-dot');
+      if (dot) {
+        const isOnline = onlineSet.has(username);
+        dot.classList.toggle('online', isOnline);
+        dot.classList.toggle('offline', !isOnline);
+      }
+    }
+
+    // Detect structural changes
+    const party = social.party;
+    const pendingInvites = social.pendingInvites ?? [];
+    const outgoing = social.outgoingPartyInvites ?? [];
+    const sameTile = (this.lastState?.otherPlayers ?? [])
+      .filter(p => p.col === this.lastState?.party.col && p.row === this.lastState?.party.row)
+      .map(p => p.username).sort();
+    const key = JSON.stringify({
+      partyId: party?.id ?? null,
+      members: (party?.members ?? []).map(m => `${m.username}:${m.role}:${m.gridPosition}`),
+      pending: pendingInvites.map(i => `${i.partyId}:${i.inviterUsername}`),
+      outgoing,
+      sameTile,
+    });
+    if (key !== this.lastRenderedPartyKey) {
+      this.lastRenderedPartyKey = key;
+      this.renderPartyPanel();
     }
   }
 
@@ -498,7 +780,7 @@ export class SocialScreen implements Screen {
 
     // Incoming friend requests section
     const incomingHtml = incoming.length > 0 ? `
-      <div class="social-group-header">Friend Requests (${incoming.length})</div>
+      <div class="social-group-header social-friend-requests-header">Friend Requests (${incoming.length})</div>
       <div class="social-friend-requests">
         ${incoming.map(r => `
           <div class="social-user-row" data-username="${this.escapeHtml(r.fromUsername)}">
@@ -527,42 +809,42 @@ export class SocialScreen implements Screen {
         ${this.renderUserListHtml(players, data.onlineSet)}
       </div>
     `;
+    // All click/input handlers are delegated via wireDelegatedClicks() — no per-element wiring needed.
+  }
 
-    // Wire search
-    this.searchInput = this.panelContainer.querySelector('.social-search')!;
-    this.searchInput.addEventListener('input', () => {
-      this.searchQuery = this.searchInput.value;
-      this.renderUserRows();
-    });
+  /** Update just the friend requests section without rebuilding the whole panel. */
+  private renderFriendRequests(): void {
+    const social = this.lastSocial;
+    if (!social) return;
+    const incoming = social.incomingFriendRequests ?? [];
+    const onlineSet = new Set(social.onlinePlayers ?? []);
 
-    // Wire filter buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-filter-btn')) {
-      btn.addEventListener('click', () => {
-        this.filterBy = btn.getAttribute('data-filter') as typeof this.filterBy;
-        this.renderUserRows();
-        // Update active class without full re-render
-        for (const b of this.panelContainer.querySelectorAll('.social-filter-btn')) {
-          b.classList.toggle('active', b.getAttribute('data-filter') === this.filterBy);
-        }
-      });
-    }
+    // Remove existing friend request elements
+    this.panelContainer.querySelector('.social-friend-requests-header')?.remove();
+    this.panelContainer.querySelector('.social-friend-requests')?.remove();
 
-    // Wire sort button
-    const sortBtn = this.panelContainer.querySelector('.social-sort-btn');
-    sortBtn?.addEventListener('click', () => {
-      this.sortBy = this.sortBy === 'name' ? 'status' : 'name';
-      this.renderUsersPanel();
-    });
+    if (incoming.length > 0) {
+      const toolbar = this.panelContainer.querySelector('.social-users-toolbar');
+      if (toolbar) {
+        const headerEl = document.createElement('div');
+        headerEl.className = 'social-group-header social-friend-requests-header';
+        headerEl.textContent = `Friend Requests (${incoming.length})`;
+        toolbar.after(headerEl);
 
-    // Wire accept/decline friend request buttons
-    for (const btn of this.panelContainer.querySelectorAll('.social-friend-requests [data-action]')) {
-      btn.addEventListener('click', () => {
-        const action = btn.getAttribute('data-action');
-        const uname = btn.getAttribute('data-username');
-        if (!uname) return;
-        if (action === 'accept_friend_request') this.gameClient.sendAcceptFriendRequest(uname);
-        if (action === 'decline_friend_request') this.gameClient.sendDeclineFriendRequest(uname);
-      });
+        const requestsEl = document.createElement('div');
+        requestsEl.className = 'social-friend-requests';
+        requestsEl.innerHTML = incoming.map(r => `
+          <div class="social-user-row" data-username="${this.escapeHtml(r.fromUsername)}">
+            <span class="social-status-dot ${onlineSet.has(r.fromUsername) ? 'online' : 'offline'}"></span>
+            <span class="social-user-name-clickable" data-username="${this.escapeHtml(r.fromUsername)}">${this.classIcon(this.getPlayerClassName(r.fromUsername))} ${this.escapeHtml(r.fromUsername)}</span>
+            <div class="social-user-actions">
+              <button class="social-action-btn add-friend" data-action="accept_friend_request" data-username="${this.escapeHtml(r.fromUsername)}">Accept</button>
+              <button class="social-action-btn remove-friend" data-action="decline_friend_request" data-username="${this.escapeHtml(r.fromUsername)}">Decline</button>
+            </div>
+          </div>
+        `).join('');
+        headerEl.after(requestsEl);
+      }
     }
   }
 
@@ -987,101 +1269,16 @@ export class SocialScreen implements Screen {
       }
     }
 
-    // Wire filter toggles
-    for (const btn of this.panelContainer.querySelectorAll('.chat-filter-btn')) {
-      btn.addEventListener('click', () => {
-        const type = btn.getAttribute('data-channel') as ChatChannelType;
-        if (this.chatFilters.has(type)) {
-          this.chatFilters.delete(type);
-        } else {
-          this.chatFilters.add(type);
-          const id = this.resolveChatChannelId(type);
-          this.loadChatHistory(type, id);
-        }
-        btn.classList.toggle('active');
-        this.renderChatMessages();
-      });
-    }
+    // Initialize DM input state
+    this.updateChatDmState();
 
-    // Wire channel selector
-    const selectEl = this.panelContainer.querySelector('.chat-send-select') as HTMLSelectElement;
-    const dmTargetInput = this.panelContainer.querySelector('.social-chat-dm-target') as HTMLInputElement;
-    const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement;
-    const sendBtn = this.panelContainer.querySelector('.social-chat-send-btn') as HTMLButtonElement;
-
-    // DM state: show/hide DM target input, disable message input if no target
-    const updateDmState = () => {
-      const isDm = this.chatSendChannel === 'dm';
-      dmTargetInput.style.display = isDm ? 'block' : 'none';
-      if (isDm && !this.chatDmTarget) {
-        chatInput.disabled = true;
-        sendBtn.disabled = true;
-        chatInput.placeholder = 'Enter a username above first';
-      } else {
-        chatInput.disabled = false;
-        sendBtn.disabled = false;
-        chatInput.placeholder = 'Type a message...';
-      }
-    };
-
-    // Wire DM target input
-    dmTargetInput.addEventListener('input', () => {
-      this.chatDmTarget = dmTargetInput.value.trim();
-      updateDmState();
-      this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
-    });
-
-    selectEl.addEventListener('change', () => {
-      this.chatSendChannel = selectEl.value as ChatChannelType;
-      updateDmState();
-      this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
-      if (this.chatSendChannel === 'dm') dmTargetInput.focus();
-    });
-
-    updateDmState();
-
-    // Wire clickable elements in messages
-    if (msgContainer) {
-      msgContainer.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-
-        // Click on channel tag → switch send channel
-        const switchChannel = target.closest('[data-switch-channel]')?.getAttribute('data-switch-channel') as ChatChannelType | null;
-        if (switchChannel) {
-          const opt = sendOptions.find(o => o.type === switchChannel);
-          if (opt?.disabled) return;
-          this.chatSendChannel = switchChannel;
-          selectEl.value = switchChannel;
-          updateDmState();
-          this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
-          chatInput.focus();
-        }
-      });
-    }
-
-    // Wire send
-    const doSend = () => {
-      if (chatInput.disabled || sendBtn.disabled) return;
-      const text = chatInput.value.trim();
-      if (!text) return;
-      const channelId = this.resolveChatChannelId(this.chatSendChannel);
-      if (!channelId) return;
-      this.gameClient.sendChat(this.chatSendChannel, channelId, text);
-      chatInput.value = '';
-      this.chatFocusAfterRender = true;
-      chatInput.focus();
-    };
-
-    sendBtn.addEventListener('click', doSend);
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doSend();
-    });
-
-    // Restore focus to message input after re-render
+    // Restore focus to message input after re-render (e.g. after startDm)
     if (this.chatFocusAfterRender) {
       this.chatFocusAfterRender = false;
-      chatInput.focus();
+      const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
+      chatInput?.focus();
     }
+    // All click/input/change/keydown handlers are delegated via wireDelegatedClicks() — no per-element wiring needed.
   }
 
   /** Append a single chat message to the existing DOM without full re-render. */

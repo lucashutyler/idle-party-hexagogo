@@ -31,6 +31,9 @@ export class ItemsScreen implements Screen {
   /** Cached item definitions from last state update. */
   private itemDefs: Record<string, ItemDefinition> = {};
 
+  /** Change detection key — only re-render when items actually change. */
+  private lastRenderedKey = '';
+
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
@@ -84,6 +87,46 @@ export class ItemsScreen implements Screen {
     this.modalOverlay.addEventListener('click', (e) => {
       if (e.target === this.modalOverlay) this.hideModal();
     });
+
+    // Delegated click handler for equipment slots → unequip
+    this.slotsContainer.addEventListener('click', (e) => {
+      const slotEl = (e.target as HTMLElement).closest('.items-equip-slot[data-slot]') as HTMLElement | null;
+      if (!slotEl) return;
+      const slot = slotEl.getAttribute('data-slot');
+      if (slot) this.gameClient.sendUnequipItem(slot);
+    });
+
+    // Delegated click handler for inventory rows → equip or destroy
+    this.inventoryList.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+
+      // Destroy button
+      const destroyBtn = target.closest('.items-destroy-btn') as HTMLElement | null;
+      if (destroyBtn) {
+        e.stopPropagation();
+        const itemId = destroyBtn.getAttribute('data-destroy-item');
+        const max = parseInt(destroyBtn.getAttribute('data-destroy-max') ?? '1', 10);
+        if (!itemId) return;
+        const def = this.itemDefs[itemId];
+        if (max === 1) {
+          this.showConfirmModal(
+            `Destroy ${def?.name ?? 'item'}?`,
+            'This item will be permanently lost.',
+            () => { this.gameClient.sendDestroyItems(itemId, 1); this.hideModal(); }
+          );
+        } else {
+          this.showDestroyCountModal(itemId, def?.name ?? 'item', max);
+        }
+        return;
+      }
+
+      // Equippable row tap → equip
+      const row = target.closest('.items-row.equippable[data-item]') as HTMLElement | null;
+      if (row) {
+        const itemId = row.getAttribute('data-item');
+        if (itemId) this.gameClient.sendEquipItem(itemId);
+      }
+    });
   }
 
   private updateFromState(state: ServerStateMessage): void {
@@ -91,6 +134,11 @@ export class ItemsScreen implements Screen {
     if (!char) return;
 
     this.itemDefs = state.itemDefinitions ?? {};
+
+    // Only re-render when equipment or inventory actually changed
+    const key = JSON.stringify({ e: char.equipment, i: char.inventory });
+    if (key === this.lastRenderedKey) return;
+    this.lastRenderedKey = key;
 
     // Render equipment slots
     this.slotsContainer.innerHTML = EQUIP_SLOTS.map(slot => {
@@ -108,16 +156,6 @@ export class ItemsScreen implements Screen {
         </div>
       </div>`;
     }).join('');
-
-    // Wire slot tap → unequip
-    for (const slotEl of this.slotsContainer.querySelectorAll('.items-equip-slot')) {
-      slotEl.addEventListener('click', () => {
-        const slot = slotEl.getAttribute('data-slot');
-        if (slot && char.equipment[slot]) {
-          this.gameClient.sendUnequipItem(slot);
-        }
-      });
-    }
 
     // Render inventory
     const entries = Object.entries(char.inventory).filter(([, count]) => count > 0);
@@ -143,38 +181,7 @@ export class ItemsScreen implements Screen {
         </div>
       </div>`;
     }).join('');
-
-    // Wire inventory tap → equip (but not on destroy button)
-    for (const rowEl of this.inventoryList.querySelectorAll('.items-row.equippable')) {
-      rowEl.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        if (target.classList.contains('items-destroy-btn')) return;
-        const itemId = rowEl.getAttribute('data-item');
-        if (itemId) {
-          this.gameClient.sendEquipItem(itemId);
-        }
-      });
-    }
-
-    // Wire destroy buttons on inventory items
-    for (const btn of this.inventoryList.querySelectorAll('.items-destroy-btn')) {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const itemId = (btn as HTMLElement).getAttribute('data-destroy-item');
-        const max = parseInt((btn as HTMLElement).getAttribute('data-destroy-max') ?? '1', 10);
-        if (!itemId) return;
-        const def = this.itemDefs[itemId];
-        if (max === 1) {
-          this.showConfirmModal(
-            `Destroy ${def?.name ?? 'item'}?`,
-            'This item will be permanently lost.',
-            () => { this.gameClient.sendDestroyItems(itemId, 1); this.hideModal(); }
-          );
-        } else {
-          this.showDestroyCountModal(itemId, def?.name ?? 'item', max);
-        }
-      });
-    }
+    // All click handlers are delegated via buildDOM() — no per-element wiring needed.
   }
 
   private showConfirmModal(title: string, message: string, onConfirm: () => void): void {
