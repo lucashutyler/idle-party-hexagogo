@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
@@ -909,7 +909,7 @@ export class SocialScreen implements Screen {
     return `<div class="social-chat-msg">
       <span class="chat-timestamp" title="${dateFull}">${time}</span>
       <span class="chat-tag chat-color-${msg.channelType} chat-clickable" data-switch-channel="${msg.channelType}">[${tag}]</span>
-      <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}"${dmTargetAttr}>${this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
+      <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}"${dmTargetAttr}>${msg.senderUsername === 'Server' ? SERVER_ICON : this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
       <span class="social-chat-text">${this.escapeHtml(msg.text)}</span>
     </div>`;
   }

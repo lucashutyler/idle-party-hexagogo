@@ -53,6 +53,7 @@ export const CLASS_ICONS: Record<string, string> = {
   Bard: '\uD83C\uDFB5',            // 🎵 musical note
 };
 export const UNKNOWN_CLASS_ICON = '\u2753'; // ❓
+export const SERVER_ICON = '\uD83D\uDDA5\uFE0F'; // 🖥️
 
 export const ALL_STATS: StatName[] = ['STR', 'INT', 'WIS', 'DEX', 'CON', 'CHA'];
 
