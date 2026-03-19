@@ -239,10 +239,11 @@ export class ItemsScreen implements Screen {
       const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
       const equippable = def.equipSlot ? ' equippable' : '';
       const effect = getItemEffectText(def);
+      const slotText = def.equipSlot ? SLOT_LABELS[def.equipSlot] : 'Material';
       return `<div class="items-row${equippable}" data-item="${itemId}">
         <div class="items-row-info">
           <span class="items-row-name" style="color: ${color}">${def.name}</span>
-          <span class="items-row-effect">${effect}</span>
+          <span class="items-row-effect">${slotText}${effect ? ' \u2022 ' + effect : ''}</span>
         </div>
         <div class="items-row-actions">
           <span class="items-row-count" style="color: ${color}">x${count}</span>
