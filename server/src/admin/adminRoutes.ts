@@ -179,6 +179,12 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
 
   // ── Monster endpoints ────────────────────────────────────
 
+  /** List all monsters. */
+  router.get('/monsters', (_req, res) => {
+    const content = getContentStore();
+    res.json({ monsters: content.getAllMonsters() });
+  });
+
   /** Add or update a monster. Supports ?versionId= for draft editing. */
   router.put('/monsters/:id', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
@@ -243,6 +249,55 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   });
 
   // ── Item endpoints ──────────────────────────────────────
+
+  /** List all items. */
+  router.get('/items', (_req, res) => {
+    const content = getContentStore();
+    res.json({ items: content.getAllItems() });
+  });
+
+  /** Bulk import items. Adds or updates each item. Supports ?versionId= for draft editing. */
+  router.post('/items/bulk', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const items = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'Body must be a non-empty array of items' });
+      return;
+    }
+    const errors: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.id || !item.name || !item.rarity) {
+        errors.push(`Item at index ${i}: missing required fields (id, name, rarity)`);
+      }
+    }
+    if (errors.length > 0) {
+      res.status(400).json({ error: 'Validation failed', errors });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      for (const item of items) {
+        const idx = snapshot.items.findIndex(i => i.id === item.id);
+        if (idx >= 0) { snapshot.items[idx] = item; } else { snapshot.items.push(item); }
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const itemsRecord: Record<string, typeof items[0]> = {};
+      for (const i of snapshot.items) itemsRecord[i.id] = i;
+      res.json({ success: true, imported: items.length, items: itemsRecord });
+    } else {
+      const content = getContentStore();
+      for (const item of items) {
+        await content.addOrUpdateItem(item);
+      }
+      res.json({ success: true, imported: items.length, items: content.getAllItems() });
+    }
+  });
 
   /** Add or update an item. Supports ?versionId= for draft editing. */
   router.put('/items/:id', async (req, res) => {
@@ -312,6 +367,12 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   });
 
   // ── Zone endpoints ──────────────────────────────────────
+
+  /** List all zones. */
+  router.get('/zones', (_req, res) => {
+    const content = getContentStore();
+    res.json({ zones: content.getAllZones() });
+  });
 
   /** Add or update a zone. Supports ?versionId= for draft editing. */
   router.put('/zones/:id', async (req, res) => {

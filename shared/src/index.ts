@@ -98,6 +98,7 @@ export {
   destroyItems,
   equipItemForceDestroy,
   computeEquipmentBonuses,
+  isTwoHandedEquipped,
   getItemEffectText,
   rollDrops,
 } from './systems/ItemTypes.js';

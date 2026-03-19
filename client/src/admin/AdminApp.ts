@@ -16,6 +16,8 @@ import {
 import type {
   MonsterDefinition,
   ItemDefinition,
+  ItemRarity,
+  EquipSlot,
   ZoneDefinition,
   EncounterTableEntry,
   WorldTileDefinition,
@@ -982,11 +984,11 @@ export class AdminApp {
     const isNew = !item;
     const i = item ?? { id: '', name: '', rarity: 'common' as const };
 
-    const rarityOptions = ['janky', 'common'].map(r =>
+    const rarityOptions = ['janky', 'common', 'uncommon', 'rare', 'epic', 'legendary', 'heirloom'].map(r =>
       `<option value="${r}" ${i.rarity === r ? 'selected' : ''}>${r}</option>`
     ).join('');
 
-    const slotOptions = ['', 'head', 'chest', 'hand', 'foot'].map(s =>
+    const slotOptions = ['', 'head', 'shoulders', 'chest', 'bracers', 'gloves', 'mainhand', 'offhand', 'foot', 'ring', 'necklace', 'back', 'relic'].map(s =>
       `<option value="${s}" ${(i.equipSlot ?? '') === s ? 'selected' : ''}>${s || '(none - material)'}</option>`
     ).join('');
 
@@ -998,6 +1000,8 @@ export class AdminApp {
           <label>Name<input type="text" id="if-name" value="${this.escapeHtml(i.name)}"></label>
           <label>Rarity<select id="if-rarity">${rarityOptions}</select></label>
           <label>Equip Slot<select id="if-equipSlot">${slotOptions}</select></label>
+          <label>Two-Handed<input type="checkbox" id="if-twoHanded" ${i.twoHanded ? 'checked' : ''}></label>
+          <label>Class<input type="text" id="if-classRestriction" value="${i.classRestriction ?? ''}" placeholder="(any)"></label>
           <label>Attack Min<input type="number" id="if-atkMin" value="${i.bonusAttackMin ?? 0}" min="0"></label>
           <label>Attack Max<input type="number" id="if-atkMax" value="${i.bonusAttackMax ?? 0}" min="0"></label>
           <label>DR Min<input type="number" id="if-drMin" value="${i.damageReductionMin ?? 0}" min="0"></label>
@@ -1025,6 +1029,7 @@ export class AdminApp {
     const name = (document.getElementById('if-name') as HTMLInputElement)?.value.trim();
     const rarity = (document.getElementById('if-rarity') as HTMLSelectElement)?.value;
     const equipSlot = (document.getElementById('if-equipSlot') as HTMLSelectElement)?.value || undefined;
+    const twoHanded = (document.getElementById('if-twoHanded') as HTMLInputElement)?.checked ?? false;
     const bonusAttackMin = parseInt((document.getElementById('if-atkMin') as HTMLInputElement)?.value) || 0;
     const bonusAttackMax = parseInt((document.getElementById('if-atkMax') as HTMLInputElement)?.value) || 0;
     const damageReductionMin = parseInt((document.getElementById('if-drMin') as HTMLInputElement)?.value) || 0;
@@ -1048,8 +1053,11 @@ export class AdminApp {
 
     const id = existingId || crypto.randomUUID();
 
-    const item: ItemDefinition = { id, name, rarity: rarity as 'janky' | 'common' };
-    if (equipSlot) item.equipSlot = equipSlot as 'head' | 'chest' | 'hand' | 'foot';
+    const item: ItemDefinition = { id, name, rarity: rarity as ItemRarity };
+    if (equipSlot) item.equipSlot = equipSlot as EquipSlot;
+    if (twoHanded) item.twoHanded = true;
+    const classRestriction = (document.getElementById('if-classRestriction') as HTMLInputElement)?.value.trim() || undefined;
+    if (classRestriction) item.classRestriction = classRestriction;
     if (bonusAttackMin > 0 || bonusAttackMax > 0) { item.bonusAttackMin = bonusAttackMin; item.bonusAttackMax = bonusAttackMax; }
     if (damageReductionMin > 0 || damageReductionMax > 0) { item.damageReductionMin = damageReductionMin; item.damageReductionMax = damageReductionMax; }
     if (dodgeChance > 0) item.dodgeChance = dodgeChance;
