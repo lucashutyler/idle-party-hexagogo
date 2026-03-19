@@ -214,6 +214,27 @@ export const adminSwaggerSpec = {
         responses: { 200: { description: 'All monster definitions keyed by ID' } },
       },
     },
+    '/api/admin/monsters/bulk': {
+      post: {
+        tags: ['Monsters'],
+        summary: 'Bulk import monsters',
+        description: 'Adds or updates each monster in the array. Existing monsters with matching IDs are overwritten.',
+        parameters: [
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' }, description: 'Target a draft version instead of live' },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/MonsterDefinition' },
+          } } },
+        },
+        responses: {
+          200: { description: 'Monsters imported, returns count and all monsters' },
+          400: { description: 'Body must be a non-empty array, or validation errors' },
+        },
+      },
+    },
     '/api/admin/monsters/{id}': {
       put: {
         tags: ['Monsters'],

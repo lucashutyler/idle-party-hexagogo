@@ -975,6 +975,11 @@ html, body {
   justify-self: end;
 }
 
+.items-equip-bottom-left .items-slot-main {
+  text-align: right;
+  align-items: flex-end;
+}
+
 .items-equip-bottom-right {
   justify-self: start;
 }
@@ -994,7 +999,7 @@ html, body {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   min-width: 0;
-  width: 160px;
+  width: 225px;
   box-sizing: border-box;
 }
 

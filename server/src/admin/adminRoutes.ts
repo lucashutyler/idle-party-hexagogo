@@ -248,6 +248,51 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  /** Bulk import monsters. Adds or updates each monster. Supports ?versionId= for draft editing. */
+  router.post('/monsters/bulk', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const monsters = req.body;
+    if (!Array.isArray(monsters) || monsters.length === 0) {
+      res.status(400).json({ error: 'Body must be a non-empty array of monsters' });
+      return;
+    }
+    const errors: string[] = [];
+    for (let i = 0; i < monsters.length; i++) {
+      const m = monsters[i];
+      if (!m.id || !m.name || m.level == null || m.hp == null ||
+          m.damage == null || !m.damageType || m.xp == null ||
+          m.goldMin == null || m.goldMax == null) {
+        errors.push(`Monster at index ${i}: missing required fields (id, name, level, hp, damage, damageType, xp, goldMin, goldMax)`);
+      }
+    }
+    if (errors.length > 0) {
+      res.status(400).json({ error: 'Validation failed', errors });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      for (const m of monsters) {
+        const idx = snapshot.monsters.findIndex(existing => existing.id === m.id);
+        if (idx >= 0) { snapshot.monsters[idx] = m; } else { snapshot.monsters.push(m); }
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const monstersRecord: Record<string, typeof monsters[0]> = {};
+      for (const m of snapshot.monsters) monstersRecord[m.id] = m;
+      res.json({ success: true, imported: monsters.length, monsters: monstersRecord });
+    } else {
+      const content = getContentStore();
+      for (const m of monsters) {
+        await content.addOrUpdateMonster(m);
+      }
+      res.json({ success: true, imported: monsters.length, monsters: content.getAllMonsters() });
+    }
+  });
+
   // ── Item endpoints ──────────────────────────────────────
 
   /** List all items. */
