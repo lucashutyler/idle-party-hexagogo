@@ -12,6 +12,7 @@ import {
   HEX_SIZE,
   TileType,
   xpForNextLevel,
+  EQUIP_SLOTS,
 } from '@idle-party-rpg/shared';
 import type {
   MonsterDefinition,
@@ -120,6 +121,7 @@ export class AdminApp {
   private accountSortColumn: AccountSortColumn = 'lastActive';
   private accountSortDir: SortDirection = 'desc';
   private activeVersionId: string | null = null;
+  private itemSlotFilter: string = 'all';
   private mapTiles: HexTile[] = [];
 
   /** World tile definitions for room name lookups. */
@@ -887,8 +889,20 @@ export class AdminApp {
   private renderItems(): string {
     const displayContent = this.getDisplayContent();
     if (!displayContent) return '<div class="admin-page-empty">No data</div>';
-    const items = Object.values(displayContent.items);
+    const allItems = Object.values(displayContent.items);
     const readOnly = this.isReadOnly();
+
+    const slotOptions = ['all', ...EQUIP_SLOTS, 'none'].map(slot => {
+      const selected = this.itemSlotFilter === slot ? ' selected' : '';
+      const label = slot === 'none' ? 'No Slot' : slot.charAt(0).toUpperCase() + slot.slice(1);
+      return `<option value="${slot}"${selected}>${label}</option>`;
+    }).join('');
+
+    const items = allItems.filter(i => {
+      if (this.itemSlotFilter === 'all') return true;
+      if (this.itemSlotFilter === 'none') return !i.equipSlot;
+      return i.equipSlot === this.itemSlotFilter;
+    });
 
     const rows = items.map(i => {
       const effects: string[] = [];
@@ -927,10 +941,13 @@ export class AdminApp {
     return `
       <div class="admin-page">
         <div class="admin-page-header">
-          <h2>Items (${items.length})</h2>
+          <h2>Items (${items.length}/${allItems.length})</h2>
           ${addBtn}
         </div>
         ${versionBar}
+        <div class="admin-filter-bar">
+          <label>Slot: <select id="item-slot-filter">${slotOptions}</select></label>
+        </div>
         <div id="item-form-area"></div>
         <div class="admin-table-wrap pixel-panel">
           <table class="admin-table">
@@ -951,6 +968,11 @@ export class AdminApp {
   }
 
   private wireItemEvents(): void {
+    document.getElementById('item-slot-filter')?.addEventListener('change', (e) => {
+      this.itemSlotFilter = (e.target as HTMLSelectElement).value;
+      this.renderTabContent();
+    });
+
     document.getElementById('item-add-btn')?.addEventListener('click', () => {
       this.showItemForm(null);
     });

@@ -441,15 +441,14 @@ export class PartyBattleManager {
           if (def?.drops) {
             const dropped = rollDrops(def.drops);
             for (const itemId of dropped) {
-              // Class-restricted items only drop for eligible players
               const itemDef = this.content.getItem(itemId);
               let eligible = members;
               if (itemDef?.classRestriction) {
-                eligible = members.filter(u => {
+                const matching = members.filter(u => {
                   const s = this.getSession(u);
                   return s && s.getClassName() === itemDef.classRestriction;
                 });
-                if (eligible.length === 0) continue; // no eligible player, discard drop
+                if (matching.length > 0) eligible = matching;
               }
               const recipient = eligible[Math.floor(Math.random() * eligible.length)];
               memberItems.get(recipient)!.push(itemId);
