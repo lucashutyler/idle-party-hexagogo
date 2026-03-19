@@ -9,7 +9,7 @@ const SLOT_LABELS: Record<EquipSlot, string> = {
   shoulders: 'Shoulders',
   chest: 'Chest',
   bracers: 'Bracers',
-  gloves: 'Gloves',
+  gloves: 'Hands',
   mainhand: 'Main Hand',
   offhand: 'Offhand',
   foot: 'Feet',
