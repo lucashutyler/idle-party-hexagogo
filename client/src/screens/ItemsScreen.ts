@@ -226,14 +226,17 @@ export class ItemsScreen implements Screen {
       iconEl.textContent = CLASS_ICONS[char.className] ?? UNKNOWN_CLASS_ICON;
     }
 
-    // Render inventory
+    // Render inventory — split into equippable items and materials
     const entries = Object.entries(char.inventory).filter(([, count]) => count > 0);
     if (entries.length === 0) {
       this.inventoryList.innerHTML = '<div class="items-empty">No items yet</div>';
       return;
     }
 
-    this.inventoryList.innerHTML = entries.map(([itemId, count]) => {
+    const equipEntries = entries.filter(([id]) => this.itemDefs[id]?.equipSlot);
+    const materialEntries = entries.filter(([id]) => !this.itemDefs[id]?.equipSlot);
+
+    const renderRow = ([itemId, count]: [string, number]) => {
       const def = this.itemDefs[itemId];
       if (!def) return '';
       const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
@@ -250,7 +253,17 @@ export class ItemsScreen implements Screen {
           <button class="items-destroy-btn" data-destroy-item="${itemId}" data-destroy-max="${count}" title="Destroy">X</button>
         </div>
       </div>`;
-    }).join('');
+    };
+
+    let html = '';
+    if (equipEntries.length > 0) {
+      html += equipEntries.map(renderRow).join('');
+    }
+    if (materialEntries.length > 0) {
+      html += '<div class="items-section-label items-material-label">Materials</div>';
+      html += materialEntries.map(renderRow).join('');
+    }
+    this.inventoryList.innerHTML = html;
     // All click handlers are delegated via buildDOM() — no per-element wiring needed.
   }
 

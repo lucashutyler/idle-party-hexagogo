@@ -943,6 +943,10 @@ html, body {
   letter-spacing: 1px;
 }
 
+.items-material-label {
+  margin-top: 8px;
+}
+
 /* ── Equipment panel: WoW-style left slots | figure | right slots ── */
 
 .items-equip-panel {
