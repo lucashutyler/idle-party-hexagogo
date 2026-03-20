@@ -19,6 +19,7 @@ import {
   destroyItems,
   equipItemForceDestroy,
   EQUIP_SLOTS,
+  isTwoHandedEquipped,
   getZone,
   createDefaultSkillLoadout,
   getSkillPointsForLevel,
@@ -112,7 +113,7 @@ export class PlayerSession {
   getCombatInfo(): PartyCombatant {
     const maxHp = calculateMaxHp(this.character.level, this.character.className);
     let baseDamage = calculateBaseDamage(this.character.level, this.character.className);
-    const equipBonuses = computeEquipmentBonuses(this.character.equipment, this.content.getAllItems());
+    const equipBonuses = computeEquipmentBonuses(this.character.equipment, this.content.getAllItems(), this.character.level);
     const playerDamageType = CLASS_DEFINITIONS[this.character.className].damageType;
 
     // Resolve equipped skill definitions
@@ -332,11 +333,14 @@ export class PlayerSession {
 
   /** Admin: force-change class, keeping level, XP, gold, and inventory. Unequips all gear. */
   forceSetClass(className: ClassName): void {
-    // Unequip all gear back to inventory
+    // Unequip all gear back to inventory (skip offhand if same as mainhand — 2H weapon)
     for (const slot of EQUIP_SLOTS) {
       const itemId = this.character.equipment[slot];
       if (itemId) {
-        this.character.inventory[itemId] = (this.character.inventory[itemId] ?? 0) + 1;
+        const skip = slot === 'offhand' && itemId === this.character.equipment.mainhand;
+        if (!skip) {
+          this.character.inventory[itemId] = (this.character.inventory[itemId] ?? 0) + 1;
+        }
         this.character.equipment[slot] = null;
       }
     }
@@ -566,14 +570,14 @@ export class PlayerSession {
     const def = this.content.getItem(itemId);
     if (!def || !def.equipSlot) return false;
 
-    const result = equipItem(this.character.inventory, this.character.equipment, itemId, this.content.getAllItems());
+    const result = equipItem(this.character.inventory, this.character.equipment, itemId, this.content.getAllItems(), this.character.className);
     return result.success;
   }
 
   handleUnequipItem(slot: EquipSlot): boolean {
     if (!EQUIP_SLOTS.includes(slot)) return false;
 
-    const result = unequipItem(this.character.inventory, this.character.equipment, slot);
+    const result = unequipItem(this.character.inventory, this.character.equipment, slot, this.content.getAllItems());
     return result.success;
   }
 
@@ -583,6 +587,17 @@ export class PlayerSession {
     if (!def || !def.equipSlot) return null;
 
     const slot = def.equipSlot;
+
+    // If a 2H weapon is equipped and we're touching mainhand/offhand, check that
+    if ((slot === 'mainhand' || slot === 'offhand') && isTwoHandedEquipped(this.character.equipment, this.content.getAllItems())) {
+      const twoHandId = this.character.equipment.mainhand!;
+      const current = this.character.inventory[twoHandId] ?? 0;
+      if (current >= 99) {
+        return { blockedByItemId: twoHandId, blockedBySlot: 'mainhand' };
+      }
+      return null;
+    }
+
     const currentEquipped = this.character.equipment[slot];
     if (!currentEquipped) return null;
 
@@ -599,7 +614,7 @@ export class PlayerSession {
     if (!def || !def.equipSlot) return false;
 
     const result = equipItemForceDestroy(
-      this.character.inventory, this.character.equipment, itemId, this.content.getAllItems()
+      this.character.inventory, this.character.equipment, itemId, this.content.getAllItems(), this.character.className
     );
     return result.success;
   }

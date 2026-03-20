@@ -1,20 +1,41 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ServerEquipBlockedMessage } from '@idle-party-rpg/shared';
-import { EQUIP_SLOTS, getItemEffectText } from '@idle-party-rpg/shared';
+import { getItemEffectText, CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
 import type { EquipSlot, ItemDefinition } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 const SLOT_LABELS: Record<EquipSlot, string> = {
   head: 'Head',
+  shoulders: 'Shoulders',
   chest: 'Chest',
-  hand: 'Hand',
-  foot: 'Foot',
+  bracers: 'Bracers',
+  gloves: 'Hands',
+  mainhand: 'Main Hand',
+  offhand: 'Offhand',
+  foot: 'Feet',
+  ring: 'Ring',
+  necklace: 'Necklace',
+  back: 'Back',
+  relic: 'Relic',
 };
+
+/** Left column slots (top to bottom). */
+const LEFT_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'gloves', 'foot'];
+
+/** Right column slots (top to bottom). */
+const RIGHT_SLOTS: EquipSlot[] = ['back', 'necklace', 'bracers', 'ring', 'relic'];
+
 
 const RARITY_COLORS: Record<string, string> = {
   janky: '#808080',
   common: '#e8e8e8',
+  uncommon: '#66bb6a',
+  rare: '#4fc3f7',
+  epic: '#ee66e3',
+  legendary: '#9233df',
+  heirloom: '#e9bc18',
 };
+
 
 export class ItemsScreen implements Screen {
   private container: HTMLElement;
@@ -73,14 +94,46 @@ export class ItemsScreen implements Screen {
     this.container.innerHTML = `
       <div class="items-content">
         <div class="items-section-label">Equipment</div>
-        <div class="items-equip-slots"></div>
+        <div class="items-equip-panel">
+          <div class="items-equip-col items-equip-left"></div>
+          <div class="items-equip-figure">
+            <div class="items-figure-body">
+              <div class="fig-head"></div>
+              <div class="fig-neck"></div>
+              <div class="fig-shoulders">
+                <div class="fig-shoulder-l"></div>
+                <div class="fig-torso"></div>
+                <div class="fig-shoulder-r"></div>
+              </div>
+              <div class="fig-arms">
+                <div class="fig-arm-l"></div>
+                <div class="fig-waist"><span class="fig-class-icon"></span></div>
+                <div class="fig-arm-r"></div>
+              </div>
+              <div class="fig-legs">
+                <div class="fig-leg-l"></div>
+                <div class="fig-leg-gap"></div>
+                <div class="fig-leg-r"></div>
+              </div>
+              <div class="fig-feet">
+                <div class="fig-foot-l"></div>
+                <div class="fig-foot-gap"></div>
+                <div class="fig-foot-r"></div>
+              </div>
+            </div>
+          </div>
+          <div class="items-equip-col items-equip-right"></div>
+          <div class="items-equip-bottom-left"></div>
+          <div class="items-equip-bottom-spacer"></div>
+          <div class="items-equip-bottom-right"></div>
+        </div>
         <div class="items-section-label">Inventory</div>
         <div class="items-inventory"></div>
       </div>
       <div class="items-modal-overlay" style="display:none"></div>
     `;
 
-    this.slotsContainer = this.container.querySelector('.items-equip-slots')!;
+    this.slotsContainer = this.container.querySelector('.items-equip-panel')!;
     this.inventoryList = this.container.querySelector('.items-inventory')!;
     this.modalOverlay = this.container.querySelector('.items-modal-overlay')!;
 
@@ -88,13 +141,14 @@ export class ItemsScreen implements Screen {
       if (e.target === this.modalOverlay) this.hideModal();
     });
 
-    // Delegated click handler for equipment slots → unequip
-    this.slotsContainer.addEventListener('click', (e) => {
+    // Delegated click handler for equipment slots → unequip (covers panel + bottom row)
+    const handleSlotClick = (e: Event) => {
       const slotEl = (e.target as HTMLElement).closest('.items-equip-slot[data-slot]') as HTMLElement | null;
       if (!slotEl) return;
       const slot = slotEl.getAttribute('data-slot');
       if (slot) this.gameClient.sendUnequipItem(slot);
-    });
+    };
+    this.slotsContainer.addEventListener('click', handleSlotClick);
 
     // Delegated click handler for inventory rows → equip or destroy
     this.inventoryList.addEventListener('click', (e) => {
@@ -140,8 +194,8 @@ export class ItemsScreen implements Screen {
     if (key === this.lastRenderedKey) return;
     this.lastRenderedKey = key;
 
-    // Render equipment slots
-    this.slotsContainer.innerHTML = EQUIP_SLOTS.map(slot => {
+    // Render equipment slots into left/right columns around the figure
+    const renderSlot = (slot: EquipSlot) => {
       const itemId = char.equipment[slot];
       const def = itemId ? this.itemDefs[itemId] : null;
       const name = def ? def.name : 'Empty';
@@ -152,10 +206,25 @@ export class ItemsScreen implements Screen {
         <div class="items-slot-main">
           <span class="items-slot-label">${SLOT_LABELS[slot]}</span>
           <span class="items-slot-item" style="${def ? `color: ${color}` : ''}">${name}</span>
-          ${effect ? `<span class="items-slot-effect">${effect}</span>` : ''}
+          <span class="items-slot-effect">${effect || '&nbsp;'}</span>
         </div>
       </div>`;
-    }).join('');
+    };
+
+    const leftCol = this.slotsContainer.querySelector('.items-equip-left')!;
+    const rightCol = this.slotsContainer.querySelector('.items-equip-right')!;
+    const bottomLeft = this.slotsContainer.querySelector('.items-equip-bottom-left')!;
+    const bottomRight = this.slotsContainer.querySelector('.items-equip-bottom-right')!;
+    leftCol.innerHTML = LEFT_SLOTS.map(renderSlot).join('');
+    rightCol.innerHTML = RIGHT_SLOTS.map(renderSlot).join('');
+    bottomLeft.innerHTML = renderSlot('mainhand');
+    bottomRight.innerHTML = renderSlot('offhand');
+
+    // Update class icon on the silhouette
+    const iconEl = this.container.querySelector('.fig-class-icon');
+    if (iconEl) {
+      iconEl.textContent = CLASS_ICONS[char.className] ?? UNKNOWN_CLASS_ICON;
+    }
 
     // Render inventory
     const entries = Object.entries(char.inventory).filter(([, count]) => count > 0);
@@ -170,10 +239,11 @@ export class ItemsScreen implements Screen {
       const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
       const equippable = def.equipSlot ? ' equippable' : '';
       const effect = getItemEffectText(def);
+      const slotText = def.equipSlot ? SLOT_LABELS[def.equipSlot] : 'Material';
       return `<div class="items-row${equippable}" data-item="${itemId}">
         <div class="items-row-info">
           <span class="items-row-name" style="color: ${color}">${def.name}</span>
-          <span class="items-row-effect">${effect}</span>
+          <span class="items-row-effect">${slotText}${effect ? ' \u2022 ' + effect : ''}</span>
         </div>
         <div class="items-row-actions">
           <span class="items-row-count" style="color: ${color}">x${count}</span>

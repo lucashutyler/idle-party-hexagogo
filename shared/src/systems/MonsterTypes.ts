@@ -46,8 +46,13 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     goldMin: 1,
     goldMax: 2,
     drops: [
-      { itemId: 'janky_helmet', chance: 0.40 },
-      { itemId: 'rusty_dagger', chance: 0.40 },
+      { itemId: 'janky_helmet', chance: 0.01 },
+      { itemId: 'rusty_dagger', chance: 0.01 },
+      { itemId: 'tarnished_ring', chance: 0.005 },
+      { itemId: 'cracked_bracers', chance: 0.005 },
+      { itemId: 'worn_gloves', chance: 0.005 },
+      { itemId: 'gnarled_wand', chance: 0.004 },
+      { itemId: 'tin_whistle', chance: 0.004 },
     ],
   },
   wolf: {
@@ -61,7 +66,11 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     goldMin: 3,
     goldMax: 5,
     drops: [
-      { itemId: 'mangy_pelt', chance: 0.40 },
+      { itemId: 'mangy_pelt', chance: 0.01 },
+      { itemId: 'moth_eaten_cloak', chance: 0.005 },
+      { itemId: 'tattered_pauldrons', chance: 0.004 },
+      { itemId: 'short_bow', chance: 0.004 },
+      { itemId: 'prayer_beads', chance: 0.004 },
     ],
   },
   bandit: {
@@ -75,8 +84,12 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     goldMin: 2,
     goldMax: 5,
     drops: [
-      { itemId: 'leather_vest', chance: 0.25 },
-      { itemId: 'old_leather_boots', chance: 0.40 },
+      { itemId: 'leather_vest', chance: 0.008 },
+      { itemId: 'old_leather_boots', chance: 0.01 },
+      { itemId: 'frayed_cord_necklace', chance: 0.005 },
+      { itemId: 'splintered_buckler', chance: 0.005 },
+      { itemId: 'cracked_idol', chance: 0.004 },
+      { itemId: 'iron_battleaxe', chance: 0.003 },
     ],
   },
 };

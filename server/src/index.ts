@@ -20,9 +20,11 @@ import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { createAdminRoutes } from './admin/adminRoutes.js';
+import swaggerUi from 'swagger-ui-express';
+import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ChatMessage, ClassName } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
 const app = express();
@@ -61,6 +63,14 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(sessionMiddleware);
+
+// --- Swagger ---
+import { adminMiddleware } from './admin/adminMiddleware.js';
+app.use('/api-docs/admin', adminMiddleware, swaggerUi.serveFiles(adminSwaggerSpec), swaggerUi.setup(adminSwaggerSpec));
+app.use('/api-docs/game', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!req.session?.username) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  next();
+}, swaggerUi.serveFiles(gameSwaggerSpec), swaggerUi.setup(gameSwaggerSpec));
 
 // --- Routes ---
 app.use('/auth', createAuthRoutes({
@@ -333,8 +343,7 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        const validSlots = ['head', 'chest', 'hand', 'foot'];
-        if (!validSlots.includes(msg.slot)) {
+        if (!EQUIP_SLOTS.includes(msg.slot)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid slot' }));
           return;
         }

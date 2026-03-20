@@ -441,7 +441,16 @@ export class PartyBattleManager {
           if (def?.drops) {
             const dropped = rollDrops(def.drops);
             for (const itemId of dropped) {
-              const recipient = members[Math.floor(Math.random() * partySize)];
+              const itemDef = this.content.getItem(itemId);
+              let eligible = members;
+              if (itemDef?.classRestriction) {
+                const matching = members.filter(u => {
+                  const s = this.getSession(u);
+                  return s && s.getClassName() === itemDef.classRestriction;
+                });
+                if (matching.length > 0) eligible = matching;
+              }
+              const recipient = eligible[Math.floor(Math.random() * eligible.length)];
               memberItems.get(recipient)!.push(itemId);
             }
           }
