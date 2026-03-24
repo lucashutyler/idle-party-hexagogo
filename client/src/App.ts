@@ -14,6 +14,7 @@ import { CharacterScreen } from './screens/CharacterScreen';
 import { ItemsScreen } from './screens/ItemsScreen';
 import { SocialScreen } from './screens/SocialScreen';
 import { ClassSelectScreen } from './screens/ClassSelectScreen';
+import { SuspensionScreen } from './screens/SuspensionScreen';
 import { BottomNav } from './ui/BottomNav';
 
 const CONNECTION_ERROR = 'Could not connect to server';
@@ -26,6 +27,7 @@ export class App {
   private verifyScreen!: VerifyScreen;
   private usernameScreen!: UsernameScreen;
   private offlineScreen!: OfflineScreen;
+  private suspensionScreen!: SuspensionScreen;
   private navEl!: HTMLElement;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -41,6 +43,10 @@ export class App {
       this.retryConnection();
     });
     this.screenManager.register('offline', document.getElementById('screen-offline')!, this.offlineScreen);
+
+    // Suspension screen
+    this.suspensionScreen = new SuspensionScreen('screen-suspended');
+    this.screenManager.register('suspended', document.getElementById('screen-suspended')!, this.suspensionScreen);
 
     // Verify screen (magic link landing)
     this.verifyScreen = new VerifyScreen('screen-verify', (token) => {
@@ -81,6 +87,10 @@ export class App {
 
     try {
       const session = await getSession();
+      if (session.deactivated) {
+        this.showSuspensionScreen(session.email);
+        return;
+      }
       if (session.authenticated && session.username) {
         // Already fully logged in — connect WS and enter game
         await this.connectAndEnterGame();
@@ -103,6 +113,11 @@ export class App {
     try {
       const result = await loginWithEmail(email);
 
+      if (result.deactivated) {
+        this.showSuspensionScreen(result.email ?? email);
+        return;
+      }
+
       if (result.error) {
         this.loginScreen.showError(result.error);
         this.loginScreen.setLoading(false);
@@ -112,6 +127,10 @@ export class App {
       if (result.mode === 'dev' && result.token) {
         // Dev mode: auto-verify with the returned token
         const verify = await verifyToken(result.token);
+        if (verify.deactivated) {
+          this.showSuspensionScreen(verify.email ?? email);
+          return;
+        }
         if (verify.success) {
           if (verify.username) {
             await this.connectAndEnterGame();
@@ -206,6 +225,11 @@ export class App {
   private async connectAndEnterGame(): Promise<void> {
     this.gameClient = new GameClient();
 
+    // Listen for account suspension (admin kicked while playing)
+    this.gameClient.onSuspension(() => {
+      this.showSuspensionScreen();
+    });
+
     // Connect WS first (creates PlayerSession server-side), then load world data
     // (world endpoint requires the player session to exist)
     const connectResult = await this.gameClient.connect();
@@ -285,6 +309,15 @@ export class App {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+  }
+
+  private showSuspensionScreen(email?: string): void {
+    if (email) {
+      localStorage.setItem('suspendedEmail', email);
+    }
+    this.suspensionScreen.setEmail(email ?? localStorage.getItem('suspendedEmail') ?? '');
+    this.navEl.style.display = 'none';
+    this.screenManager.switchTo('suspended');
   }
 
   private enterGame(): void {

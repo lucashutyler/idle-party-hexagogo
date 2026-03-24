@@ -47,9 +47,58 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         isOnline: a.username ? onlineSet.has(a.username) : false,
         className: session?.getClassName() ?? null,
         level: session?.getLevel() ?? null,
+        deactivated: a.deactivated ?? false,
+        hasReactivationRequest: !!a.reactivationRequest,
+        reactivationRequest: a.reactivationRequest ?? null,
+        sessionHistory: a.sessionHistory ?? [],
       };
     });
     res.json({ accounts });
+  });
+
+  /** Scan session histories for shared device tokens across accounts. */
+  router.get('/duplicate-tokens', (_req, res) => {
+    const tokenMap = new Map<string, Set<string>>();
+    for (const account of accountStore.getAllAccounts()) {
+      for (const record of account.sessionHistory ?? []) {
+        if (record.deviceToken === 'unknown') continue;
+        if (!tokenMap.has(record.deviceToken)) tokenMap.set(record.deviceToken, new Set());
+        tokenMap.get(record.deviceToken)!.add(account.email);
+      }
+    }
+    const duplicates: Record<string, string[]> = {};
+    for (const [token, emails] of tokenMap) {
+      if (emails.size > 1) duplicates[token] = Array.from(emails);
+    }
+    res.json({ duplicates });
+  });
+
+  /** Deactivate a player account. Kicks them if online. */
+  router.post('/players/:username/deactivate', async (req, res) => {
+    const { username } = req.params;
+    const account = accountStore.findByUsername(username);
+    if (!account) {
+      res.status(404).json({ error: `Account for "${username}" not found` });
+      return;
+    }
+    await accountStore.setDeactivated(account.email, true);
+    const pm = getPlayerManager();
+    pm.kickPlayer(username);
+    console.log(`[Admin] Deactivated "${username}"`);
+    res.json({ success: true });
+  });
+
+  /** Reactivate a player account. */
+  router.post('/players/:username/reactivate', async (req, res) => {
+    const { username } = req.params;
+    const account = accountStore.findByUsername(username);
+    if (!account) {
+      res.status(404).json({ error: `Account for "${username}" not found` });
+      return;
+    }
+    await accountStore.setDeactivated(account.email, false);
+    console.log(`[Admin] Reactivated "${username}"`);
+    res.json({ success: true });
   });
 
   /** Full unfiltered game content — admin only. */

@@ -4,6 +4,7 @@ export interface SessionInfo {
   authenticated: boolean;
   email?: string;
   username?: string | null;
+  deactivated?: boolean;
 }
 
 export interface LoginResult {
@@ -12,6 +13,8 @@ export interface LoginResult {
   loginId?: string;
   sent?: boolean;
   error?: string;
+  deactivated?: boolean;
+  email?: string;
 }
 
 export interface LoginStatusResult {
@@ -61,6 +64,7 @@ export interface VerifyResult {
   email?: string;
   username?: string | null;
   error?: string;
+  deactivated?: boolean;
 }
 
 export async function verifyToken(token: string): Promise<VerifyResult> {
@@ -91,4 +95,16 @@ export async function approveLogin(token: string): Promise<ApproveResult> {
 
 export async function logout(): Promise<void> {
   await jsonFetch(`${API_BASE}/logout`, { method: 'POST' });
+}
+
+export interface AppealResult {
+  success?: boolean;
+  error?: string;
+}
+
+export async function submitAppeal(email: string, text: string): Promise<AppealResult> {
+  return jsonFetch<AppealResult>(`${API_BASE}/appeal`, {
+    method: 'POST',
+    body: JSON.stringify({ email, text }),
+  });
 }

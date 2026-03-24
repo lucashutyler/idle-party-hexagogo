@@ -34,7 +34,13 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
     }
 
     // Create account if it doesn't exist
-    await accountStore.createAccount(trimmed);
+    const loginAccount = await accountStore.createAccount(trimmed);
+
+    // Block deactivated accounts from logging in
+    if (loginAccount.deactivated) {
+      res.json({ deactivated: true, email: trimmed });
+      return;
+    }
 
     // Generate magic link token
     const token = tokenStore.create(trimmed);
@@ -78,6 +84,12 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
     await accountStore.setVerified(email);
     const account = accountStore.findByEmail(email);
 
+    // Block deactivated accounts
+    if (account?.deactivated) {
+      res.status(403).json({ error: 'Account suspended', deactivated: true, email });
+      return;
+    }
+
     // Regenerate session to prevent fixation and ensure a fresh cookie is set.
     // This is critical because the verify request comes from a client-side fetch —
     // express-session doesn't reliably set cookies when save() is called explicitly.
@@ -97,6 +109,14 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
           res.status(500).json({ error: 'Session error' });
           return;
         }
+
+        // Record session fingerprint for duplicate detection
+        accountStore.addSessionRecord(email, {
+          deviceToken: res.locals.deviceToken ?? 'unknown',
+          ip: req.ip ?? (req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()) ?? 'unknown',
+          userAgent: req.headers['user-agent'] ?? 'unknown',
+          timestamp: new Date().toISOString(),
+        });
 
         res.json({
           success: true,
@@ -162,6 +182,12 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
 
     const account = accountStore.findByEmail(email);
 
+    // Block deactivated accounts
+    if (account?.deactivated) {
+      res.status(403).json({ error: 'Account suspended', deactivated: true, email });
+      return;
+    }
+
     req.session.regenerate((err) => {
       if (err) {
         console.error('[Auth] Session regenerate error:', err);
@@ -178,6 +204,14 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
           res.status(500).json({ error: 'Session error' });
           return;
         }
+
+        // Record session fingerprint for duplicate detection
+        accountStore.addSessionRecord(email, {
+          deviceToken: res.locals.deviceToken ?? 'unknown',
+          ip: req.ip ?? (req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()) ?? 'unknown',
+          userAgent: req.headers['user-agent'] ?? 'unknown',
+          timestamp: new Date().toISOString(),
+        });
 
         res.json({
           status: 'approved',
@@ -198,6 +232,13 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
     }
 
     const account = accountStore.findByEmail(req.session.email);
+
+    // Block deactivated accounts — return email so client can submit appeals
+    if (account?.deactivated) {
+      res.json({ authenticated: false, deactivated: true, email: req.session.email });
+      return;
+    }
+
     res.json({
       authenticated: true,
       email: req.session.email,
@@ -253,6 +294,28 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
     }
 
     res.json({ success: true, username: trimmed, oldUsername });
+  });
+
+  /**
+   * POST /auth/appeal — { email, text }
+   * Submit a reactivation appeal for a suspended account. No session required.
+   */
+  router.post('/appeal', async (req, res) => {
+    const { email, text } = req.body;
+    if (!email || typeof email !== 'string' || !text || typeof text !== 'string') {
+      res.status(400).json({ error: 'Email and appeal text are required' });
+      return;
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const account = accountStore.findByEmail(trimmedEmail);
+    if (!account || !account.deactivated) {
+      res.status(404).json({ error: 'No suspended account found' });
+      return;
+    }
+
+    await accountStore.setReactivationRequest(trimmedEmail, text.trim().slice(0, 500));
+    res.json({ success: true });
   });
 
   /**

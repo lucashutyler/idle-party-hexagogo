@@ -90,6 +90,19 @@ export class PlayerManager {
     console.log(`[PlayerManager] "${username}" disconnected (session preserved, ${this.connectionCount} connections)`);
   }
 
+  /** Kick a player: close all WebSocket connections with suspension code. */
+  kickPlayer(username: string): void {
+    const wsSet = this.playerConnections.get(username);
+    if (wsSet) {
+      for (const ws of wsSet) {
+        ws.close(4001, 'Account suspended');
+        this.connections.delete(ws);
+      }
+      this.playerConnections.delete(username);
+    }
+    console.log(`[PlayerManager] Kicked "${username}"`);
+  }
+
   getSession(ws: WebSocket): PlayerSession | undefined {
     const username = this.connections.get(ws);
     if (!username) return undefined;

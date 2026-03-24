@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 // Load .env from project root (npm workspaces set CWD to server/)
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config(); // Also check server/.env (does not override existing vars)
+import crypto from 'crypto';
 import express from 'express';
 import session from 'express-session';
 import cors from 'cors';
@@ -62,6 +63,25 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
+// Device token: persistent cookie that survives logout for duplicate detection
+app.use((req, res, next) => {
+  const cookieHeader = req.headers.cookie ?? '';
+  const dtMatch = cookieHeader.match(/(?:^|;\s*)_dt=([^;]+)/);
+  let dt = dtMatch ? dtMatch[1] : undefined;
+  if (!dt) {
+    dt = crypto.randomUUID();
+    res.cookie('_dt', dt, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 10 * 365 * 24 * 60 * 60 * 1000, // 10 years
+    });
+  }
+  res.locals.deviceToken = dt;
+  next();
+});
+
 app.use(sessionMiddleware);
 
 // --- Swagger ---
@@ -153,6 +173,14 @@ server.on('upgrade', async (req, socket, head) => {
   const username = await getSessionUsername(req);
 
   if (!username || username === 'undefined') {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  // Block deactivated accounts from connecting
+  const account = accountStore.findByUsername(username);
+  if (account?.deactivated) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;

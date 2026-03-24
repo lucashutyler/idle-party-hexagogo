@@ -8,6 +8,7 @@ type ChatHistoryListener = (channelType: ChatChannelType, channelId: string, mes
 type ConnectionListener = (connected: boolean) => void;
 type WorldUpdateListener = () => void;
 type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
+type SuspensionListener = () => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -22,6 +23,7 @@ export class GameClient {
   private chatHistoryListeners = new Set<ChatHistoryListener>();
   private worldUpdateListeners = new Set<WorldUpdateListener>();
   private equipBlockedListeners = new Set<EquipBlockedListener>();
+  private suspensionListeners = new Set<SuspensionListener>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -86,6 +88,12 @@ export class GameClient {
     return () => { this.connectionListeners.delete(listener); };
   }
 
+  /** Subscribe to account suspension events (WS close code 4001). */
+  onSuspension(listener: SuspensionListener): () => void {
+    this.suspensionListeners.add(listener);
+    return () => { this.suspensionListeners.delete(listener); };
+  }
+
   private doConnect(): void {
     if (this.destroyed) return;
 
@@ -141,8 +149,18 @@ export class GameClient {
       }
     };
 
-    this.ws.onclose = () => {
-      console.log('[GameClient] disconnected');
+    this.ws.onclose = (event) => {
+      console.log('[GameClient] disconnected', event.code);
+
+      // Account suspended — don't reconnect, notify listeners
+      if (event.code === 4001) {
+        this.destroyed = true;
+        for (const listener of this.suspensionListeners) {
+          listener();
+        }
+        return;
+      }
+
       for (const listener of this.connectionListeners) {
         listener(false);
       }
