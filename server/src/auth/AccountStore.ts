@@ -2,12 +2,22 @@ import { readFile, writeFile, rename, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
+export interface SessionRecord {
+  deviceToken: string;
+  ip: string;
+  userAgent: string;
+  timestamp: string;
+}
+
 export interface Account {
   email: string;
   username: string | null;
   verified: boolean;
   createdAt: string;
   lastActiveAt: string | null;
+  deactivated?: boolean;
+  reactivationRequest?: string;
+  sessionHistory?: SessionRecord[];
 }
 
 interface AccountsData {
@@ -114,5 +124,37 @@ export class AccountStore {
     if (!account) return;
     account.lastActiveAt = new Date().toISOString();
     await this.save();
+  }
+
+  async addSessionRecord(email: string, record: SessionRecord): Promise<void> {
+    const account = this.accounts[email.toLowerCase()];
+    if (!account) return;
+    if (!account.sessionHistory) account.sessionHistory = [];
+    account.sessionHistory.push(record);
+    if (account.sessionHistory.length > 10) {
+      account.sessionHistory = account.sessionHistory.slice(-10);
+    }
+    await this.save();
+  }
+
+  async setDeactivated(email: string, deactivated: boolean): Promise<void> {
+    const account = this.accounts[email.toLowerCase()];
+    if (!account) return;
+    account.deactivated = deactivated;
+    if (!deactivated) {
+      delete account.reactivationRequest;
+    }
+    await this.save();
+  }
+
+  async setReactivationRequest(email: string, text: string): Promise<void> {
+    const account = this.accounts[email.toLowerCase()];
+    if (!account) return;
+    account.reactivationRequest = text;
+    await this.save();
+  }
+
+  isDeactivated(email: string): boolean {
+    return this.accounts[email.toLowerCase()]?.deactivated === true;
   }
 }

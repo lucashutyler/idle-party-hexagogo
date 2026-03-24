@@ -46,6 +46,13 @@ interface OverviewData {
   uptime: number;
 }
 
+interface SessionRecord {
+  deviceToken: string;
+  ip: string;
+  userAgent: string;
+  timestamp: string;
+}
+
 interface AccountData {
   email: string;
   username: string | null;
@@ -55,6 +62,10 @@ interface AccountData {
   isOnline: boolean;
   className: string | null;
   level: number | null;
+  deactivated: boolean;
+  hasReactivationRequest: boolean;
+  reactivationRequest: string | null;
+  sessionHistory: SessionRecord[];
 }
 
 type AccountSortColumn = 'username' | 'email' | 'status' | 'level' | 'class' | 'created' | 'lastActive';
@@ -120,6 +131,10 @@ export class AdminApp {
   private accounts: AccountData[] = [];
   private accountSortColumn: AccountSortColumn = 'lastActive';
   private accountSortDir: SortDirection = 'desc';
+  private accountFilterHideNoChar = false;
+  private accountFilterActiveDays = '';
+  private accountFilterCreatedDays = '';
+  private duplicateTokens: Record<string, string[]> = {}; // deviceToken → emails
   private activeVersionId: string | null = null;
   private itemSlotFilter: string = 'all';
   private mapTiles: HexTile[] = [];
@@ -428,8 +443,30 @@ export class AdminApp {
     `;
   }
 
+  private getFilteredAccounts(): AccountData[] {
+    let filtered = [...this.accounts];
+
+    if (this.accountFilterHideNoChar) {
+      filtered = filtered.filter(a => a.username && a.className && a.className !== 'Adventurer');
+    }
+
+    const activeDays = parseInt(this.accountFilterActiveDays);
+    if (!isNaN(activeDays) && activeDays > 0) {
+      const cutoff = Date.now() - activeDays * 24 * 60 * 60 * 1000;
+      filtered = filtered.filter(a => a.lastActiveAt && new Date(a.lastActiveAt).getTime() >= cutoff);
+    }
+
+    const createdDays = parseInt(this.accountFilterCreatedDays);
+    if (!isNaN(createdDays) && createdDays > 0) {
+      const cutoff = Date.now() - createdDays * 24 * 60 * 60 * 1000;
+      filtered = filtered.filter(a => new Date(a.createdAt).getTime() >= cutoff);
+    }
+
+    return filtered;
+  }
+
   private getSortedAccounts(): AccountData[] {
-    const sorted = [...this.accounts];
+    const sorted = this.getFilteredAccounts();
     const dir = this.accountSortDir === 'asc' ? 1 : -1;
     sorted.sort((a, b) => {
       let cmp = 0;
@@ -485,6 +522,8 @@ export class AdminApp {
   private renderAccounts(): string {
     const classes = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'];
     const sorted = this.getSortedAccounts();
+    const filteredCount = sorted.length;
+    const totalCount = this.accounts.length;
     const rows = sorted.map(a => {
       const classCell = a.username && a.className
         ? `<select class="account-class-select" data-username="${this.escapeHtml(a.username)}">
@@ -492,11 +531,28 @@ export class AdminApp {
            </select>`
         : (a.className ?? '—');
 
+      const usernameCell = a.username
+        ? `<a href="#" class="account-detail-link" data-email="${this.escapeHtml(a.email)}" style="color: var(--color-link, #6af); text-decoration: underline; cursor: pointer;">${this.escapeHtml(a.username)}</a>`
+        : '<em>none</em>';
+
+      const statusBadges: string[] = [];
+      if (a.isOnline) {
+        statusBadges.push('<span class="status-online">Online</span>');
+      } else {
+        statusBadges.push('<span class="status-offline">Offline</span>');
+      }
+      if (a.deactivated) {
+        statusBadges.push('<span style="color: #e74c3c; font-weight: bold; margin-left: 4px;" title="Suspended">BAN</span>');
+      }
+      if (a.hasReactivationRequest) {
+        statusBadges.push('<span style="color: #f39c12; margin-left: 4px;" title="Has reactivation request">REQ</span>');
+      }
+
       return `
-        <tr>
-          <td>${a.username ?? '<em>none</em>'}</td>
+        <tr${a.deactivated ? ' style="opacity: 0.6;"' : ''}>
+          <td>${usernameCell}</td>
           <td>${a.email}</td>
-          <td>${a.isOnline ? '<span class="status-online">Online</span>' : '<span class="status-offline">Offline</span>'}</td>
+          <td>${statusBadges.join('')}</td>
           <td>${a.level ?? '—'}</td>
           <td>${classCell}</td>
           <td>${new Date(a.createdAt).toLocaleDateString()}</td>
@@ -507,7 +563,23 @@ export class AdminApp {
 
     return `
       <div class="admin-page">
-        <div class="admin-page-header"><h2>Accounts (${this.accounts.length})</h2></div>
+        <div class="admin-page-header"><h2>Accounts — Showing ${filteredCount} of ${totalCount}</h2></div>
+        <div class="pixel-panel" style="margin-bottom: 12px; padding: 10px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 0.85em;">
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="filter-hide-no-char" ${this.accountFilterHideNoChar ? 'checked' : ''}>
+            Hide no character
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            Active in last
+            <input type="number" id="filter-active-days" value="${this.accountFilterActiveDays}" min="1" style="width: 50px; padding: 2px 4px; background: var(--color-bg-panel, #1a1a2e); color: var(--color-text, #eee); border: 1px solid var(--color-border, #333);">
+            days
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            Created in last
+            <input type="number" id="filter-created-days" value="${this.accountFilterCreatedDays}" min="1" style="width: 50px; padding: 2px 4px; background: var(--color-bg-panel, #1a1a2e); color: var(--color-text, #eee); border: 1px solid var(--color-border, #333);">
+            days
+          </label>
+        </div>
         <div class="admin-table-wrap pixel-panel">
           <table class="admin-table admin-table-sortable">
             <thead>
@@ -530,10 +602,30 @@ export class AdminApp {
           <button id="master-reset-btn" class="admin-btn admin-btn-danger">Master Reset</button>
         </div>
       </div>
+      <div id="account-detail-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; overflow-y: auto;">
+        <div style="max-width: 700px; margin: 40px auto; background: var(--color-bg-panel, #1a1a2e); border: 2px solid var(--color-border, #333); padding: 20px; border-radius: 4px;">
+          <div id="account-detail-content"></div>
+          <button id="account-detail-close" class="admin-btn" style="margin-top: 12px;">Close</button>
+        </div>
+      </div>
     `;
   }
 
   private wireAccountEvents(): void {
+    // Filter controls
+    document.getElementById('filter-hide-no-char')?.addEventListener('change', (e) => {
+      this.accountFilterHideNoChar = (e.target as HTMLInputElement).checked;
+      this.renderTabContent();
+    });
+    document.getElementById('filter-active-days')?.addEventListener('input', (e) => {
+      this.accountFilterActiveDays = (e.target as HTMLInputElement).value;
+      this.renderTabContent();
+    });
+    document.getElementById('filter-created-days')?.addEventListener('input', (e) => {
+      this.accountFilterCreatedDays = (e.target as HTMLInputElement).value;
+      this.renderTabContent();
+    });
+
     // Sortable headers
     document.querySelectorAll('.admin-table-sortable th[data-sort]').forEach(th => {
       th.addEventListener('click', () => {
@@ -546,6 +638,27 @@ export class AdminApp {
         }
         this.renderTabContent();
       });
+    });
+
+    // Account detail modal
+    document.querySelectorAll('.account-detail-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const email = (link as HTMLElement).dataset.email!;
+        this.showAccountDetail(email);
+      });
+    });
+
+    document.getElementById('account-detail-close')?.addEventListener('click', () => {
+      const modal = document.getElementById('account-detail-modal');
+      if (modal) modal.style.display = 'none';
+    });
+
+    // Close modal on background click
+    document.getElementById('account-detail-modal')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        (e.currentTarget as HTMLElement).style.display = 'none';
+      }
     });
 
     document.querySelectorAll('.account-class-select').forEach(sel => {
@@ -602,6 +715,119 @@ export class AdminApp {
         alert('Master reset failed: ' + (err instanceof Error ? err.message : err));
       }
     });
+
+    // Fetch duplicate tokens on accounts tab load
+    this.fetchAdmin<{ duplicates: Record<string, string[]> }>('/api/admin/duplicate-tokens')
+      .then(data => { this.duplicateTokens = data.duplicates; })
+      .catch(() => { /* ignore */ });
+  }
+
+  private showAccountDetail(email: string): void {
+    const account = this.accounts.find(a => a.email === email);
+    if (!account) return;
+
+    const modal = document.getElementById('account-detail-modal');
+    const content = document.getElementById('account-detail-content');
+    if (!modal || !content) return;
+
+    // Build set of duplicate tokens for this account
+    const accountDuplicateTokens = new Set<string>();
+    for (const [token, emails] of Object.entries(this.duplicateTokens)) {
+      if (emails.includes(email)) accountDuplicateTokens.add(token);
+    }
+
+    // Find other accounts sharing device tokens
+    const linkedAccounts = new Set<string>();
+    for (const token of accountDuplicateTokens) {
+      for (const linkedEmail of this.duplicateTokens[token]) {
+        if (linkedEmail !== email) linkedAccounts.add(linkedEmail);
+      }
+    }
+
+    const sessionRows = (account.sessionHistory ?? []).map(s => {
+      const isDuplicate = accountDuplicateTokens.has(s.deviceToken);
+      return `
+        <tr${isDuplicate ? ' style="background: rgba(231, 76, 60, 0.15);"' : ''}>
+          <td title="${this.escapeHtml(s.deviceToken)}">${this.escapeHtml(s.deviceToken.slice(0, 8))}...${isDuplicate ? ' <span style="color: #e74c3c;" title="Shared with other accounts">DUP</span>' : ''}</td>
+          <td>${this.escapeHtml(s.ip)}</td>
+          <td title="${this.escapeHtml(s.userAgent)}">${this.escapeHtml(s.userAgent.slice(0, 40))}${s.userAgent.length > 40 ? '...' : ''}</td>
+          <td>${new Date(s.timestamp).toLocaleString()}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const linkedSection = linkedAccounts.size > 0
+      ? `<div style="margin-top: 12px; padding: 8px; background: rgba(231, 76, 60, 0.1); border: 1px solid #e74c3c; border-radius: 4px;">
+          <strong style="color: #e74c3c;">Shared device token with:</strong>
+          <ul style="margin: 4px 0 0 16px;">${Array.from(linkedAccounts).map(e => {
+            const linked = this.accounts.find(a => a.email === e);
+            return `<li>${linked?.username ?? '<em>no username</em>'} (${this.escapeHtml(e)})</li>`;
+          }).join('')}</ul>
+        </div>`
+      : '';
+
+    const reactivationSection = account.reactivationRequest
+      ? `<div style="margin-top: 12px; padding: 8px; background: rgba(243, 156, 18, 0.1); border: 1px solid #f39c12; border-radius: 4px;">
+          <strong style="color: #f39c12;">Reactivation Request:</strong>
+          <p style="margin: 4px 0 0; white-space: pre-wrap;">${this.escapeHtml(account.reactivationRequest)}</p>
+        </div>`
+      : '';
+
+    content.innerHTML = `
+      <h3 style="margin: 0 0 12px;">${this.escapeHtml(account.username ?? 'No username')} — Account Details</h3>
+      <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin-bottom: 16px; font-size: 0.9em;">
+        <strong>Email:</strong> <span>${this.escapeHtml(account.email)}</span>
+        <strong>Created:</strong> <span>${new Date(account.createdAt).toLocaleString()}</span>
+        <strong>Last Active:</strong> <span>${account.lastActiveAt ? new Date(account.lastActiveAt).toLocaleString() : '—'}</span>
+        <strong>Status:</strong> <span>${account.isOnline ? '<span class="status-online">Online</span>' : '<span class="status-offline">Offline</span>'}${account.deactivated ? ' <span style="color: #e74c3c; font-weight: bold;">SUSPENDED</span>' : ''}</span>
+        <strong>Class/Level:</strong> <span>${account.className ?? '—'} Lv${account.level ?? '—'}</span>
+      </div>
+      <div style="margin-bottom: 16px;">
+        ${account.deactivated
+          ? `<button class="admin-btn" id="account-reactivate-btn" data-email="${this.escapeHtml(account.email)}" data-username="${this.escapeHtml(account.username ?? '')}">Reactivate Account</button>`
+          : account.username
+            ? `<button class="admin-btn admin-btn-danger" id="account-deactivate-btn" data-email="${this.escapeHtml(account.email)}" data-username="${this.escapeHtml(account.username)}">Suspend Account</button>`
+            : ''}
+      </div>
+      ${reactivationSection}
+      ${linkedSection}
+      <h4 style="margin: 16px 0 8px;">Session History (last ${account.sessionHistory?.length ?? 0})</h4>
+      ${sessionRows
+        ? `<div class="admin-table-wrap" style="max-height: 300px; overflow-y: auto;">
+            <table class="admin-table" style="font-size: 0.8em;">
+              <thead><tr><th>Device Token</th><th>IP</th><th>User Agent</th><th>Time</th></tr></thead>
+              <tbody>${sessionRows}</tbody>
+            </table>
+          </div>`
+        : '<p style="color: #888;">No session history recorded yet.</p>'}
+    `;
+
+    // Wire deactivation/reactivation buttons
+    document.getElementById('account-deactivate-btn')?.addEventListener('click', async () => {
+      const username = (document.getElementById('account-deactivate-btn') as HTMLElement).dataset.username!;
+      if (!confirm(`Suspend account "${username}"? This will kick them and prevent login.`)) return;
+      try {
+        await fetch(`/api/admin/players/${encodeURIComponent(username)}/deactivate`, {
+          method: 'POST', credentials: 'include',
+        });
+        await this.refresh();
+        modal.style.display = 'none';
+      } catch { alert('Failed to suspend account'); }
+    });
+
+    document.getElementById('account-reactivate-btn')?.addEventListener('click', async () => {
+      const username = (document.getElementById('account-reactivate-btn') as HTMLElement).dataset.username!;
+      if (!confirm(`Reactivate account "${username}"?`)) return;
+      try {
+        await fetch(`/api/admin/players/${encodeURIComponent(username)}/reactivate`, {
+          method: 'POST', credentials: 'include',
+        });
+        await this.refresh();
+        modal.style.display = 'none';
+      } catch { alert('Failed to reactivate account'); }
+    });
+
+    modal.style.display = '';
   }
 
   private renderMonsters(): string {
