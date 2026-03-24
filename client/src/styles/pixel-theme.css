@@ -454,6 +454,103 @@ html, body {
   font-weight: bold;
 }
 
+/* ── Settings Screen ────────────────────────────────────── */
+
+.settings-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.settings-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.settings-icon {
+  font-size: 48px;
+}
+
+.settings-title {
+  font-family: var(--pixel-font);
+  font-size: 14px;
+  color: var(--accent-gold);
+}
+
+.settings-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 300px;
+  margin-top: 16px;
+}
+
+.settings-btn {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 10px;
+}
+
+.patch-notes-panel {
+  width: 100%;
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.patch-notes-back {
+  align-self: flex-start;
+  padding: 8px 12px;
+  font-size: 8px;
+}
+
+.patch-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.patch-note-entry {
+  background: var(--bg-panel);
+  border: 2px solid var(--border-pixel);
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.patch-note-version {
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  color: var(--accent-gold);
+  margin-bottom: 8px;
+}
+
+.patch-note-items {
+  list-style: none;
+  padding: 0;
+}
+
+.patch-note-items li {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+  line-height: 1.6;
+}
+
+.patch-note-items li::before {
+  content: '> ';
+  color: var(--accent-green);
+}
+
 /* ── Placeholder Screen ──────────────────────────────────── */
 
 .placeholder-content {
@@ -2323,6 +2420,7 @@ html, body {
 .chat-color-guild { color: var(--accent-purple); }
 .chat-color-global { color: var(--accent-gold); }
 .chat-color-dm { color: var(--accent-red); }
+.chat-color-server { color: var(--text-dim); }
 
 .chat-filter-btn.active.chat-color-tile { border-color: var(--accent-orange); }
 .chat-filter-btn.active.chat-color-zone { border-color: var(--accent-blue); }
@@ -2330,6 +2428,7 @@ html, body {
 .chat-filter-btn.active.chat-color-guild { border-color: var(--accent-purple); }
 .chat-filter-btn.active.chat-color-global { border-color: var(--accent-gold); }
 .chat-filter-btn.active.chat-color-dm { border-color: var(--accent-red); }
+.chat-filter-btn.active.chat-color-server { border-color: var(--text-dim); }
 
 .social-chat-messages {
   flex: 1;

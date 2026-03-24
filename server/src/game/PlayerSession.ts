@@ -598,6 +598,14 @@ export class PlayerSession {
       return null;
     }
 
+    // If equipping a 2H weapon, also check offhand stack
+    if (def.twoHanded) {
+      const offhandItem = this.character.equipment.offhand;
+      if (offhandItem && (this.character.inventory[offhandItem] ?? 0) >= 99) {
+        return { blockedByItemId: offhandItem, blockedBySlot: 'offhand' };
+      }
+    }
+
     const currentEquipped = this.character.equipment[slot];
     if (!currentEquipped) return null;
 

@@ -460,6 +460,7 @@ export function equipItemForceDestroy(
   const currentEquipped = equipment[slot];
 
   // If equipping a 2H, also destroy/clear offhand
+  const destroyedOffhand = def.twoHanded ? equipment.offhand : null;
   if (def.twoHanded) {
     equipment.offhand = null;
   }
@@ -468,7 +469,8 @@ export function equipItemForceDestroy(
   equipment[slot] = itemId;
   if (def.twoHanded) equipment.offhand = itemId;
 
-  return { success: true, destroyedItemId: currentEquipped ?? undefined };
+  // Report the mainhand item as destroyed, or the offhand if mainhand was empty
+  return { success: true, destroyedItemId: currentEquipped ?? destroyedOffhand ?? undefined };
 }
 
 /** Roll drops for a list of possible drops. Returns item IDs that dropped. */

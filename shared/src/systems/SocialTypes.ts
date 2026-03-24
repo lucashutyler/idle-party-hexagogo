@@ -50,7 +50,7 @@ export interface PartyInvite {
 }
 
 // --- Chat System ---
-export type ChatChannelType = 'tile' | 'zone' | 'party' | 'guild' | 'dm' | 'global';
+export type ChatChannelType = 'tile' | 'zone' | 'party' | 'guild' | 'dm' | 'global' | 'server';
 
 export interface ChatMessage {
   id: string;

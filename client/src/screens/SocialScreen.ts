@@ -34,7 +34,7 @@ export class SocialScreen implements Screen {
 
   // Chat state — unified timeline
   private chatMessages: ChatMessage[] = [];
-  private chatFilters = new Set<ChatChannelType>(['tile', 'zone', 'party', 'guild', 'dm', 'global'] as ChatChannelType[]);
+  private chatFilters = new Set<ChatChannelType>(['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'] as ChatChannelType[]);
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
   private hasUnread = false;
@@ -1136,13 +1136,14 @@ export class SocialScreen implements Screen {
 
   // ── Chat Panel ───────────────────────────────────────────────
 
-  private static readonly CHAT_CHANNELS: { type: ChatChannelType; tag: string; label: string }[] = [
+  private static readonly CHAT_CHANNELS: { type: ChatChannelType; tag: string; label: string; sendable?: boolean }[] = [
     { type: 'tile', tag: 'R', label: 'Room' },
     { type: 'zone', tag: 'Z', label: 'Zone' },
     { type: 'party', tag: 'P', label: 'Party' },
     { type: 'guild', tag: 'G', label: 'Guild' },
     { type: 'global', tag: 'W', label: 'World' },
     { type: 'dm', tag: 'DM', label: 'DM' },
+    { type: 'server', tag: 'S', label: 'Server', sendable: false },
   ];
 
   /** Resolve the channel ID for a given channel type from current game state. */
@@ -1156,6 +1157,7 @@ export class SocialScreen implements Screen {
       case 'guild': return social?.guild?.id ?? '';
       case 'global': return 'global';
       case 'dm': return this.chatDmTarget;
+      case 'server': return 'server';
     }
   }
 
@@ -1246,12 +1248,14 @@ export class SocialScreen implements Screen {
 
     // Build send channel options — all shown, some disabled based on context
     const social = this.lastSocial;
-    const sendOptions = SocialScreen.CHAT_CHANNELS.map(ch => {
-      let disabled = false;
-      if (ch.type === 'party') disabled = (social?.party?.members.length ?? 0) <= 1;
-      if (ch.type === 'guild') disabled = !social?.guild;
-      return { ...ch, disabled };
-    });
+    const sendOptions = SocialScreen.CHAT_CHANNELS
+      .filter(ch => ch.sendable !== false)
+      .map(ch => {
+        let disabled = false;
+        if (ch.type === 'party') disabled = (social?.party?.members.length ?? 0) <= 1;
+        if (ch.type === 'guild') disabled = !social?.guild;
+        return { ...ch, disabled };
+      });
 
     // Capture scroll position before re-render
     const oldMsgContainer = this.panelContainer.querySelector('.social-chat-messages');
