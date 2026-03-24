@@ -9,6 +9,7 @@ type ConnectionListener = (connected: boolean) => void;
 type WorldUpdateListener = () => void;
 type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
 type SuspensionListener = () => void;
+type ResumeListener = () => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -24,6 +25,7 @@ export class GameClient {
   private worldUpdateListeners = new Set<WorldUpdateListener>();
   private equipBlockedListeners = new Set<EquipBlockedListener>();
   private suspensionListeners = new Set<SuspensionListener>();
+  private resumeListeners = new Set<ResumeListener>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -48,6 +50,9 @@ export class GameClient {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         this.isInitialState = true;
+        for (const listener of this.resumeListeners) {
+          listener();
+        }
         if (this.ws?.readyState === WebSocket.OPEN) {
           this.sendRaw({ type: 'request_state' });
         } else if (this.connected && !this.destroyed) {
@@ -92,6 +97,12 @@ export class GameClient {
   onSuspension(listener: SuspensionListener): () => void {
     this.suspensionListeners.add(listener);
     return () => { this.suspensionListeners.delete(listener); };
+  }
+
+  /** Subscribe to tab resume (visibilitychange → visible). Returns an unsubscribe function. */
+  onResume(listener: ResumeListener): () => void {
+    this.resumeListeners.add(listener);
+    return () => { this.resumeListeners.delete(listener); };
   }
 
   private doConnect(): void {
@@ -376,5 +387,6 @@ export class GameClient {
     this.chatListeners.clear();
     this.chatHistoryListeners.clear();
     this.worldUpdateListeners.clear();
+    this.resumeListeners.clear();
   }
 }
