@@ -2,6 +2,12 @@ import type { Screen } from './ScreenManager';
 
 const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.03.24.2',
+    notes: [
+      'Fixed chat not refreshing when resuming from a backgrounded tab — chat history is now re-fetched on resume',
+    ],
+  },
+  {
     version: '2026.03.24.1',
     notes: [
       'Added Settings screen with Patch Notes viewer',

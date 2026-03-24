@@ -63,6 +63,15 @@ export class SocialScreen implements Screen {
     this.container = el;
     this.gameClient = gameClient;
     this.buildDOM();
+
+    // On tab resume, clear cached chat so history is re-fetched with fresh data
+    this.gameClient.onResume(() => {
+      this.chatHistoryLoaded.clear();
+      this.chatMessages = [];
+      if (this.isActive && this.activeTab === 'chat') {
+        this.renderChatPanel();
+      }
+    });
   }
 
   onActivate(): void {
