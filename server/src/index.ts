@@ -612,7 +612,7 @@ wss.on('connection', (ws) => {
       if (msg.type === 'request_chat_history') {
         const channelType = msg.channelType;
         const channelId = msg.channelId;
-        const validTypes = ['tile', 'zone', 'party', 'guild', 'dm', 'global'];
+        const validTypes = ['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'];
         if (!validTypes.includes(channelType)) return;
 
         const session = playerManager.getSessionByUsername(username);

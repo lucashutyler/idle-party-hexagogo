@@ -63,6 +63,7 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   │   ├── CharacterScreen.ts # Character stats, XP bar, XP rate calculator, class passive info
 │   │   ├── ItemsScreen.ts     # Equipment slots + inventory list with equip/unequip
 │   │   ├── SocialScreen.ts    # Social tab — sub-tabs: Users, Guild, Party, Chat
+│   │   ├── SettingsScreen.ts  # Settings screen with Patch Notes viewer (baked-in PATCH_NOTES array)
 │   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
 │   ├── admin/
 │   │   ├── main.ts            # Admin entry point — imports CSS, creates AdminApp
@@ -237,6 +238,10 @@ When adding new persistent data to `data/`, always define an interface or extend
 ## Content Versioning
 
 - **Content versioning**: Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, and relocates parties on unreachable tiles. When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.
+
+## Patch Notes
+
+Every time a new feature or fix is released, **update the `PATCH_NOTES` array** in `client/src/screens/SettingsScreen.ts`. Prepend new entries to the top of the array (newest first). Version format: `YYYY.MM.DD.N` where `N` is the release number for that day (starting at 1). If a day already has entries, increment `N`. Example: `2026.03.24.1` is the first release on March 24, `2026.03.24.2` is the second. Each entry has a `version` string and a `notes` string array of bullet points describing the changes.
 
 ## Code Conventions
 

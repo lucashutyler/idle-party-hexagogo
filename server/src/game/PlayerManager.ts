@@ -151,7 +151,7 @@ export class PlayerManager {
     const text = `Welcome our new ${className}, ${username}, to the world! ${icon}`;
     const recipients = Array.from(this.sessions.keys())
       .map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
-    this.chat.sendMessage('Server', 'global', 'global', text, recipients, this.getAllBlockedUsers());
+    this.chat.sendMessage('Server', 'server', 'server', text, recipients, this.getAllBlockedUsers());
   }
 
   /** Get all blocked users map for chat filtering. */

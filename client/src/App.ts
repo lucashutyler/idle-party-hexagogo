@@ -9,7 +9,7 @@ import { UsernameScreen } from './screens/UsernameScreen';
 import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
 import { MapScreen } from './screens/MapScreen';
-import { PlaceholderScreen } from './screens/PlaceholderScreen';
+import { SettingsScreen } from './screens/SettingsScreen';
 import { CharacterScreen } from './screens/CharacterScreen';
 import { ItemsScreen } from './screens/ItemsScreen';
 import { SocialScreen } from './screens/SocialScreen';
@@ -293,7 +293,7 @@ export class App {
     const characterScreen = new CharacterScreen('screen-character', this.gameClient);
     const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
     const socialScreen = new SocialScreen('screen-social', this.gameClient);
-    const settingsScreen = new PlaceholderScreen('screen-settings', 'Settings', '⚙');
+    const settingsScreen = new SettingsScreen('screen-settings');
 
     // Wire map username click to social screen popup
     mapScreen.setOnUserClick((username, anchor, tileCol, tileRow) => {
