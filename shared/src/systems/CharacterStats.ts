@@ -129,7 +129,7 @@ export function createDefaultCharacter(): CharacterState {
     xp: 0,
     gold: 0,
     inventory: {},
-    equipment: { head: null, chest: null, hand: null, foot: null },
+    equipment: { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
     skillLoadout: { unlockedSkills: [], equippedSkills: [null, null, null] },
     skillPoints: 0,
   };
@@ -143,7 +143,7 @@ export function createCharacter(className: ClassName): CharacterState {
     xp: 0,
     gold: 0,
     inventory: {},
-    equipment: { head: null, chest: null, hand: null, foot: null },
+    equipment: { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
     skillLoadout: createDefaultSkillLoadout(className),
     skillPoints: 0,
   };
