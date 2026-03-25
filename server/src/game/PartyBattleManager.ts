@@ -34,17 +34,20 @@ export class PartyBattleManager {
   private content: ContentStore;
   private getSession: (username: string) => PlayerSession | undefined;
   private broadcastToMember: (username: string) => void;
+  private onMembersMoved?: (members: ReadonlySet<string>) => void;
 
   constructor(
     grid: HexGrid,
     content: ContentStore,
     getSession: (username: string) => PlayerSession | undefined,
     broadcastToMember: (username: string) => void,
+    onMembersMoved?: (members: ReadonlySet<string>) => void,
   ) {
     this.grid = grid;
     this.content = content;
     this.getSession = getSession;
     this.broadcastToMember = broadcastToMember;
+    this.onMembersMoved = onMembersMoved;
   }
 
   /** Create a party battle entry. Called when a party is created or on restore. */
@@ -99,6 +102,7 @@ export class PartyBattleManager {
               s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
             }
           }
+          this.onMembersMoved?.(members);
         },
         canMoveToNextTile: () => {
           // Check if at least one member has the next tile unlocked
@@ -174,6 +178,7 @@ export class PartyBattleManager {
               s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
             }
           }
+          this.onMembersMoved?.(members);
         },
         canMoveToNextTile: () => {
           const nextTile = serverParty.nextTile;

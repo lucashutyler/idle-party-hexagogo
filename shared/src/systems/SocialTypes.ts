@@ -49,6 +49,23 @@ export interface PartyInvite {
   timestamp: number;
 }
 
+// --- Trade System ---
+export type TradeStatus = 'pending' | 'countered' | 'confirmed' | 'cancelled';
+
+export interface TradeOffer {
+  username: string;
+  itemId: string;
+}
+
+export interface TradeState {
+  id: string;
+  status: TradeStatus;
+  initiator: TradeOffer;
+  target: TradeOffer | null;
+  timestamp: number;
+  cancelReason?: string;
+}
+
 // --- Chat System ---
 export type ChatChannelType = 'tile' | 'zone' | 'party' | 'guild' | 'dm' | 'global' | 'server';
 
@@ -90,6 +107,7 @@ export interface ClientSocialState {
   allPlayers: PlayerListEntry[];
   blockedUsers: Record<string, BlockLevel>;
   chatPreferences?: ChatPreferences;
+  pendingTrade?: TradeState | null;
 }
 
 export interface ChatPreferences {
@@ -220,6 +238,25 @@ export interface ClientSetChatPreferencesMessage {
   dmTarget: string;
 }
 
+export interface ClientProposeTradeMessage {
+  type: 'propose_trade';
+  targetUsername: string;
+  itemId: string;
+}
+
+export interface ClientCounterTradeMessage {
+  type: 'counter_trade';
+  itemId: string;
+}
+
+export interface ClientConfirmTradeMessage {
+  type: 'confirm_trade';
+}
+
+export interface ClientCancelTradeMessage {
+  type: 'cancel_trade';
+}
+
 export type ClientSocialMessage =
   | ClientSendFriendRequestMessage
   | ClientAcceptFriendRequestMessage
@@ -244,7 +281,11 @@ export type ClientSocialMessage =
   | ClientRequestChatHistoryMessage
   | ClientBlockUserMessage
   | ClientUnblockUserMessage
-  | ClientSetChatPreferencesMessage;
+  | ClientSetChatPreferencesMessage
+  | ClientProposeTradeMessage
+  | ClientCounterTradeMessage
+  | ClientConfirmTradeMessage
+  | ClientCancelTradeMessage;
 
 // --- Server -> Client messages ---
 export interface ServerSocialStateMessage {
@@ -262,4 +303,21 @@ export interface ServerChatHistoryMessage {
   channelType: ChatChannelType;
   channelId: string;
   messages: ChatMessage[];
+}
+
+export interface ServerTradeProposedMessage {
+  type: 'trade_proposed';
+  trade: TradeState;
+}
+
+export interface ServerTradeCancelledMessage {
+  type: 'trade_cancelled';
+  tradeId: string;
+  reason: string;
+}
+
+export interface ServerTradeCompletedMessage {
+  type: 'trade_completed';
+  trade: TradeState;
+  receivedItemId: string;
 }

@@ -891,6 +891,130 @@ wss.on('connection', (ws) => {
         }
         return;
       }
+
+      // --- Trade messages ---
+
+      if (msg.type === 'propose_trade' && typeof msg.targetUsername === 'string' && typeof msg.itemId === 'string') {
+        const targetAccount = accountStore.findByUsername(msg.targetUsername);
+        if (!targetAccount) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
+          return;
+        }
+        const result = playerManager.trades.proposeTrade(
+          username,
+          msg.targetUsername,
+          msg.itemId,
+          (u) => playerManager.getSessionByUsername(u)?.getLevel() ?? null,
+          (u, itemId) => playerManager.hasItemInInventory(u, itemId),
+          (a, b) => playerManager.areSameTile(a, b),
+          (a, b) => playerManager.isTradeBlocked(a, b),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToPlayer(msg.targetUsername);
+        return;
+      }
+
+      if (msg.type === 'counter_trade' && typeof msg.itemId === 'string') {
+        const result = playerManager.trades.counterTrade(
+          username,
+          msg.itemId,
+          (u, itemId) => playerManager.hasItemInInventory(u, itemId),
+          (a, b) => playerManager.areSameTile(a, b),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+        const partner = playerManager.trades.getTradePartner(username)
+          ?? result.initiator.username;
+        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToPlayer(partner);
+        return;
+      }
+
+      if (msg.type === 'confirm_trade') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        const result = playerManager.trades.confirmTrade(
+          username,
+          (u, itemId) => playerManager.hasItemInInventory(u, itemId),
+          (a, b) => playerManager.areSameTile(a, b),
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+
+        const { initiatorOffer, targetOffer } = result;
+        const initiatorSession = playerManager.getSessionByUsername(initiatorOffer.username);
+        const targetSession = playerManager.getSessionByUsername(targetOffer.username);
+
+        // Validate both items still present before mutating (re-validated in confirmTrade, but double-check)
+        if (!initiatorSession || !targetSession) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
+          return;
+        }
+
+        // Check target inventories can accept the incoming items
+        const initiatorCanReceive = (initiatorSession.getInventoryCount(targetOffer.itemId) < 99);
+        const targetCanReceive = (targetSession.getInventoryCount(initiatorOffer.itemId) < 99);
+        if (!initiatorCanReceive) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Your inventory is full for that item' }));
+          return;
+        }
+        if (!targetCanReceive) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Their inventory is full for that item' }));
+          return;
+        }
+
+        // Atomic swap: remove from each, add to each
+        const removedFromInitiator = initiatorSession.removeOneFromInventory(initiatorOffer.itemId);
+        const removedFromTarget = targetSession.removeOneFromInventory(targetOffer.itemId);
+
+        if (!removedFromInitiator || !removedFromTarget) {
+          // Roll back any partial removal
+          if (removedFromInitiator) initiatorSession.addOneToInventory(initiatorOffer.itemId);
+          if (removedFromTarget) targetSession.addOneToInventory(targetOffer.itemId);
+          ws.send(JSON.stringify({ type: 'error', message: 'Trade failed — item no longer available' }));
+          return;
+        }
+
+        initiatorSession.addOneToInventory(targetOffer.itemId);
+        targetSession.addOneToInventory(initiatorOffer.itemId);
+
+        // Get item names for log entries
+        const initiatorItemDef = gameLoop.contentStore.getItem(initiatorOffer.itemId);
+        const targetItemDef = gameLoop.contentStore.getItem(targetOffer.itemId);
+        const initiatorItemName = initiatorItemDef?.name ?? initiatorOffer.itemId;
+        const targetItemName = targetItemDef?.name ?? targetOffer.itemId;
+
+        initiatorSession.addLogEntry(`Trade complete: received ${targetItemName} from ${targetOffer.username}`, 'unlock');
+        targetSession.addLogEntry(`Trade complete: received ${initiatorItemName} from ${initiatorOffer.username}`, 'unlock');
+
+        playerManager.sendStateToPlayer(initiatorOffer.username);
+        playerManager.sendStateToPlayer(targetOffer.username);
+        return;
+      }
+
+      if (msg.type === 'cancel_trade') {
+        const cancelled = playerManager.trades.cancelTrade(username, 'Trade cancelled');
+        if (cancelled) {
+          const partner = cancelled.initiator.username === username
+            ? cancelled.target?.username
+            : cancelled.initiator.username;
+          if (partner) {
+            playerManager.sendStateToPlayer(partner);
+          }
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
     } catch {
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
     }

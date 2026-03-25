@@ -162,7 +162,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] User blocking (DM-only or all messages)
 - [x] Unread message indicators
 - [x] Social badge notifications (bottom nav dot + sub-tab badges for friend requests, party invites, unread chat)
-- [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Block)
+- [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Block)
 - [x] Class icons next to usernames everywhere
 - [x] XP rate calculator (trip counter on Character tab)
 
@@ -170,7 +170,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [ ] Town interactions (shops, inns, etc.)
 - [ ] Currency system
 - [x] Item/equipment system (4 items, 4 equip slots, inventory with stacking)
-- [ ] Trading between players
+- [x] Trading between players (player-to-player item trading, same room, level 5+)
 
 ### Quests
 - [ ] Quest system framework
