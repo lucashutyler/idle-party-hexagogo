@@ -1,4 +1,5 @@
 import type { TradeState, TradeOffer } from '@idle-party-rpg/shared';
+import { MAX_STACK } from '@idle-party-rpg/shared';
 
 /**
  * TradeSystem manages peer-to-peer item trades.
@@ -10,7 +11,6 @@ import type { TradeState, TradeOffer } from '@idle-party-rpg/shared';
  *   cancelled — any cancellation (moved tiles, disconnected, explicit cancel)
  *
  * Rules:
- *   - Both players must be level 5+
  *   - Both players must be on the same tile
  *   - Both players offer exactly one unequipped inventory item
  *   - A player can only have one pending trade at a time
@@ -30,6 +30,8 @@ function generateTradeId(): string {
   return `trade_${Date.now()}_${++tradeIdCounter}`;
 }
 
+export type ConfirmTradeFailure = { success: false; reason: string; affectedPlayer: 'initiator' | 'target' };
+
 export class TradeSystem {
   /** All active trades by trade ID. */
   private trades = new Map<string, TradeState>();
@@ -43,7 +45,6 @@ export class TradeSystem {
    * Validates:
    * - Not trading with self
    * - Neither player is blocked by the other
-   * - Both players are level 5+
    * - Both players are on the same tile
    * - Neither player has an existing pending trade
    * - The item exists in the initiator's inventory (unequipped items only — equipped items
@@ -53,21 +54,12 @@ export class TradeSystem {
     initiatorUsername: string,
     targetUsername: string,
     itemId: string,
-    getPlayerLevel: (u: string) => number | null,
     hasItemInInventory: (u: string, itemId: string) => boolean,
     areSameTile: (a: string, b: string) => boolean,
     isBlocked: (a: string, b: string) => boolean,
   ): TradeState | string {
     if (initiatorUsername === targetUsername) return 'Cannot trade with yourself';
     if (isBlocked(initiatorUsername, targetUsername)) return 'Cannot trade with a blocked user';
-
-    const initiatorLevel = getPlayerLevel(initiatorUsername);
-    if (initiatorLevel === null) return 'Player not found';
-    if (initiatorLevel < 5) return 'You must be level 5 or higher to trade';
-
-    const targetLevel = getPlayerLevel(targetUsername);
-    if (targetLevel === null) return 'Target player not found';
-    if (targetLevel < 5) return 'That player must be level 5 or higher to trade';
 
     if (!areSameTile(initiatorUsername, targetUsername)) return 'You must be in the same room to trade';
 
@@ -122,15 +114,20 @@ export class TradeSystem {
 
   /**
    * Confirm a trade (initiator confirms after seeing the target's offer).
-   * Re-validates item presence for both players at confirm time.
-   * Returns { trade, initiatorOffer, targetOffer } on success, or an error string.
-   * The caller is responsible for executing the atomic item swap.
+   * Re-validates item presence and stack capacity for both players at confirm time.
+   *
+   * Returns:
+   *   - `{ trade, initiatorOffer, targetOffer }` on success — caller executes the atomic item swap
+   *   - `ConfirmTradeFailure` if either player's inventory cannot accept the incoming item (stack full)
+   *     → trade is left in `countered` state so both players can modify or cancel
+   *   - `string` for other validation errors (sent only to the initiator)
    */
   confirmTrade(
     initiatorUsername: string,
     hasItemInInventory: (u: string, itemId: string) => boolean,
     areSameTile: (a: string, b: string) => boolean,
-  ): { trade: TradeState; initiatorOffer: TradeOffer; targetOffer: TradeOffer } | string {
+    getInventoryCount: (u: string, itemId: string) => number,
+  ): { trade: TradeState; initiatorOffer: TradeOffer; targetOffer: TradeOffer } | ConfirmTradeFailure | string {
     const tradeId = this.playerTrade.get(initiatorUsername);
     if (!tradeId) return 'No pending trade';
 
@@ -153,6 +150,18 @@ export class TradeSystem {
 
     const initiatorOffer: TradeOffer = { ...trade.initiator };
     const targetOffer: TradeOffer = { ...trade.target };
+
+    // Stack capacity check — must run before mutating state so the trade stays
+    // recoverable if it fails. When both sides offer the same itemId the net
+    // change for each player is zero (give 1, receive 1), so no check is needed.
+    if (initiatorOffer.itemId !== targetOffer.itemId) {
+      if (getInventoryCount(initiatorUsername, targetOffer.itemId) + 1 > MAX_STACK) {
+        return { success: false, reason: 'inventory_full', affectedPlayer: 'initiator' };
+      }
+      if (getInventoryCount(targetOffer.username, initiatorOffer.itemId) + 1 > MAX_STACK) {
+        return { success: false, reason: 'inventory_full', affectedPlayer: 'target' };
+      }
+    }
 
     trade.status = 'confirmed';
     this.cleanupTrade(tradeId);

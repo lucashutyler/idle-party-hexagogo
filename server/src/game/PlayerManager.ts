@@ -210,6 +210,16 @@ export class PlayerManager {
     }
   }
 
+  /** Send an error message to all connections for a specific player. */
+  sendErrorToPlayer(username: string, message: string): void {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet || wsSet.size === 0) return;
+    const payload = JSON.stringify({ type: 'error', message });
+    for (const ws of wsSet) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
+  }
+
   /** Broadcast a message to all connected clients. */
   broadcastToAll(message: Record<string, unknown>): void {
     const payload = JSON.stringify(message);

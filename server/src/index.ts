@@ -904,7 +904,6 @@ wss.on('connection', (ws) => {
           username,
           msg.targetUsername,
           msg.itemId,
-          (u) => playerManager.getSessionByUsername(u)?.getLevel() ?? null,
           (u, itemId) => playerManager.hasItemInInventory(u, itemId),
           (a, b) => playerManager.areSameTile(a, b),
           (a, b) => playerManager.isTradeBlocked(a, b),
@@ -937,16 +936,32 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'confirm_trade') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-
         const result = playerManager.trades.confirmTrade(
           username,
           (u, itemId) => playerManager.hasItemInInventory(u, itemId),
           (a, b) => playerManager.areSameTile(a, b),
+          (u, itemId) => playerManager.getSessionByUsername(u)?.getInventoryCount(itemId) ?? 0,
         );
+
         if (typeof result === 'string') {
+          // Simple validation error — inform initiator only; trade state unchanged
           ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+
+        if ('success' in result) {
+          // Stack-full failure — trade left open in 'countered' state; inform both players
+          const partner = playerManager.trades.getTradePartner(username);
+          const initiatorMsg = result.affectedPlayer === 'initiator'
+            ? 'Your inventory is full for that item (max 99)'
+            : 'Their inventory is full for that item (max 99)';
+          const partnerMsg = result.affectedPlayer === 'target'
+            ? 'Your inventory is full for that item (max 99)'
+            : 'Their inventory is full for that item (max 99)';
+          ws.send(JSON.stringify({ type: 'error', message: initiatorMsg }));
+          if (partner) playerManager.sendErrorToPlayer(partner, partnerMsg);
+          playerManager.sendStateToPlayer(username);
+          if (partner) playerManager.sendStateToPlayer(partner);
           return;
         }
 
@@ -954,21 +969,8 @@ wss.on('connection', (ws) => {
         const initiatorSession = playerManager.getSessionByUsername(initiatorOffer.username);
         const targetSession = playerManager.getSessionByUsername(targetOffer.username);
 
-        // Validate both items still present before mutating (re-validated in confirmTrade, but double-check)
         if (!initiatorSession || !targetSession) {
           ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
-          return;
-        }
-
-        // Check target inventories can accept the incoming items
-        const initiatorCanReceive = (initiatorSession.getInventoryCount(targetOffer.itemId) < 99);
-        const targetCanReceive = (targetSession.getInventoryCount(initiatorOffer.itemId) < 99);
-        if (!initiatorCanReceive) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Your inventory is full for that item' }));
-          return;
-        }
-        if (!targetCanReceive) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Their inventory is full for that item' }));
           return;
         }
 

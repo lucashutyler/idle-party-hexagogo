@@ -170,7 +170,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [ ] Town interactions (shops, inns, etc.)
 - [ ] Currency system
 - [x] Item/equipment system (4 items, 4 equip slots, inventory with stacking)
-- [x] Trading between players (player-to-player item trading, same room, level 5+)
+- [x] Trading between players (player-to-player item trading, same room)
 
 ### Quests
 - [ ] Quest system framework

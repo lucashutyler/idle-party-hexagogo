@@ -714,14 +714,11 @@ export class SocialScreen implements Screen {
       }
     }
 
-    // Trade — only when same room and level 5+
-    const selfLevel = this.lastState?.character?.level ?? 0;
+    // Trade — only when same room and not already in a trade
     const pendingTrade = this.lastSocial?.pendingTrade;
     const alreadyTrading = pendingTrade != null;
     if (!sameRoom) {
       items.push(`<button class="user-popup-item disabled" disabled title="You must be in the same room to trade">Trade</button>`);
-    } else if (selfLevel < 5) {
-      items.push(`<button class="user-popup-item disabled" disabled title="Requires level 5+">Trade</button>`);
     } else if (alreadyTrading) {
       items.push(`<button class="user-popup-item disabled" disabled title="You already have an active trade">Trade</button>`);
     } else {
