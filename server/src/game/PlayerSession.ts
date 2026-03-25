@@ -62,6 +62,7 @@ export class PlayerSession {
   private content: ContentStore;
   private unlockSystem: UnlockSystem;
   private combatLog: CombatLogEntry[] = [];
+  private logIdCounter = 0;
   private battleCount = 0;
   private character: CharacterState;
   private chatHistory: ChatMessage[] = [];
@@ -416,7 +417,7 @@ export class PlayerSession {
   }
 
   addLogEntry(text: string, type: CombatLogEntry['type']): void {
-    this.combatLog.push({ text, type });
+    this.combatLog.push({ id: ++this.logIdCounter, text, type });
     if (this.combatLog.length > MAX_LOG_ENTRIES) {
       this.combatLog.shift();
     }
@@ -446,6 +447,7 @@ export class PlayerSession {
 
     this.battleCount = 0;
     this.combatLog = [];
+    this.logIdCounter = 0;
     this.unlockSystem = new UnlockSystem(this.grid, startTile);
     this.partyId = null;
 
@@ -520,7 +522,15 @@ export class PlayerSession {
     session['grid'] = grid;
     session['content'] = content;
     session['battleCount'] = data.battleCount;
-    session['combatLog'] = data.combatLog.slice(-MAX_LOG_ENTRIES);
+    // Migrate old log entries without IDs and restore the counter
+    const restoredLog = data.combatLog.slice(-MAX_LOG_ENTRIES);
+    let maxId = 0;
+    for (const entry of restoredLog) {
+      if (!entry.id) entry.id = ++maxId;
+      else if (entry.id > maxId) maxId = entry.id;
+    }
+    session['combatLog'] = restoredLog;
+    session['logIdCounter'] = maxId;
     // Migrate old cube-key-based unlocks ("q,r,s") to tile GUIDs
     let unlockedKeys = data.unlockedKeys;
     if (unlockedKeys.length > 0 && unlockedKeys[0].split(',').length === 3) {
@@ -559,7 +569,7 @@ export class PlayerSession {
         inventory: data.character.inventory ? { ...data.character.inventory } : {},
         equipment: data.character.equipment
           ? { ...data.character.equipment }
-          : { head: null, chest: null, hand: null, foot: null },
+          : { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
         skillLoadout,
         skillPoints,
       };

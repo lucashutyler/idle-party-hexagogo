@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   destroyItems,
+  equipItem,
   equipItemForceDestroy,
+  unequipItem,
   MAX_STACK,
   SEED_ITEMS,
 } from '../src/systems/ItemTypes';
@@ -94,5 +96,95 @@ describe('equipItemForceDestroy', () => {
 
     const result = equipItemForceDestroy(inv, equip, 'rusty_dagger', SEED_ITEMS);
     expect(result).toEqual({ success: false });
+  });
+});
+
+describe('equipItem - duplication prevention', () => {
+  const items: Record<string, ItemDefinition> = {
+    ...SEED_ITEMS,
+    big_rock: { id: 'big_rock', name: 'Big Rock', rarity: 'common', equipSlot: 'mainhand' as EquipSlot, twoHanded: true },
+    small_shield: { id: 'small_shield', name: 'Small Shield', rarity: 'common', equipSlot: 'offhand' as EquipSlot },
+  };
+
+  it('does not duplicate mainhand item when equipping 2H fails due to full offhand stack', () => {
+    const inv: Record<string, number> = { big_rock: 1, small_shield: MAX_STACK };
+    const equip: Record<string, string | null> = {
+      mainhand: 'rusty_dagger',
+      offhand: 'small_shield',
+      head: null, chest: null, foot: null,
+    };
+
+    // Equipping 2H big_rock should fail because small_shield is at MAX_STACK
+    const result = equipItem(inv, equip, 'big_rock', items);
+    expect(result.success).toBe(false);
+
+    // CRITICAL: mainhand item must NOT be duplicated in inventory
+    expect(inv['rusty_dagger']).toBeUndefined();
+    expect(equip.mainhand).toBe('rusty_dagger');
+    expect(equip.offhand).toBe('small_shield');
+    // big_rock should still be in inventory untouched
+    expect(inv['big_rock']).toBe(1);
+  });
+
+  it('correctly equips 2H weapon when both slots can be returned', () => {
+    const inv: Record<string, number> = { big_rock: 1 };
+    const equip: Record<string, string | null> = {
+      mainhand: 'rusty_dagger',
+      offhand: 'small_shield',
+      head: null, chest: null, foot: null,
+    };
+
+    const result = equipItem(inv, equip, 'big_rock', items);
+    expect(result.success).toBe(true);
+    expect(equip.mainhand).toBe('big_rock');
+    expect(equip.offhand).toBe('big_rock');
+    expect(inv['rusty_dagger']).toBe(1);
+    expect(inv['small_shield']).toBe(1);
+    expect(inv['big_rock']).toBeUndefined();
+  });
+
+  it('rejects items with invalid equipSlot', () => {
+    const badItems: Record<string, ItemDefinition> = {
+      fake: { id: 'fake', name: 'Fake', rarity: 'common', equipSlot: 'bogus' as EquipSlot },
+    };
+    const inv: Record<string, number> = { fake: 1 };
+    const equip: Record<string, string | null> = { mainhand: null };
+
+    const result = equipItem(inv, equip, 'fake', badItems);
+    expect(result.success).toBe(false);
+    expect(inv['fake']).toBe(1);
+  });
+});
+
+describe('unequipItem - stale 2H state', () => {
+  it('treats same item in both mainhand and offhand as 2H even without definition', () => {
+    const inv: Record<string, number> = {};
+    const equip: Record<string, string | null> = {
+      mainhand: 'old_weapon',
+      offhand: 'old_weapon',
+      head: null, chest: null, foot: null,
+    };
+
+    // Unequip mainhand — should clear BOTH slots and return only 1 copy
+    const result = unequipItem(inv, equip, 'mainhand');
+    expect(result.success).toBe(true);
+    expect(result.itemId).toBe('old_weapon');
+    expect(equip.mainhand).toBeNull();
+    expect(equip.offhand).toBeNull();
+    expect(inv['old_weapon']).toBe(1);
+  });
+
+  it('prevents double-counting when unequipping offhand of stale 2H', () => {
+    const inv: Record<string, number> = {};
+    const equip: Record<string, string | null> = {
+      mainhand: 'old_weapon',
+      offhand: 'old_weapon',
+    };
+
+    const result = unequipItem(inv, equip, 'offhand');
+    expect(result.success).toBe(true);
+    expect(equip.mainhand).toBeNull();
+    expect(equip.offhand).toBeNull();
+    expect(inv['old_weapon']).toBe(1);
   });
 });

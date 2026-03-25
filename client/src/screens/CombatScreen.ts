@@ -16,8 +16,8 @@ export class CombatScreen implements Screen {
   private enemySide!: HTMLElement;
   private logContainer!: HTMLElement;
 
-  // Last rendered log length — for incremental DOM updates
-  private renderedLogLength = 0;
+  // Last rendered log entry ID — for incremental DOM updates
+  private lastRenderedId = -1;
   private lastLog: CombatLogEntry[] = [];
   private renderedPlayerKey = '';
   private renderedEnemyKey = '';
@@ -43,7 +43,7 @@ export class CombatScreen implements Screen {
     }
 
     // Full re-render of log on activate (may have accumulated while inactive)
-    this.renderedLogLength = 0;
+    this.lastRenderedId = -1;
     this.renderLog(this.lastLog);
   }
 
@@ -270,28 +270,33 @@ export class CombatScreen implements Screen {
   }
 
   private updateLog(log: CombatLogEntry[]): void {
-    if (log.length < this.renderedLogLength) {
-      // Log was trimmed (entries shifted off the front) — full re-render
+    const lastId = log.length > 0 ? log[log.length - 1].id : -1;
+
+    // Nothing new — skip
+    if (lastId === this.lastRenderedId) return;
+
+    // Find the first entry we haven't rendered yet
+    const startIdx = log.findIndex(e => e.id > this.lastRenderedId);
+
+    if (startIdx <= 0) {
+      // Log reset or all entries are new — full re-render
       this.renderLog(log);
-      return;
-    }
-
-    if (log.length === this.renderedLogLength) {
-      // Same length — check if entries cycled (log at max capacity:
-      // server shifts old entries off the front, pushes new to the back)
-      const lastRendered = this.logContainer.lastElementChild;
-      const lastEntry = log[log.length - 1];
-      if (lastEntry && lastRendered && lastRendered.textContent !== lastEntry.text) {
-        this.renderLog(log);
+    } else {
+      // Trim DOM if old entries shifted off the front (log at max capacity)
+      const staleCount = this.logContainer.childElementCount - (log.length - startIdx) - startIdx;
+      if (staleCount > 0) {
+        // Old entries at the front are no longer in the log — remove them
+        for (let i = 0; i < staleCount && this.logContainer.firstChild; i++) {
+          this.logContainer.removeChild(this.logContainer.firstChild);
+        }
       }
-      return;
-    }
 
-    // Append only new entries
-    for (let i = this.renderedLogLength; i < log.length; i++) {
-      this.appendLogEntry(log[i]);
+      // Append only new entries
+      for (let i = startIdx; i < log.length; i++) {
+        this.appendLogEntry(log[i]);
+      }
+      this.lastRenderedId = lastId;
     }
-    this.renderedLogLength = log.length;
   }
 
   private renderLog(log: CombatLogEntry[]): void {
@@ -299,7 +304,7 @@ export class CombatScreen implements Screen {
     for (const entry of log) {
       this.appendLogEntry(entry);
     }
-    this.renderedLogLength = log.length;
+    this.lastRenderedId = log.length > 0 ? log[log.length - 1].id : -1;
   }
 
   private appendLogEntry(entry: CombatLogEntry): void {
