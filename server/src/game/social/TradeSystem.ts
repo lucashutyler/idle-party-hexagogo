@@ -196,10 +196,16 @@ export class TradeSystem {
    * Returns null if no active trade or the trade has no known other party.
    */
   getTradePartner(username: string): string | null {
-    const trade = this.getPlayerTrade(username);
+    const tradeId = this.playerTrade.get(username);
+    if (!tradeId) return null;
+    const trade = this.trades.get(tradeId);
     if (!trade) return null;
     if (trade.initiator.username === username) {
-      return trade.target?.username ?? null;
+      if (trade.target) return trade.target.username;
+      for (const [player, id] of this.playerTrade) {
+        if (id === tradeId && player !== username) return player;
+      }
+      return null;
     }
     return trade.initiator.username;
   }
