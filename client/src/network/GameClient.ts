@@ -375,6 +375,24 @@ export class GameClient {
     return () => { this.worldUpdateListeners.delete(listener); };
   }
 
+  // --- Trade ---
+
+  sendProposeTrade(targetUsername: string, itemId: string): void {
+    this.sendRaw({ type: 'propose_trade', targetUsername, itemId });
+  }
+
+  sendCounterTrade(itemId: string): void {
+    this.sendRaw({ type: 'counter_trade', itemId });
+  }
+
+  sendConfirmTrade(): void {
+    this.sendRaw({ type: 'confirm_trade' });
+  }
+
+  sendCancelTrade(): void {
+    this.sendRaw({ type: 'cancel_trade' });
+  }
+
   destroy(): void {
     this.destroyed = true;
     if (this.reconnectTimer) {

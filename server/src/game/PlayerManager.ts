@@ -8,6 +8,7 @@ import { GuildSystem } from './social/GuildSystem.js';
 import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem } from './social/PartySystem.js';
+import { TradeSystem } from './social/TradeSystem.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
@@ -23,6 +24,7 @@ export class PlayerManager {
   readonly guilds: GuildSystem;
   readonly chat: ChatSystem;
   readonly parties: PartySystem;
+  readonly trades: TradeSystem;
   readonly partyBattles: PartyBattleManager;
   private getAllUsernames: () => string[];
 
@@ -34,12 +36,14 @@ export class PlayerManager {
     this.chat = new ChatSystem();
     this.guilds = new GuildSystem(guildStore);
     this.parties = new PartySystem();
+    this.trades = new TradeSystem();
     this.getAllUsernames = () => accountStore.getAllUsernames();
     this.partyBattles = new PartyBattleManager(
       grid,
       content,
       (username) => this.sessions.get(username),
       (username) => this.sendStateToPlayer(username),
+      (members) => this.cancelTradesOnMove(members),
     );
   }
 
@@ -84,6 +88,16 @@ export class PlayerManager {
       wsSet.delete(ws);
       if (wsSet.size === 0) {
         this.playerConnections.delete(username);
+        // Cancel any active trade when all connections are gone (player fully disconnected)
+        const cancelledTrade = this.trades.cancelTrade(username, 'Player disconnected');
+        if (cancelledTrade) {
+          const partner = cancelledTrade.initiator.username === username
+            ? cancelledTrade.target?.username
+            : cancelledTrade.initiator.username;
+          if (partner) {
+            this.sendStateToPlayer(partner);
+          }
+        }
       }
     }
 
@@ -196,6 +210,16 @@ export class PlayerManager {
     }
   }
 
+  /** Send an error message to all connections for a specific player. */
+  sendErrorToPlayer(username: string, message: string): void {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet || wsSet.size === 0) return;
+    const payload = JSON.stringify({ type: 'error', message });
+    for (const ws of wsSet) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
+  }
+
   /** Broadcast a message to all connected clients. */
   broadcastToAll(message: Record<string, unknown>): void {
     const payload = JSON.stringify(message);
@@ -240,6 +264,7 @@ export class PlayerManager {
         sendChannel: session?.getChatSendChannel() ?? 'zone',
         dmTarget: session?.getChatDmTarget() ?? '',
       },
+      pendingTrade: this.trades.getPlayerTrade(username),
     };
   }
 
@@ -645,6 +670,38 @@ export class PlayerManager {
 
     console.log(`[PlayerManager] Master reset: ${count} players reset to start`);
     return count;
+  }
+
+  /** Cancel trades for all party members when the party moves to a new tile. */
+  private cancelTradesOnMove(members: ReadonlySet<string>): void {
+    for (const username of members) {
+      const cancelled = this.trades.cancelTrade(username, 'Player moved to a different room');
+      if (cancelled) {
+        const partner = cancelled.initiator.username === username
+          ? cancelled.target?.username
+          : cancelled.initiator.username;
+        if (partner) {
+          this.sendStateToPlayer(partner);
+        }
+        this.sendStateToPlayer(username);
+      }
+    }
+  }
+
+  /** Check if either player has the other blocked (in either direction). */
+  isTradeBlocked(a: string, b: string): boolean {
+    const sessionA = this.sessions.get(a);
+    const sessionB = this.sessions.get(b);
+    const blockedByA = sessionA?.getBlockedUsers() ?? {};
+    const blockedByB = sessionB?.getBlockedUsers() ?? {};
+    return b in blockedByA || a in blockedByB;
+  }
+
+  /** Check if a player has an item in their unequipped inventory. */
+  hasItemInInventory(username: string, itemId: string): boolean {
+    const session = this.sessions.get(username);
+    if (!session) return false;
+    return session.getInventoryCount(itemId) > 0;
   }
 
   /**

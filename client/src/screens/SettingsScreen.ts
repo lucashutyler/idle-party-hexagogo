@@ -4,9 +4,16 @@ const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
     version: '2026.03.24.3',
     notes: [
+<<<<<<< claude/crazy-goldwasser
+      'Added player-to-player item trading — click a player in the same room to open the Trade option',
+      'Trades require both players to be in the same room with at least one unequipped inventory item each',
+      'Trade flow: propose an item → partner counters with their item → initiator confirms → items are swapped',
+      'Trades auto-cancel on movement, disconnect, or explicit cancellation by either player',
+=======
       'Fixed item duplication exploit — equipping two-handed weapons with a full offhand stack no longer duplicates the mainhand item',
       'Fixed stale two-handed weapon state — unequipping a weapon that occupies both slots now always clears both slots correctly',
       'Added equipment slot validation to prevent items from being equipped into invalid slots',
+>>>>>>> main
     ],
   },
   {

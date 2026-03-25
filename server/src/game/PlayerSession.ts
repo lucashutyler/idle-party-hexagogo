@@ -321,6 +321,28 @@ export class PlayerSession {
     });
   }
 
+  /** Returns the count of an item in the unequipped inventory (0 if not present). */
+  getInventoryCount(itemId: string): number {
+    return this.character.inventory[itemId] ?? 0;
+  }
+
+  /** Remove one item from the unequipped inventory. Returns false if item not present. */
+  removeOneFromInventory(itemId: string): boolean {
+    const current = this.character.inventory[itemId] ?? 0;
+    if (current <= 0) return false;
+    if (current === 1) {
+      delete this.character.inventory[itemId];
+    } else {
+      this.character.inventory[itemId] = current - 1;
+    }
+    return true;
+  }
+
+  /** Add one item to the unequipped inventory. Returns false if stack is full (MAX_STACK). */
+  addOneToInventory(itemId: string): boolean {
+    return addItemToInventory(this.character.inventory, itemId);
+  }
+
   getLevel(): number { return this.character.level; }
 
   getClassName(): ClassName { return this.character.className; }

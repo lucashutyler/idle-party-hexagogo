@@ -6,6 +6,9 @@ import type {
   ServerSocialStateMessage,
   ServerChatMessageMessage,
   ServerChatHistoryMessage,
+  ServerTradeProposedMessage,
+  ServerTradeCancelledMessage,
+  ServerTradeCompletedMessage,
 } from './SocialTypes.js';
 import type { SkillLoadout } from './SkillTypes.js';
 
@@ -196,6 +199,9 @@ export type ServerMessage =
   | ServerChatMessageMessage
   | ServerChatHistoryMessage
   | ServerEquipBlockedMessage
+  | ServerTradeProposedMessage
+  | ServerTradeCancelledMessage
+  | ServerTradeCompletedMessage
   | { type: 'error'; message: string };
 
 export interface ClientSetClassMessage {

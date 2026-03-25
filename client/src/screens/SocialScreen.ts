@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, TradeState } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
@@ -44,6 +44,11 @@ export class SocialScreen implements Screen {
 
   // User popup
   private popupOverlay: HTMLElement | null = null;
+
+  // Trade modal
+  private tradeModalEl: HTMLElement | null = null;
+  private tradePickingItem = false;
+  private tradeSelectedItemId: string | null = null;
 
   // Grid drag-to-reposition state
   private gridDragging = false;
@@ -128,6 +133,7 @@ export class SocialScreen implements Screen {
     this.unsubChatHistory?.();
     this.unsubChatHistory = undefined;
     this.dismissPopup();
+    this.dismissTradeModal();
   }
 
   private buildDOM(): void {
@@ -267,6 +273,29 @@ export class SocialScreen implements Screen {
         this.doChatSend();
         return;
       }
+
+      // Trade modal actions
+      if (btn.matches('.trade-modal-cancel-btn')) { this.gameClient.sendCancelTrade(); return; }
+      if (btn.matches('.trade-modal-confirm-btn')) { this.gameClient.sendConfirmTrade(); return; }
+      if (btn.matches('.trade-modal-pick-btn')) {
+        this.tradePickingItem = true;
+        this.updateTradeModal();
+        return;
+      }
+      if (btn.matches('.trade-item-option')) {
+        const itemId = btn.getAttribute('data-item-id');
+        if (!itemId) return;
+        const trade = this.lastSocial?.pendingTrade;
+        this.tradePickingItem = false;
+        this.tradeSelectedItemId = itemId;
+        if (trade) {
+          // Trade already exists — we're the target countering
+          this.gameClient.sendCounterTrade(itemId);
+        }
+        // If no trade yet, the propose button will send sendProposeTrade with this item
+        this.updateTradeModal();
+        return;
+      }
     });
 
     // Grid cell clicks for party position
@@ -361,10 +390,11 @@ export class SocialScreen implements Screen {
 
   private renderTabBar(): void {
     const friendRequests = (this.lastSocial?.incomingFriendRequests?.length ?? 0) > 0;
+    const tradeNeedsAction = this.tradeNeedsAttention();
     this.tabBar.innerHTML = SUB_TABS.map(t => {
       const chatUnread = t.id === 'chat' && this.hasUnread && this.activeTab !== 'chat';
       const partyInvites = t.id === 'party' && (this.lastSocial?.pendingInvites?.length ?? 0) > 0;
-      const usersBadge = t.id === 'users' && friendRequests;
+      const usersBadge = t.id === 'users' && (friendRequests || tradeNeedsAction);
       const hasBadge = chatUnread || partyInvites || usersBadge;
       return `<button class="social-tab-btn${t.id === this.activeTab ? ' active' : ''}" data-tab="${t.id}">${t.label}${hasBadge ? '<span class="social-tab-badge"></span>' : ''}</button>`;
     }).join('');
@@ -375,13 +405,14 @@ export class SocialScreen implements Screen {
   private updateTabBadges(): void {
     const social = this.lastSocial;
     const friendRequests = (social?.incomingFriendRequests?.length ?? 0) > 0;
+    const tradeNeedsAction = this.tradeNeedsAttention();
     const partyInvites = (social?.pendingInvites?.length ?? 0) > 0;
     const chatUnread = this.hasUnread && this.activeTab !== 'chat';
 
     for (const btn of this.tabBar.querySelectorAll('.social-tab-btn')) {
       const tab = btn.getAttribute('data-tab');
       const needsBadge =
-        (tab === 'users' && friendRequests) ||
+        (tab === 'users' && (friendRequests || tradeNeedsAction)) ||
         (tab === 'party' && partyInvites) ||
         (tab === 'chat' && chatUnread);
       const badge = btn.querySelector('.social-tab-badge');
@@ -393,6 +424,17 @@ export class SocialScreen implements Screen {
         badge.remove();
       }
     }
+  }
+
+  /** Returns true if the pending trade requires this player's attention. */
+  private tradeNeedsAttention(): boolean {
+    const trade = this.lastSocial?.pendingTrade;
+    if (!trade) return false;
+    const selfUsername = this.lastState?.username ?? '';
+    // Needs attention if: it's a proposal targeting us (need to counter) OR partner countered and we need to confirm
+    if (trade.status === 'pending' && trade.target === null && trade.initiator.username !== selfUsername) return true;
+    if (trade.status === 'countered' && trade.initiator.username === selfUsername) return true;
+    return false;
   }
 
   private updateFromState(state: ServerStateMessage): void {
@@ -407,6 +449,21 @@ export class SocialScreen implements Screen {
 
     // Lightweight badge update — never rebuilds tab bar DOM
     this.updateTabBadges();
+
+    // Auto-open trade modal when a trade is proposed to us
+    const trade = state.social?.pendingTrade;
+    const selfUsername = state.username ?? '';
+    if (trade && !this.tradeModalEl) {
+      // Only auto-open if we're the target of a pending proposal (not the initiator)
+      if (trade.initiator.username !== selfUsername && trade.status === 'pending') {
+        this.renderTradeModal();
+      } else if (trade.initiator.username === selfUsername) {
+        // We proposed — reopen our own modal if it was closed
+        this.renderTradeModal();
+      }
+    }
+    // Update trade modal if visible
+    if (this.tradeModalEl) this.updateTradeModal();
 
     // Skip party panel updates while grid animation or drag is in progress
     if (this.activeTab === 'party' && (this.gridAnimating || this.gridDragging)) return;
@@ -657,6 +714,17 @@ export class SocialScreen implements Screen {
       }
     }
 
+    // Trade — only when same room and not already in a trade
+    const pendingTrade = this.lastSocial?.pendingTrade;
+    const alreadyTrading = pendingTrade != null;
+    if (!sameRoom) {
+      items.push(`<button class="user-popup-item disabled" disabled title="You must be in the same room to trade">Trade</button>`);
+    } else if (alreadyTrading) {
+      items.push(`<button class="user-popup-item disabled" disabled title="You already have an active trade">Trade</button>`);
+    } else {
+      items.push(`<button class="user-popup-item" data-popup-action="trade">Trade</button>`);
+    }
+
     // Block
     if (isBlocked) {
       items.push(`<button class="user-popup-item" data-popup-action="unblock">Unblock</button>`);
@@ -692,6 +760,7 @@ export class SocialScreen implements Screen {
         case 'party_invite': this.gameClient.sendInviteParty(username); break;
         case 'block': this.gameClient.sendBlockUser(username, 'all'); break;
         case 'unblock': this.gameClient.sendUnblockUser(username); break;
+        case 'trade': this.openTradeModal(username); break;
       }
       this.dismissPopup();
     });
@@ -1339,6 +1408,196 @@ export class SocialScreen implements Screen {
     if (wasAtBottom) {
       msgContainer.scrollTop = msgContainer.scrollHeight;
     }
+  }
+
+  // ── Trade Modal ───────────────────────────────────────────────
+
+  private static readonly RARITY_COLORS: Record<string, string> = {
+    janky: '#808080',
+    common: '#e8e8e8',
+    uncommon: '#66bb6a',
+    rare: '#4fc3f7',
+    epic: '#ee66e3',
+    legendary: '#9233df',
+    heirloom: '#e9bc18',
+  };
+
+  /** Open the trade modal and propose a trade with the given user. */
+  openTradeModal(targetUsername: string): void {
+    // Modal stays open until trade ends — pick item first
+    this.tradePickingItem = true;
+    this.tradeSelectedItemId = null;
+    this.renderTradeModal(targetUsername);
+  }
+
+  private renderTradeModal(targetUsername?: string): void {
+    this.dismissTradeModal();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'trade-modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'trade-modal';
+    overlay.appendChild(modal);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        // Cancel trade if active, else just close
+        const trade = this.lastSocial?.pendingTrade;
+        if (trade) this.gameClient.sendCancelTrade();
+        this.dismissTradeModal();
+      }
+    });
+
+    // Store target for rendering
+    if (targetUsername) overlay.setAttribute('data-trade-target', targetUsername);
+
+    document.body.appendChild(overlay);
+    this.tradeModalEl = overlay;
+    this.updateTradeModal();
+  }
+
+  private updateTradeModal(): void {
+    const overlay = this.tradeModalEl;
+    if (!overlay) return;
+    const modal = overlay.querySelector('.trade-modal');
+    if (!modal) return;
+
+    const trade = this.lastSocial?.pendingTrade;
+    const selfUsername = this.lastState?.username ?? '';
+    const items = this.lastState?.itemDefinitions ?? {};
+    const inventory = this.lastState?.character?.inventory ?? {};
+    const targetUsername = trade
+      ? (trade.initiator.username === selfUsername ? (trade.target?.username ?? overlay.getAttribute('data-trade-target') ?? '') : trade.initiator.username)
+      : (overlay.getAttribute('data-trade-target') ?? '');
+
+    // If trade was cancelled or completed, close modal
+    if (trade?.status === 'cancelled' || trade?.status === 'confirmed') {
+      this.dismissTradeModal();
+      return;
+    }
+
+    // If no active trade and we're not picking, close
+    if (!trade && !this.tradePickingItem) {
+      this.dismissTradeModal();
+      return;
+    }
+
+    // Tradeable items: unequipped items with count > 0
+    const equipped = this.lastState?.character?.equipment ?? {};
+    const equippedIds = new Set(Object.values(equipped).filter(Boolean) as string[]);
+    const tradeableItems = Object.entries(inventory)
+      .filter(([id, count]) => (count as number) > 0 && !equippedIds.has(id))
+      .map(([id]) => id);
+
+    const renderItemCard = (itemId: string | null | undefined, label: string): string => {
+      if (!itemId) return `<div class="trade-item-card trade-item-empty"><div class="trade-item-label">${label}</div><div class="trade-item-none">No item selected</div></div>`;
+      const def = items[itemId];
+      if (!def) return `<div class="trade-item-card"><div class="trade-item-label">${label}</div><div class="trade-item-name">${this.escapeHtml(itemId)}</div></div>`;
+      const color = SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8';
+      const effect = getItemEffectText(def);
+      return `<div class="trade-item-card">
+        <div class="trade-item-label">${label}</div>
+        <div class="trade-item-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
+        <div class="trade-item-rarity" style="color:${color}">${def.rarity}</div>
+        <div class="trade-item-effect">${this.escapeHtml(effect)}</div>
+      </div>`;
+    };
+
+    // Determine what each side has offered
+    const isSelfInitiator = trade ? trade.initiator.username === selfUsername : true;
+    const selfOffer = trade
+      ? (isSelfInitiator ? trade.initiator.itemId : (trade.target?.itemId ?? null))
+      : this.tradeSelectedItemId;
+    const partnerOffer = trade
+      ? (isSelfInitiator ? (trade.target?.itemId ?? null) : trade.initiator.itemId)
+      : null;
+
+    let actionHtml = '';
+    if (this.tradePickingItem) {
+      // Item picker list
+      const pickerHtml = tradeableItems.length === 0
+        ? '<div class="trade-empty">No tradeable items in inventory</div>'
+        : tradeableItems.map(id => {
+          const def = items[id];
+          const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+          const count = inventory[id] ?? 0;
+          const effect = def ? getItemEffectText(def) : '';
+          return `<button class="trade-item-option" data-item-id="${this.escapeHtml(id)}">
+            <span style="color:${color}">${this.escapeHtml(def?.name ?? id)}</span>
+            <span class="trade-item-count">x${count}</span>
+            <span class="trade-item-effect-small">${this.escapeHtml(effect)}</span>
+          </button>`;
+        }).join('');
+      actionHtml = `<div class="trade-picker"><div class="trade-picker-label">Select an item to offer:</div><div class="trade-picker-list">${pickerHtml}</div></div>`;
+    } else if (!trade) {
+      // Picked item, not yet sent — show confirm to propose
+      actionHtml = `
+        <div class="trade-actions">
+          <button class="social-action-btn trade-modal-pick-btn">Change Item</button>
+          <button class="social-action-btn add-friend trade-confirm-propose-btn">Propose Trade</button>
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+        </div>`;
+    } else if (trade.status === 'pending' && !isSelfInitiator && !trade.target) {
+      // We received a proposal — need to counter with our item
+      actionHtml = `
+        <div class="trade-status">Trade proposed! Select your item to counter.</div>
+        <div class="trade-actions">
+          <button class="social-action-btn trade-modal-pick-btn">Select My Item</button>
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Decline</button>
+        </div>`;
+    } else if (trade.status === 'countered' && isSelfInitiator) {
+      // Partner countered — we can confirm or cancel
+      actionHtml = `
+        <div class="trade-status">Partner offered an item. Confirm the trade?</div>
+        <div class="trade-actions">
+          <button class="social-action-btn add-friend trade-modal-confirm-btn">Confirm Trade</button>
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+        </div>`;
+    } else if (trade.status === 'countered' && !isSelfInitiator) {
+      // We countered — waiting for initiator
+      actionHtml = `
+        <div class="trade-status">Waiting for ${this.escapeHtml(trade.initiator.username)} to confirm...</div>
+        <div class="trade-actions">
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+        </div>`;
+    } else {
+      actionHtml = `
+        <div class="trade-actions">
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+        </div>`;
+    }
+
+    modal.innerHTML = `
+      <div class="trade-modal-header">Trade with ${this.escapeHtml(targetUsername)}</div>
+      <div class="trade-offers">
+        ${renderItemCard(selfOffer, 'Your offer')}
+        <div class="trade-vs">⇄</div>
+        ${renderItemCard(partnerOffer, `${this.escapeHtml(targetUsername)}'s offer`)}
+      </div>
+      ${actionHtml}
+    `;
+
+    // Wire the propose button (can't use delegated handler since it needs targetUsername + selectedItemId)
+    const proposeBtn = modal.querySelector('.trade-confirm-propose-btn') as HTMLButtonElement | null;
+    if (proposeBtn && this.tradeSelectedItemId) {
+      proposeBtn.addEventListener('click', () => {
+        if (this.tradeSelectedItemId) {
+          this.gameClient.sendProposeTrade(targetUsername, this.tradeSelectedItemId);
+          this.tradePickingItem = false;
+          this.updateTradeModal();
+        }
+      });
+    }
+  }
+
+  dismissTradeModal(): void {
+    if (this.tradeModalEl) {
+      this.tradeModalEl.remove();
+      this.tradeModalEl = null;
+    }
+    this.tradePickingItem = false;
+    this.tradeSelectedItemId = null;
   }
 
   private escapeHtml(s: string): string {
