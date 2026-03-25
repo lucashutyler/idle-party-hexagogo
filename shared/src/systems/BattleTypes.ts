@@ -114,6 +114,7 @@ export interface OtherPlayerState {
 export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup';
 
 export interface CombatLogEntry {
+  id: number;
   text: string;
   type: CombatLogType;
 }
