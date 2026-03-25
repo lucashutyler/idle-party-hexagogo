@@ -547,7 +547,7 @@ export class PlayerSession {
         inventory: data.character.inventory ? { ...data.character.inventory } : {},
         equipment: data.character.equipment
           ? { ...data.character.equipment }
-          : { head: null, chest: null, hand: null, foot: null },
+          : { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
         skillLoadout,
         skillPoints,
       };

@@ -283,26 +283,43 @@ export function equipItem(
 
   const slot = def.equipSlot;
 
-  // If a 2H weapon is currently equipped and we're touching mainhand or offhand, unequip it first
-  if ((slot === 'mainhand' || slot === 'offhand') && isTwoHandedEquipped(equipment, items)) {
+  // Validate slot is a known equip slot
+  if (!EQUIP_SLOTS.includes(slot)) return { success: false };
+
+  const replacing2H = (slot === 'mainhand' || slot === 'offhand') && isTwoHandedEquipped(equipment, items);
+
+  // --- Pre-check: ensure all inventory returns will succeed BEFORE mutating ---
+  if (replacing2H) {
     const twoHandId = equipment.mainhand!;
-    if (!addItemToInventory(inventory, twoHandId)) return { success: false };
+    if ((inventory[twoHandId] ?? 0) >= MAX_STACK) return { success: false };
+  } else {
+    const currentEquipped = equipment[slot];
+    if (currentEquipped && (inventory[currentEquipped] ?? 0) >= MAX_STACK) return { success: false };
+    // If equipping a 2H, also need to return offhand
+    if (def.twoHanded) {
+      const offhandItem = equipment.offhand;
+      if (offhandItem && (inventory[offhandItem] ?? 0) >= MAX_STACK) return { success: false };
+    }
+  }
+
+  // --- All checks passed, now mutate ---
+  if (replacing2H) {
+    const twoHandId = equipment.mainhand!;
+    addItemToInventory(inventory, twoHandId);
     equipment.mainhand = null;
     equipment.offhand = null;
-    // Now proceed to equip the new item into the target slot
   } else {
     // Normal case: if slot is occupied, return old item to inventory
     const currentEquipped = equipment[slot];
     if (currentEquipped) {
-      if (!addItemToInventory(inventory, currentEquipped)) return { success: false };
+      addItemToInventory(inventory, currentEquipped);
     }
-  }
-
-  // If equipping a 2H weapon, also clear offhand (return to inventory if occupied)
-  if (def.twoHanded) {
-    const offhandItem = equipment.offhand;
-    if (offhandItem) {
-      if (!addItemToInventory(inventory, offhandItem)) return { success: false };
+    // If equipping a 2H weapon, also clear offhand (return to inventory if occupied)
+    if (def.twoHanded) {
+      const offhandItem = equipment.offhand;
+      if (offhandItem) {
+        addItemToInventory(inventory, offhandItem);
+      }
     }
   }
 
@@ -320,6 +337,8 @@ export function equipItem(
  * Unequip an item from a slot back to inventory.
  * Returns { success: true, itemId } on success.
  * If a 2H weapon is equipped, clicking either mainhand or offhand unequips both.
+ * Also handles stale 2H state: if mainhand and offhand hold the same item ID,
+ * treat it as a 2H weapon regardless of current item definition.
  */
 export function unequipItem(
   inventory: Record<string, number>,
@@ -330,8 +349,12 @@ export function unequipItem(
   const equipped = equipment[slot];
   if (!equipped) return { success: false };
 
-  // Check if this is a 2H weapon (same item in both mainhand and offhand)
-  if ((slot === 'mainhand' || slot === 'offhand') && items && isTwoHandedEquipped(equipment, items)) {
+  // Detect 2H: either by item definition or by same item in both mainhand+offhand (stale 2H state)
+  const is2H = (slot === 'mainhand' || slot === 'offhand') && equipment.mainhand != null
+    && equipment.mainhand === equipment.offhand;
+  const is2HByDef = (slot === 'mainhand' || slot === 'offhand') && items && isTwoHandedEquipped(equipment, items);
+
+  if (is2H || is2HByDef) {
     const twoHandId = equipment.mainhand!;
     if ((inventory[twoHandId] ?? 0) >= MAX_STACK) return { success: false };
     addItemToInventory(inventory, twoHandId);
@@ -445,6 +468,9 @@ export function equipItemForceDestroy(
   if ((inventory[itemId] ?? 0) <= 0) return { success: false };
 
   const slot = def.equipSlot;
+
+  // Validate slot is a known equip slot
+  if (!EQUIP_SLOTS.includes(slot)) return { success: false };
 
   // If a 2H is equipped and we're touching mainhand/offhand, destroy the 2H and clear both slots
   if ((slot === 'mainhand' || slot === 'offhand') && isTwoHandedEquipped(equipment, items)) {

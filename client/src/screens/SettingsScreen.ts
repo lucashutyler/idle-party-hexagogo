@@ -2,6 +2,14 @@ import type { Screen } from './ScreenManager';
 
 const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.03.24.3',
+    notes: [
+      'Fixed item duplication exploit — equipping two-handed weapons with a full offhand stack no longer duplicates the mainhand item',
+      'Fixed stale two-handed weapon state — unequipping a weapon that occupies both slots now always clears both slots correctly',
+      'Added equipment slot validation to prevent items from being equipped into invalid slots',
+    ],
+  },
+  {
     version: '2026.03.24.2',
     notes: [
       'Fixed chat not refreshing when resuming from a backgrounded tab — chat history is now re-fetched on resume',
