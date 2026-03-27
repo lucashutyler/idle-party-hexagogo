@@ -760,7 +760,7 @@ export class SocialScreen implements Screen {
         case 'party_invite': this.gameClient.sendInviteParty(username); break;
         case 'block': this.gameClient.sendBlockUser(username, 'all'); break;
         case 'unblock': this.gameClient.sendUnblockUser(username); break;
-        case 'trade': this.openTradeModal(username); break;
+        case 'trade': console.log('[Trade] openTradeModal triggered for', username); this.openTradeModal(username); break;
       }
       this.dismissPopup();
     });
@@ -1431,7 +1431,12 @@ export class SocialScreen implements Screen {
   }
 
   private renderTradeModal(targetUsername?: string): void {
-    this.dismissTradeModal();
+    // Clean up any existing modal DOM without resetting tradePickingItem/tradeSelectedItemId,
+    // since callers (openTradeModal) set those before calling us.
+    if (this.tradeModalEl) {
+      this.tradeModalEl.remove();
+      this.tradeModalEl = null;
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'trade-modal-overlay';
