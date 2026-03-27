@@ -202,7 +202,25 @@ export type ServerMessage =
   | ServerTradeProposedMessage
   | ServerTradeCancelledMessage
   | ServerTradeCompletedMessage
+  | PlayerProfileMessage
   | { type: 'error'; message: string };
+
+export interface ClientViewPlayerMessage {
+  type: 'view_player';
+  username: string;
+}
+
+export interface PlayerProfileMessage {
+  type: 'player_profile';
+  username: string;
+  className: string;
+  level: number;
+  guildName: string | null;
+  equipment: Record<string, string | null>;
+  skillLoadout: SkillLoadout;
+  itemDefinitions: Record<string, ItemDefinition>;
+  partyMembers: { username: string; className?: string; level?: number }[];
+}
 
 export interface ClientSetClassMessage {
   type: 'set_class';
@@ -221,4 +239,5 @@ export type ClientMessage =
   | ClientUnlockSkillMessage
   | ClientEquipSkillMessage
   | ClientUnequipSkillMessage
+  | ClientViewPlayerMessage
   | ClientSocialMessage;

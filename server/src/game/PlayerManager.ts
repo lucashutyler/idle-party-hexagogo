@@ -258,6 +258,7 @@ export class PlayerManager {
       allPlayers: this.getAllUsernames().map(u => ({
         username: u,
         className: this.sessions.get(u)?.getClassName(),
+        level: this.sessions.get(u)?.getLevel(),
       })),
       blockedUsers: session?.getBlockedUsers() ?? {},
       chatPreferences: {

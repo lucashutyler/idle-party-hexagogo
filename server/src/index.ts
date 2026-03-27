@@ -24,7 +24,7 @@ import { createAdminRoutes } from './admin/adminRoutes.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
-import type { ChatMessage, ClassName } from '@idle-party-rpg/shared';
+import type { ChatMessage, ClassName, ItemDefinition } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES, EQUIP_SLOTS } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
@@ -392,6 +392,48 @@ wss.on('connection', (ws) => {
         if (!session.handleDestroyItems(msg.itemId, msg.count)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot destroy item' }));
         }
+        return;
+      }
+
+      // --- View player profile ---
+      if (msg.type === 'view_player' && typeof msg.username === 'string') {
+        const targetSession = playerManager.getSessionByUsername(msg.username);
+        if (!targetSession) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
+          return;
+        }
+        const profile = targetSession.getPublicProfile();
+        const guildId = targetSession.getGuildId();
+        const guild = guildId ? playerManager.guilds.getGuild(guildId) : null;
+        const partyId = targetSession.getPartyId();
+        const party = partyId ? playerManager.parties.getParty(partyId) : null;
+
+        // Resolve item definitions for equipped items only
+        const itemDefs: Record<string, ItemDefinition> = {};
+        for (const itemId of Object.values(profile.equipment)) {
+          if (itemId) {
+            const def = gameLoop.contentStore.getItem(itemId);
+            if (def) itemDefs[itemId] = def;
+          }
+        }
+
+        // Build party member list
+        const partyMembers = (party?.members ?? []).map(m => {
+          const s = playerManager.getSessionByUsername(m.username);
+          return { username: m.username, className: s?.getClassName(), level: s?.getLevel() };
+        });
+
+        ws.send(JSON.stringify({
+          type: 'player_profile',
+          username: msg.username,
+          className: profile.className,
+          level: profile.level,
+          guildName: guild?.info.name ?? null,
+          equipment: profile.equipment,
+          skillLoadout: profile.skillLoadout,
+          itemDefinitions: itemDefs,
+          partyMembers,
+        }));
         return;
       }
 
