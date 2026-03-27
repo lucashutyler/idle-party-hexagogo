@@ -173,6 +173,8 @@ export type {
   ClientUnlockSkillMessage,
   ClientEquipSkillMessage,
   ClientUnequipSkillMessage,
+  ClientViewPlayerMessage,
+  PlayerProfileMessage,
   ServerMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';

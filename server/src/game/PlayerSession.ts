@@ -347,6 +347,16 @@ export class PlayerSession {
 
   getClassName(): ClassName { return this.character.className; }
 
+  /** Returns publicly visible profile data (no HP, damage, gold, inventory). */
+  getPublicProfile(): { className: string; level: number; equipment: Record<string, string | null>; skillLoadout: SkillLoadout } {
+    return {
+      className: this.character.className,
+      level: this.character.level,
+      equipment: { ...this.character.equipment },
+      skillLoadout: { ...this.character.skillLoadout, equippedSkills: [...this.character.skillLoadout.equippedSkills] },
+    };
+  }
+
   /** Set class for a new character. Only works if className is still Adventurer. */
   setClass(className: ClassName): boolean {
     if (this.character.className !== 'Adventurer') return false;

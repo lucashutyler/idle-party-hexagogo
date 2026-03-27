@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, EQUIP_SLOTS, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
@@ -672,7 +672,14 @@ export class SocialScreen implements Screen {
       ? ` <span class="user-popup-labels">${labels.join(' · ')}</span>`
       : '';
 
+    // Look up player level from allPlayers
+    const playerEntry = social.allPlayers?.find(p => p.username === username);
+    const levelHtml = playerEntry?.level ? ` <span class="user-popup-level">Lv ${playerEntry.level}</span>` : '';
+
     const items: string[] = [];
+
+    // View Player
+    items.push(`<button class="user-popup-item" data-popup-action="view_player">View Player</button>`);
 
     // Chat
     items.push(`<button class="user-popup-item" data-popup-action="chat">Chat</button>`);
@@ -736,7 +743,7 @@ export class SocialScreen implements Screen {
     const popup = document.createElement('div');
     popup.className = 'user-popup-menu';
     popup.innerHTML = `
-      <div class="user-popup-header">${this.classIcon(this.getPlayerClassName(username))} ${this.escapeHtml(username)}${labelHtml}</div>
+      <div class="user-popup-header">${this.classIcon(this.getPlayerClassName(username))} ${this.escapeHtml(username)}${levelHtml}${labelHtml}</div>
       ${items.join('')}
     `;
 
@@ -751,6 +758,7 @@ export class SocialScreen implements Screen {
       if (!actionBtn) return;
       const action = actionBtn.getAttribute('data-popup-action');
       switch (action) {
+        case 'view_player': this.showPlayerProfile(username); break;
         case 'chat': this.startDm(username); break;
         case 'guild_invite': this.gameClient.sendInviteGuild(username); break;
         case 'accept_friend': this.gameClient.sendAcceptFriendRequest(username); break;
@@ -1771,5 +1779,115 @@ export class SocialScreen implements Screen {
       return t ? { clientX: t.clientX, clientY: t.clientY } : { clientX: 0, clientY: 0 };
     }
     return { clientX: (e as MouseEvent).clientX, clientY: (e as MouseEvent).clientY };
+  }
+
+  // ── Player Profile Modal ─────────────────────────────
+
+  private showPlayerProfile(username: string): void {
+    this.gameClient.sendViewPlayer(username);
+
+    const unsub = this.gameClient.onPlayerProfile((profile) => {
+      if (profile.username !== username) return;
+      unsub();
+      this.renderPlayerProfileModal(profile);
+    });
+  }
+
+  private renderPlayerProfileModal(profile: PlayerProfileMessage): void {
+    // Dismiss any existing profile modal
+    document.querySelector('.player-profile-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'player-profile-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'player-profile-modal';
+    overlay.appendChild(modal);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    const icon = CLASS_ICONS[profile.className] ?? UNKNOWN_CLASS_ICON;
+
+    // Equipment section
+    const SLOT_LABELS: Record<string, string> = {
+      head: 'Head', shoulders: 'Shoulders', chest: 'Chest', bracers: 'Bracers',
+      gloves: 'Hands', mainhand: 'Main Hand', offhand: 'Offhand', foot: 'Feet',
+      ring: 'Ring', necklace: 'Necklace', back: 'Back', relic: 'Relic',
+    };
+    const RARITY_COLORS: Record<string, string> = {
+      janky: '#808080', common: '#e8e8e8', uncommon: '#66bb6a', rare: '#4fc3f7',
+      epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
+    };
+
+    const equippedSlots = EQUIP_SLOTS.filter(slot => profile.equipment[slot] != null);
+    const equipHtml = equippedSlots.length > 0
+      ? equippedSlots.map(slot => {
+        const itemId = profile.equipment[slot]!;
+        const def = profile.itemDefinitions[itemId];
+        if (!def) return '';
+        const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
+        const effect = getItemEffectText(def);
+        return `<div class="profile-equip-slot">
+          <span class="profile-slot-label">${SLOT_LABELS[slot] ?? slot}</span>
+          <span class="profile-slot-item" style="color: ${color}">${this.escapeHtml(def.name)}</span>
+          ${effect ? `<span class="profile-slot-effect">${effect}</span>` : ''}
+        </div>`;
+      }).join('')
+      : '<div class="profile-empty">No equipment</div>';
+
+    // Skills section
+    const skillHtml = SKILL_SLOTS.map((slot, i) => {
+      const skillId = profile.skillLoadout.equippedSkills[i];
+      const skill = skillId ? getSkillById(skillId) : null;
+      const isUnlocked = profile.level >= slot.unlocksAtLevel;
+      if (!isUnlocked) {
+        return `<div class="profile-skill-slot locked">
+          <span class="profile-skill-type">${slot.type}</span>
+          <span class="profile-skill-name">Locked (Lv ${slot.unlocksAtLevel})</span>
+        </div>`;
+      }
+      if (!skill) {
+        return `<div class="profile-skill-slot empty">
+          <span class="profile-skill-type">${slot.type}</span>
+          <span class="profile-skill-name">Empty</span>
+        </div>`;
+      }
+      return `<div class="profile-skill-slot ${skill.type}">
+        <span class="profile-skill-type">${skill.type}${skill.cooldown ? ` CD${skill.cooldown}` : ''}</span>
+        <span class="profile-skill-name">${this.escapeHtml(skill.name)}</span>
+      </div>`;
+    }).join('');
+
+    // Party members section
+    const partyHtml = profile.partyMembers.length > 1
+      ? profile.partyMembers.map(m => {
+        const memberIcon = CLASS_ICONS[m.className ?? ''] ?? UNKNOWN_CLASS_ICON;
+        const lvl = m.level ? ` Lv ${m.level}` : '';
+        return `<div class="profile-party-member">${memberIcon} ${this.escapeHtml(m.username)}${lvl}</div>`;
+      }).join('')
+      : '<div class="profile-empty">Solo</div>';
+
+    modal.innerHTML = `
+      <div class="profile-header">
+        <span class="profile-class-icon">${icon}</span>
+        <span class="profile-name">${this.escapeHtml(profile.username)}</span>
+        <span class="profile-level">Lv ${profile.level}</span>
+      </div>
+      <div class="profile-class">${profile.className}</div>
+      <div class="profile-guild">${profile.guildName ? this.escapeHtml(profile.guildName) : 'No Guild'}</div>
+      <div class="profile-section-label">Equipment</div>
+      <div class="profile-equipment">${equipHtml}</div>
+      <div class="profile-section-label">Skills</div>
+      <div class="profile-skills">${skillHtml}</div>
+      <div class="profile-section-label">Party</div>
+      <div class="profile-party">${partyHtml}</div>
+      <button class="profile-close-btn">Close</button>
+    `;
+
+    modal.querySelector('.profile-close-btn')!.addEventListener('click', () => overlay.remove());
+
+    document.body.appendChild(overlay);
   }
 }

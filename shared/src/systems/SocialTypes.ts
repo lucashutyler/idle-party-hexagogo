@@ -92,6 +92,7 @@ export type BlockLevel = 'dm' | 'all';
 export interface PlayerListEntry {
   username: string;
   className?: string;
+  level?: number;
 }
 
 export interface ClientSocialState {

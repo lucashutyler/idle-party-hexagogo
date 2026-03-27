@@ -2,6 +2,13 @@ import type { Screen } from './ScreenManager';
 
 const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.03.26.1',
+    notes: [
+      'Added View Player — click any username to see their level, class, guild, equipped items, skills, and party members',
+      'Player level is now shown in the user popup menu',
+    ],
+  },
+  {
     version: '2026.03.24.3',
     notes: [
       'Fixed item duplication exploit — equipping two-handed weapons with a full offhand stack no longer duplicates the mainhand item',
