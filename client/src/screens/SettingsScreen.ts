@@ -2,6 +2,20 @@ import type { Screen } from './ScreenManager';
 
 const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.03.28.2',
+    notes: [
+      'Expanded skill trees — each class now has 11 skills (6 passives, 5 actives) from level 1 to 50',
+      'Added 2 new equip slots: Passive at level 30 and Passive at level 50 (5 total: 4 passive + 1 active)',
+      'Knight: Fortify, Shield Bash, Iron Will, Tenacity, War Cry passives; Intercept, Shield Slam, Sunder, Dispel actives',
+      'Archer: Marksman, Brave, Exploit Weakness, Precision, Focus passives; Triple Shot, Snipe, Bleed, Crippling Shot actives',
+      'Priest: Devotion, Blessed Arms, Consecrate, Martyr, Resurrection passives; Smite, Cure, Mending, Sanctuary actives',
+      'Mage: Intensify, Ignite, Arcane Surge, Overflow, Scorch passives; Zap, Blizzard, Chain Lightning, Arcane Blast actives',
+      'Bard: Tempo, Nimble, Inspiration (+20% XP), Unnerve, Encore passives; Dissonance, War Song, Lullaby, Chaos actives',
+      'New combat mechanics: DoTs, HoTs, damage shields, stacking marks, damage debuffs, buff removal, and more',
+      'Bard Tempo + Encore reduce active cooldowns by up to 2, enabling every-swing casting at high levels',
+    ],
+  },
+  {
     version: '2026.03.28.1',
     notes: [
       'Chat filter choices now persist across sessions — your toggled channels are saved to your account',
