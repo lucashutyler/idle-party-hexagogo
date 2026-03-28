@@ -114,6 +114,7 @@ export interface ClientSocialState {
 export interface ChatPreferences {
   sendChannel: ChatChannelType;
   dmTarget: string;
+  filters?: ChatChannelType[];
 }
 
 // --- Client -> Server messages ---

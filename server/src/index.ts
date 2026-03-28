@@ -533,6 +533,9 @@ wss.on('connection', (ws) => {
         if (session) {
           session.setChatSendChannel(msg.sendChannel);
           session.setChatDmTarget(msg.dmTarget ?? '');
+          if (Array.isArray(msg.filters)) {
+            session.setChatFilters(msg.filters);
+          }
         }
         return;
       }

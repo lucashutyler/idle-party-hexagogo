@@ -2,6 +2,16 @@ import type { Screen } from './ScreenManager';
 
 const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.03.28.1',
+    notes: [
+      'Chat filter choices now persist across sessions — your toggled channels are saved to your account',
+      'Combat log increased from 100 to 1000 entries',
+      'Combat log can now be paused by scrolling up — a "Resume Live" button appears to jump back to live updates',
+      'Added fullscreen toggle for the combat log',
+      'Damage types (physical, magical, holy) are now shown and color-coded in the combat log',
+    ],
+  },
+  {
     version: '2026.03.26.1',
     notes: [
       'Added View Player — click any username to see their level, class, guild, equipped items, skills, and party members',

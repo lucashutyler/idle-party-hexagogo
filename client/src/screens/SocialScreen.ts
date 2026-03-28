@@ -117,6 +117,9 @@ export class SocialScreen implements Screen {
       if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
         this.chatSendChannel = state.social.chatPreferences.sendChannel;
         this.chatDmTarget = state.social.chatPreferences.dmTarget;
+        if (state.social.chatPreferences.filters) {
+          this.chatFilters = new Set(state.social.chatPreferences.filters);
+        }
         this.chatPrefsInitialized = true;
       }
       this.renderTabBar();
@@ -265,6 +268,7 @@ export class SocialScreen implements Screen {
         }
         btn.classList.toggle('active');
         this.renderChatMessages();
+        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget, Array.from(this.chatFilters));
         return;
       }
 
@@ -444,6 +448,9 @@ export class SocialScreen implements Screen {
     if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
       this.chatSendChannel = state.social.chatPreferences.sendChannel;
       this.chatDmTarget = state.social.chatPreferences.dmTarget;
+      if (state.social.chatPreferences.filters) {
+        this.chatFilters = new Set(state.social.chatPreferences.filters);
+      }
       this.chatPrefsInitialized = true;
     }
 
