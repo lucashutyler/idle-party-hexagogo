@@ -29,6 +29,9 @@ export class CombatScreen implements Screen {
   private paused = false;
   private isFullscreen = false;
 
+  // Username click callback
+  private onUserClick?: (username: string, anchor: HTMLElement) => void;
+
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
@@ -37,6 +40,10 @@ export class CombatScreen implements Screen {
 
     this.buildDOM();
     this.wireSubscriptions();
+  }
+
+  setOnUserClick(cb: (username: string, anchor: HTMLElement) => void): void {
+    this.onUserClick = cb;
   }
 
   onActivate(): void {
@@ -281,11 +288,18 @@ export class CombatScreen implements Screen {
       const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
       const isSelf = p.username === selfUsername;
       hpContainer.innerHTML = `
-        <div class="combat-hp-label${isSelf ? ' self' : ''}">${this.escapeHtml(p.username)}</div>
+        <div class="combat-hp-label${isSelf ? ' self' : ''}" data-username="${this.escapeHtml(p.username)}" style="cursor: pointer">${this.escapeHtml(p.username)}</div>
         <div class="combat-hp-bar">
           <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
         </div>
       `;
+      const label = hpContainer.querySelector('.combat-hp-label') as HTMLElement;
+      if (label && this.onUserClick) {
+        label.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.onUserClick?.(p.username, label);
+        });
+      }
     }
 
     // Enemy HP bars

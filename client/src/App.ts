@@ -333,6 +333,11 @@ export class App {
       socialScreen.showUserPopup(username, anchor, tileCol, tileRow);
     });
 
+    // Wire combat screen username click to social screen popup
+    combatScreen.setOnUserClick((username, anchor) => {
+      socialScreen.showUserPopup(username, anchor);
+    });
+
     // Listen for world content updates (admin deployed a new version)
     this.gameClient.onWorldUpdate(async () => {
       console.log('[App] World updated — reloading world data');
