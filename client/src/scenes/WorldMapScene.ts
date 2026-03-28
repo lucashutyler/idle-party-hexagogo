@@ -620,8 +620,11 @@ export class WorldMapScene extends Phaser.Scene {
 
     // Zone display name from world tile def
     const zoneName = worldTileDef?.zoneName ?? worldTileDef?.zone ?? tile.zone;
-    // Room name: only show if unlocked
-    const roomName = isUnlocked && worldTileDef?.name ? worldTileDef.name : '';
+    // Room name: actual name if unlocked, "Unexplored Room" if zone-unlocked but not yet unlocked
+    const isZoneUnlocked = this.worldCache.isZoneUnlocked(tile.zone);
+    const roomName = isUnlocked && worldTileDef?.name
+      ? worldTileDef.name
+      : (!isUnlocked && isZoneUnlocked) ? 'Unexplored Room' : '';
 
     // Find players on this tile (only visible in same zone)
     const playersHere = isSameZone
