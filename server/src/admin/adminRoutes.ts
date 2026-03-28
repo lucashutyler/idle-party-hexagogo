@@ -73,7 +73,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     res.json({ duplicates });
   });
 
-  /** Deactivate a player account. Kicks them if online. */
+  /** Deactivate a player account. Fully removes them from the game world. */
   router.post('/players/:username/deactivate', async (req, res) => {
     const { username } = req.params;
     const account = accountStore.findByUsername(username);
@@ -83,7 +83,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
     await accountStore.setDeactivated(account.email, true);
     const pm = getPlayerManager();
-    pm.kickPlayer(username);
+    await pm.banPlayer(username);
     console.log(`[Admin] Deactivated "${username}"`);
     res.json({ success: true });
   });
