@@ -96,11 +96,12 @@ export class PartyBattleManager {
           for (const m of members) {
             const s = this.getSession(m);
             if (s) {
-              const pos = cubeToOffset(serverParty.position);
               const allZones = this.content.getAllZones();
               const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
-              s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
+              const tileDef = this.content.getTileById(serverParty.tile.id);
+              const rName = tileDef?.name ?? '';
+              s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
             }
           }
           this.onMembersMoved?.(members);
@@ -172,11 +173,12 @@ export class PartyBattleManager {
           for (const m of members) {
             const s = this.getSession(m);
             if (s) {
-              const pos = cubeToOffset(serverParty.position);
               const allZones = this.content.getAllZones();
               const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
-              s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
+              const tileDef = this.content.getTileById(serverParty.tile.id);
+              const rName = tileDef?.name ?? '';
+              s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
             }
           }
           this.onMembersMoved?.(members);
