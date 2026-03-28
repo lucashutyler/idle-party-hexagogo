@@ -182,6 +182,11 @@ export class PlayerSession {
     return this.unlockSystem.isUnlocked(tile);
   }
 
+  /** Returns true if this player has never completed a battle (truly new player). */
+  isNewPlayer(): boolean {
+    return this.battleCount === 0;
+  }
+
   incrementBattleCount(): void {
     this.battleCount++;
   }

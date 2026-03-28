@@ -131,7 +131,8 @@ export class AdminApp {
   private accounts: AccountData[] = [];
   private accountSortColumn: AccountSortColumn = 'lastActive';
   private accountSortDir: SortDirection = 'desc';
-  private accountFilterHideNoChar = false;
+  private accountFilterShowNoChar = false;
+  private accountFilterShowBanned = false;
   private accountFilterActiveDays = '';
   private accountFilterCreatedDays = '';
   private duplicateTokens: Record<string, string[]> = {}; // deviceToken → emails
@@ -446,8 +447,12 @@ export class AdminApp {
   private getFilteredAccounts(): AccountData[] {
     let filtered = [...this.accounts];
 
-    if (this.accountFilterHideNoChar) {
+    if (!this.accountFilterShowNoChar) {
       filtered = filtered.filter(a => a.username && a.className && a.className !== 'Adventurer');
+    }
+
+    if (!this.accountFilterShowBanned) {
+      filtered = filtered.filter(a => !a.deactivated);
     }
 
     const activeDays = parseInt(this.accountFilterActiveDays);
@@ -542,10 +547,10 @@ export class AdminApp {
         statusBadges.push('<span class="status-offline">Offline</span>');
       }
       if (a.deactivated) {
-        statusBadges.push('<span style="color: #e74c3c; font-weight: bold; margin-left: 4px;" title="Suspended">BAN</span>');
-      }
-      if (a.hasReactivationRequest) {
-        statusBadges.push('<span style="color: #f39c12; margin-left: 4px;" title="Has reactivation request">REQ</span>');
+        const appealIcon = a.hasReactivationRequest
+          ? ' <span style="color: #f39c12; cursor: help;" title="Has reactivation request">💬</span>'
+          : '';
+        statusBadges.push(`<span style="color: #e74c3c; font-weight: bold; margin-left: 4px;" title="Suspended">BAN${appealIcon}</span>`);
       }
 
       return `
@@ -566,8 +571,12 @@ export class AdminApp {
         <div class="admin-page-header"><h2>Accounts — Showing ${filteredCount} of ${totalCount}</h2></div>
         <div class="pixel-panel" style="margin-bottom: 12px; padding: 10px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 0.85em;">
           <label style="display: flex; align-items: center; gap: 4px;">
-            <input type="checkbox" id="filter-hide-no-char" ${this.accountFilterHideNoChar ? 'checked' : ''}>
-            Hide no character
+            <input type="checkbox" id="filter-show-no-char" ${this.accountFilterShowNoChar ? 'checked' : ''}>
+            Show no character
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="filter-show-banned" ${this.accountFilterShowBanned ? 'checked' : ''}>
+            Show banned
           </label>
           <label style="display: flex; align-items: center; gap: 4px;">
             Active in last
@@ -613,8 +622,12 @@ export class AdminApp {
 
   private wireAccountEvents(): void {
     // Filter controls
-    document.getElementById('filter-hide-no-char')?.addEventListener('change', (e) => {
-      this.accountFilterHideNoChar = (e.target as HTMLInputElement).checked;
+    document.getElementById('filter-show-no-char')?.addEventListener('change', (e) => {
+      this.accountFilterShowNoChar = (e.target as HTMLInputElement).checked;
+      this.renderTabContent();
+    });
+    document.getElementById('filter-show-banned')?.addEventListener('change', (e) => {
+      this.accountFilterShowBanned = (e.target as HTMLInputElement).checked;
       this.renderTabContent();
     });
     document.getElementById('filter-active-days')?.addEventListener('input', (e) => {

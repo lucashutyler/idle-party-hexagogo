@@ -20,6 +20,7 @@ export class PlayerManager {
   private grid: HexGrid;
   private content: ContentStore;
   private accountStore: AccountStore;
+  private store: GameStateStore;
   readonly friends: FriendsSystem;
   readonly guilds: GuildSystem;
   readonly chat: ChatSystem;
@@ -28,10 +29,11 @@ export class PlayerManager {
   readonly partyBattles: PartyBattleManager;
   private getAllUsernames: () => string[];
 
-  constructor(grid: HexGrid, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore) {
+  constructor(grid: HexGrid, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore) {
     this.grid = grid;
     this.content = content;
     this.accountStore = accountStore;
+    this.store = store;
     this.friends = new FriendsSystem();
     this.chat = new ChatSystem();
     this.guilds = new GuildSystem(guildStore);
@@ -47,7 +49,7 @@ export class PlayerManager {
     );
   }
 
-  login(ws: WebSocket, username: string): PlayerSession {
+  async login(ws: WebSocket, username: string): Promise<PlayerSession> {
     // Associate this connection with the username
     this.connections.set(ws, username);
 
@@ -64,7 +66,22 @@ export class PlayerManager {
     // Create session if it doesn't exist (or resume existing)
     let session = this.sessions.get(username);
     if (!session) {
-      session = new PlayerSession(username, this.grid, this.content);
+      // Try to load saved data from disk (e.g. unbanned player returning)
+      const saveData = await this.store.load(username);
+      if (saveData) {
+        // Session was not in memory (skipped during restore, e.g. was banned).
+        // Reset position to start tile and clear party state (party not in memory).
+        const startPos = this.content.getStartTile();
+        saveData.position = { col: startPos.col, row: startPos.row };
+        saveData.target = null;
+        saveData.movementQueue = [];
+        saveData.partyId = null;
+        saveData.partyRole = undefined;
+        saveData.partyGridPosition = undefined;
+        session = PlayerSession.fromSaveData(saveData, this.grid, this.content);
+      } else {
+        session = new PlayerSession(username, this.grid, this.content);
+      }
       this.sessions.set(username, session);
       this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
       this.wireCallbacks(session);
@@ -115,6 +132,64 @@ export class PlayerManager {
       this.playerConnections.delete(username);
     }
     console.log(`[PlayerManager] Kicked "${username}"`);
+  }
+
+  /**
+   * Ban a player: save state, remove from party/combat/map, close connections, delete session.
+   * The player's save data is preserved on disk (frozen at ban time).
+   * Called by admin deactivation — fully vanishes the player from the game.
+   */
+  async banPlayer(username: string, store?: GameStateStore): Promise<void> {
+    const saveStore = store ?? this.store;
+    const session = this.sessions.get(username);
+
+    // Cancel any active trade
+    const cancelledTrade = this.trades.cancelTrade(username, 'Player suspended');
+    if (cancelledTrade) {
+      const partner = cancelledTrade.initiator.username === username
+        ? cancelledTrade.target?.username
+        : cancelledTrade.initiator.username;
+      if (partner) this.sendStateToPlayer(partner);
+    }
+
+    // Save current state before removal (freezes XP/inventory at ban time)
+    if (session) {
+      const partyId = session.getPartyId();
+      const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
+      let partyInfo: { role: PartyRole; gridPosition: number } | undefined;
+      if (partyId) {
+        const party = this.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === username);
+          if (member) partyInfo = { role: member.role, gridPosition: member.gridPosition };
+        }
+      }
+      const saveData = session.toSaveData(movementData ?? undefined, partyInfo);
+      await saveStore.saveAll([saveData]);
+    }
+
+    // Remove from party (and its battle entry)
+    const partyId = session?.getPartyId();
+    if (partyId) {
+      // leaveParty handles both solo (deletes party) and multi-player (transfers ownership)
+      this.parties.leaveParty(
+        username,
+        (u) => this.sessions.get(u)?.getPartyId() ?? null,
+        (u, id) => this.sessions.get(u)?.setPartyId(id),
+      );
+      this.partyBattles.removeMember(partyId, username);
+    }
+
+    // Remove from friends system
+    this.friends.removePlayer(username);
+
+    // Remove session from memory (stops battles, removes from map/player lists)
+    this.sessions.delete(username);
+
+    // Close all WebSocket connections
+    this.kickPlayer(username);
+
+    console.log(`[PlayerManager] Banned "${username}" — session removed, state saved`);
   }
 
   getSession(ws: WebSocket): PlayerSession | undefined {
@@ -255,11 +330,16 @@ export class PlayerManager {
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: this.getOnlinePlayers(),
-      allPlayers: this.getAllUsernames().map(u => ({
-        username: u,
-        className: this.sessions.get(u)?.getClassName(),
-        level: this.sessions.get(u)?.getLevel(),
-      })),
+      allPlayers: this.getAllUsernames()
+        .filter(u => {
+          const acct = this.accountStore.findByUsername(u);
+          return !acct?.deactivated;
+        })
+        .map(u => ({
+          username: u,
+          className: this.sessions.get(u)?.getClassName(),
+          level: this.sessions.get(u)?.getLevel(),
+        })),
       blockedUsers: session?.getBlockedUsers() ?? {},
       chatPreferences: {
         sendChannel: session?.getChatSendChannel() ?? 'zone',
@@ -429,12 +509,21 @@ export class PlayerManager {
     const startPos = this.content.getStartTile();
     const startCoord = offsetToCube(startPos);
     const startTile = this.grid.getTile(startCoord);
+    let phaseStart: number;
 
     // Phase 1: Restore all sessions
+    phaseStart = performance.now();
     const validSaves: PlayerSaveData[] = [];
     for (const data of saves) {
       if (!data.username || data.username === 'undefined' || !data.position) {
         console.warn(`[PlayerManager] Skipping invalid save data (username="${data.username}", position=${JSON.stringify(data.position)})`);
+        continue;
+      }
+
+      // Skip deactivated (banned) accounts — they should not resume battling
+      const account = this.accountStore.findByUsername(data.username);
+      if (account?.deactivated) {
+        console.log(`[PlayerManager] Skipping deactivated account "${data.username}"`);
         continue;
       }
 
@@ -460,6 +549,8 @@ export class PlayerManager {
       }
     }
 
+    console.log(`[Startup] Phase 1: ${validSaves.length} sessions deserialized in ${(performance.now() - phaseStart).toFixed(1)}ms`);
+
     // Phase 2: Group by saved partyId
     const partyGroups = new Map<string, PlayerSaveData[]>();
     const soloSaves: PlayerSaveData[] = [];
@@ -475,6 +566,7 @@ export class PlayerManager {
     }
 
     // Phase 3: Restore multi-player parties
+    phaseStart = performance.now();
     for (const [savedPartyId, group] of partyGroups) {
       // If only one member left, treat as solo
       if (group.length === 1) {
@@ -530,7 +622,10 @@ export class PlayerManager {
       console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
     }
 
+    console.log(`[Startup] Phase 3: ${partyGroups.size} multi-player parties restored in ${(performance.now() - phaseStart).toFixed(1)}ms`);
+
     // Phase 4: Restore solo players (no party or single-member groups)
+    phaseStart = performance.now();
     for (const data of soloSaves) {
       const coord = offsetToCube(data.position);
       const currentTile = this.grid.getTile(coord);
@@ -554,6 +649,7 @@ export class PlayerManager {
     }
 
     if (saves.length > 0) {
+      console.log(`[Startup] Phase 4: ${soloSaves.length} solo parties created in ${(performance.now() - phaseStart).toFixed(1)}ms`);
       console.log(`[PlayerManager] Restored ${this.sessions.size} sessions`);
     }
   }
