@@ -140,8 +140,14 @@ export {
 export type {
   TickResult,
   PartyCombatant,
+  CombatMonster,
   PartyCombatState,
   CombatAction,
+  DotEffect,
+  HotEffect,
+  CombatBuff,
+  CombatDebuff,
+  SunderMark,
 } from './systems/CombatEngine.js';
 
 // Battle types & constants

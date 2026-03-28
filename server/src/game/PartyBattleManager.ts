@@ -7,6 +7,7 @@ import {
   createEncounter,
   getZone,
   rollDrops,
+  getSkillById,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -435,7 +436,24 @@ export class PartyBattleManager {
         }
       }
 
-      const splitXp = Math.ceil(totalXp / partySize);
+      // Check for Bard Inspiration XP bonus (+20% per Bard with Inspiration equipped)
+      let xpMultiplier = 1;
+      for (const username of members) {
+        const session = this.getSession(username);
+        if (!session) continue;
+        const loadout = session.getSkillLoadout();
+        if (loadout) {
+          for (const skillId of loadout.equippedSkills) {
+            if (!skillId) continue;
+            const skill = getSkillById(skillId);
+            if (skill && skill.passiveEffect?.kind === 'xp_bonus') {
+              xpMultiplier += skill.passiveEffect.flatValue ?? 0;
+            }
+          }
+        }
+      }
+
+      const splitXp = Math.ceil((totalXp * xpMultiplier) / partySize);
       const splitGold = Math.ceil(totalGold / partySize);
 
       // Roll item drops once, randomly assign each to a party member

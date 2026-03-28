@@ -16,8 +16,8 @@ import {
 
 describe('SkillTypes', () => {
   describe('SKILL_SLOTS', () => {
-    it('has 3 slots', () => {
-      expect(SKILL_SLOTS).toHaveLength(3);
+    it('has 5 slots', () => {
+      expect(SKILL_SLOTS).toHaveLength(5);
     });
 
     it('slot 0 is passive unlocked at level 1', () => {
@@ -30,6 +30,14 @@ describe('SkillTypes', () => {
 
     it('slot 2 is passive unlocked at level 10', () => {
       expect(SKILL_SLOTS[2]).toEqual({ type: 'passive', unlocksAtLevel: 10 });
+    });
+
+    it('slot 3 is passive unlocked at level 30', () => {
+      expect(SKILL_SLOTS[3]).toEqual({ type: 'passive', unlocksAtLevel: 30 });
+    });
+
+    it('slot 4 is passive unlocked at level 50', () => {
+      expect(SKILL_SLOTS[4]).toEqual({ type: 'passive', unlocksAtLevel: 50 });
     });
   });
 
@@ -130,23 +138,23 @@ describe('SkillTypes', () => {
 
   describe('equipSkillInSlot', () => {
     it('equips skill in slot', () => {
-      const loadout = { unlockedSkills: ['knight_guard'], equippedSkills: [null, null, null] };
+      const loadout = { unlockedSkills: ['knight_guard'], equippedSkills: [null, null, null, null, null] };
       const result = equipSkillInSlot('knight_guard', 0, 'Knight', 1, loadout);
-      expect(result).toEqual(['knight_guard', null, null]);
+      expect(result).toEqual(['knight_guard', null, null, null, null]);
     });
 
     it('moves skill from one slot to another', () => {
       const loadout = {
         unlockedSkills: ['knight_guard'],
-        equippedSkills: ['knight_guard' as string | null, null, null],
+        equippedSkills: ['knight_guard' as string | null, null, null, null, null],
       };
       // Equip into slot 2 (passive at level 10) — should unequip from slot 0
       const result = equipSkillInSlot('knight_guard', 2, 'Knight', 10, loadout);
-      expect(result).toEqual([null, null, 'knight_guard']);
+      expect(result).toEqual([null, null, 'knight_guard', null, null]);
     });
 
     it('returns null for invalid equip', () => {
-      const loadout = { unlockedSkills: ['knight_guard'], equippedSkills: [null, null, null] };
+      const loadout = { unlockedSkills: ['knight_guard'], equippedSkills: [null, null, null, null, null] };
       const result = equipSkillInSlot('knight_guard', 1, 'Knight', 5, loadout);
       expect(result).toBeNull(); // passive in active slot
     });
@@ -154,13 +162,13 @@ describe('SkillTypes', () => {
 
   describe('unequipSkillFromSlot', () => {
     it('clears the slot', () => {
-      const result = unequipSkillFromSlot(0, ['knight_guard', null, null]);
-      expect(result).toEqual([null, null, null]);
+      const result = unequipSkillFromSlot(0, ['knight_guard', null, null, null, null]);
+      expect(result).toEqual([null, null, null, null, null]);
     });
 
     it('ignores out-of-range slot', () => {
-      const equipped = ['knight_guard' as string | null, null, null];
-      const result = unequipSkillFromSlot(5, equipped);
+      const equipped = ['knight_guard' as string | null, null, null, null, null];
+      const result = unequipSkillFromSlot(7, equipped);
       expect(result).toEqual(equipped);
     });
   });
@@ -169,13 +177,13 @@ describe('SkillTypes', () => {
     it('unlocks and equips first passive for Knight', () => {
       const loadout = createDefaultSkillLoadout('Knight');
       expect(loadout.unlockedSkills).toEqual(['knight_guard']);
-      expect(loadout.equippedSkills).toEqual(['knight_guard', null, null]);
+      expect(loadout.equippedSkills).toEqual(['knight_guard', null, null, null, null]);
     });
 
     it('returns empty for Adventurer (no skill tree)', () => {
       const loadout = createDefaultSkillLoadout('Adventurer');
       expect(loadout.unlockedSkills).toHaveLength(0);
-      expect(loadout.equippedSkills).toEqual([null, null, null]);
+      expect(loadout.equippedSkills).toEqual([null, null, null, null, null]);
     });
   });
 
@@ -193,9 +201,25 @@ describe('SkillTypes', () => {
   });
 
   describe('SKILL_TREES', () => {
-    it('every class has at least 2 skills', () => {
+    it('every class has 11 skills', () => {
       for (const cn of ['Knight', 'Archer', 'Priest', 'Mage', 'Bard']) {
-        expect(SKILL_TREES[cn].length).toBeGreaterThanOrEqual(2);
+        expect(SKILL_TREES[cn]).toHaveLength(11);
+      }
+    });
+
+    it('every class has 6 passives and 5 actives', () => {
+      for (const cn of ['Knight', 'Archer', 'Priest', 'Mage', 'Bard']) {
+        const passives = SKILL_TREES[cn].filter(s => s.type === 'passive');
+        const actives = SKILL_TREES[cn].filter(s => s.type === 'active');
+        expect(passives).toHaveLength(6);
+        expect(actives).toHaveLength(5);
+      }
+    });
+
+    it('tree orders are sequential 0-10', () => {
+      for (const cn of ['Knight', 'Archer', 'Priest', 'Mage', 'Bard']) {
+        const orders = SKILL_TREES[cn].map(s => s.treeOrder).sort((a, b) => a - b);
+        expect(orders).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
       }
     });
 

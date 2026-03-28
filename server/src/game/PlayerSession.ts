@@ -22,6 +22,7 @@ import {
   isTwoHandedEquipped,
   getZone,
   createDefaultSkillLoadout,
+  SKILL_SLOTS,
   getSkillPointsForLevel,
   unlockSkill,
   equipSkillInSlot,
@@ -144,6 +145,18 @@ export class PlayerSession {
       equippedSkills,
       attackCount: 0,
       stunTurns: 0,
+      dots: [],
+      hots: [],
+      damageShield: 0,
+      debuffs: [],
+      consecutiveHits: 0,
+      lastTargetId: '',
+      hasResurrected: false,
+      martyrBonus: 0,
+      braceActive: false,
+      braceDamageTaken: 0,
+      interceptActive: false,
+      activeSkillCount: 0,
     };
   }
 
@@ -354,6 +367,7 @@ export class PlayerSession {
   getLevel(): number { return this.character.level; }
 
   getClassName(): ClassName { return this.character.className; }
+  getSkillLoadout(): SkillLoadout { return this.character.skillLoadout; }
 
   /** Returns publicly visible profile data (no HP, damage, gold, inventory). */
   getPublicProfile(): { className: string; level: number; equipment: Record<string, string | null>; skillLoadout: SkillLoadout } {
@@ -572,8 +586,13 @@ export class PlayerSession {
 
       // Migrate skill loadout from old saves
       const skillLoadout: SkillLoadout = data.character.skillLoadout
-        ? { ...data.character.skillLoadout }
+        ? { ...data.character.skillLoadout, equippedSkills: [...data.character.skillLoadout.equippedSkills] }
         : createDefaultSkillLoadout(className);
+
+      // Pad equippedSkills to 5 slots (backward compat from 3-slot saves)
+      while (skillLoadout.equippedSkills.length < SKILL_SLOTS.length) {
+        skillLoadout.equippedSkills.push(null);
+      }
 
       // Migrate skill points: if old save has no skillPoints, compute from level
       const skillPoints = data.character.skillPoints !== undefined
