@@ -770,6 +770,21 @@ export function getAvailableSkillPoints(level: number, unlockedSkills: SkillId[]
   return Math.max(0, totalEarned - spent);
 }
 
+/** Get the level at which a skill becomes learnable (treeOrder 0 = Lv1, others = treeOrder * 5). */
+export function getSkillLearnLevel(treeOrder: number): number {
+  return treeOrder === 0 ? 1 : treeOrder * 5;
+}
+
+/** Get all skill IDs that should be unlocked for a class at a given level (auto-unlock). */
+export function getUnlockedSkillsForLevel(className: ClassName, level: number): SkillId[] {
+  const tree = SKILL_TREES[className];
+  if (!tree) return [];
+  return tree
+    .filter(s => level >= getSkillLearnLevel(s.treeOrder))
+    .sort((a, b) => a.treeOrder - b.treeOrder)
+    .map(s => s.id);
+}
+
 /** Check if a skill can be unlocked: correct class, sequential order, has points. */
 export function canUnlockSkill(
   skillId: SkillId,

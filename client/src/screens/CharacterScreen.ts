@@ -22,6 +22,7 @@ export class CharacterScreen implements Screen {
   private skillSlotsEl!: HTMLElement;
   private skillTreeEl!: HTMLElement;
   private skillPointsEl!: HTMLElement;
+  private lastSkillKey = '';
 
   private unsubscribe?: () => void;
   private popupOpen = false;
@@ -184,8 +185,10 @@ export class CharacterScreen implements Screen {
     const availablePoints = char.skillPoints;
     this.skillPointsEl.textContent = availablePoints > 0 ? `Skill Points: ${availablePoints}` : '';
 
-    // Skill slots & tree — skip re-render while popup is open to avoid destroying it
-    if (!this.popupOpen) {
+    // Skill slots & tree — only re-render when skill state changes (not every tick)
+    const skillKey = JSON.stringify(char.skillLoadout) + char.level;
+    if (!this.popupOpen && skillKey !== this.lastSkillKey) {
+      this.lastSkillKey = skillKey;
       this.renderSkillSlots(state);
       this.renderSkillTree(state);
     }
@@ -351,27 +354,26 @@ export class CharacterScreen implements Screen {
     const loadout = char.skillLoadout;
     const isUnlocked = loadout.unlockedSkills.includes(skillId);
     const isEquipped = loadout.equippedSkills.includes(skillId);
-    const tree = SKILL_TREES[char.className as ClassName] ?? [];
-    const allPriorUnlocked = tree.every(s => s.treeOrder >= skill.treeOrder || loadout.unlockedSkills.includes(s.id));
-    const cost = skill.treeOrder === 0 ? 0 : 1;
-    const canUnlock = !isUnlocked && allPriorUnlocked && char.skillPoints >= cost;
 
     const popup = document.createElement('div');
     popup.className = `skill-popup ${skill.type}`;
 
     let buttonsHtml = '';
-    if (!isUnlocked && canUnlock) {
-      buttonsHtml = `<button class="skill-popup-btn unlock-btn">Unlock${cost > 0 ? ` (${cost} pt)` : ' (Free)'}</button>`;
-    } else if (isUnlocked && !isEquipped) {
-      // Find matching slot
+    if (isUnlocked && !isEquipped) {
+      // Find matching slots by type
       const matchingSlots = SKILL_SLOTS
         .map((s, i) => ({ ...s, index: i }))
         .filter(s => s.type === skill.type && char.level >= s.unlocksAtLevel);
 
       if (matchingSlots.length > 0) {
-        buttonsHtml = matchingSlots.map(s =>
-          `<button class="skill-popup-btn equip-btn" data-slot="${s.index}">Equip (Slot ${s.index + 1})</button>`
-        ).join('');
+        if (skill.type === 'active') {
+          // Only one active slot
+          buttonsHtml = `<button class="skill-popup-btn equip-btn" data-slot="${matchingSlots[0].index}">Equip in active slot</button>`;
+        } else {
+          buttonsHtml = matchingSlots.map(s =>
+            `<button class="skill-popup-btn equip-btn" data-slot="${s.index}">Equip in passive slot ${s.index === 0 ? '1' : s.index === 2 ? '2' : s.index === 3 ? '3' : '4'}</button>`
+          ).join('');
+        }
       }
     } else if (isEquipped) {
       const slotIdx = loadout.equippedSkills.indexOf(skillId);
@@ -404,15 +406,6 @@ export class CharacterScreen implements Screen {
     };
 
     // Wire button handlers
-    const unlockBtn = popup.querySelector('.unlock-btn');
-    if (unlockBtn) {
-      unlockBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.gameClient.sendUnlockSkill(skillId);
-        closePopup();
-      });
-    }
-
     for (const equipBtn of popup.querySelectorAll('.equip-btn')) {
       equipBtn.addEventListener('click', (e) => {
         e.stopPropagation();

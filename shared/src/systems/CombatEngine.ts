@@ -620,7 +620,7 @@ function applyHeal(
   target.currentHp += amount;
 
   if (amount > 0) {
-    logEntries.push(`${healer.username} uses ${skillName} on ${target.username} for ${amount} HP`);
+    logEntries.push(`${healer.username} casts ${skillName} on ${target.username} for ${amount} HP`);
   }
 
   return amount;
@@ -833,7 +833,7 @@ function executeActiveSkill(
         }
       }
       if (!anyStunned) {
-        logEntries.push(`${player.username} uses ${skill.name} but no enemies are stunned`);
+        logEntries.push(`${player.username} casts ${skill.name} but no enemies are stunned`);
       }
 
       return {
@@ -1084,7 +1084,7 @@ function executeActiveSkill(
       if (hadDebuffs) {
         logEntries.push(`${player.username} cures ${target.username}'s afflictions!`);
       } else {
-        logEntries.push(`${player.username} uses ${skill.name} on ${target.username} but there's nothing to cure`);
+        logEntries.push(`${player.username} casts ${skill.name} on ${target.username} but there's nothing to cure`);
       }
 
       return {
@@ -1125,7 +1125,7 @@ function executeActiveSkill(
       // Priest Sanctuary: shield lowest HP non-Knight ally
       const target = findLowestHpNonKnight(state.players);
       if (!target) {
-        logEntries.push(`${player.username} uses ${skill.name} but no non-Knight allies need protection`);
+        logEntries.push(`${player.username} casts ${skill.name} but no non-Knight allies need protection`);
         return { logEntries, action: noAction() };
       }
 
