@@ -6,6 +6,7 @@ const PATCH_NOTES: { version: string; notes: string[] }[] = [
     notes: [
       'Expanded skill trees — each class now has 11 skills (6 passives, 5 actives) from level 1 to 50',
       'Added 2 new equip slots: Passive at level 30 and Passive at level 50 (5 total: 4 passive + 1 active)',
+      'Skills now auto-unlock as you level — no manual unlocking needed',
       'Knight: Fortify, Shield Bash, Iron Will, Tenacity, War Cry passives; Intercept, Shield Slam, Sunder, Dispel actives',
       'Archer: Marksman, Brave, Exploit Weakness, Precision, Focus passives; Triple Shot, Snipe, Bleed, Crippling Shot actives',
       'Priest: Devotion, Blessed Arms, Consecrate, Martyr, Resurrection passives; Smite, Cure, Mending, Sanctuary actives',
@@ -13,6 +14,11 @@ const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'Bard: Tempo, Nimble, Inspiration (+20% XP), Unnerve, Encore passives; Dissonance, War Song, Lullaby, Chaos actives',
       'New combat mechanics: DoTs, HoTs, damage shields, stacking marks, damage debuffs, buff removal, and more',
       'Bard Tempo + Encore reduce active cooldowns by up to 2, enabling every-swing casting at high levels',
+      'Skill UI redesigned: active slot on the left, passive slots on the right; skill tree split into two columns',
+      'Locked skills now show the level required to learn them',
+      'Active skill usage now shows in the combat log (e.g., "uses Zap on Goblin for 12 damage")',
+      'Skill section no longer resets scroll position on state updates',
+      'Click party member names on the combat screen to open the user popup (View Player, Chat, etc.)',
     ],
   },
   {

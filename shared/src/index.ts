@@ -72,6 +72,8 @@ export {
   unequipSkillFromSlot,
   createDefaultSkillLoadout,
   getSkillById,
+  getSkillLearnLevel,
+  getUnlockedSkillsForLevel,
 } from './systems/SkillTypes.js';
 export type {
   SkillSlotType,

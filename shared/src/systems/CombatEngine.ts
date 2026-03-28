@@ -518,16 +518,18 @@ function applyDamageToMonster(
   state: PartyCombatState,
   logEntries: string[],
   isAoe: boolean,
+  skillName?: string,
 ): void {
   // Add Blessed Arms holy damage
   const totalDamage = damage + state.blessedArmsDamage;
   const prevHp = target.currentHp;
   target.currentHp = Math.max(0, target.currentHp - totalDamage);
 
+  const verb = skillName ? `uses ${skillName} on` : 'hits';
   if (state.blessedArmsDamage > 0 && damage > 0) {
-    logEntries.push(`${player.username} hits ${target.name} for ${damage} ${player.playerDamageType} + ${state.blessedArmsDamage} holy damage`);
+    logEntries.push(`${player.username} ${verb} ${target.name} for ${damage} ${player.playerDamageType} + ${state.blessedArmsDamage} holy damage`);
   } else {
-    logEntries.push(`${player.username} hits ${target.name} for ${totalDamage} ${player.playerDamageType} damage`);
+    logEntries.push(`${player.username} ${verb} ${target.name} for ${totalDamage} ${player.playerDamageType} damage`);
   }
 
   // Apply Scorch debuff if Mage has it equipped
@@ -786,6 +788,7 @@ function executeActiveSkill(
 ): { logEntries: string[]; action: CombatAction } {
   const logEntries: string[] = [];
   const effect = skill.activeEffect!;
+  const sn = skill.name; // skill name for log messages
 
   // Track active skill count for Arcane Surge
   player.activeSkillCount++;
@@ -806,7 +809,7 @@ function executeActiveSkill(
       if (!target) return { logEntries, action: noAction() };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
 
       let stunApplied = false;
       if (target.currentHp > 0 && Math.random() < (effect.stunChance ?? 0)) {
@@ -868,7 +871,7 @@ function executeActiveSkill(
         const target = findTarget(player.gridPosition, state.monsters, false);
         if (!target) break;
         lastTarget = target;
-        applyDamageToMonster(perHitDamage, target, player, state, logEntries, false);
+        applyDamageToMonster(perHitDamage, target, player, state, logEntries, false, sn);
       }
 
       return {
@@ -883,7 +886,7 @@ function executeActiveSkill(
       if (!target) return { logEntries, action: noAction() };
 
       const damage = computePlayerDamage(player, state, target as CombatMonster, { isActive: true }) * arcaneMult;
-      applyDamageToMonster(damage, target as CombatMonster, player, state, logEntries, false);
+      applyDamageToMonster(damage, target as CombatMonster, player, state, logEntries, false, sn);
 
       return {
         logEntries,
@@ -912,7 +915,7 @@ function executeActiveSkill(
       if (!target) return { logEntries, action: noAction() };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
 
       if (target.currentHp > 0) {
         if (!target.sunderMark) {
@@ -935,7 +938,7 @@ function executeActiveSkill(
       if (!target) return { logEntries, action: noAction() };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
 
       if (target.currentHp > 0 && target.buffs.length > 0) {
         target.buffs = [];
@@ -961,7 +964,7 @@ function executeActiveSkill(
         if (alive.length === 0) break;
         const target = alive[Math.floor(Math.random() * alive.length)];
         lastTarget = target;
-        applyDamageToMonster(perHitDamage, target, player, state, logEntries, true);
+        applyDamageToMonster(perHitDamage, target, player, state, logEntries, true, sn);
       }
 
       return {
@@ -1013,7 +1016,7 @@ function executeActiveSkill(
       if (!target) return { logEntries, action: noAction() };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
 
       if (target.currentHp > 0) {
         const dotTotal = Math.floor(damage * (effect.dotPercent ?? 0.20));
@@ -1039,7 +1042,7 @@ function executeActiveSkill(
       if (!target) return { logEntries, action: noAction() };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
 
       if (target.currentHp > 0) {
         target.debuffs.push({
@@ -1062,7 +1065,7 @@ function executeActiveSkill(
       if (!target) return { logEntries, action: noAction() };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
       // TODO: Add bonus holy damage vs undead when undead system is implemented
 
       return {
@@ -1146,7 +1149,7 @@ function executeActiveSkill(
 
       const rawDamage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       const damage = Math.max(1, Math.floor(rawDamage * (effect.damagePercent ?? 0.75)));
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
 
       return {
         logEntries,
@@ -1177,7 +1180,7 @@ function executeActiveSkill(
         for (const monster of state.monsters) {
           if (monster.currentHp <= 0) continue;
           lastTarget = monster;
-          applyDamageToMonster(damage, monster, player, state, logEntries, true);
+          applyDamageToMonster(damage, monster, player, state, logEntries, true, sn);
         }
       }
 
@@ -1194,7 +1197,7 @@ function executeActiveSkill(
 
       const rawDamage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       const damage = Math.max(1, Math.floor(rawDamage * (effect.damagePercent ?? 2.50)));
-      applyDamageToMonster(damage, target, player, state, logEntries, false);
+      applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
 
       return {
         logEntries,

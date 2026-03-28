@@ -24,6 +24,7 @@ import {
   createDefaultSkillLoadout,
   SKILL_SLOTS,
   getSkillPointsForLevel,
+  getUnlockedSkillsForLevel,
   unlockSkill,
   equipSkillInSlot,
   unequipSkillFromSlot,
@@ -188,6 +189,8 @@ export class PlayerSession {
       for (let i = 0; i < levelsGained; i++) {
         this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
       }
+      // Auto-unlock skills for the new level
+      this.autoUnlockSkills();
     }
   }
 
@@ -407,6 +410,12 @@ export class PlayerSession {
 
   // ── Skill System ──────────────────────────────────────
 
+  /** Auto-unlock all skills the player qualifies for based on level. */
+  autoUnlockSkills(): void {
+    const available = getUnlockedSkillsForLevel(this.character.className, this.character.level);
+    this.character.skillLoadout.unlockedSkills = available;
+  }
+
   handleUnlockSkill(skillId: string): boolean {
     const result = unlockSkill(
       skillId,
@@ -615,6 +624,9 @@ export class PlayerSession {
       // Invalid or legacy class — reset to Adventurer (will force class selection on login)
       session['character'] = createDefaultCharacter();
     }
+
+    // Auto-unlock skills for current level
+    session.autoUnlockSkills();
 
     // Restore social state
     session['friends'] = data.friends ? [...data.friends] : [];

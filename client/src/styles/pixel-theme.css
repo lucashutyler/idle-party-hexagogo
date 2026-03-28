@@ -838,6 +838,26 @@ html, body {
   flex-wrap: wrap;
 }
 
+.skill-slots-split {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+
+.skill-slots-active {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.skill-slots-passive {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+
 .skill-slot {
   display: flex;
   flex-direction: column;
@@ -887,6 +907,23 @@ html, body {
 }
 
 /* Skill Tree Nodes */
+.skill-tree-split {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 4px 0;
+  max-height: 400px;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+
+.skill-tree-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
 .skill-tree-nodes {
   display: flex;
   flex-direction: column;
