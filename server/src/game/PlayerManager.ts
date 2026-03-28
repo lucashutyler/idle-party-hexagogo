@@ -344,6 +344,7 @@ export class PlayerManager {
       chatPreferences: {
         sendChannel: session?.getChatSendChannel() ?? 'zone',
         dmTarget: session?.getChatDmTarget() ?? '',
+        filters: session?.getChatFilters(),
       },
       pendingTrade: this.trades.getPlayerTrade(username),
     };

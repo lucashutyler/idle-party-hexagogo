@@ -307,7 +307,7 @@ function executeActiveSkill(
 
       const damage = computePlayerDamage(player, state.rallyMultiplier);
       target.currentHp = Math.max(0, target.currentHp - damage);
-      logEntries.push(`${player.username} uses ${skill.name} on ${target.name} for ${damage} damage`);
+      logEntries.push(`${player.username} uses ${skill.name} on ${target.name} for ${damage} ${player.playerDamageType} damage`);
 
       let stunApplied = false;
       if (target.currentHp > 0 && Math.random() < (effect.stunChance ?? 0)) {
@@ -383,7 +383,7 @@ function executeActiveSkill(
         if (!target) break;
         lastTarget = target;
         target.currentHp = Math.max(0, target.currentHp - perHitDamage);
-        logEntries.push(`${player.username}'s ${skill.name} hits ${target.name} for ${perHitDamage} damage`);
+        logEntries.push(`${player.username}'s ${skill.name} hits ${target.name} for ${perHitDamage} ${player.playerDamageType} damage`);
         if (target.currentHp <= 0) {
           logEntries.push(`${target.name} defeated!`);
         }
@@ -407,7 +407,7 @@ function executeActiveSkill(
 
       const damage = computePlayerDamage(player, state.rallyMultiplier);
       target.currentHp = Math.max(0, target.currentHp - damage);
-      logEntries.push(`${player.username} uses ${skill.name} on ${target.name} for ${damage} damage`);
+      logEntries.push(`${player.username} uses ${skill.name} on ${target.name} for ${damage} ${player.playerDamageType} damage`);
 
       if (target.currentHp <= 0) {
         logEntries.push(`${target.name} defeated!`);
@@ -503,7 +503,7 @@ export function processPartyTick(state: PartyCombatState): TickResult {
         if (target) {
           const damage = computePlayerDamage(player, state.rallyMultiplier);
           target.currentHp = Math.max(0, target.currentHp - damage);
-          logEntries.push(`${player.username} hits ${target.name} for ${damage} damage`);
+          logEntries.push(`${player.username} hits ${target.name} for ${damage} ${player.playerDamageType} damage`);
 
           if (target.currentHp <= 0) {
             logEntries.push(`${target.name} defeated!`);
@@ -572,7 +572,7 @@ export function processPartyTick(state: PartyCombatState): TickResult {
 
           const damage = Math.max(0, monster.damage - reduction);
           target.currentHp = Math.max(0, target.currentHp - damage);
-          logEntries.push(`${monster.name} hits ${target.username} for ${damage} damage`);
+          logEntries.push(`${monster.name} hits ${target.username} for ${damage} ${monster.damageType} damage`);
         }
 
         state.lastAction = {

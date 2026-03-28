@@ -52,7 +52,7 @@ import type {
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
 
-const MAX_LOG_ENTRIES = 100;
+const MAX_LOG_ENTRIES = 1000;
 const MAX_SAVE_LOG_ENTRIES = 1000;
 const MAX_CHAT_HISTORY = 1000;
 
@@ -73,6 +73,7 @@ export class PlayerSession {
   private partyId: string | null = null;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
+  private chatFilters: ChatChannelType[] = ['tile', 'zone', 'party', 'guild', 'global', 'dm', 'server'];
 
   /** XP rate tracking — in-memory only, resets on server restart. */
   private xpRateStartTime = Date.now();
@@ -307,6 +308,8 @@ export class PlayerSession {
   setChatSendChannel(channel: ChatChannelType): void { this.chatSendChannel = channel; }
   getChatDmTarget(): string { return this.chatDmTarget; }
   setChatDmTarget(target: string): void { this.chatDmTarget = target; }
+  getChatFilters(): ChatChannelType[] { return this.chatFilters; }
+  setChatFilters(filters: ChatChannelType[]): void { this.chatFilters = filters; }
 
   /** Store a chat message in this player's personal history. */
   addChatMessage(message: ChatMessage): void {
@@ -519,6 +522,7 @@ export class PlayerSession {
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
+      chatFilters: [...this.chatFilters],
     };
   }
 
@@ -602,6 +606,9 @@ export class PlayerSession {
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
+    session['chatFilters'] = data.chatFilters
+      ? data.chatFilters as ChatChannelType[]
+      : ['tile', 'zone', 'party', 'guild', 'global', 'dm', 'server'];
 
     // XP rate tracking — auto-start from session restore time
     session['xpRateStartTime'] = Date.now();

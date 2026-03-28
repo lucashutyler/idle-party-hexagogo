@@ -370,8 +370,8 @@ export class GameClient {
     this.sendRaw({ type: 'request_chat_history', channelType, channelId });
   }
 
-  sendSetChatPreferences(sendChannel: string, dmTarget: string): void {
-    this.sendRaw({ type: 'set_chat_preferences', sendChannel, dmTarget });
+  sendSetChatPreferences(sendChannel: string, dmTarget: string, filters?: string[]): void {
+    this.sendRaw({ type: 'set_chat_preferences', sendChannel, dmTarget, filters });
   }
 
   /** Subscribe to incoming chat messages. Returns an unsubscribe function. */

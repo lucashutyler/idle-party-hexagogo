@@ -15,12 +15,19 @@ export class CombatScreen implements Screen {
   private playerSide!: HTMLElement;
   private enemySide!: HTMLElement;
   private logContainer!: HTMLElement;
+  private logWrapper!: HTMLElement;
+  private resumeBtn!: HTMLElement;
+  private fullscreenBtn!: HTMLElement;
 
   // Last rendered log entry ID — for incremental DOM updates
   private lastRenderedId = -1;
   private lastLog: CombatLogEntry[] = [];
   private renderedPlayerKey = '';
   private renderedEnemyKey = '';
+
+  // Pause/fullscreen state
+  private paused = false;
+  private isFullscreen = false;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -64,7 +71,13 @@ export class CombatScreen implements Screen {
         <div class="combat-vs">\u2694</div>
         <div class="combat-side combat-enemy-side"></div>
       </div>
-      <div class="combat-log"></div>
+      <div class="combat-log-wrapper">
+        <div class="combat-log-controls">
+          <button class="log-fullscreen-btn" title="Fullscreen">\u26F6</button>
+        </div>
+        <div class="combat-log"></div>
+        <button class="log-resume-btn" style="display:none">\u25BC Resume Live</button>
+      </div>
     `;
 
     this.locationLabel = this.container.querySelector('.location-label')!;
@@ -72,7 +85,33 @@ export class CombatScreen implements Screen {
     this.stage = this.container.querySelector('.combat-stage')!;
     this.playerSide = this.container.querySelector('.combat-player-side')!;
     this.enemySide = this.container.querySelector('.combat-enemy-side')!;
+    this.logWrapper = this.container.querySelector('.combat-log-wrapper')!;
     this.logContainer = this.container.querySelector('.combat-log')!;
+    this.resumeBtn = this.container.querySelector('.log-resume-btn')!;
+    this.fullscreenBtn = this.container.querySelector('.log-fullscreen-btn')!;
+
+    // Auto-pause on user scroll
+    this.logContainer.addEventListener('scroll', () => {
+      if (this.paused) return;
+      const { scrollTop, scrollHeight, clientHeight } = this.logContainer;
+      if (scrollTop + clientHeight < scrollHeight - 20) {
+        this.setPaused(true);
+      }
+    });
+
+    // Resume button
+    this.resumeBtn.addEventListener('click', () => {
+      this.setPaused(false);
+      this.renderLog(this.lastLog);
+    });
+
+    // Fullscreen toggle
+    this.fullscreenBtn.addEventListener('click', () => {
+      this.isFullscreen = !this.isFullscreen;
+      this.logWrapper.classList.toggle('fullscreen', this.isFullscreen);
+      this.fullscreenBtn.textContent = this.isFullscreen ? '\u2716' : '\u26F6';
+      this.fullscreenBtn.title = this.isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+    });
   }
 
   private wireSubscriptions(): void {
@@ -269,7 +308,15 @@ export class CombatScreen implements Screen {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  private setPaused(paused: boolean): void {
+    this.paused = paused;
+    this.resumeBtn.style.display = paused ? '' : 'none';
+  }
+
   private updateLog(log: CombatLogEntry[]): void {
+    // When paused, don't update DOM — just track latest data
+    if (this.paused) return;
+
     const lastId = log.length > 0 ? log[log.length - 1].id : -1;
 
     // Nothing new — skip
@@ -310,8 +357,15 @@ export class CombatScreen implements Screen {
   private appendLogEntry(entry: CombatLogEntry): void {
     const div = document.createElement('div');
     div.className = `log-entry ${entry.type}`;
-    div.textContent = entry.text;
+    div.innerHTML = CombatScreen.formatLogText(this.escapeHtml(entry.text));
     this.logContainer.appendChild(div);
     this.logContainer.scrollTop = this.logContainer.scrollHeight;
+  }
+
+  private static formatLogText(escaped: string): string {
+    return escaped.replace(
+      /\b(physical|magical|holy)\b/gi,
+      (match) => `<span class="dmg-${match.toLowerCase()}">${match}</span>`,
+    );
   }
 }
