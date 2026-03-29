@@ -133,6 +133,8 @@ export interface PartyCombatState {
   turnIndex: number;
   /** Total number of combatants in turn order (players + monsters). */
   turnOrderSize: number;
+  /** Number of full rounds completed (starts at 1, increments when turn order wraps). */
+  roundCount: number;
   /** The action that occurred on the most recent tick (null before first tick). */
   lastAction: CombatAction | null;
   /** Bard Rally damage multiplier (precomputed at combat start). */
@@ -768,6 +770,7 @@ export function createPartyCombatState(
     result: null,
     turnIndex: 0,
     turnOrderSize: sortedPlayers.length + sortedMonsters.length,
+    roundCount: 1,
     lastAction: null,
     rallyMultiplier,
     warSongBonus: 0,
@@ -1259,6 +1262,7 @@ export function processPartyTick(state: PartyCombatState): TickResult {
   }
 
   state.tickCount++;
+  const prevTurnIndex = state.turnIndex;
   const logEntries: string[] = [];
 
   const totalCombatants = state.turnOrderSize;
@@ -1543,6 +1547,11 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       player.braceActive = false;
       player.braceDamageTaken = 0;
     }
+  }
+
+  // Increment round count when turn order wraps back around
+  if (state.turnIndex <= prevTurnIndex && acted) {
+    state.roundCount++;
   }
 
   // Check for victory (all monsters dead)

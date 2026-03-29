@@ -19,6 +19,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
+export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -73,6 +74,8 @@ export interface ClientCombatState {
   players: ClientPlayerCombatant[];
   monsters: ClientMonsterState[];
   tickCount: number;
+  /** Number of full combat rounds completed. */
+  roundCount: number;
   /** The action that occurred on the most recent tick. */
   lastAction?: ClientCombatAction;
 }
@@ -222,6 +225,10 @@ export interface PlayerProfileMessage {
   partyMembers: { username: string; className?: string; level?: number }[];
 }
 
+export interface ClientRunMessage {
+  type: 'run';
+}
+
 export interface ClientSetClassMessage {
   type: 'set_class';
   className: string;
@@ -239,5 +246,6 @@ export type ClientMessage =
   | ClientUnlockSkillMessage
   | ClientEquipSkillMessage
   | ClientUnequipSkillMessage
+  | ClientRunMessage
   | ClientViewPlayerMessage
   | ClientSocialMessage;

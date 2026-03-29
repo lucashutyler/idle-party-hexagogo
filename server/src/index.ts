@@ -25,7 +25,7 @@ import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ChatMessage, ClassName, ItemDefinition } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
 const app = express();
@@ -254,6 +254,34 @@ wss.on('connection', (ws) => {
         if (!success) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
         }
+        return;
+      }
+
+      if (msg.type === 'run') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        const partyId = session.getPartyId();
+        if (!partyId) return;
+
+        // Only owners and leaders can run
+        const party = playerManager.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === username);
+          if (!member || !canMove(member.role)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can run' }));
+            return;
+          }
+        }
+
+        // Check round threshold
+        const battleState = playerManager.partyBattles.getBattleState(partyId);
+        if (!battleState?.combat || battleState.combat.roundCount < RUN_AVAILABLE_ROUNDS) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot run yet' }));
+          return;
+        }
+
+        playerManager.partyBattles.escapeBattle(partyId);
         return;
       }
 

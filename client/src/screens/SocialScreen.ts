@@ -1275,13 +1275,11 @@ export class SocialScreen implements Screen {
     this.gameClient.sendRequestChatHistory(type, id);
   }
 
-  /** Load history for all enabled filter channels. */
+  /** Load history for all channels (not just filtered ones — filtering is display-only). */
   private loadAllChatHistory(): void {
     for (const ch of SocialScreen.CHAT_CHANNELS) {
-      if (this.chatFilters.has(ch.type)) {
-        const id = this.resolveChatChannelId(ch.type);
-        this.loadChatHistory(ch.type, id);
-      }
+      const id = this.resolveChatChannelId(ch.type);
+      this.loadChatHistory(ch.type, id);
     }
   }
 

@@ -486,6 +486,38 @@ html, body {
   border-top: 2px solid var(--border-pixel);
 }
 
+.combat-run-btn {
+  background: none;
+  border: 1px solid var(--border-pixel);
+  color: var(--text-secondary);
+  font-size: 8px;
+  cursor: pointer;
+  padding: 2px 8px;
+  font-family: inherit;
+  margin-right: auto;
+}
+
+.combat-run-btn:not(:disabled):hover {
+  color: var(--accent-orange);
+  border-color: var(--accent-orange);
+}
+
+.combat-run-btn:disabled {
+  opacity: 0.4;
+  cursor: pointer;
+}
+
+.combat-run-hint {
+  color: var(--text-dim);
+  font-size: 7px;
+  margin-right: auto;
+}
+
+.round-label {
+  color: var(--text-dim);
+  font-size: inherit;
+}
+
 .log-fullscreen-btn {
   background: none;
   border: none;

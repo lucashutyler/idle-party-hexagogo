@@ -167,6 +167,16 @@ export class ServerBattleTimer {
     return this.combatState;
   }
 
+  /** Escape the current battle — skip rewards, immediately start next battle. */
+  escapeBattle(): void {
+    if (this.state !== 'battle') return;
+    this.clearTimers();
+    this.combatState = null;
+    this.currentVisual = 'none';
+    this.party.exitBattle();
+    this.triggerBattle();
+  }
+
   /** Restart the current battle (e.g., after a player changes class). */
   restartBattle(): void {
     this.clearTimers();
