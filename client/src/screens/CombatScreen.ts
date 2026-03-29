@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, CombatLogEntry, ClientCombatAction } from '@idle-party-rpg/shared';
-import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
+import { CLASS_ICONS, UNKNOWN_CLASS_ICON, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 export class CombatScreen implements Screen {
@@ -18,6 +18,10 @@ export class CombatScreen implements Screen {
   private logWrapper!: HTMLElement;
   private resumeBtn!: HTMLElement;
   private fullscreenBtn!: HTMLElement;
+  private runBtn!: HTMLButtonElement;
+  private runHint!: HTMLElement;
+  private runHintTimer?: ReturnType<typeof setTimeout>;
+  private roundLabel!: HTMLElement;
 
   // Last rendered log entry ID — for incremental DOM updates
   private lastRenderedId = -1;
@@ -72,6 +76,7 @@ export class CombatScreen implements Screen {
           <span class="connection-dot"></span>
           <span class="location-label">Connecting...</span>
         </div>
+        <span class="round-label"></span>
       </div>
       <div class="combat-stage">
         <div class="combat-side combat-player-side"></div>
@@ -80,6 +85,8 @@ export class CombatScreen implements Screen {
       </div>
       <div class="combat-log-wrapper">
         <div class="combat-log-controls">
+          <button class="combat-run-btn" disabled>\uD83D\uDD12 Run</button>
+          <span class="combat-run-hint" style="display:none">Available after ${RUN_AVAILABLE_ROUNDS} combat rounds</span>
           <button class="log-fullscreen-btn" title="Fullscreen">\u26F6</button>
         </div>
         <div class="combat-log"></div>
@@ -96,6 +103,9 @@ export class CombatScreen implements Screen {
     this.logContainer = this.container.querySelector('.combat-log')!;
     this.resumeBtn = this.container.querySelector('.log-resume-btn')!;
     this.fullscreenBtn = this.container.querySelector('.log-fullscreen-btn')!;
+    this.runBtn = this.container.querySelector('.combat-run-btn')! as HTMLButtonElement;
+    this.runHint = this.container.querySelector('.combat-run-hint')!;
+    this.roundLabel = this.container.querySelector('.round-label')!;
 
     // Auto-pause on user scroll
     this.logContainer.addEventListener('scroll', () => {
@@ -118,6 +128,15 @@ export class CombatScreen implements Screen {
       this.logWrapper.classList.toggle('fullscreen', this.isFullscreen);
       this.fullscreenBtn.textContent = this.isFullscreen ? '\u2716' : '\u26F6';
       this.fullscreenBtn.title = this.isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+    });
+
+    // Run button — show hint on click when disabled, run when enabled
+    this.runBtn.addEventListener('click', () => {
+      if (this.runBtn.disabled) {
+        this.showRunHint();
+      } else {
+        this.gameClient.sendRun();
+      }
     });
   }
 
@@ -207,6 +226,9 @@ export class CombatScreen implements Screen {
 
     // Per-turn attack/hit animations
     this.updateCombatAnimations(combat?.lastAction ?? null, state.battle.visual);
+
+    // Round counter and run button
+    this.updateRunButton(state);
   }
 
   /**
@@ -316,6 +338,43 @@ export class CombatScreen implements Screen {
         </div>
       `;
     }
+  }
+
+  private updateRunButton(state: ServerStateMessage): void {
+    const combat = state.battle.combat;
+    const isFighting = state.battle.visual === 'fighting';
+    const roundCount = combat?.roundCount ?? 0;
+
+    // Update round counter
+    if (isFighting && roundCount > 0) {
+      this.roundLabel.textContent = `Round ${roundCount}`;
+      this.roundLabel.style.display = '';
+    } else {
+      this.roundLabel.style.display = 'none';
+    }
+
+    // Check if user is owner/leader
+    const myRole = state.social?.party?.members.find(m => m.username === state.username)?.role;
+    const canRun = myRole === 'owner' || myRole === 'leader';
+
+    if (!isFighting || !canRun) {
+      this.runBtn.style.display = 'none';
+      return;
+    }
+
+    this.runBtn.style.display = '';
+    const available = roundCount >= RUN_AVAILABLE_ROUNDS;
+    this.runBtn.disabled = !available;
+    this.runBtn.textContent = available ? 'Run' : '\uD83D\uDD12 Run';
+  }
+
+  private showRunHint(): void {
+    if (this.runHintTimer) clearTimeout(this.runHintTimer);
+    this.runHint.style.display = '';
+    this.runHintTimer = setTimeout(() => {
+      this.runHint.style.display = 'none';
+      this.runHintTimer = undefined;
+    }, 3000);
   }
 
   private escapeHtml(s: string): string {

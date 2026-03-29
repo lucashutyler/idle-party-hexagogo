@@ -223,6 +223,25 @@ export class PartyBattleManager {
     entry.battleTimer.restartBattle();
   }
 
+  /** Escape the current battle for a party. No rewards given. */
+  escapeBattle(partyId: string): boolean {
+    const entry = this.entries.get(partyId);
+    if (!entry) return false;
+    if (entry.battleTimer.currentState !== 'battle') return false;
+
+    for (const m of entry.members) {
+      const s = this.getSession(m);
+      if (s) s.addLogEntry('Escaped the battle!', 'battle');
+    }
+
+    entry.battleTimer.escapeBattle();
+
+    for (const m of entry.members) {
+      this.broadcastToMember(m);
+    }
+    return true;
+  }
+
   /** Destroy a party battle entry and stop its timers. */
   destroyEntry(partyId: string): void {
     const entry = this.entries.get(partyId);
@@ -301,6 +320,7 @@ export class PartyBattleManager {
         stunTurns: m.stunTurns > 0 ? m.stunTurns : undefined,
       })),
       tickCount: combat.tickCount,
+      roundCount: combat.roundCount,
       lastAction: combat.lastAction ? {
         attackerSide: combat.lastAction.attackerSide,
         attackerPos: combat.lastAction.attackerPos,
