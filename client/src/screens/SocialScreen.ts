@@ -278,28 +278,8 @@ export class SocialScreen implements Screen {
         return;
       }
 
-      // Trade modal actions
-      if (btn.matches('.trade-modal-cancel-btn')) { this.gameClient.sendCancelTrade(); return; }
-      if (btn.matches('.trade-modal-confirm-btn')) { this.gameClient.sendConfirmTrade(); return; }
-      if (btn.matches('.trade-modal-pick-btn')) {
-        this.tradePickingItem = true;
-        this.updateTradeModal();
-        return;
-      }
-      if (btn.matches('.trade-item-option')) {
-        const itemId = btn.getAttribute('data-item-id');
-        if (!itemId) return;
-        const trade = this.lastSocial?.pendingTrade;
-        this.tradePickingItem = false;
-        this.tradeSelectedItemId = itemId;
-        if (trade) {
-          // Trade already exists — we're the target countering
-          this.gameClient.sendCounterTrade(itemId);
-        }
-        // If no trade yet, the propose button will send sendProposeTrade with this item
-        this.updateTradeModal();
-        return;
-      }
+      // Note: trade modal buttons are handled by a delegated handler on the overlay element
+      // inside renderTradeModal() — the modal lives in document.body, not panelContainer.
     });
 
     // Grid cell clicks for party position
@@ -1458,12 +1438,69 @@ export class SocialScreen implements Screen {
     modal.className = 'trade-modal';
     overlay.appendChild(modal);
 
+    // Delegated handler for all modal buttons — the modal lives inside overlay (in document.body,
+    // NOT inside panelContainer), so all button clicks must be handled here.
     overlay.addEventListener('click', (e) => {
+      // Backdrop click — cancel trade or just close
       if (e.target === overlay) {
-        // Cancel trade if active, else just close
         const trade = this.lastSocial?.pendingTrade;
         if (trade) this.gameClient.sendCancelTrade();
         this.dismissTradeModal();
+        return;
+      }
+
+      const btn = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null;
+      if (!btn) return;
+
+      if (btn.matches('.trade-modal-cancel-btn')) {
+        const trade = this.lastSocial?.pendingTrade;
+        console.log('[Trade] Cancel clicked, active trade:', !!trade);
+        if (trade) {
+          this.gameClient.sendCancelTrade();
+          // Modal closes when server sends back cancelled state via updateFromState
+        } else {
+          this.dismissTradeModal();
+        }
+        return;
+      }
+
+      if (btn.matches('.trade-modal-confirm-btn')) {
+        console.log('[Trade] Confirm trade clicked');
+        this.gameClient.sendConfirmTrade();
+        return;
+      }
+
+      if (btn.matches('.trade-modal-pick-btn')) {
+        this.tradePickingItem = true;
+        this.updateTradeModal();
+        return;
+      }
+
+      if (btn.matches('.trade-item-option')) {
+        const itemId = btn.getAttribute('data-item-id');
+        if (!itemId) return;
+        console.log('[Trade] Item selected:', itemId);
+        this.tradePickingItem = false;
+        this.tradeSelectedItemId = itemId;
+        const trade = this.lastSocial?.pendingTrade;
+        if (trade) {
+          // Target countering with their item
+          this.gameClient.sendCounterTrade(itemId);
+        }
+        this.updateTradeModal();
+        return;
+      }
+
+      if (btn.matches('.trade-confirm-propose-btn')) {
+        const target = overlay.getAttribute('data-trade-target') ?? '';
+        const itemId = this.tradeSelectedItemId;
+        if (itemId && target) {
+          console.log('[Trade] Proposing trade with', target, 'item:', itemId);
+          this.gameClient.sendProposeTrade(target, itemId);
+          this.tradePickingItem = false;
+          this.updateTradeModal();
+        }
+        return;
       }
     });
 
@@ -1596,17 +1633,6 @@ export class SocialScreen implements Screen {
       ${actionHtml}
     `;
 
-    // Wire the propose button (can't use delegated handler since it needs targetUsername + selectedItemId)
-    const proposeBtn = modal.querySelector('.trade-confirm-propose-btn') as HTMLButtonElement | null;
-    if (proposeBtn && this.tradeSelectedItemId) {
-      proposeBtn.addEventListener('click', () => {
-        if (this.tradeSelectedItemId) {
-          this.gameClient.sendProposeTrade(targetUsername, this.tradeSelectedItemId);
-          this.tradePickingItem = false;
-          this.updateTradeModal();
-        }
-      });
-    }
   }
 
   dismissTradeModal(): void {
