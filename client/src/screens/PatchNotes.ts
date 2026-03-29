@@ -5,6 +5,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'Added Run button — escape combat after 5 rounds (no rewards)',
       'Round counter now displayed during combat',
       'Only party owners and leaders can trigger Run',
+      'Fixed chat messages from filtered channels not being available after unfiltering',
     ],
   },
   {
