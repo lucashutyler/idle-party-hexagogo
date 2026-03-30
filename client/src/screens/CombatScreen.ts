@@ -377,14 +377,14 @@ export class CombatScreen implements Screen {
     if (!canRun) {
       this.runBtn.disabled = true;
       this.runBtn.textContent = '\uD83D\uDD12 Run';
-      this.runBtn.title = 'Only the party owner or a leader can run';
+      this.runHint.textContent = 'Only the party owner or a leader can run';
       return;
     }
 
-    this.runBtn.title = '';
     const available = roundCount >= RUN_AVAILABLE_ROUNDS;
     this.runBtn.disabled = !available;
     this.runBtn.textContent = available ? 'Run' : '\uD83D\uDD12 Run';
+    this.runHint.textContent = `Available after ${RUN_AVAILABLE_ROUNDS} combat rounds`;
   }
 
   private showRunHint(): void {
