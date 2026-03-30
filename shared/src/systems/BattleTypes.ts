@@ -5,7 +5,7 @@ import type {
   ClientSocialMessage,
   ServerSocialStateMessage,
   ServerChatMessageMessage,
-  ServerChatHistoryMessage,
+  ServerSyncChatMessage,
   ServerTradeProposedMessage,
   ServerTradeCancelledMessage,
   ServerTradeCompletedMessage,
@@ -200,7 +200,7 @@ export type ServerMessage =
   | ServerStateMessage
   | ServerSocialStateMessage
   | ServerChatMessageMessage
-  | ServerChatHistoryMessage
+  | ServerSyncChatMessage
   | ServerEquipBlockedMessage
   | ServerTradeProposedMessage
   | ServerTradeCancelledMessage

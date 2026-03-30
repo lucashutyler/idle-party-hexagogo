@@ -4,7 +4,7 @@ const RECONNECT_DELAY = 2000;
 
 type StateListener = (state: ServerStateMessage) => void;
 type ChatListener = (message: ChatMessage) => void;
-type ChatHistoryListener = (channelType: ChatChannelType, channelId: string, messages: ChatMessage[]) => void;
+type SyncChatListener = (messages: ChatMessage[], full: boolean) => void;
 type ConnectionListener = (connected: boolean) => void;
 type WorldUpdateListener = () => void;
 type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
@@ -22,7 +22,7 @@ export class GameClient {
   private stateListeners = new Set<StateListener>();
   private connectionListeners = new Set<ConnectionListener>();
   private chatListeners = new Set<ChatListener>();
-  private chatHistoryListeners = new Set<ChatHistoryListener>();
+  private syncChatListeners = new Set<SyncChatListener>();
   private worldUpdateListeners = new Set<WorldUpdateListener>();
   private equipBlockedListeners = new Set<EquipBlockedListener>();
   private suspensionListeners = new Set<SuspensionListener>();
@@ -142,9 +142,9 @@ export class GameClient {
           for (const listener of this.chatListeners) {
             listener(msg.message);
           }
-        } else if (msg.type === 'chat_history') {
-          for (const listener of this.chatHistoryListeners) {
-            listener(msg.channelType, msg.channelId, msg.messages);
+        } else if (msg.type === 'sync_chat') {
+          for (const listener of this.syncChatListeners) {
+            listener(msg.messages, msg.full);
           }
         } else if (msg.type === 'world_update') {
           for (const listener of this.worldUpdateListeners) {
@@ -370,12 +370,12 @@ export class GameClient {
     this.sendRaw({ type: 'send_chat', channelType, channelId, text });
   }
 
-  sendRequestChatHistory(channelType: ChatChannelType, channelId: string): void {
-    this.sendRaw({ type: 'request_chat_history', channelType, channelId });
+  sendSyncChat(sinceId?: string): void {
+    this.sendRaw({ type: 'sync_chat', sinceId });
   }
 
-  sendSetChatPreferences(sendChannel: string, dmTarget: string, filters?: string[]): void {
-    this.sendRaw({ type: 'set_chat_preferences', sendChannel, dmTarget, filters });
+  sendSetChatPreferences(sendChannel: string, dmTarget: string): void {
+    this.sendRaw({ type: 'set_chat_preferences', sendChannel, dmTarget });
   }
 
   /** Subscribe to incoming chat messages. Returns an unsubscribe function. */
@@ -384,10 +384,10 @@ export class GameClient {
     return () => { this.chatListeners.delete(listener); };
   }
 
-  /** Subscribe to chat history responses. Returns an unsubscribe function. */
-  onChatHistory(listener: ChatHistoryListener): () => void {
-    this.chatHistoryListeners.add(listener);
-    return () => { this.chatHistoryListeners.delete(listener); };
+  /** Subscribe to sync_chat responses. Returns an unsubscribe function. */
+  onSyncChat(listener: SyncChatListener): () => void {
+    this.syncChatListeners.add(listener);
+    return () => { this.syncChatListeners.delete(listener); };
   }
 
   /** Subscribe to world update notifications. Returns an unsubscribe function. */
@@ -424,7 +424,7 @@ export class GameClient {
     this.stateListeners.clear();
     this.connectionListeners.clear();
     this.chatListeners.clear();
-    this.chatHistoryListeners.clear();
+    this.syncChatListeners.clear();
     this.worldUpdateListeners.clear();
     this.resumeListeners.clear();
   }
