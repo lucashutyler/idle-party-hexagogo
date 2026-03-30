@@ -626,6 +626,14 @@ export class SocialScreen implements Screen {
   showUserPopup(username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number): void {
     this.dismissPopup();
 
+    // Always read fresh state — this method can be called from other screens
+    // (e.g. Map, Combat) while the social screen is inactive and lastSocial is stale
+    const freshState = this.gameClient.lastState;
+    if (freshState) {
+      this.lastSocial = freshState.social ?? null;
+      this.lastState = freshState;
+    }
+
     const social = this.lastSocial;
     if (!social) return;
 

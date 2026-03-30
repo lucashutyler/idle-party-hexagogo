@@ -11,6 +11,7 @@
   --bg-panel: #16213e;
   --bg-panel-light: #0f3460;
   --bg-input: #0d1b2a;
+  --bg-surface: #1a1a2e;
 
   /* Borders */
   --border-pixel: #533483;
@@ -456,6 +457,16 @@ html, body {
 .dmg-magical { color: #b388ff; font-weight: bold; }
 .dmg-holy { color: var(--accent-gold); font-weight: bold; }
 
+/* ── Combat Run Bar (between stage and log) ───────────── */
+
+.combat-run-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* ── Combat Log Wrapper & Controls ─────────────────────── */
 
 .combat-log-wrapper {
@@ -492,9 +503,8 @@ html, body {
   color: var(--text-secondary);
   font-size: 8px;
   cursor: pointer;
-  padding: 2px 8px;
+  padding: 4px 12px;
   font-family: inherit;
-  margin-right: auto;
 }
 
 .combat-run-btn:not(:disabled):hover {

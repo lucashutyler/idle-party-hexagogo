@@ -20,6 +20,7 @@ export class CombatScreen implements Screen {
   private fullscreenBtn!: HTMLElement;
   private runBtn!: HTMLButtonElement;
   private runHint!: HTMLElement;
+  private runBar!: HTMLElement;
   private runHintTimer?: ReturnType<typeof setTimeout>;
   private roundLabel!: HTMLElement;
 
@@ -83,10 +84,12 @@ export class CombatScreen implements Screen {
         <div class="combat-vs">\u2694</div>
         <div class="combat-side combat-enemy-side"></div>
       </div>
+      <div class="combat-run-bar">
+        <button class="combat-run-btn" disabled>\uD83D\uDD12 Run</button>
+        <span class="combat-run-hint" style="display:none">Available after ${RUN_AVAILABLE_ROUNDS} combat rounds</span>
+      </div>
       <div class="combat-log-wrapper">
         <div class="combat-log-controls">
-          <button class="combat-run-btn" disabled>\uD83D\uDD12 Run</button>
-          <span class="combat-run-hint" style="display:none">Available after ${RUN_AVAILABLE_ROUNDS} combat rounds</span>
           <button class="log-fullscreen-btn" title="Fullscreen">\u26F6</button>
         </div>
         <div class="combat-log"></div>
@@ -105,6 +108,7 @@ export class CombatScreen implements Screen {
     this.fullscreenBtn = this.container.querySelector('.log-fullscreen-btn')!;
     this.runBtn = this.container.querySelector('.combat-run-btn')! as HTMLButtonElement;
     this.runHint = this.container.querySelector('.combat-run-hint')!;
+    this.runBar = this.container.querySelector('.combat-run-bar')!;
     this.roundLabel = this.container.querySelector('.round-label')!;
 
     // Auto-pause on user scroll
@@ -128,6 +132,10 @@ export class CombatScreen implements Screen {
       this.logWrapper.classList.toggle('fullscreen', this.isFullscreen);
       this.fullscreenBtn.textContent = this.isFullscreen ? '\u2716' : '\u26F6';
       this.fullscreenBtn.title = this.isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+      // Hide run bar when log is fullscreen
+      if (this.isFullscreen) {
+        this.runBar.style.display = 'none';
+      }
     });
 
     // Run button — show hint on click when disabled, run when enabled
@@ -304,24 +312,26 @@ export class CombatScreen implements Screen {
 
     // Player HP bars
     for (const p of combat.players) {
-      const hpContainer = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"] .combat-unit-hp`);
-      if (!hpContainer) continue;
+      const unitEl = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"]`) as HTMLElement | null;
+      const hpContainer = unitEl?.querySelector('.combat-unit-hp');
+      if (!hpContainer || !unitEl) continue;
       const pct = Math.max(0, (p.currentHp / p.maxHp) * 100);
       const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
       const isSelf = p.username === selfUsername;
       hpContainer.innerHTML = `
-        <div class="combat-hp-label${isSelf ? ' self' : ''}" data-username="${this.escapeHtml(p.username)}" style="cursor: pointer">${this.escapeHtml(p.username)}</div>
+        <div class="combat-hp-label${isSelf ? ' self' : ''}" data-username="${this.escapeHtml(p.username)}">${this.escapeHtml(p.username)}</div>
         <div class="combat-hp-bar">
           <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
         </div>
       `;
-      const label = hpContainer.querySelector('.combat-hp-label') as HTMLElement;
-      if (label && this.onUserClick) {
-        label.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this.onUserClick?.(p.username, label);
-        });
-      }
+      // Make the entire player unit clickable for the user popup
+      unitEl.style.cursor = 'pointer';
+      unitEl.setAttribute('data-player-username', p.username);
+      unitEl.onclick = (e) => {
+        e.stopPropagation();
+        const label = unitEl.querySelector('.combat-hp-label') as HTMLElement;
+        this.onUserClick?.(p.username, label ?? unitEl);
+      };
     }
 
     // Enemy HP bars
@@ -357,12 +367,12 @@ export class CombatScreen implements Screen {
     const myRole = state.social?.party?.members.find(m => m.username === state.username)?.role;
     const canRun = myRole === 'owner' || myRole === 'leader';
 
-    if (!isFighting || !canRun) {
-      this.runBtn.style.display = 'none';
+    if (!isFighting || !canRun || this.isFullscreen) {
+      this.runBar.style.display = 'none';
       return;
     }
 
-    this.runBtn.style.display = '';
+    this.runBar.style.display = '';
     const available = roundCount >= RUN_AVAILABLE_ROUNDS;
     this.runBtn.disabled = !available;
     this.runBtn.textContent = available ? 'Run' : '\uD83D\uDD12 Run';
