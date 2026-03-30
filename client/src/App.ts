@@ -16,12 +16,14 @@ import { SocialScreen } from './screens/SocialScreen';
 import { ClassSelectScreen } from './screens/ClassSelectScreen';
 import { SuspensionScreen } from './screens/SuspensionScreen';
 import { BottomNav } from './ui/BottomNav';
+import { ChatLocalStore } from './network/ChatLocalStore';
 
 const CONNECTION_ERROR = 'Could not connect to server';
 
 export class App {
   private gameClient!: GameClient;
   private worldCache = new WorldCache();
+  private chatStore = new ChatLocalStore();
   private screenManager: ScreenManager;
   private loginScreen!: LoginScreen;
   private verifyScreen!: VerifyScreen;
@@ -325,7 +327,7 @@ export class App {
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const characterScreen = new CharacterScreen('screen-character', this.gameClient);
     const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
-    const socialScreen = new SocialScreen('screen-social', this.gameClient);
+    const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore);
     const settingsScreen = new SettingsScreen('screen-settings');
 
     // Wire map username click to social screen popup

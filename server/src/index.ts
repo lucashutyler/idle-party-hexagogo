@@ -24,7 +24,7 @@ import { createAdminRoutes } from './admin/adminRoutes.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
-import type { ChatMessage, ClassName, ItemDefinition } from '@idle-party-rpg/shared';
+import type { ClassName, ItemDefinition } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
@@ -561,9 +561,6 @@ wss.on('connection', (ws) => {
         if (session) {
           session.setChatSendChannel(msg.sendChannel);
           session.setChatDmTarget(msg.dmTarget ?? '');
-          if (Array.isArray(msg.filters)) {
-            session.setChatFilters(msg.filters);
-          }
         }
         return;
       }
@@ -649,7 +646,6 @@ wss.on('connection', (ws) => {
 
         // Build recipient list based on channel type
         const recipients: { username: string; send: (m: any) => void }[] = [];
-        const blockedMap = playerManager.getAllBlockedUsers();
 
         if (channelType === 'zone') {
           // All players in the same zone
@@ -706,43 +702,20 @@ wss.on('connection', (ws) => {
         }
 
         // Also send back to sender
-        const chatMsg = playerManager.chat.sendMessage(username, channelType, channelId, msg.text, recipients, blockedMap);
+        const chatMsg = playerManager.chat.sendMessage(username, channelType, channelId, msg.text, recipients);
         if (chatMsg) {
           playerManager.sendChatToPlayer(username, chatMsg);
         }
         return;
       }
 
-      if (msg.type === 'request_chat_history') {
-        const channelType = msg.channelType;
-        const channelId = msg.channelId;
-        const validTypes = ['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'];
-        if (!validTypes.includes(channelType)) return;
-
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-
-        // Return from the player's personal chat history
-        let messages: ChatMessage[];
-        if (channelType === 'dm') {
-          if (channelId) {
-            // For DMs with a specific target, match either direction
-            messages = session.getChatHistory().filter(m =>
-              m.channelType === 'dm' && (m.channelId === channelId || m.senderUsername === channelId)
-            );
-          } else {
-            // No target specified — return ALL DMs
-            messages = session.getChatHistory().filter(m => m.channelType === 'dm');
-          }
-        } else {
-          messages = session.getChatHistory(channelType);
-        }
-
+      if (msg.type === 'sync_chat') {
+        const sinceId = typeof msg.sinceId === 'string' ? msg.sinceId : undefined;
+        const result = playerManager.syncChatForPlayer(username, sinceId);
         ws.send(JSON.stringify({
-          type: 'chat_history',
-          channelType,
-          channelId,
-          messages,
+          type: 'sync_chat',
+          messages: result.messages,
+          full: result.full,
         }));
         return;
       }
