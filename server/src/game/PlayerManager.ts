@@ -698,10 +698,10 @@ export class PlayerManager {
   }
 
   /** Check if a player has an item in their unequipped inventory. */
-  hasItemInInventory(username: string, itemId: string): boolean {
+  hasItemInInventory(username: string, itemId: string, quantity: number = 1): boolean {
     const session = this.sessions.get(username);
     if (!session) return false;
-    return session.getInventoryCount(itemId) > 0;
+    return session.getInventoryCount(itemId) >= quantity;
   }
 
   /**

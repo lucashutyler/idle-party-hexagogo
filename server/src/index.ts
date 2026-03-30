@@ -894,17 +894,22 @@ wss.on('connection', (ws) => {
 
       // --- Trade messages ---
 
-      if (msg.type === 'propose_trade' && typeof msg.targetUsername === 'string' && typeof msg.itemId === 'string') {
+      if (msg.type === 'propose_trade' && typeof msg.targetUsername === 'string' && Array.isArray(msg.items)) {
         const targetAccount = accountStore.findByUsername(msg.targetUsername);
         if (!targetAccount) {
           ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
           return;
         }
+        if (!msg.items.every((i: unknown) => { const item = i as Record<string, unknown>; return item && typeof item['itemId'] === 'string' && typeof item['quantity'] === 'number' && (item['quantity'] as number) > 0; })) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid trade items' }));
+          return;
+        }
+        console.log(`[Trade] ${username} proposing trade with ${msg.targetUsername}:`, msg.items);
         const result = playerManager.trades.proposeTrade(
           username,
           msg.targetUsername,
-          msg.itemId,
-          (u, itemId) => playerManager.hasItemInInventory(u, itemId),
+          msg.items,
+          (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
           (a, b) => playerManager.areSameTile(a, b),
           (a, b) => playerManager.isTradeBlocked(a, b),
         );
@@ -917,11 +922,16 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      if (msg.type === 'counter_trade' && typeof msg.itemId === 'string') {
+      if (msg.type === 'counter_trade' && Array.isArray(msg.items)) {
+        if (!msg.items.every((i: unknown) => { const item = i as Record<string, unknown>; return item && typeof item['itemId'] === 'string' && typeof item['quantity'] === 'number' && (item['quantity'] as number) > 0; })) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid trade items' }));
+          return;
+        }
+        console.log(`[Trade] ${username} countering trade:`, msg.items);
         const result = playerManager.trades.counterTrade(
           username,
-          msg.itemId,
-          (u, itemId) => playerManager.hasItemInInventory(u, itemId),
+          msg.items,
+          (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
           (a, b) => playerManager.areSameTile(a, b),
         );
         if (typeof result === 'string') {
@@ -936,9 +946,10 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'confirm_trade') {
+        console.log(`[Trade] ${username} confirming trade`);
         const result = playerManager.trades.confirmTrade(
           username,
-          (u, itemId) => playerManager.hasItemInInventory(u, itemId),
+          (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
           (a, b) => playerManager.areSameTile(a, b),
           (u, itemId) => playerManager.getSessionByUsername(u)?.getInventoryCount(itemId) ?? 0,
         );
@@ -974,29 +985,54 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // Atomic swap: remove from each, add to each
-        const removedFromInitiator = initiatorSession.removeOneFromInventory(initiatorOffer.itemId);
-        const removedFromTarget = targetSession.removeOneFromInventory(targetOffer.itemId);
+        // Atomic swap: remove all offered items from each player, then add received items.
+        // Track removals for rollback on partial failure.
+        type Removal = { session: typeof initiatorSession; itemId: string; qty: number };
+        const removals: Removal[] = [];
 
-        if (!removedFromInitiator || !removedFromTarget) {
-          // Roll back any partial removal
-          if (removedFromInitiator) initiatorSession.addOneToInventory(initiatorOffer.itemId);
-          if (removedFromTarget) targetSession.addOneToInventory(targetOffer.itemId);
-          ws.send(JSON.stringify({ type: 'error', message: 'Trade failed — item no longer available' }));
-          return;
+        const rollback = () => {
+          for (const { session, itemId, qty } of removals) {
+            session.addToInventory(itemId, qty);
+          }
+        };
+
+        for (const { itemId, quantity } of initiatorOffer.items) {
+          if (!initiatorSession.removeFromInventory(itemId, quantity)) {
+            rollback();
+            ws.send(JSON.stringify({ type: 'error', message: 'Trade failed — item no longer available' }));
+            return;
+          }
+          removals.push({ session: initiatorSession, itemId, qty: quantity });
+        }
+        for (const { itemId, quantity } of targetOffer.items) {
+          if (!targetSession.removeFromInventory(itemId, quantity)) {
+            rollback();
+            ws.send(JSON.stringify({ type: 'error', message: 'Trade failed — item no longer available' }));
+            return;
+          }
+          removals.push({ session: targetSession, itemId, qty: quantity });
         }
 
-        initiatorSession.addOneToInventory(targetOffer.itemId);
-        targetSession.addOneToInventory(initiatorOffer.itemId);
+        // Add received items
+        for (const { itemId, quantity } of initiatorOffer.items) {
+          targetSession.addToInventory(itemId, quantity);
+        }
+        for (const { itemId, quantity } of targetOffer.items) {
+          initiatorSession.addToInventory(itemId, quantity);
+        }
 
-        // Get item names for log entries
-        const initiatorItemDef = gameLoop.contentStore.getItem(initiatorOffer.itemId);
-        const targetItemDef = gameLoop.contentStore.getItem(targetOffer.itemId);
-        const initiatorItemName = initiatorItemDef?.name ?? initiatorOffer.itemId;
-        const targetItemName = targetItemDef?.name ?? targetOffer.itemId;
+        // Combat log: summarize all items exchanged
+        const describeItems = (items: typeof initiatorOffer.items) =>
+          items.map(({ itemId, quantity }) => {
+            const def = gameLoop.contentStore.getItem(itemId);
+            const name = def?.name ?? itemId;
+            return quantity > 1 ? `${name} x${quantity}` : name;
+          }).join(', ');
 
-        initiatorSession.addLogEntry(`Trade complete: received ${targetItemName} from ${targetOffer.username}`, 'unlock');
-        targetSession.addLogEntry(`Trade complete: received ${initiatorItemName} from ${initiatorOffer.username}`, 'unlock');
+        initiatorSession.addLogEntry(`Trade complete: received ${describeItems(targetOffer.items)} from ${targetOffer.username}`, 'unlock');
+        targetSession.addLogEntry(`Trade complete: received ${describeItems(initiatorOffer.items)} from ${initiatorOffer.username}`, 'unlock');
+
+        console.log(`[Trade] Swap complete: ${initiatorOffer.username} ↔ ${targetOffer.username}`);
 
         playerManager.sendStateToPlayer(initiatorOffer.username);
         playerManager.sendStateToPlayer(targetOffer.username);

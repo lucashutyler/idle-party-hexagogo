@@ -1,4 +1,4 @@
-import type { ServerStateMessage, ServerEquipBlockedMessage, BlockLevel, ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerEquipBlockedMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
@@ -377,12 +377,14 @@ export class GameClient {
 
   // --- Trade ---
 
-  sendProposeTrade(targetUsername: string, itemId: string): void {
-    this.sendRaw({ type: 'propose_trade', targetUsername, itemId });
+  sendProposeTrade(targetUsername: string, items: TradeOfferItem[]): void {
+    console.log('[Trade] sendProposeTrade →', targetUsername, items);
+    this.sendRaw({ type: 'propose_trade', targetUsername, items });
   }
 
-  sendCounterTrade(itemId: string): void {
-    this.sendRaw({ type: 'counter_trade', itemId });
+  sendCounterTrade(items: TradeOfferItem[]): void {
+    console.log('[Trade] sendCounterTrade →', items);
+    this.sendRaw({ type: 'counter_trade', items });
   }
 
   sendConfirmTrade(): void {

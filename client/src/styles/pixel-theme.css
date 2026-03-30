@@ -3487,3 +3487,91 @@ html, body {
   text-align: center;
   padding: 12px 0;
 }
+
+/* Quantity-picker row (new multi-item UI) */
+.trade-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: var(--bg-darker);
+  border: 1px solid var(--border-pixel);
+}
+
+.trade-picker-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trade-picker-qty {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.trade-qty-dec,
+.trade-qty-inc {
+  background: var(--bg-input);
+  border: 1px solid var(--border-pixel);
+  color: var(--text-primary);
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.trade-qty-dec:disabled,
+.trade-qty-inc:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.trade-qty-dec:not(:disabled):hover,
+.trade-qty-inc:not(:disabled):hover {
+  border-color: var(--accent-gold);
+}
+
+.trade-qty-val {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--accent-gold);
+  min-width: 14px;
+  text-align: center;
+}
+
+/* Offer card rows (rendered from TradeOfferItem[]) */
+.trade-offer-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.trade-offer-name {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+}
+
+.trade-offer-qty {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.trade-offer-effect {
+  font-size: 6px;
+  color: var(--text-secondary);
+  width: 100%;
+}
