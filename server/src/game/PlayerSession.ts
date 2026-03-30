@@ -23,7 +23,9 @@ import {
   isTwoHandedEquipped,
   getZone,
   createDefaultSkillLoadout,
+  SKILL_SLOTS,
   getSkillPointsForLevel,
+  getUnlockedSkillsForLevel,
   unlockSkill,
   equipSkillInSlot,
   unequipSkillFromSlot,
@@ -53,7 +55,7 @@ import type {
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
 
-const MAX_LOG_ENTRIES = 100;
+const MAX_LOG_ENTRIES = 1000;
 const MAX_SAVE_LOG_ENTRIES = 1000;
 const MAX_CHAT_HISTORY = 1000;
 
@@ -74,6 +76,7 @@ export class PlayerSession {
   private partyId: string | null = null;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
+  private chatFilters: ChatChannelType[] = ['tile', 'zone', 'party', 'guild', 'global', 'dm', 'server'];
 
   /** XP rate tracking — in-memory only, resets on server restart. */
   private xpRateStartTime = Date.now();
@@ -144,6 +147,18 @@ export class PlayerSession {
       equippedSkills,
       attackCount: 0,
       stunTurns: 0,
+      dots: [],
+      hots: [],
+      damageShield: 0,
+      debuffs: [],
+      consecutiveHits: 0,
+      lastTargetId: '',
+      hasResurrected: false,
+      martyrBonus: 0,
+      braceActive: false,
+      braceDamageTaken: 0,
+      interceptActive: false,
+      activeSkillCount: 0,
     };
   }
 
@@ -175,12 +190,19 @@ export class PlayerSession {
       for (let i = 0; i < levelsGained; i++) {
         this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
       }
+      // Auto-unlock skills for the new level
+      this.autoUnlockSkills();
     }
   }
 
   /** Check if a tile is unlocked for this player. */
   isTileUnlocked(tile: HexTile): boolean {
     return this.unlockSystem.isUnlocked(tile);
+  }
+
+  /** Returns true if this player has never completed a battle (truly new player). */
+  isNewPlayer(): boolean {
+    return this.battleCount === 0;
   }
 
   incrementBattleCount(): void {
@@ -303,6 +325,8 @@ export class PlayerSession {
   setChatSendChannel(channel: ChatChannelType): void { this.chatSendChannel = channel; }
   getChatDmTarget(): string { return this.chatDmTarget; }
   setChatDmTarget(target: string): void { this.chatDmTarget = target; }
+  getChatFilters(): ChatChannelType[] { return this.chatFilters; }
+  setChatFilters(filters: ChatChannelType[]): void { this.chatFilters = filters; }
 
   /** Store a chat message in this player's personal history. */
   addChatMessage(message: ChatMessage): void {
@@ -368,6 +392,17 @@ export class PlayerSession {
   getLevel(): number { return this.character.level; }
 
   getClassName(): ClassName { return this.character.className; }
+  getSkillLoadout(): SkillLoadout { return this.character.skillLoadout; }
+
+  /** Returns publicly visible profile data (no HP, damage, gold, inventory). */
+  getPublicProfile(): { className: string; level: number; equipment: Record<string, string | null>; skillLoadout: SkillLoadout } {
+    return {
+      className: this.character.className,
+      level: this.character.level,
+      equipment: { ...this.character.equipment },
+      skillLoadout: { ...this.character.skillLoadout, equippedSkills: [...this.character.skillLoadout.equippedSkills] },
+    };
+  }
 
   /** Set class for a new character. Only works if className is still Adventurer. */
   setClass(className: ClassName): boolean {
@@ -396,6 +431,12 @@ export class PlayerSession {
   }
 
   // ── Skill System ──────────────────────────────────────
+
+  /** Auto-unlock all skills the player qualifies for based on level. */
+  autoUnlockSkills(): void {
+    const available = getUnlockedSkillsForLevel(this.character.className, this.character.level);
+    this.character.skillLoadout.unlockedSkills = available;
+  }
 
   handleUnlockSkill(skillId: string): boolean {
     const result = unlockSkill(
@@ -526,6 +567,7 @@ export class PlayerSession {
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
+      chatFilters: [...this.chatFilters],
     };
   }
 
@@ -575,8 +617,13 @@ export class PlayerSession {
 
       // Migrate skill loadout from old saves
       const skillLoadout: SkillLoadout = data.character.skillLoadout
-        ? { ...data.character.skillLoadout }
+        ? { ...data.character.skillLoadout, equippedSkills: [...data.character.skillLoadout.equippedSkills] }
         : createDefaultSkillLoadout(className);
+
+      // Pad equippedSkills to 5 slots (backward compat from 3-slot saves)
+      while (skillLoadout.equippedSkills.length < SKILL_SLOTS.length) {
+        skillLoadout.equippedSkills.push(null);
+      }
 
       // Migrate skill points: if old save has no skillPoints, compute from level
       const skillPoints = data.character.skillPoints !== undefined
@@ -600,6 +647,9 @@ export class PlayerSession {
       session['character'] = createDefaultCharacter();
     }
 
+    // Auto-unlock skills for current level
+    session.autoUnlockSkills();
+
     // Restore social state
     session['friends'] = data.friends ? [...data.friends] : [];
     session['outgoingFriendRequests'] = data.outgoingFriendRequests ? [...data.outgoingFriendRequests] : [];
@@ -609,6 +659,9 @@ export class PlayerSession {
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
+    session['chatFilters'] = data.chatFilters
+      ? data.chatFilters as ChatChannelType[]
+      : ['tile', 'zone', 'party', 'guild', 'global', 'dm', 'server'];
 
     // XP rate tracking — auto-start from session restore time
     session['xpRateStartTime'] = Date.now();

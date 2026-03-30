@@ -72,6 +72,8 @@ export {
   unequipSkillFromSlot,
   createDefaultSkillLoadout,
   getSkillById,
+  getSkillLearnLevel,
+  getUnlockedSkillsForLevel,
 } from './systems/SkillTypes.js';
 export type {
   SkillSlotType,
@@ -140,8 +142,14 @@ export {
 export type {
   TickResult,
   PartyCombatant,
+  CombatMonster,
   PartyCombatState,
   CombatAction,
+  DotEffect,
+  HotEffect,
+  CombatBuff,
+  CombatDebuff,
+  SunderMark,
 } from './systems/CombatEngine.js';
 
 // Battle types & constants
@@ -173,12 +181,15 @@ export type {
   ClientUnlockSkillMessage,
   ClientEquipSkillMessage,
   ClientUnequipSkillMessage,
+  ClientViewPlayerMessage,
+  PlayerProfileMessage,
   ServerMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';
 export {
   RESULT_PAUSE,
   MOVE_DURATION,
+  RUN_AVAILABLE_ROUNDS,
 } from './systems/BattleTypes.js';
 
 // Social types

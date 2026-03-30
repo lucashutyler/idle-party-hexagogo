@@ -233,10 +233,9 @@ export class TradeSystem {
     const trade = this.trades.get(tradeId);
     if (!trade) return null;
     if (trade.initiator.username === username) {
-      // If target has countered, use their offer username; otherwise find via playerTrade map
       if (trade.target) return trade.target.username;
-      for (const [u, id] of this.playerTrade) {
-        if (id === tradeId && u !== username) return u;
+      for (const [player, id] of this.playerTrade) {
+        if (id === tradeId && player !== username) return player;
       }
       return null;
     }

@@ -30,9 +30,16 @@ export class GameLoop {
    * Call once after construction, before accepting connections.
    */
   async init(accountStore: AccountStore): Promise<void> {
+    let t: number;
+
     // Load game content from data/*.json (seeds defaults if files missing)
+    t = performance.now();
     await this.contentStore.load();
+    console.log(`[Startup] ContentStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
+
+    t = performance.now();
     await this.versionStore.load();
+    console.log(`[Startup] VersionStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
 
     // Ensure at least one active version exists (first boot / fresh install)
     if (!this.versionStore.getActiveVersionId()) {
@@ -44,7 +51,9 @@ export class GameLoop {
     }
 
     // Build hex grid from content store world data
+    t = performance.now();
     this.grid = this.buildGridFromContent();
+    console.log(`[Startup] HexGrid built (${this.grid.size} tiles) in ${(performance.now() - t).toFixed(1)}ms`);
 
     // Create player manager now that grid + content are ready
     (this as { playerManager: PlayerManager }).playerManager = new PlayerManager(
@@ -52,16 +61,21 @@ export class GameLoop {
       this.contentStore,
       this.guildStore,
       accountStore,
+      this.store,
     );
 
-    console.log(`[GameLoop] Map: ${this.grid.size} tiles`);
-
+    t = performance.now();
     await this.guildStore.load();
+    console.log(`[Startup] GuildStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
 
+    t = performance.now();
     const saves = await this.store.loadAll();
+    console.log(`[Startup] Save files loaded (${saves.length} players) in ${(performance.now() - t).toFixed(1)}ms`);
+
     if (saves.length > 0) {
-      console.log(`[GameLoop] Found ${saves.length} save file(s): ${saves.map(s => s.username).join(', ')}`);
+      t = performance.now();
       this.playerManager.restoreFromSaveData(saves);
+      console.log(`[Startup] Sessions restored in ${(performance.now() - t).toFixed(1)}ms`);
     } else {
       console.log('[GameLoop] No save files found — fresh start');
     }

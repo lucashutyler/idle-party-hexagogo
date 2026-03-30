@@ -1,5 +1,5 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, ClassName } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClassName, SkillDefinition } from '@idle-party-rpg/shared';
 import { computeEquipmentBonuses, CLASS_ICONS, UNKNOWN_CLASS_ICON, SKILL_TREES, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
@@ -22,6 +22,7 @@ export class CharacterScreen implements Screen {
   private skillSlotsEl!: HTMLElement;
   private skillTreeEl!: HTMLElement;
   private skillPointsEl!: HTMLElement;
+  private lastSkillKey = '';
 
   private unsubscribe?: () => void;
   private popupOpen = false;
@@ -184,47 +185,60 @@ export class CharacterScreen implements Screen {
     const availablePoints = char.skillPoints;
     this.skillPointsEl.textContent = availablePoints > 0 ? `Skill Points: ${availablePoints}` : '';
 
-    // Skill slots & tree — skip re-render while popup is open to avoid destroying it
-    if (!this.popupOpen) {
+    // Skill slots & tree — only re-render when skill state changes (not every tick)
+    const skillKey = JSON.stringify(char.skillLoadout) + char.level;
+    if (!this.popupOpen && skillKey !== this.lastSkillKey) {
+      this.lastSkillKey = skillKey;
       this.renderSkillSlots(state);
       this.renderSkillTree(state);
     }
   }
 
+  private renderSkillSlot(slotIndex: number, char: { level: number; skillLoadout: { equippedSkills: (string | null)[] } }): string {
+    const slot = SKILL_SLOTS[slotIndex];
+    const isUnlocked = char.level >= slot.unlocksAtLevel;
+    const equippedId = char.skillLoadout.equippedSkills[slotIndex];
+    const skill = equippedId ? getSkillById(equippedId) : null;
+
+    if (!isUnlocked) {
+      return `<div class="skill-slot locked">
+        <div class="skill-slot-hex">
+          <span class="skill-slot-lock">Lv ${slot.unlocksAtLevel}</span>
+        </div>
+        <div class="skill-slot-type">${slot.type}</div>
+      </div>`;
+    } else if (skill) {
+      return `<div class="skill-slot filled ${skill.type}" data-slot="${slotIndex}" data-skill="${skill.id}">
+        <div class="skill-slot-hex ${skill.type}">
+          <span class="skill-slot-name">${this.escapeHtml(skill.name)}</span>
+        </div>
+        <div class="skill-slot-type">${skill.type}${skill.cooldown ? ` CD${skill.cooldown}` : ''}</div>
+      </div>`;
+    } else {
+      return `<div class="skill-slot empty" data-slot="${slotIndex}">
+        <div class="skill-slot-hex empty">
+          <span class="skill-slot-name">Empty</span>
+        </div>
+        <div class="skill-slot-type">${slot.type}</div>
+      </div>`;
+    }
+  }
+
   private renderSkillSlots(state: ServerStateMessage): void {
     const char = state.character;
-    const loadout = char.skillLoadout;
 
-    let html = '<div class="skill-slots-header">Equipped Skills</div><div class="skill-slots-row">';
-    for (let i = 0; i < SKILL_SLOTS.length; i++) {
-      const slot = SKILL_SLOTS[i];
-      const isUnlocked = char.level >= slot.unlocksAtLevel;
-      const equippedId = loadout.equippedSkills[i];
-      const skill = equippedId ? getSkillById(equippedId) : null;
-
-      if (!isUnlocked) {
-        html += `<div class="skill-slot locked">
-          <div class="skill-slot-hex">
-            <span class="skill-slot-lock">Lv ${slot.unlocksAtLevel}</span>
-          </div>
-          <div class="skill-slot-type">${slot.type}</div>
-        </div>`;
-      } else if (skill) {
-        html += `<div class="skill-slot filled ${skill.type}" data-slot="${i}" data-skill="${skill.id}">
-          <div class="skill-slot-hex ${skill.type}">
-            <span class="skill-slot-name">${this.escapeHtml(skill.name)}</span>
-          </div>
-          <div class="skill-slot-type">${skill.type}${skill.cooldown ? ` CD${skill.cooldown}` : ''}</div>
-        </div>`;
-      } else {
-        html += `<div class="skill-slot empty" data-slot="${i}">
-          <div class="skill-slot-hex empty">
-            <span class="skill-slot-name">Empty</span>
-          </div>
-          <div class="skill-slot-type">${slot.type}</div>
-        </div>`;
-      }
-    }
+    // Active slot (index 1) on the left, passive slots (0, 2, 3, 4) on the right
+    let html = '<div class="skill-slots-header">Equipped Skills</div>';
+    html += '<div class="skill-slots-split">';
+    html += '<div class="skill-slots-active">';
+    html += this.renderSkillSlot(1, char);
+    html += '</div>';
+    html += '<div class="skill-slots-passive">';
+    html += this.renderSkillSlot(0, char);
+    html += this.renderSkillSlot(2, char);
+    html += this.renderSkillSlot(3, char);
+    html += this.renderSkillSlot(4, char);
+    html += '</div>';
     html += '</div>';
     this.skillSlotsEl.innerHTML = html;
 
@@ -236,6 +250,24 @@ export class CharacterScreen implements Screen {
         this.showSkillPopup(skillId, el as HTMLElement, state);
       });
     }
+  }
+
+  /** Get the level at which a skill becomes learnable (treeOrder 0 = Lv1, others = treeOrder * 5). */
+  private getSkillLearnLevel(treeOrder: number): number {
+    return treeOrder === 0 ? 1 : treeOrder * 5;
+  }
+
+  private renderSkillTreeNode(skill: SkillDefinition, statusClass: string, isUnlocked: boolean): string {
+    const learnLevel = this.getSkillLearnLevel(skill.treeOrder);
+    const levelLabel = !isUnlocked ? ` Lv ${learnLevel}` : '';
+
+    let html = `<div class="skill-tree-node ${statusClass} ${skill.type}" data-skill-id="${skill.id}">`;
+    html += `<div class="skill-hex ${skill.type} ${statusClass}">`;
+    html += `<span class="skill-hex-name">${this.escapeHtml(skill.name)}</span>`;
+    html += `</div>`;
+    html += `<div class="skill-node-label">${skill.cooldown ? `CD ${skill.cooldown}` : skill.type}${levelLabel}</div>`;
+    html += `</div>`;
+    return html;
   }
 
   private renderSkillTree(state: ServerStateMessage): void {
@@ -252,34 +284,50 @@ export class CharacterScreen implements Screen {
     const unlockedSet = new Set(loadout.unlockedSkills);
     const equippedSet = new Set(loadout.equippedSkills.filter(Boolean));
 
-    let html = '<div class="skill-tree-header">Skill Tree</div><div class="skill-tree-nodes">';
+    const actives = tree.filter(s => s.type === 'active');
+    const passives = tree.filter(s => s.type === 'passive');
 
-    for (const skill of tree) {
+    const getStatus = (skill: SkillDefinition) => {
       const isUnlocked = unlockedSet.has(skill.id);
       const isEquipped = equippedSet.has(skill.id);
-
-      // Check if unlockable: all prior skills unlocked, has points (or free first)
       let canUnlock = false;
       if (!isUnlocked) {
         const allPriorUnlocked = tree.every(s => s.treeOrder >= skill.treeOrder || unlockedSet.has(s.id));
         const cost = skill.treeOrder === 0 ? 0 : 1;
         canUnlock = allPriorUnlocked && char.skillPoints >= cost;
       }
+      return {
+        isUnlocked,
+        statusClass: isEquipped ? 'equipped' : isUnlocked ? 'unlocked' : canUnlock ? 'unlockable' : 'locked',
+      };
+    };
 
-      const statusClass = isEquipped ? 'equipped' : isUnlocked ? 'unlocked' : canUnlock ? 'unlockable' : 'locked';
+    let html = '<div class="skill-tree-header">Skill Tree</div>';
+    html += '<div class="skill-tree-split">';
 
-      html += `<div class="skill-tree-node ${statusClass} ${skill.type}" data-skill-id="${skill.id}">`;
-      html += `<div class="skill-hex ${skill.type} ${statusClass}">`;
-      html += `<span class="skill-hex-name">${this.escapeHtml(skill.name)}</span>`;
-      html += `</div>`;
-      html += `<div class="skill-node-label">${skill.type}${skill.cooldown ? ` | CD ${skill.cooldown}` : ''}</div>`;
-      html += `</div>`;
-
-      // Connecting line between nodes (except last)
-      if (skill.treeOrder < tree.length - 1) {
+    // Active column (left)
+    html += '<div class="skill-tree-column skill-tree-actives">';
+    for (let i = 0; i < actives.length; i++) {
+      const skill = actives[i];
+      const { isUnlocked, statusClass } = getStatus(skill);
+      html += this.renderSkillTreeNode(skill, statusClass, isUnlocked);
+      if (i < actives.length - 1) {
         html += '<div class="skill-tree-connector"></div>';
       }
     }
+    html += '</div>';
+
+    // Passive column (right)
+    html += '<div class="skill-tree-column skill-tree-passives">';
+    for (let i = 0; i < passives.length; i++) {
+      const skill = passives[i];
+      const { isUnlocked, statusClass } = getStatus(skill);
+      html += this.renderSkillTreeNode(skill, statusClass, isUnlocked);
+      if (i < passives.length - 1) {
+        html += '<div class="skill-tree-connector"></div>';
+      }
+    }
+    html += '</div>';
 
     html += '</div>';
     this.skillTreeEl.innerHTML = html;
@@ -306,27 +354,26 @@ export class CharacterScreen implements Screen {
     const loadout = char.skillLoadout;
     const isUnlocked = loadout.unlockedSkills.includes(skillId);
     const isEquipped = loadout.equippedSkills.includes(skillId);
-    const tree = SKILL_TREES[char.className as ClassName] ?? [];
-    const allPriorUnlocked = tree.every(s => s.treeOrder >= skill.treeOrder || loadout.unlockedSkills.includes(s.id));
-    const cost = skill.treeOrder === 0 ? 0 : 1;
-    const canUnlock = !isUnlocked && allPriorUnlocked && char.skillPoints >= cost;
 
     const popup = document.createElement('div');
     popup.className = `skill-popup ${skill.type}`;
 
     let buttonsHtml = '';
-    if (!isUnlocked && canUnlock) {
-      buttonsHtml = `<button class="skill-popup-btn unlock-btn">Unlock${cost > 0 ? ` (${cost} pt)` : ' (Free)'}</button>`;
-    } else if (isUnlocked && !isEquipped) {
-      // Find matching slot
+    if (isUnlocked && !isEquipped) {
+      // Find matching slots by type
       const matchingSlots = SKILL_SLOTS
         .map((s, i) => ({ ...s, index: i }))
         .filter(s => s.type === skill.type && char.level >= s.unlocksAtLevel);
 
       if (matchingSlots.length > 0) {
-        buttonsHtml = matchingSlots.map(s =>
-          `<button class="skill-popup-btn equip-btn" data-slot="${s.index}">Equip (Slot ${s.index + 1})</button>`
-        ).join('');
+        if (skill.type === 'active') {
+          // Only one active slot
+          buttonsHtml = `<button class="skill-popup-btn equip-btn" data-slot="${matchingSlots[0].index}">Equip in active slot</button>`;
+        } else {
+          buttonsHtml = matchingSlots.map(s =>
+            `<button class="skill-popup-btn equip-btn" data-slot="${s.index}">Equip in passive slot ${s.index === 0 ? '1' : s.index === 2 ? '2' : s.index === 3 ? '3' : '4'}</button>`
+          ).join('');
+        }
       }
     } else if (isEquipped) {
       const slotIdx = loadout.equippedSkills.indexOf(skillId);
@@ -359,15 +406,6 @@ export class CharacterScreen implements Screen {
     };
 
     // Wire button handlers
-    const unlockBtn = popup.querySelector('.unlock-btn');
-    if (unlockBtn) {
-      unlockBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.gameClient.sendUnlockSkill(skillId);
-        closePopup();
-      });
-    }
-
     for (const equipBtn of popup.querySelectorAll('.equip-btn')) {
       equipBtn.addEventListener('click', (e) => {
         e.stopPropagation();

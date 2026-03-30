@@ -7,6 +7,7 @@ import {
   createEncounter,
   getZone,
   rollDrops,
+  getSkillById,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -95,11 +96,12 @@ export class PartyBattleManager {
           for (const m of members) {
             const s = this.getSession(m);
             if (s) {
-              const pos = cubeToOffset(serverParty.position);
               const allZones = this.content.getAllZones();
               const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
-              s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
+              const tileDef = this.content.getTileById(serverParty.tile.id);
+              const rName = tileDef?.name ?? '';
+              s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
             }
           }
           this.onMembersMoved?.(members);
@@ -171,11 +173,12 @@ export class PartyBattleManager {
           for (const m of members) {
             const s = this.getSession(m);
             if (s) {
-              const pos = cubeToOffset(serverParty.position);
               const allZones = this.content.getAllZones();
               const zone = getZone(serverParty.tile.zone, allZones);
               const zName = zone ? zone.displayName : serverParty.tile.zone;
-              s.addLogEntry(`Moved to ${zName} (${pos.col}, ${pos.row})`, 'move');
+              const tileDef = this.content.getTileById(serverParty.tile.id);
+              const rName = tileDef?.name ?? '';
+              s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
             }
           }
           this.onMembersMoved?.(members);
@@ -218,6 +221,25 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return;
     entry.battleTimer.restartBattle();
+  }
+
+  /** Escape the current battle for a party. No rewards given. */
+  escapeBattle(partyId: string): boolean {
+    const entry = this.entries.get(partyId);
+    if (!entry) return false;
+    if (entry.battleTimer.currentState !== 'battle') return false;
+
+    for (const m of entry.members) {
+      const s = this.getSession(m);
+      if (s) s.addLogEntry('Escaped the battle!', 'battle');
+    }
+
+    entry.battleTimer.escapeBattle();
+
+    for (const m of entry.members) {
+      this.broadcastToMember(m);
+    }
+    return true;
   }
 
   /** Destroy a party battle entry and stop its timers. */
@@ -298,6 +320,7 @@ export class PartyBattleManager {
         stunTurns: m.stunTurns > 0 ? m.stunTurns : undefined,
       })),
       tickCount: combat.tickCount,
+      roundCount: combat.roundCount,
       lastAction: combat.lastAction ? {
         attackerSide: combat.lastAction.attackerSide,
         attackerPos: combat.lastAction.attackerPos,
@@ -433,7 +456,24 @@ export class PartyBattleManager {
         }
       }
 
-      const splitXp = Math.ceil(totalXp / partySize);
+      // Check for Bard Inspiration XP bonus (+20% per Bard with Inspiration equipped)
+      let xpMultiplier = 1;
+      for (const username of members) {
+        const session = this.getSession(username);
+        if (!session) continue;
+        const loadout = session.getSkillLoadout();
+        if (loadout) {
+          for (const skillId of loadout.equippedSkills) {
+            if (!skillId) continue;
+            const skill = getSkillById(skillId);
+            if (skill && skill.passiveEffect?.kind === 'xp_bonus') {
+              xpMultiplier += skill.passiveEffect.flatValue ?? 0;
+            }
+          }
+        }
+      }
+
+      const splitXp = Math.ceil((totalXp * xpMultiplier) / partySize);
       const splitGold = Math.ceil(totalGold / partySize);
 
       // Roll item drops once, randomly assign each to a party member

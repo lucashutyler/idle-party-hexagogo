@@ -1,4 +1,4 @@
-import type { ServerStateMessage, ServerEquipBlockedMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerEquipBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
@@ -10,6 +10,7 @@ type WorldUpdateListener = () => void;
 type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
 type SuspensionListener = () => void;
 type ResumeListener = () => void;
+type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -26,6 +27,7 @@ export class GameClient {
   private equipBlockedListeners = new Set<EquipBlockedListener>();
   private suspensionListeners = new Set<SuspensionListener>();
   private resumeListeners = new Set<ResumeListener>();
+  private playerProfileListeners = new Set<PlayerProfileListener>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -152,6 +154,10 @@ export class GameClient {
           for (const listener of this.equipBlockedListeners) {
             listener(msg);
           }
+        } else if (msg.type === 'player_profile') {
+          for (const listener of this.playerProfileListeners) {
+            listener(msg);
+          }
         } else if (msg.type === 'error') {
           console.warn('[GameClient] server error:', msg.message);
         }
@@ -211,6 +217,10 @@ export class GameClient {
     this.sendRaw({ type: 'move', col, row });
   }
 
+  sendRun(): void {
+    this.sendRaw({ type: 'run' });
+  }
+
   sendUnlockSkill(skillId: string): void {
     this.sendRaw({ type: 'unlock_skill', skillId });
   }
@@ -251,6 +261,17 @@ export class GameClient {
 
   resetXpRate(): void {
     this.sendRaw({ type: 'reset_xp_rate' });
+  }
+
+  // --- View Player ---
+
+  sendViewPlayer(username: string): void {
+    this.sendRaw({ type: 'view_player', username });
+  }
+
+  onPlayerProfile(listener: PlayerProfileListener): () => void {
+    this.playerProfileListeners.add(listener);
+    return () => { this.playerProfileListeners.delete(listener); };
   }
 
   // --- Social ---
@@ -353,8 +374,8 @@ export class GameClient {
     this.sendRaw({ type: 'request_chat_history', channelType, channelId });
   }
 
-  sendSetChatPreferences(sendChannel: string, dmTarget: string): void {
-    this.sendRaw({ type: 'set_chat_preferences', sendChannel, dmTarget });
+  sendSetChatPreferences(sendChannel: string, dmTarget: string, filters?: string[]): void {
+    this.sendRaw({ type: 'set_chat_preferences', sendChannel, dmTarget, filters });
   }
 
   /** Subscribe to incoming chat messages. Returns an unsubscribe function. */

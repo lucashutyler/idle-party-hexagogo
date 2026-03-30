@@ -97,6 +97,7 @@ export type BlockLevel = 'dm' | 'all';
 export interface PlayerListEntry {
   username: string;
   className?: string;
+  level?: number;
 }
 
 export interface ClientSocialState {
@@ -118,6 +119,7 @@ export interface ClientSocialState {
 export interface ChatPreferences {
   sendChannel: ChatChannelType;
   dmTarget: string;
+  filters?: ChatChannelType[];
 }
 
 // --- Client -> Server messages ---

@@ -35,9 +35,21 @@ function makePlayer(
     gridPosition: pos,
     className,
     level,
-    equippedSkills: overrides.equippedSkills ?? [null, null, null],
+    equippedSkills: overrides.equippedSkills ?? [null, null, null, null, null],
     attackCount: 0,
     stunTurns: 0,
+    dots: [],
+    hots: [],
+    damageShield: 0,
+    debuffs: [],
+    consecutiveHits: 0,
+    lastTargetId: '',
+    hasResurrected: false,
+    martyrBonus: 0,
+    braceActive: false,
+    braceDamageTaken: 0,
+    interceptActive: false,
+    activeSkillCount: 0,
   };
 }
 
@@ -146,7 +158,7 @@ describe('Party Combat', () => {
         className: 'Mage',
         level: 5,
         baseDamage: calculateBaseDamage(5, 'Mage'), // 15 + 4*2 = 23
-        equippedSkills: [burnSkill, null, null],
+        equippedSkills: [burnSkill, null, null, null, null],
       });
       const state = createPartyCombatState([mage], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
       // Burn adds 2 * level = 10 damage
@@ -157,7 +169,7 @@ describe('Party Combat', () => {
       const rallySkill = getSkillById('bard_rally')!;
       const bard = makePlayer('Bard', 0, {
         className: 'Bard',
-        equippedSkills: [rallySkill, null, null],
+        equippedSkills: [rallySkill, null, null, null, null],
       });
       const archer = makePlayer('Archer', 2);
       const state = createPartyCombatState([bard, archer], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
@@ -212,7 +224,7 @@ describe('Party Combat', () => {
         level: 1,
         hp: 200,
         baseDamage: 1,
-        equippedSkills: [guardSkill, null, null],
+        equippedSkills: [guardSkill, null, null, null, null],
       });
       const state = createPartyCombatState([knight], [goblin]);
 
@@ -232,7 +244,7 @@ describe('Party Combat', () => {
         level: 5,
         hp: 200,
         baseDamage: 5,
-        equippedSkills: [guardSkill, null, null],
+        equippedSkills: [guardSkill, null, null, null, null],
       });
       const state = createPartyCombatState([knight], [goblin]);
 
@@ -254,7 +266,7 @@ describe('Party Combat', () => {
         level: 1,
         hp: 200,
         baseDamage: 3,
-        equippedSkills: [blessSkill, null, null],
+        equippedSkills: [blessSkill, null, null, null, null],
       });
       const archer = makePlayer('Legolas', 2, { className: 'Archer', level: 1, hp: 200, baseDamage: 15 });
       const state = createPartyCombatState([priest, archer], [wolf]);
@@ -440,7 +452,7 @@ describe('Party Combat', () => {
         className: 'Knight',
         baseDamage: 1,
         hp: 500,
-        equippedSkills: [guardSkill, bashSkill, null],
+        equippedSkills: [guardSkill, bashSkill, null, null, null],
       });
       const state = createPartyCombatState([knight], monsters);
 
@@ -469,7 +481,7 @@ describe('Party Combat', () => {
         baseDamage: 3,
         hp: 200,
         level: 5,
-        equippedSkills: [blessSkill, healSkill, null],
+        equippedSkills: [blessSkill, healSkill, null, null, null],
       });
       // Tank at col 0 (low col → acts after priest)
       const tank = makePlayer('Tank', 0, { className: 'Knight', baseDamage: 1, hp: 200 });

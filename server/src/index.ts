@@ -24,8 +24,8 @@ import { createAdminRoutes } from './admin/adminRoutes.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
-import type { ChatMessage, ClassName } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS } from '@idle-party-rpg/shared';
+import type { ChatMessage, ClassName, ItemDefinition } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
 const app = express();
@@ -214,8 +214,9 @@ wss.on('connection', (ws) => {
   console.log(`WebSocket connected for "${username}"`);
 
   // Register the connection and send initial state
-  playerManager.login(ws, username);
-  playerManager.sendStateToPlayer(username);
+  playerManager.login(ws, username).then(() => {
+    playerManager.sendStateToPlayer(username);
+  });
 
   ws.on('message', (data) => {
     try {
@@ -253,6 +254,34 @@ wss.on('connection', (ws) => {
         if (!success) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
         }
+        return;
+      }
+
+      if (msg.type === 'run') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        const partyId = session.getPartyId();
+        if (!partyId) return;
+
+        // Only owners and leaders can run
+        const party = playerManager.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === username);
+          if (!member || !canMove(member.role)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can run' }));
+            return;
+          }
+        }
+
+        // Check round threshold
+        const battleState = playerManager.partyBattles.getBattleState(partyId);
+        if (!battleState?.combat || battleState.combat.roundCount < RUN_AVAILABLE_ROUNDS) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot run yet' }));
+          return;
+        }
+
+        playerManager.partyBattles.escapeBattle(partyId);
         return;
       }
 
@@ -313,8 +342,10 @@ wss.on('connection', (ws) => {
           playerManager.partyBattles.restartBattle(classPartyId);
         }
         playerManager.sendStateToPlayer(username);
-        // Broadcast welcome message to all online players
-        playerManager.broadcastWelcome(username, msg.className as ClassName);
+        // Only broadcast welcome for truly new players (not returning from ban/reset)
+        if (session.isNewPlayer()) {
+          playerManager.broadcastWelcome(username, msg.className as ClassName);
+        }
         return;
       }
 
@@ -392,6 +423,48 @@ wss.on('connection', (ws) => {
         if (!session.handleDestroyItems(msg.itemId, msg.count)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot destroy item' }));
         }
+        return;
+      }
+
+      // --- View player profile ---
+      if (msg.type === 'view_player' && typeof msg.username === 'string') {
+        const targetSession = playerManager.getSessionByUsername(msg.username);
+        if (!targetSession) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
+          return;
+        }
+        const profile = targetSession.getPublicProfile();
+        const guildId = targetSession.getGuildId();
+        const guild = guildId ? playerManager.guilds.getGuild(guildId) : null;
+        const partyId = targetSession.getPartyId();
+        const party = partyId ? playerManager.parties.getParty(partyId) : null;
+
+        // Resolve item definitions for equipped items only
+        const itemDefs: Record<string, ItemDefinition> = {};
+        for (const itemId of Object.values(profile.equipment)) {
+          if (itemId) {
+            const def = gameLoop.contentStore.getItem(itemId);
+            if (def) itemDefs[itemId] = def;
+          }
+        }
+
+        // Build party member list
+        const partyMembers = (party?.members ?? []).map(m => {
+          const s = playerManager.getSessionByUsername(m.username);
+          return { username: m.username, className: s?.getClassName(), level: s?.getLevel() };
+        });
+
+        ws.send(JSON.stringify({
+          type: 'player_profile',
+          username: msg.username,
+          className: profile.className,
+          level: profile.level,
+          guildName: guild?.info.name ?? null,
+          equipment: profile.equipment,
+          skillLoadout: profile.skillLoadout,
+          itemDefinitions: itemDefs,
+          partyMembers,
+        }));
         return;
       }
 
@@ -488,6 +561,9 @@ wss.on('connection', (ws) => {
         if (session) {
           session.setChatSendChannel(msg.sendChannel);
           session.setChatDmTarget(msg.dmTarget ?? '');
+          if (Array.isArray(msg.filters)) {
+            session.setChatFilters(msg.filters);
+          }
         }
         return;
       }
@@ -1067,14 +1143,23 @@ wss.on('connection', (ws) => {
 const PORT = process.env.PORT ?? 3001;
 
 async function start() {
+  const startupStart = performance.now();
+
+  const t0 = performance.now();
   await accountStore.load();
+  console.log(`[Startup] AccountStore loaded in ${(performance.now() - t0).toFixed(1)}ms`);
+
   tokenStore.start();
   sessionStore.startReap();
+
+  const t1 = performance.now();
   await gameLoop.init(accountStore);
+  console.log(`[Startup] GameLoop.init completed in ${(performance.now() - t1).toFixed(1)}ms`);
+
   playerManager = gameLoop.playerManager;
 
   server.listen(PORT, () => {
-    console.log(`Game server listening on port ${PORT}`);
+    console.log(`[Startup] Server listening on port ${PORT} — total startup ${(performance.now() - startupStart).toFixed(1)}ms`);
   });
 }
 

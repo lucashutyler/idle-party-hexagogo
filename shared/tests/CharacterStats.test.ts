@@ -110,7 +110,7 @@ describe('CharacterStats', () => {
     it('initializes skill loadout with first passive unlocked and equipped', () => {
       const char = createCharacter('Knight');
       expect(char.skillLoadout.unlockedSkills).toEqual(['knight_guard']);
-      expect(char.skillLoadout.equippedSkills).toEqual(['knight_guard', null, null]);
+      expect(char.skillLoadout.equippedSkills).toEqual(['knight_guard', null, null, null, null]);
     });
 
     it('all playable classes get first skill auto-unlocked', () => {
