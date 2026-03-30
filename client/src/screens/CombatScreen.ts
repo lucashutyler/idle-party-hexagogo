@@ -138,8 +138,8 @@ export class CombatScreen implements Screen {
       }
     });
 
-    // Run button — show hint on click when disabled, run when enabled
-    this.runBtn.addEventListener('click', () => {
+    // Run bar — click on the bar (or disabled button) shows hint; enabled button runs
+    this.runBar.addEventListener('click', () => {
       if (this.runBtn.disabled) {
         this.showRunHint();
       } else {
