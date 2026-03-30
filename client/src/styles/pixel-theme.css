@@ -507,14 +507,13 @@ html, body {
   font-family: inherit;
 }
 
-.combat-run-btn:not(:disabled):hover {
+.combat-run-btn:not(.combat-run-locked):hover {
   color: var(--accent-orange);
   border-color: var(--accent-orange);
 }
 
-.combat-run-btn:disabled {
+.combat-run-btn.combat-run-locked {
   opacity: 0.4;
-  cursor: pointer;
 }
 
 .combat-run-hint {

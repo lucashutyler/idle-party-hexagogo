@@ -85,7 +85,7 @@ export class CombatScreen implements Screen {
         <div class="combat-side combat-enemy-side"></div>
       </div>
       <div class="combat-run-bar">
-        <button class="combat-run-btn" disabled>\uD83D\uDD12 Run</button>
+        <button class="combat-run-btn combat-run-locked">\uD83D\uDD12 Run</button>
         <span class="combat-run-hint" style="display:none">Available after ${RUN_AVAILABLE_ROUNDS} combat rounds</span>
       </div>
       <div class="combat-log-wrapper">
@@ -138,9 +138,9 @@ export class CombatScreen implements Screen {
       }
     });
 
-    // Run bar — click on the bar (or disabled button) shows hint; enabled button runs
-    this.runBar.addEventListener('click', () => {
-      if (this.runBtn.disabled) {
+    // Run button — show hint when locked, send run when available
+    this.runBtn.addEventListener('click', () => {
+      if (this.runBtn.classList.contains('combat-run-locked')) {
         this.showRunHint();
       } else {
         this.gameClient.sendRun();
@@ -375,14 +375,14 @@ export class CombatScreen implements Screen {
     this.runBar.style.display = '';
 
     if (!canRun) {
-      this.runBtn.disabled = true;
+      this.runBtn.classList.add('combat-run-locked');
       this.runBtn.textContent = '\uD83D\uDD12 Run';
       this.runHint.textContent = 'Only the party owner or a leader can run';
       return;
     }
 
     const available = roundCount >= RUN_AVAILABLE_ROUNDS;
-    this.runBtn.disabled = !available;
+    this.runBtn.classList.toggle('combat-run-locked', !available);
     this.runBtn.textContent = available ? 'Run' : '\uD83D\uDD12 Run';
     this.runHint.textContent = `Available after ${RUN_AVAILABLE_ROUNDS} combat rounds`;
   }
