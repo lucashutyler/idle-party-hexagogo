@@ -367,12 +367,21 @@ export class CombatScreen implements Screen {
     const myRole = state.social?.party?.members.find(m => m.username === state.username)?.role;
     const canRun = myRole === 'owner' || myRole === 'leader';
 
-    if (!isFighting || !canRun || this.isFullscreen) {
+    if (!isFighting || this.isFullscreen) {
       this.runBar.style.display = 'none';
       return;
     }
 
     this.runBar.style.display = '';
+
+    if (!canRun) {
+      this.runBtn.disabled = true;
+      this.runBtn.textContent = '\uD83D\uDD12 Run';
+      this.runBtn.title = 'Only the party owner or a leader can run';
+      return;
+    }
+
+    this.runBtn.title = '';
     const available = roundCount >= RUN_AVAILABLE_ROUNDS;
     this.runBtn.disabled = !available;
     this.runBtn.textContent = available ? 'Run' : '\uD83D\uDD12 Run';
