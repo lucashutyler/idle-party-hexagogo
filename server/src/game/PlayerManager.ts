@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import { HexGrid, offsetToCube, cubeDistance, cubeToKey, CLASS_ICONS } from '@idle-party-rpg/shared';
-import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, BlockLevel, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
+import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
@@ -253,19 +253,36 @@ export class PlayerManager {
     const text = `Welcome our new ${className}, ${username}, to the world! ${icon}`;
     const recipients = Array.from(this.sessions.keys())
       .map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
-    this.chat.sendMessage('Server', 'server', 'server', text, recipients, this.getAllBlockedUsers());
+    this.chat.sendMessage('Server', 'server', 'server', text, recipients);
   }
 
-  /** Get all blocked users map for chat filtering. */
-  getAllBlockedUsers(): Record<string, Record<string, BlockLevel>> {
-    const result: Record<string, Record<string, BlockLevel>> = {};
-    for (const [username, session] of this.sessions) {
-      const blocked = session.getBlockedUsers();
-      if (Object.keys(blocked).length > 0) {
-        result[username] = blocked;
-      }
+  private static readonly SYNC_CHAT_LIMIT = 200;
+
+  /** Get chat messages for a player since a given message ID (for incremental sync). */
+  syncChatForPlayer(username: string, sinceId?: string): { messages: ChatMessage[]; full: boolean } {
+    const session = this.sessions.get(username);
+    if (!session) return { messages: [], full: true };
+
+    if (!sinceId) {
+      // No sinceId — return the latest batch
+      const all = session.getChatHistory();
+      return {
+        messages: all.slice(-PlayerManager.SYNC_CHAT_LIMIT),
+        full: true,
+      };
     }
-    return result;
+
+    const result = session.getMessagesSince(sinceId);
+    if (result.found) {
+      return { messages: result.messages, full: true };
+    }
+
+    // sinceId not found — client cache is stale, return latest batch
+    const all = session.getChatHistory();
+    return {
+      messages: all.slice(-PlayerManager.SYNC_CHAT_LIMIT),
+      full: false,
+    };
   }
 
   sendStateToPlayer(username: string): void {
@@ -344,7 +361,6 @@ export class PlayerManager {
       chatPreferences: {
         sendChannel: session?.getChatSendChannel() ?? 'zone',
         dmTarget: session?.getChatDmTarget() ?? '',
-        filters: session?.getChatFilters(),
       },
       pendingTrade: this.trades.getPlayerTrade(username),
     };

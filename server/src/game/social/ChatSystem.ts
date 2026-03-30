@@ -1,10 +1,5 @@
-import type { ChatMessage, ChatChannelType, BlockLevel } from '@idle-party-rpg/shared';
-
-let messageIdCounter = 0;
-
-function generateMessageId(): string {
-  return `msg_${Date.now()}_${++messageIdCounter}`;
-}
+import { randomUUID } from 'crypto';
+import type { ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
 
 export interface ChatRecipient {
   username: string;
@@ -12,12 +7,12 @@ export interface ChatRecipient {
 }
 
 /**
- * ChatSystem handles message creation, routing, and block filtering.
- * Chat history is stored per-player in PlayerSession, not per-channel.
+ * ChatSystem handles message creation and routing.
+ * All messages are delivered to all recipients — filtering is client-side.
  */
 export class ChatSystem {
   /**
-   * Send a chat message. Returns the created message, or null if blocked/invalid.
+   * Send a chat message. Returns the created message, or null if invalid.
    * `recipients` is the list of players who should receive this message.
    * Each recipient's `send` callback is responsible for storing the message
    * in their personal history (via PlayerManager.sendChatToPlayer).
@@ -28,12 +23,11 @@ export class ChatSystem {
     channelId: string,
     text: string,
     recipients: ChatRecipient[],
-    blockedBy: Record<string, Record<string, BlockLevel>>,
   ): ChatMessage | null {
     if (!text || text.length === 0 || text.length > 500) return null;
 
     const message: ChatMessage = {
-      id: generateMessageId(),
+      id: randomUUID(),
       channelType,
       channelId,
       senderUsername,
@@ -41,14 +35,8 @@ export class ChatSystem {
       timestamp: Date.now(),
     };
 
-    // Deliver to recipients (excluding blocked)
+    // Deliver to all recipients unconditionally — filtering is client-side
     for (const r of recipients) {
-      const recipientBlocks = blockedBy[r.username];
-      if (recipientBlocks) {
-        const blockLevel = recipientBlocks[senderUsername];
-        if (blockLevel === 'all') continue;
-        if (blockLevel === 'dm' && channelType === 'dm') continue;
-      }
       r.send(message);
     }
 

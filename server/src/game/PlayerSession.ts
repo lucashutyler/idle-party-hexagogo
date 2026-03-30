@@ -76,7 +76,6 @@ export class PlayerSession {
   private partyId: string | null = null;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
-  private chatFilters: ChatChannelType[] = ['tile', 'zone', 'party', 'guild', 'global', 'dm', 'server'];
 
   /** XP rate tracking — in-memory only, resets on server restart. */
   private xpRateStartTime = Date.now();
@@ -325,8 +324,6 @@ export class PlayerSession {
   setChatSendChannel(channel: ChatChannelType): void { this.chatSendChannel = channel; }
   getChatDmTarget(): string { return this.chatDmTarget; }
   setChatDmTarget(target: string): void { this.chatDmTarget = target; }
-  getChatFilters(): ChatChannelType[] { return this.chatFilters; }
-  setChatFilters(filters: ChatChannelType[]): void { this.chatFilters = filters; }
 
   /** Store a chat message in this player's personal history. */
   addChatMessage(message: ChatMessage): void {
@@ -336,14 +333,16 @@ export class PlayerSession {
     }
   }
 
-  /** Get chat history, optionally filtered by channel type. */
-  getChatHistory(channelType?: string, channelId?: string): ChatMessage[] {
-    if (!channelType) return this.chatHistory;
-    return this.chatHistory.filter(m => {
-      if (m.channelType !== channelType) return false;
-      if (channelId !== undefined && m.channelId !== channelId) return false;
-      return true;
-    });
+  /** Get all chat history. */
+  getChatHistory(): ChatMessage[] {
+    return this.chatHistory;
+  }
+
+  /** Get messages since a given message ID. Returns found=false if ID not in history. */
+  getMessagesSince(sinceId: string): { messages: ChatMessage[]; found: boolean } {
+    const idx = this.chatHistory.findIndex(m => m.id === sinceId);
+    if (idx === -1) return { messages: [], found: false };
+    return { messages: this.chatHistory.slice(idx + 1), found: true };
   }
 
   /** Returns the count of an item in the unequipped inventory (0 if not present). */
@@ -567,7 +566,6 @@ export class PlayerSession {
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
-      chatFilters: [...this.chatFilters],
     };
   }
 
@@ -659,9 +657,6 @@ export class PlayerSession {
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
-    session['chatFilters'] = data.chatFilters
-      ? data.chatFilters as ChatChannelType[]
-      : ['tile', 'zone', 'party', 'guild', 'global', 'dm', 'server'];
 
     // XP rate tracking — auto-start from session restore time
     session['xpRateStartTime'] = Date.now();

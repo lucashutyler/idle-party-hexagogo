@@ -1,4 +1,5 @@
 import type { GameClient } from '../network/GameClient';
+import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem } from '@idle-party-rpg/shared';
 import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, EQUIP_SLOTS, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
@@ -15,6 +16,7 @@ const SUB_TABS: { id: SubTab; label: string }[] = [
 export class SocialScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
+  private chatStore: ChatLocalStore;
   private isActive = false;
   private activeTab: SubTab = (() => {
     const stored = sessionStorage.getItem('socialSubTab');
@@ -22,7 +24,7 @@ export class SocialScreen implements Screen {
   })();
   private unsubscribe?: () => void;
   private unsubChat?: () => void;
-  private unsubChatHistory?: () => void;
+  private unsubSyncChat?: () => void;
 
   private tabBar!: HTMLElement;
   private panelContainer!: HTMLElement;
@@ -32,13 +34,11 @@ export class SocialScreen implements Screen {
   private sortBy: 'name' | 'status' = 'status';
   private filterBy: 'all' | 'friends' | 'guild' | 'room' | 'zone' = 'all';
 
-  // Chat state — unified timeline
-  private chatMessages: ChatMessage[] = [];
-  private chatFilters = new Set<ChatChannelType>(['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'] as ChatChannelType[]);
+  // Chat state — unified timeline backed by localStorage
+  private chatFilters: Set<ChatChannelType>;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
   private hasUnread = false;
-  private chatHistoryLoaded = new Set<string>();
   private chatFocusAfterRender = false;
   private chatPrefsInitialized = false;
 
@@ -62,20 +62,29 @@ export class SocialScreen implements Screen {
   private lastRenderedGuildKey = '';
   private lastRenderedPartyKey = '';
 
-  constructor(containerId: string, gameClient: GameClient) {
+  constructor(containerId: string, gameClient: GameClient, chatStore: ChatLocalStore) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
+    this.chatStore = chatStore;
     this.buildDOM();
 
-    // On tab resume, clear cached chat so history is re-fetched with fresh data
-    this.gameClient.onResume(() => {
-      this.chatHistoryLoaded.clear();
-      this.chatMessages = [];
-      if (this.isActive && this.activeTab === 'chat') {
-        this.renderChatPanel();
+    // Load chat filters from localStorage (client-only persistence)
+    const savedFilters = localStorage.getItem('chat_filters');
+    if (savedFilters) {
+      try {
+        this.chatFilters = new Set(JSON.parse(savedFilters));
+      } catch {
+        this.chatFilters = new Set(['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'] as ChatChannelType[]);
       }
+    } else {
+      this.chatFilters = new Set(['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'] as ChatChannelType[]);
+    }
+
+    // On tab resume, trigger incremental sync (no clearing)
+    this.gameClient.onResume(() => {
+      this.gameClient.sendSyncChat(this.chatStore.getLatestId());
     });
   }
 
@@ -86,30 +95,24 @@ export class SocialScreen implements Screen {
       if (this.isActive) this.updateFromState(state);
     });
     this.unsubChat = this.gameClient.onChat((msg) => {
-      // Add to unified timeline (dedupe by id)
-      const isNew = !this.chatMessages.some(m => m.id === msg.id);
-      if (isNew) {
-        this.chatMessages.push(msg);
-      }
+      // Add to localStorage-backed store (O(1) dedup)
+      const isNew = this.chatStore.addMessage(msg);
       if (this.isActive && this.activeTab === 'chat') {
         if (isNew) this.appendChatMessage(msg);
-      } else {
+      } else if (isNew) {
         this.hasUnread = true;
       }
     });
-    this.unsubChatHistory = this.gameClient.onChatHistory((_type, _id, messages) => {
-      // Merge into unified timeline (dedupe by id)
-      const existing = new Set(this.chatMessages.map(m => m.id));
-      for (const msg of messages) {
-        if (!existing.has(msg.id)) {
-          this.chatMessages.push(msg);
-        }
-      }
-      this.chatMessages.sort((a, b) => a.timestamp - b.timestamp);
+    this.unsubSyncChat = this.gameClient.onSyncChat((messages, full) => {
+      this.chatStore.mergeSyncBatch(messages, full);
       if (this.isActive && this.activeTab === 'chat') {
         this.renderChatMessages();
       }
     });
+
+    // Trigger incremental sync
+    this.gameClient.sendSyncChat(this.chatStore.getLatestId());
+
     const state = this.gameClient.lastState;
     if (state) {
       this.lastSocial = state.social ?? null;
@@ -117,9 +120,6 @@ export class SocialScreen implements Screen {
       if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
         this.chatSendChannel = state.social.chatPreferences.sendChannel;
         this.chatDmTarget = state.social.chatPreferences.dmTarget;
-        if (state.social.chatPreferences.filters) {
-          this.chatFilters = new Set(state.social.chatPreferences.filters);
-        }
         this.chatPrefsInitialized = true;
       }
       this.renderTabBar();
@@ -133,8 +133,8 @@ export class SocialScreen implements Screen {
     this.unsubscribe = undefined;
     this.unsubChat?.();
     this.unsubChat = undefined;
-    this.unsubChatHistory?.();
-    this.unsubChatHistory = undefined;
+    this.unsubSyncChat?.();
+    this.unsubSyncChat = undefined;
     this.dismissPopup();
     this.dismissTradeModal();
   }
@@ -256,19 +256,17 @@ export class SocialScreen implements Screen {
         return;
       }
 
-      // Chat panel — filter toggles
+      // Chat panel — filter toggles (client-side only, persisted to localStorage)
       if (btn.matches('.chat-filter-btn')) {
         const type = btn.getAttribute('data-channel') as ChatChannelType;
         if (this.chatFilters.has(type)) {
           this.chatFilters.delete(type);
         } else {
           this.chatFilters.add(type);
-          const id = this.resolveChatChannelId(type);
-          this.loadChatHistory(type, id);
         }
         btn.classList.toggle('active');
         this.renderChatMessages();
-        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget, Array.from(this.chatFilters));
+        localStorage.setItem('chat_filters', JSON.stringify(Array.from(this.chatFilters)));
         return;
       }
 
@@ -428,9 +426,6 @@ export class SocialScreen implements Screen {
     if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
       this.chatSendChannel = state.social.chatPreferences.sendChannel;
       this.chatDmTarget = state.social.chatPreferences.dmTarget;
-      if (state.social.chatPreferences.filters) {
-        this.chatFilters = new Set(state.social.chatPreferences.filters);
-      }
       this.chatPrefsInitialized = true;
     }
 
@@ -1247,29 +1242,12 @@ export class SocialScreen implements Screen {
     this.chatSendChannel = 'dm';
     this.chatDmTarget = username;
     this.activeTab = 'chat';
-    this.loadChatHistory('dm', username);
     this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
     this.chatFocusAfterRender = true;
     this.renderTabBar();
     this.renderPanel();
   }
 
-  /** Request chat history for a channel if not already loaded. */
-  private loadChatHistory(type: ChatChannelType, id: string): void {
-    if (!id && type !== 'dm') return;
-    const key = `${type}:${id || '_all'}`;
-    if (this.chatHistoryLoaded.has(key)) return;
-    this.chatHistoryLoaded.add(key);
-    this.gameClient.sendRequestChatHistory(type, id);
-  }
-
-  /** Load history for all channels (not just filtered ones — filtering is display-only). */
-  private loadAllChatHistory(): void {
-    for (const ch of SocialScreen.CHAT_CHANNELS) {
-      const id = this.resolveChatChannelId(ch.type);
-      this.loadChatHistory(ch.type, id);
-    }
-  }
 
   private static formatTimestamp(ts: number): string {
     const d = new Date(ts);
@@ -1307,7 +1285,7 @@ export class SocialScreen implements Screen {
     if (!msgContainer) return;
 
     const wasAtBottom = msgContainer.scrollTop + msgContainer.clientHeight >= msgContainer.scrollHeight - 20;
-    const filtered = this.chatMessages.filter(m => this.chatFilters.has(m.channelType));
+    const filtered = this.chatStore.getFiltered(this.chatFilters, this.lastSocial?.blockedUsers);
 
     msgContainer.innerHTML = filtered.length === 0
       ? '<div class="social-empty">No messages yet</div>'
@@ -1319,11 +1297,8 @@ export class SocialScreen implements Screen {
   }
 
   private renderChatPanel(): void {
-    // Load history on first render
-    this.loadAllChatHistory();
-
-    // Filter messages by enabled channel types
-    const filtered = this.chatMessages.filter(m => this.chatFilters.has(m.channelType));
+    // Filter messages by enabled channel types and blocked users
+    const filtered = this.chatStore.getFiltered(this.chatFilters, this.lastSocial?.blockedUsers);
 
     // Build send channel options — all shown, some disabled based on context
     const social = this.lastSocial;
@@ -1391,6 +1366,14 @@ export class SocialScreen implements Screen {
   /** Append a single chat message to the existing DOM without full re-render. */
   private appendChatMessage(msg: ChatMessage): void {
     if (!this.chatFilters.has(msg.channelType)) return;
+
+    // Client-side block filtering
+    const blockedUsers = this.lastSocial?.blockedUsers;
+    if (blockedUsers && msg.senderUsername in blockedUsers) {
+      const level = blockedUsers[msg.senderUsername];
+      if (level === 'all') return;
+      if (level === 'dm' && msg.channelType === 'dm') return;
+    }
 
     const msgContainer = this.panelContainer.querySelector('.social-chat-messages');
     if (!msgContainer) return;

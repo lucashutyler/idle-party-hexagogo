@@ -119,7 +119,6 @@ export interface ClientSocialState {
 export interface ChatPreferences {
   sendChannel: ChatChannelType;
   dmTarget: string;
-  filters?: ChatChannelType[];
 }
 
 // --- Client -> Server messages ---
@@ -222,10 +221,9 @@ export interface ClientSendChatMessage {
   text: string;
 }
 
-export interface ClientRequestChatHistoryMessage {
-  type: 'request_chat_history';
-  channelType: ChatChannelType;
-  channelId: string;
+export interface ClientSyncChatMessage {
+  type: 'sync_chat';
+  sinceId?: string;
 }
 
 export interface ClientBlockUserMessage {
@@ -285,7 +283,7 @@ export type ClientSocialMessage =
   | ClientAcceptPartyInviteMessage
   | ClientDeclinePartyInviteMessage
   | ClientSendChatMessage
-  | ClientRequestChatHistoryMessage
+  | ClientSyncChatMessage
   | ClientBlockUserMessage
   | ClientUnblockUserMessage
   | ClientSetChatPreferencesMessage
@@ -305,11 +303,10 @@ export interface ServerChatMessageMessage {
   message: ChatMessage;
 }
 
-export interface ServerChatHistoryMessage {
-  type: 'chat_history';
-  channelType: ChatChannelType;
-  channelId: string;
+export interface ServerSyncChatMessage {
+  type: 'sync_chat';
   messages: ChatMessage[];
+  full: boolean;
 }
 
 export interface ServerTradeProposedMessage {
