@@ -1,5 +1,7 @@
 # Idle Party RPG
 
+**Play now at [play.idlepartyrpg.com](https://play.idlepartyrpg.com)**
+
 An idle multiplayer RPG on a hexagonal world map. Characters fight, move, and progress whether you're online or not. Party up with other players — every class is stronger together.
 
 ## Quick Start (Development)
