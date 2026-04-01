@@ -139,6 +139,8 @@ export interface ServerStateMessage {
   social?: ClientSocialState;
   /** Item definitions for items the player currently owns (inventory + equipment). */
   itemDefinitions: Record<string, ItemDefinition>;
+  /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
+  serverVersion: string;
 }
 
 export interface ClientMoveMessage {

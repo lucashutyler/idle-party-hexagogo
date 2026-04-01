@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.03.31.1',
+    notes: [
+      'Added Sign Out button in Settings',
+    ],
+  },
+  {
     version: '2026.03.29.1',
     notes: [
       'Added Run button — escape combat after 5 rounds (no rewards)',

@@ -38,6 +38,9 @@ export class GameClient {
   /** Most recent state from the server (null until first message). */
   lastState: ServerStateMessage | null = null;
 
+  /** Server version from first state message — reload if it changes. */
+  private knownServerVersion: string | null = null;
+
   constructor() {
     const host = window.location.hostname || 'localhost';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -126,6 +129,15 @@ export class GameClient {
         const msg = JSON.parse(event.data as string);
 
         if (msg.type === 'state') {
+          if (msg.serverVersion) {
+            if (this.knownServerVersion === null) {
+              this.knownServerVersion = msg.serverVersion;
+            } else if (msg.serverVersion !== this.knownServerVersion) {
+              console.log('[GameClient] Server version changed, reloading...');
+              location.reload();
+              return;
+            }
+          }
           this.lastState = msg;
 
           // Resolve pending connect on first state message
