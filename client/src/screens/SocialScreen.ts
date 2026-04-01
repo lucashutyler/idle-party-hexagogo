@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem } from '@idle-party-rpg/shared';
 import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, EQUIP_SLOTS, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
@@ -48,7 +48,7 @@ export class SocialScreen implements Screen {
   // Trade modal
   private tradeModalEl: HTMLElement | null = null;
   private tradePickingItem = false;
-  private tradeSelectedItemId: string | null = null;
+  private tradeSelectedItems = new Map<string, number>(); // itemId → quantity
 
   // Grid drag-to-reposition state
   private gridDragging = false;
@@ -1408,9 +1408,8 @@ export class SocialScreen implements Screen {
 
   /** Open the trade modal and propose a trade with the given user. */
   openTradeModal(targetUsername: string): void {
-    // Modal stays open until trade ends — pick item first
     this.tradePickingItem = true;
-    this.tradeSelectedItemId = null;
+    this.tradeSelectedItems = new Map();
     this.renderTradeModal(targetUsername);
   }
 
@@ -1461,35 +1460,47 @@ export class SocialScreen implements Screen {
         return;
       }
 
-      if (btn.matches('.trade-modal-pick-btn')) {
-        this.tradePickingItem = true;
-        this.updateTradeModal();
+      if (btn.matches('.trade-qty-inc')) {
+        const itemId = btn.getAttribute('data-item-id');
+        if (!itemId) return;
+        const inventory = this.lastState?.character?.inventory ?? {};
+        const maxQty = (inventory[itemId] as number) ?? 0;
+        const current = this.tradeSelectedItems.get(itemId) ?? 0;
+        console.log('[Trade] +1', itemId, `(${current} → ${Math.min(current + 1, maxQty)})`);
+        if (current < maxQty) {
+          this.tradeSelectedItems.set(itemId, current + 1);
+          this.updateTradeModal();
+        }
         return;
       }
 
-      if (btn.matches('.trade-item-option')) {
+      if (btn.matches('.trade-qty-dec')) {
         const itemId = btn.getAttribute('data-item-id');
         if (!itemId) return;
-        console.log('[Trade] Item selected:', itemId);
-        this.tradePickingItem = false;
-        this.tradeSelectedItemId = itemId;
-        const trade = this.lastSocial?.pendingTrade;
-        if (trade) {
-          // Target countering with their item
-          this.gameClient.sendCounterTrade(itemId);
+        const current = this.tradeSelectedItems.get(itemId) ?? 0;
+        if (current > 1) {
+          this.tradeSelectedItems.set(itemId, current - 1);
+        } else {
+          this.tradeSelectedItems.delete(itemId);
         }
         this.updateTradeModal();
         return;
       }
 
-      if (btn.matches('.trade-confirm-propose-btn')) {
-        const target = overlay.getAttribute('data-trade-target') ?? '';
-        const itemId = this.tradeSelectedItemId;
-        if (itemId && target) {
-          console.log('[Trade] Proposing trade with', target, 'item:', itemId);
-          this.gameClient.sendProposeTrade(target, itemId);
-          this.tradePickingItem = false;
-          this.updateTradeModal();
+      if (btn.matches('.trade-send-btn')) {
+        const items: TradeOfferItem[] = Array.from(this.tradeSelectedItems.entries())
+          .map(([itemId, quantity]) => ({ itemId, quantity }));
+        if (items.length === 0) return;
+        const trade = this.lastSocial?.pendingTrade;
+        const selfUsername = this.lastState?.username ?? '';
+        if (trade && trade.status === 'pending' && trade.initiator.username !== selfUsername) {
+          // We're the target — counter
+          this.gameClient.sendCounterTrade(items);
+        } else {
+          // We're the initiator — propose
+          const target = overlay.getAttribute('data-trade-target') ?? '';
+          if (!target) return;
+          this.gameClient.sendProposeTrade(target, items);
         }
         return;
       }
@@ -1511,119 +1522,154 @@ export class SocialScreen implements Screen {
 
     const trade = this.lastSocial?.pendingTrade;
     const selfUsername = this.lastState?.username ?? '';
-    const items = this.lastState?.itemDefinitions ?? {};
+    const itemDefs = this.lastState?.itemDefinitions ?? {};
     const inventory = this.lastState?.character?.inventory ?? {};
     const targetUsername = trade
-      ? (trade.initiator.username === selfUsername ? (trade.target?.username ?? overlay.getAttribute('data-trade-target') ?? '') : trade.initiator.username)
+      ? (trade.initiator.username === selfUsername
+        ? (trade.target?.username ?? overlay.getAttribute('data-trade-target') ?? '')
+        : trade.initiator.username)
       : (overlay.getAttribute('data-trade-target') ?? '');
 
-    // If trade was cancelled or completed, close modal
+    // Close if trade ended
     if (trade?.status === 'cancelled' || trade?.status === 'confirmed') {
       this.dismissTradeModal();
       return;
     }
 
-    // If no active trade and we're not picking, close
-    if (!trade && !this.tradePickingItem) {
+    // Close if no trade and nothing selected (shouldn't happen normally but guard anyway)
+    if (!trade && !this.tradePickingItem && this.tradeSelectedItems.size === 0) {
       this.dismissTradeModal();
       return;
     }
 
-    // Tradeable items: unequipped items with count > 0
+    const isSelfInitiator = trade ? trade.initiator.username === selfUsername : true;
+
+    // Tradeable items: unequipped inventory items
     const equipped = this.lastState?.character?.equipment ?? {};
     const equippedIds = new Set(Object.values(equipped).filter(Boolean) as string[]);
     const tradeableItems = Object.entries(inventory)
       .filter(([id, count]) => (count as number) > 0 && !equippedIds.has(id))
       .map(([id]) => id);
 
-    const renderItemCard = (itemId: string | null | undefined, label: string): string => {
-      if (!itemId) return `<div class="trade-item-card trade-item-empty"><div class="trade-item-label">${label}</div><div class="trade-item-none">No item selected</div></div>`;
-      const def = items[itemId];
-      if (!def) return `<div class="trade-item-card"><div class="trade-item-label">${label}</div><div class="trade-item-name">${this.escapeHtml(itemId)}</div></div>`;
-      const color = SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-      const effect = getItemEffectText(def);
-      return `<div class="trade-item-card">
-        <div class="trade-item-label">${label}</div>
-        <div class="trade-item-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
-        <div class="trade-item-rarity" style="color:${color}">${def.rarity}</div>
-        <div class="trade-item-effect">${this.escapeHtml(effect)}</div>
-      </div>`;
+    /** Render a card showing a list of offered items. */
+    const renderOfferCard = (offerItems: TradeOfferItem[], label: string): string => {
+      if (offerItems.length === 0) {
+        return `<div class="trade-item-card trade-item-empty">
+          <div class="trade-item-label">${label}</div>
+          <div class="trade-item-none">Nothing yet</div>
+        </div>`;
+      }
+      const rows = offerItems.map(({ itemId, quantity }) => {
+        const def = itemDefs[itemId];
+        const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+        const effect = def ? getItemEffectText(def) : '';
+        return `<div class="trade-offer-row">
+          <span class="trade-offer-name" style="color:${color}">${this.escapeHtml(def?.name ?? itemId)}</span>
+          <span class="trade-offer-qty">×${quantity}</span>
+          ${effect ? `<span class="trade-offer-effect">${this.escapeHtml(effect)}</span>` : ''}
+        </div>`;
+      }).join('');
+      return `<div class="trade-item-card"><div class="trade-item-label">${label}</div>${rows}</div>`;
     };
 
-    // Determine what each side has offered
-    const isSelfInitiator = trade ? trade.initiator.username === selfUsername : true;
-    const selfOffer = trade
-      ? (isSelfInitiator ? trade.initiator.itemId : (trade.target?.itemId ?? null))
-      : this.tradeSelectedItemId;
-    const partnerOffer = trade
-      ? (isSelfInitiator ? (trade.target?.itemId ?? null) : trade.initiator.itemId)
-      : null;
+    /** Render the +/- quantity picker list. */
+    const renderPicker = (): string => {
+      if (tradeableItems.length === 0) {
+        return '<div class="trade-picker-list"><div class="trade-empty">No tradeable items in inventory</div></div>';
+      }
+      const rows = tradeableItems.map(id => {
+        const def = itemDefs[id];
+        const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+        const invCount = (inventory[id] as number) ?? 0;
+        const selQty = this.tradeSelectedItems.get(id) ?? 0;
+        const effect = def ? getItemEffectText(def) : '';
+        return `<div class="trade-picker-row">
+          <div class="trade-picker-info">
+            <span class="trade-item-name" style="color:${color}">${this.escapeHtml(def?.name ?? id)}</span>
+            ${effect ? `<span class="trade-item-effect-small">${this.escapeHtml(effect)}</span>` : ''}
+          </div>
+          <div class="trade-picker-qty">
+            <span class="trade-item-count">×${invCount}</span>
+            <button class="trade-qty-dec" data-item-id="${this.escapeHtml(id)}"${selQty === 0 ? ' disabled' : ''}>−</button>
+            <span class="trade-qty-val">${selQty}</span>
+            <button class="trade-qty-inc" data-item-id="${this.escapeHtml(id)}"${selQty >= invCount ? ' disabled' : ''}>+</button>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="trade-picker-list">${rows}</div>`;
+    };
 
-    let actionHtml = '';
-    if (this.tradePickingItem) {
-      // Item picker list
-      const pickerHtml = tradeableItems.length === 0
-        ? '<div class="trade-empty">No tradeable items in inventory</div>'
-        : tradeableItems.map(id => {
-          const def = items[id];
-          const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
-          const count = inventory[id] ?? 0;
-          const effect = def ? getItemEffectText(def) : '';
-          return `<button class="trade-item-option" data-item-id="${this.escapeHtml(id)}">
-            <span style="color:${color}">${this.escapeHtml(def?.name ?? id)}</span>
-            <span class="trade-item-count">x${count}</span>
-            <span class="trade-item-effect-small">${this.escapeHtml(effect)}</span>
-          </button>`;
-        }).join('');
-      actionHtml = `<div class="trade-picker"><div class="trade-picker-label">Select an item to offer:</div><div class="trade-picker-list">${pickerHtml}</div></div>`;
-    } else if (!trade) {
-      // Picked item, not yet sent — show confirm to propose
-      actionHtml = `
+    const selItems: TradeOfferItem[] = Array.from(this.tradeSelectedItems.entries())
+      .map(([itemId, quantity]) => ({ itemId, quantity }));
+    const hasSelection = selItems.length > 0;
+
+    let html = `<div class="trade-modal-header">Trade with ${this.escapeHtml(targetUsername)}</div>`;
+
+    if (!trade) {
+      // Initiator pre-propose: full picker + live offer summary + send button
+      html += `
+        <div class="trade-picker-label">Select items to offer:</div>
+        ${renderPicker()}
+        ${renderOfferCard(selItems, 'Your offer')}
         <div class="trade-actions">
-          <button class="social-action-btn trade-modal-pick-btn">Change Item</button>
-          <button class="social-action-btn add-friend trade-confirm-propose-btn">Propose Trade</button>
+          <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Send Trade</button>
           <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
         </div>`;
-    } else if (trade.status === 'pending' && !isSelfInitiator && !trade.target) {
-      // We received a proposal — need to counter with our item
-      actionHtml = `
-        <div class="trade-status">Trade proposed! Select your item to counter.</div>
+    } else if (trade.status === 'pending' && isSelfInitiator) {
+      // Waiting for target to respond
+      html += `
+        <div class="trade-offers">
+          ${renderOfferCard(trade.initiator.items, 'Your offer')}
+          ${renderOfferCard([], `${this.escapeHtml(targetUsername)}'s offer`)}
+        </div>
+        <div class="trade-status">Waiting for ${this.escapeHtml(targetUsername)} to respond...</div>
         <div class="trade-actions">
-          <button class="social-action-btn trade-modal-pick-btn">Select My Item</button>
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+        </div>`;
+    } else if (trade.status === 'pending' && !isSelfInitiator) {
+      // Target: see initiator's offer, pick counter items
+      html += `
+        <div class="trade-offers">
+          ${renderOfferCard(trade.initiator.items, `${this.escapeHtml(targetUsername)} offers`)}
+          ${renderOfferCard(selItems, 'Your counter')}
+        </div>
+        <div class="trade-picker-label">Select items to counter with:</div>
+        ${renderPicker()}
+        <div class="trade-actions">
+          <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Send Back</button>
           <button class="social-action-btn remove-friend trade-modal-cancel-btn">Decline</button>
         </div>`;
     } else if (trade.status === 'countered' && isSelfInitiator) {
-      // Partner countered — we can confirm or cancel
-      actionHtml = `
-        <div class="trade-status">Partner offered an item. Confirm the trade?</div>
+      // Confirm: see both offers side by side
+      html += `
+        <div class="trade-offers">
+          ${renderOfferCard(trade.initiator.items, 'Your offer')}
+          <div class="trade-vs">⇄</div>
+          ${renderOfferCard(trade.target!.items, `${this.escapeHtml(targetUsername)}'s offer`)}
+        </div>
         <div class="trade-actions">
           <button class="social-action-btn add-friend trade-modal-confirm-btn">Confirm Trade</button>
           <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
         </div>`;
     } else if (trade.status === 'countered' && !isSelfInitiator) {
-      // We countered — waiting for initiator
-      actionHtml = `
-        <div class="trade-status">Waiting for ${this.escapeHtml(trade.initiator.username)} to confirm...</div>
+      // Waiting for initiator to confirm
+      html += `
+        <div class="trade-offers">
+          ${renderOfferCard(trade.target!.items, 'Your offer')}
+          <div class="trade-vs">⇄</div>
+          ${renderOfferCard(trade.initiator.items, `${this.escapeHtml(targetUsername)}'s offer`)}
+        </div>
+        <div class="trade-status">Waiting for ${this.escapeHtml(targetUsername)} to confirm...</div>
         <div class="trade-actions">
           <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
         </div>`;
     } else {
-      actionHtml = `
-        <div class="trade-actions">
-          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
-        </div>`;
+      html += `<div class="trade-actions">
+        <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+      </div>`;
     }
 
-    modal.innerHTML = `
-      <div class="trade-modal-header">Trade with ${this.escapeHtml(targetUsername)}</div>
-      <div class="trade-offers">
-        ${renderItemCard(selfOffer, 'Your offer')}
-        <div class="trade-vs">⇄</div>
-        ${renderItemCard(partnerOffer, `${this.escapeHtml(targetUsername)}'s offer`)}
-      </div>
-      ${actionHtml}
-    `;
-
+    modal.innerHTML = html;
   }
 
   dismissTradeModal(): void {
@@ -1632,7 +1678,7 @@ export class SocialScreen implements Screen {
       this.tradeModalEl = null;
     }
     this.tradePickingItem = false;
-    this.tradeSelectedItemId = null;
+    this.tradeSelectedItems = new Map();
   }
 
   private escapeHtml(s: string): string {

@@ -13,6 +13,7 @@ import {
   calculateBaseDamage,
   xpForNextLevel,
   computeEquipmentBonuses,
+  MAX_STACK,
   addItemToInventory,
   equipItem,
   unequipItem,
@@ -364,6 +365,27 @@ export class PlayerSession {
   /** Add one item to the unequipped inventory. Returns false if stack is full (MAX_STACK). */
   addOneToInventory(itemId: string): boolean {
     return addItemToInventory(this.character.inventory, itemId);
+  }
+
+  /** Remove `quantity` items from the unequipped inventory. Returns false if insufficient. */
+  removeFromInventory(itemId: string, quantity: number): boolean {
+    const current = this.character.inventory[itemId] ?? 0;
+    if (current < quantity) return false;
+    const newCount = current - quantity;
+    if (newCount === 0) {
+      delete this.character.inventory[itemId];
+    } else {
+      this.character.inventory[itemId] = newCount;
+    }
+    return true;
+  }
+
+  /** Add `quantity` items to the unequipped inventory. Returns false if it would exceed MAX_STACK. */
+  addToInventory(itemId: string, quantity: number): boolean {
+    const current = this.character.inventory[itemId] ?? 0;
+    if (current + quantity > MAX_STACK) return false;
+    this.character.inventory[itemId] = current + quantity;
+    return true;
   }
 
   getLevel(): number { return this.character.level; }

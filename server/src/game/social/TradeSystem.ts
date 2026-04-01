@@ -1,18 +1,18 @@
-import type { TradeState, TradeOffer } from '@idle-party-rpg/shared';
+import type { TradeState, TradeOffer, TradeOfferItem } from '@idle-party-rpg/shared';
 import { MAX_STACK } from '@idle-party-rpg/shared';
 
 /**
  * TradeSystem manages peer-to-peer item trades.
  *
  * Trade lifecycle:
- *   pending   — initiator proposed with an item; waiting for target to counter
- *   countered — target accepted and locked in their own item; waiting for initiator to confirm
+ *   pending   — initiator proposed items; waiting for target to counter
+ *   countered — target locked in their items; waiting for initiator to confirm
  *   confirmed — initiator confirmed; caller executes the atomic item swap
  *   cancelled — any cancellation (moved tiles, disconnected, explicit cancel)
  *
  * Rules:
  *   - Both players must be on the same tile
- *   - Both players offer exactly one unequipped inventory item
+ *   - Each player offers at least one unequipped inventory item (with quantities)
  *   - A player can only have one pending trade at a time
  *   - Blocked users cannot trade with each other
  *   - Trades cancel automatically on movement or disconnect (wired by PlayerManager)
@@ -42,37 +42,35 @@ export class TradeSystem {
   /**
    * Propose a trade. Returns the new TradeState or an error string.
    *
-   * Validates:
-   * - Not trading with self
-   * - Neither player is blocked by the other
-   * - Both players are on the same tile
-   * - Neither player has an existing pending trade
-   * - The item exists in the initiator's inventory (unequipped items only — equipped items
-   *   are removed from inventory, so inventory[itemId] > 0 implies it is not equipped)
+   * `hasItemInInventory(username, itemId, quantity)` must return true iff the player
+   * has at least `quantity` of `itemId` in their unequipped inventory.
    */
   proposeTrade(
     initiatorUsername: string,
     targetUsername: string,
-    itemId: string,
-    hasItemInInventory: (u: string, itemId: string) => boolean,
+    items: TradeOfferItem[],
+    hasItemInInventory: (u: string, itemId: string, quantity: number) => boolean,
     areSameTile: (a: string, b: string) => boolean,
     isBlocked: (a: string, b: string) => boolean,
   ): TradeState | string {
     if (initiatorUsername === targetUsername) return 'Cannot trade with yourself';
     if (isBlocked(initiatorUsername, targetUsername)) return 'Cannot trade with a blocked user';
-
     if (!areSameTile(initiatorUsername, targetUsername)) return 'You must be in the same room to trade';
-
     if (this.playerTrade.has(initiatorUsername)) return 'You already have a pending trade';
     if (this.playerTrade.has(targetUsername)) return 'That player already has a pending trade';
 
-    if (!hasItemInInventory(initiatorUsername, itemId)) return 'Item not found in your inventory';
+    if (!Array.isArray(items) || items.length === 0) return 'Must offer at least one item';
+    for (const { itemId, quantity } of items) {
+      if (!hasItemInInventory(initiatorUsername, itemId, quantity)) {
+        return 'Item not found in your inventory';
+      }
+    }
 
     const id = generateTradeId();
     const trade: TradeState = {
       id,
       status: 'pending',
-      initiator: { username: initiatorUsername, itemId },
+      initiator: { username: initiatorUsername, items },
       target: null,
       timestamp: Date.now(),
     };
@@ -91,8 +89,8 @@ export class TradeSystem {
    */
   counterTrade(
     targetUsername: string,
-    itemId: string,
-    hasItemInInventory: (u: string, itemId: string) => boolean,
+    items: TradeOfferItem[],
+    hasItemInInventory: (u: string, itemId: string, quantity: number) => boolean,
     areSameTile: (a: string, b: string) => boolean,
   ): TradeState | string {
     const tradeId = this.playerTrade.get(targetUsername);
@@ -104,9 +102,15 @@ export class TradeSystem {
     if (trade.status !== 'pending') return 'Trade is not awaiting an offer';
 
     if (!areSameTile(trade.initiator.username, targetUsername)) return 'You are no longer in the same room';
-    if (!hasItemInInventory(targetUsername, itemId)) return 'Item not found in your inventory';
 
-    trade.target = { username: targetUsername, itemId };
+    if (!Array.isArray(items) || items.length === 0) return 'Must offer at least one item';
+    for (const { itemId, quantity } of items) {
+      if (!hasItemInInventory(targetUsername, itemId, quantity)) {
+        return 'Item not found in your inventory';
+      }
+    }
+
+    trade.target = { username: targetUsername, items };
     trade.status = 'countered';
 
     return trade;
@@ -116,15 +120,17 @@ export class TradeSystem {
    * Confirm a trade (initiator confirms after seeing the target's offer).
    * Re-validates item presence and stack capacity for both players at confirm time.
    *
+   * Stack check uses net change per itemId (same itemId in both offers partially cancel out).
+   *
    * Returns:
    *   - `{ trade, initiatorOffer, targetOffer }` on success — caller executes the atomic item swap
-   *   - `ConfirmTradeFailure` if either player's inventory cannot accept the incoming item (stack full)
+   *   - `ConfirmTradeFailure` if either player's inventory cannot accept incoming items (stack full)
    *     → trade is left in `countered` state so both players can modify or cancel
    *   - `string` for other validation errors (sent only to the initiator)
    */
   confirmTrade(
     initiatorUsername: string,
-    hasItemInInventory: (u: string, itemId: string) => boolean,
+    hasItemInInventory: (u: string, itemId: string, quantity: number) => boolean,
     areSameTile: (a: string, b: string) => boolean,
     getInventoryCount: (u: string, itemId: string) => number,
   ): { trade: TradeState; initiatorOffer: TradeOffer; targetOffer: TradeOffer } | ConfirmTradeFailure | string {
@@ -137,31 +143,57 @@ export class TradeSystem {
     if (trade.status !== 'countered') return 'Waiting for the other player to offer an item first';
     if (!trade.target) return 'Trade has no target offer';
 
-    // Re-validate same tile at confirm time (not just at propose time)
     if (!areSameTile(initiatorUsername, trade.target.username)) return 'You are no longer in the same room';
 
-    // Re-validate item presence at confirm time (not just at propose time)
-    if (!hasItemInInventory(initiatorUsername, trade.initiator.itemId)) {
-      return 'Your offered item is no longer in your inventory';
+    // Re-validate item presence with required quantities
+    for (const { itemId, quantity } of trade.initiator.items) {
+      if (!hasItemInInventory(initiatorUsername, itemId, quantity)) {
+        return 'Your offered item is no longer in your inventory';
+      }
     }
-    if (!hasItemInInventory(trade.target.username, trade.target.itemId)) {
-      return 'Their offered item is no longer in their inventory';
+    for (const { itemId, quantity } of trade.target.items) {
+      if (!hasItemInInventory(trade.target.username, itemId, quantity)) {
+        return 'Their offered item is no longer in their inventory';
+      }
     }
 
     const initiatorOffer: TradeOffer = { ...trade.initiator };
     const targetOffer: TradeOffer = { ...trade.target };
 
-    // Stack capacity check — must run before mutating state so the trade stays
-    // recoverable if it fails. When both sides offer the same itemId the net
-    // change for each player is zero (give 1, receive 1), so no check is needed.
-    if (initiatorOffer.itemId !== targetOffer.itemId) {
-      if (getInventoryCount(initiatorUsername, targetOffer.itemId) + 1 > MAX_STACK) {
-        return { success: false, reason: 'inventory_full', affectedPlayer: 'initiator' };
+    // Stack capacity check using net change per itemId.
+    // For initiator: they lose initiatorOffer items, gain targetOffer items.
+    // For target: they lose targetOffer items, gain initiatorOffer items.
+    // Only check items with a positive net change (gaining more than giving of same type).
+    const checkStackCapacity = (
+      receiver: string,
+      receiving: TradeOfferItem[],
+      sending: TradeOfferItem[],
+      affectedPlayer: 'initiator' | 'target',
+    ): ConfirmTradeFailure | null => {
+      const sendMap = new Map<string, number>();
+      for (const { itemId, quantity } of sending) {
+        sendMap.set(itemId, (sendMap.get(itemId) ?? 0) + quantity);
       }
-      if (getInventoryCount(targetOffer.username, initiatorOffer.itemId) + 1 > MAX_STACK) {
-        return { success: false, reason: 'inventory_full', affectedPlayer: 'target' };
+      for (const { itemId, quantity } of receiving) {
+        const netGain = quantity - (sendMap.get(itemId) ?? 0);
+        if (netGain > 0) {
+          if (getInventoryCount(receiver, itemId) + netGain > MAX_STACK) {
+            return { success: false, reason: 'inventory_full', affectedPlayer };
+          }
+        }
       }
-    }
+      return null;
+    };
+
+    const initiatorFail = checkStackCapacity(
+      initiatorUsername, targetOffer.items, initiatorOffer.items, 'initiator',
+    );
+    if (initiatorFail) return initiatorFail;
+
+    const targetFail = checkStackCapacity(
+      targetOffer.username, initiatorOffer.items, targetOffer.items, 'target',
+    );
+    if (targetFail) return targetFail;
 
     trade.status = 'confirmed';
     this.cleanupTrade(tradeId);

@@ -262,6 +262,7 @@ export type {
   ServerChatMessageMessage,
   ServerSyncChatMessage,
   TradeStatus,
+  TradeOfferItem,
   TradeOffer,
   TradeState,
   ClientProposeTradeMessage,

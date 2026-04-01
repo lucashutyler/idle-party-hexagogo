@@ -52,9 +52,14 @@ export interface PartyInvite {
 // --- Trade System ---
 export type TradeStatus = 'pending' | 'countered' | 'confirmed' | 'cancelled';
 
+export interface TradeOfferItem {
+  itemId: string;
+  quantity: number;
+}
+
 export interface TradeOffer {
   username: string;
-  itemId: string;
+  items: TradeOfferItem[];
 }
 
 export interface TradeState {
@@ -241,12 +246,12 @@ export interface ClientSetChatPreferencesMessage {
 export interface ClientProposeTradeMessage {
   type: 'propose_trade';
   targetUsername: string;
-  itemId: string;
+  items: TradeOfferItem[];
 }
 
 export interface ClientCounterTradeMessage {
   type: 'counter_trade';
-  itemId: string;
+  items: TradeOfferItem[];
 }
 
 export interface ClientConfirmTradeMessage {
