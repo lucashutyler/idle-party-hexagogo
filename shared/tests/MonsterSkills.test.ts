@@ -76,12 +76,12 @@ describe('Monster Resistances', () => {
       expect(result).toBe(70);
     });
 
-    it('floors at minimum 1', () => {
+    it('floors at minimum 0 (full block is allowed)', () => {
       const resistances: Resistance[] = [
         { damageType: 'physical', flatReduction: 1000, percentReduction: 99 },
       ];
       const result = applyMonsterResistance(10, 'physical', resistances);
-      expect(result).toBe(1);
+      expect(result).toBe(0);
     });
 
     it('handles holy damage type', () => {

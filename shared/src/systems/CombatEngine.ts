@@ -421,7 +421,7 @@ export function applyMonsterResistance(
   damage = damage * (1 - res.percentReduction / 100);
   // Flat reduction (negative = extra damage)
   damage = damage - res.flatReduction;
-  return Math.max(1, Math.floor(damage));
+  return Math.max(0, Math.floor(damage));
 }
 
 // --- Combat Helpers ---

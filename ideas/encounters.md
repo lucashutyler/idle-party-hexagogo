@@ -147,7 +147,7 @@ interface MonsterDefinition {
 **Resistance application order** (per incoming hit):
 1. Apply `percentReduction` first: `damage = damage * (1 - percentReduction / 100)`
 2. Apply `flatReduction` second: `damage = damage - flatReduction`
-3. Floor at 1 (minimum 1 damage)
+3. Floor at 0 (monsters can fully block damage)
 
 Only the resistance matching the incoming `damageType` applies. Holy is its own type (not lumped with magical for monster resistance purposes — that simplification was only for player-side Priest Bless).
 
