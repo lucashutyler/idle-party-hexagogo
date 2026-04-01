@@ -28,6 +28,7 @@ export class PlayerManager {
   readonly trades: TradeSystem;
   readonly partyBattles: PartyBattleManager;
   private getAllUsernames: () => string[];
+  private readonly serverVersion = Date.now().toString();
 
   constructor(grid: HexGrid, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore) {
     this.grid = grid;
@@ -293,7 +294,7 @@ export class PlayerManager {
     if (!session) return;
 
     const otherPlayers = this.getOtherPlayers(username);
-    const state = JSON.stringify({ type: 'state' as const, ...session.getState(otherPlayers) });
+    const state = JSON.stringify({ type: 'state' as const, ...session.getState(otherPlayers), serverVersion: this.serverVersion });
 
     for (const ws of wsSet) {
       if (ws.readyState === WebSocket.OPEN) {

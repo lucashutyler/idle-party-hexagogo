@@ -253,7 +253,7 @@ export class PlayerSession {
     return defs;
   }
 
-  getState(otherPlayers: OtherPlayerState[]): Omit<ServerStateMessage, 'type'> {
+  getState(otherPlayers: OtherPlayerState[]): Omit<ServerStateMessage, 'type' | 'serverVersion'> {
     const battleState = this.getBattleState?.();
     const partyState = this.getPartyPositionState?.();
     const partyZone = this.getPartyZone?.();
