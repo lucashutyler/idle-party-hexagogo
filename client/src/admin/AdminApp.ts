@@ -1045,12 +1045,13 @@ export class AdminApp {
     ).join('');
 
     const skillDef = MONSTER_SKILL_CATALOG[entry.skillId];
-    const info = skillDef ? `CD:${skillDef.cooldown} ${skillDef.targeting}` : '';
+    const info = skillDef ? `${skillDef.targeting} / ${skillDef.effect}` : '';
 
     return `
       <div class="monster-skill-row" data-index="${index}">
         <select class="mf-skill-id">${options}</select>
         <label>Value<input type="number" class="mf-skill-value" value="${entry.value}" min="1"></label>
+        <label>CD<input type="number" class="mf-skill-cd" value="${entry.cooldown}" min="1"></label>
         <span class="mf-skill-info">${info}</span>
         <button class="admin-btn admin-btn-sm admin-btn-danger mf-skill-remove">X</button>
       </div>
@@ -1088,7 +1089,8 @@ export class AdminApp {
       if (!list) return;
       const index = list.querySelectorAll('.monster-skill-row').length;
       const firstSkillId = Object.keys(MONSTER_SKILL_CATALOG)[0];
-      const html = this.renderMonsterSkillRow(index, { skillId: firstSkillId, value: 1 });
+      const defaultCd = MONSTER_SKILL_CATALOG[firstSkillId]?.cooldown ?? 3;
+      const html = this.renderMonsterSkillRow(index, { skillId: firstSkillId, value: 1, cooldown: defaultCd });
       list.insertAdjacentHTML('beforeend', html);
       this.wireSkillRemoveButtons();
     });
@@ -1180,7 +1182,8 @@ export class AdminApp {
     document.querySelectorAll('.monster-skill-row').forEach(row => {
       const skillId = (row.querySelector('.mf-skill-id') as HTMLSelectElement)?.value;
       const value = parseInt((row.querySelector('.mf-skill-value') as HTMLInputElement)?.value) || 1;
-      if (skillId) skills.push({ skillId, value });
+      const cooldown = parseInt((row.querySelector('.mf-skill-cd') as HTMLInputElement)?.value) || 3;
+      if (skillId) skills.push({ skillId, value, cooldown });
     });
 
     const monster: MonsterDefinition = {

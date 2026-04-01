@@ -13,6 +13,7 @@ export interface Resistance {
 export interface MonsterSkillEntry {
   skillId: string;
   value: number;
+  cooldown: number;
 }
 
 export interface MonsterDefinition {

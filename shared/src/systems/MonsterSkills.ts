@@ -7,7 +7,7 @@ export interface MonsterSkillDefinition {
   name: string;
   description: string;
   damageType?: DamageType;
-  targeting: 'aoe_all' | 'lowest_hp_enemy' | 'lowest_hp_ally' | 'all_class';
+  targeting: 'standard' | 'aoe_all' | 'lowest_hp_enemy' | 'lowest_hp_ally' | 'all_class';
   targetClasses?: string[];
   effect: 'damage' | 'stun' | 'dot' | 'heal';
   dotDuration?: number;
@@ -38,9 +38,9 @@ export const MONSTER_SKILL_CATALOG: Record<string, MonsterSkillDefinition> = {
   rot: {
     id: 'rot',
     name: 'Rot',
-    description: 'Applies a stacking magical DoT to the weakest enemy',
+    description: 'Applies a stacking magical DoT to the target in front',
     damageType: 'magical',
-    targeting: 'lowest_hp_enemy',
+    targeting: 'standard',
     effect: 'dot',
     dotDuration: 3,
     cooldown: 2,

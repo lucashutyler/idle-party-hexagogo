@@ -202,6 +202,7 @@ interface MonsterDefinition {
 interface MonsterSkillEntry {
   skillId: string;    // references MonsterSkillDefinition.id
   value: number;      // the X value for this monster's use of the skill
+  cooldown: number;   // cooldown in ticks (per-monster, not from catalog)
 }
 ```
 

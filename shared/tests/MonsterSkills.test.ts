@@ -142,7 +142,7 @@ describe('Monster Skills', () => {
         xp: 5,
         goldMin: 1,
         goldMax: 2,
-        skills: [{ skillId: 'fireball', value: 20 }],
+        skills: [{ skillId: 'fireball', value: 20, cooldown: 3 }],
       };
       const monster = createMonsterInstance(monsterDef, 4);
       const player1 = makePlayer('Alice', 4);
@@ -177,7 +177,7 @@ describe('Monster Skills', () => {
         xp: 5,
         goldMin: 1,
         goldMax: 2,
-        skills: [{ skillId: 'heal', value: 50 }],
+        skills: [{ skillId: 'heal', value: 50, cooldown: 2 }],
       };
       const woundedDef: MonsterDefinition = {
         id: 'wounded',
@@ -219,7 +219,7 @@ describe('Monster Skills', () => {
         xp: 5,
         goldMin: 1,
         goldMax: 2,
-        skills: [{ skillId: 'fireball', value: 5 }], // CD 3
+        skills: [{ skillId: 'fireball', value: 5, cooldown: 3 }],
       };
       const monster = createMonsterInstance(monsterDef, 4);
       const player = makePlayer('Alice', 4, { maxHp: 10000, currentHp: 10000 });
@@ -252,7 +252,7 @@ describe('Monster Skills', () => {
         xp: 5,
         goldMin: 1,
         goldMax: 2,
-        skills: [{ skillId: 'fear', value: 1 }],
+        skills: [{ skillId: 'fear', value: 1, cooldown: 3 }],
       };
       const monster = createMonsterInstance(monsterDef, 4);
       const archer = makePlayer('Archer', 4, { className: 'Archer' });

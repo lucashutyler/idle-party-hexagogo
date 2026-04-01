@@ -1642,8 +1642,8 @@ function tryExecuteMonsterSkill(
     const skillDef = MONSTER_SKILL_CATALOG[entry.skillId];
     if (!skillDef) continue;
 
-    // Set cooldown
-    monster.skillCooldowns[entry.skillId] = skillDef.cooldown;
+    // Set cooldown (per-monster, not from catalog)
+    monster.skillCooldowns[entry.skillId] = entry.cooldown;
 
     const alivePlayers = state.players.filter(p => p.currentHp > 0);
     const aliveMonsters = state.monsters.filter(m => m.currentHp > 0);
@@ -1713,26 +1713,29 @@ function tryExecuteMonsterSkill(
         };
       }
     } else if (skillDef.effect === 'dot') {
-      if (skillDef.targeting === 'lowest_hp_enemy') {
-        const target = alivePlayers.reduce((low, p) => p.currentHp < low.currentHp ? p : low, alivePlayers[0]);
-        if (target) {
-          const ticks = skillDef.dotDuration ?? 3;
-          target.dots.push({
-            sourceUsername: monster.name,
-            damagePerTick: Math.max(1, entry.value),
-            ticksRemaining: ticks,
-            damageType: skillDef.damageType ?? 'magical',
-          });
-          logEntries.push(`${monster.name} casts ${skillDef.name} on ${target.username}! (${entry.value} ${skillDef.damageType ?? 'magical'} damage/tick for ${ticks} ticks)`);
-          return {
-            attackerSide: 'monster',
-            attackerPos: monster.gridPosition,
-            targetPos: target.gridPosition,
-            targetSide: 'player',
-            dodged: false,
-            skillName: skillDef.name,
-          };
-        }
+      let target: PartyCombatant | undefined;
+      if (skillDef.targeting === 'standard') {
+        target = findTarget(monster.gridPosition, alivePlayers, true) ?? undefined;
+      } else if (skillDef.targeting === 'lowest_hp_enemy') {
+        target = alivePlayers.reduce((low, p) => p.currentHp < low.currentHp ? p : low, alivePlayers[0]);
+      }
+      if (target) {
+        const ticks = skillDef.dotDuration ?? 3;
+        target.dots.push({
+          sourceUsername: monster.name,
+          damagePerTick: Math.max(1, entry.value),
+          ticksRemaining: ticks,
+          damageType: skillDef.damageType ?? 'magical',
+        });
+        logEntries.push(`${monster.name} casts ${skillDef.name} on ${target.username}! (${entry.value} ${skillDef.damageType ?? 'magical'} damage/tick for ${ticks} ticks)`);
+        return {
+          attackerSide: 'monster',
+          attackerPos: monster.gridPosition,
+          targetPos: target.gridPosition,
+          targetSide: 'player',
+          dodged: false,
+          skillName: skillDef.name,
+        };
       }
     } else if (skillDef.effect === 'heal') {
       if (skillDef.targeting === 'lowest_hp_ally') {
