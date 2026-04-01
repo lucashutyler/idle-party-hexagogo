@@ -1,5 +1,14 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.03.31.2',
+    notes: [
+      'Overhauled the encounter system — monsters can now appear in mixed groups with randomized formations',
+      'Monsters can now have resistances and vulnerabilities to different damage types',
+      'Monsters can now use skills — watch out for fireballs, fear, and more',
+      'Look out for more dangerous and varied encounters coming soon!',
+    ],
+  },
+  {
     version: '2026.03.31.1',
     notes: [
       'Added Sign Out button in Settings',
