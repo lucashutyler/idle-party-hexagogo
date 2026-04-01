@@ -1,8 +1,9 @@
 import type { ClassName, DamageType } from './CharacterStats.js';
-import type { MonsterInstance } from './MonsterTypes.js';
+import type { MonsterInstance, Resistance, MonsterSkillEntry } from './MonsterTypes.js';
 import type { EquipmentBonuses } from './ItemTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type { SkillDefinition } from './SkillTypes.js';
+import { MONSTER_SKILL_CATALOG } from './MonsterSkills.js';
 
 // --- Types ---
 
@@ -100,6 +101,14 @@ export interface CombatMonster extends MonsterInstance {
   chaosActive: boolean;
   /** Whether Lullaby damage reduction is active. */
   lullabyReduction: number;
+  /** Monster resistances (copied from definition). */
+  resistances: Resistance[];
+  /** Monster skill entries (copied from definition). */
+  skills: MonsterSkillEntry[];
+  /** Cooldown ticks remaining per skill ID. */
+  skillCooldowns: Record<string, number>;
+  /** Number of attacks performed (for cooldown tracking). */
+  attackCount: number;
 }
 
 export interface CombatAction {
@@ -398,6 +407,23 @@ function hasArcaneSurge(player: PartyCombatant): boolean {
   return hasPassive(player, 'arcane_surge');
 }
 
+// --- Monster Resistance ---
+
+/** Apply monster resistance to incoming damage. Percent first, then flat, min 1. */
+export function applyMonsterResistance(
+  damage: number,
+  damageType: DamageType,
+  resistances: Resistance[],
+): number {
+  const res = resistances.find(r => r.damageType === damageType);
+  if (!res) return damage;
+  // Percent reduction first (negative = vulnerability)
+  damage = damage * (1 - res.percentReduction / 100);
+  // Flat reduction (negative = extra damage)
+  damage = damage - res.flatReduction;
+  return Math.max(0, Math.floor(damage));
+}
+
 // --- Combat Helpers ---
 
 function computeAttackBonus(equipBonuses?: EquipmentBonuses): number {
@@ -522,14 +548,23 @@ function applyDamageToMonster(
   isAoe: boolean,
   skillName?: string,
 ): void {
-  // Add Blessed Arms holy damage
-  const totalDamage = damage + state.blessedArmsDamage;
+  // Apply monster resistance to player's damage type
+  if (target.resistances.length > 0) {
+    damage = applyMonsterResistance(damage, player.playerDamageType, target.resistances);
+  }
+
+  // Add Blessed Arms holy damage (also subject to resistance)
+  let holyDamage = state.blessedArmsDamage;
+  if (holyDamage > 0 && target.resistances.length > 0) {
+    holyDamage = applyMonsterResistance(holyDamage, 'holy', target.resistances);
+  }
+  const totalDamage = damage + holyDamage;
   const prevHp = target.currentHp;
   target.currentHp = Math.max(0, target.currentHp - totalDamage);
 
   const verb = skillName ? `uses ${skillName} on` : 'hits';
-  if (state.blessedArmsDamage > 0 && damage > 0) {
-    logEntries.push(`${player.username} ${verb} ${target.name} for ${damage} ${player.playerDamageType} + ${state.blessedArmsDamage} holy damage`);
+  if (holyDamage > 0 && damage > 0) {
+    logEntries.push(`${player.username} ${verb} ${target.name} for ${damage} ${player.playerDamageType} + ${holyDamage} holy damage`);
   } else {
     logEntries.push(`${player.username} ${verb} ${target.name} for ${totalDamage} ${player.playerDamageType} damage`);
   }
@@ -756,6 +791,10 @@ export function createPartyCombatState(
     buffs: [],
     chaosActive: false,
     lullabyReduction: 0,
+    resistances: m.resistances ?? [],
+    skills: m.skills ?? [],
+    skillCooldowns: m.skillCooldowns ? { ...m.skillCooldowns } : {},
+    attackCount: 0,
   })).sort((a, b) => {
     const colDiff = getCol(a.gridPosition) - getCol(b.gridPosition);
     if (colDiff !== 0) return colDiff;
@@ -1417,6 +1456,23 @@ export function processPartyTick(state: PartyCombatState): TickResult {
         break;
       }
 
+      // Monster skill check: use first off-cooldown skill
+      monster.attackCount++;
+      if (monster.skills.length > 0) {
+        // Decrement all cooldowns
+        for (const key of Object.keys(monster.skillCooldowns)) {
+          if (monster.skillCooldowns[key] > 0) monster.skillCooldowns[key]--;
+        }
+
+        const skillResult = tryExecuteMonsterSkill(monster, state, logEntries);
+        if (skillResult) {
+          state.lastAction = skillResult;
+          state.turnIndex = (idx + 1) % totalCombatants;
+          acted = true;
+          break;
+        }
+      }
+
       // Normal monster attack on player
       let target = findTarget(monster.gridPosition, state.players, true);
 
@@ -1569,6 +1625,143 @@ export function processPartyTick(state: PartyCombatState): TickResult {
   }
 
   return { logEntries, finished: false, result: null };
+}
+
+/**
+ * Try to execute a monster skill. Returns the CombatAction if a skill was used, null otherwise.
+ */
+function tryExecuteMonsterSkill(
+  monster: CombatMonster,
+  state: PartyCombatState,
+  logEntries: string[],
+): CombatAction | null {
+  for (const entry of monster.skills) {
+    const cd = monster.skillCooldowns[entry.skillId] ?? 0;
+    if (cd > 0) continue;
+
+    const skillDef = MONSTER_SKILL_CATALOG[entry.skillId];
+    if (!skillDef) continue;
+
+    // Set cooldown (per-monster, not from catalog)
+    monster.skillCooldowns[entry.skillId] = entry.cooldown;
+
+    const alivePlayers = state.players.filter(p => p.currentHp > 0);
+    const aliveMonsters = state.monsters.filter(m => m.currentHp > 0);
+
+    if (skillDef.effect === 'damage') {
+      if (skillDef.targeting === 'aoe_all') {
+        // Damage all alive players
+        for (const p of alivePlayers) {
+          const dmg = Math.max(1, entry.value);
+          p.currentHp = Math.max(0, p.currentHp - dmg);
+          if (p.currentHp <= 0) {
+            if (!checkResurrection(p, state, logEntries)) {
+              logEntries.push(`${p.username} has fallen!`);
+            }
+          }
+        }
+        logEntries.push(`${monster.name} casts ${skillDef.name} for ${entry.value} ${skillDef.damageType ?? 'physical'} damage to all!`);
+        return {
+          attackerSide: 'monster',
+          attackerPos: monster.gridPosition,
+          targetPos: null,
+          targetSide: 'player',
+          dodged: false,
+          skillName: skillDef.name,
+        };
+      } else if (skillDef.targeting === 'lowest_hp_enemy') {
+        // Target lowest HP player
+        const target = alivePlayers.reduce((low, p) => p.currentHp < low.currentHp ? p : low, alivePlayers[0]);
+        if (target) {
+          const dmg = Math.max(1, entry.value);
+          target.currentHp = Math.max(0, target.currentHp - dmg);
+          logEntries.push(`${monster.name} uses ${skillDef.name} on ${target.username} for ${dmg} ${skillDef.damageType ?? 'physical'} damage!`);
+          if (target.currentHp <= 0) {
+            if (!checkResurrection(target, state, logEntries)) {
+              logEntries.push(`${target.username} has fallen!`);
+            }
+          }
+          return {
+            attackerSide: 'monster',
+            attackerPos: monster.gridPosition,
+            targetPos: target.gridPosition,
+            targetSide: 'player',
+            dodged: false,
+            skillName: skillDef.name,
+          };
+        }
+      }
+    } else if (skillDef.effect === 'stun') {
+      if (skillDef.targeting === 'all_class' && skillDef.targetClasses) {
+        const targets = alivePlayers.filter(p => skillDef.targetClasses!.includes(p.className));
+        for (const t of targets) {
+          t.stunTurns = Math.max(t.stunTurns, 1);
+        }
+        if (targets.length > 0) {
+          logEntries.push(`${monster.name} casts ${skillDef.name}! ${targets.map(t => t.username).join(', ')} ${targets.length === 1 ? 'is' : 'are'} stunned!`);
+        } else {
+          logEntries.push(`${monster.name} casts ${skillDef.name} but no targets are affected!`);
+        }
+        return {
+          attackerSide: 'monster',
+          attackerPos: monster.gridPosition,
+          targetPos: null,
+          targetSide: 'player',
+          dodged: false,
+          skillName: skillDef.name,
+          stunApplied: targets.length > 0,
+        };
+      }
+    } else if (skillDef.effect === 'dot') {
+      let target: PartyCombatant | undefined;
+      if (skillDef.targeting === 'standard') {
+        target = findTarget(monster.gridPosition, alivePlayers, true) ?? undefined;
+      } else if (skillDef.targeting === 'lowest_hp_enemy') {
+        target = alivePlayers.reduce((low, p) => p.currentHp < low.currentHp ? p : low, alivePlayers[0]);
+      }
+      if (target) {
+        const ticks = skillDef.dotDuration ?? 3;
+        target.dots.push({
+          sourceUsername: monster.name,
+          damagePerTick: Math.max(1, entry.value),
+          ticksRemaining: ticks,
+          damageType: skillDef.damageType ?? 'magical',
+        });
+        logEntries.push(`${monster.name} casts ${skillDef.name} on ${target.username}! (${entry.value} ${skillDef.damageType ?? 'magical'} damage/tick for ${ticks} ticks)`);
+        return {
+          attackerSide: 'monster',
+          attackerPos: monster.gridPosition,
+          targetPos: target.gridPosition,
+          targetSide: 'player',
+          dodged: false,
+          skillName: skillDef.name,
+        };
+      }
+    } else if (skillDef.effect === 'heal') {
+      if (skillDef.targeting === 'lowest_hp_ally') {
+        const wounded = aliveMonsters.filter(m => m.currentHp < m.maxHp);
+        if (wounded.length > 0) {
+          const target = wounded.reduce((low, m) => m.currentHp < low.currentHp ? m : low, wounded[0]);
+          const healAmt = Math.min(entry.value, target.maxHp - target.currentHp);
+          target.currentHp += healAmt;
+          logEntries.push(`${monster.name} casts ${skillDef.name} on ${target.name} for ${healAmt} HP!`);
+          return {
+            attackerSide: 'monster',
+            attackerPos: monster.gridPosition,
+            targetPos: target.gridPosition,
+            targetSide: 'monster',
+            dodged: false,
+            skillName: skillDef.name,
+            healAmount: healAmt,
+            healTarget: target.name,
+          };
+        }
+        // No wounded allies — reset cooldown so skill isn't wasted
+        monster.skillCooldowns[entry.skillId] = 0;
+      }
+    }
+  }
+  return null;
 }
 
 /** Get monster damage with all reductions (Unnerve, Lullaby, Crippling Shot). */

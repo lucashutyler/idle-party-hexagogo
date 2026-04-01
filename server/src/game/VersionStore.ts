@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry } from '@idle-party-rpg/shared';
 
 export type VersionStatus = 'draft' | 'published';
 
@@ -9,6 +9,7 @@ export interface ContentSnapshot {
   monsters: MonsterDefinition[];
   items: ItemDefinition[];
   zones: ZoneDefinition[];
+  encounters?: EncounterDefinition[];
   world: WorldData;
 }
 
@@ -138,18 +139,33 @@ export class VersionStore {
   async loadSnapshot(id: string): Promise<ContentSnapshot> {
     const raw = await fs.readFile(this.snapshotPath(id), 'utf-8');
     const snapshot: ContentSnapshot = JSON.parse(raw);
+    let needsSave = false;
 
     // Migrate: assign GUIDs to any tiles missing an id
-    let migrated = 0;
+    let guidsMigrated = 0;
     for (const tile of snapshot.world.tiles) {
       if (!tile.id) {
         tile.id = crypto.randomUUID();
-        migrated++;
+        guidsMigrated++;
       }
     }
-    if (migrated > 0) {
+    if (guidsMigrated > 0) {
+      console.log(`[VersionStore] Assigned GUIDs to ${guidsMigrated} tiles in version ${id}`);
+      needsSave = true;
+    }
+
+    // Migrate: old-format encounter tables → new format
+    if (!snapshot.encounters) {
+      snapshot.encounters = [];
+    }
+    const encountersMigrated = migrateSnapshotEncounterTables(snapshot);
+    if (encountersMigrated) {
+      console.log(`[VersionStore] Migrated encounter tables in version ${id}`);
+      needsSave = true;
+    }
+
+    if (needsSave) {
       await this.saveSnapshot(id, snapshot);
-      console.log(`[VersionStore] Assigned GUIDs to ${migrated} tiles in version ${id}`);
     }
 
     return snapshot;
@@ -163,4 +179,69 @@ export class VersionStore {
   private snapshotPath(id: string): string {
     return path.join(VERSIONS_DIR, `${id}.json`);
   }
+}
+
+/**
+ * Migrate old-format encounter tables in a snapshot.
+ * Detects entries with `monsterId` instead of `encounterId` and auto-creates encounter definitions.
+ */
+function migrateSnapshotEncounterTables(snapshot: ContentSnapshot): boolean {
+  let migrated = false;
+  const encounters = snapshot.encounters ?? [];
+  const encounterMap = new Map<string, EncounterDefinition>();
+  for (const e of encounters) encounterMap.set(e.id, e);
+
+  const monsterMap = new Map<string, MonsterDefinition>();
+  for (const m of snapshot.monsters) monsterMap.set(m.id, m);
+
+  const isOldFormat = (entry: Record<string, unknown>): boolean => {
+    return 'monsterId' in entry && !('encounterId' in entry);
+  };
+
+  const getOrCreateEncounter = (entry: { monsterId: string; weight: number; minCount: number; maxCount: number }): string => {
+    const encId = `auto_${entry.monsterId}`;
+    if (!encounterMap.has(encId)) {
+      const monsterDef = monsterMap.get(entry.monsterId);
+      const name = monsterDef ? `${monsterDef.name}s` : entry.monsterId;
+      const enc: EncounterDefinition = {
+        id: encId,
+        name,
+        type: 'random',
+        monsterPool: [{ monsterId: entry.monsterId, min: entry.minCount, max: entry.maxCount }],
+        roomMax: 9,
+      };
+      encounterMap.set(encId, enc);
+    }
+    return encId;
+  };
+
+  for (const zone of snapshot.zones) {
+    if (zone.encounterTable.length > 0 && isOldFormat(zone.encounterTable[0] as unknown as Record<string, unknown>)) {
+      const oldTable = zone.encounterTable as unknown as { monsterId: string; weight: number; minCount: number; maxCount: number }[];
+      const newTable: EncounterTableEntry[] = oldTable.map(entry => ({
+        encounterId: getOrCreateEncounter(entry),
+        weight: entry.weight,
+      }));
+      zone.encounterTable = newTable;
+      migrated = true;
+    }
+  }
+
+  for (const tile of snapshot.world.tiles) {
+    if (tile.encounterTable && tile.encounterTable.length > 0 && isOldFormat(tile.encounterTable[0] as unknown as Record<string, unknown>)) {
+      const oldTable = tile.encounterTable as unknown as { monsterId: string; weight: number; minCount: number; maxCount: number }[];
+      const newTable: EncounterTableEntry[] = oldTable.map(entry => ({
+        encounterId: getOrCreateEncounter(entry),
+        weight: entry.weight,
+      }));
+      tile.encounterTable = newTable;
+      migrated = true;
+    }
+  }
+
+  if (migrated) {
+    snapshot.encounters = Array.from(encounterMap.values());
+  }
+
+  return migrated;
 }

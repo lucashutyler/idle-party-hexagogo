@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { findTarget, createPartyCombatState, processPartyTick } from '../src/systems/CombatEngine';
 import type { PartyCombatant } from '../src/systems/CombatEngine';
-import { createEncounter, createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes';
+import { createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes';
+import { createEncounter, SEED_ENCOUNTERS } from '../src/systems/EncounterTypes';
 import { SEED_ZONES } from '../src/systems/ZoneTypes';
 import { calculateMaxHp, calculateBaseDamage, CLASS_DEFINITIONS } from '../src/systems/CharacterStats';
 import type { ClassName, DamageType } from '../src/systems/CharacterStats';
@@ -134,7 +135,7 @@ describe('Party Combat', () => {
   describe('createPartyCombatState', () => {
     it('creates party combat with multiple players', () => {
       const players = [makePlayer('Alice', 0), makePlayer('Bob', 4)];
-      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS);
       const state = createPartyCombatState(players, monsters);
 
       expect(state.players).toHaveLength(2);
@@ -148,7 +149,7 @@ describe('Party Combat', () => {
     it('resets players to full HP', () => {
       const player = makePlayer('Alice', 4, { hp: 100 });
       player.currentHp = 50;
-      const state = createPartyCombatState([player], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
+      const state = createPartyCombatState([player], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS));
       expect(state.players[0].currentHp).toBe(100);
     });
 
@@ -160,7 +161,7 @@ describe('Party Combat', () => {
         baseDamage: calculateBaseDamage(5, 'Mage'), // 15 + 4*2 = 23
         equippedSkills: [burnSkill, null, null, null, null],
       });
-      const state = createPartyCombatState([mage], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
+      const state = createPartyCombatState([mage], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS));
       // Burn adds 2 * level = 10 damage
       expect(state.players[0].baseDamage).toBe(23 + 10);
     });
@@ -172,14 +173,14 @@ describe('Party Combat', () => {
         equippedSkills: [rallySkill, null, null, null, null],
       });
       const archer = makePlayer('Archer', 2);
-      const state = createPartyCombatState([bard, archer], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
+      const state = createPartyCombatState([bard, archer], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS));
       // Rally: 0.20 * 2 members = 0.40
       expect(state.rallyMultiplier).toBeCloseTo(0.40);
     });
 
     it('rally multiplier is 0 with no Bard', () => {
       const archer = makePlayer('Archer', 0);
-      const state = createPartyCombatState([archer], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
+      const state = createPartyCombatState([archer], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS));
       expect(state.rallyMultiplier).toBe(0);
     });
   });
@@ -299,7 +300,7 @@ describe('Party Combat', () => {
 
   describe('processPartyTick (turn-based)', () => {
     it('increments tick count', () => {
-      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
+      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS));
       processPartyTick(state);
       expect(state.tickCount).toBe(1);
     });
@@ -366,7 +367,7 @@ describe('Party Combat', () => {
     });
 
     it('does nothing on already-finished combat', () => {
-      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES));
+      const state = createPartyCombatState([makePlayer('Alice', 4)], createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS));
       state.finished = true;
       state.result = 'victory';
 

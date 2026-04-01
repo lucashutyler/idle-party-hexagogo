@@ -28,9 +28,12 @@ function createFakeContentStore(): ContentStore {
     getZone: () => ({
       id: 'hatchetmill',
       name: 'Hatchet Mill',
-      encounters: [{ monsterId: 'goblin', weight: 1, minCount: 1, maxCount: 1 }],
+      encounterTable: [{ encounterId: 'auto_goblin', weight: 1 }],
     }),
     getAllZones: () => ({}),
+    getAllEncounters: () => ({
+      auto_goblin: { id: 'auto_goblin', name: 'Goblins', type: 'random', monsterPool: [{ monsterId: 'goblin', min: 1, max: 1 }], roomMax: 9 },
+    }),
   } as unknown as ContentStore;
 }
 

@@ -315,7 +315,6 @@ export class PartyBattleManager {
         name: m.name,
         currentHp: m.currentHp,
         maxHp: m.maxHp,
-        level: m.level,
         gridPosition: m.gridPosition,
         stunTurns: m.stunTurns > 0 ? m.stunTurns : undefined,
       })),
@@ -411,10 +410,11 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     const allMonsters = this.content.getAllMonsters();
     const allZones = this.content.getAllZones();
+    const allEncounters = this.content.getAllEncounters();
 
     if (!entry) {
       // Fallback: empty combat
-      return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones));
+      return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones, allEncounters));
     }
 
     const players: PartyCombatant[] = [];
@@ -428,7 +428,7 @@ export class PartyBattleManager {
     const zone = entry.serverParty.tile.zone;
     const tileId = entry.serverParty.tile.id;
     const tileDef = this.content.getTileById(tileId);
-    const monsters = createEncounter(zone, allMonsters, allZones, tileDef?.encounterTable);
+    const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, tileDef?.encounterTable);
 
     return createPartyCombatState(players, monsters);
   }
