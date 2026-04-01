@@ -607,6 +607,11 @@ html, body {
   font-size: 10px;
 }
 
+.settings-btn-danger {
+  background: var(--color-danger, #c0392b);
+  border-color: var(--color-danger, #c0392b);
+}
+
 .patch-notes-panel {
   width: 100%;
   max-width: 500px;

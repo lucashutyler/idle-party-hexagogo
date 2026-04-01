@@ -1,5 +1,6 @@
 import type { Screen } from './ScreenManager';
 import { PATCH_NOTES } from './PatchNotes';
+import { logout } from '../network/AuthClient';
 
 export class SettingsScreen implements Screen {
   private container: HTMLElement;
@@ -17,6 +18,7 @@ export class SettingsScreen implements Screen {
         </div>
         <div class="settings-buttons">
           <button class="pixel-btn settings-btn" id="btn-patch-notes">Patch Notes</button>
+          <button class="pixel-btn settings-btn settings-btn-danger" id="btn-sign-out">Sign Out</button>
         </div>
         <div id="patch-notes-panel" class="patch-notes-panel" style="display:none;">
           <button class="pixel-btn patch-notes-back" id="btn-patch-back">Back</button>
@@ -50,6 +52,18 @@ export class SettingsScreen implements Screen {
       patchPanel.style.display = 'none';
       buttonsSection.style.display = '';
       headerSection.style.display = '';
+    });
+
+    const btnSignOut = this.container.querySelector('#btn-sign-out') as HTMLButtonElement;
+    btnSignOut.addEventListener('click', async () => {
+      if (!confirm('Sign out of your account?')) return;
+      btnSignOut.disabled = true;
+      btnSignOut.textContent = 'Signing out...';
+      try {
+        await logout();
+      } finally {
+        window.location.reload();
+      }
     });
   }
 
