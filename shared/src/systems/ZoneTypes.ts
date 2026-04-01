@@ -1,10 +1,8 @@
 // --- Types ---
 
 export interface EncounterTableEntry {
-  monsterId: string;
+  encounterId: string;
   weight: number;
-  minCount: number;
-  maxCount: number;
 }
 
 export interface ZoneDefinition {
@@ -21,7 +19,7 @@ export const SEED_ZONES: Record<string, ZoneDefinition> = {
     id: 'hatchetmill',
     displayName: 'Hatchetmill',
     encounterTable: [
-      { monsterId: 'goblin', weight: 1, minCount: 1, maxCount: 2 },
+      { encounterId: 'hatchetmill_goblins', weight: 1 },
     ],
     levelRange: [1, 1],
   },
@@ -29,9 +27,9 @@ export const SEED_ZONES: Record<string, ZoneDefinition> = {
     id: 'darkwood',
     displayName: 'Darkwood',
     encounterTable: [
-      { monsterId: 'goblin', weight: 3, minCount: 2, maxCount: 3 },
-      { monsterId: 'wolf', weight: 4, minCount: 1, maxCount: 3 },
-      { monsterId: 'bandit', weight: 3, minCount: 1, maxCount: 2 },
+      { encounterId: 'darkwood_goblins', weight: 3 },
+      { encounterId: 'darkwood_wolves', weight: 4 },
+      { encounterId: 'darkwood_bandits', weight: 3 },
     ],
     levelRange: [2, 3],
   },
@@ -39,8 +37,8 @@ export const SEED_ZONES: Record<string, ZoneDefinition> = {
     id: 'crystal_caves',
     displayName: 'Crystal Caves',
     encounterTable: [
-      { monsterId: 'goblin', weight: 2, minCount: 1, maxCount: 2 },
-      { monsterId: 'wolf', weight: 3, minCount: 1, maxCount: 2 },
+      { encounterId: 'crystal_caves_goblins', weight: 2 },
+      { encounterId: 'crystal_caves_wolves', weight: 3 },
     ],
     levelRange: [1, 2],
   },

@@ -13,6 +13,7 @@ import {
   TileType,
   xpForNextLevel,
   EQUIP_SLOTS,
+  MONSTER_SKILL_CATALOG,
 } from '@idle-party-rpg/shared';
 import type {
   MonsterDefinition,
@@ -21,9 +22,15 @@ import type {
   EquipSlot,
   ZoneDefinition,
   EncounterTableEntry,
+  EncounterDefinition,
+  RandomMonsterEntry,
+  ExplicitPlacement,
   WorldTileDefinition,
   WorldData,
   CubeCoord,
+  DamageType,
+  Resistance,
+  MonsterSkillEntry,
 } from '@idle-party-rpg/shared';
 
 // Maps CUBE_DIRECTIONS index → hex corner indices for the shared edge.
@@ -75,6 +82,7 @@ interface ContentData {
   monsters: Record<string, MonsterDefinition>;
   items: Record<string, ItemDefinition>;
   zones: Record<string, ZoneDefinition>;
+  encounters: Record<string, EncounterDefinition>;
   world: WorldData;
 }
 
@@ -88,7 +96,7 @@ interface ContentVersion {
   publishedAt: string | null;
 }
 
-type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'zones' | 'map' | 'versions' | 'xp-table';
+type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'zones' | 'encounters' | 'map' | 'versions' | 'xp-table';
 
 interface TabDef {
   id: TabId;
@@ -102,6 +110,7 @@ const TABS: TabDef[] = [
   { id: 'monsters', label: 'Monsters', icon: '!' },
   { id: 'items', label: 'Items', icon: '+' },
   { id: 'zones', label: 'Zones', icon: '#' },
+  { id: 'encounters', label: 'Encounters', icon: 'E' },
   { id: 'map', label: 'Map', icon: '*' },
   { id: 'versions', label: 'Versions', icon: 'V' },
   { id: 'xp-table', label: 'XP Table', icon: 'X' },
@@ -351,6 +360,10 @@ export class AdminApp {
       case 'zones':
         content.innerHTML = this.renderZones();
         this.wireZoneEvents();
+        break;
+      case 'encounters':
+        content.innerHTML = this.renderEncounters();
+        this.wireEncounterEvents();
         break;
       case 'map':
         content.innerHTML = this.renderMapSection();
@@ -853,7 +866,7 @@ export class AdminApp {
     const rows = monsters.map(m => {
       const drops = m.drops?.map(d => {
         const item = items[d.itemId];
-        return `${item?.name ?? d.itemId} (${Math.round(d.chance * 100)}%)`;
+        return `${item?.name ?? d.itemId} (${(d.chance * 100).toFixed(3)}%)`;
       }).join(', ') ?? 'None';
 
       const actions = readOnly ? '' : `
@@ -866,13 +879,13 @@ export class AdminApp {
       return `
         <tr>
           <td>${this.escapeHtml(m.name)}</td>
-          <td>${m.level}</td>
           <td>${m.hp}</td>
           <td>${m.damage}</td>
           <td>${m.damageType}</td>
           <td>${m.xp}</td>
           <td>${m.goldMin}-${m.goldMax}</td>
           <td>${drops}</td>
+          <td>${m.resistances?.length ?? 0} res, ${m.skills?.length ?? 0} skills</td>
           ${actions}
         </tr>
       `;
@@ -895,13 +908,13 @@ export class AdminApp {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Lv</th>
                 <th>HP</th>
                 <th>Dmg</th>
                 <th>Type</th>
                 <th>XP</th>
                 <th>Gold</th>
                 <th>Drops</th>
+                <th>Mods</th>
                 ${actionsHeader}
               </tr>
             </thead>
@@ -946,10 +959,12 @@ export class AdminApp {
     if (!displayContent) return;
 
     const isNew = !monster;
-    const m = monster ?? { id: '', name: '', level: 1, hp: 10, damage: 3, damageType: 'physical' as const, xp: 5, goldMin: 1, goldMax: 2, drops: [] };
+    const m = monster ?? { id: '', name: '', hp: 10, damage: 3, damageType: 'physical' as const, xp: 5, goldMin: 1, goldMax: 2, drops: [] };
     const items = Object.values(displayContent.items);
 
     const dropRows = (m.drops ?? []).map((d, i) => this.renderDropRow(i, d.itemId, d.chance, items)).join('');
+    const resistanceRows = (m.resistances ?? []).map((r, i) => this.renderResistanceRow(i, r)).join('');
+    const skillRows = (m.skills ?? []).map((s, i) => this.renderMonsterSkillRow(i, s)).join('');
 
     area.innerHTML = `
       <div class="pixel-panel monster-form">
@@ -957,7 +972,6 @@ export class AdminApp {
         <input type="hidden" id="mf-id" value="${this.escapeHtml(m.id)}">
         <div class="monster-form-grid">
           <label>Name<input type="text" id="mf-name" value="${this.escapeHtml(m.name)}"></label>
-          <label>Level<input type="number" id="mf-level" value="${m.level}" min="1"></label>
           <label>HP<input type="number" id="mf-hp" value="${m.hp}" min="1"></label>
           <label>Damage<input type="number" id="mf-damage" value="${m.damage}" min="0"></label>
           <label>Type
@@ -974,6 +988,14 @@ export class AdminApp {
           <h4>Drops <button class="admin-btn admin-btn-sm" id="mf-add-drop">+ Drop</button></h4>
           <div id="mf-drops-list">${dropRows}</div>
         </div>
+        <div class="monster-form-resistances">
+          <h4>Resistances <button class="admin-btn admin-btn-sm" id="mf-add-resistance">+ Resistance</button></h4>
+          <div id="mf-resistances-list">${resistanceRows}</div>
+        </div>
+        <div class="monster-form-skills">
+          <h4>Skills <button class="admin-btn admin-btn-sm" id="mf-add-skill">+ Skill</button></h4>
+          <div id="mf-skills-list">${skillRows}</div>
+        </div>
         <div class="monster-form-actions">
           <button class="admin-btn" id="mf-save">${isNew ? 'Add' : 'Save'}</button>
           <button class="admin-btn admin-btn-secondary" id="mf-cancel">Cancel</button>
@@ -989,12 +1011,48 @@ export class AdminApp {
       `<option value="${i.id}" ${i.id === itemId ? 'selected' : ''}>${this.escapeHtml(i.name)}</option>`
     ).join('');
 
+    const rateHint = chance > 0 ? `<span class="mf-drop-rate-hint">~${Math.round(1 / chance)} per kill</span>` : '';
+
     return `
       <div class="monster-drop-row" data-index="${index}">
         <select class="mf-drop-item">${options}</select>
-        <input type="number" class="mf-drop-chance" value="${Math.round(chance * 100)}" min="1" max="100" step="1">
+        <input type="number" class="mf-drop-chance" value="${(chance * 100).toFixed(3)}" min="0.001" max="100" step="0.001">
         <span>%</span>
+        ${rateHint}
         <button class="admin-btn admin-btn-sm admin-btn-danger mf-drop-remove">X</button>
+      </div>
+    `;
+  }
+
+  private renderResistanceRow(index: number, resistance: Resistance): string {
+    return `
+      <div class="monster-resistance-row" data-index="${index}">
+        <select class="mf-res-type">
+          <option value="physical" ${resistance.damageType === 'physical' ? 'selected' : ''}>Physical</option>
+          <option value="magical" ${resistance.damageType === 'magical' ? 'selected' : ''}>Magical</option>
+          <option value="holy" ${resistance.damageType === 'holy' ? 'selected' : ''}>Holy</option>
+        </select>
+        <label>Flat<input type="number" class="mf-res-flat" value="${resistance.flatReduction}" step="1"></label>
+        <label>%<input type="number" class="mf-res-percent" value="${resistance.percentReduction}" step="1"></label>
+        <button class="admin-btn admin-btn-sm admin-btn-danger mf-res-remove">X</button>
+      </div>
+    `;
+  }
+
+  private renderMonsterSkillRow(index: number, entry: MonsterSkillEntry): string {
+    const options = Object.values(MONSTER_SKILL_CATALOG).map(s =>
+      `<option value="${s.id}" ${s.id === entry.skillId ? 'selected' : ''}>${this.escapeHtml(s.name)}</option>`
+    ).join('');
+
+    const skillDef = MONSTER_SKILL_CATALOG[entry.skillId];
+    const info = skillDef ? `CD:${skillDef.cooldown} ${skillDef.targeting}` : '';
+
+    return `
+      <div class="monster-skill-row" data-index="${index}">
+        <select class="mf-skill-id">${options}</select>
+        <label>Value<input type="number" class="mf-skill-value" value="${entry.value}" min="1"></label>
+        <span class="mf-skill-info">${info}</span>
+        <button class="admin-btn admin-btn-sm admin-btn-danger mf-skill-remove">X</button>
       </div>
     `;
   }
@@ -1016,6 +1074,28 @@ export class AdminApp {
 
     this.wireDropRemoveButtons();
 
+    document.getElementById('mf-add-resistance')?.addEventListener('click', () => {
+      const list = document.getElementById('mf-resistances-list');
+      if (!list) return;
+      const index = list.querySelectorAll('.monster-resistance-row').length;
+      const html = this.renderResistanceRow(index, { damageType: 'physical', flatReduction: 0, percentReduction: 0 });
+      list.insertAdjacentHTML('beforeend', html);
+      this.wireResistanceRemoveButtons();
+    });
+
+    document.getElementById('mf-add-skill')?.addEventListener('click', () => {
+      const list = document.getElementById('mf-skills-list');
+      if (!list) return;
+      const index = list.querySelectorAll('.monster-skill-row').length;
+      const firstSkillId = Object.keys(MONSTER_SKILL_CATALOG)[0];
+      const html = this.renderMonsterSkillRow(index, { skillId: firstSkillId, value: 1 });
+      list.insertAdjacentHTML('beforeend', html);
+      this.wireSkillRemoveButtons();
+    });
+
+    this.wireResistanceRemoveButtons();
+    this.wireSkillRemoveButtons();
+
     document.getElementById('mf-save')?.addEventListener('click', () => {
       this.saveMonsterForm();
     });
@@ -1032,10 +1112,31 @@ export class AdminApp {
     });
   }
 
+  private wireResistanceRemoveButtons(): void {
+    document.querySelectorAll('.mf-res-remove').forEach(btn => {
+      btn.replaceWith(btn.cloneNode(true));
+    });
+    document.querySelectorAll('.mf-res-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        (btn as HTMLElement).closest('.monster-resistance-row')?.remove();
+      });
+    });
+  }
+
+  private wireSkillRemoveButtons(): void {
+    document.querySelectorAll('.mf-skill-remove').forEach(btn => {
+      btn.replaceWith(btn.cloneNode(true));
+    });
+    document.querySelectorAll('.mf-skill-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        (btn as HTMLElement).closest('.monster-skill-row')?.remove();
+      });
+    });
+  }
+
   private async saveMonsterForm(): Promise<void> {
     const existingId = (document.getElementById('mf-id') as HTMLInputElement)?.value.trim();
     const name = (document.getElementById('mf-name') as HTMLInputElement)?.value.trim();
-    const level = parseInt((document.getElementById('mf-level') as HTMLInputElement)?.value);
     const hp = parseInt((document.getElementById('mf-hp') as HTMLInputElement)?.value);
     const damage = parseInt((document.getElementById('mf-damage') as HTMLInputElement)?.value);
     const damageType = (document.getElementById('mf-damageType') as HTMLSelectElement)?.value;
@@ -1063,15 +1164,32 @@ export class AdminApp {
     const drops: { itemId: string; chance: number }[] = [];
     document.querySelectorAll('.monster-drop-row').forEach(row => {
       const itemId = (row.querySelector('.mf-drop-item') as HTMLSelectElement)?.value;
-      const chance = parseInt((row.querySelector('.mf-drop-chance') as HTMLInputElement)?.value) / 100;
+      const chance = parseFloat((row.querySelector('.mf-drop-chance') as HTMLInputElement)?.value) / 100;
       if (itemId && chance > 0) drops.push({ itemId, chance });
     });
 
+    const resistances: Resistance[] = [];
+    document.querySelectorAll('.monster-resistance-row').forEach(row => {
+      const dt = (row.querySelector('.mf-res-type') as HTMLSelectElement)?.value as DamageType;
+      const flatReduction = parseInt((row.querySelector('.mf-res-flat') as HTMLInputElement)?.value) || 0;
+      const percentReduction = parseInt((row.querySelector('.mf-res-percent') as HTMLInputElement)?.value) || 0;
+      resistances.push({ damageType: dt, flatReduction, percentReduction });
+    });
+
+    const skills: MonsterSkillEntry[] = [];
+    document.querySelectorAll('.monster-skill-row').forEach(row => {
+      const skillId = (row.querySelector('.mf-skill-id') as HTMLSelectElement)?.value;
+      const value = parseInt((row.querySelector('.mf-skill-value') as HTMLInputElement)?.value) || 1;
+      if (skillId) skills.push({ skillId, value });
+    });
+
     const monster: MonsterDefinition = {
-      id, name, level, hp, damage,
-      damageType: damageType as 'physical' | 'magical',
+      id, name, hp, damage,
+      damageType: damageType as DamageType,
       xp, goldMin, goldMax,
       drops: drops.length > 0 ? drops : undefined,
+      resistances: resistances.length > 0 ? resistances : undefined,
+      skills: skills.length > 0 ? skills : undefined,
     };
 
     try {
@@ -1378,13 +1496,12 @@ export class AdminApp {
     const displayContent = this.getDisplayContent();
     if (!displayContent) return '<div class="admin-page-empty">No data</div>';
     const zones = Object.values(displayContent.zones);
-    const monsters = displayContent.monsters;
+    const encounters = displayContent.encounters;
     const readOnly = this.isReadOnly();
 
     const rows = zones.map(z => {
-      const encounters = z.encounterTable.map(e => {
-        const monster = monsters[e.monsterId];
-        return `${monster?.name ?? e.monsterId} (w:${e.weight}, ${e.minCount}-${e.maxCount})`;
+      const encounterDescs = z.encounterTable.map(e => {
+        return `${encounters[e.encounterId]?.name ?? e.encounterId} (w:${e.weight})`;
       }).join(', ');
 
       const actions = readOnly ? '' : `
@@ -1398,7 +1515,7 @@ export class AdminApp {
         <tr>
           <td>${this.escapeHtml(z.displayName)}</td>
           <td>${z.levelRange[0]}-${z.levelRange[1]}</td>
-          <td>${encounters}</td>
+          <td>${encounterDescs}</td>
           ${actions}
         </tr>
       `;
@@ -1468,9 +1585,9 @@ export class AdminApp {
 
     const isNew = !zone;
     const z = zone ?? { id: '', displayName: '', levelRange: [1, 1] as [number, number], encounterTable: [] };
-    const monsterList = Object.values(displayContent.monsters);
+    const encounterDefs = Object.values(displayContent.encounters);
 
-    const encounterRows = z.encounterTable.map((e, i) => this.renderEncounterRow(i, e, monsterList)).join('');
+    const encounterRows = z.encounterTable.map((e, i) => this.renderEncounterRow(i, e, encounterDefs)).join('');
 
     area.innerHTML = `
       <div class="pixel-panel monster-form">
@@ -1492,26 +1609,24 @@ export class AdminApp {
       </div>
     `;
 
-    this.wireZoneFormEvents(monsterList);
+    this.wireZoneFormEvents(encounterDefs);
   }
 
-  private renderEncounterRow(index: number, entry: EncounterTableEntry, monsters: MonsterDefinition[]): string {
-    const options = monsters.map(m =>
-      `<option value="${m.id}" ${m.id === entry.monsterId ? 'selected' : ''}>${this.escapeHtml(m.name)}</option>`
+  private renderEncounterRow(index: number, entry: EncounterTableEntry, encounters: EncounterDefinition[]): string {
+    const options = encounters.map(enc =>
+      `<option value="${enc.id}" ${enc.id === entry.encounterId ? 'selected' : ''}>${this.escapeHtml(enc.name)}</option>`
     ).join('');
 
     return `
       <div class="monster-drop-row" data-index="${index}">
-        <select class="zf-enc-monster">${options}</select>
+        <select class="zf-enc-id">${options}</select>
         <label class="zf-enc-inline">W<input type="number" class="zf-enc-weight" value="${entry.weight}" min="1" step="1"></label>
-        <label class="zf-enc-inline">Min<input type="number" class="zf-enc-min" value="${entry.minCount}" min="1" step="1"></label>
-        <label class="zf-enc-inline">Max<input type="number" class="zf-enc-max" value="${entry.maxCount}" min="1" step="1"></label>
         <button class="admin-btn admin-btn-sm admin-btn-danger zf-enc-remove">X</button>
       </div>
     `;
   }
 
-  private wireZoneFormEvents(monsters: MonsterDefinition[]): void {
+  private wireZoneFormEvents(encounters: EncounterDefinition[]): void {
     document.getElementById('zf-cancel')?.addEventListener('click', () => {
       const area = document.getElementById('zone-form-area');
       if (area) area.innerHTML = '';
@@ -1519,9 +1634,9 @@ export class AdminApp {
 
     document.getElementById('zf-add-encounter')?.addEventListener('click', () => {
       const list = document.getElementById('zf-encounters-list');
-      if (!list || monsters.length === 0) return;
+      if (!list || encounters.length === 0) return;
       const index = list.querySelectorAll('.monster-drop-row').length;
-      const html = this.renderEncounterRow(index, { monsterId: monsters[0].id, weight: 1, minCount: 1, maxCount: 1 }, monsters);
+      const html = this.renderEncounterRow(index, { encounterId: encounters[0].id, weight: 1 }, encounters);
       list.insertAdjacentHTML('beforeend', html);
       this.wireEncounterRemoveButtons();
     });
@@ -1569,11 +1684,9 @@ export class AdminApp {
 
     const encounterTable: EncounterTableEntry[] = [];
     document.querySelectorAll('#zf-encounters-list .monster-drop-row').forEach(row => {
-      const monsterId = (row.querySelector('.zf-enc-monster') as HTMLSelectElement)?.value;
+      const encounterId = (row.querySelector('.zf-enc-id') as HTMLSelectElement)?.value;
       const weight = parseInt((row.querySelector('.zf-enc-weight') as HTMLInputElement)?.value) || 1;
-      const minCount = parseInt((row.querySelector('.zf-enc-min') as HTMLInputElement)?.value) || 1;
-      const maxCount = parseInt((row.querySelector('.zf-enc-max') as HTMLInputElement)?.value) || 1;
-      if (monsterId) encounterTable.push({ monsterId, weight, minCount, maxCount });
+      if (encounterId) encounterTable.push({ encounterId, weight });
     });
 
     const zone: ZoneDefinition = {
@@ -1631,6 +1744,339 @@ export class AdminApp {
   private updateDisplayZones(zones: Record<string, ZoneDefinition>): void {
     if (this.versionContent) {
       this.versionContent.zones = zones;
+    }
+  }
+
+  // --- Encounters ---
+
+  private renderEncounters(): string {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return '<div class="admin-page-empty">No data</div>';
+    const encounters = Object.values(displayContent.encounters);
+    const monsters = displayContent.monsters;
+    const readOnly = this.isReadOnly();
+
+    const rows = encounters.map(enc => {
+      let summary = '';
+      if (enc.type === 'random') {
+        summary = (enc.monsterPool ?? []).map(p => {
+          const m = monsters[p.monsterId];
+          return `${m?.name ?? p.monsterId} (${p.min}-${p.max})`;
+        }).join(', ') || 'Empty pool';
+      } else {
+        summary = (enc.placements ?? []).map(p => {
+          const m = monsters[p.monsterId];
+          return `${m?.name ?? p.monsterId} @${p.gridPosition}`;
+        }).join(', ') || 'No placements';
+      }
+
+      const actions = readOnly ? '' : `
+        <td>
+          <button class="admin-btn admin-btn-sm encounter-edit-btn" data-id="${enc.id}">Edit</button>
+          <button class="admin-btn admin-btn-sm admin-btn-danger encounter-delete-btn" data-id="${enc.id}">Del</button>
+        </td>
+      `;
+
+      return `
+        <tr>
+          <td>${this.escapeHtml(enc.name)}</td>
+          <td>${enc.type}</td>
+          <td>${this.escapeHtml(summary)}</td>
+          ${actions}
+        </tr>
+      `;
+    }).join('');
+
+    const versionBar = this.renderVersionBar();
+    const addBtn = readOnly ? '' : '<button class="admin-btn" id="encounter-add-btn">+ Add Encounter</button>';
+    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+
+    return `
+      <div class="admin-page">
+        <div class="admin-page-header">
+          <h2>Encounters (${encounters.length})</h2>
+          ${addBtn}
+        </div>
+        ${versionBar}
+        <div class="admin-table-wrap pixel-panel">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Summary</th>
+                ${actionsHeader}
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  private wireEncounterEvents(): void {
+    document.getElementById('encounter-add-btn')?.addEventListener('click', () => {
+      this.showEncounterModal(null);
+    });
+
+    document.querySelectorAll('.encounter-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const displayContent = this.getDisplayContent();
+        if (!displayContent) return;
+        const encounter = displayContent.encounters[id];
+        if (encounter) this.showEncounterModal(encounter);
+      });
+    });
+
+    document.querySelectorAll('.encounter-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.deleteEncounter(id);
+      });
+    });
+
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
+    });
+  }
+
+  private showEncounterModal(encounter: EncounterDefinition | null): void {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+
+    const isNew = !encounter;
+    const enc = encounter ?? { id: '', name: '', type: 'random' as const, monsterPool: [], roomMax: 9, placements: [] };
+
+    // Remove any existing modal
+    document.querySelector('.admin-encounter-modal-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-encounter-modal-overlay';
+    overlay.innerHTML = `
+      <div class="admin-encounter-modal">
+        <div class="admin-encounter-modal-header">
+          <input type="text" id="enc-name" value="${this.escapeHtml(enc.name)}" placeholder="Encounter Name">
+          <select id="enc-type">
+            <option value="random" ${enc.type === 'random' ? 'selected' : ''}>Random</option>
+            <option value="explicit" ${enc.type === 'explicit' ? 'selected' : ''}>Explicit</option>
+          </select>
+          <input type="hidden" id="enc-id" value="${this.escapeHtml(enc.id)}">
+          <div class="admin-encounter-modal-actions">
+            <button class="admin-btn" id="enc-save">${isNew ? 'Add' : 'Save'}</button>
+            <button class="admin-btn admin-btn-secondary" id="enc-cancel">Cancel</button>
+          </div>
+        </div>
+        <div class="admin-encounter-modal-body" id="enc-body">
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Render the body based on type
+    this.renderEncounterModalBody(enc);
+
+    // Wire events
+    this.wireEncounterModalEvents(displayContent);
+  }
+
+  private renderEncounterModalBody(enc: EncounterDefinition): void {
+    const body = document.getElementById('enc-body');
+    if (!body) return;
+
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const monsters = displayContent.monsters;
+
+    const type = (document.getElementById('enc-type') as HTMLSelectElement)?.value ?? enc.type;
+
+    if (type === 'random') {
+      const poolRows = (enc.monsterPool ?? []).map((p, i) => this.renderEncPoolRow(i, p, monsters)).join('');
+      body.innerHTML = `
+        <div class="enc-random-body">
+          <div class="enc-pool-section">
+            <h4>Monster Pool <button class="admin-btn admin-btn-sm" id="enc-add-pool">+ Monster</button></h4>
+            <div id="enc-pool-list">${poolRows}</div>
+          </div>
+          <div class="enc-room-max">
+            <label>Room Max <input type="number" id="enc-room-max" value="${enc.roomMax ?? 9}" min="1" max="9"></label>
+          </div>
+        </div>
+      `;
+      this.wireEncPoolEvents(monsters);
+    } else {
+      const cells: string[] = [];
+      for (let pos = 0; pos < 9; pos++) {
+        const placement = (enc.placements ?? []).find(p => p.gridPosition === pos);
+        const selectedId = placement?.monsterId ?? '';
+        const options = `<option value="">Empty</option>` + Object.values(monsters).map(m =>
+          `<option value="${m.id}" ${m.id === selectedId ? 'selected' : ''}>${this.escapeHtml(m.name)}</option>`
+        ).join('');
+        cells.push(`
+          <div class="enc-grid-cell" data-pos="${pos}">
+            <div class="enc-grid-pos">${pos}</div>
+            <select class="enc-grid-monster">${options}</select>
+          </div>
+        `);
+      }
+
+      body.innerHTML = `
+        <div class="enc-explicit-body">
+          <h4>Monster Placements (3x3 Grid)</h4>
+          <div class="enc-grid">
+            ${cells.join('')}
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  private renderEncPoolRow(index: number, entry: RandomMonsterEntry, monsters: Record<string, MonsterDefinition>): string {
+    const options = Object.values(monsters).map(m =>
+      `<option value="${m.id}" ${m.id === entry.monsterId ? 'selected' : ''}>${this.escapeHtml(m.name)}</option>`
+    ).join('');
+
+    return `
+      <div class="enc-pool-row" data-index="${index}">
+        <select class="enc-pool-monster">${options}</select>
+        <label>Min<input type="number" class="enc-pool-min" value="${entry.min}" min="0" max="9"></label>
+        <label>Max<input type="number" class="enc-pool-max" value="${entry.max}" min="0" max="9"></label>
+        <button class="admin-btn admin-btn-sm admin-btn-danger enc-pool-remove">X</button>
+      </div>
+    `;
+  }
+
+  private wireEncPoolEvents(monsters: Record<string, MonsterDefinition>): void {
+    document.getElementById('enc-add-pool')?.addEventListener('click', () => {
+      const list = document.getElementById('enc-pool-list');
+      if (!list) return;
+      const index = list.children.length;
+      const firstMonsterId = Object.keys(monsters)[0] ?? '';
+      const entry: RandomMonsterEntry = { monsterId: firstMonsterId, min: 1, max: 1 };
+      const row = document.createElement('div');
+      row.innerHTML = this.renderEncPoolRow(index, entry, monsters);
+      const newRow = row.firstElementChild as HTMLElement;
+      list.appendChild(newRow);
+      newRow.querySelector('.enc-pool-remove')?.addEventListener('click', () => newRow.remove());
+    });
+
+    document.querySelectorAll('.enc-pool-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        (btn as HTMLElement).closest('.enc-pool-row')?.remove();
+      });
+    });
+  }
+
+  private wireEncounterModalEvents(_displayContent: ContentData): void {
+    // Type switching
+    document.getElementById('enc-type')?.addEventListener('change', () => {
+      const type = (document.getElementById('enc-type') as HTMLSelectElement).value as 'random' | 'explicit';
+      const blankEnc: EncounterDefinition = {
+        id: (document.getElementById('enc-id') as HTMLInputElement)?.value ?? '',
+        name: (document.getElementById('enc-name') as HTMLInputElement)?.value ?? '',
+        type,
+        monsterPool: [],
+        roomMax: 9,
+        placements: [],
+      };
+      this.renderEncounterModalBody(blankEnc);
+    });
+
+    // Save
+    document.getElementById('enc-save')?.addEventListener('click', () => {
+      this.saveEncounter();
+    });
+
+    // Cancel
+    document.getElementById('enc-cancel')?.addEventListener('click', () => {
+      document.querySelector('.admin-encounter-modal-overlay')?.remove();
+    });
+  }
+
+  private async saveEncounter(): Promise<void> {
+    const existingId = (document.getElementById('enc-id') as HTMLInputElement)?.value.trim();
+    const name = (document.getElementById('enc-name') as HTMLInputElement)?.value.trim();
+    const type = (document.getElementById('enc-type') as HTMLSelectElement)?.value as 'random' | 'explicit';
+
+    if (!name) {
+      alert('Name is required.');
+      return;
+    }
+
+    const id = existingId || crypto.randomUUID();
+
+    const encounter: EncounterDefinition = { id, name, type };
+
+    if (type === 'random') {
+      const pool: RandomMonsterEntry[] = [];
+      document.querySelectorAll('.enc-pool-row').forEach(row => {
+        const monsterId = (row.querySelector('.enc-pool-monster') as HTMLSelectElement)?.value;
+        const min = parseInt((row.querySelector('.enc-pool-min') as HTMLInputElement)?.value) || 0;
+        const max = parseInt((row.querySelector('.enc-pool-max') as HTMLInputElement)?.value) || 0;
+        if (monsterId) pool.push({ monsterId, min, max });
+      });
+      encounter.monsterPool = pool;
+      encounter.roomMax = parseInt((document.getElementById('enc-room-max') as HTMLInputElement)?.value) || 9;
+    } else {
+      const placements: ExplicitPlacement[] = [];
+      document.querySelectorAll('.enc-grid-cell').forEach(cell => {
+        const pos = parseInt((cell as HTMLElement).dataset.pos!) as ExplicitPlacement['gridPosition'];
+        const monsterId = (cell.querySelector('.enc-grid-monster') as HTMLSelectElement)?.value;
+        if (monsterId) placements.push({ monsterId, gridPosition: pos });
+      });
+      encounter.placements = placements;
+    }
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/encounters/${encodeURIComponent(id)}${qp}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(encounter),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save encounter');
+        return;
+      }
+      this.updateDisplayEncounters(data.encounters);
+      document.querySelector('.admin-encounter-modal-overlay')?.remove();
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not save encounter');
+    }
+  }
+
+  private async deleteEncounter(encounterId: string): Promise<void> {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const encounter = displayContent.encounters[encounterId];
+    if (!encounter) return;
+    if (!confirm(`Delete encounter "${encounter.name}"?`)) return;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/encounters/${encodeURIComponent(encounterId)}${qp}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete encounter');
+        return;
+      }
+      this.updateDisplayEncounters(data.encounters);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not delete encounter');
+    }
+  }
+
+  private updateDisplayEncounters(encounters: Record<string, EncounterDefinition>): void {
+    if (this.versionContent) {
+      this.versionContent.encounters = encounters;
     }
   }
 
@@ -2730,7 +3176,7 @@ export class AdminApp {
           </label>
         </div>
         <div id="sidebar-encounters-section" style="${tile.encounterTable?.length ? '' : 'display:none'}">
-          ${this.renderSidebarEncounterRows(tile, displayContent ? Object.values(displayContent.monsters) : [], readOnly)}
+          ${this.renderSidebarEncounterRows(tile, displayContent ? Object.values(displayContent.encounters) : [], readOnly)}
         </div>
         ${startBtnHtml}
         <div class="admin-map-sidebar-spacer"></div>
@@ -2777,7 +3223,7 @@ export class AdminApp {
           }
           section.style.display = '';
           const displayContent = this.getDisplayContent();
-          section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, displayContent ? Object.values(displayContent.monsters) : [], this.isReadOnly());
+          section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, displayContent ? Object.values(displayContent.encounters) : [], this.isReadOnly());
           this.wireSidebarEncounterEvents();
         } else {
           delete this.selectedTile.encounterTable;
@@ -2803,19 +3249,17 @@ export class AdminApp {
     }
   }
 
-  private renderSidebarEncounterRows(tile: WorldTileDefinition, monsters: MonsterDefinition[], readOnly: boolean): string {
+  private renderSidebarEncounterRows(tile: WorldTileDefinition, encounters: EncounterDefinition[], readOnly: boolean): string {
     const disabled = readOnly ? ' disabled' : '';
     const entries = tile.encounterTable ?? [];
     const rows = entries.map((e, i) => {
-      const options = monsters.map(m =>
-        `<option value="${m.id}" ${m.id === e.monsterId ? 'selected' : ''}>${this.escapeHtml(m.name)}</option>`
+      const options = encounters.map(enc =>
+        `<option value="${enc.id}" ${enc.id === e.encounterId ? 'selected' : ''}>${this.escapeHtml(enc.name)}</option>`
       ).join('');
       return `
         <div class="monster-drop-row sidebar-enc-row" data-index="${i}">
-          <select class="sidebar-enc-monster"${disabled}>${options}</select>
+          <select class="sidebar-enc-encounter"${disabled}>${options}</select>
           <label class="zf-enc-inline">W<input type="number" class="sidebar-enc-weight" value="${e.weight}" min="1" step="1"${disabled}></label>
-          <label class="zf-enc-inline">Min<input type="number" class="sidebar-enc-min" value="${e.minCount}" min="1" step="1"${disabled}></label>
-          <label class="zf-enc-inline">Max<input type="number" class="sidebar-enc-max" value="${e.maxCount}" min="1" step="1"${disabled}></label>
           ${readOnly ? '' : '<button class="admin-btn admin-btn-sm admin-btn-danger sidebar-enc-remove">X</button>'}
         </div>
       `;
@@ -2829,17 +3273,17 @@ export class AdminApp {
     document.getElementById('sidebar-add-encounter')?.addEventListener('click', () => {
       if (!this.selectedTile) return;
       const displayContent = this.getDisplayContent();
-      const monsters = displayContent ? Object.values(displayContent.monsters) : [];
-      if (monsters.length === 0) return;
+      const encounterDefs = displayContent ? Object.values(displayContent.encounters) : [];
+      if (encounterDefs.length === 0) return;
 
       if (!this.selectedTile.encounterTable) this.selectedTile.encounterTable = [];
-      this.selectedTile.encounterTable.push({ monsterId: monsters[0].id, weight: 1, minCount: 1, maxCount: 1 });
+      this.selectedTile.encounterTable.push({ encounterId: encounterDefs[0].id, weight: 1 });
       this.scheduleSave();
 
       // Re-render encounter section
       const section = document.getElementById('sidebar-encounters-section');
       if (section) {
-        section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, monsters, this.isReadOnly());
+        section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, encounterDefs, this.isReadOnly());
         this.wireSidebarEncounterEvents();
       }
     });
@@ -2856,7 +3300,7 @@ export class AdminApp {
           const section = document.getElementById('sidebar-encounters-section');
           const displayContent = this.getDisplayContent();
           if (section) {
-            section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, displayContent ? Object.values(displayContent.monsters) : [], this.isReadOnly());
+            section.innerHTML = this.renderSidebarEncounterRows(this.selectedTile, displayContent ? Object.values(displayContent.encounters) : [], this.isReadOnly());
             this.wireSidebarEncounterEvents();
           }
         }
@@ -2868,9 +3312,9 @@ export class AdminApp {
       const index = parseInt(row.getAttribute('data-index') ?? '-1');
       if (index < 0) return;
 
-      row.querySelector('.sidebar-enc-monster')?.addEventListener('change', (e) => {
+      row.querySelector('.sidebar-enc-encounter')?.addEventListener('change', (e) => {
         if (this.selectedTile?.encounterTable?.[index]) {
-          this.selectedTile.encounterTable[index].monsterId = (e.target as HTMLSelectElement).value;
+          this.selectedTile.encounterTable[index].encounterId = (e.target as HTMLSelectElement).value;
           this.scheduleSave();
         }
       });
@@ -2878,20 +3322,6 @@ export class AdminApp {
       row.querySelector('.sidebar-enc-weight')?.addEventListener('input', (e) => {
         if (this.selectedTile?.encounterTable?.[index]) {
           this.selectedTile.encounterTable[index].weight = parseInt((e.target as HTMLInputElement).value) || 1;
-          this.scheduleSave();
-        }
-      });
-
-      row.querySelector('.sidebar-enc-min')?.addEventListener('input', (e) => {
-        if (this.selectedTile?.encounterTable?.[index]) {
-          this.selectedTile.encounterTable[index].minCount = parseInt((e.target as HTMLInputElement).value) || 1;
-          this.scheduleSave();
-        }
-      });
-
-      row.querySelector('.sidebar-enc-max')?.addEventListener('input', (e) => {
-        if (this.selectedTile?.encounterTable?.[index]) {
-          this.selectedTile.encounterTable[index].maxCount = parseInt((e.target as HTMLInputElement).value) || 1;
           this.scheduleSave();
         }
       });

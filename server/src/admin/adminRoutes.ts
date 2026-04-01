@@ -108,6 +108,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       monsters: content.getAllMonsters(),
       items: content.getAllItems(),
       zones: content.getAllZones(),
+      encounters: content.getAllEncounters(),
       world: content.getWorld(),
     });
   });
@@ -124,8 +125,8 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     // Validate optional encounter table entries
     if (encounterTable != null && Array.isArray(encounterTable)) {
       for (const entry of encounterTable) {
-        if (!entry.monsterId || entry.weight == null || entry.minCount == null || entry.maxCount == null) {
-          res.status(400).json({ error: 'Each encounter entry requires: monsterId, weight, minCount, maxCount' });
+        if (!entry.encounterId || entry.weight == null) {
+          res.status(400).json({ error: 'Each encounter entry requires: encounterId, weight' });
           return;
         }
       }
@@ -238,7 +239,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   router.put('/monsters/:id', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
     const monster = req.body;
-    if (!monster.id || !monster.name || monster.level == null || monster.hp == null ||
+    if (!monster.id || !monster.name || monster.hp == null ||
         monster.damage == null || !monster.damageType || monster.xp == null ||
         monster.goldMin == null || monster.goldMax == null) {
       res.status(400).json({ error: 'Missing required fields: id, name, level, hp, damage, damageType, xp, goldMin, goldMax' });
@@ -308,7 +309,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const errors: string[] = [];
     for (let i = 0; i < monsters.length; i++) {
       const m = monsters[i];
-      if (!m.id || !m.name || m.level == null || m.hp == null ||
+      if (!m.id || !m.name || m.hp == null ||
           m.damage == null || !m.damageType || m.xp == null ||
           m.goldMin == null || m.goldMax == null) {
         errors.push(`Monster at index ${i}: missing required fields (id, name, level, hp, damage, damageType, xp, goldMin, goldMax)`);
@@ -535,6 +536,88 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  // ── Encounter endpoints ────────────────────────────────────
+
+  /** List all encounters. */
+  router.get('/encounters', (_req, res) => {
+    const content = getContentStore();
+    res.json({ encounters: content.getAllEncounters() });
+  });
+
+  /** Add or update an encounter. Supports ?versionId= for draft editing. */
+  router.put('/encounters/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const encounter = req.body;
+    if (!encounter.id || !encounter.name || !encounter.type) {
+      res.status(400).json({ error: 'Missing required fields: id, name, type' });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.encounters) snapshot.encounters = [];
+      const idx = snapshot.encounters.findIndex(e => e.id === encounter.id);
+      if (idx >= 0) {
+        snapshot.encounters[idx] = encounter;
+      } else {
+        snapshot.encounters.push(encounter);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const encountersRecord: Record<string, typeof encounter> = {};
+      for (const e of snapshot.encounters) encountersRecord[e.id] = e;
+      res.json({ success: true, encounters: encountersRecord });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateEncounter(encounter);
+      res.json({ success: true, encounters: content.getAllEncounters() });
+    }
+  });
+
+  /** Delete an encounter. Supports ?versionId= for draft editing. */
+  router.delete('/encounters/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const encounterId = req.params.id;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.encounters) snapshot.encounters = [];
+      // Check referential integrity within the snapshot
+      for (const zone of snapshot.zones) {
+        if (zone.encounterTable.some(e => e.encounterId === encounterId)) {
+          res.status(400).json({ error: `Cannot delete: encounter is referenced by zone "${zone.displayName}".` });
+          return;
+        }
+      }
+      for (const tile of snapshot.world.tiles) {
+        if (tile.encounterTable?.some(e => e.encounterId === encounterId)) {
+          res.status(400).json({ error: `Cannot delete: encounter is referenced by tile "${tile.name}".` });
+          return;
+        }
+      }
+      snapshot.encounters = snapshot.encounters.filter(e => e.id !== encounterId);
+      await versions.saveSnapshot(versionId, snapshot);
+      const encountersRecord: Record<string, (typeof snapshot.encounters)[0]> = {};
+      for (const e of snapshot.encounters) encountersRecord[e.id] = e;
+      res.json({ success: true, encounters: encountersRecord });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteEncounter(encounterId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, encounters: content.getAllEncounters() });
+    }
+  });
+
   // ── Version endpoints ──────────────────────────────────────
 
   /** List all versions. */
@@ -588,7 +671,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     for (const i of snapshot.items) itemsRecord[i.id] = i;
     const zonesRecord: Record<string, (typeof snapshot.zones)[0]> = {};
     for (const z of snapshot.zones) zonesRecord[z.id] = z;
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, world: snapshot.world });
+    const encountersRecord: Record<string, NonNullable<(typeof snapshot.encounters)>[0]> = {};
+    if (snapshot.encounters) {
+      for (const e of snapshot.encounters) encountersRecord[e.id] = e;
+    }
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */

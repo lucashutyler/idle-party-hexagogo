@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SEED_ZONES, getZone } from '../src/systems/ZoneTypes';
-import { SEED_MONSTERS, createEncounter } from '../src/systems/MonsterTypes';
+import { SEED_MONSTERS } from '../src/systems/MonsterTypes';
+import { SEED_ENCOUNTERS, createEncounter } from '../src/systems/EncounterTypes';
 
 describe('ZoneTypes', () => {
   describe('SEED_ZONES', () => {
@@ -10,19 +11,17 @@ describe('ZoneTypes', () => {
       expect(SEED_ZONES.crystal_caves).toBeDefined();
     });
 
-    it('every encounter table entry references a valid monster', () => {
+    it('every encounter table entry references a valid encounter', () => {
       for (const zone of Object.values(SEED_ZONES)) {
         for (const entry of zone.encounterTable) {
-          expect(SEED_MONSTERS[entry.monsterId]).toBeDefined();
+          expect(SEED_ENCOUNTERS[entry.encounterId]).toBeDefined();
         }
       }
     });
 
-    it('encounter table entries have valid counts', () => {
+    it('encounter table entries have valid weights', () => {
       for (const zone of Object.values(SEED_ZONES)) {
         for (const entry of zone.encounterTable) {
-          expect(entry.minCount).toBeGreaterThanOrEqual(1);
-          expect(entry.maxCount).toBeGreaterThanOrEqual(entry.minCount);
           expect(entry.weight).toBeGreaterThan(0);
         }
       }
@@ -43,7 +42,7 @@ describe('ZoneTypes', () => {
 
   describe('createEncounter with zones', () => {
     it('returns monsters for hatchetmill', () => {
-      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES);
+      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS);
       expect(monsters.length).toBeGreaterThanOrEqual(1);
       expect(monsters.length).toBeLessThanOrEqual(2);
       // hatchetmill only has goblins
@@ -53,7 +52,7 @@ describe('ZoneTypes', () => {
     });
 
     it('returns monsters for darkwood', () => {
-      const monsters = createEncounter('darkwood', SEED_MONSTERS, SEED_ZONES);
+      const monsters = createEncounter('darkwood', SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS);
       expect(monsters.length).toBeGreaterThanOrEqual(1);
       expect(monsters.length).toBeLessThanOrEqual(3);
       // darkwood has goblins, wolves, or bandits
@@ -63,30 +62,30 @@ describe('ZoneTypes', () => {
     });
 
     it('falls back to 2 goblins with no zone', () => {
-      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES);
+      const monsters = createEncounter(undefined, SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS);
       expect(monsters).toHaveLength(2);
       expect(monsters[0].id).toBe('goblin');
       expect(monsters[1].id).toBe('goblin');
     });
 
     it('falls back to 2 goblins for unknown zone', () => {
-      const monsters = createEncounter('nonexistent', SEED_MONSTERS, SEED_ZONES);
+      const monsters = createEncounter('nonexistent', SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS);
       expect(monsters).toHaveLength(2);
       expect(monsters[0].id).toBe('goblin');
     });
 
     it('uses room encounter table override when provided', () => {
-      const roomTable = [{ monsterId: 'wolf', weight: 1, minCount: 2, maxCount: 2 }];
+      const roomTable = [{ encounterId: 'darkwood_wolves', weight: 1 }];
       // Even though zone is hatchetmill (goblins only), room override should produce wolves
-      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES, roomTable);
-      expect(monsters).toHaveLength(2);
+      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS, roomTable);
+      expect(monsters.length).toBeGreaterThanOrEqual(1);
       for (const m of monsters) {
         expect(m.id).toBe('wolf');
       }
     });
 
     it('falls back to zone table when room encounter table is empty', () => {
-      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES, []);
+      const monsters = createEncounter('hatchetmill', SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS, []);
       expect(monsters.length).toBeGreaterThanOrEqual(1);
       for (const m of monsters) {
         expect(m.id).toBe('goblin');

@@ -1,14 +1,23 @@
-import type { EncounterTableEntry, ZoneDefinition } from './ZoneTypes.js';
 import type { ItemDrop } from './ItemTypes.js';
 import type { DamageType } from './CharacterStats.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 
 // --- Types ---
 
+export interface Resistance {
+  damageType: DamageType;
+  flatReduction: number;
+  percentReduction: number;
+}
+
+export interface MonsterSkillEntry {
+  skillId: string;
+  value: number;
+}
+
 export interface MonsterDefinition {
   id: string;
   name: string;
-  level: number;
   hp: number;
   damage: number;
   damageType: DamageType;
@@ -16,12 +25,13 @@ export interface MonsterDefinition {
   goldMin: number;
   goldMax: number;
   drops?: ItemDrop[];
+  resistances?: Resistance[];
+  skills?: MonsterSkillEntry[];
 }
 
 export interface MonsterInstance {
   id: string;
   name: string;
-  level: number;
   maxHp: number;
   currentHp: number;
   damage: number;
@@ -30,6 +40,10 @@ export interface MonsterInstance {
   gridPosition: PartyGridPosition;
   /** Remaining stun turns (0 = not stunned). */
   stunTurns: number;
+  resistances?: Resistance[];
+  skills?: MonsterSkillEntry[];
+  /** Cooldown ticks remaining per skill ID. */
+  skillCooldowns?: Record<string, number>;
 }
 
 // --- Seed data (used as defaults when data files don't exist) ---
@@ -38,7 +52,6 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
   goblin: {
     id: 'goblin',
     name: 'Goblin',
-    level: 1,
     hp: 15,
     damage: 4,
     damageType: 'physical',
@@ -58,7 +71,6 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
   wolf: {
     id: 'wolf',
     name: 'Wolf',
-    level: 2,
     hp: 20,
     damage: 6,
     damageType: 'magical',
@@ -76,7 +88,6 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
   bandit: {
     id: 'bandit',
     name: 'Bandit',
-    level: 3,
     hp: 30,
     damage: 5,
     damageType: 'physical',
@@ -96,15 +107,11 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
 
 // --- Functions ---
 
-/** Grid positions used to distribute monsters across the 3x3 grid. */
-const MONSTER_GRID_POSITIONS: PartyGridPosition[] = [4, 1, 7, 3, 5, 0, 2, 6, 8];
-
 /** Create a live monster instance from a definition. */
 export function createMonsterInstance(def: MonsterDefinition, gridPosition: PartyGridPosition = 4): MonsterInstance {
-  return {
+  const instance: MonsterInstance = {
     id: def.id,
     name: def.name,
-    level: def.level,
     maxHp: def.hp,
     currentHp: def.hp,
     damage: def.damage,
@@ -113,64 +120,16 @@ export function createMonsterInstance(def: MonsterDefinition, gridPosition: Part
     gridPosition,
     stunTurns: 0,
   };
-}
-
-/**
- * Pick a random entry from the encounter table using weighted random selection.
- */
-function pickWeightedEntry(table: EncounterTableEntry[]): EncounterTableEntry {
-  const totalWeight = table.reduce((sum, e) => sum + e.weight, 0);
-  let roll = Math.random() * totalWeight;
-  for (const entry of table) {
-    roll -= entry.weight;
-    if (roll <= 0) return entry;
+  if (def.resistances?.length) {
+    instance.resistances = def.resistances;
   }
-  return table[table.length - 1];
-}
-
-/**
- * Create an encounter for the given zone, with optional room-level override.
- * Priority: roomEncounterTable → zone's encounterTable → goblin fallback.
- */
-export function createEncounter(
-  zoneId: string | undefined,
-  monsters: Record<string, MonsterDefinition>,
-  zones: Record<string, ZoneDefinition>,
-  roomEncounterTable?: EncounterTableEntry[],
-): MonsterInstance[] {
-  const fallbackDef = monsters['goblin'] ?? Object.values(monsters)[0];
-  if (!fallbackDef) return [];
-
-  // Determine which encounter table to use: room override → zone default
-  let encounterTable: EncounterTableEntry[] | undefined = roomEncounterTable?.length ? roomEncounterTable : undefined;
-
-  if (!encounterTable && zoneId) {
-    const zone = zones[zoneId];
-    if (zone) {
-      encounterTable = zone.encounterTable;
+  if (def.skills?.length) {
+    instance.skills = def.skills;
+    instance.skillCooldowns = {};
+    for (const s of def.skills) {
+      instance.skillCooldowns[s.skillId] = 0;
     }
   }
-
-  if (!encounterTable || encounterTable.length === 0) {
-    return [
-      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[0]),
-      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[1]),
-    ];
-  }
-
-  const entry = pickWeightedEntry(encounterTable);
-  const def = monsters[entry.monsterId];
-  if (!def) {
-    return [
-      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[0]),
-      createMonsterInstance(fallbackDef, MONSTER_GRID_POSITIONS[1]),
-    ];
-  }
-
-  const count = entry.minCount + Math.floor(Math.random() * (entry.maxCount - entry.minCount + 1));
-  const result: MonsterInstance[] = [];
-  for (let i = 0; i < count; i++) {
-    result.push(createMonsterInstance(def, MONSTER_GRID_POSITIONS[i % MONSTER_GRID_POSITIONS.length]));
-  }
-  return result;
+  return instance;
 }
+

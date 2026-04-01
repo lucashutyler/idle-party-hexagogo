@@ -116,12 +116,33 @@ export type {
 export {
   SEED_MONSTERS,
   createMonsterInstance,
-  createEncounter,
 } from './systems/MonsterTypes.js';
 export type {
+  Resistance,
+  MonsterSkillEntry,
   MonsterDefinition,
   MonsterInstance,
 } from './systems/MonsterTypes.js';
+
+// Monster skills
+export {
+  MONSTER_SKILL_CATALOG,
+} from './systems/MonsterSkills.js';
+export type {
+  MonsterSkillDefinition,
+} from './systems/MonsterSkills.js';
+
+// Encounter types
+export {
+  SEED_ENCOUNTERS,
+  resolveEncounter,
+  createEncounter,
+} from './systems/EncounterTypes.js';
+export type {
+  RandomMonsterEntry,
+  ExplicitPlacement,
+  EncounterDefinition,
+} from './systems/EncounterTypes.js';
 
 // Zone types
 export {
@@ -138,6 +159,7 @@ export {
   createPartyCombatState,
   processPartyTick,
   findTarget,
+  applyMonsterResistance,
 } from './systems/CombatEngine.js';
 export type {
   TickResult,

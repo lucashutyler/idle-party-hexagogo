@@ -48,7 +48,6 @@ export interface ClientMonsterState {
   name: string;
   currentHp: number;
   maxHp: number;
-  level: number;
   gridPosition: PartyGridPosition;
   /** Remaining stun turns (0 or undefined = not stunned). */
   stunTurns?: number;
