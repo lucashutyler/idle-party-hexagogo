@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.01.1',
+    notes: [
+      'Fixed admin class switch not unlocking skills for the new class',
+      'Fixed skills appearing unlockable before reaching the required level',
+      'DOT and HOT effects are now grouped in the combat log (e.g. "receives 136 magical damage from ignite (x6)!")',
+    ],
+  },
+  {
     version: '2026.03.31.2',
     notes: [
       'Overhauled the encounter system — monsters can now appear in mixed groups with randomized formations',
