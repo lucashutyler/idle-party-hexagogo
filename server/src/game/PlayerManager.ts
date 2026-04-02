@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import { HexGrid, offsetToCube, cubeDistance, cubeToKey, CLASS_ICONS } from '@idle-party-rpg/shared';
-import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
+import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, CombatLogEntry } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
@@ -834,6 +834,15 @@ export class PlayerManager {
   addShutdownLog(): void {
     for (const session of this.sessions.values()) {
       session.addLogEntry('Server shutting down — saving state...', 'battle');
+    }
+  }
+
+  /**
+   * Add a log entry to all existing sessions.
+   */
+  addLogToAll(text: string, type: CombatLogEntry['type']): void {
+    for (const session of this.sessions.values()) {
+      session.addLogEntry(text, type);
     }
   }
 }

@@ -34,7 +34,6 @@ export interface PlayerSaveData {
   chatHistory?: ChatMessage[];
   chatSendChannel?: string;
   chatDmTarget?: string;
-  lastSeenVersion?: string;
 }
 
 /**
