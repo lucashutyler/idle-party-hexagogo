@@ -77,6 +77,7 @@ export class PlayerSession {
   private partyId: string | null = null;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
+  private lastSeenVersion: string = GAME_VERSION;
 
   /** XP rate tracking — in-memory only, resets on server restart. */
   private xpRateStartTime = Date.now();
@@ -568,6 +569,7 @@ export class PlayerSession {
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
+      lastSeenVersion: this.lastSeenVersion,
     };
   }
 
@@ -666,7 +668,13 @@ export class PlayerSession {
 
     // Add server-online log entry
     session['addLogEntry']('Server back online — resuming!', 'battle');
-    session['addLogEntry'](`Update ${GAME_VERSION}! Check Settings > Patch Notes for details.`, 'battle');
+
+    // Announce new version only if player hasn't seen it yet
+    const savedVersion = data.lastSeenVersion ?? '';
+    if (savedVersion !== GAME_VERSION) {
+      session['addLogEntry'](`Update ${GAME_VERSION}! Check Settings > Patch Notes for details.`, 'battle');
+      session['lastSeenVersion'] = GAME_VERSION;
+    }
 
     return session;
   }
