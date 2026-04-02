@@ -87,7 +87,7 @@ export class GameLoop {
     let lastVersion = '';
     try { lastVersion = (await fs.readFile(VERSION_FILE, 'utf-8')).trim(); } catch { /* first boot */ }
     if (lastVersion !== GAME_VERSION) {
-      this.playerManager.addLogToAll(`Update ${GAME_VERSION}! Check Settings > Patch Notes for details.`, 'battle');
+      this.playerManager.broadcastServerMessage(`Update ${GAME_VERSION}! Check Settings > Patch Notes for details.`);
       await fs.writeFile(VERSION_FILE, GAME_VERSION, 'utf-8');
       console.log(`[GameLoop] Version updated: ${lastVersion || '(none)'} → ${GAME_VERSION}`);
     }
