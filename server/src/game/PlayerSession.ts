@@ -30,6 +30,7 @@ import {
   equipSkillInSlot,
   unequipSkillFromSlot,
   getSkillById,
+  GAME_VERSION,
 } from '@idle-party-rpg/shared';
 import type {
   ServerStateMessage,
@@ -665,6 +666,7 @@ export class PlayerSession {
 
     // Add server-online log entry
     session['addLogEntry']('Server back online — resuming!', 'battle');
+    session['addLogEntry'](`Update ${GAME_VERSION}! Check Settings > Patch Notes for details.`, 'battle');
 
     return session;
   }
