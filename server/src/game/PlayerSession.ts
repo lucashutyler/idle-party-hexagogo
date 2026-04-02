@@ -426,6 +426,7 @@ export class PlayerSession {
     this.character.className = className;
     this.character.skillLoadout = createDefaultSkillLoadout(className);
     this.character.skillPoints = getSkillPointsForLevel(this.character.level);
+    this.autoUnlockSkills();
     this.addLogEntry(`Class changed to ${className}!`, 'battle');
   }
 

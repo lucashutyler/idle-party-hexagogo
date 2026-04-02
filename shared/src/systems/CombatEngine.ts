@@ -20,6 +20,7 @@ export interface TickResult {
 
 export interface DotEffect {
   sourceUsername: string;
+  name: string;
   damagePerTick: number;
   ticksRemaining: number;
   damageType: DamageType;
@@ -27,6 +28,7 @@ export interface DotEffect {
 
 export interface HotEffect {
   sourceUsername: string;
+  name: string;
   healPerTick: number;
   ticksRemaining: number;
 }
@@ -589,6 +591,7 @@ function applyDamageToMonster(
         if (dotTotal > 0 && target.currentHp > 0) {
           target.dots.push({
             sourceUsername: player.username,
+            name: skill.name.toLowerCase(),
             damagePerTick: Math.max(1, Math.floor(dotTotal / ticks)),
             ticksRemaining: ticks,
             damageType: 'magical',
@@ -667,31 +670,57 @@ function applyHeal(
 
 /** Process DoTs and HoTs on a combatant at the start of their turn. */
 function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: string[]): void {
-  // Process DoTs
-  for (let i = entity.dots.length - 1; i >= 0; i--) {
-    const dot = entity.dots[i];
+  // Process DoTs — group same-name effects
+  if (entity.dots.length > 0) {
     const name = 'username' in entity ? (entity as PartyCombatant).username : (entity as CombatMonster).name;
-    entity.currentHp = Math.max(0, entity.currentHp - dot.damagePerTick);
-    logEntries.push(`${name} takes ${dot.damagePerTick} ${dot.damageType} damage (DoT)`);
-    dot.ticksRemaining--;
-    if (dot.ticksRemaining <= 0) {
-      entity.dots.splice(i, 1);
+    const grouped = new Map<string, { totalDamage: number; count: number; damageType: DamageType }>();
+    for (let i = entity.dots.length - 1; i >= 0; i--) {
+      const dot = entity.dots[i];
+      const group = grouped.get(dot.name);
+      if (group) {
+        group.totalDamage += dot.damagePerTick;
+        group.count++;
+      } else {
+        grouped.set(dot.name, { totalDamage: dot.damagePerTick, count: 1, damageType: dot.damageType });
+      }
+      dot.ticksRemaining--;
+      if (dot.ticksRemaining <= 0) {
+        entity.dots.splice(i, 1);
+      }
+    }
+    for (const [dotName, { totalDamage, count, damageType }] of grouped) {
+      entity.currentHp = Math.max(0, entity.currentHp - totalDamage);
+      const stacks = count > 1 ? ` (x${count})` : '';
+      logEntries.push(`${name} receives ${totalDamage} ${damageType} damage from ${dotName}${stacks}!`);
     }
   }
 
-  // Process HoTs (players only)
+  // Process HoTs (players only) — group same-name effects
   if ('hots' in entity && 'maxHp' in entity && 'username' in entity) {
     const player = entity as PartyCombatant;
-    for (let i = player.hots.length - 1; i >= 0; i--) {
-      const hot = player.hots[i];
-      const healAmount = Math.min(hot.healPerTick, player.maxHp - player.currentHp);
-      player.currentHp += healAmount;
-      if (healAmount > 0) {
-        logEntries.push(`${player.username} heals for ${healAmount} HP (HoT)`);
+    if (player.hots.length > 0) {
+      const grouped = new Map<string, { totalHeal: number; count: number }>();
+      for (let i = player.hots.length - 1; i >= 0; i--) {
+        const hot = player.hots[i];
+        const healAmount = Math.min(hot.healPerTick, player.maxHp - player.currentHp);
+        player.currentHp += healAmount;
+        if (healAmount > 0) {
+          const group = grouped.get(hot.name);
+          if (group) {
+            group.totalHeal += healAmount;
+            group.count++;
+          } else {
+            grouped.set(hot.name, { totalHeal: healAmount, count: 1 });
+          }
+        }
+        hot.ticksRemaining--;
+        if (hot.ticksRemaining <= 0) {
+          player.hots.splice(i, 1);
+        }
       }
-      hot.ticksRemaining--;
-      if (hot.ticksRemaining <= 0) {
-        player.hots.splice(i, 1);
+      for (const [hotName, { totalHeal, count }] of grouped) {
+        const stacks = count > 1 ? ` (x${count})` : '';
+        logEntries.push(`${player.username} heals for ${totalHeal} HP from ${hotName}${stacks}`);
       }
     }
   }
@@ -1065,6 +1094,7 @@ function executeActiveSkill(
         const ticks = effect.dotTicks ?? 3;
         target.dots.push({
           sourceUsername: player.username,
+          name: skill.name.toLowerCase(),
           damagePerTick: Math.max(1, Math.floor(dotTotal / ticks)),
           ticksRemaining: ticks,
           damageType: player.playerDamageType,
@@ -1155,6 +1185,7 @@ function executeActiveSkill(
 
       target.hots.push({
         sourceUsername: player.username,
+        name: skill.name.toLowerCase(),
         healPerTick: adjustedHeal,
         ticksRemaining: ticks,
       });
@@ -1723,6 +1754,7 @@ function tryExecuteMonsterSkill(
         const ticks = skillDef.dotDuration ?? 3;
         target.dots.push({
           sourceUsername: monster.name,
+          name: skillDef.name.toLowerCase(),
           damagePerTick: Math.max(1, entry.value),
           ticksRemaining: ticks,
           damageType: skillDef.damageType ?? 'magical',

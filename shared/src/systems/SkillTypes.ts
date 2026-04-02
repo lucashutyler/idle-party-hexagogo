@@ -801,6 +801,9 @@ export function canUnlockSkill(
   // Already unlocked
   if (unlockedSkills.includes(skillId)) return false;
 
+  // Must meet level requirement
+  if (level < getSkillLearnLevel(skill.treeOrder)) return false;
+
   // Must unlock in tree order — all prior skills must be unlocked
   for (const s of tree) {
     if (s.treeOrder < skill.treeOrder && !unlockedSkills.includes(s.id)) {
