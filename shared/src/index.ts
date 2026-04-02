@@ -212,6 +212,7 @@ export {
   RESULT_PAUSE,
   MOVE_DURATION,
   RUN_AVAILABLE_ROUNDS,
+  GAME_VERSION,
 } from './systems/BattleTypes.js';
 
 // Social types

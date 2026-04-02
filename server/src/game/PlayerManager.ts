@@ -836,4 +836,13 @@ export class PlayerManager {
       session.addLogEntry('Server shutting down — saving state...', 'battle');
     }
   }
+
+  /**
+   * Broadcast a server chat message to all existing sessions.
+   */
+  broadcastServerMessage(text: string): void {
+    const recipients = Array.from(this.sessions.keys())
+      .map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
+    this.chat.sendMessage('Server', 'server', 'server', text, recipients);
+  }
 }

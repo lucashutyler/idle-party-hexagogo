@@ -1,5 +1,7 @@
 import crypto from 'crypto';
-import { HexGrid, HexTile, offsetToCube } from '@idle-party-rpg/shared';
+import fs from 'fs/promises';
+import path from 'path';
+import { HexGrid, HexTile, offsetToCube, GAME_VERSION } from '@idle-party-rpg/shared';
 import { PlayerManager } from './PlayerManager.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
@@ -8,6 +10,7 @@ import { VersionStore } from './VersionStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
+const VERSION_FILE = path.resolve('data', 'game-version.txt');
 
 export class GameLoop {
   readonly playerManager!: PlayerManager;
@@ -78,6 +81,15 @@ export class GameLoop {
       console.log(`[Startup] Sessions restored in ${(performance.now() - t).toFixed(1)}ms`);
     } else {
       console.log('[GameLoop] No save files found — fresh start');
+    }
+
+    // Announce new version to all restored sessions if GAME_VERSION changed
+    let lastVersion = '';
+    try { lastVersion = (await fs.readFile(VERSION_FILE, 'utf-8')).trim(); } catch { /* first boot */ }
+    if (lastVersion !== GAME_VERSION) {
+      this.playerManager.broadcastServerMessage(`Update ${GAME_VERSION}! Check Settings > Patch Notes for details.`);
+      await fs.writeFile(VERSION_FILE, GAME_VERSION, 'utf-8');
+      console.log(`[GameLoop] Version updated: ${lastVersion || '(none)'} → ${GAME_VERSION}`);
     }
 
     this.saveInterval = setInterval(() => {

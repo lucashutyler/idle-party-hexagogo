@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ClassName, SkillDefinition } from '@idle-party-rpg/shared';
-import { computeEquipmentBonuses, CLASS_ICONS, UNKNOWN_CLASS_ICON, SKILL_TREES, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
+import { computeEquipmentBonuses, CLASS_ICONS, UNKNOWN_CLASS_ICON, SKILL_TREES, SKILL_SLOTS, LEVELS_PER_SKILL_POINT, getSkillById } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 export class CharacterScreen implements Screen {
@@ -292,9 +292,10 @@ export class CharacterScreen implements Screen {
       const isEquipped = equippedSet.has(skill.id);
       let canUnlock = false;
       if (!isUnlocked) {
+        const learnLevel = skill.treeOrder === 0 ? 1 : skill.treeOrder * LEVELS_PER_SKILL_POINT;
         const allPriorUnlocked = tree.every(s => s.treeOrder >= skill.treeOrder || unlockedSet.has(s.id));
         const cost = skill.treeOrder === 0 ? 0 : 1;
-        canUnlock = allPriorUnlocked && char.skillPoints >= cost;
+        canUnlock = char.level >= learnLevel && allPriorUnlocked && char.skillPoints >= cost;
       }
       return {
         isUnlocked,
