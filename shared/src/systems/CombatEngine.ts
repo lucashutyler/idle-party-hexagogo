@@ -669,10 +669,11 @@ function applyHeal(
 }
 
 /** Process DoTs and HoTs on a combatant at the start of their turn. */
-function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: string[]): void {
-  // Process DoTs — group same-name effects
+function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: string[], state?: PartyCombatState): void {
+  // Process DoTs — group same-name effects, apply resistance to grouped total
   if (entity.dots.length > 0) {
     const name = 'username' in entity ? (entity as PartyCombatant).username : (entity as CombatMonster).name;
+    const isMonster = !('username' in entity);
     const grouped = new Map<string, { totalDamage: number; count: number; damageType: DamageType }>();
     for (let i = entity.dots.length - 1; i >= 0; i--) {
       const dot = entity.dots[i];
@@ -689,9 +690,25 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
       }
     }
     for (const [dotName, { totalDamage, count, damageType }] of grouped) {
-      entity.currentHp = Math.max(0, entity.currentHp - totalDamage);
+      let damage = totalDamage;
+      if (isMonster) {
+        // Monster receiving DoT — apply monster resistances
+        damage = applyMonsterResistance(damage, damageType, (entity as CombatMonster).resistances);
+      } else if (state) {
+        // Player receiving DoT — apply equipment DR + Guard (physical) or Bless (magical/holy)
+        const player = entity as PartyCombatant;
+        let reduction = 0;
+        if (damageType === 'physical') {
+          reduction += computeEquipReduction(player.equipBonuses);
+          reduction += getPhysicalReduction(player, state.players);
+        } else {
+          reduction += getMagicalReduction(state.players);
+        }
+        damage = Math.max(0, damage - reduction);
+      }
+      entity.currentHp = Math.max(0, entity.currentHp - damage);
       const stacks = count > 1 ? ` (x${count})` : '';
-      logEntries.push(`${name} receives ${totalDamage} ${damageType} damage from ${dotName}${stacks}!`);
+      logEntries.push(`${name} receives ${damage} ${damageType} damage from ${dotName}${stacks}!`);
     }
   }
 
@@ -1348,7 +1365,7 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       if (player.currentHp <= 0) continue;
 
       // Process tick effects (DoTs, HoTs, debuff expiry)
-      processTickEffects(player, logEntries);
+      processTickEffects(player, logEntries, state);
       if (player.currentHp <= 0) {
         // Check Resurrection
         if (checkResurrection(player, state, logEntries)) {
@@ -1438,7 +1455,7 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       if (monster.currentHp <= 0) continue;
 
       // Process tick effects (DoTs, debuff expiry)
-      processTickEffects(monster, logEntries);
+      processTickEffects(monster, logEntries, state);
       if (monster.currentHp <= 0) {
         logEntries.push(`${monster.name} defeated! (DoT)`);
         state.turnIndex = (idx + 1) % totalCombatants;
