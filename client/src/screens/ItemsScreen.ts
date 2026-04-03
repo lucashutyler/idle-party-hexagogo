@@ -73,7 +73,8 @@ function injectItemsStyles(): void {
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 2px solid transparent;
+      border: 2px solid rgba(180,180,180,0.25);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
       box-sizing: border-box;
       min-width: 0;
     }
@@ -129,19 +130,28 @@ function injectItemsStyles(): void {
       line-height: 1;
     }
 
-    @keyframes item-shiny-border {
-      0%   { border-color: rgba(255,255,255,0.3); }
-      50%  { border-color: rgba(255,255,255,0.9); }
-      100% { border-color: rgba(255,255,255,0.3); }
+    @keyframes item-border-epic {
+      0%, 100% { border-color: #ee66e3; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(238,102,227,0.3); }
+      50% { border-color: #ff99f0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 6px rgba(255,153,240,0.5); }
+    }
+    @keyframes item-border-legendary {
+      0% { border-color: #9233df; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(146,51,223,0.3); }
+      33% { border-color: #c77dff; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 6px rgba(199,125,255,0.5); }
+      66% { border-color: #e0aaff; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(224,170,255,0.6); }
+      100% { border-color: #9233df; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(146,51,223,0.3); }
+    }
+    @keyframes item-border-heirloom {
+      0%, 100% { border-color: #e9bc18; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(233,188,24,0.3); }
+      50% { border-color: #fff176; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(255,241,118,0.6); }
     }
     .item-rarity-epic {
-      animation: item-shiny-border 2.5s ease-in-out infinite;
+      animation: item-border-epic 2s ease-in-out infinite;
     }
     .item-rarity-legendary {
-      animation: item-shiny-border 1.8s ease-in-out infinite;
+      animation: item-border-legendary 3s ease-in-out infinite;
     }
     .item-rarity-heirloom {
-      animation: item-shiny-border 1.2s ease-in-out infinite;
+      animation: item-border-heirloom 2.5s ease-in-out infinite;
     }
 
     .item-popup-overlay {
@@ -293,8 +303,8 @@ function injectItemsStyles(): void {
     }
 
     .items-equip-slot-square {
-      width: 40px;
-      height: 40px;
+      width: 44px;
+      height: 44px;
     }
 
     @media (min-width: 768px) {
@@ -303,8 +313,8 @@ function injectItemsStyles(): void {
         gap: 6px;
       }
       .items-equip-slot-square {
-        width: 48px;
-        height: 48px;
+        width: 52px;
+        height: 52px;
       }
       .item-square-initials {
         font-size: 16px;
@@ -515,7 +525,7 @@ export class ItemsScreen implements Screen {
       let inner = '';
       if (def) {
         const initials = getItemInitials(def.name);
-        inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" alt="">
+        inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
           <span class="item-square-initials">${initials}</span>`;
         if (hasSet) inner += `<span class="item-square-set">S</span>`;
       } else {
@@ -690,7 +700,7 @@ export class ItemsScreen implements Screen {
       <div class="item-popup-overlay">
         <div class="item-popup">
           <div class="item-popup-artwork${shinyClass}" style="background:${bgColor}">
-            <img src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" alt="">
+            <img src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
             <span class="item-popup-initials">${initials}</span>
           </div>
           <div class="item-popup-name" style="color:${rarityColor}">${def.name}</div>

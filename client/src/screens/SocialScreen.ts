@@ -1,7 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, DISPLAY_EQUIP_SLOTS, SKILL_SLOTS, getSkillById, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, SKILL_SLOTS, getSkillById, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
@@ -1900,21 +1900,53 @@ export class SocialScreen implements Screen {
       return name.substring(0, 2).toUpperCase();
     };
 
-    const equipHtml = DISPLAY_EQUIP_SLOTS.map(slot => {
+    const LEFT_SLOTS = ['head', 'shoulders', 'chest', 'gloves', 'foot'];
+    const RIGHT_SLOTS = ['back', 'necklace', 'bracers', 'ring', 'relic'];
+    const SHINY_RARITIES = new Set(['epic', 'legendary', 'heirloom']);
+
+    const renderProfileSlot = (slot: string) => {
       const itemId = profile.equipment[slot];
       const def = itemId ? profile.itemDefinitions[itemId] : null;
       const bgColor = def ? (RARITY_COLORS[def.rarity] ?? '#808080') : '#333';
       const initials = def ? getInitials(def.name) : '';
-      const label = SLOT_LABELS[slot] ?? slot;
-      const artworkUrl = (def as Record<string, unknown> | null)?.artworkUrl as string | undefined;
-      const imgHtml = artworkUrl
-        ? `<img src="${artworkUrl}" class="profile-equip-icon-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="profile-equip-icon-initials" style="display:none">${initials}</span>`
-        : `<span class="profile-equip-icon-initials">${initials}</span>`;
-      return `<div class="profile-equip-square" data-slot="${slot}" data-item-id="${itemId ?? ''}">
-        <div class="profile-equip-icon" style="background:${bgColor}">${imgHtml}</div>
-        <span class="profile-equip-label">${label}</span>
+      const shinyClass = def && SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
+      const slotAbbrev = !def ? ({'head':'H','shoulders':'S','chest':'C','gloves':'G','foot':'F','back':'K','necklace':'N','bracers':'B','ring':'R','relic':'L','mainhand':'M','offhand':'O'}[slot] ?? '') : '';
+
+      let inner = '';
+      if (def && itemId) {
+        inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
+          <span class="item-square-initials">${initials}</span>`;
+      } else {
+        inner = `<span class="item-square-initials" style="color:rgba(255,255,255,0.3)">${slotAbbrev}</span>`;
+      }
+
+      return `<div class="item-square profile-slot-square${shinyClass}" data-slot="${slot}" data-item-id="${itemId ?? ''}" title="${def ? def.name : (SLOT_LABELS[slot] ?? slot)}" style="background:${bgColor};border-color:${def ? 'rgba(180,180,180,0.25)' : 'rgba(255,255,255,0.08)'}">${inner}</div>`;
+    };
+
+    const leftSlotsHtml = LEFT_SLOTS.map(renderProfileSlot).join('');
+    const rightSlotsHtml = RIGHT_SLOTS.map(renderProfileSlot).join('');
+    const mainhandHtml = renderProfileSlot('mainhand');
+    const offhandHtml = renderProfileSlot('offhand');
+
+    const equipHtml = `
+      <div class="profile-equip-panel">
+        <div class="profile-equip-col profile-equip-left">${leftSlotsHtml}</div>
+        <div class="profile-equip-figure">
+          <div class="items-figure-body">
+            <div class="fig-head"></div>
+            <div class="fig-neck"></div>
+            <div class="fig-shoulders"><div class="fig-shoulder-l"></div><div class="fig-torso"></div><div class="fig-shoulder-r"></div></div>
+            <div class="fig-arms"><div class="fig-arm-l"></div><div class="fig-waist"><span class="fig-class-icon">${icon}</span></div><div class="fig-arm-r"></div></div>
+            <div class="fig-legs"><div class="fig-leg-l"></div><div class="fig-leg-gap"></div><div class="fig-leg-r"></div></div>
+            <div class="fig-feet"><div class="fig-foot-l"></div><div class="fig-foot-gap"></div><div class="fig-foot-r"></div></div>
+          </div>
+        </div>
+        <div class="profile-equip-col profile-equip-right">${rightSlotsHtml}</div>
+        <div class="profile-equip-bottom-left">${mainhandHtml}</div>
+        <div class="profile-equip-bottom-spacer"></div>
+        <div class="profile-equip-bottom-right">${offhandHtml}</div>
       </div>`;
-    }).join('');
+
 
     // Skills section
     const skillHtml = SKILL_SLOTS.map((slot, i) => {
@@ -1957,7 +1989,7 @@ export class SocialScreen implements Screen {
       <div class="profile-class">${profile.className}</div>
       <div class="profile-guild">${profile.guildName ? this.escapeHtml(profile.guildName) : 'No Guild'}</div>
       <div class="profile-section-label">Equipment</div>
-      <div class="profile-equipment" style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">${equipHtml}</div>
+      ${equipHtml}
       <div class="profile-section-label">Skills</div>
       <div class="profile-skills">${skillHtml}</div>
       <div class="profile-section-label">Party</div>
@@ -1974,7 +2006,7 @@ export class SocialScreen implements Screen {
       if (id) equippedItemIds.add(id);
     }
 
-    for (const el of modal.querySelectorAll('.profile-equip-square')) {
+    for (const el of modal.querySelectorAll('.profile-slot-square')) {
       el.addEventListener('click', () => {
         const itemId = el.getAttribute('data-item-id');
         if (!itemId) return;

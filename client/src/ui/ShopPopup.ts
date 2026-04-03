@@ -112,7 +112,7 @@ export class ShopPopup {
       const rarityClass = RARITY_ORDER.indexOf(rarity) >= 4 ? ` item-rarity-${rarity}` : '';
 
       return `<div class="item-square shop-item-square${rarityClass}" data-item-id="${si.itemId}" data-price="${si.price}" style="background:${color}40;" title="${this.escapeHtml(name)}">
-        <img class="item-square-img" src="/item-artwork/${si.itemId}.png" onerror="this.style.display='none'">
+        <img class="item-square-img" src="/item-artwork/${si.itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'">
         <span class="item-square-initials">${initials}</span>
         <span class="shop-item-price">${si.price}g</span>
       </div>`;
@@ -143,7 +143,7 @@ export class ShopPopup {
       const value = def?.value ?? 1;
 
       return `<div class="item-square shop-item-square${rarityClass}" data-item-id="${itemId}" data-qty="${qty}" style="background:${color}40;" title="${this.escapeHtml(name)}">
-        <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'">
+        <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'">
         <span class="item-square-initials">${initials}</span>
         ${qty > 1 ? `<span class="item-square-qty">x${qty}</span>` : ''}
         <span class="shop-item-price">${value}g</span>
@@ -174,7 +174,7 @@ export class ShopPopup {
     this.overlay.innerHTML = `
       <div class="item-popup">
         <div class="item-popup-artwork" style="background:${color}40;">
-          <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" style="width:64px;height:64px;">
+          <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" style="width:64px;height:64px;">
           <span class="item-square-initials" style="font-size:28px;">${initials}</span>
         </div>
         <div class="item-popup-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
@@ -235,7 +235,7 @@ export class ShopPopup {
     this.overlay.innerHTML = `
       <div class="item-popup">
         <div class="item-popup-artwork" style="background:${color}40;">
-          <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" style="width:64px;height:64px;">
+          <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" style="width:64px;height:64px;">
           <span class="item-square-initials" style="font-size:28px;">${initials}</span>
         </div>
         <div class="item-popup-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
