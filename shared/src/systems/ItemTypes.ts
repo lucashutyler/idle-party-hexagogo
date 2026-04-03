@@ -234,7 +234,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
   magma_boots: {
     id: 'magma_boots',
     name: 'Magma Boots',
-    rarity: 'common',
+    rarity: 'rare',
     equipSlot: 'foot',
   },
 };
