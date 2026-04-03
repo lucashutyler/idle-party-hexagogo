@@ -287,7 +287,7 @@ describe('Party Combat', () => {
     it('equipment reduction does NOT apply to magical damage', () => {
       const wolf = createMonsterInstance(SEED_MONSTERS.wolf, 4); // 6 magical damage
       const archer = makePlayer('Legolas', 2, { className: 'Archer', level: 1, hp: 200, baseDamage: 15 });
-      archer.equipBonuses = { bonusAttackMin: 0, bonusAttackMax: 0, damageReductionMin: 5, damageReductionMax: 5, dodgeChance: 0 };
+      archer.equipBonuses = { bonusAttackMin: 0, bonusAttackMax: 0, damageReductionMin: 5, damageReductionMax: 5, magicReductionMin: 0, magicReductionMax: 0 };
       const state = createPartyCombatState([archer], [wolf]);
 
       processPartyTick(state); // Archer attacks

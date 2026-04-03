@@ -539,10 +539,10 @@ export class PartyBattleManager {
             for (const itemId of dropped) {
               const itemDef = this.content.getItem(itemId);
               let eligible = members;
-              if (itemDef?.classRestriction) {
+              if (itemDef?.classRestriction && itemDef.classRestriction.length > 0) {
                 const matching = members.filter(u => {
                   const s = this.getSession(u);
-                  return s && s.getClassName() === itemDef.classRestriction;
+                  return s && itemDef.classRestriction!.includes(s.getClassName());
                 });
                 if (matching.length > 0) eligible = matching;
               }

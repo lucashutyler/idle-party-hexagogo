@@ -6,14 +6,19 @@ export class TileInfoModal {
   private modal: HTMLElement;
   private onMove: (col: number, row: number) => void;
   private onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void;
+  private onShopClick?: () => void;
+  /** Whether the player's current tile has a shop. Set externally before showing. */
+  hasShop = false;
 
   constructor(
     parent: HTMLElement,
     onMove: (col: number, row: number) => void,
     onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void,
+    onShopClick?: () => void,
   ) {
     this.onMove = onMove;
     this.onUserClick = onUserClick;
+    this.onShopClick = onShopClick;
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'tile-modal-overlay';
@@ -73,6 +78,7 @@ export class TileInfoModal {
       ${roomNameHtml}
       ${playerList}
       <div class="tile-modal-actions">
+        ${this.hasShop ? '<button class="tile-modal-btn tile-modal-shop" style="background:#e9bc18;color:#000;">Shop</button>' : ''}
         <button class="tile-modal-btn tile-modal-move">Go to room</button>
         <button class="tile-modal-btn tile-modal-close">Close</button>
       </div>
@@ -85,6 +91,11 @@ export class TileInfoModal {
 
     this.modal.querySelector('.tile-modal-close')!.addEventListener('click', () => {
       this.hide();
+    });
+
+    this.modal.querySelector('.tile-modal-shop')?.addEventListener('click', () => {
+      this.hide();
+      this.onShopClick?.();
     });
 
     // Wire clickable usernames to open popup

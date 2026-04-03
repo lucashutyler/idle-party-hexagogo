@@ -2,20 +2,21 @@
 
 export type ItemRarity = 'janky' | 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'heirloom';
 
-export type EquipSlot = 'head' | 'shoulders' | 'chest' | 'bracers' | 'gloves' | 'mainhand' | 'offhand' | 'foot' | 'ring' | 'necklace' | 'back' | 'relic';
+export type EquipSlot = 'head' | 'shoulders' | 'chest' | 'bracers' | 'gloves' | 'mainhand' | 'offhand' | 'twohanded' | 'foot' | 'ring' | 'necklace' | 'back' | 'relic';
 
 export interface ItemDefinition {
   id: string;
   name: string;
   rarity: ItemRarity;
   equipSlot?: EquipSlot;
-  twoHanded?: boolean;
-  classRestriction?: string;
+  classRestriction?: string[];
   bonusAttackMin?: number;
   bonusAttackMax?: number;
   damageReductionMin?: number;
   damageReductionMax?: number;
-  dodgeChance?: number;
+  magicReductionMin?: number;
+  magicReductionMax?: number;
+  value?: number;
 }
 
 export interface ItemDrop {
@@ -28,7 +29,8 @@ export interface EquipmentBonuses {
   bonusAttackMax: number;
   damageReductionMin: number;
   damageReductionMax: number;
-  dodgeChance: number;
+  magicReductionMin: number;
+  magicReductionMax: number;
 }
 
 // --- Constants ---
@@ -45,7 +47,10 @@ export const RARITY_DROP_RATES: Record<ItemRarity, number> = {
   heirloom: 0,
 };
 
-export const EQUIP_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'bracers', 'gloves', 'mainhand', 'offhand', 'foot', 'ring', 'necklace', 'back', 'relic'];
+export const EQUIP_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'bracers', 'gloves', 'mainhand', 'offhand', 'twohanded', 'foot', 'ring', 'necklace', 'back', 'relic'];
+
+/** Equipment record keys — excludes 'twohanded' since 2H items map to mainhand+offhand in the equipment record. */
+export const DISPLAY_EQUIP_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'bracers', 'gloves', 'mainhand', 'offhand', 'foot', 'ring', 'necklace', 'back', 'relic'];
 
 export const SEED_ITEMS: Record<string, ItemDefinition> = {
   janky_helmet: {
@@ -55,6 +60,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'head',
     damageReductionMin: 0,
     damageReductionMax: 1,
+    value: 1,
   },
   rusty_dagger: {
     id: 'rusty_dagger',
@@ -63,6 +69,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'mainhand',
     bonusAttackMin: 1,
     bonusAttackMax: 3,
+    value: 1,
   },
   leather_vest: {
     id: 'leather_vest',
@@ -71,18 +78,20 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'chest',
     damageReductionMin: 1,
     damageReductionMax: 2,
+    value: 1,
   },
   old_leather_boots: {
     id: 'old_leather_boots',
     name: 'Old Leather Boots',
     rarity: 'janky',
     equipSlot: 'foot',
-    dodgeChance: 0.02,
+    value: 1,
   },
   mangy_pelt: {
     id: 'mangy_pelt',
     name: 'Mangy Pelt',
     rarity: 'janky',
+    value: 1,
   },
   tarnished_ring: {
     id: 'tarnished_ring',
@@ -91,6 +100,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'ring',
     bonusAttackMin: 0,
     bonusAttackMax: 1,
+    value: 1,
   },
   frayed_cord_necklace: {
     id: 'frayed_cord_necklace',
@@ -99,6 +109,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'necklace',
     damageReductionMin: 0,
     damageReductionMax: 1,
+    value: 1,
   },
   splintered_buckler: {
     id: 'splintered_buckler',
@@ -107,14 +118,14 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'offhand',
     damageReductionMin: 0,
     damageReductionMax: 1,
-    dodgeChance: 0.01,
+    value: 1,
   },
   moth_eaten_cloak: {
     id: 'moth_eaten_cloak',
     name: 'Moth-Eaten Cloak',
     rarity: 'common',
     equipSlot: 'back',
-    dodgeChance: 0.02,
+    value: 1,
   },
   cracked_bracers: {
     id: 'cracked_bracers',
@@ -123,6 +134,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'bracers',
     damageReductionMin: 0,
     damageReductionMax: 1,
+    value: 1,
   },
   tattered_pauldrons: {
     id: 'tattered_pauldrons',
@@ -133,6 +145,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     damageReductionMax: 1,
     bonusAttackMin: 0,
     bonusAttackMax: 1,
+    value: 1,
   },
   worn_gloves: {
     id: 'worn_gloves',
@@ -141,6 +154,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'gloves',
     bonusAttackMin: 0,
     bonusAttackMax: 1,
+    value: 1,
   },
   ancestral_blade: {
     id: 'ancestral_blade',
@@ -149,6 +163,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'mainhand',
     bonusAttackMin: 1,
     bonusAttackMax: 2,
+    value: 1,
   },
   ancestral_ward: {
     id: 'ancestral_ward',
@@ -157,6 +172,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'offhand',
     damageReductionMin: 1,
     damageReductionMax: 1,
+    value: 1,
   },
   ancestral_signet: {
     id: 'ancestral_signet',
@@ -165,7 +181,7 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     equipSlot: 'ring',
     bonusAttackMin: 0,
     bonusAttackMax: 1,
-    dodgeChance: 0.01,
+    value: 1,
   },
   cracked_idol: {
     id: 'cracked_idol',
@@ -176,66 +192,71 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     bonusAttackMax: 1,
     damageReductionMin: 0,
     damageReductionMax: 1,
+    value: 1,
   },
   iron_battleaxe: {
     id: 'iron_battleaxe',
     name: 'Iron Battleaxe',
     rarity: 'uncommon',
-    equipSlot: 'mainhand',
-    twoHanded: true,
-    classRestriction: 'Knight',
+    equipSlot: 'twohanded',
+    classRestriction: ['Knight'],
     bonusAttackMin: 3,
     bonusAttackMax: 6,
+    value: 1,
   },
   short_bow: {
     id: 'short_bow',
     name: 'Short Bow',
     rarity: 'common',
-    equipSlot: 'mainhand',
-    twoHanded: true,
-    classRestriction: 'Archer',
+    equipSlot: 'twohanded',
+    classRestriction: ['Archer'],
     bonusAttackMin: 2,
     bonusAttackMax: 5,
+    value: 1,
   },
   prayer_beads: {
     id: 'prayer_beads',
     name: 'Prayer Beads',
     rarity: 'common',
     equipSlot: 'necklace',
-    classRestriction: 'Priest',
+    classRestriction: ['Priest'],
     damageReductionMin: 1,
     damageReductionMax: 2,
+    value: 1,
   },
   gnarled_wand: {
     id: 'gnarled_wand',
     name: 'Gnarled Wand',
     rarity: 'common',
     equipSlot: 'mainhand',
-    classRestriction: 'Mage',
+    classRestriction: ['Mage'],
     bonusAttackMin: 2,
     bonusAttackMax: 4,
+    value: 1,
   },
   tin_whistle: {
     id: 'tin_whistle',
     name: 'Tin Whistle',
     rarity: 'common',
     equipSlot: 'relic',
-    classRestriction: 'Bard',
+    classRestriction: ['Bard'],
     bonusAttackMin: 1,
     bonusAttackMax: 2,
-    dodgeChance: 0.02,
+    value: 1,
   },
   waterskin: {
     id: 'waterskin',
     name: 'Waterskin',
     rarity: 'common',
     equipSlot: 'relic',
+    value: 1,
   },
   magma_boots: {
     id: 'magma_boots',
     name: 'Magma Boots',
     rarity: 'rare',
     equipSlot: 'foot',
+    value: 1,
   },
 };
 
@@ -269,14 +290,14 @@ export function isTwoHandedEquipped(
   const mh = equipment.mainhand;
   if (!mh) return false;
   const def = items[mh];
-  return !!def?.twoHanded;
+  return def?.equipSlot === 'twohanded';
 }
 
 /**
  * Equip an item from inventory into its slot.
  * Returns { success: true, unequippedItemId? } on success.
  * If the slot was occupied, the old item is returned to inventory.
- * Two-handed weapons fill both mainhand and offhand.
+ * Two-handed weapons (equipSlot: 'twohanded') fill both mainhand and offhand.
  * Equipping into mainhand or offhand when a 2H is equipped unequips the 2H first.
  */
 export function equipItem(
@@ -288,29 +309,41 @@ export function equipItem(
 ): { success: boolean; unequippedItemId?: string } {
   const def = items[itemId];
   if (!def || !def.equipSlot) return { success: false };
-  if (def.classRestriction && className && def.classRestriction !== className) return { success: false };
+  if (def.classRestriction && def.classRestriction.length > 0 && className && !def.classRestriction.includes(className)) return { success: false };
 
   // Must have the item in inventory
   if ((inventory[itemId] ?? 0) <= 0) return { success: false };
 
   const slot = def.equipSlot;
+  const is2H = slot === 'twohanded';
 
   // Validate slot is a known equip slot
   if (!EQUIP_SLOTS.includes(slot)) return { success: false };
 
-  const replacing2H = (slot === 'mainhand' || slot === 'offhand') && isTwoHandedEquipped(equipment, items);
+  const replacing2H = (slot === 'mainhand' || slot === 'offhand' || is2H) && isTwoHandedEquipped(equipment, items);
 
   // --- Pre-check: ensure all inventory returns will succeed BEFORE mutating ---
   if (replacing2H) {
     const twoHandId = equipment.mainhand!;
     if ((inventory[twoHandId] ?? 0) >= MAX_STACK) return { success: false };
+    // If equipping a 1H into mainhand/offhand (not 2H), also need to return the other slot's item if different
+    if (!is2H) {
+      // The 2H fills both slots with the same ID, so only one item to return
+    }
   } else {
-    const currentEquipped = equipment[slot];
-    if (currentEquipped && (inventory[currentEquipped] ?? 0) >= MAX_STACK) return { success: false };
-    // If equipping a 2H, also need to return offhand
-    if (def.twoHanded) {
-      const offhandItem = equipment.offhand;
-      if (offhandItem && (inventory[offhandItem] ?? 0) >= MAX_STACK) return { success: false };
+    if (is2H) {
+      // Equipping 2H: need to return both mainhand and offhand items
+      const mhItem = equipment.mainhand;
+      const ohItem = equipment.offhand;
+      if (mhItem && (inventory[mhItem] ?? 0) >= MAX_STACK) return { success: false };
+      if (ohItem && ohItem !== mhItem && (inventory[ohItem] ?? 0) >= MAX_STACK) return { success: false };
+      // Also check that returning mhItem won't block ohItem
+      if (mhItem && ohItem && mhItem === ohItem && (inventory[mhItem] ?? 0) + 1 >= MAX_STACK) {
+        // Can't fit 2 copies back — but this shouldn't happen since 2H is already handled by replacing2H
+      }
+    } else {
+      const currentEquipped = equipment[slot];
+      if (currentEquipped && (inventory[currentEquipped] ?? 0) >= MAX_STACK) return { success: false };
     }
   }
 
@@ -320,26 +353,33 @@ export function equipItem(
     addItemToInventory(inventory, twoHandId);
     equipment.mainhand = null;
     equipment.offhand = null;
+  } else if (is2H) {
+    // Return both mainhand and offhand to inventory
+    const mhItem = equipment.mainhand;
+    const ohItem = equipment.offhand;
+    if (mhItem) {
+      addItemToInventory(inventory, mhItem);
+    }
+    if (ohItem && ohItem !== mhItem) {
+      addItemToInventory(inventory, ohItem);
+    }
+    equipment.mainhand = null;
+    equipment.offhand = null;
   } else {
     // Normal case: if slot is occupied, return old item to inventory
     const currentEquipped = equipment[slot];
     if (currentEquipped) {
       addItemToInventory(inventory, currentEquipped);
     }
-    // If equipping a 2H weapon, also clear offhand (return to inventory if occupied)
-    if (def.twoHanded) {
-      const offhandItem = equipment.offhand;
-      if (offhandItem) {
-        addItemToInventory(inventory, offhandItem);
-      }
-    }
   }
 
   // Remove new item from inventory and equip it
   removeItemFromInventory(inventory, itemId);
-  equipment[slot] = itemId;
-  if (def.twoHanded) {
+  if (is2H) {
+    equipment.mainhand = itemId;
     equipment.offhand = itemId;
+  } else {
+    equipment[slot] = itemId;
   }
 
   return { success: true, unequippedItemId: undefined };
@@ -375,6 +415,9 @@ export function unequipItem(
     return { success: true, itemId: twoHandId };
   }
 
+  // 'twohanded' slot shouldn't appear in equipment record, but handle gracefully
+  if (slot === 'twohanded') return { success: false };
+
   // Check if inventory can hold the item
   if ((inventory[equipped] ?? 0) >= MAX_STACK) return { success: false };
 
@@ -397,7 +440,8 @@ export function computeEquipmentBonuses(
     bonusAttackMax: 0,
     damageReductionMin: 0,
     damageReductionMax: 0,
-    dodgeChance: 0,
+    magicReductionMin: 0,
+    magicReductionMax: 0,
   };
 
   // Skip offhand if it's the same item as mainhand (2H weapon)
@@ -413,7 +457,8 @@ export function computeEquipmentBonuses(
     bonuses.bonusAttackMax += (def.bonusAttackMax ?? 0) * scale;
     bonuses.damageReductionMin += (def.damageReductionMin ?? 0) * scale;
     bonuses.damageReductionMax += (def.damageReductionMax ?? 0) * scale;
-    bonuses.dodgeChance += (def.dodgeChance ?? 0) * scale;
+    bonuses.magicReductionMin += (def.magicReductionMin ?? 0) * scale;
+    bonuses.magicReductionMax += (def.magicReductionMax ?? 0) * scale;
   }
 
   return bonuses;
@@ -428,15 +473,15 @@ export function getItemEffectText(def: ItemDefinition): string {
   if (def.damageReductionMin != null && def.damageReductionMax != null && def.damageReductionMax > 0) {
     parts.push(`Blocks ${def.damageReductionMin}-${def.damageReductionMax} damage`);
   }
-  if (def.dodgeChance != null && def.dodgeChance > 0) {
-    parts.push(`${Math.round(def.dodgeChance * 100)}% Dodge`);
+  if (def.magicReductionMin != null && def.magicReductionMax != null && def.magicReductionMax > 0) {
+    parts.push(`Blocks ${def.magicReductionMin}-${def.magicReductionMax} magic damage`);
   }
   if (parts.length === 0) {
     return def.equipSlot ? 'No bonus' : 'Material';
   }
   let text = parts.join(', ');
   if (def.rarity === 'heirloom') text = `${text} (x Lv)`;
-  if (def.classRestriction) text = `${text} [${def.classRestriction}]`;
+  if (def.classRestriction && def.classRestriction.length > 0) text = `${text} [${def.classRestriction.join('/')}]`;
   return text;
 }
 
@@ -476,39 +521,47 @@ export function equipItemForceDestroy(
 ): { success: boolean; destroyedItemId?: string } {
   const def = items[itemId];
   if (!def || !def.equipSlot) return { success: false };
-  if (def.classRestriction && className && def.classRestriction !== className) return { success: false };
+  if (def.classRestriction && def.classRestriction.length > 0 && className && !def.classRestriction.includes(className)) return { success: false };
   if ((inventory[itemId] ?? 0) <= 0) return { success: false };
 
   const slot = def.equipSlot;
+  const is2H = slot === 'twohanded';
 
   // Validate slot is a known equip slot
   if (!EQUIP_SLOTS.includes(slot)) return { success: false };
 
-  // If a 2H is equipped and we're touching mainhand/offhand, destroy the 2H and clear both slots
-  if ((slot === 'mainhand' || slot === 'offhand') && isTwoHandedEquipped(equipment, items)) {
+  // If a 2H is equipped and we're touching mainhand/offhand/twohanded, destroy the 2H and clear both slots
+  if ((slot === 'mainhand' || slot === 'offhand' || is2H) && isTwoHandedEquipped(equipment, items)) {
     const destroyedId = equipment.mainhand!;
     equipment.mainhand = null;
     equipment.offhand = null;
     removeItemFromInventory(inventory, itemId);
-    equipment[slot] = itemId;
-    if (def.twoHanded) equipment.offhand = itemId;
+    if (is2H) {
+      equipment.mainhand = itemId;
+      equipment.offhand = itemId;
+    } else {
+      equipment[slot] = itemId;
+    }
     return { success: true, destroyedItemId: destroyedId };
+  }
+
+  if (is2H) {
+    // Destroying mainhand (if any) — offhand is also cleared/destroyed
+    const destroyedId = equipment.mainhand ?? equipment.offhand ?? undefined;
+    equipment.mainhand = null;
+    equipment.offhand = null;
+    removeItemFromInventory(inventory, itemId);
+    equipment.mainhand = itemId;
+    equipment.offhand = itemId;
+    return { success: true, destroyedItemId: destroyedId ?? undefined };
   }
 
   const currentEquipped = equipment[slot];
 
-  // If equipping a 2H, also destroy/clear offhand
-  const destroyedOffhand = def.twoHanded ? equipment.offhand : null;
-  if (def.twoHanded) {
-    equipment.offhand = null;
-  }
-
   removeItemFromInventory(inventory, itemId);
   equipment[slot] = itemId;
-  if (def.twoHanded) equipment.offhand = itemId;
 
-  // Report the mainhand item as destroyed, or the offhand if mainhand was empty
-  return { success: true, destroyedItemId: currentEquipped ?? destroyedOffhand ?? undefined };
+  return { success: true, destroyedItemId: currentEquipped ?? undefined };
 }
 
 /** Roll drops for a list of possible drops. Returns item IDs that dropped. */

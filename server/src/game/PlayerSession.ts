@@ -49,6 +49,8 @@ import type {
   FriendRequest,
   ChatChannelType,
   ItemDefinition,
+  SetDefinition,
+  ShopDefinition,
   SkillDefinition,
   SkillLoadout,
 } from '@idle-party-rpg/shared';
@@ -260,6 +262,33 @@ export class PlayerSession {
     return defs;
   }
 
+  /** Build set definitions for sets containing at least one item the player owns. */
+  private getOwnedSetDefinitions(): Record<string, SetDefinition> {
+    const ownedItemIds = new Set<string>();
+    for (const itemId of Object.keys(this.character.inventory)) ownedItemIds.add(itemId);
+    for (const itemId of Object.values(this.character.equipment)) {
+      if (itemId) ownedItemIds.add(itemId);
+    }
+
+    const allSets = this.content.getAllSets();
+    const result: Record<string, SetDefinition> = {};
+    for (const [id, set] of Object.entries(allSets)) {
+      if (set.itemIds.some(itemId => ownedItemIds.has(itemId))) {
+        result[id] = set;
+      }
+    }
+    return result;
+  }
+
+  /** Get the shop definition for the player's current tile, if any. */
+  private getCurrentShopDefinition(): ShopDefinition | undefined {
+    const pos = this.getPosition();
+    const world = this.content.getWorld();
+    const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
+    if (!tile?.shopId) return undefined;
+    return this.content.getShop(tile.shopId);
+  }
+
   getState(otherPlayers: OtherPlayerState[]): Omit<ServerStateMessage, 'type' | 'serverVersion'> {
     const battleState = this.getBattleState?.();
     const partyState = this.getPartyPositionState?.();
@@ -298,6 +327,8 @@ export class PlayerSession {
       zoneName,
       social: this.getSocialState?.(),
       itemDefinitions: this.getOwnedItemDefinitions(),
+      setDefinitions: this.getOwnedSetDefinitions(),
+      shopDefinition: this.getCurrentShopDefinition(),
     };
   }
 
@@ -392,6 +423,20 @@ export class PlayerSession {
     if (current + quantity > MAX_STACK) return false;
     this.character.inventory[itemId] = current + quantity;
     return true;
+  }
+
+  getGold(): number { return this.character.gold; }
+
+  /** Deduct gold from the character. Returns false if insufficient gold. */
+  deductGold(amount: number): boolean {
+    if (this.character.gold < amount) return false;
+    this.character.gold -= amount;
+    return true;
+  }
+
+  /** Add gold to the character. */
+  grantGold(amount: number): void {
+    addGold(this.character, amount);
   }
 
   getLevel(): number { return this.character.level; }
@@ -724,8 +769,10 @@ export class PlayerSession {
 
     const slot = def.equipSlot;
 
-    // If a 2H weapon is equipped and we're touching mainhand/offhand, check that
-    if ((slot === 'mainhand' || slot === 'offhand') && isTwoHandedEquipped(this.character.equipment, this.content.getAllItems())) {
+    const is2H = slot === 'twohanded';
+
+    // If a 2H weapon is equipped and we're touching mainhand/offhand/twohanded, check that
+    if ((slot === 'mainhand' || slot === 'offhand' || is2H) && isTwoHandedEquipped(this.character.equipment, this.content.getAllItems())) {
       const twoHandId = this.character.equipment.mainhand!;
       const current = this.character.inventory[twoHandId] ?? 0;
       if (current >= 99) {
@@ -735,14 +782,20 @@ export class PlayerSession {
     }
 
     // If equipping a 2H weapon, also check offhand stack
-    if (def.twoHanded) {
+    if (is2H) {
       const offhandItem = this.character.equipment.offhand;
       if (offhandItem && (this.character.inventory[offhandItem] ?? 0) >= 99) {
         return { blockedByItemId: offhandItem, blockedBySlot: 'offhand' };
       }
+      const mainhandItem = this.character.equipment.mainhand;
+      if (mainhandItem && (this.character.inventory[mainhandItem] ?? 0) >= 99) {
+        return { blockedByItemId: mainhandItem, blockedBySlot: 'mainhand' };
+      }
     }
 
-    const currentEquipped = this.character.equipment[slot];
+    // For twohanded items, check mainhand slot (since that's where it maps in the equipment record)
+    const effectiveSlot = is2H ? 'mainhand' : slot;
+    const currentEquipped = this.character.equipment[effectiveSlot];
     if (!currentEquipped) return null;
 
     // Check if the old item's stack is at max

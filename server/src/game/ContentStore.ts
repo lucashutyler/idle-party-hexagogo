@@ -2,6 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry } from '@idle-party-rpg/shared';
+import type { SetDefinition } from '@idle-party-rpg/shared';
+import type { ShopDefinition } from '@idle-party-rpg/shared';
 import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, TILE_CONFIGS } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
@@ -11,6 +13,8 @@ const ITEMS_FILE = path.join(DATA_DIR, 'items.json');
 const ZONES_FILE = path.join(DATA_DIR, 'zones.json');
 const WORLD_FILE = path.join(DATA_DIR, 'world.json');
 const ENCOUNTERS_FILE = path.join(DATA_DIR, 'encounters.json');
+const SETS_FILE = path.join(DATA_DIR, 'sets.json');
+const SHOPS_FILE = path.join(DATA_DIR, 'shops.json');
 
 /**
  * Loads and manages game content from JSON files in data/.
@@ -22,6 +26,8 @@ export class ContentStore {
   private items = new Map<string, ItemDefinition>();
   private zones = new Map<string, ZoneDefinition>();
   private encounters = new Map<string, EncounterDefinition>();
+  private sets = new Map<string, SetDefinition>();
+  private shops = new Map<string, ShopDefinition>();
   private world: WorldData = { startTile: { col: 0, row: 0 }, tiles: [] };
 
   async load(): Promise<void> {
@@ -40,6 +46,8 @@ export class ContentStore {
     await fs.writeFile(ZONES_FILE, JSON.stringify(Array.from(this.zones.values()), null, 2));
     await fs.writeFile(WORLD_FILE, JSON.stringify(this.world, null, 2));
     await fs.writeFile(ENCOUNTERS_FILE, JSON.stringify(Array.from(this.encounters.values()), null, 2));
+    await fs.writeFile(SETS_FILE, JSON.stringify(Array.from(this.sets.values()), null, 2));
+    await fs.writeFile(SHOPS_FILE, JSON.stringify(Array.from(this.shops.values()), null, 2));
   }
 
   // --- Accessors ---
@@ -81,6 +89,26 @@ export class ContentStore {
   getAllEncounters(): Record<string, EncounterDefinition> {
     const result: Record<string, EncounterDefinition> = {};
     for (const [id, def] of this.encounters) result[id] = def;
+    return result;
+  }
+
+  getSet(id: string): SetDefinition | undefined {
+    return this.sets.get(id);
+  }
+
+  getAllSets(): Record<string, SetDefinition> {
+    const result: Record<string, SetDefinition> = {};
+    for (const [id, def] of this.sets) result[id] = def;
+    return result;
+  }
+
+  getShop(id: string): ShopDefinition | undefined {
+    return this.shops.get(id);
+  }
+
+  getAllShops(): Record<string, ShopDefinition> {
+    const result: Record<string, ShopDefinition> = {};
+    for (const [id, def] of this.shops) result[id] = def;
     return result;
   }
 
@@ -228,21 +256,60 @@ export class ContentStore {
     return { success: true };
   }
 
+  // --- Set CRUD ---
+
+  async addOrUpdateSet(set: SetDefinition): Promise<void> {
+    this.sets.set(set.id, set);
+    await this.save();
+  }
+
+  async deleteSet(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.sets.has(id)) {
+      return { success: false, error: 'Set not found.' };
+    }
+    this.sets.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
+  // --- Shop CRUD ---
+
+  async addOrUpdateShop(shop: ShopDefinition): Promise<void> {
+    this.shops.set(shop.id, shop);
+    await this.save();
+  }
+
+  async deleteShop(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.shops.has(id)) {
+      return { success: false, error: 'Shop not found.' };
+    }
+    // Check if any world tile references this shop
+    const referencingTile = this.world.tiles.find(t => t.shopId === id);
+    if (referencingTile) {
+      return { success: false, error: `Cannot delete: shop is used by room "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` };
+    }
+    this.shops.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
       zones: Array.from(this.zones.values()),
       encounters: Array.from(this.encounters.values()),
+      sets: Array.from(this.sets.values()),
+      shops: Array.from(this.shops.values()),
       world: JSON.parse(JSON.stringify(this.world)),
     };
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -257,6 +324,16 @@ export class ContentStore {
       for (const e of snapshot.encounters) this.encounters.set(e.id, e);
     }
 
+    this.sets.clear();
+    if (snapshot.sets) {
+      for (const s of snapshot.sets) this.sets.set(s.id, s);
+    }
+
+    this.shops.clear();
+    if (snapshot.shops) {
+      for (const s of snapshot.shops) this.shops.set(s.id, s);
+    }
+
     this.world = snapshot.world;
 
     // Safety net: ensure every tile has a GUID
@@ -269,8 +346,11 @@ export class ContentStore {
     // Migrate old-format encounter tables if needed
     this.migrateEncounterTables();
 
+    // Migrate items if needed
+    this.migrateItems();
+
     await this.save();
-    console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.world.tiles.length} tiles`);
+    console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.sets.size} sets, ${this.shops.size} shops, ${this.world.tiles.length} tiles`);
   }
 
   // --- Private ---
@@ -295,13 +375,29 @@ export class ContentStore {
 
       this.world = JSON.parse(worldRaw);
 
-      // Try loading encounters file (may not exist on older installations)
+      // Try loading optional files (may not exist on older installations)
       try {
         const encountersRaw = await fs.readFile(ENCOUNTERS_FILE, 'utf-8');
         const encountersArr: EncounterDefinition[] = JSON.parse(encountersRaw);
         for (const e of encountersArr) this.encounters.set(e.id, e);
       } catch {
         // encounters.json doesn't exist yet — will be created after migration
+      }
+
+      try {
+        const setsRaw = await fs.readFile(SETS_FILE, 'utf-8');
+        const setsArr: SetDefinition[] = JSON.parse(setsRaw);
+        for (const s of setsArr) this.sets.set(s.id, s);
+      } catch {
+        // sets.json doesn't exist yet
+      }
+
+      try {
+        const shopsRaw = await fs.readFile(SHOPS_FILE, 'utf-8');
+        const shopsArr: ShopDefinition[] = JSON.parse(shopsRaw);
+        for (const s of shopsArr) this.shops.set(s.id, s);
+      } catch {
+        // shops.json doesn't exist yet
       }
 
       // Migrate: assign GUIDs to any tiles missing an id
@@ -319,7 +415,10 @@ export class ContentStore {
       // Migrate old-format encounter tables (monsterId → encounterId)
       const encountersMigrated = this.migrateEncounterTables();
 
-      if (migrated > 0 || encountersMigrated) {
+      // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
+      const itemsMigrated = this.migrateItems();
+
+      if (migrated > 0 || encountersMigrated || itemsMigrated) {
         await this.save();
       }
 
@@ -388,6 +487,55 @@ export class ContentStore {
 
     if (migrated) {
       console.log(`[ContentStore] Migrated encounter tables to new format, created ${this.encounters.size} encounter definitions`);
+    }
+
+    return migrated;
+  }
+
+  /**
+   * Migrate items from old format:
+   * - twoHanded: true + equipSlot: 'mainhand' → equipSlot: 'twohanded'
+   * - twoHanded on non-weapon items → remove property
+   * - dodgeChance → remove
+   * - classRestriction string → string[]
+   * - missing value → set to 1
+   */
+  private migrateItems(): boolean {
+    let migrated = false;
+
+    for (const item of this.items.values()) {
+      const raw = item as unknown as Record<string, unknown>;
+
+      // twoHanded migration
+      if (raw['twoHanded']) {
+        if (item.equipSlot === 'mainhand') {
+          item.equipSlot = 'twohanded';
+        }
+        delete raw['twoHanded'];
+        migrated = true;
+      }
+
+      // dodgeChance removal
+      if (raw['dodgeChance'] != null) {
+        delete raw['dodgeChance'];
+        migrated = true;
+      }
+
+      // classRestriction string → string[]
+      if (typeof item.classRestriction === 'string') {
+        (item as { classRestriction: string[] }).classRestriction = [item.classRestriction as unknown as string];
+        migrated = true;
+      }
+
+      // Add default value
+      if (item.value == null) {
+        item.value = 1;
+        migrated = true;
+      }
+    }
+
+    if (migrated) {
+      console.log('[ContentStore] Migrated items to new format');
     }
 
     return migrated;

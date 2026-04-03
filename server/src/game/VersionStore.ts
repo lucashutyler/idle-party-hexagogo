@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition } from '@idle-party-rpg/shared';
 
 export type VersionStatus = 'draft' | 'published';
 
@@ -10,6 +10,8 @@ export interface ContentSnapshot {
   items: ItemDefinition[];
   zones: ZoneDefinition[];
   encounters?: EncounterDefinition[];
+  sets?: SetDefinition[];
+  shops?: ShopDefinition[];
   world: WorldData;
 }
 
@@ -154,9 +156,15 @@ export class VersionStore {
       needsSave = true;
     }
 
-    // Migrate: old-format encounter tables → new format
+    // Default missing content arrays for backward compatibility
     if (!snapshot.encounters) {
       snapshot.encounters = [];
+    }
+    if (!snapshot.sets) {
+      snapshot.sets = [];
+    }
+    if (!snapshot.shops) {
+      snapshot.shops = [];
     }
     const encountersMigrated = migrateSnapshotEncounterTables(snapshot);
     if (encountersMigrated) {
