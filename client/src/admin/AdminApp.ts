@@ -135,6 +135,11 @@ const EDITABLE_TILE_TYPES = [
   TileType.Water,
   TileType.Town,
   TileType.Dungeon,
+  TileType.Desert,
+  TileType.LavaField,
+  TileType.Beach,
+  TileType.Hedge,
+  TileType.Volcano,
 ];
 
 /** Adjacent empty hex position where a new tile can be added. */
@@ -3581,9 +3586,12 @@ export class AdminApp {
       id: '',
       col: slot.col,
       row: slot.row,
-      type: TileType.Plains,
+      type: this.selectedTile?.type ?? TileType.Plains,
       zone: defaultZone,
-      name: 'Default Room Name',
+      name: this.selectedTile?.name ?? 'Default Room Name',
+      encounterTable: this.selectedTile?.encounterTable
+        ? [...this.selectedTile.encounterTable]
+        : undefined,
     };
 
     try {

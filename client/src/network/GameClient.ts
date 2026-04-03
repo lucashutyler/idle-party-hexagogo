@@ -10,6 +10,7 @@ type WorldUpdateListener = () => void;
 type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
 type SuspensionListener = () => void;
 type ResumeListener = () => void;
+type MoveBlockedListener = (msg: { itemName: string; itemId: string; missingPlayers: string[] }) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 
 export class GameClient {
@@ -25,6 +26,7 @@ export class GameClient {
   private syncChatListeners = new Set<SyncChatListener>();
   private worldUpdateListeners = new Set<WorldUpdateListener>();
   private equipBlockedListeners = new Set<EquipBlockedListener>();
+  private moveBlockedListeners = new Set<MoveBlockedListener>();
   private suspensionListeners = new Set<SuspensionListener>();
   private resumeListeners = new Set<ResumeListener>();
   private playerProfileListeners = new Set<PlayerProfileListener>();
@@ -125,56 +127,90 @@ export class GameClient {
     };
 
     this.ws.onmessage = (event) => {
+      let msg: any;
       try {
-        const msg = JSON.parse(event.data as string);
-
-        if (msg.type === 'state') {
-          if (msg.serverVersion) {
-            if (this.knownServerVersion === null) {
-              this.knownServerVersion = msg.serverVersion;
-            } else if (msg.serverVersion !== this.knownServerVersion) {
-              console.log('[GameClient] Server version changed, reloading...');
-              location.reload();
-              return;
-            }
-          }
-          this.lastState = msg;
-
-          // Resolve pending connect on first state message
-          if (this.connectResolve) {
-            this.connectResolve({ success: true });
-            this.connectResolve = undefined;
-          }
-
-          for (const listener of this.stateListeners) {
-            listener(msg);
-          }
-          this.isInitialState = false;
-        } else if (msg.type === 'chat_message') {
-          for (const listener of this.chatListeners) {
-            listener(msg.message);
-          }
-        } else if (msg.type === 'sync_chat') {
-          for (const listener of this.syncChatListeners) {
-            listener(msg.messages, msg.full);
-          }
-        } else if (msg.type === 'world_update') {
-          for (const listener of this.worldUpdateListeners) {
-            listener();
-          }
-        } else if (msg.type === 'equip_blocked') {
-          for (const listener of this.equipBlockedListeners) {
-            listener(msg);
-          }
-        } else if (msg.type === 'player_profile') {
-          for (const listener of this.playerProfileListeners) {
-            listener(msg);
-          }
-        } else if (msg.type === 'error') {
-          console.warn('[GameClient] server error:', msg.message);
-        }
+        msg = JSON.parse(event.data as string);
       } catch {
         console.error('[GameClient] failed to parse message');
+        return;
+      }
+
+      if (msg.type === 'state') {
+        if (msg.serverVersion) {
+          if (this.knownServerVersion === null) {
+            this.knownServerVersion = msg.serverVersion;
+          } else if (msg.serverVersion !== this.knownServerVersion) {
+            console.log('[GameClient] Server version changed, reloading...');
+            location.reload();
+            return;
+          }
+        }
+        this.lastState = msg;
+
+        // Resolve pending connect on first state message
+        if (this.connectResolve) {
+          this.connectResolve({ success: true });
+          this.connectResolve = undefined;
+        }
+
+        for (const listener of this.stateListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in state listener:', err);
+          }
+        }
+        this.isInitialState = false;
+      } else if (msg.type === 'chat_message') {
+        for (const listener of this.chatListeners) {
+          try {
+            listener(msg.message);
+          } catch (err) {
+            console.error('[GameClient] error in chat listener:', err);
+          }
+        }
+      } else if (msg.type === 'sync_chat') {
+        for (const listener of this.syncChatListeners) {
+          try {
+            listener(msg.messages, msg.full);
+          } catch (err) {
+            console.error('[GameClient] error in sync_chat listener:', err);
+          }
+        }
+      } else if (msg.type === 'world_update') {
+        for (const listener of this.worldUpdateListeners) {
+          try {
+            listener();
+          } catch (err) {
+            console.error('[GameClient] error in world_update listener:', err);
+          }
+        }
+      } else if (msg.type === 'equip_blocked') {
+        for (const listener of this.equipBlockedListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in equip_blocked listener:', err);
+          }
+        }
+      } else if (msg.type === 'move_blocked') {
+        for (const listener of this.moveBlockedListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in move_blocked listener:', err);
+          }
+        }
+      } else if (msg.type === 'player_profile') {
+        for (const listener of this.playerProfileListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in player_profile listener:', err);
+          }
+        }
+      } else if (msg.type === 'error') {
+        console.warn('[GameClient] server error:', msg.message);
       }
     };
 
@@ -269,6 +305,12 @@ export class GameClient {
   onEquipBlocked(listener: EquipBlockedListener): () => void {
     this.equipBlockedListeners.add(listener);
     return () => { this.equipBlockedListeners.delete(listener); };
+  }
+
+  /** Subscribe to move_blocked messages. Returns an unsubscribe function. */
+  onMoveBlocked(listener: MoveBlockedListener): () => void {
+    this.moveBlockedListeners.add(listener);
+    return () => { this.moveBlockedListeners.delete(listener); };
   }
 
   resetXpRate(): void {

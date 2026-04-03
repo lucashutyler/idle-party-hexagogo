@@ -44,11 +44,14 @@ export class JsonSessionStore extends session.Store {
       .catch((err) => callback?.(err));
   }
 
-  touch(sid: string, sessionData: session.SessionData, callback?: () => void): void {
+  touch(sid: string, sessionData: session.SessionData, callback?: (err?: any) => void): void {
     // Update the session file with the new cookie expiry
     this.writeSession(sid, sessionData)
       .then(() => callback?.())
-      .catch(() => callback?.());
+      .catch((err) => {
+        console.error(`[JsonSessionStore] Failed to touch session "${sid}":`, err);
+        callback?.(err);
+      });
   }
 
   // --- Reap (expired session cleanup) ---

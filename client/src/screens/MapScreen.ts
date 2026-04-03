@@ -23,6 +23,11 @@ export class MapScreen implements Screen {
     this.container = el;
     this.gameClient = gameClient;
     this.worldCache = worldCache;
+
+    this.gameClient.onMoveBlocked((msg) => {
+      const names = msg.missingPlayers.join(', ');
+      this.showMoveToast(`${msg.itemName} required! Missing: ${names}`);
+    });
   }
 
   setOnUserClick(cb: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void): void {
@@ -112,6 +117,13 @@ export class MapScreen implements Screen {
   }
 
   private async createPhaserGame(): Promise<void> {
+    // Ensure world data is loaded before creating the scene
+    if (!this.worldCache.isLoaded) {
+      await this.worldCache.loadWorld().catch(err => {
+        console.warn('[MapScreen] Failed to load world data:', err);
+      });
+    }
+
     const Phaser = await import('phaser');
     const { WorldMapScene } = await import('../scenes/WorldMapScene');
 

@@ -464,6 +464,21 @@ export class WorldMapScene extends Phaser.Scene {
         case TileType.Water:
           icon = '🌊';
           break;
+        case TileType.Desert:
+          icon = '🏜️';
+          break;
+        case TileType.LavaField:
+          icon = '🔥';
+          break;
+        case TileType.Beach:
+          icon = '🏖️';
+          break;
+        case TileType.Hedge:
+          icon = '🌿';
+          break;
+        case TileType.Volcano:
+          icon = '🌋';
+          break;
       }
     }
 
@@ -640,6 +655,9 @@ export class WorldMapScene extends Phaser.Scene {
           : tile.type === TileType.Forest ? 'Forest'
           : tile.type === TileType.Plains ? 'Plains'
           : tile.type === TileType.Dungeon ? 'Dungeon'
+          : tile.type === TileType.Desert ? 'Desert'
+          : tile.type === TileType.LavaField ? 'Lava Field'
+          : tile.type === TileType.Beach ? 'Beach'
           : 'Unknown',
         zoneName,
         roomName,
@@ -697,6 +715,8 @@ export class WorldMapScene extends Phaser.Scene {
     if (!tile.isTraversable) {
       const typeLabel = tile.type === TileType.Mountain ? 'Mountain'
         : tile.type === TileType.Water ? 'Water'
+        : tile.type === TileType.Hedge ? 'Hedge'
+        : tile.type === TileType.Volcano ? 'Volcano'
         : tile.type.charAt(0).toUpperCase() + tile.type.slice(1);
       this.tooltipText.setText(typeLabel);
       this.tooltipText.setPosition(pointer.x + 12, pointer.y - 20);

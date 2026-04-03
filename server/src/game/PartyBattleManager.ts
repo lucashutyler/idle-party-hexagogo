@@ -107,9 +107,17 @@ export class PartyBattleManager {
           this.onMembersMoved?.(members);
         },
         canMoveToNextTile: () => {
-          // Check if at least one member has the next tile unlocked
           const nextTile = serverParty.nextTile;
           if (!nextTile) return false;
+          // Check item requirements — ALL members must have the required item
+          const requiredItemId = nextTile.requiredItemId;
+          if (requiredItemId) {
+            for (const m of members) {
+              const s = this.getSession(m);
+              if (!s || !s.hasItemEquipped(requiredItemId)) return false;
+            }
+          }
+          // Check if at least one member has the next tile unlocked
           for (const m of members) {
             const s = this.getSession(m);
             if (s && s.isTileUnlocked(nextTile)) return true;
@@ -186,6 +194,15 @@ export class PartyBattleManager {
         canMoveToNextTile: () => {
           const nextTile = serverParty.nextTile;
           if (!nextTile) return false;
+          // Check item requirements — ALL members must have the required item
+          const requiredItemId = nextTile.requiredItemId;
+          if (requiredItemId) {
+            for (const m of members) {
+              const s = this.getSession(m);
+              if (!s || !s.hasItemEquipped(requiredItemId)) return false;
+            }
+          }
+          // Check if at least one member has the next tile unlocked
           for (const m of members) {
             const s = this.getSession(m);
             if (s && s.isTileUnlocked(nextTile)) return true;
@@ -250,22 +267,49 @@ export class PartyBattleManager {
     this.entries.delete(partyId);
   }
 
-  /** Handle move request. */
-  handleMove(partyId: string, col: number, row: number): boolean {
+  /** Handle move request. Returns a result with missing-item info if the path is blocked. */
+  handleMove(partyId: string, col: number, row: number): { success: true } | { success: false; missingItemId?: string; missingPlayers?: string[] } {
     const entry = this.entries.get(partyId);
-    if (!entry) return false;
+    if (!entry) return { success: false };
 
     const coord = offsetToCube({ col, row });
     const tile = this.grid.getTile(coord);
-    if (!tile || !tile.isTraversable) return false;
+    if (!tile || !tile.isTraversable) return { success: false };
 
     const success = entry.serverParty.setDestination(tile);
-    if (success) {
-      for (const m of entry.members) {
-        this.broadcastToMember(m);
+    if (!success) return { success: false };
+
+    // Validate item requirements for every tile in the path
+    const pathCheck = this.validatePathItemRequirements(entry);
+    if (!pathCheck.valid) {
+      entry.serverParty.clearDestination();
+      return { success: false, missingItemId: pathCheck.missingItemId, missingPlayers: pathCheck.missingPlayers };
+    }
+
+    for (const m of entry.members) {
+      this.broadcastToMember(m);
+    }
+    return { success: true };
+  }
+
+  /** Check every tile in the path for required items. All party members must have each required item equipped. */
+  private validatePathItemRequirements(entry: PartyBattleEntry): { valid: true } | { valid: false; missingItemId: string; missingPlayers: string[] } {
+    for (const tile of entry.serverParty.remainingPath) {
+      const requiredItemId = tile.requiredItemId;
+      if (!requiredItemId) continue;
+
+      const missingPlayers: string[] = [];
+      for (const username of entry.members) {
+        const session = this.getSession(username);
+        if (!session || !session.hasItemEquipped(requiredItemId)) {
+          missingPlayers.push(username);
+        }
+      }
+      if (missingPlayers.length > 0) {
+        return { valid: false, missingItemId: requiredItemId, missingPlayers };
       }
     }
-    return success;
+    return { valid: true };
   }
 
   /** Get the party's current position. */
@@ -280,6 +324,13 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return null;
     return entry.serverParty.tile;
+  }
+
+  /** Get the party's remaining movement path. */
+  getPath(partyId: string): HexTile[] {
+    const entry = this.entries.get(partyId);
+    if (!entry) return [];
+    return entry.serverParty.remainingPath;
   }
 
   /** Get zone string for the party's current tile. */
