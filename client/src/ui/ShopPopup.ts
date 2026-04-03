@@ -1,19 +1,8 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import type { ShopDefinition, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { getItemEffectText, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
-
-const RARITY_COLORS: Record<string, string> = {
-  janky: '#808080',
-  common: '#e8e8e8',
-  uncommon: '#66bb6a',
-  rare: '#4fc3f7',
-  epic: '#ee66e3',
-  legendary: '#9233df',
-  heirloom: '#e9bc18',
-};
-
-const RARITY_ORDER = ['janky', 'common', 'uncommon', 'rare', 'epic', 'legendary', 'heirloom'];
+import { renderItemIcon, escapeHtml } from './ItemIcon';
+import { renderItemPopupContent } from './ItemPopup';
 
 export class ShopPopup {
   private overlay: HTMLElement;
@@ -62,7 +51,7 @@ export class ShopPopup {
     this.overlay.innerHTML = `
       <div class="shop-popup">
         <div class="shop-header">
-          <span class="shop-title">${this.escapeHtml(shop.name)}</span>
+          <span class="shop-title">${escapeHtml(shop.name)}</span>
           <span class="shop-gold">${char.gold} gold</span>
         </div>
         <div class="shop-toggle">
@@ -105,17 +94,21 @@ export class ShopPopup {
   private renderBuyItems(shop: ShopDefinition, itemDefs: Record<string, ItemDefinition>, _setDefs: Record<string, SetDefinition>): string {
     return shop.inventory.map(si => {
       const def = itemDefs[si.itemId];
-      const name = def?.name ?? si.itemId;
-      const rarity = def?.rarity ?? 'common';
-      const color = RARITY_COLORS[rarity] ?? '#e8e8e8';
-      const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2);
-      const rarityClass = RARITY_ORDER.indexOf(rarity) >= 4 ? ` item-rarity-${rarity}` : '';
-
-      return `<div class="item-square shop-item-square${rarityClass}" data-item-id="${si.itemId}" data-price="${si.price}" style="background:${color}40;" title="${this.escapeHtml(name)}">
-        <img class="item-square-img" src="/item-artwork/${si.itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'">
-        <span class="item-square-initials">${initials}</span>
-        <span class="shop-item-price">${si.price}g</span>
-      </div>`;
+      if (!def) {
+        const name = si.itemId;
+        return `<div class="item-square shop-item-square" data-item-id="${si.itemId}" data-price="${si.price}" style="background:#e8e8e840;" title="${escapeHtml(name)}">
+          <span class="item-square-initials">${name.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
+          <span class="shop-item-price">${si.price}g</span>
+        </div>`;
+      }
+      // renderItemIcon produces the outer div; we need to inject shop-specific data attrs and the price overlay.
+      // Use renderItemIcon with extra class and data attrs, then append the price span.
+      const html = renderItemIcon(si.itemId, def, {
+        extraClass: 'shop-item-square',
+        dataAttrs: { 'item-id': si.itemId, price: String(si.price) },
+      });
+      // Inject price badge before closing </div>
+      return html.replace(/<\/div>$/, `<span class="shop-item-price">${si.price}g</span></div>`);
     }).join('');
   }
 
@@ -135,19 +128,20 @@ export class ShopPopup {
 
     return entries.map(([itemId, qty]) => {
       const def = itemDefs[itemId];
-      const name = def?.name ?? itemId;
-      const rarity = def?.rarity ?? 'common';
-      const color = RARITY_COLORS[rarity] ?? '#e8e8e8';
-      const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2);
-      const rarityClass = RARITY_ORDER.indexOf(rarity) >= 4 ? ` item-rarity-${rarity}` : '';
-      const value = def?.value ?? 1;
-
-      return `<div class="item-square shop-item-square${rarityClass}" data-item-id="${itemId}" data-qty="${qty}" style="background:${color}40;" title="${this.escapeHtml(name)}">
-        <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'">
-        <span class="item-square-initials">${initials}</span>
-        ${qty > 1 ? `<span class="item-square-qty">x${qty}</span>` : ''}
-        <span class="shop-item-price">${value}g</span>
-      </div>`;
+      if (!def) {
+        return `<div class="item-square shop-item-square" data-item-id="${itemId}" data-qty="${qty}" style="background:#e8e8e840;" title="${escapeHtml(itemId)}">
+          <span class="item-square-initials">${itemId.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
+          <span class="shop-item-price">1g</span>
+        </div>`;
+      }
+      const value = def.value ?? 1;
+      const html = renderItemIcon(itemId, def, {
+        qty,
+        extraClass: 'shop-item-square',
+        dataAttrs: { 'item-id': itemId, qty: String(qty) },
+      });
+      // Inject price badge before closing </div>
+      return html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`);
     }).join('');
   }
 
@@ -159,39 +153,18 @@ export class ShopPopup {
   ): void {
     const def = itemDefs[itemId];
     if (!def) return;
-    const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-    const initials = def.name.split(' ').map(w => w[0]).join('').slice(0, 2);
-    const effects = getItemEffectText(def);
-    const setInfo = getSetInfoForItem(itemId, setDefs);
 
-    const setHtml = setInfo ? `
-      <div class="item-popup-set">
-        <div class="item-popup-set-name">${this.escapeHtml(setInfo.set.name)} (${setInfo.equippedCount}/${setInfo.set.itemIds.length})</div>
-        <div class="item-popup-set-bonus">${getSetBonusText(setInfo.set.bonuses)}</div>
-      </div>
-    ` : '';
-
-    this.overlay.innerHTML = `
-      <div class="item-popup">
-        <div class="item-popup-artwork" style="background:${color}40;">
-          <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" style="width:64px;height:64px;">
-          <span class="item-square-initials" style="font-size:28px;">${initials}</span>
-        </div>
-        <div class="item-popup-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
-        <div class="item-popup-stats">
-          <div>${effects}</div>
-          <div>Value: ${def.value ?? 1} gold</div>
-          ${def.equipSlot ? `<div>Slot: ${def.equipSlot}</div>` : '<div>Material</div>'}
-          ${def.classRestriction?.length ? `<div>Class: ${def.classRestriction.join(', ')}</div>` : ''}
-        </div>
-        ${setHtml}
+    const popupContent = renderItemPopupContent(def, {
+      itemDefs,
+      setDefs,
+      actionsHtml: `
         <div style="margin-top:12px;font-size:14px;color:#ffd700;">Price: ${price} gold</div>
-        <div class="item-popup-actions">
-          <button class="item-popup-btn item-popup-btn-primary shop-buy-confirm">Buy</button>
-          <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
-        </div>
-      </div>
-    `;
+        <button class="item-popup-btn item-popup-btn-primary shop-buy-confirm">Buy</button>
+        <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
+      `,
+    });
+
+    this.overlay.innerHTML = `<div class="item-popup">${popupContent}</div>`;
 
     this.overlay.querySelector('.shop-buy-confirm')?.addEventListener('click', () => {
       this.gameClient.sendShopBuy(itemId);
@@ -210,18 +183,7 @@ export class ShopPopup {
   ): void {
     const def = itemDefs[itemId];
     if (!def) return;
-    const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-    const initials = def.name.split(' ').map(w => w[0]).join('').slice(0, 2);
-    const effects = getItemEffectText(def);
     const value = def.value ?? 1;
-    const setInfo = getSetInfoForItem(itemId, setDefs);
-
-    const setHtml = setInfo ? `
-      <div class="item-popup-set">
-        <div class="item-popup-set-name">${this.escapeHtml(setInfo.set.name)} (${setInfo.equippedCount}/${setInfo.set.itemIds.length})</div>
-        <div class="item-popup-set-bonus">${getSetBonusText(setInfo.set.bonuses)}</div>
-      </div>
-    ` : '';
 
     let qty = 1;
 
@@ -232,19 +194,10 @@ export class ShopPopup {
       if (totalEl) totalEl.textContent = `Total: ${qty * value} gold`;
     };
 
-    this.overlay.innerHTML = `
-      <div class="item-popup">
-        <div class="item-popup-artwork" style="background:${color}40;">
-          <img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" style="width:64px;height:64px;">
-          <span class="item-square-initials" style="font-size:28px;">${initials}</span>
-        </div>
-        <div class="item-popup-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
-        <div class="item-popup-stats">
-          <div>${effects}</div>
-          <div>Value: ${value} gold each</div>
-          ${def.equipSlot ? `<div>Slot: ${def.equipSlot}</div>` : '<div>Material</div>'}
-        </div>
-        ${setHtml}
+    const popupContent = renderItemPopupContent(def, {
+      itemDefs,
+      setDefs,
+      actionsHtml: `
         <div class="shop-sell-controls">
           <button class="shop-qty-btn shop-qty-minus">-</button>
           <span class="shop-qty-value">1</span>
@@ -252,12 +205,12 @@ export class ShopPopup {
           <button class="shop-qty-btn shop-qty-all">All</button>
         </div>
         <div class="shop-sell-total" style="color:#ffd700;margin-top:4px;">Total: ${value} gold</div>
-        <div class="item-popup-actions">
-          <button class="item-popup-btn item-popup-btn-primary shop-sell-confirm">Sell</button>
-          <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
-        </div>
-      </div>
-    `;
+        <button class="item-popup-btn item-popup-btn-primary shop-sell-confirm">Sell</button>
+        <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
+      `,
+    });
+
+    this.overlay.innerHTML = `<div class="item-popup">${popupContent}</div>`;
 
     this.overlay.querySelector('.shop-qty-minus')?.addEventListener('click', () => {
       qty = Math.max(1, qty - 1);
@@ -280,7 +233,4 @@ export class ShopPopup {
     });
   }
 
-  private escapeHtml(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
 }

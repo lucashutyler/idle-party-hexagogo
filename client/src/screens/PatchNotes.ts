@@ -1,23 +1,27 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.03.2',
+    notes: [
+      'Item icons now show artwork when available, with rarity-colored frames',
+      'Higher rarity items have animated glowing borders',
+      'Equipment silhouette is larger and easier to read',
+      'Viewing another player shows the same equipment layout as your own inventory',
+      'Clicking an item on another player shows full item details',
+    ],
+  },
+  {
     version: '2026.04.03.1',
     notes: [
-      'Fixed bug where rings with two-handed flag could corrupt equipment slots (#114)',
-      'Two-handed weapons now use a dedicated equip slot instead of a boolean flag',
+      'Fixed bug where rings could corrupt equipment slots',
+      'Two-handed weapons now use a dedicated equipment slot',
       'Removed dodge chance from equipment — Bard Nimble skill remains',
       'Added Magic Resistance (MR) stat to equipment — reduces magical damage',
-      'Class restrictions can now apply to multiple classes',
-      'Items now have a gold value',
-      'Items screen reworked: square grid icons with artwork support, rarity backgrounds, animated borders',
-      'Item popup modal shows full details, set info, and actions',
+      'Items screen reworked: square grid icons with rarity backgrounds and animated borders',
+      'Click any item to see full details, stats, and set info',
       'Inventory search and sort (by rarity, type, or newest)',
       'Item sets: equip all pieces for bonus stats',
       'Shops: buy and sell items at designated rooms',
-      'Admin: item editor is now a popup modal with artwork upload',
-      'Admin: class restriction is now a checklist',
-      'Admin: new Sets and Shops management tabs',
-      'Admin: items show value, set, and artwork in list view',
-      'View player profile now shows equipment as square icons',
+      'Items now have a gold value',
     ],
   },
   {

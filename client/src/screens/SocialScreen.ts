@@ -1,8 +1,10 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, SKILL_SLOTS, getSkillById, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
+import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
+import { renderItemPopupContent } from '../ui/ItemPopup';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
 
@@ -1396,15 +1398,6 @@ export class SocialScreen implements Screen {
 
   // ── Trade Modal ───────────────────────────────────────────────
 
-  private static readonly RARITY_COLORS: Record<string, string> = {
-    janky: '#808080',
-    common: '#e8e8e8',
-    uncommon: '#66bb6a',
-    rare: '#4fc3f7',
-    epic: '#ee66e3',
-    legendary: '#9233df',
-    heirloom: '#e9bc18',
-  };
 
   /** Open the trade modal and propose a trade with the given user. */
   openTradeModal(targetUsername: string): void {
@@ -1561,7 +1554,7 @@ export class SocialScreen implements Screen {
       }
       const rows = offerItems.map(({ itemId, quantity }) => {
         const def = itemDefs[itemId];
-        const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+        const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
         const effect = def ? getItemEffectText(def) : '';
         return `<div class="trade-offer-row">
           <span class="trade-offer-name" style="color:${color}">${this.escapeHtml(def?.name ?? itemId)}</span>
@@ -1579,7 +1572,7 @@ export class SocialScreen implements Screen {
       }
       const rows = tradeableItems.map(id => {
         const def = itemDefs[id];
-        const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+        const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
         const invCount = (inventory[id] as number) ?? 0;
         const selQty = this.tradeSelectedItems.get(id) ?? 0;
         const effect = def ? getItemEffectText(def) : '';
@@ -1884,43 +1877,23 @@ export class SocialScreen implements Screen {
     const icon = CLASS_ICONS[profile.className] ?? UNKNOWN_CLASS_ICON;
 
     // Equipment section
-    const SLOT_LABELS: Record<string, string> = {
-      head: 'Head', shoulders: 'Shoulders', chest: 'Chest', bracers: 'Bracers',
-      gloves: 'Hands', mainhand: 'Main Hand', offhand: 'Offhand', foot: 'Feet',
-      ring: 'Ring', necklace: 'Necklace', back: 'Back', relic: 'Relic',
-    };
-    const RARITY_COLORS: Record<string, string> = {
-      janky: '#808080', common: '#e8e8e8', uncommon: '#66bb6a', rare: '#4fc3f7',
-      epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
-    };
-
-    const getInitials = (name: string): string => {
-      const words = name.split(/\s+/);
-      if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-      return name.substring(0, 2).toUpperCase();
-    };
-
     const LEFT_SLOTS = ['head', 'shoulders', 'chest', 'gloves', 'foot'];
     const RIGHT_SLOTS = ['back', 'necklace', 'bracers', 'ring', 'relic'];
-    const SHINY_RARITIES = new Set(['epic', 'legendary', 'heirloom']);
 
     const renderProfileSlot = (slot: string) => {
       const itemId = profile.equipment[slot];
       const def = itemId ? profile.itemDefinitions[itemId] : null;
-      const bgColor = def ? (RARITY_COLORS[def.rarity] ?? '#808080') : '#333';
-      const initials = def ? getInitials(def.name) : '';
-      const shinyClass = def && SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
-      const slotAbbrev = !def ? ({'head':'H','shoulders':'S','chest':'C','gloves':'G','foot':'F','back':'K','necklace':'N','bracers':'B','ring':'R','relic':'L','mainhand':'M','offhand':'O'}[slot] ?? '') : '';
-
-      let inner = '';
+      const dataAttrs: Record<string, string> = { slot, 'item-id': itemId ?? '' };
       if (def && itemId) {
-        inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
-          <span class="item-square-initials">${initials}</span>`;
-      } else {
-        inner = `<span class="item-square-initials" style="color:rgba(255,255,255,0.3)">${slotAbbrev}</span>`;
+        return renderItemIcon(itemId, def, {
+          extraClass: 'profile-slot-square',
+          dataAttrs,
+        });
       }
-
-      return `<div class="item-square profile-slot-square${shinyClass}" data-slot="${slot}" data-item-id="${itemId ?? ''}" title="${def ? def.name : (SLOT_LABELS[slot] ?? slot)}" style="background:${bgColor};border-color:${def ? 'rgba(180,180,180,0.25)' : 'rgba(255,255,255,0.08)'}">${inner}</div>`;
+      return renderEmptySlotIcon(slot, {
+        extraClass: 'profile-slot-square',
+        dataAttrs,
+      });
     };
 
     const leftSlotsHtml = LEFT_SLOTS.map(renderProfileSlot).join('');
@@ -2028,84 +2001,19 @@ export class SocialScreen implements Screen {
     // Remove any existing popup
     document.querySelector('.profile-item-popup-overlay')?.remove();
 
-    const RARITY_COLORS: Record<string, string> = {
-      janky: '#808080', common: '#e8e8e8', uncommon: '#66bb6a', rare: '#4fc3f7',
-      epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
-    };
-    const SLOT_LABELS: Record<string, string> = {
-      head: 'Head', shoulders: 'Shoulders', chest: 'Chest', bracers: 'Bracers',
-      gloves: 'Hands', mainhand: 'Main Hand', offhand: 'Offhand', twohanded: 'Two-Handed',
-      foot: 'Feet', ring: 'Ring', necklace: 'Necklace', back: 'Back', relic: 'Relic',
-    };
-    const SHINY_RARITIES = new Set(['epic', 'legendary', 'heirloom']);
-
-    const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-    const effect = getItemEffectText(def);
-    const initials = (() => {
-      const words = def.name.split(/\s+/).filter(Boolean);
-      if (words.length === 0) return '?';
-      if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
-      return (words[0][0] + words[1][0]).toUpperCase();
-    })();
-    const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
-
-    // Stat lines
-    const statLines: string[] = [];
-    if (effect && effect !== 'Material' && effect !== 'No bonus') {
-      statLines.push(`<div><span class="stat-label">Effect</span><span>${effect}</span></div>`);
-    }
-    if (def.equipSlot) {
-      statLines.push(`<div><span class="stat-label">Slot</span><span>${SLOT_LABELS[def.equipSlot] ?? def.equipSlot}</span></div>`);
-    } else {
-      statLines.push(`<div><span class="stat-label">Type</span><span>Material</span></div>`);
-    }
-    statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1)}</span></div>`);
-    if (def.value != null && def.value > 0) {
-      statLines.push(`<div><span class="stat-label">Value</span><span>${def.value}g</span></div>`);
-    }
-    if (def.classRestriction && def.classRestriction.length > 0) {
-      statLines.push(`<div><span class="stat-label">Class</span><span>${def.classRestriction.join(', ')}</span></div>`);
-    }
-
-    // Set info
-    const setInfo = getSetInfoForItem(def.id, setDefs, equippedItemIds, equippedItemIds);
-    let setHtml = '';
-    if (setInfo) {
-      const itemDefs = this.gameClient.lastState?.itemDefinitions ?? {};
-      const piecesHtml = setInfo.set.itemIds.map(pieceId => {
-        const pieceDef = itemDefs[pieceId];
-        const pieceName = pieceDef?.name ?? pieceId;
-        const isEquipped = equippedItemIds.has(pieceId);
-        const cssClass = isEquipped ? 'equipped' : '';
-        const check = isEquipped ? '&#9745; ' : '&#9744; ';
-        return `<div class="item-popup-set-piece ${cssClass}">${check}${this.escapeHtml(pieceName)}</div>`;
-      }).join('');
-      const bonusText = getSetBonusText(setInfo.set.bonuses);
-      setHtml = `
-        <div class="item-popup-set-section">
-          <div class="item-popup-set-name">${this.escapeHtml(setInfo.set.name)} (${setInfo.equippedCount}/${setInfo.set.itemIds.length})</div>
-          <div class="item-popup-set-pieces">${piecesHtml}</div>
-          <div class="item-popup-set-bonus">Set bonus: ${bonusText}</div>
-        </div>`;
-    }
+    const itemDefs = this.gameClient.lastState?.itemDefinitions ?? {};
+    const popupContent = renderItemPopupContent(def, {
+      itemDefs,
+      setDefs,
+      ownedItemIds: equippedItemIds,
+      equippedItemIds,
+      actionsHtml: '<button class="profile-item-close-btn">Close</button>',
+    });
 
     const overlay = document.createElement('div');
     overlay.className = 'profile-item-popup-overlay item-popup-overlay';
     overlay.style.zIndex = '10001';
-    overlay.innerHTML = `
-      <div class="item-popup">
-        <div class="item-popup-artwork${shinyClass}" style="background:${color}">
-          <img src="/item-artwork/${def.id}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
-          <span class="item-popup-initials">${initials}</span>
-        </div>
-        <div class="item-popup-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
-        <div class="item-popup-stats">${statLines.join('')}</div>
-        ${setHtml}
-        <div class="item-popup-actions">
-          <button class="profile-item-close-btn">Close</button>
-        </div>
-      </div>
-    `;
+    overlay.innerHTML = `<div class="item-popup">${popupContent}</div>`;
 
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) overlay.remove();
