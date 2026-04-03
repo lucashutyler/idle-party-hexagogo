@@ -127,60 +127,90 @@ export class GameClient {
     };
 
     this.ws.onmessage = (event) => {
+      let msg: any;
       try {
-        const msg = JSON.parse(event.data as string);
-
-        if (msg.type === 'state') {
-          if (msg.serverVersion) {
-            if (this.knownServerVersion === null) {
-              this.knownServerVersion = msg.serverVersion;
-            } else if (msg.serverVersion !== this.knownServerVersion) {
-              console.log('[GameClient] Server version changed, reloading...');
-              location.reload();
-              return;
-            }
-          }
-          this.lastState = msg;
-
-          // Resolve pending connect on first state message
-          if (this.connectResolve) {
-            this.connectResolve({ success: true });
-            this.connectResolve = undefined;
-          }
-
-          for (const listener of this.stateListeners) {
-            listener(msg);
-          }
-          this.isInitialState = false;
-        } else if (msg.type === 'chat_message') {
-          for (const listener of this.chatListeners) {
-            listener(msg.message);
-          }
-        } else if (msg.type === 'sync_chat') {
-          for (const listener of this.syncChatListeners) {
-            listener(msg.messages, msg.full);
-          }
-        } else if (msg.type === 'world_update') {
-          for (const listener of this.worldUpdateListeners) {
-            listener();
-          }
-        } else if (msg.type === 'equip_blocked') {
-          for (const listener of this.equipBlockedListeners) {
-            listener(msg);
-          }
-        } else if (msg.type === 'move_blocked') {
-          for (const listener of this.moveBlockedListeners) {
-            listener(msg);
-          }
-        } else if (msg.type === 'player_profile') {
-          for (const listener of this.playerProfileListeners) {
-            listener(msg);
-          }
-        } else if (msg.type === 'error') {
-          console.warn('[GameClient] server error:', msg.message);
-        }
+        msg = JSON.parse(event.data as string);
       } catch {
         console.error('[GameClient] failed to parse message');
+        return;
+      }
+
+      if (msg.type === 'state') {
+        if (msg.serverVersion) {
+          if (this.knownServerVersion === null) {
+            this.knownServerVersion = msg.serverVersion;
+          } else if (msg.serverVersion !== this.knownServerVersion) {
+            console.log('[GameClient] Server version changed, reloading...');
+            location.reload();
+            return;
+          }
+        }
+        this.lastState = msg;
+
+        // Resolve pending connect on first state message
+        if (this.connectResolve) {
+          this.connectResolve({ success: true });
+          this.connectResolve = undefined;
+        }
+
+        for (const listener of this.stateListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in state listener:', err);
+          }
+        }
+        this.isInitialState = false;
+      } else if (msg.type === 'chat_message') {
+        for (const listener of this.chatListeners) {
+          try {
+            listener(msg.message);
+          } catch (err) {
+            console.error('[GameClient] error in chat listener:', err);
+          }
+        }
+      } else if (msg.type === 'sync_chat') {
+        for (const listener of this.syncChatListeners) {
+          try {
+            listener(msg.messages, msg.full);
+          } catch (err) {
+            console.error('[GameClient] error in sync_chat listener:', err);
+          }
+        }
+      } else if (msg.type === 'world_update') {
+        for (const listener of this.worldUpdateListeners) {
+          try {
+            listener();
+          } catch (err) {
+            console.error('[GameClient] error in world_update listener:', err);
+          }
+        }
+      } else if (msg.type === 'equip_blocked') {
+        for (const listener of this.equipBlockedListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in equip_blocked listener:', err);
+          }
+        }
+      } else if (msg.type === 'move_blocked') {
+        for (const listener of this.moveBlockedListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in move_blocked listener:', err);
+          }
+        }
+      } else if (msg.type === 'player_profile') {
+        for (const listener of this.playerProfileListeners) {
+          try {
+            listener(msg);
+          } catch (err) {
+            console.error('[GameClient] error in player_profile listener:', err);
+          }
+        }
+      } else if (msg.type === 'error') {
+        console.warn('[GameClient] server error:', msg.message);
       }
     };
 
