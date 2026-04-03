@@ -440,6 +440,12 @@ function computeEquipReduction(equipBonuses?: EquipmentBonuses): number {
   return damageReductionMin + Math.floor(Math.random() * (damageReductionMax - damageReductionMin + 1));
 }
 
+function computeEquipMagicReduction(equipBonuses?: EquipmentBonuses): number {
+  if (!equipBonuses || equipBonuses.magicReductionMax <= 0) return 0;
+  const { magicReductionMin, magicReductionMax } = equipBonuses;
+  return magicReductionMin + Math.floor(Math.random() * (magicReductionMax - magicReductionMin + 1));
+}
+
 /** Compute damage for a player's normal attack or active skill (base + equipment + variance + rally + crit + conditionals). */
 function computePlayerDamage(
   player: PartyCombatant,
@@ -1534,9 +1540,8 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       }
 
       if (target) {
-        // Dodge check: equipment dodge + Nimble party dodge
-        const equipDodge = target.equipBonuses?.dodgeChance ?? 0;
-        const totalDodge = equipDodge + state.nimbleDodge;
+        // Dodge check: Nimble party dodge
+        const totalDodge = state.nimbleDodge;
         const dodged = totalDodge > 0 && Math.random() < totalDodge;
 
         if (dodged) {
@@ -1548,7 +1553,11 @@ export function processPartyTick(state: PartyCombatState): TickResult {
           if (monster.damageType === 'physical') {
             reduction += computeEquipReduction(target.equipBonuses);
             reduction += getPhysicalReduction(target, state.players);
+          } else if (monster.damageType === 'magical') {
+            reduction += computeEquipMagicReduction(target.equipBonuses);
+            reduction += getMagicalReduction(state.players);
           } else {
+            // holy: only Bless skill reduces holy damage
             reduction += getMagicalReduction(state.players);
           }
 

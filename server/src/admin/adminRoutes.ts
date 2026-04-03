@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import crypto from 'crypto';
+import multer from 'multer';
+import fs from 'fs/promises';
+import path from 'path';
 import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
@@ -7,6 +10,8 @@ import type { VersionStore } from '../game/VersionStore.js';
 import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
+
+const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 } });
 
 interface AdminRouteOptions {
   playerManager: () => PlayerManager;
@@ -109,6 +114,8 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       items: content.getAllItems(),
       zones: content.getAllZones(),
       encounters: content.getAllEncounters(),
+      sets: content.getAllSets(),
+      shops: content.getAllShops(),
       world: content.getWorld(),
     });
   });
@@ -461,6 +468,179 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  /** Upload artwork for an item. PNG only, square dimensions. */
+  router.post('/items/:id/artwork', artworkUpload.single('artwork'), async (req, res) => {
+    if (!req.file) { res.status(400).json({ error: 'No file uploaded.' }); return; }
+    if (req.file.mimetype !== 'image/png') { res.status(400).json({ error: 'Only PNG files are accepted.' }); return; }
+
+    // Validate PNG is square by reading IHDR chunk
+    // PNG structure: 8-byte signature, then IHDR chunk: 4 bytes length + 4 bytes 'IHDR' + 4 bytes width + 4 bytes height
+    // So width is at offset 16 and height is at offset 20
+    const buf = req.file.buffer;
+    if (buf.length < 24) { res.status(400).json({ error: 'Invalid PNG file.' }); return; }
+    const pngWidth = buf.readUInt32BE(16);
+    const pngHeight = buf.readUInt32BE(20);
+    if (pngWidth !== pngHeight) { res.status(400).json({ error: `Image must be square. Got ${pngWidth}x${pngHeight}.` }); return; }
+
+    const artworkDir = path.resolve('data/item-artwork');
+    await fs.mkdir(artworkDir, { recursive: true });
+    await fs.writeFile(path.join(artworkDir, `${req.params.id}.png`), buf);
+    res.json({ success: true });
+  });
+
+  /** Delete artwork for an item. */
+  router.delete('/items/:id/artwork', async (req, res) => {
+    const artworkPath = path.resolve('data/item-artwork', `${req.params.id}.png`);
+    try {
+      await fs.unlink(artworkPath);
+      res.json({ success: true });
+    } catch {
+      res.json({ success: true }); // Already doesn't exist, that's fine
+    }
+  });
+
+  // ── Set endpoints ──────────────────────────────────────
+
+  /** List all sets. */
+  router.get('/sets', (_req, res) => {
+    const content = getContentStore();
+    res.json({ sets: content.getAllSets() });
+  });
+
+  /** Add or update a set. Supports ?versionId= for draft editing. */
+  router.put('/sets/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const set = req.body;
+    if (!set.id || !set.name || !set.itemIds || !set.bonuses) {
+      res.status(400).json({ error: 'Missing required fields: id, name, itemIds, bonuses' });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.sets) snapshot.sets = [];
+      const idx = snapshot.sets.findIndex(s => s.id === set.id);
+      if (idx >= 0) {
+        snapshot.sets[idx] = set;
+      } else {
+        snapshot.sets.push(set);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const setsRecord: Record<string, typeof set> = {};
+      for (const s of snapshot.sets) setsRecord[s.id] = s;
+      res.json({ success: true, sets: setsRecord });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateSet(set);
+      res.json({ success: true, sets: content.getAllSets() });
+    }
+  });
+
+  /** Delete a set. Supports ?versionId= for draft editing. */
+  router.delete('/sets/:id', async (req, res) => {
+    const setId = req.params.id;
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.sets) snapshot.sets = [];
+      const idx = snapshot.sets.findIndex(s => s.id === setId);
+      if (idx < 0) { res.status(400).json({ error: 'Set not found.' }); return; }
+      snapshot.sets.splice(idx, 1);
+      await versions.saveSnapshot(versionId, snapshot);
+      const setsRecord: Record<string, typeof snapshot.sets[0]> = {};
+      for (const s of snapshot.sets) setsRecord[s.id] = s;
+      res.json({ success: true, sets: setsRecord });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteSet(setId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, sets: content.getAllSets() });
+    }
+  });
+
+  // ── Shop endpoints ──────────────────────────────────────
+
+  /** List all shops. */
+  router.get('/shops', (_req, res) => {
+    const content = getContentStore();
+    res.json({ shops: content.getAllShops() });
+  });
+
+  /** Add or update a shop. Supports ?versionId= for draft editing. */
+  router.put('/shops/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const shop = req.body;
+    if (!shop.id || !shop.name || !shop.inventory) {
+      res.status(400).json({ error: 'Missing required fields: id, name, inventory' });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.shops) snapshot.shops = [];
+      const idx = snapshot.shops.findIndex(s => s.id === shop.id);
+      if (idx >= 0) {
+        snapshot.shops[idx] = shop;
+      } else {
+        snapshot.shops.push(shop);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const shopsRecord: Record<string, typeof shop> = {};
+      for (const s of snapshot.shops) shopsRecord[s.id] = s;
+      res.json({ success: true, shops: shopsRecord });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateShop(shop);
+      res.json({ success: true, shops: content.getAllShops() });
+    }
+  });
+
+  /** Delete a shop. Supports ?versionId= for draft editing. */
+  router.delete('/shops/:id', async (req, res) => {
+    const shopId = req.params.id;
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.shops) snapshot.shops = [];
+      const idx = snapshot.shops.findIndex(s => s.id === shopId);
+      if (idx < 0) { res.status(400).json({ error: 'Shop not found.' }); return; }
+      snapshot.shops.splice(idx, 1);
+      await versions.saveSnapshot(versionId, snapshot);
+      const shopsRecord: Record<string, typeof snapshot.shops[0]> = {};
+      for (const s of snapshot.shops) shopsRecord[s.id] = s;
+      res.json({ success: true, shops: shopsRecord });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteShop(shopId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, shops: content.getAllShops() });
+    }
+  });
+
   // ── Zone endpoints ──────────────────────────────────────
 
   /** List all zones. */
@@ -675,7 +855,15 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (snapshot.encounters) {
       for (const e of snapshot.encounters) encountersRecord[e.id] = e;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, world: snapshot.world });
+    const setsRecord: Record<string, NonNullable<(typeof snapshot.sets)>[0]> = {};
+    if (snapshot.sets) {
+      for (const s of snapshot.sets) setsRecord[s.id] = s;
+    }
+    const shopsRecord: Record<string, NonNullable<(typeof snapshot.shops)>[0]> = {};
+    if (snapshot.shops) {
+      for (const s of snapshot.shops) shopsRecord[s.id] = s;
+    }
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */

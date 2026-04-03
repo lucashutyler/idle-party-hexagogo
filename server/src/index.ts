@@ -137,7 +137,9 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// --- Static files (production: serve built client) ---
+// --- Static files ---
+app.use('/item-artwork', express.static(path.resolve('data/item-artwork')));
+
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
@@ -426,6 +428,98 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // --- Shop messages ---
+
+      if (msg.type === 'shop_buy' && typeof msg.itemId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        // Find the tile the player is on and check for a shop
+        const pos = session.getPosition();
+        const world = gameLoop.contentStore.getWorld();
+        const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
+        if (!tile?.shopId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
+          return;
+        }
+        const shop = gameLoop.contentStore.getShop(tile.shopId);
+        if (!shop) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Shop not found' }));
+          return;
+        }
+
+        // Check item is in shop inventory
+        const shopItem = shop.inventory.find(si => si.itemId === msg.itemId);
+        if (!shopItem) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Item not available in this shop' }));
+          return;
+        }
+
+        // Check player has enough gold
+        if (session.getGold() < shopItem.price) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Not enough gold' }));
+          return;
+        }
+
+        // Check inventory space (addOneToInventory checks MAX_STACK)
+        if (!session.addOneToInventory(msg.itemId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full' }));
+          return;
+        }
+
+        // Deduct gold (item already added above)
+        session.deductGold(shopItem.price);
+
+        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
+        session.addLogEntry(`Bought ${itemDef?.name ?? msg.itemId} for ${shopItem.price} gold`, 'victory');
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'shop_sell' && typeof msg.itemId === 'string' && typeof msg.quantity === 'number') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        const quantity = msg.quantity;
+        if (quantity < 1) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid quantity' }));
+          return;
+        }
+
+        // Check player has the item (unequipped inventory only)
+        if (session.getInventoryCount(msg.itemId) < quantity) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Not enough items' }));
+          return;
+        }
+
+        // Get item definition for sell value
+        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
+        if (!itemDef) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Unknown item' }));
+          return;
+        }
+
+        const sellValue = (itemDef.value ?? 1) * quantity;
+
+        // Remove items and add gold
+        if (!session.removeFromInventory(msg.itemId, quantity)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to remove items' }));
+          return;
+        }
+        session.grantGold(sellValue);
+
+        const itemName = quantity > 1 ? `${itemDef.name} x${quantity}` : itemDef.name;
+        session.addLogEntry(`Sold ${itemName} for ${sellValue} gold`, 'victory');
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
       // --- View player profile ---
       if (msg.type === 'view_player' && typeof msg.username === 'string') {
         const targetSession = playerManager.getSessionByUsername(msg.username);
@@ -454,6 +548,16 @@ wss.on('connection', (ws) => {
           return { username: m.username, className: s?.getClassName(), level: s?.getLevel() };
         });
 
+        // Resolve set definitions for sets containing equipped items
+        const equippedItemIds = new Set(Object.values(profile.equipment).filter(Boolean) as string[]);
+        const allSets = gameLoop.contentStore.getAllSets();
+        const profileSetDefs: Record<string, import('@idle-party-rpg/shared').SetDefinition> = {};
+        for (const [id, set] of Object.entries(allSets)) {
+          if (set.itemIds.some(itemId => equippedItemIds.has(itemId))) {
+            profileSetDefs[id] = set;
+          }
+        }
+
         ws.send(JSON.stringify({
           type: 'player_profile',
           username: msg.username,
@@ -463,6 +567,7 @@ wss.on('connection', (ws) => {
           equipment: profile.equipment,
           skillLoadout: profile.skillLoadout,
           itemDefinitions: itemDefs,
+          setDefinitions: profileSetDefs,
           partyMembers,
         }));
         return;

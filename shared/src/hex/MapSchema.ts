@@ -33,6 +33,8 @@ export interface WorldTileDefinition {
   zoneName?: string;
   /** Optional per-room encounter table — overrides the zone's default encounters. */
   encounterTable?: EncounterTableEntry[];
+  /** Optional shop assigned to this room. */
+  shopId?: string;
 }
 
 /**

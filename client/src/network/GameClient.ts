@@ -275,6 +275,16 @@ export class GameClient {
     this.sendRaw({ type: 'reset_xp_rate' });
   }
 
+  // --- Shop ---
+
+  sendShopBuy(itemId: string): void {
+    this.sendRaw({ type: 'shop_buy', itemId });
+  }
+
+  sendShopSell(itemId: string, quantity: number): void {
+    this.sendRaw({ type: 'shop_sell', itemId, quantity });
+  }
+
   // --- View Player ---
 
   sendViewPlayer(username: string): void {

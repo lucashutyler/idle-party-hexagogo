@@ -13,7 +13,10 @@ import {
   TileType,
   xpForNextLevel,
   EQUIP_SLOTS,
+  DISPLAY_EQUIP_SLOTS,
+  ALL_CLASS_NAMES,
   MONSTER_SKILL_CATALOG,
+  getSetBonusText,
 } from '@idle-party-rpg/shared';
 import type {
   MonsterDefinition,
@@ -31,6 +34,10 @@ import type {
   DamageType,
   Resistance,
   MonsterSkillEntry,
+  SetDefinition,
+  SetBonuses,
+  ShopDefinition,
+  ShopItem,
 } from '@idle-party-rpg/shared';
 
 // Maps CUBE_DIRECTIONS index → hex corner indices for the shared edge.
@@ -83,6 +90,8 @@ interface ContentData {
   items: Record<string, ItemDefinition>;
   zones: Record<string, ZoneDefinition>;
   encounters: Record<string, EncounterDefinition>;
+  sets: Record<string, SetDefinition>;
+  shops: Record<string, ShopDefinition>;
   world: WorldData;
 }
 
@@ -96,7 +105,7 @@ interface ContentVersion {
   publishedAt: string | null;
 }
 
-type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'zones' | 'encounters' | 'map' | 'versions' | 'xp-table';
+type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'sets' | 'shops' | 'zones' | 'encounters' | 'map' | 'versions' | 'xp-table';
 
 interface TabDef {
   id: TabId;
@@ -109,6 +118,8 @@ const TABS: TabDef[] = [
   { id: 'accounts', label: 'Accounts', icon: '@' },
   { id: 'monsters', label: 'Monsters', icon: '!' },
   { id: 'items', label: 'Items', icon: '+' },
+  { id: 'sets', label: 'Sets', icon: 'S' },
+  { id: 'shops', label: 'Shops', icon: '$' },
   { id: 'zones', label: 'Zones', icon: '#' },
   { id: 'encounters', label: 'Encounters', icon: 'E' },
   { id: 'map', label: 'Map', icon: '*' },
@@ -356,6 +367,14 @@ export class AdminApp {
       case 'items':
         content.innerHTML = this.renderItems();
         this.wireItemEvents();
+        break;
+      case 'sets':
+        content.innerHTML = this.renderSets();
+        this.wireSetsEvents();
+        break;
+      case 'shops':
+        content.innerHTML = this.renderShops();
+        this.wireShopsEvents();
         break;
       case 'zones':
         content.innerHTML = this.renderZones();
@@ -1252,7 +1271,7 @@ export class AdminApp {
     const allItems = Object.values(displayContent.items);
     const readOnly = this.isReadOnly();
 
-    const slotOptions = ['all', ...EQUIP_SLOTS, 'none'].map(slot => {
+    const slotOptions = ['all', ...EQUIP_SLOTS, 'twohanded', 'none'].map(slot => {
       const selected = this.itemSlotFilter === slot ? ' selected' : '';
       const label = slot === 'none' ? 'No Slot' : slot.charAt(0).toUpperCase() + slot.slice(1);
       return `<option value="${slot}"${selected}>${label}</option>`;
@@ -1261,8 +1280,19 @@ export class AdminApp {
     const items = allItems.filter(i => {
       if (this.itemSlotFilter === 'all') return true;
       if (this.itemSlotFilter === 'none') return !i.equipSlot;
+      if (this.itemSlotFilter === 'twohanded') return i.equipSlot === 'twohanded';
       return i.equipSlot === this.itemSlotFilter;
     });
+
+    // Build set lookup: itemId → set name
+    const itemSetMap = new Map<string, string>();
+    if (displayContent.sets) {
+      for (const set of Object.values(displayContent.sets)) {
+        for (const itemId of set.itemIds) {
+          itemSetMap.set(itemId, set.name);
+        }
+      }
+    }
 
     const rows = items.map(i => {
       const effects: string[] = [];
@@ -1272,9 +1302,11 @@ export class AdminApp {
       if (i.damageReductionMin != null && i.damageReductionMax != null && i.damageReductionMax > 0) {
         effects.push(`${i.damageReductionMin}-${i.damageReductionMax} DR`);
       }
-      if (i.dodgeChance != null && i.dodgeChance > 0) {
-        effects.push(`${Math.round(i.dodgeChance * 100)}% Dodge`);
+      if (i.magicReductionMin != null && i.magicReductionMax != null && i.magicReductionMax > 0) {
+        effects.push(`${i.magicReductionMin}-${i.magicReductionMax} MR`);
       }
+
+      const setName = itemSetMap.get(i.id) ?? '-';
 
       const actions = readOnly ? '' : `
         <td class="monster-actions-cell">
@@ -1285,10 +1317,12 @@ export class AdminApp {
 
       return `
         <tr>
-          <td>${this.escapeHtml(i.name)}</td>
+          <td><img src="/item-artwork/${i.id}.png" style="width:24px;height:24px;vertical-align:middle;margin-right:4px;" onerror="this.style.display='none'">${this.escapeHtml(i.name)}</td>
           <td><span class="rarity-${i.rarity}">${i.rarity}</span></td>
           <td>${i.equipSlot ?? '-'}</td>
           <td>${effects.length > 0 ? effects.join(', ') : 'Material'}</td>
+          <td>${i.value ?? 1}</td>
+          <td>${this.escapeHtml(setName)}</td>
           ${actions}
         </tr>
       `;
@@ -1317,6 +1351,8 @@ export class AdminApp {
                 <th>Rarity</th>
                 <th>Slot</th>
                 <th>Effects</th>
+                <th>Value</th>
+                <th>Set</th>
                 ${actionsHeader}
               </tr>
             </thead>
@@ -1360,9 +1396,6 @@ export class AdminApp {
   }
 
   private showItemForm(item: ItemDefinition | null): void {
-    const area = document.getElementById('item-form-area');
-    if (!area) return;
-
     const isNew = !item;
     const i = item ?? { id: '', name: '', rarity: 'common' as const };
 
@@ -1370,25 +1403,55 @@ export class AdminApp {
       `<option value="${r}" ${i.rarity === r ? 'selected' : ''}>${r}</option>`
     ).join('');
 
-    const slotOptions = ['', 'head', 'shoulders', 'chest', 'bracers', 'gloves', 'mainhand', 'offhand', 'foot', 'ring', 'necklace', 'back', 'relic'].map(s =>
+    const slotOptions = ['', ...DISPLAY_EQUIP_SLOTS, 'twohanded'].map(s =>
       `<option value="${s}" ${(i.equipSlot ?? '') === s ? 'selected' : ''}>${s || '(none - material)'}</option>`
     ).join('');
 
-    area.innerHTML = `
-      <div class="pixel-panel monster-form">
+    const classRestrictions = Array.isArray(i.classRestriction) ? i.classRestriction : [];
+    const classCheckboxes = ALL_CLASS_NAMES.map(c =>
+      `<label style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;">
+        <input type="checkbox" class="if-class-check" value="${c}" ${classRestrictions.includes(c) ? 'checked' : ''}> ${c}
+      </label>`
+    ).join('');
+
+    const artworkPreview = i.id
+      ? `<img src="/item-artwork/${i.id}.png" style="max-width:96px;max-height:96px;margin-bottom:8px;display:block;" onerror="this.style.display='none'">`
+      : '';
+
+    // Remove any existing modal
+    document.querySelector('.admin-item-modal-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-item-modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto;display:flex;justify-content:center;align-items:flex-start;';
+    overlay.innerHTML = `
+      <div style="max-width:600px;width:100%;margin:40px auto;background:var(--color-bg-panel,#1a1a2e);border:2px solid var(--color-border,#333);padding:20px;border-radius:4px;" class="pixel-panel">
         <h3>${isNew ? 'Add Item' : `Edit: ${this.escapeHtml(i.name)}`}</h3>
         <input type="hidden" id="if-id" value="${this.escapeHtml(i.id)}">
         <div class="monster-form-grid">
           <label>Name<input type="text" id="if-name" value="${this.escapeHtml(i.name)}"></label>
           <label>Rarity<select id="if-rarity">${rarityOptions}</select></label>
           <label>Equip Slot<select id="if-equipSlot">${slotOptions}</select></label>
-          <label>Two-Handed<input type="checkbox" id="if-twoHanded" ${i.twoHanded ? 'checked' : ''}></label>
-          <label>Class<input type="text" id="if-classRestriction" value="${i.classRestriction ?? ''}" placeholder="(any)"></label>
           <label>Attack Min<input type="number" id="if-atkMin" value="${i.bonusAttackMin ?? 0}" min="0"></label>
           <label>Attack Max<input type="number" id="if-atkMax" value="${i.bonusAttackMax ?? 0}" min="0"></label>
           <label>DR Min<input type="number" id="if-drMin" value="${i.damageReductionMin ?? 0}" min="0"></label>
           <label>DR Max<input type="number" id="if-drMax" value="${i.damageReductionMax ?? 0}" min="0"></label>
-          <label>Dodge %<input type="number" id="if-dodge" value="${i.dodgeChance != null ? Math.round(i.dodgeChance * 100) : 0}" min="0" max="100" step="1"></label>
+          <label>MR Min<input type="number" id="if-mrMin" value="${i.magicReductionMin ?? 0}" min="0"></label>
+          <label>MR Max<input type="number" id="if-mrMax" value="${i.magicReductionMax ?? 0}" min="0"></label>
+          <label>Value<input type="number" id="if-value" value="${i.value ?? 1}" min="0"></label>
+        </div>
+        <div style="margin:8px 0;">
+          <label style="display:block;margin-bottom:4px;">Class Restriction</label>
+          ${classCheckboxes}
+        </div>
+        <div style="margin:8px 0;">
+          <label style="display:block;margin-bottom:4px;">Artwork</label>
+          ${artworkPreview}
+          <input type="file" id="if-artwork-file" accept="image/png" style="margin-bottom:4px;">
+          <div style="display:flex;gap:8px;">
+            <button class="admin-btn admin-btn-sm" id="if-artwork-upload">Upload</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger" id="if-artwork-remove">Remove Artwork</button>
+          </div>
         </div>
         <div class="monster-form-actions">
           <button class="admin-btn" id="if-save">${isNew ? 'Add' : 'Save'}</button>
@@ -1396,14 +1459,78 @@ export class AdminApp {
         </div>
       </div>
     `;
+    document.body.appendChild(overlay);
+
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
 
     document.getElementById('if-cancel')?.addEventListener('click', () => {
-      area.innerHTML = '';
+      overlay.remove();
     });
 
     document.getElementById('if-save')?.addEventListener('click', () => {
       this.saveItemForm();
     });
+
+    document.getElementById('if-artwork-upload')?.addEventListener('click', () => {
+      this.uploadItemArtwork();
+    });
+
+    document.getElementById('if-artwork-remove')?.addEventListener('click', () => {
+      this.removeItemArtwork();
+    });
+  }
+
+  private async uploadItemArtwork(): Promise<void> {
+    const id = (document.getElementById('if-id') as HTMLInputElement)?.value.trim();
+    if (!id) {
+      alert('Save the item first before uploading artwork.');
+      return;
+    }
+    const fileInput = document.getElementById('if-artwork-file') as HTMLInputElement;
+    if (!fileInput?.files?.length) {
+      alert('Select a PNG file first.');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('artwork', fileInput.files[0]);
+    try {
+      const res = await fetch(`/api/admin/items/${encodeURIComponent(id)}/artwork`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to upload artwork');
+        return;
+      }
+      alert('Artwork uploaded successfully.');
+    } catch {
+      alert('Network error uploading artwork.');
+    }
+  }
+
+  private async removeItemArtwork(): Promise<void> {
+    const id = (document.getElementById('if-id') as HTMLInputElement)?.value.trim();
+    if (!id) return;
+    if (!confirm('Remove artwork for this item?')) return;
+    try {
+      const res = await fetch(`/api/admin/items/${encodeURIComponent(id)}/artwork`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to remove artwork');
+        return;
+      }
+      alert('Artwork removed.');
+    } catch {
+      alert('Network error removing artwork.');
+    }
   }
 
   private async saveItemForm(): Promise<void> {
@@ -1411,12 +1538,13 @@ export class AdminApp {
     const name = (document.getElementById('if-name') as HTMLInputElement)?.value.trim();
     const rarity = (document.getElementById('if-rarity') as HTMLSelectElement)?.value;
     const equipSlot = (document.getElementById('if-equipSlot') as HTMLSelectElement)?.value || undefined;
-    const twoHanded = (document.getElementById('if-twoHanded') as HTMLInputElement)?.checked ?? false;
     const bonusAttackMin = parseInt((document.getElementById('if-atkMin') as HTMLInputElement)?.value) || 0;
     const bonusAttackMax = parseInt((document.getElementById('if-atkMax') as HTMLInputElement)?.value) || 0;
     const damageReductionMin = parseInt((document.getElementById('if-drMin') as HTMLInputElement)?.value) || 0;
     const damageReductionMax = parseInt((document.getElementById('if-drMax') as HTMLInputElement)?.value) || 0;
-    const dodgeChance = (parseInt((document.getElementById('if-dodge') as HTMLInputElement)?.value) || 0) / 100;
+    const magicReductionMin = parseInt((document.getElementById('if-mrMin') as HTMLInputElement)?.value) || 0;
+    const magicReductionMax = parseInt((document.getElementById('if-mrMax') as HTMLInputElement)?.value) || 0;
+    const value = parseInt((document.getElementById('if-value') as HTMLInputElement)?.value) || 1;
 
     if (!name) {
       alert('Name is required.');
@@ -1437,12 +1565,20 @@ export class AdminApp {
 
     const item: ItemDefinition = { id, name, rarity: rarity as ItemRarity };
     if (equipSlot) item.equipSlot = equipSlot as EquipSlot;
-    if (twoHanded) item.twoHanded = true;
-    const classRestriction = (document.getElementById('if-classRestriction') as HTMLInputElement)?.value.trim() || undefined;
-    if (classRestriction) item.classRestriction = classRestriction;
+
+    // Collect class restriction checkboxes
+    const classRestriction: string[] = [];
+    document.querySelectorAll('.if-class-check').forEach(cb => {
+      if ((cb as HTMLInputElement).checked) {
+        classRestriction.push((cb as HTMLInputElement).value);
+      }
+    });
+    if (classRestriction.length > 0) item.classRestriction = classRestriction;
+
     if (bonusAttackMin > 0 || bonusAttackMax > 0) { item.bonusAttackMin = bonusAttackMin; item.bonusAttackMax = bonusAttackMax; }
     if (damageReductionMin > 0 || damageReductionMax > 0) { item.damageReductionMin = damageReductionMin; item.damageReductionMax = damageReductionMax; }
-    if (dodgeChance > 0) item.dodgeChance = dodgeChance;
+    if (magicReductionMin > 0 || magicReductionMax > 0) { item.magicReductionMin = magicReductionMin; item.magicReductionMax = magicReductionMax; }
+    if (value !== 1) item.value = value;
 
     try {
       const qp = this.versionQueryParam();
@@ -1458,6 +1594,7 @@ export class AdminApp {
         return;
       }
       this.updateDisplayItems(data.items);
+      document.querySelector('.admin-item-modal-overlay')?.remove();
       this.renderTabContent();
     } catch {
       alert('Network error — could not save item');
@@ -1492,6 +1629,478 @@ export class AdminApp {
   private updateDisplayItems(items: Record<string, ItemDefinition>): void {
     if (this.versionContent) {
       this.versionContent.items = items;
+    }
+  }
+
+  // --- Sets ---
+
+  private renderSets(): string {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return '<div class="admin-page-empty">No data</div>';
+    const sets = Object.values(displayContent.sets ?? {});
+    const readOnly = this.isReadOnly();
+
+    const rows = sets.map(s => {
+      const bonusSummary = getSetBonusText(s.bonuses);
+
+      const actions = readOnly ? '' : `
+        <td class="monster-actions-cell">
+          <button class="admin-btn admin-btn-sm set-edit-btn" data-id="${s.id}">Edit</button>
+          <button class="admin-btn admin-btn-sm admin-btn-danger set-delete-btn" data-id="${s.id}">Del</button>
+        </td>
+      `;
+
+      return `
+        <tr>
+          <td>${this.escapeHtml(s.name)}</td>
+          <td>${s.itemIds.length}</td>
+          <td>${this.escapeHtml(bonusSummary)}</td>
+          ${actions}
+        </tr>
+      `;
+    }).join('');
+
+    const versionBar = this.renderVersionBar();
+    const addBtn = readOnly ? '' : '<button class="admin-btn" id="set-add-btn">+ Add Set</button>';
+    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+
+    return `
+      <div class="admin-page">
+        <div class="admin-page-header">
+          <h2>Sets (${sets.length})</h2>
+          ${addBtn}
+        </div>
+        ${versionBar}
+        <div class="admin-table-wrap pixel-panel">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Items</th>
+                <th>Bonus Summary</th>
+                ${actionsHeader}
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  private wireSetsEvents(): void {
+    document.getElementById('set-add-btn')?.addEventListener('click', () => {
+      this.showSetForm(null);
+    });
+
+    document.querySelectorAll('.set-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const displayContent = this.getDisplayContent();
+        if (!displayContent) return;
+        const set = (displayContent.sets ?? {})[id];
+        if (set) this.showSetForm(set);
+      });
+    });
+
+    document.querySelectorAll('.set-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.deleteSet(id);
+      });
+    });
+
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
+    });
+  }
+
+  private showSetForm(set: SetDefinition | null): void {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+
+    const isNew = !set;
+    const s = set ?? { id: '', name: '', itemIds: [], bonuses: {} };
+    const items = Object.values(displayContent.items);
+    const existingItemIds = new Set(s.itemIds);
+
+    const itemCheckboxes = items.map(item =>
+      `<label style="display:block;margin:2px 0;">
+        <input type="checkbox" class="sf-item-check" value="${item.id}" ${existingItemIds.has(item.id) ? 'checked' : ''}> ${this.escapeHtml(item.name)}
+      </label>`
+    ).join('');
+
+    const b = s.bonuses;
+
+    // Remove any existing modal
+    document.querySelector('.admin-set-modal-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-set-modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto;display:flex;justify-content:center;align-items:flex-start;';
+    overlay.innerHTML = `
+      <div style="max-width:600px;width:100%;margin:40px auto;background:var(--color-bg-panel,#1a1a2e);border:2px solid var(--color-border,#333);padding:20px;border-radius:4px;" class="pixel-panel">
+        <h3>${isNew ? 'Add Set' : `Edit: ${this.escapeHtml(s.name)}`}</h3>
+        <input type="hidden" id="sf-id" value="${this.escapeHtml(s.id)}">
+        <div class="monster-form-grid">
+          <label>Name<input type="text" id="sf-name" value="${this.escapeHtml(s.name)}"></label>
+        </div>
+        <div style="margin:8px 0;">
+          <label style="display:block;margin-bottom:4px;font-weight:bold;">Items</label>
+          <div style="max-height:200px;overflow-y:auto;border:1px solid var(--color-border,#333);padding:8px;">
+            ${itemCheckboxes}
+          </div>
+        </div>
+        <div style="margin:8px 0;">
+          <label style="display:block;margin-bottom:4px;font-weight:bold;">Set Bonuses</label>
+          <div class="monster-form-grid">
+            <label>CD Reduction<input type="number" id="sf-cooldownReduction" value="${b.cooldownReduction ?? 0}" min="0"></label>
+            <label>Damage %<input type="number" id="sf-damagePercent" value="${b.damagePercent ?? 0}" min="0"></label>
+            <label>Dmg Resist %<input type="number" id="sf-damageResistancePercent" value="${b.damageResistancePercent ?? 0}" min="0"></label>
+            <label>DR Min<input type="number" id="sf-drMin" value="${b.damageReductionMin ?? 0}" min="0"></label>
+            <label>DR Max<input type="number" id="sf-drMax" value="${b.damageReductionMax ?? 0}" min="0"></label>
+            <label>MR Min<input type="number" id="sf-mrMin" value="${b.magicReductionMin ?? 0}" min="0"></label>
+            <label>MR Max<input type="number" id="sf-mrMax" value="${b.magicReductionMax ?? 0}" min="0"></label>
+            <label>Atk Min<input type="number" id="sf-atkMin" value="${b.bonusAttackMin ?? 0}" min="0"></label>
+            <label>Atk Max<input type="number" id="sf-atkMax" value="${b.bonusAttackMax ?? 0}" min="0"></label>
+            <label>Flat HP<input type="number" id="sf-flatHp" value="${b.flatHp ?? 0}" min="0"></label>
+            <label>% HP<input type="number" id="sf-percentHp" value="${b.percentHp ?? 0}" min="0"></label>
+          </div>
+        </div>
+        <div class="monster-form-actions">
+          <button class="admin-btn" id="sf-save">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="sf-cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    document.getElementById('sf-cancel')?.addEventListener('click', () => {
+      overlay.remove();
+    });
+
+    document.getElementById('sf-save')?.addEventListener('click', () => {
+      this.saveSetForm();
+    });
+  }
+
+  private async saveSetForm(): Promise<void> {
+    const existingId = (document.getElementById('sf-id') as HTMLInputElement)?.value.trim();
+    const name = (document.getElementById('sf-name') as HTMLInputElement)?.value.trim();
+
+    if (!name) {
+      alert('Name is required.');
+      return;
+    }
+
+    const id = existingId || crypto.randomUUID();
+
+    const itemIds: string[] = [];
+    document.querySelectorAll('.sf-item-check').forEach(cb => {
+      if ((cb as HTMLInputElement).checked) {
+        itemIds.push((cb as HTMLInputElement).value);
+      }
+    });
+
+    const bonuses: SetBonuses = {};
+    const cooldownReduction = parseInt((document.getElementById('sf-cooldownReduction') as HTMLInputElement)?.value) || 0;
+    const damagePercent = parseInt((document.getElementById('sf-damagePercent') as HTMLInputElement)?.value) || 0;
+    const damageResistancePercent = parseInt((document.getElementById('sf-damageResistancePercent') as HTMLInputElement)?.value) || 0;
+    const drMin = parseInt((document.getElementById('sf-drMin') as HTMLInputElement)?.value) || 0;
+    const drMax = parseInt((document.getElementById('sf-drMax') as HTMLInputElement)?.value) || 0;
+    const mrMin = parseInt((document.getElementById('sf-mrMin') as HTMLInputElement)?.value) || 0;
+    const mrMax = parseInt((document.getElementById('sf-mrMax') as HTMLInputElement)?.value) || 0;
+    const atkMin = parseInt((document.getElementById('sf-atkMin') as HTMLInputElement)?.value) || 0;
+    const atkMax = parseInt((document.getElementById('sf-atkMax') as HTMLInputElement)?.value) || 0;
+    const flatHp = parseInt((document.getElementById('sf-flatHp') as HTMLInputElement)?.value) || 0;
+    const percentHp = parseInt((document.getElementById('sf-percentHp') as HTMLInputElement)?.value) || 0;
+
+    if (cooldownReduction) bonuses.cooldownReduction = cooldownReduction;
+    if (damagePercent) bonuses.damagePercent = damagePercent;
+    if (damageResistancePercent) bonuses.damageResistancePercent = damageResistancePercent;
+    if (drMin || drMax) { bonuses.damageReductionMin = drMin; bonuses.damageReductionMax = drMax; }
+    if (mrMin || mrMax) { bonuses.magicReductionMin = mrMin; bonuses.magicReductionMax = mrMax; }
+    if (atkMin || atkMax) { bonuses.bonusAttackMin = atkMin; bonuses.bonusAttackMax = atkMax; }
+    if (flatHp) bonuses.flatHp = flatHp;
+    if (percentHp) bonuses.percentHp = percentHp;
+
+    const setDef: SetDefinition = { id, name, itemIds, bonuses };
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/sets/${encodeURIComponent(id)}${qp}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(setDef),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save set');
+        return;
+      }
+      this.updateDisplaySets(data.sets);
+      document.querySelector('.admin-set-modal-overlay')?.remove();
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not save set');
+    }
+  }
+
+  private async deleteSet(setId: string): Promise<void> {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const set = (displayContent.sets ?? {})[setId];
+    if (!set) return;
+    if (!confirm(`Delete set "${set.name}"?`)) return;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/sets/${encodeURIComponent(setId)}${qp}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete set');
+        return;
+      }
+      this.updateDisplaySets(data.sets);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not delete set');
+    }
+  }
+
+  private updateDisplaySets(sets: Record<string, SetDefinition>): void {
+    if (this.versionContent) {
+      this.versionContent.sets = sets;
+    }
+  }
+
+  // --- Shops ---
+
+  private renderShops(): string {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return '<div class="admin-page-empty">No data</div>';
+    const shops = Object.values(displayContent.shops ?? {});
+    const readOnly = this.isReadOnly();
+
+    const rows = shops.map(s => {
+      const actions = readOnly ? '' : `
+        <td class="monster-actions-cell">
+          <button class="admin-btn admin-btn-sm shop-edit-btn" data-id="${s.id}">Edit</button>
+          <button class="admin-btn admin-btn-sm admin-btn-danger shop-delete-btn" data-id="${s.id}">Del</button>
+        </td>
+      `;
+
+      return `
+        <tr>
+          <td>${this.escapeHtml(s.name)}</td>
+          <td>${s.inventory.length}</td>
+          ${actions}
+        </tr>
+      `;
+    }).join('');
+
+    const versionBar = this.renderVersionBar();
+    const addBtn = readOnly ? '' : '<button class="admin-btn" id="shop-add-btn">+ Add Shop</button>';
+    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+
+    return `
+      <div class="admin-page">
+        <div class="admin-page-header">
+          <h2>Shops (${shops.length})</h2>
+          ${addBtn}
+        </div>
+        ${versionBar}
+        <div class="admin-table-wrap pixel-panel">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Items</th>
+                ${actionsHeader}
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  private wireShopsEvents(): void {
+    document.getElementById('shop-add-btn')?.addEventListener('click', () => {
+      this.showShopForm(null);
+    });
+
+    document.querySelectorAll('.shop-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const displayContent = this.getDisplayContent();
+        if (!displayContent) return;
+        const shop = (displayContent.shops ?? {})[id];
+        if (shop) this.showShopForm(shop);
+      });
+    });
+
+    document.querySelectorAll('.shop-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.deleteShop(id);
+      });
+    });
+
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
+    });
+  }
+
+  private showShopForm(shop: ShopDefinition | null): void {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+
+    const isNew = !shop;
+    const s = shop ?? { id: '', name: '', inventory: [] };
+    const items = Object.values(displayContent.items);
+
+    // Build price lookup from existing inventory
+    const priceMap = new Map<string, number>();
+    const inShop = new Set<string>();
+    for (const si of s.inventory) {
+      priceMap.set(si.itemId, si.price);
+      inShop.add(si.itemId);
+    }
+
+    const itemRows = items.map(item => {
+      const checked = inShop.has(item.id);
+      const price = priceMap.get(item.id) ?? (item.value ?? 1);
+      return `
+        <div style="display:flex;align-items:center;gap:8px;margin:2px 0;">
+          <input type="checkbox" class="shf-item-check" value="${item.id}" ${checked ? 'checked' : ''}>
+          <span style="min-width:150px;">${this.escapeHtml(item.name)}</span>
+          <label>Price<input type="number" class="shf-item-price" data-item-id="${item.id}" value="${price}" min="0" style="width:80px;"></label>
+        </div>
+      `;
+    }).join('');
+
+    // Remove any existing modal
+    document.querySelector('.admin-shop-modal-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-shop-modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto;display:flex;justify-content:center;align-items:flex-start;';
+    overlay.innerHTML = `
+      <div style="max-width:600px;width:100%;margin:40px auto;background:var(--color-bg-panel,#1a1a2e);border:2px solid var(--color-border,#333);padding:20px;border-radius:4px;" class="pixel-panel">
+        <h3>${isNew ? 'Add Shop' : `Edit: ${this.escapeHtml(s.name)}`}</h3>
+        <input type="hidden" id="shf-id" value="${this.escapeHtml(s.id)}">
+        <div class="monster-form-grid">
+          <label>Name<input type="text" id="shf-name" value="${this.escapeHtml(s.name)}"></label>
+        </div>
+        <div style="margin:8px 0;">
+          <label style="display:block;margin-bottom:4px;font-weight:bold;">Inventory</label>
+          <div style="max-height:300px;overflow-y:auto;border:1px solid var(--color-border,#333);padding:8px;">
+            ${itemRows}
+          </div>
+        </div>
+        <div class="monster-form-actions">
+          <button class="admin-btn" id="shf-save">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="shf-cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    document.getElementById('shf-cancel')?.addEventListener('click', () => {
+      overlay.remove();
+    });
+
+    document.getElementById('shf-save')?.addEventListener('click', () => {
+      this.saveShopForm();
+    });
+  }
+
+  private async saveShopForm(): Promise<void> {
+    const existingId = (document.getElementById('shf-id') as HTMLInputElement)?.value.trim();
+    const name = (document.getElementById('shf-name') as HTMLInputElement)?.value.trim();
+
+    if (!name) {
+      alert('Name is required.');
+      return;
+    }
+
+    const id = existingId || crypto.randomUUID();
+
+    const inventory: ShopItem[] = [];
+    document.querySelectorAll('.shf-item-check').forEach(cb => {
+      if ((cb as HTMLInputElement).checked) {
+        const itemId = (cb as HTMLInputElement).value;
+        const priceInput = document.querySelector(`.shf-item-price[data-item-id="${itemId}"]`) as HTMLInputElement;
+        const price = parseInt(priceInput?.value) || 1;
+        inventory.push({ itemId, price });
+      }
+    });
+
+    const shopDef: ShopDefinition = { id, name, inventory };
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/shops/${encodeURIComponent(id)}${qp}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(shopDef),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save shop');
+        return;
+      }
+      this.updateDisplayShops(data.shops);
+      document.querySelector('.admin-shop-modal-overlay')?.remove();
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not save shop');
+    }
+  }
+
+  private async deleteShop(shopId: string): Promise<void> {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const shop = (displayContent.shops ?? {})[shopId];
+    if (!shop) return;
+    if (!confirm(`Delete shop "${shop.name}"?`)) return;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/shops/${encodeURIComponent(shopId)}${qp}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete shop');
+        return;
+      }
+      this.updateDisplayShops(data.shops);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not delete shop');
+    }
+  }
+
+  private updateDisplayShops(shops: Record<string, ShopDefinition>): void {
+    if (this.versionContent) {
+      this.versionContent.shops = shops;
     }
   }
 
@@ -3137,6 +3746,11 @@ export class AdminApp {
       `<option value="${z.id}"${z.id === tile.zone ? ' selected' : ''}>${z.displayName}</option>`
     ).join('');
 
+    const shops = displayContent ? Object.values(displayContent.shops ?? {}) : [];
+    const shopOptions = [`<option value="">(none)</option>`].concat(shops.map(s =>
+      `<option value="${s.id}"${s.id === (tile.shopId ?? '') ? ' selected' : ''}>${this.escapeHtml(s.name)}</option>`
+    )).join('');
+
     let startBtnHtml = '';
     if (!readOnly) {
       startBtnHtml = isStart
@@ -3167,6 +3781,10 @@ export class AdminApp {
         <div class="admin-map-sidebar-field">
           <label>Zone</label>
           <select id="sidebar-zone"${disabled}>${zoneOptions}</select>
+        </div>
+        <div class="admin-map-sidebar-field">
+          <label>Shop</label>
+          <select id="sidebar-shop"${disabled}>${shopOptions}</select>
         </div>
         <div class="admin-map-sidebar-field">
           <label>Coordinates</label>
@@ -3212,6 +3830,19 @@ export class AdminApp {
     zoneSelect?.addEventListener('change', () => {
       if (this.selectedTile) {
         this.selectedTile.zone = zoneSelect.value;
+        this.scheduleSave();
+      }
+    });
+
+    const shopSelect = document.getElementById('sidebar-shop') as HTMLSelectElement;
+    shopSelect?.addEventListener('change', () => {
+      if (this.selectedTile) {
+        const val = shopSelect.value;
+        if (val) {
+          this.selectedTile.shopId = val;
+        } else {
+          delete this.selectedTile.shopId;
+        }
         this.scheduleSave();
       }
     });

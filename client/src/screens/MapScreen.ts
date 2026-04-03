@@ -2,6 +2,7 @@ import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
 import { TileInfoModal } from '../ui/TileInfoModal';
+import { ShopPopup } from '../ui/ShopPopup';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -12,6 +13,7 @@ export class MapScreen implements Screen {
   private sceneReady = false;
   private zoomControls?: HTMLElement;
   private tileModal?: TileInfoModal;
+  private shopPopup?: ShopPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
@@ -135,12 +137,21 @@ export class MapScreen implements Screen {
       scene.setSendMove((col, row) => this.tryMove(col, row));
 
       // Wire tile click handler for modal
+      this.shopPopup = new ShopPopup(this.gameClient);
       this.tileModal = new TileInfoModal(
         this.container,
         (col, row) => { this.tryMove(col, row); },
         (username, anchor, tileCol, tileRow) => { this.onUserClickCallback?.(username, anchor, tileCol, tileRow); },
+        () => {
+          const state = this.gameClient.lastState;
+          if (state?.shopDefinition) this.shopPopup!.show(state);
+        },
       );
       scene.setOnTileClick((tileInfo) => {
+        // Show shop button only if the player is on this tile and it has a shop
+        const state = this.gameClient.lastState;
+        const playerOnTile = state && state.party.col === tileInfo.col && state.party.row === tileInfo.row;
+        this.tileModal!.hasShop = !!(playerOnTile && state?.shopDefinition);
         this.tileModal!.show(tileInfo);
       });
 

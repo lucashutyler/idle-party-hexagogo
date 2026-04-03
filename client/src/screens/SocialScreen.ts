@@ -1,7 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, EQUIP_SLOTS, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, DISPLAY_EQUIP_SLOTS, SKILL_SLOTS, getSkillById, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
@@ -1894,21 +1894,27 @@ export class SocialScreen implements Screen {
       epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
     };
 
-    const equippedSlots = EQUIP_SLOTS.filter(slot => profile.equipment[slot] != null);
-    const equipHtml = equippedSlots.length > 0
-      ? equippedSlots.map(slot => {
-        const itemId = profile.equipment[slot]!;
-        const def = profile.itemDefinitions[itemId];
-        if (!def) return '';
-        const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-        const effect = getItemEffectText(def);
-        return `<div class="profile-equip-slot">
-          <span class="profile-slot-label">${SLOT_LABELS[slot] ?? slot}</span>
-          <span class="profile-slot-item" style="color: ${color}">${this.escapeHtml(def.name)}</span>
-          ${effect ? `<span class="profile-slot-effect">${effect}</span>` : ''}
-        </div>`;
-      }).join('')
-      : '<div class="profile-empty">No equipment</div>';
+    const getInitials = (name: string): string => {
+      const words = name.split(/\s+/);
+      if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+      return name.substring(0, 2).toUpperCase();
+    };
+
+    const equipHtml = DISPLAY_EQUIP_SLOTS.map(slot => {
+      const itemId = profile.equipment[slot];
+      const def = itemId ? profile.itemDefinitions[itemId] : null;
+      const bgColor = def ? (RARITY_COLORS[def.rarity] ?? '#808080') : '#333';
+      const initials = def ? getInitials(def.name) : '';
+      const label = SLOT_LABELS[slot] ?? slot;
+      const artworkUrl = (def as Record<string, unknown> | null)?.artworkUrl as string | undefined;
+      const imgHtml = artworkUrl
+        ? `<img src="${artworkUrl}" class="profile-equip-icon-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="profile-equip-icon-initials" style="display:none">${initials}</span>`
+        : `<span class="profile-equip-icon-initials">${initials}</span>`;
+      return `<div class="profile-equip-square" data-slot="${slot}" data-item-id="${itemId ?? ''}">
+        <div class="profile-equip-icon" style="background:${bgColor}">${imgHtml}</div>
+        <span class="profile-equip-label">${label}</span>
+      </div>`;
+    }).join('');
 
     // Skills section
     const skillHtml = SKILL_SLOTS.map((slot, i) => {
@@ -1951,7 +1957,7 @@ export class SocialScreen implements Screen {
       <div class="profile-class">${profile.className}</div>
       <div class="profile-guild">${profile.guildName ? this.escapeHtml(profile.guildName) : 'No Guild'}</div>
       <div class="profile-section-label">Equipment</div>
-      <div class="profile-equipment">${equipHtml}</div>
+      <div class="profile-equipment" style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">${equipHtml}</div>
       <div class="profile-section-label">Skills</div>
       <div class="profile-skills">${skillHtml}</div>
       <div class="profile-section-label">Party</div>
@@ -1961,6 +1967,81 @@ export class SocialScreen implements Screen {
 
     modal.querySelector('.profile-close-btn')!.addEventListener('click', () => overlay.remove());
 
+    // Wire equipment square clicks to show read-only item popup
+    const setDefs = profile.setDefinitions ?? {};
+    const equippedItemIds = new Set<string>();
+    for (const id of Object.values(profile.equipment)) {
+      if (id) equippedItemIds.add(id);
+    }
+
+    for (const el of modal.querySelectorAll('.profile-equip-square')) {
+      el.addEventListener('click', () => {
+        const itemId = el.getAttribute('data-item-id');
+        if (!itemId) return;
+        const def = profile.itemDefinitions[itemId];
+        if (!def) return;
+        this.showProfileItemPopup(def, setDefs, equippedItemIds, el as HTMLElement);
+      });
+    }
+
     document.body.appendChild(overlay);
+  }
+
+  private showProfileItemPopup(
+    def: ItemDefinition,
+    setDefs: Record<string, SetDefinition>,
+    equippedItemIds: Set<string>,
+    anchor: HTMLElement,
+  ): void {
+    // Remove any existing popup
+    document.querySelector('.profile-item-popup')?.remove();
+
+    const RARITY_COLORS: Record<string, string> = {
+      janky: '#808080', common: '#e8e8e8', uncommon: '#66bb6a', rare: '#4fc3f7',
+      epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
+    };
+    const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
+    const effect = getItemEffectText(def);
+    const setInfo = getSetInfoForItem(def.id, setDefs, equippedItemIds, equippedItemIds);
+
+    let setHtml = '';
+    if (setInfo) {
+      const bonusText = getSetBonusText(setInfo.set.bonuses);
+      const piecesEquipped = setInfo.equippedCount;
+      const piecesTotal = setInfo.set.itemIds.length;
+      setHtml = `
+        <div class="profile-item-set">
+          <div class="profile-item-set-name">${this.escapeHtml(setInfo.set.name)} (${piecesEquipped}/${piecesTotal})</div>
+          <div class="profile-item-set-bonus">${bonusText}</div>
+        </div>
+      `;
+    }
+
+    const popup = document.createElement('div');
+    popup.className = 'profile-item-popup';
+    popup.innerHTML = `
+      <div class="profile-item-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
+      <div class="profile-item-rarity" style="color:${color}">${def.rarity}</div>
+      ${effect ? `<div class="profile-item-effect">${effect}</div>` : ''}
+      ${setHtml}
+    `;
+
+    // Position near the anchor
+    const rect = anchor.getBoundingClientRect();
+    popup.style.position = 'fixed';
+    popup.style.left = `${rect.left + rect.width / 2}px`;
+    popup.style.top = `${rect.bottom + 4}px`;
+    popup.style.transform = 'translateX(-50%)';
+    popup.style.zIndex = '10001';
+    document.body.appendChild(popup);
+
+    // Dismiss on outside click
+    const dismiss = (e: MouseEvent) => {
+      if (!popup.contains(e.target as Node)) {
+        popup.remove();
+        document.removeEventListener('click', dismiss, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', dismiss, true), 0);
   }
 }

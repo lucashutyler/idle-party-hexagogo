@@ -1,4 +1,6 @@
 import type { EquipSlot, ItemDefinition } from './ItemTypes.js';
+import type { SetDefinition } from './SetTypes.js';
+import type { ShopDefinition } from './ShopTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type {
   ClientSocialState,
@@ -20,7 +22,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.04.01.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.04.03.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -140,6 +142,10 @@ export interface ServerStateMessage {
   social?: ClientSocialState;
   /** Item definitions for items the player currently owns (inventory + equipment). */
   itemDefinitions: Record<string, ItemDefinition>;
+  /** Set definitions for sets that include items the player owns. */
+  setDefinitions?: Record<string, SetDefinition>;
+  /** Shop definition for the player's current room (if any). */
+  shopDefinition?: ShopDefinition;
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
 }
@@ -224,11 +230,23 @@ export interface PlayerProfileMessage {
   equipment: Record<string, string | null>;
   skillLoadout: SkillLoadout;
   itemDefinitions: Record<string, ItemDefinition>;
+  setDefinitions?: Record<string, SetDefinition>;
   partyMembers: { username: string; className?: string; level?: number }[];
 }
 
 export interface ClientRunMessage {
   type: 'run';
+}
+
+export interface ClientShopBuyMessage {
+  type: 'shop_buy';
+  itemId: string;
+}
+
+export interface ClientShopSellMessage {
+  type: 'shop_sell';
+  itemId: string;
+  quantity: number;
 }
 
 export interface ClientSetClassMessage {
@@ -250,4 +268,6 @@ export type ClientMessage =
   | ClientUnequipSkillMessage
   | ClientRunMessage
   | ClientViewPlayerMessage
+  | ClientShopBuyMessage
+  | ClientShopSellMessage
   | ClientSocialMessage;

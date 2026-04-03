@@ -166,6 +166,7 @@ export class CharacterScreen implements Screen {
     const bonuses = computeEquipmentBonuses(char.equipment, state.itemDefinitions ?? {}, char.level);
     const hasAtk = bonuses.bonusAttackMax > 0;
     const hasDef = bonuses.damageReductionMax > 0;
+    const hasMR = bonuses.magicReductionMax > 0;
     this.combatBonuses.innerHTML = `
       <div class="character-bonus-row">
         <span class="character-bonus-label">Attack bonus</span>
@@ -176,8 +177,8 @@ export class CharacterScreen implements Screen {
         <span class="character-bonus-value${hasDef ? ' active' : ''}">${hasDef ? `${bonuses.damageReductionMin}-${bonuses.damageReductionMax}` : 'None'}</span>
       </div>
       <div class="character-bonus-row">
-        <span class="character-bonus-label">Dodge chance</span>
-        <span class="character-bonus-value${bonuses.dodgeChance > 0 ? ' active' : ''}">${bonuses.dodgeChance > 0 ? `${Math.round(bonuses.dodgeChance * 100)}%` : '0%'}</span>
+        <span class="character-bonus-label">Magic resistance</span>
+        <span class="character-bonus-value${hasMR ? ' active' : ''}">${hasMR ? `${bonuses.magicReductionMin}-${bonuses.magicReductionMax}` : 'None'}</span>
       </div>
     `;
 

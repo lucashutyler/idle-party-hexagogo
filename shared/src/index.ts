@@ -92,6 +92,7 @@ export {
   MAX_STACK,
   RARITY_DROP_RATES,
   EQUIP_SLOTS,
+  DISPLAY_EQUIP_SLOTS,
   SEED_ITEMS,
   addItemToInventory,
   removeItemFromInventory,
@@ -204,6 +205,8 @@ export type {
   ClientEquipSkillMessage,
   ClientUnequipSkillMessage,
   ClientViewPlayerMessage,
+  ClientShopBuyMessage,
+  ClientShopSellMessage,
   PlayerProfileMessage,
   ServerMessage,
   ClientMessage,
@@ -214,6 +217,24 @@ export {
   RUN_AVAILABLE_ROUNDS,
   GAME_VERSION,
 } from './systems/BattleTypes.js';
+
+// Set types
+export {
+  computeActiveSetBonuses,
+  mergeSetBonusesIntoEquip,
+  getSetInfoForItem,
+  getSetBonusText,
+} from './systems/SetTypes.js';
+export type {
+  SetBonuses,
+  SetDefinition,
+} from './systems/SetTypes.js';
+
+// Shop types
+export type {
+  ShopItem,
+  ShopDefinition,
+} from './systems/ShopTypes.js';
 
 // Social types
 export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';
