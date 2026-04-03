@@ -225,17 +225,41 @@ export class AdminApp {
       this.versions = versionsData.versions;
       this.activeVersionId = versionsData.activeVersionId ?? null;
 
-      // Always view a version — select the active one (or first available)
-      const initialVersionId = this.activeVersionId ?? this.versions[0]?.id ?? null;
+      // Restore version from sessionStorage, or default to active version
+      const savedVersionId = sessionStorage.getItem('adminVersionId');
+      const initialVersionId = (savedVersionId && this.versions.some(v => v.id === savedVersionId))
+        ? savedVersionId
+        : (this.activeVersionId ?? this.versions[0]?.id ?? null);
       if (initialVersionId) {
         await this.selectVersion(initialVersionId);
       }
 
-      // Restore last active tab from sessionStorage
-      const saved = sessionStorage.getItem('adminTab') as TabId | null;
-      if (saved && TABS.some(t => t.id === saved)) {
-        this.activeTab = saved;
+      // Restore tab from URL path, falling back to sessionStorage
+      const tabFromUrl = this.getTabFromUrl();
+      if (tabFromUrl) {
+        this.activeTab = tabFromUrl;
+      } else {
+        const saved = sessionStorage.getItem('adminTab') as TabId | null;
+        if (saved && TABS.some(t => t.id === saved)) {
+          this.activeTab = saved;
+        }
       }
+
+      // Listen for browser back/forward navigation
+      const handleNavigation = () => {
+        const tab = this.getTabFromUrl();
+        if (tab && tab !== this.activeTab) {
+          if (this.activeTab === 'map') this.cleanupMapCanvas();
+          this.activeTab = tab;
+          this.container.querySelectorAll('.admin-sidebar-btn[data-tab]').forEach(btn => {
+            const el = btn as HTMLElement;
+            el.classList.toggle('active', el.dataset.tab === tab);
+          });
+          this.renderTabContent();
+        }
+      };
+      window.addEventListener('popstate', handleNavigation);
+      window.addEventListener('hashchange', handleNavigation);
 
       this.renderShell();
     } catch (err) {
@@ -330,7 +354,50 @@ export class AdminApp {
 
     document.getElementById('admin-refresh')?.addEventListener('click', () => this.refresh());
 
+    // Set URL to reflect initial tab (use replaceState to avoid extra history entry)
+    const isDev = window.location.pathname.includes('admin.html');
+    if (isDev) {
+      if (!window.location.hash) window.location.hash = this.activeTab;
+    } else {
+      const url = `/admin/${this.activeTab}`;
+      if (window.location.pathname !== url) {
+        history.replaceState(null, '', url);
+      }
+    }
+
     this.renderTabContent();
+  }
+
+  /** Extract the active tab from the URL path (e.g. /admin/sets → 'sets'). */
+  private getTabFromUrl(): TabId | null {
+    const path = window.location.pathname;
+    // Match /admin/{tab} or /admin.html#{tab} (dev mode)
+    const match = path.match(/\/admin\/(\w[\w-]*)/) ?? path.match(/\/admin\.html#(\w[\w-]*)/);
+    if (match) {
+      const candidate = match[1] as TabId;
+      if (TABS.some(t => t.id === candidate)) return candidate;
+    }
+    // Also check hash for dev mode
+    if (window.location.hash) {
+      const hashTab = window.location.hash.replace('#', '') as TabId;
+      if (TABS.some(t => t.id === hashTab)) return hashTab;
+    }
+    return null;
+  }
+
+  /** Update the URL to reflect the current tab. */
+  private pushTabUrl(tabId: TabId): void {
+    // In dev mode (Vite on admin.html), use hash routing
+    // In prod mode (/admin/*), use path routing
+    const isDev = window.location.pathname.includes('admin.html');
+    if (isDev) {
+      window.location.hash = tabId;
+    } else {
+      const url = `/admin/${tabId}`;
+      if (window.location.pathname !== url) {
+        history.pushState(null, '', url);
+      }
+    }
   }
 
   private switchTab(tabId: TabId): void {
@@ -343,6 +410,7 @@ export class AdminApp {
 
     this.activeTab = tabId;
     sessionStorage.setItem('adminTab', tabId);
+    this.pushTabUrl(tabId);
 
     // Update active class on sidebar buttons
     this.container.querySelectorAll('.admin-sidebar-btn[data-tab]').forEach(btn => {
@@ -2818,6 +2886,7 @@ export class AdminApp {
 
   private async selectVersion(versionId: string): Promise<void> {
     this.selectedVersionId = versionId;
+    sessionStorage.setItem('adminVersionId', versionId);
     try {
       const snapshot = await this.fetchAdmin<ContentData>(`/api/admin/versions/${versionId}/content`);
       this.versionContent = snapshot;
