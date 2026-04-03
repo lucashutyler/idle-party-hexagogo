@@ -48,6 +48,7 @@ const sessionMiddleware = session({
   store: sessionStore,
   secret: process.env.SESSION_SECRET ?? 'dev-secret',
   resave: false,
+  rolling: true,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
