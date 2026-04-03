@@ -21,6 +21,11 @@ export class MapScreen implements Screen {
     this.container = el;
     this.gameClient = gameClient;
     this.worldCache = worldCache;
+
+    this.gameClient.onMoveBlocked((msg) => {
+      const names = msg.missingPlayers.join(', ');
+      this.showMoveToast(`${msg.itemName} required! Missing: ${names}`);
+    });
   }
 
   setOnUserClick(cb: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void): void {

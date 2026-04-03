@@ -250,9 +250,19 @@ wss.on('connection', (ws) => {
           }
         }
 
-        const success = playerManager.partyBattles.handleMove(partyId, msg.col, msg.row);
-        if (!success) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
+        const moveResult = playerManager.partyBattles.handleMove(partyId, msg.col, msg.row);
+        if (!moveResult.success) {
+          if (moveResult.missingItemId) {
+            const itemDef = gameLoop.contentStore.getItem(moveResult.missingItemId);
+            ws.send(JSON.stringify({
+              type: 'move_blocked',
+              itemName: itemDef?.name ?? moveResult.missingItemId,
+              itemId: moveResult.missingItemId,
+              missingPlayers: moveResult.missingPlayers,
+            }));
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
+          }
         }
         return;
       }
@@ -407,8 +417,17 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        if (!session.handleUnequipItem(msg.slot)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot unequip item' }));
+        const unequipResult = session.handleUnequipItem(msg.slot);
+        if (!unequipResult.success) {
+          if (unequipResult.lockedByTile) {
+            const lockedIds = session.getLockedItemIds();
+            const lockedName = lockedIds.length > 0
+              ? (gameLoop.contentStore.getItem(lockedIds[0])?.name ?? 'this item')
+              : 'this item';
+            ws.send(JSON.stringify({ type: 'error', message: `Cannot unequip ${lockedName} — required for this route` }));
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Cannot unequip item' }));
+          }
         }
         return;
       }
