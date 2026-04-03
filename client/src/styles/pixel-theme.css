@@ -1205,6 +1205,15 @@ html, body {
   gap: 6px;
   align-items: center;
   justify-items: center;
+  /* Constrain width to roughly match height (5 slots × 44px + gaps) */
+  max-width: 280px;
+  margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+  .items-equip-panel {
+    max-width: 340px;
+  }
 }
 
 .items-equip-col {
@@ -4395,7 +4404,8 @@ html, body {
   gap: 6px;
   align-items: center;
   justify-items: center;
-  margin: 8px 0;
+  max-width: 240px;
+  margin: 0 auto;
 }
 .profile-equip-col {
   display: flex;

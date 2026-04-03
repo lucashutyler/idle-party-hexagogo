@@ -11,9 +11,9 @@ export const RARITY_COLORS: Record<string, string> = {
 };
 
 export const SLOT_ICONS: Record<string, string> = {
-  head: 'H', shoulders: 'S', chest: 'C', bracers: 'B', gloves: 'G',
-  mainhand: 'M', offhand: 'O', twohanded: '2H', foot: 'F',
-  ring: 'R', necklace: 'N', back: 'K', relic: 'L',
+  head: '🪖', shoulders: '🦺', chest: '👕', bracers: '⌚', gloves: '🧤',
+  mainhand: '⚔️', offhand: '🛡️', twohanded: '🗡️', foot: '👢',
+  ring: '💍', necklace: '📿', back: '🧣', relic: '🔮',
 };
 
 export const SLOT_LABELS: Record<string, string> = {
