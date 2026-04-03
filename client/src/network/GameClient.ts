@@ -10,6 +10,7 @@ type WorldUpdateListener = () => void;
 type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
 type SuspensionListener = () => void;
 type ResumeListener = () => void;
+type MoveBlockedListener = (msg: { itemName: string; itemId: string; missingPlayers: string[] }) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 
 export class GameClient {
@@ -25,6 +26,7 @@ export class GameClient {
   private syncChatListeners = new Set<SyncChatListener>();
   private worldUpdateListeners = new Set<WorldUpdateListener>();
   private equipBlockedListeners = new Set<EquipBlockedListener>();
+  private moveBlockedListeners = new Set<MoveBlockedListener>();
   private suspensionListeners = new Set<SuspensionListener>();
   private resumeListeners = new Set<ResumeListener>();
   private playerProfileListeners = new Set<PlayerProfileListener>();
@@ -166,6 +168,10 @@ export class GameClient {
           for (const listener of this.equipBlockedListeners) {
             listener(msg);
           }
+        } else if (msg.type === 'move_blocked') {
+          for (const listener of this.moveBlockedListeners) {
+            listener(msg);
+          }
         } else if (msg.type === 'player_profile') {
           for (const listener of this.playerProfileListeners) {
             listener(msg);
@@ -269,6 +275,12 @@ export class GameClient {
   onEquipBlocked(listener: EquipBlockedListener): () => void {
     this.equipBlockedListeners.add(listener);
     return () => { this.equipBlockedListeners.delete(listener); };
+  }
+
+  /** Subscribe to move_blocked messages. Returns an unsubscribe function. */
+  onMoveBlocked(listener: MoveBlockedListener): () => void {
+    this.moveBlockedListeners.add(listener);
+    return () => { this.moveBlockedListeners.delete(listener); };
   }
 
   resetXpRate(): void {

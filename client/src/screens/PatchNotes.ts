@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.02.1',
+    notes: [
+      'New tile types: Desert, Lava Field, Beach, Hedge, and Volcano',
+      'Desert rooms require a Waterskin equipped by all party members to traverse',
+      'Lava Field rooms require Magma Boots equipped by all party members to traverse',
+      'Required traversal items are locked while on or en route to gated rooms',
+      'Map editor now clones tile type, room name, and encounters from the selected room when adding adjacent rooms',
+    ],
+  },
+  {
     version: '2026.04.01.1',
     notes: [
       'Fixed admin class switch not unlocking skills for the new class',

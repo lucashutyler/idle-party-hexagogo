@@ -225,6 +225,18 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     bonusAttackMax: 2,
     dodgeChance: 0.02,
   },
+  waterskin: {
+    id: 'waterskin',
+    name: 'Waterskin',
+    rarity: 'common',
+    equipSlot: 'relic',
+  },
+  magma_boots: {
+    id: 'magma_boots',
+    name: 'Magma Boots',
+    rarity: 'rare',
+    equipSlot: 'foot',
+  },
 };
 
 // --- Pure functions ---

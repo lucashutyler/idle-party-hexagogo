@@ -390,6 +390,16 @@ export class PlayerManager {
       if (!partyId) return null;
       return this.partyBattles.getPosition(partyId);
     };
+    session.getCurrentTile = () => {
+      const partyId = session.getPartyId();
+      if (!partyId) return null;
+      return this.partyBattles.getTile(partyId);
+    };
+    session.getCurrentPath = () => {
+      const partyId = session.getPartyId();
+      if (!partyId) return [];
+      return this.partyBattles.getPath(partyId);
+    };
   }
 
   /** Ensure a player is in a party. Auto-creates a solo party if needed. */

@@ -96,6 +96,12 @@ export class PlayerSession {
   /** Callback to get position — set by PlayerManager. */
   getPartyPosition?: () => { col: number; row: number } | null;
 
+  /** Callback to get the current tile — set by PlayerManager. */
+  getCurrentTile?: () => HexTile | null;
+
+  /** Callback to get the remaining movement path — set by PlayerManager. */
+  getCurrentPath?: () => HexTile[];
+
   constructor(username: string, grid: HexGrid, content: ContentStore) {
     this.username = username;
     this.grid = grid;
@@ -677,11 +683,38 @@ export class PlayerSession {
     return result.success;
   }
 
-  handleUnequipItem(slot: EquipSlot): boolean {
-    if (!EQUIP_SLOTS.includes(slot)) return false;
+  /** Check if the player has a specific item equipped in any slot. */
+  hasItemEquipped(itemId: string): boolean {
+    for (const equippedItemId of Object.values(this.character.equipment)) {
+      if (equippedItemId === itemId) return true;
+    }
+    return false;
+  }
+
+  /** Get item IDs locked by the current tile and remaining path (required for traversal). */
+  getLockedItemIds(): string[] {
+    const locked = new Set<string>();
+    const tile = this.getCurrentTile?.();
+    if (tile?.requiredItemId) locked.add(tile.requiredItemId);
+    const path = this.getCurrentPath?.() ?? [];
+    for (const t of path) {
+      if (t.requiredItemId) locked.add(t.requiredItemId);
+    }
+    return [...locked];
+  }
+
+  handleUnequipItem(slot: EquipSlot): { success: boolean; lockedByTile?: boolean } {
+    if (!EQUIP_SLOTS.includes(slot)) return { success: false };
+
+    // Check if the equipped item in this slot is locked by tile traversal
+    const equippedInSlot = this.character.equipment[slot];
+    if (equippedInSlot) {
+      const lockedIds = this.getLockedItemIds();
+      if (lockedIds.includes(equippedInSlot)) return { success: false, lockedByTile: true };
+    }
 
     const result = unequipItem(this.character.inventory, this.character.equipment, slot, this.content.getAllItems());
-    return result.success;
+    return { success: result.success };
   }
 
   /** Check why equip failed — returns the blocking item info if inventory full. */

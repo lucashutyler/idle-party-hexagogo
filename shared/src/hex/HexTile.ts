@@ -8,12 +8,19 @@ export enum TileType {
   Town = 'town',
   Dungeon = 'dungeon',
   Void = 'void',
+  Desert = 'desert',
+  LavaField = 'lava_field',
+  Beach = 'beach',
+  Hedge = 'hedge',
+  Volcano = 'volcano',
 }
 
 export interface TileConfig {
   type: TileType;
   color: number;
   traversable: boolean;
+  /** Item ID that ALL party members must have equipped to traverse this tile. */
+  requiredItemId?: string;
 }
 
 export const TILE_CONFIGS: Record<TileType, TileConfig> = {
@@ -52,6 +59,33 @@ export const TILE_CONFIGS: Record<TileType, TileConfig> = {
     color: 0x000000,
     traversable: false,
   },
+  [TileType.Desert]: {
+    type: TileType.Desert,
+    color: 0xc2b280,
+    traversable: true,
+    requiredItemId: 'waterskin',
+  },
+  [TileType.LavaField]: {
+    type: TileType.LavaField,
+    color: 0xd44000,
+    traversable: true,
+    requiredItemId: 'magma_boots',
+  },
+  [TileType.Beach]: {
+    type: TileType.Beach,
+    color: 0xf5deb3,
+    traversable: true,
+  },
+  [TileType.Hedge]: {
+    type: TileType.Hedge,
+    color: 0x2d5a27,
+    traversable: false,
+  },
+  [TileType.Volcano]: {
+    type: TileType.Volcano,
+    color: 0x4a1a1a,
+    traversable: false,
+  },
 };
 
 export class HexTile {
@@ -74,6 +108,10 @@ export class HexTile {
 
   get isTraversable(): boolean {
     return this.config.traversable;
+  }
+
+  get requiredItemId(): string | undefined {
+    return this.config.requiredItemId;
   }
 
   get color(): number {
