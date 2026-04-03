@@ -1,8 +1,10 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, DISPLAY_EQUIP_SLOTS, SKILL_SLOTS, getSkillById, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
+import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
+import { renderItemPopupContent } from '../ui/ItemPopup';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
 
@@ -1396,15 +1398,6 @@ export class SocialScreen implements Screen {
 
   // ── Trade Modal ───────────────────────────────────────────────
 
-  private static readonly RARITY_COLORS: Record<string, string> = {
-    janky: '#808080',
-    common: '#e8e8e8',
-    uncommon: '#66bb6a',
-    rare: '#4fc3f7',
-    epic: '#ee66e3',
-    legendary: '#9233df',
-    heirloom: '#e9bc18',
-  };
 
   /** Open the trade modal and propose a trade with the given user. */
   openTradeModal(targetUsername: string): void {
@@ -1561,7 +1554,7 @@ export class SocialScreen implements Screen {
       }
       const rows = offerItems.map(({ itemId, quantity }) => {
         const def = itemDefs[itemId];
-        const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+        const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
         const effect = def ? getItemEffectText(def) : '';
         return `<div class="trade-offer-row">
           <span class="trade-offer-name" style="color:${color}">${this.escapeHtml(def?.name ?? itemId)}</span>
@@ -1579,7 +1572,7 @@ export class SocialScreen implements Screen {
       }
       const rows = tradeableItems.map(id => {
         const def = itemDefs[id];
-        const color = def ? (SocialScreen.RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+        const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
         const invCount = (inventory[id] as number) ?? 0;
         const selQty = this.tradeSelectedItems.get(id) ?? 0;
         const effect = def ? getItemEffectText(def) : '';
@@ -1884,37 +1877,49 @@ export class SocialScreen implements Screen {
     const icon = CLASS_ICONS[profile.className] ?? UNKNOWN_CLASS_ICON;
 
     // Equipment section
-    const SLOT_LABELS: Record<string, string> = {
-      head: 'Head', shoulders: 'Shoulders', chest: 'Chest', bracers: 'Bracers',
-      gloves: 'Hands', mainhand: 'Main Hand', offhand: 'Offhand', foot: 'Feet',
-      ring: 'Ring', necklace: 'Necklace', back: 'Back', relic: 'Relic',
-    };
-    const RARITY_COLORS: Record<string, string> = {
-      janky: '#808080', common: '#e8e8e8', uncommon: '#66bb6a', rare: '#4fc3f7',
-      epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
-    };
+    const LEFT_SLOTS = ['head', 'shoulders', 'chest', 'gloves', 'foot'];
+    const RIGHT_SLOTS = ['back', 'necklace', 'bracers', 'ring', 'relic'];
 
-    const getInitials = (name: string): string => {
-      const words = name.split(/\s+/);
-      if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-      return name.substring(0, 2).toUpperCase();
-    };
-
-    const equipHtml = DISPLAY_EQUIP_SLOTS.map(slot => {
+    const renderProfileSlot = (slot: string) => {
       const itemId = profile.equipment[slot];
       const def = itemId ? profile.itemDefinitions[itemId] : null;
-      const bgColor = def ? (RARITY_COLORS[def.rarity] ?? '#808080') : '#333';
-      const initials = def ? getInitials(def.name) : '';
-      const label = SLOT_LABELS[slot] ?? slot;
-      const artworkUrl = (def as Record<string, unknown> | null)?.artworkUrl as string | undefined;
-      const imgHtml = artworkUrl
-        ? `<img src="${artworkUrl}" class="profile-equip-icon-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="profile-equip-icon-initials" style="display:none">${initials}</span>`
-        : `<span class="profile-equip-icon-initials">${initials}</span>`;
-      return `<div class="profile-equip-square" data-slot="${slot}" data-item-id="${itemId ?? ''}">
-        <div class="profile-equip-icon" style="background:${bgColor}">${imgHtml}</div>
-        <span class="profile-equip-label">${label}</span>
+      const dataAttrs: Record<string, string> = { slot, 'item-id': itemId ?? '' };
+      if (def && itemId) {
+        return renderItemIcon(itemId, def, {
+          extraClass: 'profile-slot-square',
+          dataAttrs,
+        });
+      }
+      return renderEmptySlotIcon(slot, {
+        extraClass: 'profile-slot-square',
+        dataAttrs,
+      });
+    };
+
+    const leftSlotsHtml = LEFT_SLOTS.map(renderProfileSlot).join('');
+    const rightSlotsHtml = RIGHT_SLOTS.map(renderProfileSlot).join('');
+    const mainhandHtml = renderProfileSlot('mainhand');
+    const offhandHtml = renderProfileSlot('offhand');
+
+    const equipHtml = `
+      <div class="profile-equip-panel">
+        <div class="profile-equip-col profile-equip-left">${leftSlotsHtml}</div>
+        <div class="profile-equip-figure">
+          <div class="items-figure-body">
+            <div class="fig-head"></div>
+            <div class="fig-neck"></div>
+            <div class="fig-shoulders"><div class="fig-shoulder-l"></div><div class="fig-torso"></div><div class="fig-shoulder-r"></div></div>
+            <div class="fig-arms"><div class="fig-arm-l"></div><div class="fig-waist"><span class="fig-class-icon">${icon}</span></div><div class="fig-arm-r"></div></div>
+            <div class="fig-legs"><div class="fig-leg-l"></div><div class="fig-leg-gap"></div><div class="fig-leg-r"></div></div>
+            <div class="fig-feet"><div class="fig-foot-l"></div><div class="fig-foot-gap"></div><div class="fig-foot-r"></div></div>
+          </div>
+        </div>
+        <div class="profile-equip-col profile-equip-right">${rightSlotsHtml}</div>
+        <div class="profile-equip-bottom-left">${mainhandHtml}</div>
+        <div class="profile-equip-bottom-spacer"></div>
+        <div class="profile-equip-bottom-right">${offhandHtml}</div>
       </div>`;
-    }).join('');
+
 
     // Skills section
     const skillHtml = SKILL_SLOTS.map((slot, i) => {
@@ -1957,7 +1962,7 @@ export class SocialScreen implements Screen {
       <div class="profile-class">${profile.className}</div>
       <div class="profile-guild">${profile.guildName ? this.escapeHtml(profile.guildName) : 'No Guild'}</div>
       <div class="profile-section-label">Equipment</div>
-      <div class="profile-equipment" style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">${equipHtml}</div>
+      ${equipHtml}
       <div class="profile-section-label">Skills</div>
       <div class="profile-skills">${skillHtml}</div>
       <div class="profile-section-label">Party</div>
@@ -1974,7 +1979,7 @@ export class SocialScreen implements Screen {
       if (id) equippedItemIds.add(id);
     }
 
-    for (const el of modal.querySelectorAll('.profile-equip-square')) {
+    for (const el of modal.querySelectorAll('.profile-slot-square')) {
       el.addEventListener('click', () => {
         const itemId = el.getAttribute('data-item-id');
         if (!itemId) return;
@@ -1991,57 +1996,30 @@ export class SocialScreen implements Screen {
     def: ItemDefinition,
     setDefs: Record<string, SetDefinition>,
     equippedItemIds: Set<string>,
-    anchor: HTMLElement,
+    _anchor: HTMLElement,
   ): void {
     // Remove any existing popup
-    document.querySelector('.profile-item-popup')?.remove();
+    document.querySelector('.profile-item-popup-overlay')?.remove();
 
-    const RARITY_COLORS: Record<string, string> = {
-      janky: '#808080', common: '#e8e8e8', uncommon: '#66bb6a', rare: '#4fc3f7',
-      epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
-    };
-    const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-    const effect = getItemEffectText(def);
-    const setInfo = getSetInfoForItem(def.id, setDefs, equippedItemIds, equippedItemIds);
+    const itemDefs = this.gameClient.lastState?.itemDefinitions ?? {};
+    const popupContent = renderItemPopupContent(def, {
+      itemDefs,
+      setDefs,
+      ownedItemIds: equippedItemIds,
+      equippedItemIds,
+      actionsHtml: '<button class="profile-item-close-btn">Close</button>',
+    });
 
-    let setHtml = '';
-    if (setInfo) {
-      const bonusText = getSetBonusText(setInfo.set.bonuses);
-      const piecesEquipped = setInfo.equippedCount;
-      const piecesTotal = setInfo.set.itemIds.length;
-      setHtml = `
-        <div class="profile-item-set">
-          <div class="profile-item-set-name">${this.escapeHtml(setInfo.set.name)} (${piecesEquipped}/${piecesTotal})</div>
-          <div class="profile-item-set-bonus">${bonusText}</div>
-        </div>
-      `;
-    }
+    const overlay = document.createElement('div');
+    overlay.className = 'profile-item-popup-overlay item-popup-overlay';
+    overlay.style.zIndex = '10001';
+    overlay.innerHTML = `<div class="item-popup">${popupContent}</div>`;
 
-    const popup = document.createElement('div');
-    popup.className = 'profile-item-popup';
-    popup.innerHTML = `
-      <div class="profile-item-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
-      <div class="profile-item-rarity" style="color:${color}">${def.rarity}</div>
-      ${effect ? `<div class="profile-item-effect">${effect}</div>` : ''}
-      ${setHtml}
-    `;
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+    overlay.querySelector('.profile-item-close-btn')!.addEventListener('click', () => overlay.remove());
 
-    // Position near the anchor
-    const rect = anchor.getBoundingClientRect();
-    popup.style.position = 'fixed';
-    popup.style.left = `${rect.left + rect.width / 2}px`;
-    popup.style.top = `${rect.bottom + 4}px`;
-    popup.style.transform = 'translateX(-50%)';
-    popup.style.zIndex = '10001';
-    document.body.appendChild(popup);
-
-    // Dismiss on outside click
-    const dismiss = (e: MouseEvent) => {
-      if (!popup.contains(e.target as Node)) {
-        popup.remove();
-        document.removeEventListener('click', dismiss, true);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+    document.body.appendChild(overlay);
   }
 }

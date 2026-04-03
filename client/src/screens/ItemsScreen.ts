@@ -1,24 +1,10 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ServerEquipBlockedMessage } from '@idle-party-rpg/shared';
-import { getItemEffectText, CLASS_ICONS, UNKNOWN_CLASS_ICON, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
+import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
 import type { EquipSlot, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
-
-const SLOT_LABELS: Record<EquipSlot, string> = {
-  head: 'Head',
-  shoulders: 'Shoulders',
-  chest: 'Chest',
-  bracers: 'Bracers',
-  gloves: 'Hands',
-  mainhand: 'Main Hand',
-  offhand: 'Offhand',
-  twohanded: 'Two-Handed',
-  foot: 'Feet',
-  ring: 'Ring',
-  necklace: 'Necklace',
-  back: 'Back',
-  relic: 'Relic',
-};
+import { RARITY_ORDER, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
+import { renderItemPopupContent } from '../ui/ItemPopup';
 
 /** Left column slots (top to bottom). */
 const LEFT_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'gloves', 'foot'];
@@ -26,38 +12,7 @@ const LEFT_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'gloves', 'foot']
 /** Right column slots (top to bottom). */
 const RIGHT_SLOTS: EquipSlot[] = ['back', 'necklace', 'bracers', 'ring', 'relic'];
 
-const RARITY_COLORS: Record<string, string> = {
-  janky: '#808080',
-  common: '#e8e8e8',
-  uncommon: '#66bb6a',
-  rare: '#4fc3f7',
-  epic: '#ee66e3',
-  legendary: '#9233df',
-  heirloom: '#e9bc18',
-};
-
-const EMPTY_SLOT_COLOR = '#333333';
-
-const SLOT_ICONS: Record<string, string> = {
-  head: 'H', shoulders: 'S', chest: 'C', bracers: 'B', gloves: 'G',
-  mainhand: 'M', offhand: 'O', twohanded: '2H', foot: 'F',
-  ring: 'R', necklace: 'N', back: 'K', relic: 'L',
-};
-
-const SHINY_RARITIES = new Set(['epic', 'legendary', 'heirloom']);
-
 type SortMode = 'rarity' | 'type' | 'newest';
-
-const RARITY_ORDER: Record<string, number> = {
-  heirloom: 0, legendary: 1, epic: 2, rare: 3, uncommon: 4, common: 5, janky: 6,
-};
-
-function getItemInitials(name: string): string {
-  const words = name.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '?';
-  if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
-  return (words[0][0] + words[1][0]).toUpperCase();
-}
 
 function injectItemsStyles(): void {
   if (document.getElementById('items-screen-styles')) return;
@@ -73,7 +28,8 @@ function injectItemsStyles(): void {
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 2px solid transparent;
+      border: 2px solid rgba(180,180,180,0.25);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
       box-sizing: border-box;
       min-width: 0;
     }
@@ -129,19 +85,28 @@ function injectItemsStyles(): void {
       line-height: 1;
     }
 
-    @keyframes item-shiny-border {
-      0%   { border-color: rgba(255,255,255,0.3); }
-      50%  { border-color: rgba(255,255,255,0.9); }
-      100% { border-color: rgba(255,255,255,0.3); }
+    @keyframes item-border-epic {
+      0%, 100% { border-color: #ee66e3; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(238,102,227,0.3); }
+      50% { border-color: #ff99f0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 6px rgba(255,153,240,0.5); }
+    }
+    @keyframes item-border-legendary {
+      0% { border-color: #9233df; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(146,51,223,0.3); }
+      33% { border-color: #c77dff; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 6px rgba(199,125,255,0.5); }
+      66% { border-color: #e0aaff; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(224,170,255,0.6); }
+      100% { border-color: #9233df; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(146,51,223,0.3); }
+    }
+    @keyframes item-border-heirloom {
+      0%, 100% { border-color: #e9bc18; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(233,188,24,0.3); }
+      50% { border-color: #fff176; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(255,241,118,0.6); }
     }
     .item-rarity-epic {
-      animation: item-shiny-border 2.5s ease-in-out infinite;
+      animation: item-border-epic 2s ease-in-out infinite;
     }
     .item-rarity-legendary {
-      animation: item-shiny-border 1.8s ease-in-out infinite;
+      animation: item-border-legendary 3s ease-in-out infinite;
     }
     .item-rarity-heirloom {
-      animation: item-shiny-border 1.2s ease-in-out infinite;
+      animation: item-border-heirloom 2.5s ease-in-out infinite;
     }
 
     .item-popup-overlay {
@@ -293,8 +258,8 @@ function injectItemsStyles(): void {
     }
 
     .items-equip-slot-square {
-      width: 40px;
-      height: 40px;
+      width: 44px;
+      height: 44px;
     }
 
     @media (min-width: 768px) {
@@ -303,8 +268,8 @@ function injectItemsStyles(): void {
         gap: 6px;
       }
       .items-equip-slot-square {
-        width: 48px;
-        height: 48px;
+        width: 52px;
+        height: 52px;
       }
       .item-square-initials {
         font-size: 16px;
@@ -508,21 +473,16 @@ export class ItemsScreen implements Screen {
     const renderSlotSquare = (slot: EquipSlot) => {
       const itemId = char.equipment[slot];
       const def = itemId ? this.itemDefs[itemId] : null;
-      const bgColor = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : EMPTY_SLOT_COLOR;
-      const shinyClass = def && SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
-      const hasSet = def && itemId ? this.getItemSetId(itemId) : false;
-
-      let inner = '';
-      if (def) {
-        const initials = getItemInitials(def.name);
-        inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" alt="">
-          <span class="item-square-initials">${initials}</span>`;
-        if (hasSet) inner += `<span class="item-square-set">S</span>`;
-      } else {
-        inner = `<span class="item-square-initials" style="color:rgba(255,255,255,0.3)">${SLOT_ICONS[slot] ?? ''}</span>`;
+      const dataAttrs: Record<string, string> = { slot, 'item-id': itemId ?? '' };
+      if (def && itemId) {
+        return renderItemIcon(itemId, def, {
+          showSetIndicator: true,
+          setDefs: this.setDefs,
+          extraClass: 'items-equip-slot-square',
+          dataAttrs,
+        });
       }
-
-      return `<div class="item-square items-equip-slot-square${shinyClass}" data-slot="${slot}" data-item-id="${itemId ?? ''}" title="${def ? def.name : SLOT_LABELS[slot]}" style="background:${bgColor}">${inner}</div>`;
+      return renderEmptySlotIcon(slot, { extraClass: 'items-equip-slot-square', dataAttrs });
     };
 
     const leftCol = this.slotsContainer.querySelector('.items-equip-left')!;
@@ -591,86 +551,28 @@ export class ItemsScreen implements Screen {
     this.inventoryGrid.innerHTML = filtered.map(([itemId, count]) => {
       const def = this.itemDefs[itemId];
       if (!def) return '';
-      const bgColor = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-      const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
-      const initials = getItemInitials(def.name);
-      const slotIcon = def.equipSlot ? (SLOT_ICONS[def.equipSlot] ?? '') : '';
-      const hasSet = this.getItemSetId(itemId);
-
-      let inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" alt="">
-        <span class="item-square-initials">${initials}</span>`;
-      if (hasSet) inner += `<span class="item-square-set">S</span>`;
-      if (count > 1) inner += `<span class="item-square-qty">${count}</span>`;
-      if (slotIcon) inner += `<span class="item-square-slot-icon">${slotIcon}</span>`;
-
-      return `<div class="item-square${shinyClass}" data-item="${itemId}" title="${def.name}" style="background:${bgColor}">${inner}</div>`;
+      return renderItemIcon(itemId, def, {
+        qty: count,
+        showSlotIcon: true,
+        showSetIndicator: true,
+        setDefs: this.setDefs,
+        dataAttrs: { item: itemId },
+      });
     }).join('');
-  }
-
-  private getItemSetId(itemId: string): string | null {
-    for (const set of Object.values(this.setDefs)) {
-      if (set.itemIds.includes(itemId)) return set.id;
-    }
-    return null;
   }
 
   private showItemPopup(itemId: string, context: 'equipped' | 'inventory', equippedSlot?: EquipSlot): void {
     const def = this.itemDefs[itemId];
     if (!def) return;
 
-    const bgColor = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-    const rarityColor = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
-    const initials = getItemInitials(def.name);
-
-    // Build stat lines
-    const statLines: string[] = [];
-    const effect = getItemEffectText(def);
-    if (effect && effect !== 'Material' && effect !== 'No bonus') {
-      statLines.push(`<div><span class="stat-label">Effect</span><span>${effect}</span></div>`);
-    }
-    if (def.equipSlot) {
-      statLines.push(`<div><span class="stat-label">Slot</span><span>${SLOT_LABELS[def.equipSlot] ?? def.equipSlot}</span></div>`);
-    } else {
-      statLines.push(`<div><span class="stat-label">Type</span><span>Material</span></div>`);
-    }
-    statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${rarityColor}">${def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1)}</span></div>`);
-    if (def.value != null && def.value > 0) {
-      statLines.push(`<div><span class="stat-label">Value</span><span>${def.value}g</span></div>`);
-    }
-    if (def.classRestriction && def.classRestriction.length > 0) {
-      statLines.push(`<div><span class="stat-label">Class</span><span>${def.classRestriction.join(', ')}</span></div>`);
-    }
-
-    // Set info
+    // Build owned/equipped sets for set info display
     const ownedItemIds = new Set<string>(
       Object.entries(this.lastInventory).filter(([, c]) => c > 0).map(([id]) => id)
     );
     const equippedItemIds = new Set<string>(
       Object.values(this.lastEquipment).filter((id): id is string => id != null)
     );
-    // Owned should also include equipped items
     for (const eid of equippedItemIds) ownedItemIds.add(eid);
-
-    const setInfo = getSetInfoForItem(itemId, this.setDefs, ownedItemIds, equippedItemIds);
-    let setHtml = '';
-    if (setInfo) {
-      const piecesHtml = setInfo.set.itemIds.map(pieceId => {
-        const pieceDef = this.itemDefs[pieceId];
-        const pieceName = pieceDef?.name ?? pieceId;
-        const isEquipped = equippedItemIds.has(pieceId);
-        const isOwned = ownedItemIds.has(pieceId);
-        const cssClass = isEquipped ? 'equipped' : isOwned ? 'owned' : '';
-        const check = isOwned ? (isEquipped ? '&#9745; ' : '&#9744; ') : '&#9744; ';
-        return `<div class="item-popup-set-piece ${cssClass}">${check}${pieceName}</div>`;
-      }).join('');
-      const bonusText = getSetBonusText(setInfo.set.bonuses);
-      setHtml = `
-        <div class="item-popup-set-section">
-          <div class="item-popup-set-name">${setInfo.set.name} (${setInfo.equippedCount}/${setInfo.set.itemIds.length})</div>
-          <div class="item-popup-set-pieces">${piecesHtml}</div>
-          <div class="item-popup-set-bonus">Set bonus: ${bonusText}</div>
-        </div>`;
-    }
 
     // Action buttons
     const count = this.lastInventory[itemId] ?? 0;
@@ -684,20 +586,17 @@ export class ItemsScreen implements Screen {
       actionsHtml += `<button class="popup-action-destroy danger" data-item="${itemId}" data-max="${count}">Destroy</button>`;
     }
 
-    const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
+    const popupContent = renderItemPopupContent(def, {
+      itemDefs: this.itemDefs,
+      setDefs: this.setDefs,
+      ownedItemIds,
+      equippedItemIds,
+      actionsHtml,
+    });
 
     this.modalOverlay.innerHTML = `
       <div class="item-popup-overlay">
-        <div class="item-popup">
-          <div class="item-popup-artwork${shinyClass}" style="background:${bgColor}">
-            <img src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" alt="">
-            <span class="item-popup-initials">${initials}</span>
-          </div>
-          <div class="item-popup-name" style="color:${rarityColor}">${def.name}</div>
-          <div class="item-popup-stats">${statLines.join('')}</div>
-          ${setHtml}
-          <div class="item-popup-actions">${actionsHtml}</div>
-        </div>
+        <div class="item-popup">${popupContent}</div>
       </div>
     `;
     this.modalOverlay.style.display = 'flex';
