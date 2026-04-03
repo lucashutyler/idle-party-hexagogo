@@ -2023,57 +2023,95 @@ export class SocialScreen implements Screen {
     def: ItemDefinition,
     setDefs: Record<string, SetDefinition>,
     equippedItemIds: Set<string>,
-    anchor: HTMLElement,
+    _anchor: HTMLElement,
   ): void {
     // Remove any existing popup
-    document.querySelector('.profile-item-popup')?.remove();
+    document.querySelector('.profile-item-popup-overlay')?.remove();
 
     const RARITY_COLORS: Record<string, string> = {
       janky: '#808080', common: '#e8e8e8', uncommon: '#66bb6a', rare: '#4fc3f7',
       epic: '#ee66e3', legendary: '#9233df', heirloom: '#e9bc18',
     };
+    const SLOT_LABELS: Record<string, string> = {
+      head: 'Head', shoulders: 'Shoulders', chest: 'Chest', bracers: 'Bracers',
+      gloves: 'Hands', mainhand: 'Main Hand', offhand: 'Offhand', twohanded: 'Two-Handed',
+      foot: 'Feet', ring: 'Ring', necklace: 'Necklace', back: 'Back', relic: 'Relic',
+    };
+    const SHINY_RARITIES = new Set(['epic', 'legendary', 'heirloom']);
+
     const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
     const effect = getItemEffectText(def);
-    const setInfo = getSetInfoForItem(def.id, setDefs, equippedItemIds, equippedItemIds);
+    const initials = (() => {
+      const words = def.name.split(/\s+/).filter(Boolean);
+      if (words.length === 0) return '?';
+      if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
+      return (words[0][0] + words[1][0]).toUpperCase();
+    })();
+    const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
 
-    let setHtml = '';
-    if (setInfo) {
-      const bonusText = getSetBonusText(setInfo.set.bonuses);
-      const piecesEquipped = setInfo.equippedCount;
-      const piecesTotal = setInfo.set.itemIds.length;
-      setHtml = `
-        <div class="profile-item-set">
-          <div class="profile-item-set-name">${this.escapeHtml(setInfo.set.name)} (${piecesEquipped}/${piecesTotal})</div>
-          <div class="profile-item-set-bonus">${bonusText}</div>
-        </div>
-      `;
+    // Stat lines
+    const statLines: string[] = [];
+    if (effect && effect !== 'Material' && effect !== 'No bonus') {
+      statLines.push(`<div><span class="stat-label">Effect</span><span>${effect}</span></div>`);
+    }
+    if (def.equipSlot) {
+      statLines.push(`<div><span class="stat-label">Slot</span><span>${SLOT_LABELS[def.equipSlot] ?? def.equipSlot}</span></div>`);
+    } else {
+      statLines.push(`<div><span class="stat-label">Type</span><span>Material</span></div>`);
+    }
+    statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1)}</span></div>`);
+    if (def.value != null && def.value > 0) {
+      statLines.push(`<div><span class="stat-label">Value</span><span>${def.value}g</span></div>`);
+    }
+    if (def.classRestriction && def.classRestriction.length > 0) {
+      statLines.push(`<div><span class="stat-label">Class</span><span>${def.classRestriction.join(', ')}</span></div>`);
     }
 
-    const popup = document.createElement('div');
-    popup.className = 'profile-item-popup';
-    popup.innerHTML = `
-      <div class="profile-item-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
-      <div class="profile-item-rarity" style="color:${color}">${def.rarity}</div>
-      ${effect ? `<div class="profile-item-effect">${effect}</div>` : ''}
-      ${setHtml}
+    // Set info
+    const setInfo = getSetInfoForItem(def.id, setDefs, equippedItemIds, equippedItemIds);
+    let setHtml = '';
+    if (setInfo) {
+      const itemDefs = this.gameClient.lastState?.itemDefinitions ?? {};
+      const piecesHtml = setInfo.set.itemIds.map(pieceId => {
+        const pieceDef = itemDefs[pieceId];
+        const pieceName = pieceDef?.name ?? pieceId;
+        const isEquipped = equippedItemIds.has(pieceId);
+        const cssClass = isEquipped ? 'equipped' : '';
+        const check = isEquipped ? '&#9745; ' : '&#9744; ';
+        return `<div class="item-popup-set-piece ${cssClass}">${check}${this.escapeHtml(pieceName)}</div>`;
+      }).join('');
+      const bonusText = getSetBonusText(setInfo.set.bonuses);
+      setHtml = `
+        <div class="item-popup-set-section">
+          <div class="item-popup-set-name">${this.escapeHtml(setInfo.set.name)} (${setInfo.equippedCount}/${setInfo.set.itemIds.length})</div>
+          <div class="item-popup-set-pieces">${piecesHtml}</div>
+          <div class="item-popup-set-bonus">Set bonus: ${bonusText}</div>
+        </div>`;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'profile-item-popup-overlay item-popup-overlay';
+    overlay.style.zIndex = '10001';
+    overlay.innerHTML = `
+      <div class="item-popup">
+        <div class="item-popup-artwork${shinyClass}" style="background:${color}">
+          <img src="/item-artwork/${def.id}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
+          <span class="item-popup-initials">${initials}</span>
+        </div>
+        <div class="item-popup-name" style="color:${color}">${this.escapeHtml(def.name)}</div>
+        <div class="item-popup-stats">${statLines.join('')}</div>
+        ${setHtml}
+        <div class="item-popup-actions">
+          <button class="profile-item-close-btn">Close</button>
+        </div>
+      </div>
     `;
 
-    // Position near the anchor
-    const rect = anchor.getBoundingClientRect();
-    popup.style.position = 'fixed';
-    popup.style.left = `${rect.left + rect.width / 2}px`;
-    popup.style.top = `${rect.bottom + 4}px`;
-    popup.style.transform = 'translateX(-50%)';
-    popup.style.zIndex = '10001';
-    document.body.appendChild(popup);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+    overlay.querySelector('.profile-item-close-btn')!.addEventListener('click', () => overlay.remove());
 
-    // Dismiss on outside click
-    const dismiss = (e: MouseEvent) => {
-      if (!popup.contains(e.target as Node)) {
-        popup.remove();
-        document.removeEventListener('click', dismiss, true);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+    document.body.appendChild(overlay);
   }
 }
