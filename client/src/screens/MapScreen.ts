@@ -115,6 +115,13 @@ export class MapScreen implements Screen {
   }
 
   private async createPhaserGame(): Promise<void> {
+    // Ensure world data is loaded before creating the scene
+    if (!this.worldCache.isLoaded) {
+      await this.worldCache.loadWorld().catch(err => {
+        console.warn('[MapScreen] Failed to load world data:', err);
+      });
+    }
+
     const Phaser = await import('phaser');
     const { WorldMapScene } = await import('../scenes/WorldMapScene');
 

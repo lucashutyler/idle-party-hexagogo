@@ -246,8 +246,12 @@ export class App {
     }
 
     // Load world data now that the player session exists server-side
-    await this.worldCache.loadWorld().catch(err => {
-      console.warn('[App] Failed to load world data:', err);
+    await this.worldCache.loadWorld().catch(async () => {
+      // Retry once after a brief delay (session may not be fully persisted yet)
+      await new Promise(r => setTimeout(r, 500));
+      await this.worldCache.loadWorld().catch(err => {
+        console.warn('[App] Failed to load world data after retry:', err);
+      });
     });
 
     // Check if player needs to select a class (new player or reset Adventurer)
