@@ -10,6 +10,17 @@ export const RARITY_COLORS: Record<string, string> = {
   heirloom: '#e9bc18',
 };
 
+/** Border colors: gray for all rarities. Epic+ get animated glow via CSS. */
+export const RARITY_BORDER_COLORS: Record<string, string> = {
+  janky: 'rgba(180,180,180,0.25)',
+  common: 'rgba(180,180,180,0.25)',
+  uncommon: 'rgba(180,180,180,0.25)',
+  rare: 'rgba(180,180,180,0.25)',
+  epic: 'rgba(180,180,180,0.4)',
+  legendary: 'rgba(180,180,180,0.4)',
+  heirloom: 'rgba(180,180,180,0.4)',
+};
+
 export const SLOT_ICONS: Record<string, string> = {
   head: '🪖', shoulders: '🦺', chest: '👕', bracers: '⌚', gloves: '🧤',
   mainhand: '⚔️', offhand: '🛡️', twohanded: '🗡️', foot: '👢',
@@ -47,6 +58,11 @@ export function getItemSetId(itemId: string, setDefs: Record<string, SetDefiniti
   return null;
 }
 
+/** Render the dogear corner element with an optional emoji icon. */
+function renderDogear(emoji: string): string {
+  return `<span class="item-dogear"><span class="item-dogear-icon">${emoji}</span></span>`;
+}
+
 export interface ItemIconOptions {
   qty?: number;
   showSlotIcon?: boolean;
@@ -60,11 +76,12 @@ export interface ItemIconOptions {
 
 /**
  * Render a square item icon as HTML string.
- * Options control what overlays appear (qty badge, set indicator, slot icon).
+ * Options control what overlays appear (qty badge, set indicator, slot icon dogear).
  */
 export function renderItemIcon(itemId: string, def: ItemDefinition, options?: ItemIconOptions): string {
   const rarity = def.rarity ?? 'common';
   const bgColor = RARITY_COLORS[rarity] ?? '#e8e8e8';
+  const borderColor = RARITY_BORDER_COLORS[rarity] ?? 'rgba(180,180,180,0.25)';
   const shinyClass = SHINY_RARITIES.has(rarity) ? ` item-rarity-${rarity}` : '';
   const initials = getItemInitials(def.name);
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
@@ -87,23 +104,23 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   if (options?.showSlotIcon && def.equipSlot) {
     const slotIcon = SLOT_ICONS[def.equipSlot] ?? '';
     if (slotIcon) {
-      inner += `<span class="item-square-slot-icon">${slotIcon}</span>`;
+      inner += renderDogear(slotIcon);
     }
   }
 
-  return `<div class="item-square${shinyClass}${extraClass}" title="${escapeHtml(def.name)}" style="background:${bgColor}"${dataStr}>${inner}</div>`;
+  return `<div class="item-square${shinyClass}${extraClass}" title="${escapeHtml(def.name)}" style="background:${bgColor};border-color:${borderColor}"${dataStr}>${inner}</div>`;
 }
 
 /**
- * Render an empty equipment slot icon.
+ * Render an empty equipment slot icon with a dogear showing the slot emoji.
  */
 export function renderEmptySlotIcon(slot: string, options?: { extraClass?: string; dataAttrs?: Record<string, string> }): string {
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
   const dataStr = options?.dataAttrs
     ? Object.entries(options.dataAttrs).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('')
     : '';
-  const slotAbbrev = SLOT_ICONS[slot] ?? '';
+  const slotEmoji = SLOT_ICONS[slot] ?? '';
   const label = SLOT_LABELS[slot] ?? slot;
 
-  return `<div class="item-square${extraClass}" title="${escapeHtml(label)}" style="background:#333333"${dataStr}><span class="item-square-initials" style="color:rgba(255,255,255,0.3)">${slotAbbrev}</span></div>`;
+  return `<div class="item-square item-square-empty${extraClass}" title="${escapeHtml(label)}" style="background:#2a2a3a;border-color:rgba(255,255,255,0.08)"${dataStr}>${renderDogear(slotEmoji)}</div>`;
 }

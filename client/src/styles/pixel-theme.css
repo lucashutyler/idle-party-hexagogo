@@ -1201,19 +1201,11 @@ html, body {
 
 .items-equip-panel {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 6px;
+  grid-template-columns: auto auto auto;
+  gap: 4px 8px;
   align-items: center;
-  justify-items: center;
-  /* Constrain width to roughly match height (5 slots × 44px + gaps) */
-  max-width: 280px;
+  justify-content: center;
   margin: 0 auto;
-}
-
-@media (min-width: 768px) {
-  .items-equip-panel {
-    max-width: 340px;
-  }
 }
 
 .items-equip-col {
@@ -4400,11 +4392,10 @@ html, body {
 /* Equipment panel for profile view — mirrors items screen layout */
 .profile-equip-panel {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 6px;
+  grid-template-columns: auto auto auto;
+  gap: 4px 6px;
   align-items: center;
-  justify-items: center;
-  max-width: 240px;
+  justify-content: center;
   margin: 0 auto;
 }
 .profile-equip-col {
