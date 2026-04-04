@@ -51,15 +51,37 @@ function injectItemsStyles(): void {
       text-align: center;
       line-height: 1;
     }
-    .item-square-slot-icon {
+    /* Dogear corner — white triangle in bottom-right with emoji */
+    .item-dogear {
       position: absolute;
-      bottom: 2px;
-      right: 2px;
-      font-size: 8px;
-      color: rgba(255,255,255,0.6);
+      bottom: 0;
+      right: 0;
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 0 0 20px 20px;
+      border-color: transparent transparent #f0f0f0 transparent;
       pointer-events: none;
-      z-index: 2;
+      z-index: 3;
+      filter: drop-shadow(-1px -1px 0 rgba(0,0,0,0.3));
+    }
+    .item-dogear-icon {
+      position: absolute;
+      bottom: -20px;
+      right: -1px;
+      font-size: 10px;
       line-height: 1;
+      pointer-events: none;
+    }
+    .item-square-empty {
+      cursor: default;
+    }
+    .item-square-empty .item-dogear {
+      border-width: 0 0 18px 18px;
+    }
+    .item-square-empty .item-dogear-icon {
+      bottom: -18px;
+      font-size: 9px;
     }
     .item-square-qty {
       position: absolute;
@@ -85,19 +107,19 @@ function injectItemsStyles(): void {
       line-height: 1;
     }
 
+    /* Runic borders: gray base with glowing rarity-colored accents */
     @keyframes item-border-epic {
-      0%, 100% { border-color: #ee66e3; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(238,102,227,0.3); }
-      50% { border-color: #ff99f0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 6px rgba(255,153,240,0.5); }
+      0%, 100% { border-color: rgba(180,180,180,0.4); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(238,102,227,0.3); }
+      50% { border-color: rgba(200,200,200,0.5); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(238,102,227,0.6), inset 0 0 4px rgba(238,102,227,0.15); }
     }
     @keyframes item-border-legendary {
-      0% { border-color: #9233df; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(146,51,223,0.3); }
-      33% { border-color: #c77dff; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 6px rgba(199,125,255,0.5); }
-      66% { border-color: #e0aaff; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(224,170,255,0.6); }
-      100% { border-color: #9233df; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(146,51,223,0.3); }
+      0%, 100% { border-color: rgba(180,180,180,0.4); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(146,51,223,0.3); }
+      33% { border-color: rgba(200,200,200,0.5); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(199,125,255,0.6), inset 0 0 4px rgba(199,125,255,0.15); }
+      66% { border-color: rgba(210,210,210,0.5); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 12px rgba(224,170,255,0.7), inset 0 0 6px rgba(224,170,255,0.2); }
     }
     @keyframes item-border-heirloom {
-      0%, 100% { border-color: #e9bc18; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(233,188,24,0.3); }
-      50% { border-color: #fff176; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(255,241,118,0.6); }
+      0%, 100% { border-color: rgba(180,180,180,0.4); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(233,188,24,0.3); }
+      50% { border-color: rgba(200,200,200,0.5); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 10px rgba(255,241,118,0.6), inset 0 0 5px rgba(255,241,118,0.15); }
     }
     .item-rarity-epic {
       animation: item-border-epic 2s ease-in-out infinite;
@@ -274,8 +296,12 @@ function injectItemsStyles(): void {
       .item-square-initials {
         font-size: 16px;
       }
-      .item-square-slot-icon {
-        font-size: 9px;
+      .item-dogear {
+        border-width: 0 0 22px 22px;
+      }
+      .item-dogear-icon {
+        bottom: -22px;
+        font-size: 11px;
       }
       .item-square-qty {
         font-size: 9px;
