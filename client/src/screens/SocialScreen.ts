@@ -1886,6 +1886,8 @@ export class SocialScreen implements Screen {
       const dataAttrs: Record<string, string> = { slot, 'item-id': itemId ?? '' };
       if (def && itemId) {
         return renderItemIcon(itemId, def, {
+          showSlotIcon: true,
+          slotOverride: slot,
           extraClass: 'profile-slot-square',
           dataAttrs,
         });

@@ -51,25 +51,25 @@ function injectItemsStyles(): void {
       text-align: center;
       line-height: 1;
     }
-    /* Dogear corner — white triangle in bottom-right with emoji */
+    /* Dogear corner — square tab in bottom-right with emoji */
     .item-dogear {
       position: absolute;
       bottom: 0;
       right: 0;
-      width: 0;
-      height: 0;
-      border-style: solid;
-      border-width: 0 0 20px 20px;
-      border-color: transparent transparent #f0f0f0 transparent;
+      width: 18px;
+      height: 18px;
+      background: rgba(240,240,240,0.85);
+      border-top-left-radius: 4px;
+      border-top: 1px solid rgba(0,0,0,0.2);
+      border-left: 1px solid rgba(0,0,0,0.2);
       pointer-events: none;
       z-index: 3;
-      filter: drop-shadow(-1px -1px 0 rgba(0,0,0,0.3));
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .item-dogear-icon {
-      position: absolute;
-      bottom: -20px;
-      right: -1px;
-      font-size: 10px;
+      font-size: 11px;
       line-height: 1;
       pointer-events: none;
     }
@@ -77,11 +77,11 @@ function injectItemsStyles(): void {
       cursor: default;
     }
     .item-square-empty .item-dogear {
-      border-width: 0 0 18px 18px;
+      width: 16px;
+      height: 16px;
     }
     .item-square-empty .item-dogear-icon {
-      bottom: -18px;
-      font-size: 9px;
+      font-size: 10px;
     }
     .item-square-qty {
       position: absolute;
@@ -297,11 +297,11 @@ function injectItemsStyles(): void {
         font-size: 16px;
       }
       .item-dogear {
-        border-width: 0 0 22px 22px;
+        width: 22px;
+        height: 22px;
       }
       .item-dogear-icon {
-        bottom: -22px;
-        font-size: 11px;
+        font-size: 13px;
       }
       .item-square-qty {
         font-size: 9px;
@@ -505,6 +505,8 @@ export class ItemsScreen implements Screen {
       const dataAttrs: Record<string, string> = { slot, 'item-id': itemId ?? '' };
       if (def && itemId) {
         return renderItemIcon(itemId, def, {
+          showSlotIcon: true,
+          slotOverride: slot,
           showSetIndicator: true,
           setDefs: this.setDefs,
           extraClass: 'items-equip-slot-square',
