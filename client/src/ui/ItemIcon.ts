@@ -66,6 +66,8 @@ function renderDogear(emoji: string): string {
 export interface ItemIconOptions {
   qty?: number;
   showSlotIcon?: boolean;
+  /** Override the slot used for the dogear (e.g. for equipped items where slot comes from position, not definition). */
+  slotOverride?: string;
   showSetIndicator?: boolean;
   setDefs?: Record<string, SetDefinition>;
   /** Extra CSS classes */
@@ -101,8 +103,9 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
     inner += `<span class="item-square-qty">${options.qty}</span>`;
   }
 
-  if (options?.showSlotIcon && def.equipSlot) {
-    const slotIcon = SLOT_ICONS[def.equipSlot] ?? '';
+  if (options?.showSlotIcon) {
+    const slot = options.slotOverride ?? def.equipSlot;
+    const slotIcon = slot ? (SLOT_ICONS[slot] ?? '') : '';
     if (slotIcon) {
       inner += renderDogear(slotIcon);
     }
