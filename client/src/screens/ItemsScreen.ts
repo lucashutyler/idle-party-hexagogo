@@ -3,7 +3,7 @@ import type { ServerStateMessage, ServerEquipBlockedMessage } from '@idle-party-
 import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
 import type { EquipSlot, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
-import { RARITY_ORDER, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
+import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
 
 /** Left column slots (top to bottom). */
@@ -437,6 +437,9 @@ export class ItemsScreen implements Screen {
       const itemId = slotEl.getAttribute('data-item-id');
       if (slot && itemId) {
         this.showItemPopup(itemId, 'equipped', slot);
+      } else if (slot) {
+        // Empty slot — show tooltip with slot name
+        this.showSlotTooltip(slotEl, slot);
       }
     });
 
@@ -721,6 +724,25 @@ export class ItemsScreen implements Screen {
         this.hideModal();
       }
     );
+  }
+
+  private showSlotTooltip(anchor: HTMLElement, slot: EquipSlot): void {
+    // Remove any existing tooltip
+    document.querySelector('.items-slot-tooltip')?.remove();
+
+    const label = SLOT_LABELS[slot] ?? slot;
+    const tooltip = document.createElement('div');
+    tooltip.className = 'items-slot-tooltip';
+    tooltip.textContent = label;
+    tooltip.style.cssText = 'position:fixed;background:#222;color:#e8e8e8;padding:4px 10px;border-radius:4px;font-size:11px;z-index:1000;pointer-events:none;border:1px solid #555;white-space:nowrap;';
+
+    document.body.appendChild(tooltip);
+
+    const rect = anchor.getBoundingClientRect();
+    tooltip.style.left = `${rect.left + rect.width / 2 - tooltip.offsetWidth / 2}px`;
+    tooltip.style.top = `${rect.bottom + 4}px`;
+
+    setTimeout(() => tooltip.remove(), 1500);
   }
 
   private hideModal(): void {
