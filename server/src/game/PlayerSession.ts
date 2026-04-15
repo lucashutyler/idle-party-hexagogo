@@ -259,6 +259,17 @@ export class PlayerSession {
       }
     }
 
+    // Shop items (so client has defs for buyable items)
+    const shop = this.getCurrentShopDefinition();
+    if (shop) {
+      for (const si of shop.inventory) {
+        if (!defs[si.itemId]) {
+          const def = this.content.getItem(si.itemId);
+          if (def) defs[si.itemId] = def;
+        }
+      }
+    }
+
     return defs;
   }
 
