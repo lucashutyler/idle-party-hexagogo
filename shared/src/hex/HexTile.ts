@@ -19,8 +19,6 @@ export interface TileConfig {
   type: TileType;
   color: number;
   traversable: boolean;
-  /** Item ID that ALL party members must have equipped to traverse this tile. */
-  requiredItemId?: string;
 }
 
 export const TILE_CONFIGS: Record<TileType, TileConfig> = {
@@ -63,13 +61,11 @@ export const TILE_CONFIGS: Record<TileType, TileConfig> = {
     type: TileType.Desert,
     color: 0xc2b280,
     traversable: true,
-    requiredItemId: 'waterskin',
   },
   [TileType.LavaField]: {
     type: TileType.LavaField,
     color: 0xd44000,
     traversable: true,
-    requiredItemId: 'magma_boots',
   },
   [TileType.Beach]: {
     type: TileType.Beach,
@@ -114,7 +110,7 @@ export class HexTile {
   }
 
   get requiredItemId(): string | undefined {
-    return this._requiredItemId ?? this.config.requiredItemId;
+    return this._requiredItemId;
   }
 
   get color(): number {
