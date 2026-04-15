@@ -35,6 +35,8 @@ export interface WorldTileDefinition {
   encounterTable?: EncounterTableEntry[];
   /** Optional shop assigned to this room. */
   shopId?: string;
+  /** Item ID required to traverse. Overrides the tile type default if set. */
+  requiredItemId?: string;
 }
 
 /**

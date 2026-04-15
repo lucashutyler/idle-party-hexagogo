@@ -116,8 +116,18 @@ export class ShopPopup {
     itemDefs: Record<string, ItemDefinition>,
     _setDefs: Record<string, SetDefinition>,
   ): string {
-    const equippedIds = new Set(Object.values(equipment).filter(Boolean));
-    const entries = Object.entries(inventory).filter(([id, count]) => count > 0 && !equippedIds.has(id));
+    // Count how many of each item is equipped (an item can occupy multiple slots)
+    const equippedCounts: Record<string, number> = {};
+    for (const itemId of Object.values(equipment)) {
+      if (itemId) equippedCounts[itemId] = (equippedCounts[itemId] ?? 0) + 1;
+    }
+
+    // Show all inventory items, but reduce sellable qty by equipped count
+    const entries: [string, number][] = [];
+    for (const [id, count] of Object.entries(inventory)) {
+      const sellable = count - (equippedCounts[id] ?? 0);
+      if (sellable > 0) entries.push([id, sellable]);
+    }
 
     if (entries.length === 0) {
       return '<div style="color:#888;text-align:center;padding:16px;">No items to sell</div>';

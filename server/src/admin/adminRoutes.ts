@@ -123,7 +123,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Add or update a world tile. Supports ?versionId= for draft editing. */
   router.put('/world/tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
-    const { col, row, type, zone, name, encounterTable, shopId } = req.body;
+    const { col, row, type, zone, name, encounterTable, shopId, requiredItemId } = req.body;
     if (col == null || row == null || !type || !zone || !name) {
       res.status(400).json({ error: 'Missing required fields: col, row, type, zone, name' });
       return;
@@ -151,16 +151,16 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const idx = snapshot.world.tiles.findIndex(t => t.col === col && t.row === row);
       if (idx >= 0) {
         // Preserve existing GUID on update
-        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined };
+        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined };
       } else {
         // New tile — generate a GUID
-        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined });
+        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined });
       }
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ id: '', col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined });
+      await content.addOrUpdateTile({ id: '', col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined });
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }
