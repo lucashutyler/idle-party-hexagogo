@@ -24,7 +24,7 @@ export class ShopPopup {
     const shop = state.shopDefinition;
     if (!shop) return;
     this.mode = 'buy';
-    this.render(state, shop);
+    this.renderGrid(state, shop);
     this.overlay.style.display = 'flex';
   }
 
@@ -33,7 +33,8 @@ export class ShopPopup {
     this.overlay.innerHTML = '';
   }
 
-  private render(state: ServerStateMessage, shop: ShopDefinition): void {
+  /** Render the main grid view (buy or sell item list). */
+  private renderGrid(state: ServerStateMessage, shop: ShopDefinition): void {
     const char = state.character;
     const itemDefs = state.itemDefinitions ?? {};
     const setDefs = state.setDefinitions ?? {};
@@ -69,7 +70,7 @@ export class ShopPopup {
     for (const btn of this.overlay.querySelectorAll('.shop-toggle-btn')) {
       btn.addEventListener('click', () => {
         this.mode = (btn as HTMLElement).dataset.mode as 'buy' | 'sell';
-        this.render(state, shop);
+        this.renderGrid(state, shop);
       });
     }
 
@@ -80,10 +81,10 @@ export class ShopPopup {
         if (!itemId) return;
         if (this.mode === 'buy') {
           const price = parseInt((el as HTMLElement).dataset.price ?? '0', 10);
-          this.showBuyPopup(itemId, price, itemDefs, setDefs, state, shop);
+          this.renderBuyDetail(itemId, price, itemDefs, setDefs, state, shop);
         } else {
           const max = parseInt((el as HTMLElement).dataset.qty ?? '1', 10);
-          this.showSellPopup(itemId, max, itemDefs, setDefs, state, shop);
+          this.renderSellDetail(itemId, max, itemDefs, setDefs, state, shop);
         }
       });
     }
@@ -101,13 +102,10 @@ export class ShopPopup {
           <span class="shop-item-price">${si.price}g</span>
         </div>`;
       }
-      // renderItemIcon produces the outer div; we need to inject shop-specific data attrs and the price overlay.
-      // Use renderItemIcon with extra class and data attrs, then append the price span.
       const html = renderItemIcon(si.itemId, def, {
         extraClass: 'shop-item-square',
         dataAttrs: { 'item-id': si.itemId, price: String(si.price) },
       });
-      // Inject price badge before closing </div>
       return html.replace(/<\/div>$/, `<span class="shop-item-price">${si.price}g</span></div>`);
     }).join('');
   }
@@ -118,7 +116,6 @@ export class ShopPopup {
     itemDefs: Record<string, ItemDefinition>,
     _setDefs: Record<string, SetDefinition>,
   ): string {
-    // Only show unequipped inventory items
     const equippedIds = new Set(Object.values(equipment).filter(Boolean));
     const entries = Object.entries(inventory).filter(([id, count]) => count > 0 && !equippedIds.has(id));
 
@@ -140,12 +137,12 @@ export class ShopPopup {
         extraClass: 'shop-item-square',
         dataAttrs: { 'item-id': itemId, qty: String(qty) },
       });
-      // Inject price badge before closing </div>
       return html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`);
     }).join('');
   }
 
-  private showBuyPopup(
+  /** Render a buy detail view inside the shop popup container. */
+  private renderBuyDetail(
     itemId: string, price: number,
     itemDefs: Record<string, ItemDefinition>,
     setDefs: Record<string, SetDefinition>,
@@ -154,28 +151,69 @@ export class ShopPopup {
     const def = itemDefs[itemId];
     if (!def) return;
 
+    let qty = 1;
+    const maxAffordable = Math.max(1, Math.floor(state.character.gold / price));
+
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
       setDefs,
-      actionsHtml: `
-        <div style="margin-top:12px;font-size:14px;color:#ffd700;">Price: ${price} gold</div>
-        <button class="item-popup-btn item-popup-btn-primary shop-buy-confirm">Buy</button>
-        <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
-      `,
     });
 
-    this.overlay.innerHTML = `<div class="item-popup">${popupContent}</div>`;
+    this.overlay.innerHTML = `
+      <div class="shop-popup shop-detail-view">
+        <div class="shop-header">
+          <span class="shop-title">${escapeHtml(shop.name)}</span>
+          <span class="shop-gold">${state.character.gold} gold</span>
+        </div>
+        <div class="shop-detail-content">${popupContent}</div>
+        <div class="shop-detail-controls">
+          <div class="shop-qty-row">
+            <button class="shop-qty-btn shop-qty-minus">-</button>
+            <span class="shop-qty-value">1</span>
+            <button class="shop-qty-btn shop-qty-plus">+</button>
+            <button class="shop-qty-btn shop-qty-all">Max</button>
+          </div>
+          <div class="shop-detail-total">Total: ${price} gold</div>
+          <div class="shop-detail-actions">
+            <button class="item-popup-btn item-popup-btn-primary shop-action-confirm">Buy</button>
+            <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
+          </div>
+        </div>
+      </div>
+    `;
 
-    this.overlay.querySelector('.shop-buy-confirm')?.addEventListener('click', () => {
-      this.gameClient.sendShopBuy(itemId);
-      this.render(state, shop);
+    const updateQty = () => {
+      const qtyEl = this.overlay.querySelector('.shop-qty-value');
+      const totalEl = this.overlay.querySelector('.shop-detail-total');
+      if (qtyEl) qtyEl.textContent = String(qty);
+      if (totalEl) totalEl.textContent = `Total: ${qty * price} gold`;
+    };
+
+    this.overlay.querySelector('.shop-qty-minus')?.addEventListener('click', () => {
+      qty = Math.max(1, qty - 1);
+      updateQty();
+    });
+    this.overlay.querySelector('.shop-qty-plus')?.addEventListener('click', () => {
+      qty = Math.min(maxAffordable, qty + 1);
+      updateQty();
+    });
+    this.overlay.querySelector('.shop-qty-all')?.addEventListener('click', () => {
+      qty = maxAffordable;
+      updateQty();
+    });
+    this.overlay.querySelector('.shop-action-confirm')?.addEventListener('click', () => {
+      for (let i = 0; i < qty; i++) {
+        this.gameClient.sendShopBuy(itemId);
+      }
+      this.renderGrid(state, shop);
     });
     this.overlay.querySelector('.shop-detail-back')?.addEventListener('click', () => {
-      this.render(state, shop);
+      this.renderGrid(state, shop);
     });
   }
 
-  private showSellPopup(
+  /** Render a sell detail view inside the shop popup container. */
+  private renderSellDetail(
     itemId: string, max: number,
     itemDefs: Record<string, ItemDefinition>,
     setDefs: Record<string, SetDefinition>,
@@ -187,49 +225,59 @@ export class ShopPopup {
 
     let qty = 1;
 
-    const renderQty = () => {
+    const popupContent = renderItemPopupContent(def, {
+      itemDefs,
+      setDefs,
+    });
+
+    this.overlay.innerHTML = `
+      <div class="shop-popup shop-detail-view">
+        <div class="shop-header">
+          <span class="shop-title">${escapeHtml(shop.name)}</span>
+          <span class="shop-gold">${state.character.gold} gold</span>
+        </div>
+        <div class="shop-detail-content">${popupContent}</div>
+        <div class="shop-detail-controls">
+          <div class="shop-qty-row">
+            <button class="shop-qty-btn shop-qty-minus">-</button>
+            <span class="shop-qty-value">1</span>
+            <button class="shop-qty-btn shop-qty-plus">+</button>
+            <button class="shop-qty-btn shop-qty-all">All</button>
+          </div>
+          <div class="shop-detail-total">Total: ${value} gold</div>
+          <div class="shop-detail-actions">
+            <button class="item-popup-btn item-popup-btn-primary shop-action-confirm">Sell</button>
+            <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const updateQty = () => {
       const qtyEl = this.overlay.querySelector('.shop-qty-value');
-      const totalEl = this.overlay.querySelector('.shop-sell-total');
+      const totalEl = this.overlay.querySelector('.shop-detail-total');
       if (qtyEl) qtyEl.textContent = String(qty);
       if (totalEl) totalEl.textContent = `Total: ${qty * value} gold`;
     };
 
-    const popupContent = renderItemPopupContent(def, {
-      itemDefs,
-      setDefs,
-      actionsHtml: `
-        <div class="shop-sell-controls">
-          <button class="shop-qty-btn shop-qty-minus">-</button>
-          <span class="shop-qty-value">1</span>
-          <button class="shop-qty-btn shop-qty-plus">+</button>
-          <button class="shop-qty-btn shop-qty-all">All</button>
-        </div>
-        <div class="shop-sell-total" style="color:#ffd700;margin-top:4px;">Total: ${value} gold</div>
-        <button class="item-popup-btn item-popup-btn-primary shop-sell-confirm">Sell</button>
-        <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
-      `,
-    });
-
-    this.overlay.innerHTML = `<div class="item-popup">${popupContent}</div>`;
-
     this.overlay.querySelector('.shop-qty-minus')?.addEventListener('click', () => {
       qty = Math.max(1, qty - 1);
-      renderQty();
+      updateQty();
     });
     this.overlay.querySelector('.shop-qty-plus')?.addEventListener('click', () => {
       qty = Math.min(max, qty + 1);
-      renderQty();
+      updateQty();
     });
     this.overlay.querySelector('.shop-qty-all')?.addEventListener('click', () => {
       qty = max;
-      renderQty();
+      updateQty();
     });
-    this.overlay.querySelector('.shop-sell-confirm')?.addEventListener('click', () => {
+    this.overlay.querySelector('.shop-action-confirm')?.addEventListener('click', () => {
       this.gameClient.sendShopSell(itemId, qty);
-      this.render(state, shop);
+      this.renderGrid(state, shop);
     });
     this.overlay.querySelector('.shop-detail-back')?.addEventListener('click', () => {
-      this.render(state, shop);
+      this.renderGrid(state, shop);
     });
   }
 
