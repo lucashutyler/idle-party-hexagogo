@@ -19,8 +19,6 @@ export interface TileConfig {
   type: TileType;
   color: number;
   traversable: boolean;
-  /** Item ID that ALL party members must have equipped to traverse this tile. */
-  requiredItemId?: string;
 }
 
 export const TILE_CONFIGS: Record<TileType, TileConfig> = {
@@ -63,13 +61,11 @@ export const TILE_CONFIGS: Record<TileType, TileConfig> = {
     type: TileType.Desert,
     color: 0xc2b280,
     traversable: true,
-    requiredItemId: 'waterskin',
   },
   [TileType.LavaField]: {
     type: TileType.LavaField,
     color: 0xd44000,
     traversable: true,
-    requiredItemId: 'magma_boots',
   },
   [TileType.Beach]: {
     type: TileType.Beach,
@@ -96,14 +92,17 @@ export class HexTile {
   readonly zone: string;
   /** Stable GUID from WorldTileDefinition — used as unlock key. */
   readonly id: string;
+  /** Per-tile override for required item. Takes precedence over TileConfig default. */
+  private readonly _requiredItemId?: string;
 
-  constructor(coord: CubeCoord, type: TileType, zone: string = 'friendly_forest', id?: string) {
+  constructor(coord: CubeCoord, type: TileType, zone: string = 'friendly_forest', id?: string, requiredItemId?: string) {
     this.coord = coord;
     this.type = type;
     this.config = TILE_CONFIGS[type];
     this.key = cubeToKey(coord);
     this.zone = zone;
     this.id = id ?? this.key; // Fallback to cube key for legacy/test usage
+    this._requiredItemId = requiredItemId;
   }
 
   get isTraversable(): boolean {
@@ -111,7 +110,7 @@ export class HexTile {
   }
 
   get requiredItemId(): string | undefined {
-    return this.config.requiredItemId;
+    return this._requiredItemId;
   }
 
   get color(): number {
