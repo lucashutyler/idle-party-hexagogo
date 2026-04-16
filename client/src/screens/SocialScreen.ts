@@ -735,7 +735,7 @@ export class SocialScreen implements Screen {
     const popup = document.createElement('div');
     popup.className = 'user-popup-menu';
     popup.innerHTML = `
-      <div class="user-popup-header">${this.classIcon(this.getPlayerClassName(username))} ${this.escapeHtml(username)}${levelHtml}${labelHtml}</div>
+      <div class="user-popup-header"><span class="user-popup-name">${this.classIcon(this.getPlayerClassName(username))} ${this.escapeHtml(username)}</span>${levelHtml}${labelHtml}</div>
       ${items.join('')}
     `;
 

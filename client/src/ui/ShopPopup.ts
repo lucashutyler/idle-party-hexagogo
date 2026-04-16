@@ -98,7 +98,7 @@ export class ShopPopup {
       const def = itemDefs[si.itemId];
       if (!def) {
         const name = si.itemId;
-        return `<div class="item-square shop-item-square" data-item-id="${si.itemId}" data-price="${si.price}" style="background:#e8e8e840;" title="${escapeHtml(name)}">
+        return `<div class="item-square shop-item-square" data-item-id="${si.itemId}" data-price="${si.price}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(name)}">
           <span class="item-square-initials">${name.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
           <span class="shop-item-price">${si.price}g</span>
         </div>`;
@@ -137,7 +137,7 @@ export class ShopPopup {
     return entries.map(([itemId, qty]) => {
       const def = itemDefs[itemId];
       if (!def) {
-        return `<div class="item-square shop-item-square" data-item-id="${itemId}" data-qty="${qty}" style="background:#e8e8e840;" title="${escapeHtml(itemId)}">
+        return `<div class="item-square shop-item-square" data-item-id="${itemId}" data-qty="${qty}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(itemId)}">
           <span class="item-square-initials">${itemId.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
           <span class="shop-item-price">1g</span>
         </div>`;
