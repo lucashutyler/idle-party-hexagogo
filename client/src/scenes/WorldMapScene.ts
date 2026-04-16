@@ -2,7 +2,6 @@ import Phaser from 'phaser';
 import {
   HexGrid,
   HexTile,
-  TileType,
   HEX_SIZE,
   getHexCorners,
   getNeighbors,
@@ -302,7 +301,7 @@ export class WorldMapScene extends Phaser.Scene {
     const corners = getHexCorners(HEX_SIZE);
 
     for (const tile of this.grid.getAllTiles()) {
-      if (tile.type === TileType.Void) continue;
+      if (tile.type === 'void') continue;
 
       const pos = tile.pixelPosition;
       const x = pos.x + this.mapOffsetX;
@@ -359,7 +358,7 @@ export class WorldMapScene extends Phaser.Scene {
     const corners = getHexCorners(HEX_SIZE);
 
     for (const tile of this.grid.getAllTiles()) {
-      if (tile.type === TileType.Void) continue;
+      if (tile.type === 'void') continue;
       if (!tile.isTraversable) continue;
       if (tile.zone === this.currentZone) continue;
 
@@ -396,7 +395,7 @@ export class WorldMapScene extends Phaser.Scene {
     const processed = new Set<string>();
 
     for (const tile of this.grid.getAllTiles()) {
-      if (tile.type === TileType.Void) continue;
+      if (tile.type === 'void') continue;
 
       const neighbors = getNeighbors(tile.coord);
       for (let dir = 0; dir < 6; dir++) {
@@ -435,7 +434,7 @@ export class WorldMapScene extends Phaser.Scene {
   }
 
   private drawTileIcon(
-    type: TileType,
+    type: string,
     isTraversable: boolean,
     isZoneUnlocked: boolean,
     isUnlocked: boolean,
@@ -622,14 +621,7 @@ export class WorldMapScene extends Phaser.Scene {
       this.onTileClickFn({
         col: offset.col,
         row: offset.row,
-        tileType: tile.type === TileType.Town ? 'Town'
-          : tile.type === TileType.Forest ? 'Forest'
-          : tile.type === TileType.Plains ? 'Plains'
-          : tile.type === TileType.Dungeon ? 'Dungeon'
-          : tile.type === TileType.Desert ? 'Desert'
-          : tile.type === TileType.LavaField ? 'Lava Field'
-          : tile.type === TileType.Beach ? 'Beach'
-          : 'Unknown',
+        tileType: this.worldCache.getTileTypeDef(tile.type)?.name ?? tile.type,
         zoneName,
         roomName,
         zoneId: tile.zone,
@@ -684,11 +676,7 @@ export class WorldMapScene extends Phaser.Scene {
 
     // Non-traversable tiles always show their terrain type name
     if (!tile.isTraversable) {
-      const typeLabel = tile.type === TileType.Mountain ? 'Mountain'
-        : tile.type === TileType.Water ? 'Water'
-        : tile.type === TileType.Hedge ? 'Hedge'
-        : tile.type === TileType.Volcano ? 'Volcano'
-        : tile.type.charAt(0).toUpperCase() + tile.type.slice(1);
+      const typeLabel = this.worldCache.getTileTypeDef(tile.type)?.name ?? tile.type;
       this.tooltipText.setText(typeLabel);
       this.tooltipText.setPosition(pointer.x + 12, pointer.y - 20);
       this.tooltipText.setVisible(true);
