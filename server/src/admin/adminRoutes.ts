@@ -7,7 +7,7 @@ import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
 
@@ -890,6 +890,36 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (!result.success) {
         res.status(400).json({ error: result.error });
         return;
+      }
+      res.json({ success: true, tileTypes: content.getAllTileTypes() });
+    }
+  });
+
+  /** Restore seed tile types (adds any missing defaults). */
+  router.post('/tile-types/seed', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.tileTypes) snapshot.tileTypes = [];
+      const existingIds = new Set(snapshot.tileTypes.map(t => t.id));
+      for (const seed of SEED_TILE_TYPES) {
+        if (!existingIds.has(seed.id)) snapshot.tileTypes.push(seed);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
+      for (const t of snapshot.tileTypes) record[t.id] = t;
+      res.json({ success: true, tileTypes: record });
+    } else {
+      const content = getContentStore();
+      for (const seed of SEED_TILE_TYPES) {
+        if (!content.getTileType(seed.id)) {
+          await content.addOrUpdateTileType(seed);
+        }
       }
       res.json({ success: true, tileTypes: content.getAllTileTypes() });
     }
