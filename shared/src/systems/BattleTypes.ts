@@ -137,7 +137,7 @@ export interface ServerStateMessage {
   otherPlayers: OtherPlayerState[];
   combatLog: CombatLogEntry[];
   battleCount: number;
-  character: ClientCharacterState;
+  character: ClientCharacterState | null;
   zoneName: string;
   social?: ClientSocialState;
   /** Item definitions for items the player currently owns (inventory + equipment). */

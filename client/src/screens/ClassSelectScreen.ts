@@ -93,7 +93,7 @@ export class ClassSelectScreen implements Screen {
 
       // Listen for the state update confirming class change
       const unsub = this.gameClient.subscribe((state) => {
-        if (state.character.className !== 'Adventurer') {
+        if (state.character !== null) {
           unsub();
           // Defer to next microtask so enterGame() runs outside the subscriber
           // loop — errors propagate properly instead of being swallowed

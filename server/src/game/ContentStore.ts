@@ -1,10 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, TILE_CONFIGS } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, TILE_CONFIGS } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -15,6 +15,7 @@ const WORLD_FILE = path.join(DATA_DIR, 'world.json');
 const ENCOUNTERS_FILE = path.join(DATA_DIR, 'encounters.json');
 const SETS_FILE = path.join(DATA_DIR, 'sets.json');
 const SHOPS_FILE = path.join(DATA_DIR, 'shops.json');
+const TILE_TYPES_FILE = path.join(DATA_DIR, 'tile-types.json');
 
 /**
  * Loads and manages game content from JSON files in data/.
@@ -28,6 +29,7 @@ export class ContentStore {
   private encounters = new Map<string, EncounterDefinition>();
   private sets = new Map<string, SetDefinition>();
   private shops = new Map<string, ShopDefinition>();
+  private tileTypes = new Map<string, TileTypeDefinition>();
   private world: WorldData = { startTile: { col: 0, row: 0 }, tiles: [] };
 
   async load(): Promise<void> {
@@ -48,6 +50,7 @@ export class ContentStore {
     await fs.writeFile(ENCOUNTERS_FILE, JSON.stringify(Array.from(this.encounters.values()), null, 2));
     await fs.writeFile(SETS_FILE, JSON.stringify(Array.from(this.sets.values()), null, 2));
     await fs.writeFile(SHOPS_FILE, JSON.stringify(Array.from(this.shops.values()), null, 2));
+    await fs.writeFile(TILE_TYPES_FILE, JSON.stringify(Array.from(this.tileTypes.values()), null, 2));
   }
 
   // --- Accessors ---
@@ -112,6 +115,16 @@ export class ContentStore {
     return result;
   }
 
+  getTileType(id: string): TileTypeDefinition | undefined {
+    return this.tileTypes.get(id);
+  }
+
+  getAllTileTypes(): Record<string, TileTypeDefinition> {
+    const result: Record<string, TileTypeDefinition> = {};
+    for (const [id, def] of this.tileTypes) result[id] = def;
+    return result;
+  }
+
   getWorld(): WorldData {
     return this.world;
   }
@@ -161,8 +174,9 @@ export class ContentStore {
     if (!tile) {
       return { success: false, error: 'Tile not found.' };
     }
-    const config = TILE_CONFIGS[tile.type];
-    if (!config || !config.traversable) {
+    const tileTypeDef = this.tileTypes.get(tile.type);
+    const isTraversable = tileTypeDef ? tileTypeDef.traversable : (TILE_CONFIGS[tile.type]?.traversable ?? false);
+    if (!isTraversable) {
       return { success: false, error: 'Start tile must be traversable.' };
     }
     this.world.startTile = { col, row };
@@ -293,10 +307,31 @@ export class ContentStore {
     return { success: true };
   }
 
+  // --- Tile Type CRUD ---
+
+  async addOrUpdateTileType(def: TileTypeDefinition): Promise<void> {
+    this.tileTypes.set(def.id, def);
+    await this.save();
+  }
+
+  async deleteTileType(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.tileTypes.has(id)) {
+      return { success: false, error: 'Tile type not found.' };
+    }
+    // Check if any world tile uses this type
+    const referencingTile = this.world.tiles.find(t => t.type === id);
+    if (referencingTile) {
+      return { success: false, error: `Cannot delete: tile type is used by room "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` };
+    }
+    this.tileTypes.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
@@ -304,12 +339,13 @@ export class ContentStore {
       encounters: Array.from(this.encounters.values()),
       sets: Array.from(this.sets.values()),
       shops: Array.from(this.shops.values()),
+      tileTypes: Array.from(this.tileTypes.values()),
       world: JSON.parse(JSON.stringify(this.world)),
     };
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -332,6 +368,11 @@ export class ContentStore {
     this.shops.clear();
     if (snapshot.shops) {
       for (const s of snapshot.shops) this.shops.set(s.id, s);
+    }
+
+    this.tileTypes.clear();
+    if (snapshot.tileTypes) {
+      for (const t of snapshot.tileTypes) this.tileTypes.set(t.id, t);
     }
 
     this.world = snapshot.world;
@@ -400,6 +441,17 @@ export class ContentStore {
         // shops.json doesn't exist yet
       }
 
+      let tileTypesSeeded = false;
+      try {
+        const tileTypesRaw = await fs.readFile(TILE_TYPES_FILE, 'utf-8');
+        const tileTypesArr: TileTypeDefinition[] = JSON.parse(tileTypesRaw);
+        for (const t of tileTypesArr) this.tileTypes.set(t.id, t);
+      } catch {
+        // tile-types.json doesn't exist yet — seed from defaults
+        for (const t of SEED_TILE_TYPES) this.tileTypes.set(t.id, t);
+        tileTypesSeeded = true;
+      }
+
       // Migrate: assign GUIDs to any tiles missing an id
       let migrated = 0;
       for (const tile of this.world.tiles) {
@@ -418,7 +470,7 @@ export class ContentStore {
       // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
       const itemsMigrated = this.migrateItems();
 
-      if (migrated > 0 || encountersMigrated || itemsMigrated) {
+      if (migrated > 0 || encountersMigrated || itemsMigrated || tileTypesSeeded) {
         await this.save();
       }
 
@@ -560,6 +612,11 @@ export class ContentStore {
     // Encounters
     for (const e of Object.values(SEED_ENCOUNTERS)) {
       this.encounters.set(e.id, e);
+    }
+
+    // Tile Types
+    for (const t of SEED_TILE_TYPES) {
+      this.tileTypes.set(t.id, t);
     }
 
     // World — Hatchetmill (village), Darkwood (forest), Crystal Caves (dungeon)

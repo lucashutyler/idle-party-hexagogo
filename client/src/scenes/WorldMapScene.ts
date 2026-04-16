@@ -228,7 +228,8 @@ export class WorldMapScene extends Phaser.Scene {
 
     for (const tileDef of this.worldCache.getTiles()) {
       const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
-      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id);
+      const tileTypeDef = this.worldCache.getTileTypeDef(tileDef.type);
+      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id, tileDef.requiredItemId, tileTypeDef);
       grid.addTile(tile);
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }
@@ -447,39 +448,9 @@ export class WorldMapScene extends Phaser.Scene {
       // Zone not unlocked — show cloud icons
       icon = isTraversable ? '☁️' : '🌑';
     } else {
-      // Zone unlocked — show real tile type
-      switch (type) {
-        case TileType.Town:
-          icon = '🏠';
-          break;
-        case TileType.Dungeon:
-          icon = '🕳️';
-          break;
-        case TileType.Mountain:
-          icon = '⛰️';
-          break;
-        case TileType.Forest:
-          icon = '🌲';
-          break;
-        case TileType.Water:
-          icon = '🌊';
-          break;
-        case TileType.Desert:
-          icon = '🏜️';
-          break;
-        case TileType.LavaField:
-          icon = '🔥';
-          break;
-        case TileType.Beach:
-          icon = '🏖️';
-          break;
-        case TileType.Hedge:
-          icon = '🌿';
-          break;
-        case TileType.Volcano:
-          icon = '🌋';
-          break;
-      }
+      // Zone unlocked — use data-driven icon from tile type definition
+      const tileTypeDef = this.worldCache.getTileTypeDef(type);
+      icon = tileTypeDef?.icon ?? '';
     }
 
     if (icon) {

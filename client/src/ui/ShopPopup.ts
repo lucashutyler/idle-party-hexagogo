@@ -36,6 +36,7 @@ export class ShopPopup {
   /** Render the main grid view (buy or sell item list). */
   private renderGrid(state: ServerStateMessage, shop: ShopDefinition): void {
     const char = state.character;
+    if (!char) return;
     const itemDefs = state.itemDefinitions ?? {};
     const setDefs = state.setDefinitions ?? {};
 
@@ -162,7 +163,7 @@ export class ShopPopup {
     if (!def) return;
 
     let qty = 1;
-    const maxAffordable = Math.max(1, Math.floor(state.character.gold / price));
+    const maxAffordable = Math.max(1, Math.floor((state.character?.gold ?? 0) / price));
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
@@ -173,7 +174,7 @@ export class ShopPopup {
       <div class="shop-popup shop-detail-view">
         <div class="shop-header">
           <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${state.character.gold} gold</span>
+          <span class="shop-gold">${state.character?.gold ?? 0} gold</span>
         </div>
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
@@ -244,7 +245,7 @@ export class ShopPopup {
       <div class="shop-popup shop-detail-view">
         <div class="shop-header">
           <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${state.character.gold} gold</span>
+          <span class="shop-gold">${state.character?.gold ?? 0} gold</span>
         </div>
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">

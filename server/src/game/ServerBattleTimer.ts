@@ -167,14 +167,28 @@ export class ServerBattleTimer {
     return this.combatState;
   }
 
-  /** Escape the current battle — skip rewards, immediately start next battle. */
+  /** Escape the current battle — skip rewards, move like defeat (only to discovered tiles). */
   escapeBattle(): void {
     if (this.state !== 'battle') return;
     this.clearTimers();
     this.combatState = null;
     this.currentVisual = 'none';
     this.party.exitBattle();
-    this.triggerBattle();
+
+    // Movement follows defeat rules: only move to already-unlocked tiles
+    const canMove = this.party.hasDestination && (this.canMoveToNextTile?.() ?? false);
+
+    if (canMove) {
+      this.setState('result');
+      this.resultTimeout = setTimeout(() => {
+        this.party.moveToNextTile();
+        this.onMove?.();
+        this.onStateChange?.(this.state);
+        this.moveTimeout = setTimeout(() => this.triggerBattle(), MOVE_DURATION);
+      }, RESULT_PAUSE);
+    } else {
+      this.triggerBattle();
+    }
   }
 
   /** Restart the current battle (e.g., after a player changes class). */

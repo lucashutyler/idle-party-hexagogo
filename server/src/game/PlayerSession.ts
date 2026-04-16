@@ -3,7 +3,6 @@ import {
   HexTile,
   UnlockSystem,
   offsetToCube,
-  createDefaultCharacter,
   createCharacter,
   ALL_CLASS_NAMES,
   CLASS_DEFINITIONS,
@@ -69,7 +68,7 @@ export class PlayerSession {
   private combatLog: CombatLogEntry[] = [];
   private logIdCounter = 0;
   private battleCount = 0;
-  private character: CharacterState;
+  private character: CharacterState | null = null;
   private chatHistory: ChatMessage[] = [];
   private friends: string[] = [];
   private outgoingFriendRequests: FriendRequest[] = [];
@@ -117,12 +116,12 @@ export class PlayerSession {
       throw new Error('Invalid starting position');
     }
 
-    this.character = createDefaultCharacter();
     this.unlockSystem = new UnlockSystem(this.grid, startTile);
   }
 
-  /** Get combat info for the party combat system. */
+  /** Get combat info for the party combat system. Requires character to exist. */
   getCombatInfo(): PartyCombatant {
+    if (!this.character) throw new Error('getCombatInfo called on characterless session');
     const maxHp = calculateMaxHp(this.character.level, this.character.className);
     let baseDamage = calculateBaseDamage(this.character.level, this.character.className);
     const equipBonuses = computeEquipmentBonuses(this.character.equipment, this.content.getAllItems(), this.character.level);
@@ -171,6 +170,7 @@ export class PlayerSession {
 
   /** Handle victory rewards (called by PartyBattleManager with pre-split rewards). */
   handleVictory(rewards: { xp: number; gold: number; items: string[] }, tile: HexTile): void {
+    if (!this.character) return;
     this.addLogEntry('Victory!', 'victory');
 
     const unlocked = this.unlockSystem.unlockAdjacentTiles(tile);
@@ -207,9 +207,14 @@ export class PlayerSession {
     return this.unlockSystem.isUnlocked(tile);
   }
 
-  /** Returns true if this player has never completed a battle (truly new player). */
+  /** Returns true if this player has no character (hasn't selected a class yet). */
   isNewPlayer(): boolean {
-    return this.battleCount === 0;
+    return this.character === null;
+  }
+
+  /** Returns true if this player has a character (has selected a class). */
+  hasCharacter(): boolean {
+    return this.character !== null;
   }
 
   incrementBattleCount(): void {
@@ -243,6 +248,7 @@ export class PlayerSession {
 
   /** Build item definitions for items the player currently owns (inventory + equipment). */
   private getOwnedItemDefinitions(): Record<string, ItemDefinition> {
+    if (!this.character) return {};
     const defs: Record<string, ItemDefinition> = {};
 
     // Inventory items
@@ -275,6 +281,7 @@ export class PlayerSession {
 
   /** Build set definitions for sets containing at least one item the player owns. */
   private getOwnedSetDefinitions(): Record<string, SetDefinition> {
+    if (!this.character) return {};
     const ownedItemIds = new Set<string>();
     for (const itemId of Object.keys(this.character.inventory)) ownedItemIds.add(itemId);
     for (const itemId of Object.values(this.character.equipment)) {
@@ -305,21 +312,24 @@ export class PlayerSession {
     const partyState = this.getPartyPositionState?.();
     const partyZone = this.getPartyZone?.();
 
-    const charState: ClientCharacterState = {
-      className: this.character.className,
-      level: this.character.level,
-      xp: this.character.xp,
-      xpForNextLevel: xpForNextLevel(this.character.level),
-      maxHp: calculateMaxHp(this.character.level, this.character.className),
-      gold: this.character.gold,
-      baseDamage: calculateBaseDamage(this.character.level, this.character.className),
-      damageType: CLASS_DEFINITIONS[this.character.className].damageType,
-      skillLoadout: this.character.skillLoadout,
-      skillPoints: this.character.skillPoints,
-      inventory: { ...this.character.inventory },
-      equipment: { ...this.character.equipment },
-      xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
-    };
+    let charState: ClientCharacterState | null = null;
+    if (this.character) {
+      charState = {
+        className: this.character.className,
+        level: this.character.level,
+        xp: this.character.xp,
+        xpForNextLevel: xpForNextLevel(this.character.level),
+        maxHp: calculateMaxHp(this.character.level, this.character.className),
+        gold: this.character.gold,
+        baseDamage: calculateBaseDamage(this.character.level, this.character.className),
+        damageType: CLASS_DEFINITIONS[this.character.className].damageType,
+        skillLoadout: this.character.skillLoadout,
+        skillPoints: this.character.skillPoints,
+        inventory: { ...this.character.inventory },
+        equipment: { ...this.character.equipment },
+        xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
+      };
+    }
 
     const allZones = this.content.getAllZones();
     const zone = partyZone ? getZone(partyZone, allZones) : null;
@@ -395,11 +405,13 @@ export class PlayerSession {
 
   /** Returns the count of an item in the unequipped inventory (0 if not present). */
   getInventoryCount(itemId: string): number {
+    if (!this.character) return 0;
     return this.character.inventory[itemId] ?? 0;
   }
 
   /** Remove one item from the unequipped inventory. Returns false if item not present. */
   removeOneFromInventory(itemId: string): boolean {
+    if (!this.character) return false;
     const current = this.character.inventory[itemId] ?? 0;
     if (current <= 0) return false;
     if (current === 1) {
@@ -412,11 +424,13 @@ export class PlayerSession {
 
   /** Add one item to the unequipped inventory. Returns false if stack is full (MAX_STACK). */
   addOneToInventory(itemId: string): boolean {
+    if (!this.character) return false;
     return addItemToInventory(this.character.inventory, itemId);
   }
 
   /** Remove `quantity` items from the unequipped inventory. Returns false if insufficient. */
   removeFromInventory(itemId: string, quantity: number): boolean {
+    if (!this.character) return false;
     const current = this.character.inventory[itemId] ?? 0;
     if (current < quantity) return false;
     const newCount = current - quantity;
@@ -430,16 +444,18 @@ export class PlayerSession {
 
   /** Add `quantity` items to the unequipped inventory. Returns false if it would exceed MAX_STACK. */
   addToInventory(itemId: string, quantity: number): boolean {
+    if (!this.character) return false;
     const current = this.character.inventory[itemId] ?? 0;
     if (current + quantity > MAX_STACK) return false;
     this.character.inventory[itemId] = current + quantity;
     return true;
   }
 
-  getGold(): number { return this.character.gold; }
+  getGold(): number { return this.character?.gold ?? 0; }
 
   /** Deduct gold from the character. Returns false if insufficient gold. */
   deductGold(amount: number): boolean {
+    if (!this.character) return false;
     if (this.character.gold < amount) return false;
     this.character.gold -= amount;
     return true;
@@ -447,16 +463,18 @@ export class PlayerSession {
 
   /** Add gold to the character. */
   grantGold(amount: number): void {
+    if (!this.character) return;
     addGold(this.character, amount);
   }
 
-  getLevel(): number { return this.character.level; }
+  getLevel(): number { return this.character?.level ?? 0; }
 
-  getClassName(): ClassName { return this.character.className; }
-  getSkillLoadout(): SkillLoadout { return this.character.skillLoadout; }
+  getClassName(): ClassName | null { return this.character?.className ?? null; }
+  getSkillLoadout(): SkillLoadout | null { return this.character?.skillLoadout ?? null; }
 
   /** Returns publicly visible profile data (no HP, damage, gold, inventory). */
-  getPublicProfile(): { className: string; level: number; equipment: Record<string, string | null>; skillLoadout: SkillLoadout } {
+  getPublicProfile(): { className: string; level: number; equipment: Record<string, string | null>; skillLoadout: SkillLoadout } | null {
+    if (!this.character) return null;
     return {
       className: this.character.className,
       level: this.character.level,
@@ -465,15 +483,22 @@ export class PlayerSession {
     };
   }
 
-  /** Set class for a new character. Only works if className is still Adventurer. */
+  /** Set class for a new character. Only works if no character exists yet. */
   setClass(className: ClassName): boolean {
-    if (this.character.className !== 'Adventurer') return false;
+    if (this.character !== null) return false;
     this.character = createCharacter(className);
     return true;
   }
 
   /** Admin: force-change class, keeping level, XP, gold, and inventory. Unequips all gear. */
   forceSetClass(className: ClassName): void {
+    if (!this.character) {
+      // Admin creating a character for a player who hasn't chosen yet
+      this.character = createCharacter(className);
+      this.autoUnlockSkills();
+      this.addLogEntry(`Class set to ${className}!`, 'battle');
+      return;
+    }
     // Unequip all gear back to inventory (skip offhand if same as mainhand — 2H weapon)
     for (const slot of EQUIP_SLOTS) {
       const itemId = this.character.equipment[slot];
@@ -496,11 +521,13 @@ export class PlayerSession {
 
   /** Auto-unlock all skills the player qualifies for based on level. */
   autoUnlockSkills(): void {
+    if (!this.character) return;
     const available = getUnlockedSkillsForLevel(this.character.className, this.character.level);
     this.character.skillLoadout.unlockedSkills = available;
   }
 
   handleUnlockSkill(skillId: string): boolean {
+    if (!this.character) return false;
     const result = unlockSkill(
       skillId,
       this.character.className,
@@ -523,6 +550,7 @@ export class PlayerSession {
   }
 
   handleEquipSkill(skillId: string, slotIndex: number): boolean {
+    if (!this.character) return false;
     const result = equipSkillInSlot(
       skillId,
       slotIndex,
@@ -536,6 +564,7 @@ export class PlayerSession {
   }
 
   handleUnequipSkill(slotIndex: number): boolean {
+    if (!this.character) return false;
     const newEquipped = unequipSkillFromSlot(slotIndex, this.character.skillLoadout.equippedSkills);
     this.character.skillLoadout.equippedSkills = newEquipped;
     return true;
@@ -562,12 +591,8 @@ export class PlayerSession {
    * clear inventory/equipment, move to start tile, reset unlocks and combat log.
    */
   resetForMasterReset(startTile: HexTile): void {
-    const className = this.character.className;
-    // Keep the chosen class, but if still Adventurer, stay Adventurer
-    if (className === 'Adventurer') {
-      this.character = createDefaultCharacter();
-    } else {
-      this.character = createCharacter(className);
+    if (this.character) {
+      this.character = createCharacter(this.character.className);
     }
 
     this.battleCount = 0;
@@ -609,7 +634,7 @@ export class PlayerSession {
       position: { col: pos.col, row: pos.row },
       target: movementData?.target ?? null,
       movementQueue: movementData?.movementQueue ?? [],
-      character: {
+      character: this.character ? {
         className: this.character.className,
         level: this.character.level,
         xp: this.character.xp,
@@ -618,7 +643,7 @@ export class PlayerSession {
         equipment: { ...this.character.equipment },
         skillLoadout: { ...this.character.skillLoadout },
         skillPoints: this.character.skillPoints,
-      },
+      } : undefined,
       friends: [...this.friends],
       outgoingFriendRequests: [...this.outgoingFriendRequests],
       blockedUsers: { ...this.blockedUsers },
@@ -669,7 +694,7 @@ export class PlayerSession {
     }
     session['unlockSystem'] = UnlockSystem.fromKeys(grid, unlockedKeys);
 
-    // Restore character — reset to fresh Adventurer if class is invalid/legacy
+    // Restore character — null if class is invalid/legacy (forces class selection)
     const savedClassName = data.character?.className;
     const isValidClass = savedClassName && ALL_CLASS_NAMES.includes(savedClassName as ClassName);
 
@@ -704,12 +729,14 @@ export class PlayerSession {
         skillPoints,
       };
     } else {
-      // Invalid or legacy class — reset to Adventurer (will force class selection on login)
-      session['character'] = createDefaultCharacter();
+      // Invalid or legacy class — no character (will force class selection on login)
+      session['character'] = null;
     }
 
-    // Auto-unlock skills for current level
-    session.autoUnlockSkills();
+    // Auto-unlock skills for current level (only if character exists)
+    if (session['character']) {
+      session.autoUnlockSkills();
+    }
 
     // Restore social state
     session['friends'] = data.friends ? [...data.friends] : [];
@@ -732,6 +759,7 @@ export class PlayerSession {
   }
 
   handleEquipItem(itemId: string): boolean {
+    if (!this.character) return false;
     const def = this.content.getItem(itemId);
     if (!def || !def.equipSlot) return false;
 
@@ -741,6 +769,7 @@ export class PlayerSession {
 
   /** Check if the player has a specific item equipped in any slot. */
   hasItemEquipped(itemId: string): boolean {
+    if (!this.character) return false;
     for (const equippedItemId of Object.values(this.character.equipment)) {
       if (equippedItemId === itemId) return true;
     }
@@ -760,6 +789,7 @@ export class PlayerSession {
   }
 
   handleUnequipItem(slot: EquipSlot): { success: boolean; lockedByTile?: boolean } {
+    if (!this.character) return { success: false };
     if (!EQUIP_SLOTS.includes(slot)) return { success: false };
 
     // Check if the equipped item in this slot is locked by tile traversal
@@ -775,6 +805,7 @@ export class PlayerSession {
 
   /** Check why equip failed — returns the blocking item info if inventory full. */
   getEquipBlockInfo(itemId: string): { blockedByItemId: string; blockedBySlot: EquipSlot } | null {
+    if (!this.character) return null;
     const def = this.content.getItem(itemId);
     if (!def || !def.equipSlot) return null;
 
@@ -818,6 +849,7 @@ export class PlayerSession {
   }
 
   handleEquipItemForceDestroy(itemId: string): boolean {
+    if (!this.character) return false;
     const def = this.content.getItem(itemId);
     if (!def || !def.equipSlot) return false;
 
@@ -828,6 +860,7 @@ export class PlayerSession {
   }
 
   handleDestroyItems(itemId: string, count: number): boolean {
+    if (!this.character) return false;
     const result = destroyItems(this.character.inventory, itemId, count);
     return result.success;
   }
