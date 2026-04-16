@@ -20,8 +20,8 @@ export {
 export type { CubeCoord, OffsetCoord, PixelCoord } from './hex/HexUtils.js';
 
 // Hex tile
-export { TileType, TILE_CONFIGS, HexTile } from './hex/HexTile.js';
-export type { TileConfig } from './hex/HexTile.js';
+export { TileType, TILE_CONFIGS, SEED_TILE_TYPES, HexTile } from './hex/HexTile.js';
+export type { TileConfig, TileTypeDefinition } from './hex/HexTile.js';
 
 // Hex grid & pathfinding
 export { HexGrid } from './hex/HexGrid.js';
@@ -46,7 +46,6 @@ export {
   xpForNextLevel,
   calculateMaxHp,
   calculateBaseDamage,
-  createDefaultCharacter,
   createCharacter,
   addXp,
   addGold,

@@ -63,7 +63,7 @@ export class CharacterScreen implements Screen {
       <div class="character-content">
         <div class="character-card">
           <div class="character-card-header">
-            <span class="character-class-name">Adventurer</span>
+            <span class="character-class-name"></span>
             <span class="character-level">Lv 1</span>
           </div>
           <div class="character-xp-section">
@@ -227,6 +227,7 @@ export class CharacterScreen implements Screen {
 
   private renderSkillSlots(state: ServerStateMessage): void {
     const char = state.character;
+    if (!char) return;
 
     // Active slot (index 1) on the left, passive slots (0, 2, 3, 4) on the right
     let html = '<div class="skill-slots-header">Equipped Skills</div>';
@@ -273,6 +274,7 @@ export class CharacterScreen implements Screen {
 
   private renderSkillTree(state: ServerStateMessage): void {
     const char = state.character;
+    if (!char) return;
     const className = char.className as ClassName;
     const tree = SKILL_TREES[className];
 
@@ -353,6 +355,7 @@ export class CharacterScreen implements Screen {
     if (!skill) return;
 
     const char = state.character;
+    if (!char) return;
     const loadout = char.skillLoadout;
     const isUnlocked = loadout.unlockedSkills.includes(skillId);
     const isEquipped = loadout.equippedSkills.includes(skillId);

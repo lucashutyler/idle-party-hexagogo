@@ -65,10 +65,9 @@ export class PartyBattleManager {
         onBattleStart: () => {
           for (const m of members) {
             const s = this.getSession(m);
-            if (s) {
-              s.incrementBattleCount();
-              s.addLogEntry('Battle begins!', 'battle');
-            }
+            if (!s) continue;
+            s.incrementBattleCount();
+            s.addLogEntry('Battle begins!', 'battle');
           }
         },
         onStateChange: () => {
@@ -150,10 +149,9 @@ export class PartyBattleManager {
         onBattleStart: () => {
           for (const m of members) {
             const s = this.getSession(m);
-            if (s) {
-              s.incrementBattleCount();
-              s.addLogEntry('Battle begins!', 'battle');
-            }
+            if (!s) continue;
+            s.incrementBattleCount();
+            s.addLogEntry('Battle begins!', 'battle');
           }
         },
         onStateChange: () => {
@@ -542,7 +540,8 @@ export class PartyBattleManager {
               if (itemDef?.classRestriction && itemDef.classRestriction.length > 0) {
                 const matching = members.filter(u => {
                   const s = this.getSession(u);
-                  return s && itemDef.classRestriction!.includes(s.getClassName());
+                  const cn = s?.getClassName();
+                  return cn && itemDef.classRestriction!.includes(cn);
                 });
                 if (matching.length > 0) eligible = matching;
               }

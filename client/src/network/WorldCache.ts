@@ -1,4 +1,4 @@
-import type { WorldTileDefinition } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, TileTypeDefinition } from '@idle-party-rpg/shared';
 
 /**
  * Client-side cache for world data.
@@ -7,6 +7,7 @@ import type { WorldTileDefinition } from '@idle-party-rpg/shared';
  */
 export class WorldCache {
   private tiles = new Map<string, WorldTileDefinition>();
+  private tileTypeDefs = new Map<string, TileTypeDefinition>();
   private startTile: { col: number; row: number } = { col: 0, row: 0 };
 
   /** Tile GUID → offset key ("col,row") for fast unlock lookups. */
@@ -29,6 +30,7 @@ export class WorldCache {
     const data = await res.json() as {
       startTile: { col: number; row: number };
       tiles: WorldTileDefinition[];
+      tileTypes?: Record<string, TileTypeDefinition>;
     };
 
     this.startTile = data.startTile;
@@ -38,6 +40,13 @@ export class WorldCache {
       const offsetKey = `${tile.col},${tile.row}`;
       this.tiles.set(offsetKey, tile);
       this.idToOffsetKey.set(tile.id, offsetKey);
+    }
+
+    this.tileTypeDefs.clear();
+    if (data.tileTypes) {
+      for (const def of Object.values(data.tileTypes)) {
+        this.tileTypeDefs.set(def.id, def);
+      }
     }
   }
 
@@ -90,6 +99,16 @@ export class WorldCache {
   /** Get the start tile position. */
   getStartTile(): { col: number; row: number } {
     return this.startTile;
+  }
+
+  /** Get a tile type definition by ID. */
+  getTileTypeDef(typeId: string): TileTypeDefinition | undefined {
+    return this.tileTypeDefs.get(typeId);
+  }
+
+  /** Get all tile type definitions. */
+  getAllTileTypeDefs(): Map<string, TileTypeDefinition> {
+    return this.tileTypeDefs;
   }
 
   /** Check if world data has been loaded. */

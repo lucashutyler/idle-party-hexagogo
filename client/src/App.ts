@@ -254,8 +254,8 @@ export class App {
       });
     });
 
-    // Check if player needs to select a class (new player or reset Adventurer)
-    if (this.gameClient.lastState?.character.className === 'Adventurer') {
+    // Check if player needs to select a class (no character yet)
+    if (!this.gameClient.lastState?.character) {
       const classScreen = new ClassSelectScreen('screen-class-select', this.gameClient, () => {
         this.enterGame();
       });

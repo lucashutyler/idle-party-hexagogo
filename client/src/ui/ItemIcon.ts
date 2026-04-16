@@ -111,7 +111,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
     }
   }
 
-  return `<div class="item-square${shinyClass}${extraClass}" title="${escapeHtml(def.name)}" style="background:${bgColor};border-color:${borderColor}"${dataStr}>${inner}</div>`;
+  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${escapeHtml(def.name)}" style="background:${bgColor};border-color:${borderColor}"${dataStr}>${inner}</div>`;
 }
 
 /**
@@ -125,5 +125,5 @@ export function renderEmptySlotIcon(slot: string, options?: { extraClass?: strin
   const slotEmoji = SLOT_ICONS[slot] ?? '';
   const label = SLOT_LABELS[slot] ?? slot;
 
-  return `<div class="item-square item-square-empty${extraClass}" title="${escapeHtml(label)}" style="background:#2a2a3a;border-color:rgba(255,255,255,0.08)"${dataStr}>${renderDogear(slotEmoji)}</div>`;
+  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" style="background:#2a2a3a;border-color:rgba(255,255,255,0.08)"${dataStr}>${renderDogear(slotEmoji)}</div>`;
 }

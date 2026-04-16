@@ -1,5 +1,16 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.15.1',
+    notes: [
+      'Characters no longer start as Adventurer — you pick your class right away',
+      'Players are not visible in the world until they choose a class',
+      'Welcome message now broadcasts when a new player picks their class',
+      'Running from combat now moves the party forward (to discovered rooms only)',
+      'Hovering over items on desktop now shows the item name instantly',
+      'Player popup no longer cuts off the level when the name is long',
+    ],
+  },
+  {
     version: '2026.04.03.2',
     notes: [
       'Item icons now show artwork when available, with rarity-colored frames',

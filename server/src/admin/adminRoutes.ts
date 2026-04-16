@@ -116,6 +116,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       encounters: content.getAllEncounters(),
       sets: content.getAllSets(),
       shops: content.getAllShops(),
+      tileTypes: content.getAllTileTypes(),
       world: content.getWorld(),
     });
   });
@@ -798,6 +799,97 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  // ── Tile Type endpoints ──────────────────────────────────────
+
+  router.get('/tile-types', (_req, res) => {
+    const content = getContentStore();
+    res.json(content.getAllTileTypes());
+  });
+
+  router.put('/tile-types/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const tileTypeId = req.params.id;
+    const { name, icon, color, traversable, requiredItemId } = req.body as {
+      name?: string; icon?: string; color?: string; traversable?: boolean; requiredItemId?: string;
+    };
+
+    if (!name || typeof name !== 'string') {
+      res.status(400).json({ error: 'name is required.' });
+      return;
+    }
+    if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      res.status(400).json({ error: 'color must be a hex string like #ff0000.' });
+      return;
+    }
+    if (typeof traversable !== 'boolean') {
+      res.status(400).json({ error: 'traversable is required (boolean).' });
+      return;
+    }
+
+    const def = {
+      id: tileTypeId,
+      name,
+      icon: icon ?? '',
+      color,
+      traversable,
+      requiredItemId: requiredItemId || undefined,
+    };
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.tileTypes) snapshot.tileTypes = [];
+      const idx = snapshot.tileTypes.findIndex(t => t.id === tileTypeId);
+      if (idx >= 0) snapshot.tileTypes[idx] = def;
+      else snapshot.tileTypes.push(def);
+      await versions.saveSnapshot(versionId, snapshot);
+      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
+      for (const t of snapshot.tileTypes) record[t.id] = t;
+      res.json({ success: true, tileTypes: record });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateTileType(def);
+      res.json({ success: true, tileTypes: content.getAllTileTypes() });
+    }
+  });
+
+  router.delete('/tile-types/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const tileTypeId = req.params.id;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.tileTypes) snapshot.tileTypes = [];
+      // Check referential integrity
+      for (const tile of snapshot.world.tiles) {
+        if (tile.type === tileTypeId) {
+          res.status(400).json({ error: `Cannot delete: tile type is used by room "${tile.name}".` });
+          return;
+        }
+      }
+      snapshot.tileTypes = snapshot.tileTypes.filter(t => t.id !== tileTypeId);
+      await versions.saveSnapshot(versionId, snapshot);
+      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
+      for (const t of snapshot.tileTypes) record[t.id] = t;
+      res.json({ success: true, tileTypes: record });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteTileType(tileTypeId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, tileTypes: content.getAllTileTypes() });
+    }
+  });
+
   // ── Version endpoints ──────────────────────────────────────
 
   /** List all versions. */
@@ -939,6 +1031,10 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     session.forceSetClass(className as ClassName);
+    // Ensure the player has a party (needed if admin assigns class to characterless player)
+    if (!session.getPartyId()) {
+      pm.ensureParty(username);
+    }
     console.log(`[Admin] Changed "${username}" class to ${className}`);
     res.json({ success: true, className, level: session.getLevel() });
   });
