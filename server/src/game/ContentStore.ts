@@ -370,10 +370,11 @@ export class ContentStore {
       for (const s of snapshot.shops) this.shops.set(s.id, s);
     }
 
-    this.tileTypes.clear();
-    if (snapshot.tileTypes) {
+    if (snapshot.tileTypes && snapshot.tileTypes.length > 0) {
+      this.tileTypes.clear();
       for (const t of snapshot.tileTypes) this.tileTypes.set(t.id, t);
     }
+    // Old snapshots predate tile types — keep existing tile types intact
 
     this.world = snapshot.world;
 

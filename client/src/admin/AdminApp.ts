@@ -2764,6 +2764,8 @@ export class AdminApp {
     if (!displayContent) return '<div class="admin-page-empty">No data</div>';
     const tileTypes = Object.values(displayContent.tileTypes ?? {});
     const items = displayContent.items;
+    const readOnly = this.isReadOnly();
+    const versionBar = this.renderVersionBar();
 
     const rows = tileTypes.map(t => {
       const itemName = t.requiredItemId ? (items[t.requiredItemId]?.name ?? t.requiredItemId) : '';
@@ -2774,16 +2776,19 @@ export class AdminApp {
         <td><span class="color-swatch" style="background:${this.escapeHtml(t.color)}"></span> ${this.escapeHtml(t.color)}</td>
         <td>${t.traversable ? 'Yes' : 'No'}</td>
         <td>${this.escapeHtml(itemName)}</td>
-        <td>
+        <td>${readOnly ? '' : `
           <button class="admin-btn admin-btn-sm tile-type-edit-btn" data-id="${this.escapeHtml(t.id)}">Edit</button>
           <button class="admin-btn admin-btn-sm admin-btn-danger tile-type-delete-btn" data-id="${this.escapeHtml(t.id)}">Del</button>
-        </td>
+        `}</td>
       </tr>`;
     }).join('');
 
+    const newBtn = readOnly ? '' : '<button class="admin-btn tile-type-new-btn">+ New Tile Type</button>';
+
     return `<div class="admin-page">
+      ${versionBar}
       <h2>Tile Types (${tileTypes.length})</h2>
-      <button class="admin-btn tile-type-new-btn">+ New Tile Type</button>
+      ${newBtn}
       <table class="admin-table">
         <thead><tr><th>Icon</th><th>ID</th><th>Name</th><th>Color</th><th>Walk</th><th>Req. Item</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
@@ -2806,6 +2811,9 @@ export class AdminApp {
     });
     document.querySelector('.tile-type-new-btn')?.addEventListener('click', () => {
       this.openTileTypeModal(null);
+    });
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
     });
   }
 
