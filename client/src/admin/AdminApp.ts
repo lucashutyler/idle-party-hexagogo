@@ -2784,11 +2784,14 @@ export class AdminApp {
     }).join('');
 
     const newBtn = readOnly ? '' : '<button class="admin-btn tile-type-new-btn">+ New Tile Type</button>';
+    const seedBtn = !readOnly && tileTypes.length === 0
+      ? '<button class="admin-btn tile-type-seed-btn" style="margin-left:8px">Restore Seed Data</button>'
+      : '';
 
     return `<div class="admin-page">
       ${versionBar}
       <h2>Tile Types (${tileTypes.length})</h2>
-      ${newBtn}
+      ${newBtn}${seedBtn}
       <table class="admin-table">
         <thead><tr><th>Icon</th><th>ID</th><th>Name</th><th>Color</th><th>Walk</th><th>Req. Item</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
@@ -2811,6 +2814,9 @@ export class AdminApp {
     });
     document.querySelector('.tile-type-new-btn')?.addEventListener('click', () => {
       this.openTileTypeModal(null);
+    });
+    document.querySelector('.tile-type-seed-btn')?.addEventListener('click', () => {
+      this.seedTileTypes();
     });
     document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
       if (this.activeVersionId) this.selectVersion(this.activeVersionId);
@@ -2897,6 +2903,23 @@ export class AdminApp {
       this.renderTabContent();
     } catch {
       alert('Network error — could not delete tile type');
+    }
+  }
+
+  private async seedTileTypes(): Promise<void> {
+    if (!confirm('Restore default tile types? This will add any missing seed types.')) return;
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/tile-types/seed${qp}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed to seed tile types'); return; }
+      this.updateDisplayTileTypes(data.tileTypes);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not seed tile types');
     }
   }
 
