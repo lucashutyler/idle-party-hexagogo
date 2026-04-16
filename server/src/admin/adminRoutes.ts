@@ -955,7 +955,15 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (snapshot.shops) {
       for (const s of snapshot.shops) shopsRecord[s.id] = s;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, world: snapshot.world });
+    const tileTypesRecord: Record<string, NonNullable<(typeof snapshot.tileTypes)>[0]> = {};
+    if (snapshot.tileTypes && snapshot.tileTypes.length > 0) {
+      for (const t of snapshot.tileTypes) tileTypesRecord[t.id] = t;
+    } else {
+      // Old snapshots predate tile types — seed from live content
+      const liveTileTypes = getContentStore().getAllTileTypes();
+      for (const [id, t] of Object.entries(liveTileTypes)) tileTypesRecord[id] = t;
+    }
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */
