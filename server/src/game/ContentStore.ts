@@ -175,7 +175,7 @@ export class ContentStore {
       return { success: false, error: 'Tile not found.' };
     }
     const tileTypeDef = this.tileTypes.get(tile.type);
-    const isTraversable = tileTypeDef ? tileTypeDef.traversable : (TILE_CONFIGS[tile.type]?.traversable ?? false);
+    const isTraversable = tileTypeDef ? tileTypeDef.traversable : (TILE_CONFIGS[tile.type as TileType]?.traversable ?? false);
     if (!isTraversable) {
       return { success: false, error: 'Start tile must be traversable.' };
     }

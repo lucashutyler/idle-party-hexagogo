@@ -3994,7 +3994,8 @@ html, body {
 
 /* --- Encounter Modal --- */
 
-.admin-encounter-modal-overlay {
+.admin-encounter-modal-overlay,
+.admin-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -4005,6 +4006,54 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.admin-modal {
+  background: var(--bg-darker, #1a1a2e);
+  border: 2px solid var(--border-pixel, #555);
+  width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  font-family: var(--pixel-font, 'Press Start 2P', monospace);
+  font-size: 8px;
+  color: var(--text-primary, #eee);
+  padding: 16px;
+}
+
+.admin-modal h3 {
+  margin: 0 0 12px 0;
+  font-size: 10px;
+  color: var(--accent-gold, #f5c842);
+}
+
+.admin-modal .admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-modal .admin-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-secondary, #aaa);
+}
+
+.admin-modal .admin-form input,
+.admin-modal .admin-form select {
+  font-family: var(--pixel-font, 'Press Start 2P', monospace);
+  font-size: 8px;
+  background: var(--bg-input, #0d1b2a);
+  color: var(--text-primary, #eee);
+  border: 1px solid var(--border-pixel, #555);
+  padding: 6px 8px;
+}
+
+.admin-modal .admin-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
 }
 
 .admin-encounter-modal {

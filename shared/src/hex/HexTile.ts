@@ -112,22 +112,20 @@ export const SEED_TILE_TYPES: TileTypeDefinition[] = [
 
 export class HexTile {
   readonly coord: CubeCoord;
-  readonly type: TileType;
-  readonly config: TileConfig;
+  readonly type: string;
   readonly key: string;
   readonly zone: string;
   /** Stable GUID from WorldTileDefinition — used as unlock key. */
   readonly id: string;
-  /** Per-tile override for required item. Takes precedence over TileConfig default. */
+  /** Per-tile override for required item. Takes precedence over tile type default. */
   private readonly _requiredItemId?: string;
 
-  /** Optional data-driven tile type definition from ContentStore. */
+  /** Data-driven tile type definition from ContentStore. */
   private readonly _tileTypeDef?: TileTypeDefinition;
 
-  constructor(coord: CubeCoord, type: TileType, zone: string = 'friendly_forest', id?: string, requiredItemId?: string, tileTypeDef?: TileTypeDefinition) {
+  constructor(coord: CubeCoord, type: string, zone: string = 'friendly_forest', id?: string, requiredItemId?: string, tileTypeDef?: TileTypeDefinition) {
     this.coord = coord;
     this.type = type;
-    this.config = TILE_CONFIGS[type] ?? TILE_CONFIGS[TileType.Plains];
     this.key = cubeToKey(coord);
     this.zone = zone;
     this.id = id ?? this.key; // Fallback to cube key for legacy/test usage
@@ -137,17 +135,19 @@ export class HexTile {
 
   get isTraversable(): boolean {
     if (this._tileTypeDef) return this._tileTypeDef.traversable;
-    return this.config.traversable;
+    // Fallback for tiles without a definition (legacy/test)
+    const config = TILE_CONFIGS[this.type as TileType];
+    return config?.traversable ?? true;
   }
 
   get requiredItemId(): string | undefined {
-    // Per-tile override takes precedence, then tile type default
     return this._requiredItemId ?? this._tileTypeDef?.requiredItemId;
   }
 
   get color(): number {
     if (this._tileTypeDef) return parseInt(this._tileTypeDef.color.replace('#', ''), 16);
-    return this.config.color;
+    const config = TILE_CONFIGS[this.type as TileType];
+    return config?.color ?? 0x888888;
   }
 
   get pixelPosition(): { x: number; y: number } {

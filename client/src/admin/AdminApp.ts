@@ -10,7 +10,6 @@ import {
   getNeighbor,
   TILE_CONFIGS,
   HEX_SIZE,
-  TileType,
   xpForNextLevel,
   EQUIP_SLOTS,
   DISPLAY_EQUIP_SLOTS,
@@ -3534,7 +3533,7 @@ export class AdminApp {
       this.drawHex(ctx, corners, sx, sy, zoom);
 
       const ttDef = displayContent?.tileTypes?.[tile.type];
-      ctx.fillStyle = ttDef ? ttDef.color : '#' + (TILE_CONFIGS[tile.type]?.color ?? 0x333333).toString(16).padStart(6, '0');
+      ctx.fillStyle = ttDef ? ttDef.color : '#' + (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.color ?? 0x333333).toString(16).padStart(6, '0');
       ctx.fill();
       ctx.strokeStyle = '#2a2a3e';
       ctx.lineWidth = 0.5;
@@ -3605,7 +3604,7 @@ export class AdminApp {
       this.drawHex(ctx, corners, sx, sy, zoom);
 
       const ttDef = displayContent?.tileTypes?.[tile.type];
-      ctx.fillStyle = ttDef ? ttDef.color : '#' + (TILE_CONFIGS[tile.type]?.color ?? 0x333333).toString(16).padStart(6, '0');
+      ctx.fillStyle = ttDef ? ttDef.color : '#' + (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.color ?? 0x333333).toString(16).padStart(6, '0');
       ctx.fill();
       ctx.strokeStyle = '#2a2a3e';
       ctx.lineWidth = 0.5;
@@ -3657,7 +3656,7 @@ export class AdminApp {
       ctx.shadowOffsetY = Math.max(1, 3 * zoom);
       this.drawHex(ctx, corners, sx, sy, zoom, 1.08);
       const selTtDef = displayContent?.tileTypes?.[selectedHexTile.type];
-      ctx.fillStyle = selTtDef ? selTtDef.color : '#' + (TILE_CONFIGS[selectedHexTile.type]?.color ?? 0x333333).toString(16).padStart(6, '0');
+      ctx.fillStyle = selTtDef ? selTtDef.color : '#' + (TILE_CONFIGS[selectedHexTile.type as import('@idle-party-rpg/shared').TileType]?.color ?? 0x333333).toString(16).padStart(6, '0');
       ctx.fill();
       ctx.restore();
 
@@ -3694,7 +3693,7 @@ export class AdminApp {
   private drawNonTraversableMarker(ctx: CanvasRenderingContext2D, tile: HexTile, sx: number, sy: number, zoom: number): void {
     const displayContent = this.getDisplayContent();
     const ntDef = displayContent?.tileTypes?.[tile.type];
-    const isTraversable = ntDef ? ntDef.traversable : (TILE_CONFIGS[tile.type]?.traversable ?? true);
+    const isTraversable = ntDef ? ntDef.traversable : (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.traversable ?? true);
     if (isTraversable) return;
     const size = Math.max(5, 10 * zoom);
     ctx.save();
@@ -3793,7 +3792,7 @@ export class AdminApp {
       id: '',
       col: slot.col,
       row: slot.row,
-      type: this.selectedTile?.type ?? TileType.Plains,
+      type: this.selectedTile?.type ?? 'plains',
       zone: defaultZone,
       name: this.selectedTile?.name ?? 'Default Room Name',
       encounterTable: this.selectedTile?.encounterTable
@@ -3950,7 +3949,7 @@ export class AdminApp {
     const isStart = startTile && startTile.col === tile.col && startTile.row === tile.row;
     const tileTypeDefs = displayContent ? Object.values(displayContent.tileTypes ?? {}) : [];
     const tileTypeDef = displayContent?.tileTypes?.[tile.type];
-    const isTraversable = tileTypeDef ? tileTypeDef.traversable : (TILE_CONFIGS[tile.type]?.traversable ?? false);
+    const isTraversable = tileTypeDef ? tileTypeDef.traversable : (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.traversable ?? false);
     const disabled = readOnly ? ' disabled' : '';
 
     const typeOptions = tileTypeDefs
@@ -4047,7 +4046,7 @@ export class AdminApp {
 
     typeSelect?.addEventListener('change', () => {
       if (this.selectedTile) {
-        this.selectedTile.type = typeSelect.value as TileType;
+        this.selectedTile.type = typeSelect.value;
         this.scheduleSave();
         // Re-render sidebar to update start tile button visibility
         this.renderSidebar();
