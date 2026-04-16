@@ -841,7 +841,10 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.tileTypes) snapshot.tileTypes = [];
+      if (!snapshot.tileTypes || snapshot.tileTypes.length === 0) {
+        // Old snapshot predates tile types — seed from live content
+        snapshot.tileTypes = Object.values(getContentStore().getAllTileTypes());
+      }
       const idx = snapshot.tileTypes.findIndex(t => t.id === tileTypeId);
       if (idx >= 0) snapshot.tileTypes[idx] = def;
       else snapshot.tileTypes.push(def);
@@ -866,7 +869,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.tileTypes) snapshot.tileTypes = [];
+      if (!snapshot.tileTypes || snapshot.tileTypes.length === 0) {
+        snapshot.tileTypes = Object.values(getContentStore().getAllTileTypes());
+      }
       // Check referential integrity
       for (const tile of snapshot.world.tiles) {
         if (tile.type === tileTypeId) {

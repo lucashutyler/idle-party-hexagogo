@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import path from 'path';
 
 export default defineConfig({
-  base: './',
+  base: '/',
   build: {
     outDir: 'dist',
     rollupOptions: {
@@ -12,6 +12,18 @@ export default defineConfig({
       },
     },
   },
+  // Rewrite /admin routes to admin.html in dev (SPA fallback for multi-page app)
+  plugins: [{
+    name: 'admin-spa-fallback',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        if (req.url && req.url.startsWith('/admin') && !req.url.includes('.')) {
+          req.url = '/admin.html';
+        }
+        next();
+      });
+    },
+  }],
   server: {
     port: 3000,
     open: true,
