@@ -502,4 +502,54 @@ describe('PartySystem', () => {
       expect(transferResult).toBe('Only the owner can transfer ownership');
     });
   });
+
+  // ── Invite cancellation on move ─────────────────────────────
+
+  describe('cancelInvitesInvolving', () => {
+    it('cancels invites where the target has moved', () => {
+      system.createParty('alice', state.getPartyId, state.setPartyId);
+      state.setPosition('alice', 0, 0);
+      state.setPosition('bob', 0, 0);
+
+      system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+      expect(system.getPendingInvites('bob')).toHaveLength(1);
+
+      const affected = system.cancelInvitesInvolving(new Set(['bob']));
+      expect(affected.has('alice')).toBe(true);
+      expect(affected.has('bob')).toBe(true);
+      expect(system.getPendingInvites('bob')).toHaveLength(0);
+      expect(system.getOutgoingInvites('alice')).toHaveLength(0);
+    });
+
+    it('cancels invites where the inviter has moved', () => {
+      system.createParty('alice', state.getPartyId, state.setPartyId);
+      state.setPosition('alice', 0, 0);
+      state.setPosition('bob', 0, 0);
+
+      system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+      expect(system.getPendingInvites('bob')).toHaveLength(1);
+
+      const affected = system.cancelInvitesInvolving(new Set(['alice']));
+      expect(affected.has('alice')).toBe(true);
+      expect(affected.has('bob')).toBe(true);
+      expect(system.getPendingInvites('bob')).toHaveLength(0);
+      expect(system.getOutgoingInvites('alice')).toHaveLength(0);
+    });
+
+    it('leaves unrelated invites alone', () => {
+      system.createParty('alice', state.getPartyId, state.setPartyId);
+      system.createParty('dave', state.getPartyId, state.setPartyId);
+      state.setPosition('alice', 0, 0);
+      state.setPosition('bob', 0, 0);
+      state.setPosition('dave', 5, 5);
+      state.setPosition('eve', 5, 5);
+
+      system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+      system.inviteToParty('dave', 'eve', state.getPartyId, state.areSameTile);
+
+      system.cancelInvitesInvolving(new Set(['alice']));
+      expect(system.getPendingInvites('bob')).toHaveLength(0);
+      expect(system.getPendingInvites('eve')).toHaveLength(1);
+    });
+  });
 });

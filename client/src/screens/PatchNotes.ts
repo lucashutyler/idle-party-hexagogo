@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.19.1',
+    notes: [
+      'Fixed party leave/kick sometimes teleporting the leaver to the starting room',
+      'Party invites now auto-expire when either player leaves the room',
+      'Party chat now announces joins, kicks, promotions, demotions, and ownership changes',
+    ],
+  },
+  {
     version: '2026.04.03.2',
     notes: [
       'Item icons now show artwork when available, with rarity-colored frames',

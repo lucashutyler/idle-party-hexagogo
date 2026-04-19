@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { HexGrid, offsetToCube, cubeDistance, cubeToKey, CLASS_ICONS } from '@idle-party-rpg/shared';
 import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
@@ -46,7 +47,10 @@ export class PlayerManager {
       content,
       (username) => this.sessions.get(username),
       (username) => this.sendStateToPlayer(username),
-      (members) => this.cancelTradesOnMove(members),
+      (members) => {
+        this.cancelTradesOnMove(members);
+        this.cancelInvitesOnMove(members);
+      },
     );
   }
 
@@ -451,11 +455,13 @@ export class PlayerManager {
 
   /** Handle a player leaving/being kicked from a party. Creates new solo party at current position. */
   handlePartyLeave(username: string, oldPartyId: string): void {
+    // Capture the position BEFORE removeMember — if this was the last member, the
+    // entry will be destroyed and we'd lose the position (teleporting the player to start).
+    const pos = this.partyBattles.getPosition(oldPartyId);
+
     // Remove from party battle
     this.partyBattles.removeMember(oldPartyId, username);
 
-    // Get the position they were at (from the party they just left, if it still exists)
-    const pos = this.partyBattles.getPosition(oldPartyId);
     let tile: import('@idle-party-rpg/shared').HexTile | null = null;
     if (pos) {
       const coord = offsetToCube(pos);
@@ -813,6 +819,14 @@ export class PlayerManager {
     }
   }
 
+  /** Cancel any pending party invites involving party members that just moved. */
+  private cancelInvitesOnMove(members: ReadonlySet<string>): void {
+    const affected = this.parties.cancelInvitesInvolving(members);
+    for (const username of affected) {
+      this.sendStateToPlayer(username);
+    }
+  }
+
   /** Check if either player has the other blocked (in either direction). */
   isTradeBlocked(a: string, b: string): boolean {
     const sessionA = this.sessions.get(a);
@@ -844,6 +858,48 @@ export class PlayerManager {
   addShutdownLog(): void {
     for (const session of this.sessions.values()) {
       session.addLogEntry('Server shutting down — saving state...', 'battle');
+    }
+  }
+
+  /**
+   * Broadcast a party event to all current members of `partyId`, with a personalized
+   * message for the subject of the event ("You were ..." vs "<name> was ...").
+   * If the subject is no longer in the party (e.g. just kicked), they get a server
+   * channel message instead.
+   */
+  broadcastPartyEvent(
+    partyId: string,
+    subjectUsername: string,
+    selfText: string,
+    othersText: string,
+  ): void {
+    const party = this.parties.getParty(partyId);
+    if (!party) return;
+
+    const timestamp = Date.now();
+    const subjectInParty = party.members.some(m => m.username === subjectUsername);
+
+    for (const member of party.members) {
+      const text = member.username === subjectUsername ? selfText : othersText;
+      this.sendChatToPlayer(member.username, {
+        id: randomUUID(),
+        channelType: 'party',
+        channelId: partyId,
+        senderUsername: 'Server',
+        text,
+        timestamp,
+      });
+    }
+
+    if (!subjectInParty) {
+      this.sendChatToPlayer(subjectUsername, {
+        id: randomUUID(),
+        channelType: 'server',
+        channelId: 'server',
+        senderUsername: 'Server',
+        text: selfText,
+        timestamp,
+      });
     }
   }
 

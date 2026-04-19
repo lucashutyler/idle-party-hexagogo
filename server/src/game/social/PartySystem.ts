@@ -207,6 +207,31 @@ export class PartySystem {
     }
   }
 
+  /**
+   * Cancel all pending invites involving the given players as either inviter or target.
+   * Returns the set of usernames whose invite state changed (so callers can push updates).
+   */
+  cancelInvitesInvolving(usernames: ReadonlySet<string>): Set<string> {
+    const affected = new Set<string>();
+    for (const [targetUsername, invites] of Array.from(this.pendingInvites.entries())) {
+      const toKeep: PartyInvite[] = [];
+      for (const inv of invites) {
+        if (usernames.has(inv.inviterUsername) || usernames.has(inv.targetUsername)) {
+          affected.add(inv.inviterUsername);
+          affected.add(inv.targetUsername);
+        } else {
+          toKeep.push(inv);
+        }
+      }
+      if (toKeep.length === 0) {
+        this.pendingInvites.delete(targetUsername);
+      } else {
+        this.pendingInvites.set(targetUsername, toKeep);
+      }
+    }
+    return affected;
+  }
+
   /** Leave a party. If last member, party is deleted. */
   leaveParty(
     username: string,
