@@ -3,7 +3,6 @@ import {
   xpForNextLevel,
   calculateMaxHp,
   calculateBaseDamage,
-  createDefaultCharacter,
   createCharacter,
   addXp,
   ALL_CLASS_NAMES,
@@ -81,21 +80,6 @@ describe('CharacterStats', () => {
         expect(calculateBaseDamage(1, cn)).toBe(def.baseDamage);
         expect(calculateBaseDamage(10, cn)).toBe(def.baseDamage + 9 * def.damagePerLevel);
       }
-    });
-  });
-
-  describe('createDefaultCharacter', () => {
-    it('creates a Level 1 Adventurer', () => {
-      const char = createDefaultCharacter();
-      expect(char.className).toBe('Adventurer');
-      expect(char.level).toBe(1);
-      expect(char.xp).toBe(0);
-    });
-
-    it('has empty skill loadout and 0 skill points', () => {
-      const char = createDefaultCharacter();
-      expect(char.skillLoadout.unlockedSkills).toHaveLength(0);
-      expect(char.skillPoints).toBe(0);
     });
   });
 
@@ -211,9 +195,13 @@ describe('CharacterStats', () => {
       expect(CLASS_DEFINITIONS.Mage.damageType).toBe('magical');
     });
 
-    it('ALL_CLASS_NAMES excludes Adventurer', () => {
-      expect(ALL_CLASS_NAMES).not.toContain('Adventurer');
+    it('ALL_CLASS_NAMES has 5 playable classes', () => {
       expect(ALL_CLASS_NAMES).toHaveLength(5);
+      expect(ALL_CLASS_NAMES).toContain('Knight');
+      expect(ALL_CLASS_NAMES).toContain('Archer');
+      expect(ALL_CLASS_NAMES).toContain('Priest');
+      expect(ALL_CLASS_NAMES).toContain('Mage');
+      expect(ALL_CLASS_NAMES).toContain('Bard');
     });
 
     it('all classes have positive baseHp and baseDamage', () => {

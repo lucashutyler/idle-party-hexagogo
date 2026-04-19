@@ -7,7 +7,7 @@ import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
 
@@ -116,6 +116,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       encounters: content.getAllEncounters(),
       sets: content.getAllSets(),
       shops: content.getAllShops(),
+      tileTypes: content.getAllTileTypes(),
       world: content.getWorld(),
     });
   });
@@ -123,7 +124,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Add or update a world tile. Supports ?versionId= for draft editing. */
   router.put('/world/tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
-    const { col, row, type, zone, name, encounterTable, shopId } = req.body;
+    const { col, row, type, zone, name, encounterTable, shopId, requiredItemId } = req.body;
     if (col == null || row == null || !type || !zone || !name) {
       res.status(400).json({ error: 'Missing required fields: col, row, type, zone, name' });
       return;
@@ -151,16 +152,16 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const idx = snapshot.world.tiles.findIndex(t => t.col === col && t.row === row);
       if (idx >= 0) {
         // Preserve existing GUID on update
-        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined };
+        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined };
       } else {
         // New tile — generate a GUID
-        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined });
+        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined });
       }
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ id: '', col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined });
+      await content.addOrUpdateTile({ id: '', col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined });
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }
@@ -798,6 +799,132 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  // ── Tile Type endpoints ──────────────────────────────────────
+
+  router.get('/tile-types', (_req, res) => {
+    const content = getContentStore();
+    res.json(content.getAllTileTypes());
+  });
+
+  router.put('/tile-types/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const tileTypeId = req.params.id;
+    const { name, icon, color, traversable, requiredItemId } = req.body as {
+      name?: string; icon?: string; color?: string; traversable?: boolean; requiredItemId?: string;
+    };
+
+    if (!name || typeof name !== 'string') {
+      res.status(400).json({ error: 'name is required.' });
+      return;
+    }
+    if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      res.status(400).json({ error: 'color must be a hex string like #ff0000.' });
+      return;
+    }
+    if (typeof traversable !== 'boolean') {
+      res.status(400).json({ error: 'traversable is required (boolean).' });
+      return;
+    }
+
+    const def = {
+      id: tileTypeId,
+      name,
+      icon: icon ?? '',
+      color,
+      traversable,
+      requiredItemId: requiredItemId || undefined,
+    };
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.tileTypes || snapshot.tileTypes.length === 0) {
+        // Old snapshot predates tile types — seed from live content
+        snapshot.tileTypes = Object.values(getContentStore().getAllTileTypes());
+      }
+      const idx = snapshot.tileTypes.findIndex(t => t.id === tileTypeId);
+      if (idx >= 0) snapshot.tileTypes[idx] = def;
+      else snapshot.tileTypes.push(def);
+      await versions.saveSnapshot(versionId, snapshot);
+      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
+      for (const t of snapshot.tileTypes) record[t.id] = t;
+      res.json({ success: true, tileTypes: record });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateTileType(def);
+      res.json({ success: true, tileTypes: content.getAllTileTypes() });
+    }
+  });
+
+  router.delete('/tile-types/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const tileTypeId = req.params.id;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.tileTypes || snapshot.tileTypes.length === 0) {
+        snapshot.tileTypes = Object.values(getContentStore().getAllTileTypes());
+      }
+      // Check referential integrity
+      for (const tile of snapshot.world.tiles) {
+        if (tile.type === tileTypeId) {
+          res.status(400).json({ error: `Cannot delete: tile type is used by room "${tile.name}".` });
+          return;
+        }
+      }
+      snapshot.tileTypes = snapshot.tileTypes.filter(t => t.id !== tileTypeId);
+      await versions.saveSnapshot(versionId, snapshot);
+      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
+      for (const t of snapshot.tileTypes) record[t.id] = t;
+      res.json({ success: true, tileTypes: record });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteTileType(tileTypeId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, tileTypes: content.getAllTileTypes() });
+    }
+  });
+
+  /** Restore seed tile types (adds any missing defaults). */
+  router.post('/tile-types/seed', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.tileTypes) snapshot.tileTypes = [];
+      const existingIds = new Set(snapshot.tileTypes.map(t => t.id));
+      for (const seed of SEED_TILE_TYPES) {
+        if (!existingIds.has(seed.id)) snapshot.tileTypes.push(seed);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
+      for (const t of snapshot.tileTypes) record[t.id] = t;
+      res.json({ success: true, tileTypes: record });
+    } else {
+      const content = getContentStore();
+      for (const seed of SEED_TILE_TYPES) {
+        if (!content.getTileType(seed.id)) {
+          await content.addOrUpdateTileType(seed);
+        }
+      }
+      res.json({ success: true, tileTypes: content.getAllTileTypes() });
+    }
+  });
+
   // ── Version endpoints ──────────────────────────────────────
 
   /** List all versions. */
@@ -863,7 +990,15 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (snapshot.shops) {
       for (const s of snapshot.shops) shopsRecord[s.id] = s;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, world: snapshot.world });
+    const tileTypesRecord: Record<string, NonNullable<(typeof snapshot.tileTypes)>[0]> = {};
+    if (snapshot.tileTypes && snapshot.tileTypes.length > 0) {
+      for (const t of snapshot.tileTypes) tileTypesRecord[t.id] = t;
+    } else {
+      // Old snapshots predate tile types — seed from live content
+      const liveTileTypes = getContentStore().getAllTileTypes();
+      for (const [id, t] of Object.entries(liveTileTypes)) tileTypesRecord[id] = t;
+    }
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */
@@ -939,6 +1074,10 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     session.forceSetClass(className as ClassName);
+    // Ensure the player has a party (needed if admin assigns class to characterless player)
+    if (!session.getPartyId()) {
+      pm.ensureParty(username);
+    }
     console.log(`[Admin] Changed "${username}" class to ${className}`);
     res.json({ success: true, className, level: session.getLevel() });
   });

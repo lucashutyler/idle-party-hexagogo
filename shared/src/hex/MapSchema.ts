@@ -14,7 +14,7 @@ export interface MapSchema {
 export interface TileDefinition {
   col: number;
   row: number;
-  type: TileType;
+  type: string;
 }
 
 /**
@@ -26,7 +26,7 @@ export interface WorldTileDefinition {
   id: string;
   col: number;
   row: number;
-  type: TileType;
+  type: string;
   zone: string;
   name: string;
   /** Zone display name — populated by server when sending to clients, not stored in world.json. */
@@ -35,6 +35,8 @@ export interface WorldTileDefinition {
   encounterTable?: EncounterTableEntry[];
   /** Optional shop assigned to this room. */
   shopId?: string;
+  /** Item ID required to traverse. Overrides the tile type default if set. */
+  requiredItemId?: string;
 }
 
 /**

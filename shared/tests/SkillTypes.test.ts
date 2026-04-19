@@ -180,11 +180,6 @@ describe('SkillTypes', () => {
       expect(loadout.equippedSkills).toEqual(['knight_guard', null, null, null, null]);
     });
 
-    it('returns empty for Adventurer (no skill tree)', () => {
-      const loadout = createDefaultSkillLoadout('Adventurer');
-      expect(loadout.unlockedSkills).toHaveLength(0);
-      expect(loadout.equippedSkills).toEqual([null, null, null, null, null]);
-    });
   });
 
   describe('getSkillById', () => {

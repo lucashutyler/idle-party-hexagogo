@@ -19,7 +19,15 @@ export interface TileConfig {
   type: TileType;
   color: number;
   traversable: boolean;
-  /** Item ID that ALL party members must have equipped to traverse this tile. */
+}
+
+/** Data-driven tile type definition — stored in ContentStore, editable via admin. */
+export interface TileTypeDefinition {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  traversable: boolean;
   requiredItemId?: string;
 }
 
@@ -63,13 +71,11 @@ export const TILE_CONFIGS: Record<TileType, TileConfig> = {
     type: TileType.Desert,
     color: 0xc2b280,
     traversable: true,
-    requiredItemId: 'waterskin',
   },
   [TileType.LavaField]: {
     type: TileType.LavaField,
     color: 0xd44000,
     traversable: true,
-    requiredItemId: 'magma_boots',
   },
   [TileType.Beach]: {
     type: TileType.Beach,
@@ -88,34 +94,60 @@ export const TILE_CONFIGS: Record<TileType, TileConfig> = {
   },
 };
 
+/** Seed data for tile type definitions. Used to populate data/tile-types.json on first run. */
+export const SEED_TILE_TYPES: TileTypeDefinition[] = [
+  { id: 'plains', name: 'Plains', icon: '', color: '#7ec850', traversable: true },
+  { id: 'forest', name: 'Forest', icon: '\uD83C\uDF32', color: '#3d8c40', traversable: true },
+  { id: 'mountain', name: 'Mountain', icon: '\u26F0\uFE0F', color: '#8b7355', traversable: false },
+  { id: 'water', name: 'Water', icon: '\uD83C\uDF0A', color: '#4a90d9', traversable: false },
+  { id: 'town', name: 'Town', icon: '\uD83C\uDFE0', color: '#d4a574', traversable: true },
+  { id: 'dungeon', name: 'Dungeon', icon: '\uD83D\uDD73\uFE0F', color: '#6b4c6b', traversable: true },
+  { id: 'void', name: 'Void', icon: '', color: '#000000', traversable: false },
+  { id: 'desert', name: 'Desert', icon: '\uD83C\uDFDC\uFE0F', color: '#c2b280', traversable: true },
+  { id: 'lava_field', name: 'Lava Field', icon: '\uD83D\uDD25', color: '#d44000', traversable: true },
+  { id: 'beach', name: 'Beach', icon: '\uD83C\uDFD6\uFE0F', color: '#f5deb3', traversable: true },
+  { id: 'hedge', name: 'Hedge', icon: '\uD83C\uDF3F', color: '#2d5a27', traversable: false },
+  { id: 'volcano', name: 'Volcano', icon: '\uD83C\uDF0B', color: '#4a1a1a', traversable: false },
+];
+
 export class HexTile {
   readonly coord: CubeCoord;
-  readonly type: TileType;
-  readonly config: TileConfig;
+  readonly type: string;
   readonly key: string;
   readonly zone: string;
   /** Stable GUID from WorldTileDefinition — used as unlock key. */
   readonly id: string;
+  /** Per-tile override for required item. Takes precedence over tile type default. */
+  private readonly _requiredItemId?: string;
 
-  constructor(coord: CubeCoord, type: TileType, zone: string = 'friendly_forest', id?: string) {
+  /** Data-driven tile type definition from ContentStore. */
+  private readonly _tileTypeDef?: TileTypeDefinition;
+
+  constructor(coord: CubeCoord, type: string, zone: string = 'friendly_forest', id?: string, requiredItemId?: string, tileTypeDef?: TileTypeDefinition) {
     this.coord = coord;
     this.type = type;
-    this.config = TILE_CONFIGS[type];
     this.key = cubeToKey(coord);
     this.zone = zone;
     this.id = id ?? this.key; // Fallback to cube key for legacy/test usage
+    this._requiredItemId = requiredItemId;
+    this._tileTypeDef = tileTypeDef;
   }
 
   get isTraversable(): boolean {
-    return this.config.traversable;
+    if (this._tileTypeDef) return this._tileTypeDef.traversable;
+    // Fallback for tiles without a definition (legacy/test)
+    const config = TILE_CONFIGS[this.type as TileType];
+    return config?.traversable ?? true;
   }
 
   get requiredItemId(): string | undefined {
-    return this.config.requiredItemId;
+    return this._requiredItemId ?? this._tileTypeDef?.requiredItemId;
   }
 
   get color(): number {
-    return this.config.color;
+    if (this._tileTypeDef) return parseInt(this._tileTypeDef.color.replace('#', ''), 16);
+    const config = TILE_CONFIGS[this.type as TileType];
+    return config?.color ?? 0x888888;
   }
 
   get pixelPosition(): { x: number; y: number } {

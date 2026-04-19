@@ -90,7 +90,9 @@ export class PlayerManager {
       this.sessions.set(username, session);
       this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
       this.wireCallbacks(session);
-      this.ensureParty(username);
+      if (session.hasCharacter()) {
+        this.ensureParty(username);
+      }
       console.log(`[PlayerManager] New session for "${username}" (${this.sessions.size} total sessions)`);
     } else {
       console.log(`[PlayerManager] "${username}" connected (${wsSet.size} connections, ${this.sessions.size} sessions)`);
@@ -256,8 +258,9 @@ export class PlayerManager {
   broadcastWelcome(username: string, className: ClassName): void {
     const icon = CLASS_ICONS[className] ?? '';
     const text = `Welcome our new ${className}, ${username}, to the world! ${icon}`;
-    const recipients = Array.from(this.sessions.keys())
-      .map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
+    const recipients = Array.from(this.sessions.entries())
+      .filter(([, s]) => s.hasCharacter())
+      .map(([u]) => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
     this.chat.sendMessage('Server', 'server', 'server', text, recipients);
   }
 
@@ -355,11 +358,14 @@ export class PlayerManager {
       allPlayers: this.getAllUsernames()
         .filter(u => {
           const acct = this.accountStore.findByUsername(u);
-          return !acct?.deactivated;
+          if (acct?.deactivated) return false;
+          const s = this.sessions.get(u);
+          if (s && !s.hasCharacter()) return false;
+          return true;
         })
         .map(u => ({
           username: u,
-          className: this.sessions.get(u)?.getClassName(),
+          className: this.sessions.get(u)?.getClassName() ?? undefined,
           level: this.sessions.get(u)?.getLevel(),
         })),
       blockedUsers: session?.getBlockedUsers() ?? {},
@@ -490,8 +496,9 @@ export class PlayerManager {
     const others: OtherPlayerState[] = [];
     for (const [username, session] of this.sessions) {
       if (username === excludeUsername) continue;
+      if (!session.hasCharacter()) continue;
       const pos = session.getPosition();
-      others.push({ username, col: pos.col, row: pos.row, zone: session.getZone(), className: session.getClassName() });
+      others.push({ username, col: pos.col, row: pos.row, zone: session.getZone(), className: session.getClassName() ?? undefined });
     }
     return others;
   }
@@ -590,6 +597,10 @@ export class PlayerManager {
     const soloSaves: PlayerSaveData[] = [];
 
     for (const data of validSaves) {
+      // Skip characterless players — they don't exist in the game yet
+      const session = this.sessions.get(data.username);
+      if (session && !session.hasCharacter()) continue;
+
       if (data.partyId && data.partyRole !== undefined) {
         const group = partyGroups.get(data.partyId) ?? [];
         group.push(data);
@@ -794,8 +805,10 @@ export class PlayerManager {
       session.resetForMasterReset(startTile);
       this.wireCallbacks(session);
 
-      // Create a fresh solo party at start tile
-      this.createSoloPartyAtTile(session.username, startTile, null, []);
+      // Create a fresh solo party at start tile (only for players with characters)
+      if (session.hasCharacter()) {
+        this.createSoloPartyAtTile(session.username, startTile, null, []);
+      }
       count++;
     }
 
@@ -907,8 +920,9 @@ export class PlayerManager {
    * Broadcast a server chat message to all existing sessions.
    */
   broadcastServerMessage(text: string): void {
-    const recipients = Array.from(this.sessions.keys())
-      .map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
+    const recipients = Array.from(this.sessions.entries())
+      .filter(([, s]) => s.hasCharacter())
+      .map(([u]) => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
     this.chat.sendMessage('Server', 'server', 'server', text, recipients);
   }
 }

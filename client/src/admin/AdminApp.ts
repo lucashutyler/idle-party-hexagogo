@@ -10,7 +10,6 @@ import {
   getNeighbor,
   TILE_CONFIGS,
   HEX_SIZE,
-  TileType,
   xpForNextLevel,
   EQUIP_SLOTS,
   DISPLAY_EQUIP_SLOTS,
@@ -38,6 +37,7 @@ import type {
   SetBonuses,
   ShopDefinition,
   ShopItem,
+  TileTypeDefinition,
 } from '@idle-party-rpg/shared';
 
 // Maps CUBE_DIRECTIONS index → hex corner indices for the shared edge.
@@ -92,6 +92,7 @@ interface ContentData {
   encounters: Record<string, EncounterDefinition>;
   sets: Record<string, SetDefinition>;
   shops: Record<string, ShopDefinition>;
+  tileTypes: Record<string, TileTypeDefinition>;
   world: WorldData;
 }
 
@@ -105,7 +106,7 @@ interface ContentVersion {
   publishedAt: string | null;
 }
 
-type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'sets' | 'shops' | 'zones' | 'encounters' | 'map' | 'versions' | 'xp-table';
+type TabId = 'overview' | 'accounts' | 'monsters' | 'items' | 'sets' | 'shops' | 'zones' | 'encounters' | 'tile-types' | 'map' | 'versions' | 'xp-table';
 
 interface TabDef {
   id: TabId;
@@ -122,25 +123,12 @@ const TABS: TabDef[] = [
   { id: 'shops', label: 'Shops', icon: '$' },
   { id: 'zones', label: 'Zones', icon: '#' },
   { id: 'encounters', label: 'Encounters', icon: 'E' },
+  { id: 'tile-types', label: 'Tile Types', icon: 'T' },
   { id: 'map', label: 'Map', icon: '*' },
   { id: 'versions', label: 'Versions', icon: 'V' },
   { id: 'xp-table', label: 'XP Table', icon: 'X' },
 ];
 
-/** Tile types available in the editor dropdown (excludes Void). */
-const EDITABLE_TILE_TYPES = [
-  TileType.Plains,
-  TileType.Forest,
-  TileType.Mountain,
-  TileType.Water,
-  TileType.Town,
-  TileType.Dungeon,
-  TileType.Desert,
-  TileType.LavaField,
-  TileType.Beach,
-  TileType.Hedge,
-  TileType.Volcano,
-];
 
 /** Adjacent empty hex position where a new tile can be added. */
 interface AdjacentSlot {
@@ -457,6 +445,10 @@ export class AdminApp {
         content.innerHTML = this.renderEncounters();
         this.wireEncounterEvents();
         break;
+      case 'tile-types':
+        content.innerHTML = this.renderTileTypes();
+        this.wireTileTypeEvents();
+        break;
       case 'map':
         content.innerHTML = this.renderMapSection();
         this.initMapCanvas();
@@ -553,7 +545,7 @@ export class AdminApp {
     let filtered = [...this.accounts];
 
     if (!this.accountFilterShowNoChar) {
-      filtered = filtered.filter(a => a.username && a.className && a.className !== 'Adventurer');
+      filtered = filtered.filter(a => a.username && a.className);
     }
 
     if (!this.accountFilterShowBanned) {
@@ -2765,6 +2757,178 @@ export class AdminApp {
     }
   }
 
+  // --- Tile Types ---
+
+  private renderTileTypes(): string {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return '<div class="admin-page-empty">No data</div>';
+    const tileTypes = Object.values(displayContent.tileTypes ?? {});
+    const items = displayContent.items;
+    const readOnly = this.isReadOnly();
+    const versionBar = this.renderVersionBar();
+
+    const rows = tileTypes.map(t => {
+      const itemName = t.requiredItemId ? (items[t.requiredItemId]?.name ?? t.requiredItemId) : '';
+      return `<tr>
+        <td>${this.escapeHtml(t.icon)}</td>
+        <td>${this.escapeHtml(t.id)}</td>
+        <td>${this.escapeHtml(t.name)}</td>
+        <td><span class="color-swatch" style="background:${this.escapeHtml(t.color)}"></span> ${this.escapeHtml(t.color)}</td>
+        <td>${t.traversable ? 'Yes' : 'No'}</td>
+        <td>${this.escapeHtml(itemName)}</td>
+        <td>${readOnly ? '' : `
+          <button class="admin-btn admin-btn-sm tile-type-edit-btn" data-id="${this.escapeHtml(t.id)}">Edit</button>
+          <button class="admin-btn admin-btn-sm admin-btn-danger tile-type-delete-btn" data-id="${this.escapeHtml(t.id)}">Del</button>
+        `}</td>
+      </tr>`;
+    }).join('');
+
+    const newBtn = readOnly ? '' : '<button class="admin-btn tile-type-new-btn">+ New Tile Type</button>';
+    const seedBtn = !readOnly && tileTypes.length === 0
+      ? '<button class="admin-btn tile-type-seed-btn" style="margin-left:8px">Restore Seed Data</button>'
+      : '';
+
+    return `<div class="admin-page">
+      ${versionBar}
+      <h2>Tile Types (${tileTypes.length})</h2>
+      ${newBtn}${seedBtn}
+      <table class="admin-table">
+        <thead><tr><th>Icon</th><th>ID</th><th>Name</th><th>Color</th><th>Walk</th><th>Req. Item</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  private wireTileTypeEvents(): void {
+    document.querySelectorAll('.tile-type-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.openTileTypeModal(id);
+      });
+    });
+    document.querySelectorAll('.tile-type-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.deleteTileType(id);
+      });
+    });
+    document.querySelector('.tile-type-new-btn')?.addEventListener('click', () => {
+      this.openTileTypeModal(null);
+    });
+    document.querySelector('.tile-type-seed-btn')?.addEventListener('click', () => {
+      this.seedTileTypes();
+    });
+    document.getElementById('version-bar-view-active')?.addEventListener('click', () => {
+      if (this.activeVersionId) this.selectVersion(this.activeVersionId);
+    });
+  }
+
+  private openTileTypeModal(editId: string | null): void {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const existing = editId ? displayContent.tileTypes?.[editId] : null;
+    const items = Object.values(displayContent.items);
+    const itemOptions = items.map(i =>
+      `<option value="${this.escapeHtml(i.id)}"${existing?.requiredItemId === i.id ? ' selected' : ''}>${this.escapeHtml(i.name)}</option>`
+    ).join('');
+
+    const modal = document.createElement('div');
+    modal.className = 'admin-modal-overlay';
+    modal.innerHTML = `<div class="admin-modal" style="max-width:460px">
+      <h3>${existing ? 'Edit' : 'New'} Tile Type</h3>
+      <div class="admin-form">
+        <label>ID<input id="ttf-id" value="${this.escapeHtml(existing?.id ?? '')}" ${existing ? 'readonly' : ''}></label>
+        <label>Name<input id="ttf-name" value="${this.escapeHtml(existing?.name ?? '')}"></label>
+        <label>Icon (emoji)<input id="ttf-icon" value="${this.escapeHtml(existing?.icon ?? '')}"></label>
+        <label>Color<input id="ttf-color" type="color" value="${existing?.color ?? '#888888'}"></label>
+        <label><input id="ttf-traversable" type="checkbox" ${existing?.traversable !== false ? 'checked' : ''}> Traversable</label>
+        <label>Required Item<select id="ttf-required-item"><option value="">(none)</option>${itemOptions}</select></label>
+      </div>
+      <div class="admin-modal-actions">
+        <button class="admin-btn" id="ttf-save">Save</button>
+        <button class="admin-btn admin-btn-secondary" id="ttf-cancel">Cancel</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#ttf-cancel')!.addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+    modal.querySelector('#ttf-save')!.addEventListener('click', async () => {
+      const id = (document.getElementById('ttf-id') as HTMLInputElement).value.trim();
+      const name = (document.getElementById('ttf-name') as HTMLInputElement).value.trim();
+      const icon = (document.getElementById('ttf-icon') as HTMLInputElement).value.trim();
+      const color = (document.getElementById('ttf-color') as HTMLInputElement).value;
+      const traversable = (document.getElementById('ttf-traversable') as HTMLInputElement).checked;
+      const requiredItemId = (document.getElementById('ttf-required-item') as HTMLSelectElement).value || undefined;
+
+      if (!id) { alert('ID is required.'); return; }
+      if (!name) { alert('Name is required.'); return; }
+
+      try {
+        const qp = this.versionQueryParam();
+        const res = await fetch(`/api/admin/tile-types/${encodeURIComponent(id)}${qp}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ name, icon, color, traversable, requiredItemId }),
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Failed to save tile type'); return; }
+        this.updateDisplayTileTypes(data.tileTypes);
+        modal.remove();
+        this.renderTabContent();
+      } catch {
+        alert('Network error — could not save tile type');
+      }
+    });
+  }
+
+  private async deleteTileType(tileTypeId: string): Promise<void> {
+    const displayContent = this.getDisplayContent();
+    if (!displayContent) return;
+    const tt = displayContent.tileTypes?.[tileTypeId];
+    if (!tt) return;
+    if (!confirm(`Delete tile type "${tt.name}"?`)) return;
+
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/tile-types/${encodeURIComponent(tileTypeId)}${qp}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed to delete tile type'); return; }
+      this.updateDisplayTileTypes(data.tileTypes);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not delete tile type');
+    }
+  }
+
+  private async seedTileTypes(): Promise<void> {
+    if (!confirm('Restore default tile types? This will add any missing seed types.')) return;
+    try {
+      const qp = this.versionQueryParam();
+      const res = await fetch(`/api/admin/tile-types/seed${qp}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed to seed tile types'); return; }
+      this.updateDisplayTileTypes(data.tileTypes);
+      this.renderTabContent();
+    } catch {
+      alert('Network error — could not seed tile types');
+    }
+  }
+
+  private updateDisplayTileTypes(tileTypes: Record<string, TileTypeDefinition>): void {
+    if (this.versionContent) {
+      this.versionContent.tileTypes = tileTypes;
+    }
+  }
+
   // --- Versions ---
 
   private renderVersions(): string {
@@ -3324,6 +3488,7 @@ export class AdminApp {
     ctx.fillStyle = '#0d1b2a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const displayContent = this.getDisplayContent();
     const corners = getHexCorners(HEX_SIZE);
     const zoom = this.mapZoom;
     const ox = this.mapOffset.x;
@@ -3398,8 +3563,8 @@ export class AdminApp {
 
       this.drawHex(ctx, corners, sx, sy, zoom);
 
-      const color = TILE_CONFIGS[tile.type]?.color ?? 0x333333;
-      ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+      const ttDef = displayContent?.tileTypes?.[tile.type];
+      ctx.fillStyle = ttDef ? ttDef.color : '#' + (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.color ?? 0x333333).toString(16).padStart(6, '0');
       ctx.fill();
       ctx.strokeStyle = '#2a2a3e';
       ctx.lineWidth = 0.5;
@@ -3469,8 +3634,8 @@ export class AdminApp {
 
       this.drawHex(ctx, corners, sx, sy, zoom);
 
-      const color = TILE_CONFIGS[tile.type]?.color ?? 0x333333;
-      ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+      const ttDef = displayContent?.tileTypes?.[tile.type];
+      ctx.fillStyle = ttDef ? ttDef.color : '#' + (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.color ?? 0x333333).toString(16).padStart(6, '0');
       ctx.fill();
       ctx.strokeStyle = '#2a2a3e';
       ctx.lineWidth = 0.5;
@@ -3521,8 +3686,8 @@ export class AdminApp {
       ctx.shadowBlur = Math.max(4, 8 * zoom);
       ctx.shadowOffsetY = Math.max(1, 3 * zoom);
       this.drawHex(ctx, corners, sx, sy, zoom, 1.08);
-      const color = TILE_CONFIGS[selectedHexTile.type]?.color ?? 0x333333;
-      ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+      const selTtDef = displayContent?.tileTypes?.[selectedHexTile.type];
+      ctx.fillStyle = selTtDef ? selTtDef.color : '#' + (TILE_CONFIGS[selectedHexTile.type as import('@idle-party-rpg/shared').TileType]?.color ?? 0x333333).toString(16).padStart(6, '0');
       ctx.fill();
       ctx.restore();
 
@@ -3557,7 +3722,10 @@ export class AdminApp {
 
   /** Draw a red X on non-traversable tiles. */
   private drawNonTraversableMarker(ctx: CanvasRenderingContext2D, tile: HexTile, sx: number, sy: number, zoom: number): void {
-    if (TILE_CONFIGS[tile.type]?.traversable !== false) return;
+    const displayContent = this.getDisplayContent();
+    const ntDef = displayContent?.tileTypes?.[tile.type];
+    const isTraversable = ntDef ? ntDef.traversable : (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.traversable ?? true);
+    if (isTraversable) return;
     const size = Math.max(5, 10 * zoom);
     ctx.save();
     ctx.strokeStyle = 'rgba(255, 60, 60, 0.7)';
@@ -3655,7 +3823,7 @@ export class AdminApp {
       id: '',
       col: slot.col,
       row: slot.row,
-      type: this.selectedTile?.type ?? TileType.Plains,
+      type: this.selectedTile?.type ?? 'plains',
       zone: defaultZone,
       name: this.selectedTile?.name ?? 'Default Room Name',
       encounterTable: this.selectedTile?.encounterTable
@@ -3810,14 +3978,17 @@ export class AdminApp {
     const zones = displayContent ? Object.values(displayContent.zones) : [];
     const startTile = displayContent?.world.startTile;
     const isStart = startTile && startTile.col === tile.col && startTile.row === tile.row;
-    const isTraversable = TILE_CONFIGS[tile.type]?.traversable ?? false;
+    const tileTypeDefs = displayContent ? Object.values(displayContent.tileTypes ?? {}) : [];
+    const tileTypeDef = displayContent?.tileTypes?.[tile.type];
+    const isTraversable = tileTypeDef ? tileTypeDef.traversable : (TILE_CONFIGS[tile.type as import('@idle-party-rpg/shared').TileType]?.traversable ?? false);
     const disabled = readOnly ? ' disabled' : '';
 
-    const typeOptions = EDITABLE_TILE_TYPES.map(t => {
-      const label = t.charAt(0).toUpperCase() + t.slice(1);
-      const prefix = TILE_CONFIGS[t]?.traversable === false ? '(X) ' : '';
-      return `<option value="${t}"${t === tile.type ? ' selected' : ''}>${prefix}${label}</option>`;
-    }).join('');
+    const typeOptions = tileTypeDefs
+      .filter(t => t.id !== 'void')
+      .map(t => {
+        const prefix = !t.traversable ? '(X) ' : '';
+        return `<option value="${t.id}"${t.id === tile.type ? ' selected' : ''}>${prefix}${this.escapeHtml(t.name)}</option>`;
+      }).join('');
 
     const zoneOptions = zones.map(z =>
       `<option value="${z.id}"${z.id === tile.zone ? ' selected' : ''}>${z.displayName}</option>`
@@ -3864,6 +4035,15 @@ export class AdminApp {
           <select id="sidebar-shop"${disabled}>${shopOptions}</select>
         </div>
         <div class="admin-map-sidebar-field">
+          <label>Required Item (override)</label>
+          <select id="sidebar-required-item"${disabled}>
+            <option value="">(use type default)</option>
+            ${Object.values(displayContent?.items ?? {}).map(i =>
+              `<option value="${this.escapeHtml(i.id)}"${i.id === (tile.requiredItemId ?? '') ? ' selected' : ''}>${this.escapeHtml(i.name)}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="admin-map-sidebar-field">
           <label>Coordinates</label>
           <div class="admin-map-sidebar-coords">(${tile.col}, ${tile.row})</div>
         </div>
@@ -3897,7 +4077,7 @@ export class AdminApp {
 
     typeSelect?.addEventListener('change', () => {
       if (this.selectedTile) {
-        this.selectedTile.type = typeSelect.value as TileType;
+        this.selectedTile.type = typeSelect.value;
         this.scheduleSave();
         // Re-render sidebar to update start tile button visibility
         this.renderSidebar();
@@ -3919,6 +4099,19 @@ export class AdminApp {
           this.selectedTile.shopId = val;
         } else {
           delete this.selectedTile.shopId;
+        }
+        this.scheduleSave();
+      }
+    });
+
+    const requiredItemSelect = document.getElementById('sidebar-required-item') as HTMLSelectElement;
+    requiredItemSelect?.addEventListener('change', () => {
+      if (this.selectedTile) {
+        const val = requiredItemSelect.value;
+        if (val) {
+          this.selectedTile.requiredItemId = val;
+        } else {
+          delete this.selectedTile.requiredItemId;
         }
         this.scheduleSave();
       }

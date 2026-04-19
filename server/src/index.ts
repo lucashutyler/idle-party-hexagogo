@@ -118,7 +118,8 @@ app.get('/api/world', requireAuth, (req, res) => {
     res.status(404).json({ error: 'No session' });
     return;
   }
-  res.json(session.getWorldData());
+  const worldData = session.getWorldData();
+  res.json({ ...worldData, tileTypes: gameLoop.contentStore.getAllTileTypes() });
 });
 
 app.use('/api/admin', createAdminRoutes({
@@ -228,6 +229,15 @@ wss.on('connection', (ws) => {
       if (msg.type === 'request_state') {
         playerManager.sendStateToPlayer(username);
         return;
+      }
+
+      // set_class is handled below — it's the only game action that works without a character
+      if (msg.type !== 'set_class') {
+        const charSession = playerManager.getSessionByUsername(username);
+        if (charSession && !charSession.hasCharacter()) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Select a class first' }));
+          return;
+        }
       }
 
       if (msg.type === 'move' && typeof msg.col === 'number' && typeof msg.row === 'number') {
@@ -345,10 +355,13 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid class' }));
           return;
         }
+        const wasNewPlayer = session.isNewPlayer();
         if (!session.setClass(msg.className as ClassName)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot change class' }));
           return;
         }
+        // Create party + start battle (player just came into existence)
+        playerManager.ensureParty(username);
         // Restart the current battle so combat uses the new class data
         const classPartyId = session.getPartyId();
         if (classPartyId) {
@@ -356,7 +369,7 @@ wss.on('connection', (ws) => {
         }
         playerManager.sendStateToPlayer(username);
         // Only broadcast welcome for truly new players (not returning from ban/reset)
-        if (session.isNewPlayer()) {
+        if (wasNewPlayer) {
           playerManager.broadcastWelcome(username, msg.className as ClassName);
         }
         return;
@@ -548,6 +561,10 @@ wss.on('connection', (ws) => {
           return;
         }
         const profile = targetSession.getPublicProfile();
+        if (!profile) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player has no character yet' }));
+          return;
+        }
         const guildId = targetSession.getGuildId();
         const guild = guildId ? playerManager.guilds.getGuild(guildId) : null;
         const partyId = targetSession.getPartyId();
@@ -565,7 +582,7 @@ wss.on('connection', (ws) => {
         // Build party member list
         const partyMembers = (party?.members ?? []).map(m => {
           const s = playerManager.getSessionByUsername(m.username);
-          return { username: m.username, className: s?.getClassName(), level: s?.getLevel() };
+          return { username: m.username, className: s?.getClassName() ?? undefined, level: s?.getLevel() };
         });
 
         // Resolve set definitions for sets containing equipped items

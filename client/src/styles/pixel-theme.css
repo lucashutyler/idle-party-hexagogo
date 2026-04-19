@@ -3431,9 +3431,22 @@ html, body {
   color: var(--accent-gold);
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-pixel);
-  white-space: nowrap;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+}
+.user-popup-name {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.user-popup-level {
+  font-size: 7px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .user-popup-labels {
@@ -3745,12 +3758,6 @@ html, body {
 
 /* ── Player Profile Modal ────────────────────────────── */
 
-.user-popup-level {
-  font-size: 7px;
-  color: var(--text-secondary);
-  margin-left: 4px;
-}
-
 .player-profile-overlay {
   position: fixed;
   inset: 0;
@@ -3987,7 +3994,8 @@ html, body {
 
 /* --- Encounter Modal --- */
 
-.admin-encounter-modal-overlay {
+.admin-encounter-modal-overlay,
+.admin-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -3998,6 +4006,54 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.admin-modal {
+  background: var(--bg-darker, #1a1a2e);
+  border: 2px solid var(--border-pixel, #555);
+  width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  font-family: var(--pixel-font, 'Press Start 2P', monospace);
+  font-size: 8px;
+  color: var(--text-primary, #eee);
+  padding: 16px;
+}
+
+.admin-modal h3 {
+  margin: 0 0 12px 0;
+  font-size: 10px;
+  color: var(--accent-gold, #f5c842);
+}
+
+.admin-modal .admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-modal .admin-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-secondary, #aaa);
+}
+
+.admin-modal .admin-form input,
+.admin-modal .admin-form select {
+  font-family: var(--pixel-font, 'Press Start 2P', monospace);
+  font-size: 8px;
+  background: var(--bg-input, #0d1b2a);
+  color: var(--text-primary, #eee);
+  border: 1px solid var(--border-pixel, #555);
+  padding: 6px 8px;
+}
+
+.admin-modal .admin-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
 }
 
 .admin-encounter-modal {
@@ -4162,6 +4218,26 @@ html, body {
 .item-square:hover {
   transform: scale(1.08);
   border-color: rgba(255,255,255,0.4);
+}
+/* Desktop-only item name tooltip on hover */
+@media (min-width: 768px) and (hover: hover) {
+  .item-square[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 10, 20, 0.95);
+    color: #fff;
+    font-family: var(--pixel-font);
+    font-size: 7px;
+    padding: 3px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border-pixel);
+    white-space: nowrap;
+    z-index: 100;
+    pointer-events: none;
+  }
 }
 .item-square-img {
   width: 80%;

@@ -36,6 +36,7 @@ export class ShopPopup {
   /** Render the main grid view (buy or sell item list). */
   private renderGrid(state: ServerStateMessage, shop: ShopDefinition): void {
     const char = state.character;
+    if (!char) return;
     const itemDefs = state.itemDefinitions ?? {};
     const setDefs = state.setDefinitions ?? {};
 
@@ -97,7 +98,7 @@ export class ShopPopup {
       const def = itemDefs[si.itemId];
       if (!def) {
         const name = si.itemId;
-        return `<div class="item-square shop-item-square" data-item-id="${si.itemId}" data-price="${si.price}" style="background:#e8e8e840;" title="${escapeHtml(name)}">
+        return `<div class="item-square shop-item-square" data-item-id="${si.itemId}" data-price="${si.price}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(name)}">
           <span class="item-square-initials">${name.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
           <span class="shop-item-price">${si.price}g</span>
         </div>`;
@@ -116,8 +117,18 @@ export class ShopPopup {
     itemDefs: Record<string, ItemDefinition>,
     _setDefs: Record<string, SetDefinition>,
   ): string {
-    const equippedIds = new Set(Object.values(equipment).filter(Boolean));
-    const entries = Object.entries(inventory).filter(([id, count]) => count > 0 && !equippedIds.has(id));
+    // Count how many of each item is equipped (an item can occupy multiple slots)
+    const equippedCounts: Record<string, number> = {};
+    for (const itemId of Object.values(equipment)) {
+      if (itemId) equippedCounts[itemId] = (equippedCounts[itemId] ?? 0) + 1;
+    }
+
+    // Show all inventory items, but reduce sellable qty by equipped count
+    const entries: [string, number][] = [];
+    for (const [id, count] of Object.entries(inventory)) {
+      const sellable = count - (equippedCounts[id] ?? 0);
+      if (sellable > 0) entries.push([id, sellable]);
+    }
 
     if (entries.length === 0) {
       return '<div style="color:#888;text-align:center;padding:16px;">No items to sell</div>';
@@ -126,7 +137,7 @@ export class ShopPopup {
     return entries.map(([itemId, qty]) => {
       const def = itemDefs[itemId];
       if (!def) {
-        return `<div class="item-square shop-item-square" data-item-id="${itemId}" data-qty="${qty}" style="background:#e8e8e840;" title="${escapeHtml(itemId)}">
+        return `<div class="item-square shop-item-square" data-item-id="${itemId}" data-qty="${qty}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(itemId)}">
           <span class="item-square-initials">${itemId.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
           <span class="shop-item-price">1g</span>
         </div>`;
@@ -152,7 +163,7 @@ export class ShopPopup {
     if (!def) return;
 
     let qty = 1;
-    const maxAffordable = Math.max(1, Math.floor(state.character.gold / price));
+    const maxAffordable = Math.max(1, Math.floor((state.character?.gold ?? 0) / price));
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
@@ -163,7 +174,7 @@ export class ShopPopup {
       <div class="shop-popup shop-detail-view">
         <div class="shop-header">
           <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${state.character.gold} gold</span>
+          <span class="shop-gold">${state.character?.gold ?? 0} gold</span>
         </div>
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
@@ -234,7 +245,7 @@ export class ShopPopup {
       <div class="shop-popup shop-detail-view">
         <div class="shop-header">
           <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${state.character.gold} gold</span>
+          <span class="shop-gold">${state.character?.gold ?? 0} gold</span>
         </div>
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">

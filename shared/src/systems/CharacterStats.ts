@@ -3,7 +3,7 @@ import { createDefaultSkillLoadout } from './SkillTypes.js';
 
 // --- Types ---
 
-export type ClassName = 'Adventurer' | 'Knight' | 'Archer' | 'Priest' | 'Mage' | 'Bard';
+export type ClassName = 'Knight' | 'Archer' | 'Priest' | 'Mage' | 'Bard';
 
 export type DamageType = 'physical' | 'magical' | 'holy';
 
@@ -41,15 +41,6 @@ export const UNKNOWN_CLASS_ICON = '\u2753'; // ❓
 export const SERVER_ICON = '\uD83D\uDDA5\uFE0F'; // 🖥️
 
 export const CLASS_DEFINITIONS: Record<ClassName, ClassDefinition> = {
-  Adventurer: {
-    displayName: 'Adventurer',
-    description: 'Legacy class. Pick a real class!',
-    baseHp: 30,
-    hpPerLevel: 5,
-    baseDamage: 5,
-    damagePerLevel: 1,
-    damageType: 'physical',
-  },
   Knight: {
     displayName: 'Knight',
     description: 'Massive HP pool, low damage. Guard reduces physical damage taken.',
@@ -97,7 +88,7 @@ export const CLASS_DEFINITIONS: Record<ClassName, ClassDefinition> = {
   },
 };
 
-/** Playable class names (excludes legacy Adventurer). */
+/** All playable class names. */
 export const ALL_CLASS_NAMES: ClassName[] = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'];
 
 export const MAX_GOLD = 999_999_999;
@@ -119,20 +110,6 @@ export function calculateBaseDamage(level: number, className: ClassName): number
 /** XP required to advance from `level` to `level + 1`. */
 export function xpForNextLevel(level: number): number {
   return Math.floor(18000 * Math.pow(level, 1.2) * Math.pow(1.06, level));
-}
-
-/** Create a fresh Level 1 Adventurer (legacy, for backward compat). */
-export function createDefaultCharacter(): CharacterState {
-  return {
-    className: 'Adventurer',
-    level: 1,
-    xp: 0,
-    gold: 0,
-    inventory: {},
-    equipment: { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
-    skillLoadout: { unlockedSkills: [], equippedSkills: [null, null, null] },
-    skillPoints: 0,
-  };
 }
 
 /** Create a fresh Level 1 character of the given class. */
