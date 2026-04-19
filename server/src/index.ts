@@ -922,6 +922,13 @@ wss.on('connection', (ws) => {
         }
         // Wire party battle join
         playerManager.handlePartyJoin(username, msg.partyId, oldPartyId);
+        // Announce the join in party chat
+        playerManager.broadcastPartyEvent(
+          msg.partyId,
+          username,
+          'You joined the party.',
+          `${username} joined the party.`,
+        );
         // Notify all members of the joined party
         for (const m of result.joined.members) {
           playerManager.sendStateToPlayer(m.username);
@@ -942,6 +949,7 @@ wss.on('connection', (ws) => {
         // Get other members before leaving (to notify them)
         const party = partyId ? playerManager.parties.getParty(partyId) : null;
         const otherMembers = party ? party.members.filter(m => m.username !== username) : [];
+        const wasOwner = party?.members.find(m => m.username === username)?.role === 'owner';
 
         const result = playerManager.parties.leaveParty(
           username,
@@ -951,6 +959,19 @@ wss.on('connection', (ws) => {
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
+        }
+        // If the owner left and the party still has members, ownership auto-transferred
+        if (wasOwner && partyId && otherMembers.length > 0) {
+          const partyAfter = playerManager.parties.getParty(partyId);
+          const newOwner = partyAfter?.members.find(m => m.role === 'owner');
+          if (newOwner) {
+            playerManager.broadcastPartyEvent(
+              partyId,
+              newOwner.username,
+              'You became the new party owner.',
+              `${newOwner.username} became the new party owner.`,
+            );
+          }
         }
         // Handle party battle leave (removes from shared combat, creates solo party)
         if (partyId) {
@@ -979,6 +1000,15 @@ wss.on('connection', (ws) => {
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
+        }
+        // Announce the kick in party chat (subject no longer in party → gets a server message)
+        if (partyId) {
+          playerManager.broadcastPartyEvent(
+            partyId,
+            msg.username,
+            'You were kicked from the party.',
+            `${msg.username} was kicked from the party.`,
+          );
         }
         // Handle party battle leave for the kicked player
         if (partyId) {
@@ -1027,6 +1057,12 @@ wss.on('connection', (ws) => {
         const session = playerManager.getSessionByUsername(username);
         const partyId = session?.getPartyId();
         if (partyId) {
+          playerManager.broadcastPartyEvent(
+            partyId,
+            msg.username,
+            'You were promoted to party leader.',
+            `${msg.username} was promoted to party leader.`,
+          );
           const party = playerManager.parties.getParty(partyId);
           if (party) {
             for (const m of party.members) {
@@ -1050,6 +1086,12 @@ wss.on('connection', (ws) => {
         const session = playerManager.getSessionByUsername(username);
         const partyId = session?.getPartyId();
         if (partyId) {
+          playerManager.broadcastPartyEvent(
+            partyId,
+            msg.username,
+            'You were demoted from party leader.',
+            `${msg.username} was demoted from party leader.`,
+          );
           const party = playerManager.parties.getParty(partyId);
           if (party) {
             for (const m of party.members) {
@@ -1073,6 +1115,12 @@ wss.on('connection', (ws) => {
         const session = playerManager.getSessionByUsername(username);
         const partyId = session?.getPartyId();
         if (partyId) {
+          playerManager.broadcastPartyEvent(
+            partyId,
+            msg.username,
+            'You became the new party owner.',
+            `${msg.username} became the new party owner.`,
+          );
           const party = playerManager.parties.getParty(partyId);
           if (party) {
             for (const m of party.members) {
