@@ -26,8 +26,6 @@ export interface DotEffect {
   damageType: DamageType;
   /** If true, this DoT never expires for the rest of combat. */
   permanent?: boolean;
-  /** If true, this DoT bypasses monster resistance (already factored in at application). */
-  bypassResistance?: boolean;
 }
 
 export interface HotEffect {
@@ -611,7 +609,8 @@ function applyDamageToMonster(
     }
   }
 
-  // Apply Ignite DoT on auto-attacks — uses pre-MR damage so it reflects raw mage output.
+  // Apply Ignite DoT on auto-attacks — uses pre-MR damage so the stack value reflects raw mage output.
+  // Resistance is applied at tick time (consistent with all other DoTs), so MR changes mid-fight are honored.
   // Each application is a permanent stack; ticks accumulate over time, making it shine in long fights.
   if (!isAoe) {
     for (const skill of player.equippedSkills) {
@@ -625,7 +624,6 @@ function applyDamageToMonster(
             ticksRemaining: 1,
             damageType: 'magical',
             permanent: true,
-            bypassResistance: true,
           });
         }
       }
@@ -705,7 +703,7 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
   if (entity.dots.length > 0) {
     const name = 'username' in entity ? (entity as PartyCombatant).username : (entity as CombatMonster).name;
     const isMonster = !('username' in entity);
-    const grouped = new Map<string, { totalDamage: number; count: number; damageType: DamageType; bypassResistance: boolean }>();
+    const grouped = new Map<string, { totalDamage: number; count: number; damageType: DamageType }>();
     for (let i = entity.dots.length - 1; i >= 0; i--) {
       const dot = entity.dots[i];
       const group = grouped.get(dot.name);
@@ -713,7 +711,7 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
         group.totalDamage += dot.damagePerTick;
         group.count++;
       } else {
-        grouped.set(dot.name, { totalDamage: dot.damagePerTick, count: 1, damageType: dot.damageType, bypassResistance: !!dot.bypassResistance });
+        grouped.set(dot.name, { totalDamage: dot.damagePerTick, count: 1, damageType: dot.damageType });
       }
       if (!dot.permanent) {
         dot.ticksRemaining--;
@@ -722,12 +720,11 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
         }
       }
     }
-    for (const [dotName, { totalDamage, count, damageType, bypassResistance }] of grouped) {
+    for (const [dotName, { totalDamage, count, damageType }] of grouped) {
       let damage = totalDamage;
       if (isMonster) {
-        if (!bypassResistance) {
-          damage = applyMonsterResistance(damage, damageType, (entity as CombatMonster).resistances);
-        }
+        // Monster receiving DoT — apply monster resistances at tick time so mid-fight changes are honored
+        damage = applyMonsterResistance(damage, damageType, (entity as CombatMonster).resistances);
       } else if (state) {
         // Player receiving DoT — apply equipment DR + Guard (physical) or Bless (magical/holy)
         const player = entity as PartyCombatant;
