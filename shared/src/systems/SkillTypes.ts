@@ -563,11 +563,11 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'mage_ignite',
       name: 'Ignite',
-      description: 'Normal attacks apply a burn: 25% of damage dealt over 3 ticks.',
+      description: 'Normal attacks add a permanent burn stack equal to 25% of pre-resistance damage. Stacks indefinitely for the rest of combat.',
       className: 'Mage',
       type: 'passive',
       treeOrder: 4,
-      passiveEffect: { kind: 'dot_on_auto', dotPercent: 0.25, dotTicks: 3 },
+      passiveEffect: { kind: 'dot_on_auto', dotPercent: 0.25 },
     },
     // --- Active 3 (Lv25) ---
     {
@@ -662,7 +662,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'bard_tempo',
       name: 'Tempo',
-      description: 'Reduce active skill cooldown by 1 (minimum 1).',
+      description: 'Reduce all party members\' active skill cooldowns by 1 (minimum 1).',
       className: 'Bard',
       type: 'passive',
       treeOrder: 2,
@@ -672,11 +672,11 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'bard_drumroll',
       name: 'Drumroll',
-      description: '10% chance per enemy to stun for one round.',
+      description: '25% chance per enemy to stun for one round.',
       className: 'Bard',
       type: 'active',
       treeOrder: 3,
-      activeEffect: { kind: 'stun_aoe', stunChance: 0.10 },
+      activeEffect: { kind: 'stun_aoe', stunChance: 0.25 },
       cooldown: 3,
     },
     // --- Passive 3 (Lv20) ---
@@ -746,7 +746,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'bard_encore',
       name: 'Encore',
-      description: 'Reduce active skill cooldown by another 1 (stacks with Tempo, minimum 1).',
+      description: 'Reduce all party members\' active skill cooldowns by another 1 (stacks with Tempo, minimum 1).',
       className: 'Bard',
       type: 'passive',
       treeOrder: 10,

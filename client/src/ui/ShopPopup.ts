@@ -8,6 +8,11 @@ export class ShopPopup {
   private overlay: HTMLElement;
   private gameClient: GameClient;
   private mode: 'buy' | 'sell' = 'buy';
+  /** View context — what's open inside the shop popup right now. */
+  private view: { kind: 'grid' } | { kind: 'buy'; itemId: string; price: number; qty: number } | { kind: 'sell'; itemId: string; qty: number } = { kind: 'grid' };
+  private notice: string | null = null;
+  private noticeTimer: number | null = null;
+  private unsubscribeState: (() => void) | null = null;
 
   constructor(gameClient: GameClient) {
     this.gameClient = gameClient;
@@ -24,13 +29,68 @@ export class ShopPopup {
     const shop = state.shopDefinition;
     if (!shop) return;
     this.mode = 'buy';
-    this.renderGrid(state, shop);
+    this.view = { kind: 'grid' };
+    this.notice = null;
+    this.renderCurrentView(state);
     this.overlay.style.display = 'flex';
+
+    // Subscribe to state updates so the popup reflects post-action state (sold qty, gold, etc.)
+    this.unsubscribeState?.();
+    this.unsubscribeState = this.gameClient.subscribe(s => {
+      if (this.overlay.style.display === 'none') return;
+      if (!s.shopDefinition) { this.hide(); return; }
+      this.renderCurrentView(s);
+    });
   }
 
   hide(): void {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = '';
+    this.unsubscribeState?.();
+    this.unsubscribeState = null;
+    if (this.noticeTimer !== null) {
+      window.clearTimeout(this.noticeTimer);
+      this.noticeTimer = null;
+    }
+    this.notice = null;
+  }
+
+  private renderCurrentView(state: ServerStateMessage): void {
+    const shop = state.shopDefinition;
+    if (!shop) return;
+    if (this.view.kind === 'grid') {
+      this.renderGrid(state, shop);
+    } else if (this.view.kind === 'buy') {
+      this.renderBuyDetail(this.view.itemId, this.view.price, state.itemDefinitions ?? {}, state.setDefinitions ?? {}, state, shop);
+    } else if (this.view.kind === 'sell') {
+      // Recompute max from current inventory minus equipped
+      const max = this.computeSellable(state, this.view.itemId);
+      if (max <= 0) {
+        this.view = { kind: 'grid' };
+        this.renderGrid(state, shop);
+        return;
+      }
+      this.renderSellDetail(this.view.itemId, max, state.itemDefinitions ?? {}, state.setDefinitions ?? {}, state, shop);
+    }
+  }
+
+  private computeSellable(state: ServerStateMessage, itemId: string): number {
+    const char = state.character;
+    if (!char) return 0;
+    let equipped = 0;
+    for (const id of Object.values(char.equipment)) if (id === itemId) equipped++;
+    return Math.max(0, (char.inventory[itemId] ?? 0) - equipped);
+  }
+
+  private setNotice(message: string): void {
+    this.notice = message;
+    if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer);
+    this.noticeTimer = window.setTimeout(() => {
+      this.notice = null;
+      this.noticeTimer = null;
+      const state = this.gameClient.lastState;
+      if (state && this.overlay.style.display !== 'none') this.renderCurrentView(state);
+    }, 3500);
   }
 
   /** Render the main grid view (buy or sell item list). */
@@ -50,12 +110,15 @@ export class ShopPopup {
       itemsHtml = this.renderSellItems(char.inventory, char.equipment, itemDefs, setDefs);
     }
 
+    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
+
     this.overlay.innerHTML = `
       <div class="shop-popup">
         <div class="shop-header">
           <span class="shop-title">${escapeHtml(shop.name)}</span>
           <span class="shop-gold">${char.gold} gold</span>
         </div>
+        ${noticeHtml}
         <div class="shop-toggle">
           <button class="shop-toggle-btn${buyActive}" data-mode="buy">Buy</button>
           <button class="shop-toggle-btn${sellActive}" data-mode="sell">Sell</button>
@@ -71,6 +134,7 @@ export class ShopPopup {
     for (const btn of this.overlay.querySelectorAll('.shop-toggle-btn')) {
       btn.addEventListener('click', () => {
         this.mode = (btn as HTMLElement).dataset.mode as 'buy' | 'sell';
+        this.view = { kind: 'grid' };
         this.renderGrid(state, shop);
       });
     }
@@ -82,9 +146,11 @@ export class ShopPopup {
         if (!itemId) return;
         if (this.mode === 'buy') {
           const price = parseInt((el as HTMLElement).dataset.price ?? '0', 10);
+          this.view = { kind: 'buy', itemId, price, qty: 1 };
           this.renderBuyDetail(itemId, price, itemDefs, setDefs, state, shop);
         } else {
           const max = parseInt((el as HTMLElement).dataset.qty ?? '1', 10);
+          this.view = { kind: 'sell', itemId, qty: 1 };
           this.renderSellDetail(itemId, max, itemDefs, setDefs, state, shop);
         }
       });
@@ -162,8 +228,11 @@ export class ShopPopup {
     const def = itemDefs[itemId];
     if (!def) return;
 
-    let qty = 1;
     const maxAffordable = Math.max(1, Math.floor((state.character?.gold ?? 0) / price));
+    if (this.view.kind !== 'buy') this.view = { kind: 'buy', itemId, price, qty: 1 };
+    let qty = Math.min(this.view.qty, maxAffordable);
+    this.view.qty = qty;
+    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
@@ -176,15 +245,16 @@ export class ShopPopup {
           <span class="shop-title">${escapeHtml(shop.name)}</span>
           <span class="shop-gold">${state.character?.gold ?? 0} gold</span>
         </div>
+        ${noticeHtml}
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
           <div class="shop-qty-row">
             <button class="shop-qty-btn shop-qty-minus">-</button>
-            <span class="shop-qty-value">1</span>
+            <span class="shop-qty-value">${qty}</span>
             <button class="shop-qty-btn shop-qty-plus">+</button>
             <button class="shop-qty-btn shop-qty-all">Max</button>
           </div>
-          <div class="shop-detail-total">Total: ${price} gold</div>
+          <div class="shop-detail-total">Total: ${qty * price} gold</div>
           <div class="shop-detail-actions">
             <button class="item-popup-btn item-popup-btn-primary shop-action-confirm">Buy</button>
             <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
@@ -194,6 +264,7 @@ export class ShopPopup {
     `;
 
     const updateQty = () => {
+      if (this.view.kind === 'buy') this.view.qty = qty;
       const qtyEl = this.overlay.querySelector('.shop-qty-value');
       const totalEl = this.overlay.querySelector('.shop-detail-total');
       if (qtyEl) qtyEl.textContent = String(qty);
@@ -216,9 +287,13 @@ export class ShopPopup {
       for (let i = 0; i < qty; i++) {
         this.gameClient.sendShopBuy(itemId);
       }
+      const noun = qty === 1 ? def.name : `${qty} ${def.name}`;
+      this.setNotice(`You bought ${noun} for ${qty * price} gold.`);
+      this.view = { kind: 'grid' };
       this.renderGrid(state, shop);
     });
     this.overlay.querySelector('.shop-detail-back')?.addEventListener('click', () => {
+      this.view = { kind: 'grid' };
       this.renderGrid(state, shop);
     });
   }
@@ -234,7 +309,10 @@ export class ShopPopup {
     if (!def) return;
     const value = def.value ?? 1;
 
-    let qty = 1;
+    if (this.view.kind !== 'sell') this.view = { kind: 'sell', itemId, qty: 1 };
+    let qty = Math.min(this.view.qty, max);
+    this.view.qty = qty;
+    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
@@ -247,15 +325,16 @@ export class ShopPopup {
           <span class="shop-title">${escapeHtml(shop.name)}</span>
           <span class="shop-gold">${state.character?.gold ?? 0} gold</span>
         </div>
+        ${noticeHtml}
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
           <div class="shop-qty-row">
             <button class="shop-qty-btn shop-qty-minus">-</button>
-            <span class="shop-qty-value">1</span>
+            <span class="shop-qty-value">${qty}</span>
             <button class="shop-qty-btn shop-qty-plus">+</button>
             <button class="shop-qty-btn shop-qty-all">All</button>
           </div>
-          <div class="shop-detail-total">Total: ${value} gold</div>
+          <div class="shop-detail-total">Available: ${max} · Total: ${qty * value} gold</div>
           <div class="shop-detail-actions">
             <button class="item-popup-btn item-popup-btn-primary shop-action-confirm">Sell</button>
             <button class="item-popup-btn item-popup-btn-secondary shop-detail-back">Back</button>
@@ -265,10 +344,11 @@ export class ShopPopup {
     `;
 
     const updateQty = () => {
+      if (this.view.kind === 'sell') this.view.qty = qty;
       const qtyEl = this.overlay.querySelector('.shop-qty-value');
       const totalEl = this.overlay.querySelector('.shop-detail-total');
       if (qtyEl) qtyEl.textContent = String(qty);
-      if (totalEl) totalEl.textContent = `Total: ${qty * value} gold`;
+      if (totalEl) totalEl.textContent = `Available: ${max} · Total: ${qty * value} gold`;
     };
 
     this.overlay.querySelector('.shop-qty-minus')?.addEventListener('click', () => {
@@ -285,9 +365,14 @@ export class ShopPopup {
     });
     this.overlay.querySelector('.shop-action-confirm')?.addEventListener('click', () => {
       this.gameClient.sendShopSell(itemId, qty);
+      const itemName = def.name;
+      const noun = qty === 1 ? itemName : `${qty} ${itemName}`;
+      this.setNotice(`You sold ${noun} for ${qty * value} gold.`);
+      this.view = { kind: 'grid' };
       this.renderGrid(state, shop);
     });
     this.overlay.querySelector('.shop-detail-back')?.addEventListener('click', () => {
+      this.view = { kind: 'grid' };
       this.renderGrid(state, shop);
     });
   }

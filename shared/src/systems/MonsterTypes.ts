@@ -28,6 +28,8 @@ export interface MonsterDefinition {
   drops?: ItemDrop[];
   resistances?: Resistance[];
   skills?: MonsterSkillEntry[];
+  /** Passive monsters (e.g. walls) never attack and don't count toward victory. */
+  passive?: boolean;
 }
 
 export interface MonsterInstance {
@@ -45,6 +47,8 @@ export interface MonsterInstance {
   skills?: MonsterSkillEntry[];
   /** Cooldown ticks remaining per skill ID. */
   skillCooldowns?: Record<string, number>;
+  /** Passive monsters (e.g. walls) never attack and don't count toward victory. */
+  passive?: boolean;
 }
 
 // --- Seed data (used as defaults when data files don't exist) ---
@@ -104,6 +108,17 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
       { itemId: 'iron_battleaxe', chance: 0.003 },
     ],
   },
+  stone_wall: {
+    id: 'stone_wall',
+    name: 'Stone Wall',
+    hp: 100,
+    damage: 0,
+    damageType: 'physical',
+    xp: 0,
+    goldMin: 0,
+    goldMax: 0,
+    passive: true,
+  },
 };
 
 // --- Functions ---
@@ -131,6 +146,7 @@ export function createMonsterInstance(def: MonsterDefinition, gridPosition: Part
       instance.skillCooldowns[s.skillId] = 0;
     }
   }
+  if (def.passive) instance.passive = true;
   return instance;
 }
 
