@@ -726,12 +726,18 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
         // Monster receiving DoT — apply monster resistances at tick time so mid-fight changes are honored
         damage = applyMonsterResistance(damage, damageType, (entity as CombatMonster).resistances);
       } else if (state) {
-        // Player receiving DoT — apply equipment DR + Guard (physical) or Bless (magical/holy)
+        // Player receiving DoT — mirror the direct-hit reduction rules:
+        //   physical → equip DR + Knight Guard
+        //   magical  → equip MR + Priest Bless
+        //   holy     → Priest Bless only (equipment MR doesn't reduce holy)
         const player = entity as PartyCombatant;
         let reduction = 0;
         if (damageType === 'physical') {
           reduction += computeEquipReduction(player.equipBonuses);
           reduction += getPhysicalReduction(player, state.players);
+        } else if (damageType === 'magical') {
+          reduction += computeEquipMagicReduction(player.equipBonuses);
+          reduction += getMagicalReduction(state.players);
         } else {
           reduction += getMagicalReduction(state.players);
         }
