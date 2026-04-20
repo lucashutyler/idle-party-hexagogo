@@ -57,6 +57,8 @@ export interface PassiveEffect {
   dotPercent?: number;
   /** DoT tick count (for dot_on_auto). */
   dotTicks?: number;
+  /** For cooldown_reduction: if true, the reduction applies to the whole party. Defaults to self-only. */
+  partyWide?: boolean;
 }
 
 export type ActiveEffectKind =
@@ -662,7 +664,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'bard_tempo',
       name: 'Tempo',
-      description: 'Reduce all party members\' active skill cooldowns by 1 (minimum 1).',
+      description: 'Reduce your own active skill cooldown by 1 (minimum 1).',
       className: 'Bard',
       type: 'passive',
       treeOrder: 2,
@@ -746,11 +748,11 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'bard_encore',
       name: 'Encore',
-      description: 'Reduce all party members\' active skill cooldowns by another 1 (stacks with Tempo, minimum 1).',
+      description: 'Reduce all party members\' active skill cooldowns by 1 (stacks with Tempo for the Bard, minimum 1).',
       className: 'Bard',
       type: 'passive',
       treeOrder: 10,
-      passiveEffect: { kind: 'cooldown_reduction', flatValue: 1 },
+      passiveEffect: { kind: 'cooldown_reduction', flatValue: 1, partyWide: true },
     },
   ],
 };

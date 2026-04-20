@@ -393,17 +393,28 @@ function getHealPowerMultiplier(player: PartyCombatant): number {
 }
 
 /** Get the effective cooldown for a player's active skill.
- *  Tempo/Encore (Bard cooldown_reduction passives) apply party-wide from any alive Bard. */
-function getEffectiveCooldown(_player: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
+ *  cooldown_reduction passives without `partyWide` only affect their own caster (Bard Tempo).
+ *  passives with `partyWide: true` apply to every party member (Bard Encore). */
+function getEffectiveCooldown(player: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
   let cdReduction = 0;
+
+  // Self CDR — any cooldown_reduction passive on the caster applies
+  for (const s of player.equippedSkills) {
+    if (s && s.passiveEffect?.kind === 'cooldown_reduction') {
+      cdReduction += s.passiveEffect.flatValue ?? 0;
+    }
+  }
+
+  // Party-wide CDR — only partyWide passives from OTHER alive members
   for (const p of allPlayers) {
-    if (p.currentHp <= 0) continue;
+    if (p === player || p.currentHp <= 0) continue;
     for (const s of p.equippedSkills) {
-      if (s && s.passiveEffect?.kind === 'cooldown_reduction') {
+      if (s && s.passiveEffect?.kind === 'cooldown_reduction' && s.passiveEffect.partyWide) {
         cdReduction += s.passiveEffect.flatValue ?? 0;
       }
     }
   }
+
   return Math.max(1, (skill.cooldown ?? 1) - cdReduction);
 }
 

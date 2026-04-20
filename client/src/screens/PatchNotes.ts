@@ -4,7 +4,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
     notes: [
       'Priests no longer waste a turn casting heal/cure/sanctuary on a no-op — they fall back to a normal attack instead',
       'Bard Drumroll stun chance buffed from 10% → 25% per enemy',
-      'Bard Tempo and Encore now reduce active skill cooldowns for the entire party (not just the Bard)',
+      'Bard Encore now reduces active skill cooldowns for the entire party (Tempo still self-only)',
       'Mage Ignite reworked: each auto-attack adds a permanent burn stack worth 25% of pre-resistance damage. Stacks last the rest of combat — devastating in long fights',
       'Shop sell now updates available quantity immediately and shows "You sold X for Y gold" confirmation',
       'New monster type — passive walls. They never attack and don\'t count toward victory, but they can block your line of attack on the grid',
