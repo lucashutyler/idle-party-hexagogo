@@ -24,6 +24,8 @@ export interface DotEffect {
   damagePerTick: number;
   ticksRemaining: number;
   damageType: DamageType;
+  /** If true, this DoT never expires for the rest of combat. */
+  permanent?: boolean;
 }
 
 export interface HotEffect {
@@ -388,14 +390,29 @@ function getHealPowerMultiplier(player: PartyCombatant): number {
   return 1 + bonus / 100;
 }
 
-/** Get the effective cooldown for a player's active skill (with Tempo/Encore reductions). */
-function getEffectiveCooldown(player: PartyCombatant, skill: SkillDefinition): number {
+/** Get the effective cooldown for a player's active skill.
+ *  cooldown_reduction passives without `partyWide` only affect their own caster (Bard Tempo).
+ *  passives with `partyWide: true` apply to every party member (Bard Encore). */
+function getEffectiveCooldown(player: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
   let cdReduction = 0;
+
+  // Self CDR — any cooldown_reduction passive on the caster applies
   for (const s of player.equippedSkills) {
     if (s && s.passiveEffect?.kind === 'cooldown_reduction') {
       cdReduction += s.passiveEffect.flatValue ?? 0;
     }
   }
+
+  // Party-wide CDR — only partyWide passives from OTHER alive members
+  for (const p of allPlayers) {
+    if (p === player || p.currentHp <= 0) continue;
+    for (const s of p.equippedSkills) {
+      if (s && s.passiveEffect?.kind === 'cooldown_reduction' && s.passiveEffect.partyWide) {
+        cdReduction += s.passiveEffect.flatValue ?? 0;
+      }
+    }
+  }
+
   return Math.max(1, (skill.cooldown ?? 1) - cdReduction);
 }
 
@@ -556,6 +573,10 @@ function applyDamageToMonster(
   isAoe: boolean,
   skillName?: string,
 ): void {
+  // Pre-resistance damage — used for DoT calculations so they reflect the player's
+  // raw output, not the post-MR hit (which would double-dip resistance).
+  const preMrDamage = damage;
+
   // Apply monster resistance to player's damage type
   if (target.resistances.length > 0) {
     damage = applyMonsterResistance(damage, player.playerDamageType, target.resistances);
@@ -588,19 +609,21 @@ function applyDamageToMonster(
     }
   }
 
-  // Apply Ignite DoT on auto-attacks
+  // Apply Ignite DoT on auto-attacks — uses pre-MR damage so the stack value reflects raw mage output.
+  // Resistance is applied at tick time (consistent with all other DoTs), so MR changes mid-fight are honored.
+  // Each application is a permanent stack; ticks accumulate over time, making it shine in long fights.
   if (!isAoe) {
     for (const skill of player.equippedSkills) {
       if (skill && skill.passiveEffect?.kind === 'dot_on_auto') {
-        const dotTotal = Math.floor(damage * (skill.passiveEffect.dotPercent ?? 0));
-        const ticks = skill.passiveEffect.dotTicks ?? 3;
-        if (dotTotal > 0 && target.currentHp > 0) {
+        const perTick = Math.floor(preMrDamage * (skill.passiveEffect.dotPercent ?? 0));
+        if (perTick > 0 && target.currentHp > 0) {
           target.dots.push({
             sourceUsername: player.username,
             name: skill.name.toLowerCase(),
-            damagePerTick: Math.max(1, Math.floor(dotTotal / ticks)),
-            ticksRemaining: ticks,
+            damagePerTick: Math.max(1, perTick),
+            ticksRemaining: 1,
             damageType: 'magical',
+            permanent: true,
           });
         }
       }
@@ -690,23 +713,31 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
       } else {
         grouped.set(dot.name, { totalDamage: dot.damagePerTick, count: 1, damageType: dot.damageType });
       }
-      dot.ticksRemaining--;
-      if (dot.ticksRemaining <= 0) {
-        entity.dots.splice(i, 1);
+      if (!dot.permanent) {
+        dot.ticksRemaining--;
+        if (dot.ticksRemaining <= 0) {
+          entity.dots.splice(i, 1);
+        }
       }
     }
     for (const [dotName, { totalDamage, count, damageType }] of grouped) {
       let damage = totalDamage;
       if (isMonster) {
-        // Monster receiving DoT — apply monster resistances
+        // Monster receiving DoT — apply monster resistances at tick time so mid-fight changes are honored
         damage = applyMonsterResistance(damage, damageType, (entity as CombatMonster).resistances);
       } else if (state) {
-        // Player receiving DoT — apply equipment DR + Guard (physical) or Bless (magical/holy)
+        // Player receiving DoT — mirror the direct-hit reduction rules:
+        //   physical → equip DR + Knight Guard
+        //   magical  → equip MR + Priest Bless
+        //   holy     → Priest Bless only (equipment MR doesn't reduce holy)
         const player = entity as PartyCombatant;
         let reduction = 0;
         if (damageType === 'physical') {
           reduction += computeEquipReduction(player.equipBonuses);
           reduction += getPhysicalReduction(player, state.players);
+        } else if (damageType === 'magical') {
+          reduction += computeEquipMagicReduction(player.equipBonuses);
+          reduction += getMagicalReduction(state.players);
         } else {
           reduction += getMagicalReduction(state.players);
         }
@@ -847,6 +878,7 @@ export function createPartyCombatState(
     skills: m.skills ?? [],
     skillCooldowns: m.skillCooldowns ? { ...m.skillCooldowns } : {},
     attackCount: 0,
+    passive: m.passive,
   })).sort((a, b) => {
     const colDiff = getCol(a.gridPosition) - getCol(b.gridPosition);
     if (colDiff !== 0) return colDiff;
@@ -879,7 +911,7 @@ function executeActiveSkill(
   player: PartyCombatant,
   skill: SkillDefinition,
   state: PartyCombatState,
-): { logEntries: string[]; action: CombatAction } {
+): { logEntries: string[]; action: CombatAction; isNoOp?: boolean } {
   const logEntries: string[] = [];
   const effect = skill.activeEffect!;
   const sn = skill.name; // skill name for log messages
@@ -896,11 +928,18 @@ function executeActiveSkill(
     targetPos: null, targetSide: null, dodged: false, skillName: skill.name,
   });
 
+  // Mark this attempt as a no-op so the caller can fall back to a normal attack.
+  // Rewinds the activeSkillCount so Arcane Surge cadence isn't burned on a wasted cast.
+  const noOp = () => {
+    player.activeSkillCount--;
+    return { logEntries: [] as string[], action: noAction(), isNoOp: true };
+  };
+
   switch (effect.kind) {
     case 'stun_single': {
       // Knight Bash: normal damage + chance to stun target
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
@@ -919,7 +958,7 @@ function executeActiveSkill(
     }
 
     case 'stun_aoe': {
-      // Bard Drumroll: chance to stun each alive enemy, no damage
+      // Bard Drumroll: chance to stun each alive enemy, no damage. Fall back to attack if RNG lands no stuns.
       let anyStunned = false;
       for (const monster of state.monsters) {
         if (monster.currentHp <= 0) continue;
@@ -929,27 +968,29 @@ function executeActiveSkill(
           logEntries.push(`${player.username}'s ${skill.name} stuns ${monster.name}!`);
         }
       }
-      if (!anyStunned) {
-        logEntries.push(`${player.username} uses ${skill.name} but no enemies are stunned`);
-      }
+      if (!anyStunned) return noOp();
 
       return {
         logEntries,
         action: { ...noAction(), stunApplied: anyStunned },
+        isNoOp: false,
       };
     }
 
     case 'heal_lowest': {
-      // Priest Minor Heal: heal lowest % HP ally
+      // Priest Minor Heal: heal lowest % HP ally — fall back to attack if no one needs healing.
       const healTarget = findLowestPercentHpAlly(state.players);
-      if (!healTarget) return { logEntries, action: noAction() };
+      if (!healTarget) return noOp();
+      if (healTarget.currentHp >= healTarget.maxHp) return noOp();
 
       const baseHeal = player.level * (effect.healMultiplier ?? 4);
       const healAmount = applyHeal(player, healTarget, baseHeal, logEntries, skill.name);
+      if (healAmount === 0) return noOp();
 
       return {
         logEntries,
         action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: healTarget.gridPosition, targetSide: 'player', dodged: false, skillName: skill.name, healAmount, healTarget: healTarget.username },
+        isNoOp: false,
       };
     }
 
@@ -977,7 +1018,7 @@ function executeActiveSkill(
     case 'target_lowest_hp': {
       // Archer Cut Down: normal damage but targets lowest HP enemy
       const target = findLowestHpTarget(state.monsters);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const damage = computePlayerDamage(player, state, target as CombatMonster, { isActive: true }) * arcaneMult;
       applyDamageToMonster(damage, target as CombatMonster, player, state, logEntries, false, sn);
@@ -1006,7 +1047,7 @@ function executeActiveSkill(
     case 'stacking_mark': {
       // Knight Sunder: normal damage + stacking damage mark
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
@@ -1029,7 +1070,7 @@ function executeActiveSkill(
     case 'remove_buffs': {
       // Knight Dispel: normal damage + remove all buffs from target
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
@@ -1070,7 +1111,7 @@ function executeActiveSkill(
     case 'ignore_dr_single': {
       // Archer Snipe: high damage ignoring DR
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const rawDamage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       const damage = Math.max(1, Math.floor(rawDamage * (effect.damagePercent ?? 2.0)));
@@ -1107,7 +1148,7 @@ function executeActiveSkill(
     case 'dot_attack': {
       // Archer Bleed: normal damage + DoT
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
@@ -1134,7 +1175,7 @@ function executeActiveSkill(
     case 'debuff_attack': {
       // Archer Crippling Shot: normal damage + damage debuff on target
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
@@ -1157,7 +1198,7 @@ function executeActiveSkill(
     case 'smite': {
       // Priest Smite: normal physical damage (+ bonus holy vs undead, stubbed for now)
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const damage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       applyDamageToMonster(damage, target, player, state, logEntries, false, sn);
@@ -1170,31 +1211,29 @@ function executeActiveSkill(
     }
 
     case 'cure_debuffs': {
-      // Priest Cure: remove all debuffs from lowest HP ally
+      // Priest Cure: remove all debuffs from lowest HP ally — fall back to attack if there's nothing to cure.
       const target = findLowestPercentHpAlly(state.players);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return noOp();
 
       const hadDebuffs = target.debuffs.length > 0 || target.stunTurns > 0 || target.dots.length > 0;
+      if (!hadDebuffs) return noOp();
+
       target.debuffs = [];
       target.dots = [];
       if (target.stunTurns > 0) target.stunTurns = 0;
-
-      if (hadDebuffs) {
-        logEntries.push(`${player.username} cures ${target.username}'s afflictions!`);
-      } else {
-        logEntries.push(`${player.username} uses ${skill.name} on ${target.username} but there's nothing to cure`);
-      }
+      logEntries.push(`${player.username} cures ${target.username}'s afflictions!`);
 
       return {
         logEntries,
         action: { attackerSide: 'player', attackerPos: player.gridPosition, targetPos: target.gridPosition, targetSide: 'player', dodged: false, skillName: skill.name },
+        isNoOp: false,
       };
     }
 
     case 'hot_lowest': {
       // Priest Mending: HoT on lowest HP ally
       const target = findLowestPercentHpAlly(state.players);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const healPerTick = Math.floor(player.level * (effect.healMultiplier ?? 2) * getHealPowerMultiplier(player));
       const ticks = effect.dotTicks ?? 3;
@@ -1221,12 +1260,10 @@ function executeActiveSkill(
     }
 
     case 'shield_non_knight': {
-      // Priest Sanctuary: shield lowest HP non-Knight ally
+      // Priest Sanctuary: shield lowest HP non-Knight ally — fall back to attack if no valid target or already shielded.
       const target = findLowestHpNonKnight(state.players);
-      if (!target) {
-        logEntries.push(`${player.username} uses ${skill.name} but no non-Knight allies need protection`);
-        return { logEntries, action: noAction() };
-      }
+      if (!target) return noOp();
+      if (target.damageShield > 0) return noOp();
 
       const shieldAmount = player.level * (effect.shieldMultiplier ?? 4);
       target.damageShield = shieldAmount;
@@ -1241,7 +1278,7 @@ function executeActiveSkill(
     case 'damage_percent': {
       // Mage Zap: deal % damage to single target
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const rawDamage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       const damage = Math.max(1, Math.floor(rawDamage * (effect.damagePercent ?? 0.75)));
@@ -1289,7 +1326,7 @@ function executeActiveSkill(
     case 'high_damage_single': {
       // Mage Arcane Blast: high % damage to single target
       const target = findTarget(player.gridPosition, state.monsters, false);
-      if (!target) return { logEntries, action: noAction() };
+      if (!target) return { logEntries, action: noAction(), isNoOp: false };
 
       const rawDamage = computePlayerDamage(player, state, target, { isActive: true }) * arcaneMult;
       const damage = Math.max(1, Math.floor(rawDamage * (effect.damagePercent ?? 2.50)));
@@ -1412,13 +1449,16 @@ export function processPartyTick(state: PartyCombatState): TickResult {
 
       player.attackCount++;
 
-      // Check if an active skill should trigger (every Nth attack, with CD reduction)
+      // Check if an active skill should trigger (every Nth attack, with CD reduction).
+      // If the active resolves to a no-op (e.g. Priest Heal at full party HP), fall through
+      // to a normal attack so the turn isn't wasted.
       let usedSkill = false;
       for (const skill of player.equippedSkills) {
         if (skill && skill.type === 'active' && skill.cooldown && skill.activeEffect) {
-          const effectiveCD = getEffectiveCooldown(player, skill);
+          const effectiveCD = getEffectiveCooldown(player, skill, state.players);
           if (player.attackCount % effectiveCD === 0) {
             const result = executeActiveSkill(player, skill, state);
+            if (result.isNoOp) break;
             logEntries.push(...result.logEntries);
             state.lastAction = result.action;
             usedSkill = true;
@@ -1464,6 +1504,20 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       processTickEffects(monster, logEntries, state);
       if (monster.currentHp <= 0) {
         logEntries.push(`${monster.name} defeated! (DoT)`);
+        state.turnIndex = (idx + 1) % totalCombatants;
+        acted = true;
+        break;
+      }
+
+      // Passive monsters (e.g. walls) never act
+      if (monster.passive) {
+        state.lastAction = {
+          attackerSide: 'monster',
+          attackerPos: monster.gridPosition,
+          targetPos: null,
+          targetSide: null,
+          dodged: false,
+        };
         state.turnIndex = (idx + 1) % totalCombatants;
         acted = true;
         break;
@@ -1667,8 +1721,8 @@ export function processPartyTick(state: PartyCombatState): TickResult {
     state.roundCount++;
   }
 
-  // Check for victory (all monsters dead)
-  if (state.monsters.every(m => m.currentHp <= 0)) {
+  // Check for victory (all non-passive monsters dead — walls etc. don't count)
+  if (state.monsters.filter(m => !m.passive).every(m => m.currentHp <= 0)) {
     state.finished = true;
     state.result = 'victory';
     return { logEntries, finished: true, result: 'victory' };

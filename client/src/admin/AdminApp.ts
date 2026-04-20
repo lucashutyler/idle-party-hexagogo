@@ -1043,7 +1043,7 @@ export class AdminApp {
     if (!displayContent) return;
 
     const isNew = !monster;
-    const m = monster ?? { id: '', name: '', hp: 10, damage: 3, damageType: 'physical' as const, xp: 5, goldMin: 1, goldMax: 2, drops: [] };
+    const m: MonsterDefinition = monster ?? { id: '', name: '', hp: 10, damage: 3, damageType: 'physical', xp: 5, goldMin: 1, goldMax: 2, drops: [] };
     const items = Object.values(displayContent.items);
 
     const dropRows = (m.drops ?? []).map((d, i) => this.renderDropRow(i, d.itemId, d.chance, items)).join('');
@@ -1067,6 +1067,10 @@ export class AdminApp {
           <label>XP<input type="number" id="mf-xp" value="${m.xp}" min="0"></label>
           <label>Gold Min<input type="number" id="mf-goldMin" value="${m.goldMin}" min="0"></label>
           <label>Gold Max<input type="number" id="mf-goldMax" value="${m.goldMax}" min="0"></label>
+          <label class="mf-passive-label">
+            <input type="checkbox" id="mf-passive" ${m.passive ? 'checked' : ''}>
+            Passive (wall — never attacks, doesn't count toward victory)
+          </label>
         </div>
         <div class="monster-form-drops">
           <h4>Drops <button class="admin-btn admin-btn-sm" id="mf-add-drop">+ Drop</button></h4>
@@ -1270,6 +1274,8 @@ export class AdminApp {
       if (skillId) skills.push({ skillId, value, cooldown });
     });
 
+    const passive = (document.getElementById('mf-passive') as HTMLInputElement)?.checked ?? false;
+
     const monster: MonsterDefinition = {
       id, name, hp, damage,
       damageType: damageType as DamageType,
@@ -1277,6 +1283,7 @@ export class AdminApp {
       drops: drops.length > 0 ? drops : undefined,
       resistances: resistances.length > 0 ? resistances : undefined,
       skills: skills.length > 0 ? skills : undefined,
+      passive: passive ? true : undefined,
     };
 
     try {
