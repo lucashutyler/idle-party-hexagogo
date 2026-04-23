@@ -13,6 +13,65 @@ Format:
 
 Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `social`, `notify`, `admin`, `analytics`, `anticheat`, `mcp`, `qol`, `bigbet`.
 
+Status tags (only applied once an item has been evaluated — i.e. has a **Feedback** block):
+- Priority: `priority-hi`, `priority-mid`, `priority-low`.
+- Size: `small`, `medium`, `large`.
+- `dropped` — explicitly rejected or subsumed by another item.
+
+Items without a **Feedback** block are intentionally untagged — they haven't been evaluated yet.
+
+---
+
+## Prioritized: Next-Up (from evaluated items only)
+
+Only items with **Feedback** appear here. Untagged items still need a read-through.
+
+**Priority-hi — do next**
+- [engine] Quest system MVP — "Yes, high priority."
+- [dungeon] Dungeon data model + ContentStore integration — "Yes for sure."
+- [dungeon] Dungeon instance runtime — core dungeon behavior.
+- [craft] Crafting framework core — gate it behind level 20.
+- [guild] Guild roster cap — "this is important."
+- [notify] Notification framework core.
+- [notify] Preference UI (granular opt-in) — "required before rolling out notifications."
+
+**Priority-mid — queued**
+- Combat / systems: [engine] Henchmen, [engine] Quest chains, [engine] Weekly repeatables (drop dailies), [engine] Status resistance stats on gear.
+- Dungeons: [dungeon] Entry requirements enforcement, [dungeon] Dungeon-specific loot tables.
+- World: [world] Multi-map, [world] Continents / overworld zoom, [world] Town portal scrolls, [world] Waypoints / bindstones.
+- Crafting: [craft] Skill leveling, all 5 class crafts, [craft] Recipe unlock via drops/quests, [craft] Output quality tiers, [craft] Inter-class recipe deps.
+- Consumables: [consumable] Framework, [consumable] Auto-use toggles, [consumable] Cure/antidote, [consumable] Stat-buff elixirs, [consumable] XP/gold/drop boosters, [consumable] Reset scrolls.
+- Items: [item] Sockets & gems (pair w/ Bard craft), [item] Reforging, [item] Salvage, [item] Auction house (buy-now MVP is fine forever), [item] Player mailbox (trade-system refactor).
+- Guilds: [guild] Ranks & permissions, [guild] Tags, [guild] Achievements, [guild] Bank, [guild] Apply-to-join, [guild] Audit log, [guild] Defendable tile data model → Tile ownership → Defender deployment (default 5-in-3x3) → Daily tile combat tick → First-attacker rule → Daily reward distribution → Tile control history.
+- Social: [social] Room arrival toast, [social] "Add me to your party" (refined), [social] @mentions, [social] /roll slash command.
+- Notify: [notify] In-app notification center.
+
+**Priority-low — parked / needs refinement**
+- [engine] World events framework, [engine] Timed boss spawns (needs fairness rethink), [engine] Pet slot (likely a class specialization), [engine] Faction reputation, [engine] Expanded damage types.
+- [dungeon] Non-3x3 grids, [dungeon] Time limits, [dungeon] Lockouts, [dungeon] Boss rooms, [dungeon] Token vendor (grind risk), [dungeon] Leaderboards, [dungeon] Roguelike variant.
+- [world] Weather/biome effects, [world] Teleport runes, [world] Summon scrolls, [world] Recall home (fold into waypoints).
+- [craft] Material drops / harvest nodes, [craft] Craft station room requirements.
+- [consumable] Heal/mana/stamina potions (no mana/stam; heals low pri).
+- [item] Personal stash, [item] Partial set bonuses, [item] Set visual cosmetics, [item] Vendor buy-low/sell-high.
+- [guild] MOTD & description, [guild] Leveling & XP, [guild] Perk tree, [guild] Raid calendar, [guild] GvG leaderboards, [guild] Hall/tile, [guild] Alliances, [guild] Finder, [guild] GvG PvP combat mode, [guild] Multi-guild tournament, [guild] Map visualization (blocked on map UI).
+- [social] Emote system (needs definition), [social] LFG queue, [social] Chat reactions, [social] Victory poses (blocked on sprites), [social] Mentor badge, [social] Nearby players tab, [social] Recently partied list, [social] Report button.
+
+**Dropped — evaluated no-go / covered elsewhere**
+- [engine] Monster targeting-priority overrides — "skills should be required for priority targeting, not the player/monster definition."
+- [engine] Multi-action & scripted monsters — fold into skill framework.
+- [engine] Monster status effects — fold into skills/passives for monsters.
+- [engine] Death penalty system — idle-hostile.
+- [engine] Class combo system — already implemented via skills.
+- [dungeon] Party size above 5 (raid mode) — covered by arbitrary-size entry requirements.
+- [dungeon] Solo trial dungeons — covered by party-size + rewards.
+- [dungeon] Class trial dungeons — covered by entry restrictions.
+- [item] Gear upgrade (+1 … +10) — simple DR/MR stats are being phased out.
+- [consumable] Rare-consumable guard — players always opt-in to auto-use.
+- [guild] Attack declaration flow — deployed assignments at the tick are enough.
+- [social] Shared-class-diversity buff — skills only; no party-composition incentives.
+- [social] Threaded replies — disliked in other chat apps.
+- [social] "People you might like" suggestions — complicated, rarely beneficial.
+
 ---
 
 ## Table of Contents
@@ -37,7 +96,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## Game Engine & Core Systems
 
-### [engine] World events framework
+### [engine] [priority-low] [medium] World events framework
 **Summary**: A scheduler that can apply global modifiers (e.g., "Blood Moon: +50% monster HP, +100% drops") for a time window.
 **Deliverables**:
 - `WorldEventDefinition` type + `data/world-events.json` via ContentStore.
@@ -48,7 +107,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Low priority for now, interesting idea we can keep in the backlog.
 
-### [engine] Timed boss spawns
+### [engine] [priority-low] [medium] Timed boss spawns
 **Summary**: Named bosses that spawn in specific rooms at specific times (daily/weekly cadence).
 **Deliverables**:
 - `BossSchedule` entries tied to a tile.
@@ -58,7 +117,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Doesn't quite work with the current boss model. I like the idea, but not sure how to make it "fair" if we have 5 parties sitting at a boss for two days waiting for loot. Worth keeping in consideration as we strive to improve.
 
-### [engine] Monster targeting-priority overrides
+### [engine] [dropped] Monster targeting-priority overrides
 **Summary**: Let `MonsterDefinition` declare non-default targeting rules ("lowest HP," "healer class," "back row").
 **Deliverables**:
 - Extend `MonsterDefinition` with optional `targetingPriority` enum.
@@ -68,7 +127,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Skills should be required for priority targeting, not the player/monster defintion. This is a no-go.
 
-### [engine] Multi-action & scripted monsters
+### [engine] [dropped] Multi-action & scripted monsters
 **Summary**: Monsters that act more than once per tick, or have scripted abilities (phase changes, enrage, summons).
 **Deliverables**:
 - Support `actionsPerTick` on `MonsterDefinition`.
@@ -78,7 +137,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - These can all fall under skills. There will need to be engine requirements to "phase change" or "summon" though. Enrage or multiple actions sound like existing skills. We should probably work on a larger skill framework/pool to pull from when building monsters though.
 
-### [engine] Monster status effects
+### [engine] [dropped] Monster status effects
 **Summary**: Monsters can apply the same DoT/HoT/stun/shield effects the skill system already supports.
 **Deliverables**:
 - `MonsterAbility` type that emits a `PassiveEffect`- or `ActiveEffect`-shaped effect on hit.
@@ -86,7 +145,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Again, just skills. Maybe we need more skills, and passives even for monsters. This would help players strive to target specific monsters creatively if they had a powerful passive.
 
-### [engine] Henchmen (hireable NPCs)
+### [engine] [priority-mid] [medium] Henchmen (hireable NPCs)
 **Summary**: NPCs a solo player can hire to fill party slots. Weaker than players to still incentivize real parties.
 **Deliverables**:
 - `Henchman` type (class, level, hire cost, fixed equipment).
@@ -96,7 +155,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Yes. This is still a need. Don't even worry about equipment, just have them have some fixed hp/damage/skills. MVP doesn't require a cost to hire. But the henchmen should be lower than the lowest party member. You'd have to kick the henchmen to invite someone lower level and go find another henchman from another town if you felt you still needed that gap to fill. They should be a "last resort" feature. Not allowed in dungeons. Just used on occassion ideally.
 
-### [engine] Pet slot
+### [engine] [priority-low] [large] Pet slot
 **Summary**: A single pet that adds passive bonuses and an occasional attack, without occupying a grid position.
 **Deliverables**:
 - `Pet` definition (name, level, passive bonus, attack stats).
@@ -106,7 +165,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Right now if we had 5 party members, 9 slots, each party member having a pet, that wouldn't work very well. If we do go with pets, I would expect it to be a skill thing for specific classes. This is a low priority item. I think I might even expect pets to fall into a "class specialization" (future feature) like Druid (Archer specializaiton) or Necromancer (Priest specialization).
 
-### [engine] Quest system MVP
+### [engine] [priority-hi] [large] Quest system MVP
 **Summary**: Simple kill/collect/visit quests from NPCs, with XP/gold/item rewards.
 **Deliverables**:
 - `QuestDefinition` + `data/quests.json`.
@@ -117,21 +176,21 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Yes, high priority.
 
-### [engine] Quest chains
+### [engine] [priority-mid] [medium] Quest chains
 **Summary**: Sequential quests that unlock new zones/items.
 **Dependencies**: Quest system MVP.
 **Deliverables**: Prerequisite field on quests, chain visualization in quest log.
 **Feedback**:
 - I like the idea of quest chains that unlock new quests. Some quests probably require levels as well. However, I don't think quests should unlock zones. I like the idea of power leveling as an option if the players are strong enough to carry around a low level player. Item requirements for areas are already a thing and dungeons may have level requirements. Zones probably don't need them.
 
-### [engine] Daily/weekly repeatable quests
+### [engine] [priority-mid] [small] Daily/weekly repeatable quests
 **Summary**: Give idle players a login goal.
 **Dependencies**: Quest system MVP.
 **Deliverables**: Repeat cadence on quests, reset cron job, UI indicator.
 **Feedback**:
 - I don't know if daily quests are a great idea for a game that is strictly focused on "not needing to play" (idle). Weeklies for sure though.
 
-### [engine] Faction reputation system
+### [engine] [priority-low] [large] Faction reputation system
 **Summary**: Reputation scores tied to zones/NPCs. Unlock quests, vendors, titles.
 **Deliverables**:
 - `FactionDefinition` + per-player rep map.
@@ -141,14 +200,14 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Low priority. This one feels like something that can come as the game expands.
 
-### [engine] Death penalty system
+### [engine] [dropped] Death penalty system
 **Summary**: Soft penalty on party wipe to make loss meaningful without being anti-idle.
 **Deliverables**: Decide mechanic (XP shave, durability, gold drop). Implement + tune. UI feedback in combat log.
 **Notes**: Explicit design decision; should default to opt-in or very mild for idle-friendliness.
 **Feedback**:
 - A no-go for the time being. I've considered this but all of the above mentioned could be very penalizing to players if they are afk. They come back and have lost a ton of xp or gold or because durability loss, they weren't able to ever get any more wins while afk. Losing battles continuously should discourage a player enough from trying an area. Or maybe they're trying to kill a boss and just "rolling the dice" many, many times hoping they'll get the RNG to win. I'm ok with that.
 
-### [engine] Class combo system
+### [engine] [dropped] Class combo system
 **Summary**: Certain skills from different classes chained within N ticks trigger a bonus — rewards class diversity.
 **Deliverables**:
 - Combo definition language (skill A followed by skill B from different player).
@@ -157,14 +216,14 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Already implemented with skills. Not really "combos" but there are complimentary skills that benefit other classes (or similar classes).
 
-### [engine] Status resistance stats on gear
+### [engine] [priority-mid] [medium] Status resistance stats on gear
 **Summary**: Add resistance stats (poison, stun, silence) to gear affixes.
 **Dependencies**: Existing equipment system.
 **Deliverables**: New stat fields on `ItemDefinition`, hooked into effect-application code.
 **Feedback**:
 - This does feel like something we should implement. Not only gear, but sets as well. There will probably be a long list of buffs, resistances, special effects that gear (and sets) will be able to benefit from.
 
-### [engine] Expanded damage types
+### [engine] [priority-low] [large] Expanded damage types
 **Summary**: Add `nature`, `cold`, `fire`, `dark` to `DamageType`.
 **Deliverables**:
 - Extend enum + targeted `computeEquipmentBonuses`.
@@ -179,7 +238,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## Dungeons
 
-### [dungeon] Dungeon data model + ContentStore integration
+### [dungeon] [priority-hi] [medium] Dungeon data model + ContentStore integration
 **Summary**: Scaffolding for dungeons: definitions, storage, admin CRUD.
 **Deliverables**:
 - `DungeonDefinition` type with floors, grid shape, entry requirements, rewards.
@@ -189,7 +248,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Yes for sure.
 
-### [dungeon] Dungeon instance runtime
+### [dungeon] [priority-hi] [large] Dungeon instance runtime
 **Summary**: Parties can enter a dungeon and get a private instance with floor progression.
 **Dependencies**: Dungeon data model.
 **Deliverables**:
@@ -200,14 +259,14 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This might be a little complicated... Almost like there needs to be a staging area for groups. As mentioned before, I'd like to allow different party sizes for dungeons, which leaves people without a party after the dungeon. I guess this could be okay. If players want to run a dungeon, that probably won't be afk the whole time, and they can manually party up with whoever after the dungeon.
 
-### [dungeon] Entry requirements enforcement
+### [dungeon] [priority-mid] [medium] Entry requirements enforcement
 **Summary**: Block dungeon entry based on level, required item, required classes, party size.
 **Dependencies**: Dungeon instance runtime.
 **Deliverables**: Entry validation with clear error messages; tests.
 **Feedback**:
 - I like the required item. Maybe even a consumable item. That leaves the possibility of a limited entry granted by performing quests or something. A little more interesting than just a level. All of these requirements are nice.
 
-### [dungeon] Non-3x3 grid shapes
+### [dungeon] [priority-low] [large] Non-3x3 grid shapes
 **Summary**: Support arbitrary grid rectangles (2x3, 5x5, 4x2) for dungeons.
 **Deliverables**:
 - Generalize `PartyGridPosition` from fixed 0-8 to (col, row) on an arbitrary rectangle.
@@ -217,7 +276,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This sounds interesting. Lower proirity than the above dungeon tasks though.
 
-### [dungeon] Party size above 5 (raid mode)
+### [dungeon] [dropped] Party size above 5 (raid mode)
 **Summary**: Raid dungeons with party cap of 10–20.
 **Dependencies**: Non-3x3 grid shapes.
 **Deliverables**:
@@ -227,7 +286,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This should be arbitrary sizes. Some many even be smaller than 5. So I would consider this part of the Entry requirements. You can strike this task specifically.
 
-### [dungeon] Dungeon time limits
+### [dungeon] [priority-low] [small] Dungeon time limits
 **Summary**: Optional timer per dungeon; party kicked or loot forfeited on expiry.
 **Deliverables**:
 - `timeLimitSec` on `DungeonDefinition`.
@@ -236,7 +295,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - I think I recommended this one. Not liking it yet, so very low priority if we even get to it.
 
-### [dungeon] Dungeon lockouts / cooldowns
+### [dungeon] [priority-low] [small] Dungeon lockouts / cooldowns
 **Summary**: Daily/weekly lockout per dungeon to protect loot economy.
 **Deliverables**:
 - Per-player lockout state in `PlayerSaveData`.
@@ -245,45 +304,45 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - I think we may be able to handle this via the other requirements. I'd say hold off on this unless we see that it becomes a need.
 
-### [dungeon] Dungeon boss rooms
+### [dungeon] [priority-low] [small] Dungeon boss rooms
 **Summary**: Last floor is a unique boss encounter with special mechanics.
 **Dependencies**: Dungeon instance runtime, scripted monsters.
 **Deliverables**: `isBoss` flag on floor, optional unique drop table, victory fanfare.
 **Feedback**:
 - Lower priority for now. I think we can handle this with the existing encounters and monsters arrangements. Well, maybe dungeon encounters will need special grid sizes to handle arranging monsters differently. But that's about it. Monsters drop the loot. Victory fanfare does sound nice, but more so for the dungeon, not the boss.
 
-### [dungeon] Dungeon-specific loot tables
+### [dungeon] [priority-mid] [medium] Dungeon-specific loot tables
 **Summary**: Unique items + first-clear rewards per dungeon.
 **Deliverables**: Reward tables on dungeon floors, one-time first-clear flag per player, UI indicating unclaimed.
 **Feedback**:
 - I kind of like this. Mid-priority.
 
-### [dungeon] Dungeon tokens + rotating vendor
+### [dungeon] [priority-low] [medium] Dungeon tokens + rotating vendor
 **Summary**: Earn tokens from dungeon clears, spend at a vendor on rotating cosmetic/utility items.
 **Deliverables**: New currency, earn/spend mechanics, weekly rotation config.
 **Feedback**:
 - This could lead to a very non-idle mechanic. I'm going to say low priority, or needs refinement maybe. If there are dozens of dungeons in the game eventually and players have to farm every dungeon, every week or so, then it becomes very grindy. The opposite of what this game was designed to go against.
 
-### [dungeon] Dungeon leaderboards
+### [dungeon] [priority-low] [medium] Dungeon leaderboards
 **Summary**: Track fastest clear, most damage, least damage taken per dungeon.
 **Deliverables**: Leaderboard store, admin-configurable metrics, UI.
 **Feedback**:
 - Yeah sure. This is a nice to have.
 
-### [dungeon] Roguelike dungeon variant
+### [dungeon] [priority-low] [large] Roguelike dungeon variant
 **Summary**: Procedural floors with between-floor buff choices.
 **Dependencies**: Dungeon instance runtime.
 **Deliverables**: Procedural floor generator, buff draft UI, loot only on completion.
 **Feedback**:
 - This could be a very fun part of the game. Maybe there's a special dungeon or dungeon type that handles this. Low priority for the time being.
 
-### [dungeon] Solo trial dungeons
+### [dungeon] [dropped] Solo trial dungeons
 **Summary**: Single-player dungeons tuned per class to test mastery.
 **Deliverables**: Tuning per class, class-locked entry requirement, class-specific rewards.
 **Feedback**:
 - Yes. But I don't think this actually needs to be a task. We have party size limits mentioned earlier. We also mentioned dungeon rewards earlier as well.
 
-### [dungeon] Class trial dungeons
+### [dungeon] [dropped] Class trial dungeons
 **Summary**: "5 of the same class only" dungeons with class-exclusive rewards.
 **Deliverables**: Entry requirement: all members same class. Reward gated to that class.
 **Feedback**:
@@ -293,7 +352,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## World & Maps
 
-### [world] Multi-map / interior map support
+### [world] [priority-mid] [large] Multi-map / interior map support
 **Summary**: A room can transition to a different hex map (castle interior, floor 2, etc.).
 **Deliverables**:
 - `transitionsTo: { mapId, tileId }` on `WorldTileDefinition`.
@@ -303,34 +362,34 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Mid-priority.
 
-### [world] Continents / top-level maps
+### [world] [priority-mid] [large] Continents / top-level maps
 **Summary**: Multiple top-level maps linked by ports, portals, or airships.
 **Dependencies**: Multi-map support.
 **Deliverables**: Map-select UI, per-map fog of war, shared global unlock tracking.
 **Feedback**:
 - I like the ability to zoom "way out" and see the whole world. We could have "map fog" as another layer over "zone fog" and "tile fog". Essentially once we zoom out far enough, it just becomes an overworld map view instead of a navigation map view.
 
-### [world] Weather/biome per-room effects
+### [world] [priority-low] [medium] Weather/biome per-room effects
 **Summary**: Tiles can declare temporary buffs/debuffs (rain slows casters, night boosts undead).
 **Deliverables**: Tile-level modifier list, hook into combat engine, admin UI.
 **Feedback**:
 - Low priority. Sounds interesting, but balancing challenges come with this.
 
-### [world] Town portal scrolls
+### [world] [priority-mid] [small] Town portal scrolls
 **Summary**: Consumable that sends party (or self) to a bound town.
 **Dependencies**: Consumables framework.
 **Deliverables**: Scroll item + "bind to town" action + teleport handler.
 **Feedback**:
 - Yes please.
 
-### [world] Teleport runes (craftable, one-use)
+### [world] [priority-low] [small] Teleport runes (craftable, one-use)
 **Summary**: Crafted consumable teleports bearer to a specific room picked at craft time.
 **Dependencies**: Crafting system, town portal scrolls.
 **Deliverables**: Rune item with `destinationTileId` field set on craft; UI for picking destination.
 **Feedback**:
 - Low priority. Let's stick with scrolls for the time being.
 
-### [world] Waypoints / bindstones
+### [world] [priority-mid] [medium] Waypoints / bindstones
 **Summary**: Discover waypoints on the map, fast-travel between them for gold.
 **Deliverables**:
 - Waypoint tile type.
@@ -339,14 +398,14 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Waypoints don't sound bad for fast travel between towns, for instance.
 
-### [world] Summon scrolls
+### [world] [priority-low] [small] Summon scrolls
 **Summary**: Consumable — one player summons a party member from another tile.
 **Dependencies**: Consumables framework.
 **Deliverables**: Consumable type + target-selection UI + consent prompt on target.
 **Feedback**:
 - I don't like this for some reason... Maybe this leaves room for "player skills" on certain classes such as a mage being able to summon guild mates or friend or something. But... I don't know what we would add to other classes for the time being, so let's low priority this one.
 
-### [world] Recall home (long cooldown)
+### [world] [priority-low] [small] Recall home (long cooldown)
 **Summary**: Free, long-cooldown teleport back to the starting town. Guards against stuck parties.
 **Deliverables**: Cooldown tracker on player state, UI button.
 **Feedback**:
@@ -356,7 +415,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## Crafting
 
-### [craft] Crafting framework core
+### [craft] [priority-hi] [large] Crafting framework core
 **Summary**: Baseline for class-specific crafting queues that run in parallel to combat.
 **Deliverables**:
 - `CraftingDefinition` + `RecipeDefinition` + `data/recipes.json`.
@@ -367,75 +426,75 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Yes, this sounds good. I'm confused on the save/restore of queue state comment. This should run in the background just like combat I would think, maybe even following the same ticks that combat do. This could be something that is unlocked at level 20 or so.
 
-### [craft] Crafting skill leveling
+### [craft] [priority-mid] [medium] Crafting skill leveling
 **Summary**: Separate skill level per player; crafting more yields better quality chance.
 **Dependencies**: Crafting framework core.
 **Deliverables**: Skill XP per craft type, leveling formula, unlocks gated on skill level.
 **Feedback**:
 - I do like this. I don't think there really has to be craft types to start though. As mentioned below, each class kind of only has one craft, for now.
 
-### [craft] Knight heavy smithing
+### [craft] [priority-mid] [medium] Knight heavy smithing
 **Summary**: Class craft — iron/steel/plate/heavy weapons.
 **Dependencies**: Crafting framework core.
 **Deliverables**: Recipe set, material drops (ore), smithy room type/requirement.
 **Feedback**:
 - I like it.
 
-### [craft] Mage alchemy (potions)
+### [craft] [priority-mid] [medium] Mage alchemy (potions)
 **Dependencies**: Crafting framework core, consumables framework.
 **Deliverables**: Recipe set, herb/reagent materials, potion outputs.
 **Feedback**:
 - I like it.
 
-### [craft] Priest enchanting
+### [craft] [priority-mid] [medium] Priest enchanting
 **Summary**: Priest applies enchantments to existing gear.
 **Dependencies**: Crafting framework core.
 **Deliverables**: Enchant recipes that modify an item's stats (limited slots per item).
 **Feedback**:
 - I like it.
 
-### [craft] Archer light crafting
+### [craft] [priority-mid] [medium] Archer light crafting
 **Summary**: Leather, wood, bows, light armor.
 **Dependencies**: Crafting framework core.
 **Deliverables**: Recipe set, hide/wood materials, workshop flow.
 **Feedback**:
 - I like it.
 
-### [craft] Bard jewelry
+### [craft] [priority-mid] [medium] Bard jewelry
 **Summary**: Rings, amulets, instruments — feeds the socket/gem system.
 **Dependencies**: Crafting framework core.
 **Deliverables**: Recipe set, gem/metal materials.
 **Feedback**:
 - I like it.
 
-### [craft] Material drops & harvest nodes
+### [craft] [priority-low] [medium] Material drops & harvest nodes
 **Summary**: Raw materials drop from monsters + harvestable from room types (mines, forests, sea).
 **Deliverables**: Extend drop tables, add harvest nodes as tile features, UI for harvest actions.
 **Feedback**:
 - We already have materials in the game that drop from monsters. The harvestable rooms are interesting, but low priority for now. We can handle this by just having certain monsters drop wood/ore/etc for the short-term.
 
-### [craft] Recipe unlock via drops/quests
+### [craft] [priority-mid] [small] Recipe unlock via drops/quests
 **Summary**: Recipe discovery mechanics.
 **Dependencies**: Crafting framework core, quest system (for quest route).
 **Deliverables**: Recipe drop table entries; quest reward recipes; unlock state on player.
 **Feedback**:
 - This sounds good.
 
-### [craft] Output quality tiers
+### [craft] [priority-mid] [medium] Output quality tiers
 **Summary**: Roll quality (normal/fine/masterwork) on crafted items.
 **Dependencies**: Crafting framework core.
 **Deliverables**: Quality roll + stat modifiers + visual indicator on item.
 **Feedback**:
 - I like this... This idea makes me think of a much more dynamic loot system in the game, similar to Diablo type loot... "Fine shining staff of the bear" with modifiers all the way around. Probably don't want an exact ripoff of that, but something to consider if it's not mentioned down further.
 
-### [craft] Craft station room requirements
+### [craft] [priority-low] [small] Craft station room requirements
 **Summary**: Some recipes require being at a specific room (forge, alchemy lab).
 **Deliverables**: Optional station requirement on recipes; check on queue start; UI call-out.
 **Notes**: Open question — should queued jobs require being at the station the whole time, or just at job start?
 **Feedback**:
 - This may punish "crafters" from gaining xp with their friends. Low priority for now, but it may come into play.
 
-### [craft] Inter-class recipe dependencies
+### [craft] [priority-mid] [medium] Inter-class recipe dependencies
 **Summary**: Recipes that require an item from another class's craft (Archer bowstring → Mage enchanted bow). Encourages trading.
 **Deliverables**: Reagent field on recipes referencing arbitrary items; balance pass.
 **Feedback**:
@@ -445,7 +504,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## Consumables & Auto-Use
 
-### [consumable] Consumables framework
+### [consumable] [priority-mid] [large] Consumables framework
 **Summary**: Core system for usable items — effects, durations, stacking rules.
 **Deliverables**:
 - `ConsumableDefinition` type (instant, fight-count, time-based, permanent-until-death).
@@ -456,7 +515,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Lowish priority at the moment. Will be a requirement for crafting as mages wouldn't be able to craft consuable without it.
 
-### [consumable] Auto-use toggles
+### [consumable] [priority-mid] [small] Auto-use toggles
 **Summary**: Per-consumable opt-in auto-use with trigger conditions.
 **Dependencies**: Consumables framework.
 **Deliverables**:
@@ -466,42 +525,42 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This feels like a requirement when we build out the consumables framework.
 
-### [consumable] Rare-consumable guard
+### [consumable] [dropped] Rare-consumable guard
 **Summary**: Prevent rare consumables from auto-consuming.
 **Dependencies**: Consumables framework.
 **Deliverables**: Rarity-based default (rare+ never auto). Explicit admin override per item.
 **Feedback**:
 - Not necessary. A player should always opt-in to auto-consuming, so this can be dropped.
 
-### [consumable] Heal / mana / stamina potions
+### [consumable] [priority-low] [small] Heal / mana / stamina potions
 **Summary**: Baseline potion set.
 **Dependencies**: Consumables framework.
 **Deliverables**: Potion items, auto-use rules, tuning.
 **Feedback**:
 - Heals make sense. There's no mana or stamina, so not important for those two. Let's mark this as a low priority and focus on buffing potions that have a duration for now.
 
-### [consumable] Cure / antidote potions
+### [consumable] [priority-mid] [small] Cure / antidote potions
 **Summary**: Cleanse debuffs.
 **Dependencies**: Consumables framework, status effect system.
 **Deliverables**: Cleanse effect, auto-use trigger "when debuffed."
 **Feedback**:
 - This sounds good. Could be handy for killing bosses with dots, stuns etc.
 
-### [consumable] Stat-buff elixirs
+### [consumable] [priority-mid] [small] Stat-buff elixirs
 **Summary**: Temp +damage / +DR / +MR / +crit elixirs.
 **Dependencies**: Consumables framework.
 **Deliverables**: Buff effects, UI, tuning.
 **Feedback**:
 - Yeah, these make sense.
 
-### [consumable] XP / gold-find / drop-rate boosters
+### [consumable] [priority-mid] [small] XP / gold-find / drop-rate boosters
 **Summary**: Time-based progression boosters.
 **Dependencies**: Consumables framework.
 **Deliverables**: Buff implementations hooked into XP/gold/drop pipeline.
 **Feedback**:
 - Interesting, let's say yes.
 
-### [consumable] Reset scrolls
+### [consumable] [priority-mid] [small] Reset scrolls
 **Summary**: Reset a skill cooldown or remove a DoT.
 **Dependencies**: Consumables framework.
 **Deliverables**: Effect type, target picker UI.
@@ -512,66 +571,66 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## Items, Economy & Progression
 
-### [item] Socket & gem system
+### [item] [priority-mid] [medium] Socket & gem system
 **Summary**: Sockets on gear accept gems for extra stats.
 **Dependencies**: Bard jewelry craft.
 **Deliverables**: `sockets` field on items; gem items; socketing UI; stat integration.
 **Feedback**:
 - Almost a dependency for the bard crafting. I think these need to go together.
 
-### [item] Gear upgrade (+1 … +10)
+### [item] [dropped] Gear upgrade (+1 … +10)
 **Summary**: Upgrade gear using crafting currency.
 **Dependencies**: Crafting framework, currency pass.
 **Deliverables**: Upgrade recipe/action; fail/success rolls; visible +N on item name.
 **Feedback**:
 - I'm going to say no on this for now. Simple damage, MR, DR, etc. is probably going to go away in favor of other class specific bonuses soon.
 
-### [item] Reforging (reroll stats)
+### [item] [priority-mid] [medium] Reforging (reroll stats)
 **Summary**: Re-roll stats on an item for a cost.
 **Deliverables**: Reforge NPC/station; cost formula; UI.
 **Feedback**:
 - I'm okay with this. We just need to understand "item roll stats" first.
 
-### [item] Salvage gear for materials
+### [item] [priority-mid] [small] Salvage gear for materials
 **Summary**: Break down gear into crafting materials.
 **Dependencies**: Crafting framework.
 **Deliverables**: Salvage action; material drop table per item type/rarity.
 **Feedback**:
 - Not sure why I didn't think of this before. This makes sense. We'd just need to make sure that items are salvagable (have a defined loot table) before letting the player salvage them.
 
-### [item] Auction house
+### [item] [priority-mid] [large] Auction house
 **Summary**: Async player-to-player market.
 **Deliverables**: Listing/bidding data model; UI with search/filter; expiration + refund; fee.
 **Notes**: Large scope — consider splitting into MVP (buy-now only) vs. full (bidding).
 **Feedback**:
 - I like this. Honestly, even if we only have buy-now forever, that's probably fine.
 
-### [item] Player mailbox
+### [item] [priority-mid] [large] Player mailbox
 **Summary**: Send items/gold to a specific player offline.
 **Deliverables**: Mailbox store; send/receive UI; expiration/return policy.
 **Feedback**:
 - This is probably an upgrade to the trade system. The existing trade system in the game doesn't work well as it requires both players to be online and in the same room. Maybe this is a refactor of that.
 
-### [item] Personal stash
+### [item] [priority-low] [medium] Personal stash
 **Summary**: Expandable paid stash.
 **Deliverables**: Stash store per player; buy-slot UI; rent/cap decisions.
 **Feedback**:
 - Low priority, but nice if we have a limited inventory in the future.
 
-### [item] Partial set bonuses (2-piece / 4-piece)
+### [item] [priority-low] [small] Partial set bonuses (2-piece / 4-piece)
 **Summary**: Expand set bonuses beyond all-or-nothing.
 **Dependencies**: Existing set system.
 **Deliverables**: Threshold-based bonuses; UI tooltip showing which tier is active.
 **Feedback**:
 - This is understandable. Low priority.
 
-### [item] Set visual cosmetics
+### [item] [priority-low] [medium] Set visual cosmetics
 **Summary**: Particle/outline effect on combat sprite when set is equipped.
 **Deliverables**: Cosmetic data field; Phaser renderer hook.
 **Feedback**:
 - We need a lot of graphics enhancements before this becomes beneficial.
 
-### [item] Vendor buy-low / sell-high anchoring
+### [item] [priority-low] [small] Vendor buy-low / sell-high anchoring
 **Summary**: Vendors buy at fraction of value, sell at multiplier, as an economy anchor.
 **Deliverables**: Configurable multipliers on shops; tuning pass.
 **Feedback**:
@@ -581,7 +640,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## Guilds
 
-### [guild] Guild ranks & permissions
+### [guild] [priority-mid] [medium] Guild ranks & permissions
 **Summary**: Configurable ranks (Leader, Officer, Member, Recruit) with per-rank perms.
 **Deliverables**:
 - Rank structure on `Guild`.
@@ -591,90 +650,90 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - I suppose this makes sense.
 
-### [guild] Guild MOTD & description
+### [guild] [priority-low] [small] Guild MOTD & description
 **Summary**: MOTD on login; long-form description on guild page.
 **Deliverables**: Fields on `Guild`; edit UI for leaders; display on Guild tab.
 **Feedback**:
 - This feels low priority to me. Depends on demand.
 
-### [guild] Guild tags
+### [guild] [priority-mid] [small] Guild tags
 **Summary**: Short tag (`[IPR]`) shown next to member names everywhere.
 **Deliverables**: Tag field; render across Users tab, chat, combat, popup.
 **Feedback**:
 - Yes this is nice.
 
-### [guild] Guild leveling & XP
+### [guild] [priority-low] [medium] Guild leveling & XP
 **Summary**: Guild earns XP from member activity; levels unlock perks.
 **Deliverables**: Guild XP events (kills, dungeon clears), level curve, level display.
 **Feedback**:
 - Sounds difficult to balance. Let's leave this as low priority. There are other guild benefits that may be listed below.
 
-### [guild] Guild perk tree
+### [guild] [priority-low] [medium] Guild perk tree
 **Summary**: Perks unlocked as guild levels up (+party XP, +loot quality, extra bank tab).
 **Dependencies**: Guild leveling.
 **Deliverables**: Perk definitions, purchase/unlock UI, effects hooked into the relevant systems.
 **Feedback**:
 - Low priority. Need to be careful on this one.
 
-### [guild] Guild achievements
+### [guild] [priority-mid] [medium] Guild achievements
 **Summary**: "Kill 10k goblins," "Clear every dungeon."
 **Dependencies**: Analytics event pipeline.
 **Deliverables**: Achievement definitions, progress tracker, reveal UI.
 **Feedback**:
 - Sounds interesting. Could lead to unlocks of some sort in the future.
 
-### [guild] Guild bank
+### [guild] [priority-mid] [medium] Guild bank
 **Summary**: Shared stash with per-rank limits, deposit/withdraw log.
 **Dependencies**: Guild ranks & permissions.
 **Deliverables**: Bank store; UI; rate/limit enforcement; audit log.
 **Feedback**:
 - Yeah, will be nice.
 
-### [guild] Guild raid / event calendar
+### [guild] [priority-low] [medium] Guild raid / event calendar
 **Summary**: Schedule dungeon runs visible to guild.
 **Deliverables**: Event data model; RSVP UI; reminder notifications.
 **Feedback**:
 - Low priority for now.
 
-### [guild] Guild vs. guild leaderboards
+### [guild] [priority-low] [medium] Guild vs. guild leaderboards
 **Summary**: Weekly rankings by XP, dungeons, etc.
 **Dependencies**: Analytics event pipeline.
 **Deliverables**: Leaderboard store; reset cron; UI.
 **Feedback**:
 - This sounds interesting, low priority.
 
-### [guild] Guild hall / guild tile
+### [guild] [priority-low] [large] Guild hall / guild tile
 **Summary**: Unique room only guild members can enter.
 **Dependencies**: Multi-map support (or per-guild private tile).
 **Deliverables**: Hall tile type; guild-gated entry; customization UI.
 **Feedback**:
 - Low priority. Having a guild hall sounds cool, but with the "always in combat" idea of the game, what are we fighting in the guild hall? Does combat disable? Need to consider a few things...
 
-### [guild] Alliances
+### [guild] [priority-low] [medium] Alliances
 **Summary**: Two guilds can ally to share a chat channel (and maybe a hall).
 **Deliverables**: Alliance data model; alliance chat channel; invite/accept flow.
 **Feedback**:
 - Not for now. Very low priority.
 
-### [guild] Guild finder
+### [guild] [priority-low] [medium] Guild finder
 **Summary**: Browse public guilds, filter by size/activity/focus.
 **Deliverables**: Search API; browse UI; filters.
 **Feedback**:
 - This could be nice as the game scales. Low priority for now.
 
-### [guild] Apply-to-join flow
+### [guild] [priority-mid] [small] Apply-to-join flow
 **Summary**: In addition to invites, players apply, officers accept/decline.
 **Deliverables**: Application data model; application queue UI for officers.
 **Feedback**:
 - Yes, this sounds good.
 
-### [guild] Guild audit log
+### [guild] [priority-mid] [small] Guild audit log
 **Summary**: Log of joins/leaves/kicks/bank transactions.
 **Deliverables**: Event log; filter UI.
 **Feedback**:
 - Sure, this sounds nice.
 
-### [guild] Guild roster cap
+### [guild] [priority-hi] [small] Guild roster cap
 **Summary**: Hard limit on guild size (target 30–50, likely configurable per guild tier or level).
 **Deliverables**:
 - `maxMembers` on `Guild` (default constant, overridable by perks).
@@ -685,7 +744,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Yes, this is important.
 
-### [guild] Defendable tile data model
+### [guild] [priority-mid] [medium] Defendable tile data model
 **Summary**: Mark specific tiles as defendable and configure their daily reward pool.
 **Deliverables**:
 - `defendable?: boolean` and `dailyReward?: TileRewardSpec` on `WorldTileDefinition`.
@@ -696,7 +755,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This one will be a nice incentive for guilds.
 
-### [guild] Tile ownership & occupation state
+### [guild] [priority-mid] [medium] Tile ownership & occupation state
 **Summary**: Track which guild currently holds each defendable tile and who they've deployed there.
 **Deliverables**:
 - New store (`GuildTileStore`) tracking `{ tileId, ownerGuildId, defenders: PlayerDeployment[], since }`.
@@ -707,7 +766,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Yes, this is good.
 
-### [guild] Defender deployment UI
+### [guild] [priority-mid] [medium] Defender deployment UI
 **Summary**: Guild officers assign which members defend a held tile and where they sit on the grid.
 **Deliverables**:
 - Guild tab → "Tile Defenses" sub-section listing held/contested tiles.
@@ -720,7 +779,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Sounds good. We will leave this as the default 5 player in a 3x3 layout. A guild may assign less than 5 players if they wish.
 
-### [guild] Attack declaration flow
+### [guild] [dropped] Attack declaration flow
 **Summary**: A guild declares intent to attack a defendable tile before the daily resolution window.
 **Deliverables**:
 - Declaration endpoint — officer+ of attacking guild flags the target tile.
@@ -733,7 +792,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This seems unnecessary. Whatever the assigned players are at the combat tick is what will engage in combat. It doesn't need to be defined at any length of time in advnace.
 
-### [guild] Daily tile combat tick
+### [guild] [priority-mid] [large] Daily tile combat tick
 **Summary**: Once per day, resolve combat on every contested defendable tile.
 **Deliverables**:
 - Cron job at a configurable UTC time.
@@ -746,7 +805,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - There's no declarations. Just assignments. The instant combat sounds fine as long as we have a log.
 
-### [guild] First-attacker rule (prior-holder bias)
+### [guild] [priority-mid] [large] First-attacker rule (prior-holder bias)
 **Summary**: If a tile was held before this cycle, the *attacker(s)* get first attack in combat. Fresh/uncontested claims default to the current turn order.
 **Deliverables**:
 - `CombatEngine` gains an optional `firstActor: 'players' | 'monsters' | 'party-a' | 'party-b'` parameter on `processPartyTick` / `createPartyCombatState`.
@@ -757,7 +816,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Yes, this will probably need to be redefined over time. There's a good chance that we overhaul the combat system in the future anyway.
 
-### [guild] Guild-vs-guild PvP combat mode
+### [guild] [priority-low] [large] Guild-vs-guild PvP combat mode
 **Summary**: Adapt the combat engine to resolve party-vs-party (not party-vs-monsters) while reusing as much of the existing skill/equipment system as possible.
 **Deliverables**:
 - Generalize `processPartyTick` to take two `CombatSide` objects instead of players vs. monsters.
@@ -771,7 +830,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Low priority. This will be a nice to have.
 
-### [guild] Multi-guild tournament resolution
+### [guild] [priority-low] [large] Multi-guild tournament resolution
 **Summary**: When 2+ attacker guilds contest a tile, run a single-elimination bracket between the attackers; the tile holder always fights last against the bracket winner.
 **Deliverables**:
 - **Tile holder seeding**: The current tile holder (if any) does not enter the attacker bracket. They receive a bye to the final and fight the attacker-bracket winner last.
@@ -787,7 +846,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - Also low priority, nice to have.
 
-### [guild] Daily reward distribution
+### [guild] [priority-mid] [medium] Daily reward distribution
 **Summary**: Award the daily reward pool to the guild currently holding each defendable tile, after the combat tick resolves.
 **Deliverables**:
 - Reward computation from `TileRewardSpec`.
@@ -799,7 +858,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This sounds good.
 
-### [guild] Tile control history & leaderboard
+### [guild] [priority-mid] [medium] Tile control history & leaderboard
 **Summary**: Surface who owned each tile over time and reward long holds.
 **Deliverables**:
 - Append-only ownership log per tile.
@@ -810,7 +869,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 **Feedback**:
 - This sounds good.
 
-### [guild] Defendable-tile visualization on map
+### [guild] [priority-low] [medium] Defendable-tile visualization on map
 **Summary**: Defendable tiles are visually distinct; owning guild's tag appears on the tile; contested tiles pulse.
 **Deliverables**:
 - Render hook in `WorldMapScene` for defendable tile state.
@@ -825,94 +884,94 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 ## Social & Communication
 
-### [social] Room arrival toast
+### [social] [priority-mid] [small] Room arrival toast
 **Summary**: When a player enters your room, show a subtle toast with their class/level.
 **Deliverables**: Toast component; mute-by-default for own entries; setting to disable.
 **Feedback**:
 - Sounds good.
 
-### [social] Emote system
+### [social] [priority-low] [medium] Emote system
 **Summary**: Zero-commitment "hi" — emotes play a tiny animation over the sprite and broadcast to room chat.
 **Deliverables**: Emote catalog; emote wheel UI; server broadcast; client animation.
 **Feedback**:
 - Interesting, needs more definition.
 
-### [social] "Form a party?" suggestion banner
+### [social] [priority-mid] [medium] "Form a party?" suggestion banner
 **Summary**: When N players are in a room and not partied, banner suggests forming.
 **Deliverables**: Banner component; class-icon preview; one-click party create + invites.
 **Feedback**:
 - This could be nice. Maybe refine this to "Add me to your party, please!" where a player auto-joins if invited. The auto-join would be toggleable by the player, so even if someone picks them up and drops them off then they would still be in auto-join mode. They would not be able to be "picked from a party" though. Only in effect when they are not in a party.
 
-### [social] Shared-class-diversity buff
+### [social] [dropped] Shared-class-diversity buff
 **Summary**: Temporary buff when a room has X different classes together — rewards recruiting strangers.
 **Dependencies**: World events framework.
 **Deliverables**: Buff logic; tuning; UI badge.
 **Feedback**:
 - No. This would be a skills thing only. There may be skills that benefit other classes or even classes of the same type. There should be no specific incentive for a party to have one of each class type. There may be incentives to have multiple of the same type...
 
-### [social] LFG / queue for dungeons
+### [social] [priority-low] [medium] LFG / queue for dungeons
 **Summary**: Auto-group players looking for the same dungeon with compatible classes.
 **Dependencies**: Dungeon instance runtime.
 **Deliverables**: Queue server; matchmaking logic; UI.
 **Feedback**:
 - Similar to the Looking for party idea above. However, I think all players should be present when joining a dungeon.
 
-### [social] Chat reactions
+### [social] [priority-low] [small] Chat reactions
 **Summary**: Emoji reactions on chat messages.
 **Deliverables**: Reaction data model; UI; rate limit.
 **Feedback**:
 - Yeah sure.
 
-### [social] @mentions
+### [social] [priority-mid] [small] @mentions
 **Summary**: `@username` pings the mentioned user.
 **Deliverables**: Parser; notification; highlight in receiver's chat.
 **Feedback**:
 - This is a nice to have.
 
-### [social] Chat slash commands
+### [social] [priority-mid] [small] Chat slash commands
 **Summary**: `/roll`, `/me`, `/who`, etc.
 **Deliverables**: Command registry; dispatch; help text.
 **Feedback**:
 - I like the /roll at the very least.
 
-### [social] Threaded replies on chat messages
+### [social] [dropped] Threaded replies on chat messages
 **Summary**: Reply to a specific message, show a small thread.
 **Deliverables**: Message parent-id; UI for replies; notification to original poster.
 **Feedback**:
 - I actually don't like this. I've seen this implemented in annoying ways in other chat apps.
 
-### [social] Victory poses
+### [social] [priority-low] [small] Victory poses
 **Summary**: After a win, combat sprites briefly do a pose animation.
 **Deliverables**: Pose assets; Phaser renderer hook; optional mute setting.
 **Feedback**:
 - We are going to need combat sprites first!
 
-### [social] Mentor badge
+### [social] [priority-low] [medium] Mentor badge
 **Summary**: Flag high-level players willing to help newbies. Mentor+new-player party gets bonus XP.
 **Deliverables**: Mentor opt-in setting; bonus hook in combat engine; badge on Users tab.
 **Feedback**:
 - This brings up a few different badge opportunities. Will consider more. Needs a better map UI. Could work in the Users UI though.
 
-### [social] Nearby players tab
+### [social] [priority-low] [small] Nearby players tab
 **Summary**: List players on adjacent tiles for easy discovery.
 **Deliverables**: New sub-tab or Users filter; real-time updates.
 **Feedback**:
 - I don't know how urgent this is. The map already shows players within your zone. It might be nice to see guildmates further away than we do right now though.
 
-### [social] Recently partied list
+### [social] [priority-low] [small] Recently partied list
 **Summary**: Remember people you played with; re-invite quickly.
 **Deliverables**: Persisted list (capped); UI in Party tab or popup.
 **Feedback**:
 - Interesting, low priority.
 
-### [social] "People you might like" suggestions
+### [social] [dropped] "People you might like" suggestions
 **Summary**: Surface players with similar play patterns.
 **Dependencies**: Analytics event pipeline.
 **Deliverables**: Matching heuristic (zones overlap, times active, class compat); opt-out setting.
 **Feedback**:
 - Nope. Sounds complicated and rarely beneficial.
 
-### [social] Player report button
+### [social] [priority-low] [small] Player report button
 **Summary**: Report a player for cheating/harassment/etc.
 **Deliverables**: Report UI in popup; reason picker; admin queue; disposition flow.
 **Feedback**:
@@ -924,7 +983,7 @@ Tags: `engine`, `dungeon`, `world`, `craft`, `consumable`, `item`, `guild`, `soc
 
 All notification channels are **opt-in** and **granular** — users pick which categories they want on which channels. PWA is the chosen mobile path (not a native app).
 
-### [notify] Notification framework core
+### [notify] [priority-hi] [large] Notification framework core
 **Summary**: Central system for emitting notifications from game events, routing to enabled channels, and persisting a per-user inbox.
 **Deliverables**:
 - `NotificationEvent` type catalog: `{ id, category, severity, title, body, payload, timestamp, readAt? }`.
@@ -937,7 +996,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - Yes, this is nice.
 
-### [notify] Preference UI (granular opt-in)
+### [notify] [priority-hi] [medium] Preference UI (granular opt-in)
 **Summary**: Settings page where users toggle each notification category per channel, with a master kill-switch per channel.
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -949,7 +1008,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - Basically required before rolling out notifications.
 
-### [notify] In-app notification center
+### [notify] [priority-mid] [medium] In-app notification center
 **Summary**: Bell icon with unread badge; dropdown or panel showing recent notifications; mark-as-read and deep links to the relevant screen.
 **Dependencies**: Notification framework core.
 **Deliverables**:
