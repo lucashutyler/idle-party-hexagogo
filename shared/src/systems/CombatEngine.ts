@@ -746,6 +746,13 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
       entity.currentHp = Math.max(0, entity.currentHp - damage);
       const stacks = count > 1 ? ` (x${count})` : '';
       logEntries.push(`${name} receives ${damage} ${damageType} damage from ${dotName}${stacks}!`);
+      // Martyr: any damage to a Knight (including DoTs) triggers a heal-bonus stack
+      if (!isMonster && state && damage > 0) {
+        const player = entity as PartyCombatant;
+        if (player.className === 'Knight') {
+          triggerMartyr(state, player);
+        }
+      }
     }
   }
 
@@ -1602,64 +1609,7 @@ export function processPartyTick(state: PartyCombatState): TickResult {
           logEntries.push(`${target.username} dodges ${monster.name}'s attack!`);
         } else {
           const rawMonsterDmg = getMonsterDamage(monster, state);
-
-          let reduction = 0;
-          if (monster.damageType === 'physical') {
-            reduction += computeEquipReduction(target.equipBonuses);
-            reduction += getPhysicalReduction(target, state.players);
-          } else if (monster.damageType === 'magical') {
-            reduction += computeEquipMagicReduction(target.equipBonuses);
-            reduction += getMagicalReduction(state.players);
-          } else {
-            // holy: only Bless skill reduces holy damage
-            reduction += getMagicalReduction(state.players);
-          }
-
-          let damage = Math.max(0, rawMonsterDmg - reduction);
-
-          // Damage shield (Sanctuary)
-          if (target.damageShield > 0) {
-            const absorbed = Math.min(damage, target.damageShield);
-            target.damageShield -= absorbed;
-            damage -= absorbed;
-            if (absorbed > 0) {
-              logEntries.push(`${target.username}'s shield absorbs ${absorbed} damage`);
-            }
-          }
-
-          target.currentHp = Math.max(0, target.currentHp - damage);
-          logEntries.push(`${monster.name} hits ${target.username} for ${damage} ${monster.damageType} damage`);
-
-          // Shield Slam brace: accumulate damage taken
-          if (target.braceActive) {
-            target.braceDamageTaken += damage;
-          }
-
-          // Shield Bash passive: 10% chance to stun attacker on physical hit
-          if (monster.damageType === 'physical' && hasPassive(target, 'stun_on_phys_hit')) {
-            const stunChance = getPassiveValue(target, 'stun_on_phys_hit');
-            if (Math.random() < stunChance) {
-              monster.stunTurns = 1;
-              logEntries.push(`${target.username}'s Shield Bash stuns ${monster.name}!`);
-            }
-          }
-
-          // Martyr: when a Knight takes damage, Priests with Martyr get heal bonus
-          if (target.className === 'Knight' && damage > 0) {
-            for (const p of state.players) {
-              if (p.currentHp <= 0 || p === target) continue;
-              if (hasPassive(p, 'martyr')) {
-                p.martyrBonus += getPassiveValue(p, 'martyr');
-              }
-            }
-          }
-
-          // Check for player death
-          if (target.currentHp <= 0) {
-            if (!checkResurrection(target, state, logEntries)) {
-              logEntries.push(`${target.username} has fallen!`);
-            }
-          }
+          applyMonsterDirectDamage(target, rawMonsterDmg, monster.damageType, monster, state, logEntries, `${monster.name} hits`);
         }
 
         state.lastAction = {
@@ -1739,6 +1689,93 @@ export function processPartyTick(state: PartyCombatState): TickResult {
 }
 
 /**
+ * Trigger Martyr stack on each alive Priest (other than the victim) when a Knight takes damage.
+ * Capped at a single stack between heals — multiple damage events do not stack.
+ */
+function triggerMartyr(state: PartyCombatState, victim: PartyCombatant): void {
+  for (const p of state.players) {
+    if (p.currentHp <= 0 || p === victim) continue;
+    if (hasPassive(p, 'martyr')) {
+      const value = getPassiveValue(p, 'martyr');
+      if (p.martyrBonus < value) {
+        p.martyrBonus = value;
+      }
+    }
+  }
+}
+
+/**
+ * Apply a single direct-damage hit from a monster to a player.
+ * Handles: damage-type reduction, damage shield, brace (physical only),
+ * Shield Bash retaliation (physical only), Martyr (any damage to Knight),
+ * resurrection check on death.
+ *
+ * Caller is responsible for dodge and intercept resolution before calling.
+ */
+function applyMonsterDirectDamage(
+  target: PartyCombatant,
+  rawDamage: number,
+  damageType: DamageType,
+  attacker: CombatMonster,
+  state: PartyCombatState,
+  logEntries: string[],
+  hitLabel: string,
+): number {
+  let reduction = 0;
+  if (damageType === 'physical') {
+    reduction += computeEquipReduction(target.equipBonuses);
+    reduction += getPhysicalReduction(target, state.players);
+  } else if (damageType === 'magical') {
+    reduction += computeEquipMagicReduction(target.equipBonuses);
+    reduction += getMagicalReduction(state.players);
+  } else {
+    // holy: only Bless reduces holy damage
+    reduction += getMagicalReduction(state.players);
+  }
+
+  let damage = Math.max(0, rawDamage - reduction);
+
+  if (target.damageShield > 0) {
+    const absorbed = Math.min(damage, target.damageShield);
+    target.damageShield -= absorbed;
+    damage -= absorbed;
+    if (absorbed > 0) {
+      logEntries.push(`${target.username}'s shield absorbs ${absorbed} damage`);
+    }
+  }
+
+  target.currentHp = Math.max(0, target.currentHp - damage);
+  logEntries.push(`${hitLabel} ${target.username} for ${damage} ${damageType} damage`);
+
+  // Brace (physical only) — only physical damage builds Shield Slam reflect
+  if (damageType === 'physical' && target.braceActive) {
+    target.braceDamageTaken += damage;
+  }
+
+  // Shield Bash retaliation (physical only)
+  if (damageType === 'physical' && hasPassive(target, 'stun_on_phys_hit')) {
+    const stunChance = getPassiveValue(target, 'stun_on_phys_hit');
+    if (Math.random() < stunChance) {
+      attacker.stunTurns = 1;
+      logEntries.push(`${target.username}'s Shield Bash stuns ${attacker.name}!`);
+    }
+  }
+
+  // Martyr: any damage to a Knight queues a heal bonus (capped at one stack)
+  if (target.className === 'Knight' && damage > 0) {
+    triggerMartyr(state, target);
+  }
+
+  if (target.currentHp <= 0) {
+    if (!checkResurrection(target, state, logEntries)) {
+      logEntries.push(`${target.username} has fallen!`);
+    }
+  }
+
+  return damage;
+}
+
+/**
  * Try to execute a monster skill. Returns the CombatAction if a skill was used, null otherwise.
  */
 function tryExecuteMonsterSkill(
@@ -1760,18 +1797,19 @@ function tryExecuteMonsterSkill(
     const aliveMonsters = state.monsters.filter(m => m.currentHp > 0);
 
     if (skillDef.effect === 'damage') {
+      const damageType = skillDef.damageType ?? 'physical';
+      const dodgeChance = state.nimbleDodge;
+
       if (skillDef.targeting === 'aoe_all') {
-        // Damage all alive players
+        logEntries.push(`${monster.name} casts ${skillDef.name}!`);
         for (const p of alivePlayers) {
-          const dmg = Math.max(1, entry.value);
-          p.currentHp = Math.max(0, p.currentHp - dmg);
-          if (p.currentHp <= 0) {
-            if (!checkResurrection(p, state, logEntries)) {
-              logEntries.push(`${p.username} has fallen!`);
-            }
+          const dodged = dodgeChance > 0 && Math.random() < dodgeChance;
+          if (dodged) {
+            logEntries.push(`${p.username} dodges ${skillDef.name}!`);
+            continue;
           }
+          applyMonsterDirectDamage(p, Math.max(1, entry.value), damageType, monster, state, logEntries, `${skillDef.name} hits`);
         }
-        logEntries.push(`${monster.name} casts ${skillDef.name} for ${entry.value} ${skillDef.damageType ?? 'physical'} damage to all!`);
         return {
           attackerSide: 'monster',
           attackerPos: monster.gridPosition,
@@ -1782,22 +1820,27 @@ function tryExecuteMonsterSkill(
         };
       } else if (skillDef.targeting === 'lowest_hp_enemy') {
         // Target lowest HP player
-        const target = alivePlayers.reduce((low, p) => p.currentHp < low.currentHp ? p : low, alivePlayers[0]);
+        let target = alivePlayers.reduce((low, p) => p.currentHp < low.currentHp ? p : low, alivePlayers[0]);
         if (target) {
-          const dmg = Math.max(1, entry.value);
-          target.currentHp = Math.max(0, target.currentHp - dmg);
-          logEntries.push(`${monster.name} uses ${skillDef.name} on ${target.username} for ${dmg} ${skillDef.damageType ?? 'physical'} damage!`);
-          if (target.currentHp <= 0) {
-            if (!checkResurrection(target, state, logEntries)) {
-              logEntries.push(`${target.username} has fallen!`);
-            }
+          // Intercept redirect: physical and magical single-target skills can be intercepted
+          const interceptor = state.players.find(p => p.currentHp > 0 && p.interceptActive && p !== target);
+          if (interceptor) {
+            logEntries.push(`${interceptor.username} intercepts ${monster.name}'s ${skillDef.name} aimed at ${target.username}!`);
+            target = interceptor;
+          }
+
+          const dodged = dodgeChance > 0 && Math.random() < dodgeChance;
+          if (dodged) {
+            logEntries.push(`${target.username} dodges ${monster.name}'s ${skillDef.name}!`);
+          } else {
+            applyMonsterDirectDamage(target, Math.max(1, entry.value), damageType, monster, state, logEntries, `${monster.name}'s ${skillDef.name} hits`);
           }
           return {
             attackerSide: 'monster',
             attackerPos: monster.gridPosition,
             targetPos: target.gridPosition,
             targetSide: 'player',
-            dodged: false,
+            dodged,
             skillName: skillDef.name,
           };
         }

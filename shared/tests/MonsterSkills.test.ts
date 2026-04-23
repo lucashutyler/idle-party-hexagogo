@@ -4,7 +4,7 @@ import type { PartyCombatant } from '../src/systems/CombatEngine';
 import { createMonsterInstance } from '../src/systems/MonsterTypes';
 import type { MonsterDefinition, Resistance } from '../src/systems/MonsterTypes';
 import type { PartyGridPosition } from '../src/systems/SocialTypes';
-import { createDefaultSkillLoadout } from '../src/systems/SkillTypes';
+import { createDefaultSkillLoadout, getSkillById } from '../src/systems/SkillTypes';
 
 function makePlayer(
   username: string,
@@ -238,6 +238,130 @@ describe('Monster Skills', () => {
       // In ~15 monster turns, should fire ~5 times max (first use + every 3 turns after)
       expect(fireballCount).toBeGreaterThanOrEqual(1);
       expect(fireballCount).toBeLessThanOrEqual(8);
+    });
+  });
+
+  describe('player defenses against monster skills', () => {
+    function equip(player: PartyCombatant, skillIds: string[]): PartyCombatant {
+      player.equippedSkills = skillIds.map(id => getSkillById(id) ?? null) as any;
+      return player;
+    }
+
+    it('Fireball is reduced by Priest Bless (party-wide MR)', () => {
+      const monsterDef: MonsterDefinition = {
+        id: 'mage', name: 'Mage', hp: 1000, damage: 0, damageType: 'magical',
+        xp: 1, goldMin: 0, goldMax: 0,
+        skills: [{ skillId: 'fireball', value: 50, cooldown: 3 }],
+      };
+      const monster = createMonsterInstance(monsterDef, 4);
+      const knight = equip(makePlayer('K', 4, { className: 'Knight', maxHp: 1000, currentHp: 1000 }), []);
+      const priest = equip(
+        makePlayer('P', 1, { className: 'Priest', level: 10, maxHp: 1000, currentHp: 1000 }),
+        ['priest_bless'],
+      );
+
+      const state = createPartyCombatState([knight, priest], [monster]);
+
+      let used = false;
+      for (let i = 0; i < 20; i++) {
+        const r = processPartyTick(state);
+        if (r.logEntries.some(l => l.includes('Fireball'))) { used = true; break; }
+      }
+      expect(used).toBe(true);
+      const k = state.players.find(p => p.username === 'K')!;
+      // Bless = 2/level * 10 = 20 reduction → 50 - 20 = 30 dmg
+      expect(k.currentHp).toBe(1000 - 30);
+    });
+
+    it('Assassinate is reduced by Knight Guard (physical reduction)', () => {
+      const monsterDef: MonsterDefinition = {
+        id: 'rogue', name: 'Rogue', hp: 1000, damage: 0, damageType: 'physical',
+        xp: 1, goldMin: 0, goldMax: 0,
+        skills: [{ skillId: 'assassinate', value: 50, cooldown: 5 }],
+      };
+      const monster = createMonsterInstance(monsterDef, 4);
+      const knight = equip(
+        makePlayer('K', 4, { className: 'Knight', level: 10, maxHp: 1000, currentHp: 1000 }),
+        ['knight_guard'],
+      );
+      const state = createPartyCombatState([knight], [monster]);
+
+      let used = false;
+      for (let i = 0; i < 20; i++) {
+        const r = processPartyTick(state);
+        if (r.logEntries.some(l => l.includes('Assassinate'))) { used = true; break; }
+      }
+      expect(used).toBe(true);
+      // Guard = 2/level * 10 = 20 reduction → 50 - 20 = 30 dmg
+      expect(state.players[0].currentHp).toBe(1000 - 30);
+    });
+
+    it('Assassinate is redirected to a Knight with Intercept active', () => {
+      const monsterDef: MonsterDefinition = {
+        id: 'rogue', name: 'Rogue', hp: 1000, damage: 0, damageType: 'physical',
+        xp: 1, goldMin: 0, goldMax: 0,
+        skills: [{ skillId: 'assassinate', value: 30, cooldown: 5 }],
+      };
+      const monster = createMonsterInstance(monsterDef, 0);
+      // Equip Intercept in the active slot so the Knight casts it each turn
+      const knight = equip(
+        makePlayer('K', 0, { className: 'Knight', baseDamage: 0, maxHp: 200, currentHp: 200 }),
+        ['knight_guard', 'knight_intercept'],
+      );
+      const archer = makePlayer('A', 4, { className: 'Archer', baseDamage: 0, maxHp: 50, currentHp: 50 });
+      const state = createPartyCombatState([knight, archer], [monster]);
+
+      let used = false;
+      for (let i = 0; i < 30; i++) {
+        const r = processPartyTick(state);
+        if (r.logEntries.some(l => l.includes('intercepts'))) { used = true; break; }
+      }
+      expect(used).toBe(true);
+      const a = state.players.find(p => p.username === 'A')!;
+      // Archer (lowest HP) was the natural Assassinate target but Intercept redirected
+      expect(a.currentHp).toBe(50);
+    });
+
+    it('Brace (Shield Slam) does not accumulate magical damage', () => {
+      const monsterDef: MonsterDefinition = {
+        id: 'mage', name: 'Mage', hp: 1000, damage: 30, damageType: 'magical',
+        xp: 1, goldMin: 0, goldMax: 0,
+      };
+      const monster = createMonsterInstance(monsterDef, 4);
+      const knight = makePlayer('K', 4, {
+        className: 'Knight', maxHp: 1000, currentHp: 1000,
+        braceActive: true, braceDamageTaken: 0,
+      });
+      const state = createPartyCombatState([knight], [monster]);
+
+      // Drive enough ticks for the monster to land at least one hit
+      for (let i = 0; i < 10; i++) processPartyTick(state);
+      const k = state.players[0];
+      expect(k.currentHp).toBeLessThan(1000); // took magical damage
+      expect(k.braceDamageTaken).toBe(0);     // but brace did not accumulate it
+    });
+
+    it('Martyr triggers from DoT damage to a Knight (capped at single stack)', () => {
+      const monsterDef: MonsterDefinition = {
+        id: 'rotter', name: 'Rotter', hp: 1000, damage: 0, damageType: 'magical',
+        xp: 1, goldMin: 0, goldMax: 0,
+        skills: [{ skillId: 'rot', value: 5, cooldown: 2 }],
+      };
+      const monster = createMonsterInstance(monsterDef, 4);
+      const knight = makePlayer('K', 4, { className: 'Knight', maxHp: 1000, currentHp: 1000 });
+      const priest = equip(
+        makePlayer('P', 1, { className: 'Priest', level: 1, maxHp: 100, currentHp: 100 }),
+        ['priest_martyr'],
+      );
+
+      const state = createPartyCombatState([knight, priest], [monster]);
+
+      // Run enough ticks to apply Rot and let it tick a couple times on the Knight
+      for (let i = 0; i < 15; i++) processPartyTick(state);
+
+      const p = state.players.find(pl => pl.username === 'P')!;
+      // Capped at single stack — flatValue 0.25 — regardless of how many ticks landed
+      expect(p.martyrBonus).toBe(0.25);
     });
   });
 

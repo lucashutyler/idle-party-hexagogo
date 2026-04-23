@@ -1,5 +1,16 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.22.1',
+    notes: [
+      'Monster skills (Fireball, Assassinate, etc.) now honor your defenses — equipment DR/MR, Knight Guard, Priest Bless, and damage shields all apply',
+      'Bard Nimble dodge now applies to monster skills as well — including AoE (each player rolls dodge independently against Fireball)',
+      'Knight Intercept now redirects single-target monster skills like Assassinate, not just normal attacks',
+      'Knight Shield Slam now reflects only physical damage taken (magical fireballs no longer charge the reflect)',
+      'Knight Shield Bash retaliation still triggers only on physical hits (unchanged behavior, now consistent across skills and basic attacks)',
+      'Priest Martyr now triggers from any damage to a Knight — including DoTs and skill damage. Bonus is capped at one stack between heals',
+    ],
+  },
+  {
     version: '2026.04.19.2',
     notes: [
       'Priests no longer waste a turn casting heal/cure/sanctuary on a no-op — they fall back to a normal attack instead',

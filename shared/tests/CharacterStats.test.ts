@@ -116,7 +116,7 @@ describe('CharacterStats', () => {
 
   describe('addXp', () => {
     it('adds XP without leveling up', () => {
-      const char = createDefaultCharacter();
+      const char = createCharacter('Knight');
       const result = addXp(char, 1000);
       expect(char.xp).toBe(1000);
       expect(char.level).toBe(1);
@@ -125,7 +125,7 @@ describe('CharacterStats', () => {
     });
 
     it('levels up at exactly xpForNextLevel(1)', () => {
-      const char = createDefaultCharacter();
+      const char = createCharacter('Knight');
       const needed = xpForNextLevel(1);
       const result = addXp(char, needed);
       expect(char.level).toBe(2);
@@ -135,7 +135,7 @@ describe('CharacterStats', () => {
     });
 
     it('carries over excess XP', () => {
-      const char = createDefaultCharacter();
+      const char = createCharacter('Knight');
       const needed = xpForNextLevel(1);
       addXp(char, needed + 500);
       expect(char.level).toBe(2);
@@ -143,7 +143,7 @@ describe('CharacterStats', () => {
     });
 
     it('multi-level-up from large XP gain', () => {
-      const char = createDefaultCharacter();
+      const char = createCharacter('Knight');
       const needed = xpForNextLevel(1) + xpForNextLevel(2);
       const result = addXp(char, needed);
       expect(char.level).toBe(3);

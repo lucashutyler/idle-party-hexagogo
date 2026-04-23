@@ -215,7 +215,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'knight_shield_slam',
       name: 'Shield Slam',
-      description: 'Instead of attacking, brace — reflect 10% of all damage taken this round back to attackers.',
+      description: 'Instead of attacking, brace — reflect 10% of physical damage taken this round back to attackers.',
       className: 'Knight',
       type: 'active',
       treeOrder: 5,
