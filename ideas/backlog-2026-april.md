@@ -34,6 +34,15 @@ Only items with **Feedback** appear here. Untagged items still need a read-throu
 - [guild] Guild roster cap — "this is important."
 - [notify] Notification framework core.
 - [notify] Preference UI (granular opt-in) — "required before rolling out notifications."
+- [notify] PWA installable shell — prerequisite for several other items.
+- [notify] Per-category opt-in: Party / DM / Friend-request / Guild events / Quest — "must" notification types.
+- [admin] Undo/redo in world editor.
+- [admin] Skill tree editor — at minimum a read-only "view all skills at a glance" admin view.
+- [analytics] Event pipeline MVP — foundation for most analytics.
+- [anticheat] Report queue & disposition workflow — high once a report button ships.
+- [anticheat] Trade confirm nonce — high if it leaves a real cheating gap.
+- [mcp] MCP read-only server.
+- [mcp] MCP write tools (draft only) — love the draft-only approach.
 
 **Priority-mid — queued**
 - Combat / systems: [engine] Henchmen, [engine] Quest chains, [engine] Weekly repeatables (drop dailies), [engine] Status resistance stats on gear.
@@ -44,7 +53,11 @@ Only items with **Feedback** appear here. Untagged items still need a read-throu
 - Items: [item] Sockets & gems (pair w/ Bard craft), [item] Reforging, [item] Salvage, [item] Auction house (buy-now MVP is fine forever), [item] Player mailbox (trade-system refactor).
 - Guilds: [guild] Ranks & permissions, [guild] Tags, [guild] Achievements, [guild] Bank, [guild] Apply-to-join, [guild] Audit log, [guild] Defendable tile data model → Tile ownership → Defender deployment (default 5-in-3x3) → Daily tile combat tick → First-attacker rule → Daily reward distribution → Tile control history.
 - Social: [social] Room arrival toast, [social] "Add me to your party" (refined), [social] @mentions, [social] /roll slash command.
-- Notify: [notify] In-app notification center.
+- Notify: [notify] In-app notification center, [notify] Rate limiting & deduplication (want append/coalesce style on web/iOS).
+- Admin: [admin] Mass-mail / gift tool (mid-high — gift+mailbox angle), [admin] Content sanity linter (run on publish).
+- Analytics: [analytics] Retention cohort dashboard (mid-high), [analytics] New-player funnel (with per-player "first" tags that could feed quests/achievements), [analytics] Class XP rate (quick win), [analytics] Class distribution (no event-pipeline dependency), [analytics] Party composition stats (pair with retention).
+- Anti-cheat: [anticheat] Device-token overlap detection.
+- QoL: [qol] Damage numbers in combat, [qol] Combat log filters, [qol] Gear loadouts, [qol] Bulk sell, [qol] Drag to equip/sell, [qol] Unified toast system, [qol] Font size scale (current fonts are a common complaint).
 
 **Priority-low — parked / needs refinement**
 - [engine] World events framework, [engine] Timed boss spawns (needs fairness rethink), [engine] Pet slot (likely a class specialization), [engine] Faction reputation, [engine] Expanded damage types.
@@ -55,6 +68,14 @@ Only items with **Feedback** appear here. Untagged items still need a read-throu
 - [item] Personal stash, [item] Partial set bonuses, [item] Set visual cosmetics, [item] Vendor buy-low/sell-high.
 - [guild] MOTD & description, [guild] Leveling & XP, [guild] Perk tree, [guild] Raid calendar, [guild] GvG leaderboards, [guild] Hall/tile, [guild] Alliances, [guild] Finder, [guild] GvG PvP combat mode, [guild] Multi-guild tournament, [guild] Map visualization (blocked on map UI).
 - [social] Emote system (needs definition), [social] LFG queue, [social] Chat reactions, [social] Victory poses (blocked on sprites), [social] Mentor badge, [social] Nearby players tab, [social] Recently partied list, [social] Report button.
+- Notify: [notify] Browser push (SW), [notify] Email channel (AWS-spend concern), [notify] Digest (weekly stat-summary idea), [notify] Quiet hours, [notify] Trade / Guild combat / World event notifications, [notify] Admin broadcast tool (could ride on a "Server" chat-channel notification subscription).
+- Admin: [admin] Bulk tile paint & fill, [admin] Copy/paste tile regions, [admin] Layered map view, [admin] Version diff preview, [admin] Scheduled deploys, [admin] Battle simulator, [admin] Balance preview, [admin] Item editor QoL, [admin] Encounter designer (mostly done), [admin] Shop bulk import (prefer API + AI tools), [admin] Player inspector, [admin] Impersonate, [admin] Gift codes, [admin] Staging server / PBE (split if export/import lands).
+- Analytics: [analytics] Skill usage frequency, [analytics] Death/wipe rate, [analytics] Loot distribution, [analytics] Economy health, [analytics] Active hours heatmap (needs timezone filters), [analytics] Live metrics dashboard (also balance admin- vs. player-visible cuts).
+- Anti-cheat: [anticheat] Global WS rate-limit pass *(needs scope clarification — per-player?)*, [anticheat] Input-validation audit (promote if issues), [anticheat] Trade-abuse heuristics ("no mains" by design), [anticheat] Chat rate limit & spam filter, [anticheat] WS session rotation, [anticheat] Transparent ban changelog *(needs examples)*.
+- MCP: [mcp] simulate_battle (only if sim demand surfaces), [mcp] balance_stats (depends on analytics maturity).
+- QoL: [qol] Combat log auto-scroll pin (works mostly today), [qol] Skill timeline UI (best paired with combat-UI rework), [qol] Tile hover tooltips (encounter memory needs versioning), [qol] Map search, [qol] Item comparison tooltip (think carefully about pushing iLvl onto build-correct lower-iLvl gear), [qol] Browser title flash, [qol] Colorblind modes, [qol] Reduced motion, [qol] Screen reader labels, [qol] i18n scaffold, [qol] Per-tick broadcast perf audit *(needs clarification — player QoL or server perf?)*.
+- Big bets: [bigbet] Native mobile (slows dev), [bigbet] PvP arenas (combat-engine rework first), [bigbet] Player housing, [bigbet] Lore system (split from cinematics — lore is low-mid), [bigbet] Cinematic cutscenes (very low), [bigbet] Mod / theme system (needs trusted contributors), [bigbet] Cosmetic money sinks (consider in-game "casino" sinks instead; cosmetics for real money), [bigbet] Seasonal ladders, [bigbet] Cross-shard portals.
+- Meta: [meta] Monthly backlog grooming (planned), [meta] Link implemented items back to PRs (use this doc as a funnel into GitHub issues; strike/delete when issued).
 
 **Dropped — evaluated no-go / covered elsewhere**
 - [engine] Monster targeting-priority overrides — "skills should be required for priority targeting, not the player/monster definition."
@@ -71,6 +92,12 @@ Only items with **Feedback** appear here. Untagged items still need a read-throu
 - [social] Shared-class-diversity buff — skills only; no party-composition incentives.
 - [social] Threaded replies — disliked in other chat apps.
 - [social] "People you might like" suggestions — complicated, rarely beneficial.
+- [admin] Version rollback — already works via deploying older versions; recast wishlist as "export/import for versions."
+- [mcp] propose_version — subsumed by write tools + a "drafts need changelog" rule.
+- [mcp] Community content sandbox — folds into PBE / staging env.
+- [qol] Auto-equip upgrades — explicit no; players need reasons to check in.
+- [qol] Minimap — not needed on a tile-based map.
+- [qol] Map path preview — not needed; ETAs are undefined and path is shown on travel.
 
 ---
 
@@ -1021,7 +1048,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - This sounds nice.
 
-### [notify] PWA scaffolding
+### [notify] [priority-hi] [large] PWA scaffolding
 **Summary**: Make the web client installable as a PWA (manifest, service worker, icons, offline splash). Foundation for mobile push.
 **Deliverables**:
 - `manifest.webmanifest` with app name, icons, theme colors, start URL.
@@ -1033,7 +1060,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - This would be really nice to have as it's a requirement for a few other items.
 
-### [notify] Browser push via Service Worker
+### [notify] [priority-low] [medium] Browser push via Service Worker
 **Summary**: Deliver push notifications to users who've installed the PWA or enabled notifications in their browser.
 **Dependencies**: PWA scaffolding, notification framework core.
 **Deliverables**:
@@ -1046,7 +1073,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - I don't know many users that allow notifications on websites, but this would be nice to have.
 
-### [notify] Email notification channel
+### [notify] [priority-low] [medium] Email notification channel
 **Summary**: Deliver notifications via email for users who opt in. Reuses the existing AWS SES setup from magic-link auth.
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1059,7 +1086,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - This is a lower priority as I don't want to be too concerned with my AWS spend at the moment. But it is a nice to have.
 
-### [notify] Digest / bundling
+### [notify] [priority-low] [small] Digest / bundling
 **Summary**: Instead of one email per event, bundle multiple notifications into a daily or hourly digest (per-user preference).
 **Dependencies**: Email notification channel.
 **Deliverables**:
@@ -1071,7 +1098,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - If we have email notifications, this sounds nice. Maybe even a weekly digest with things like "number of monsters killed" or "exp gained" or "items acquired". There's a few possibilities with the digest, but a low priority.
 
-### [notify] Quiet hours / do-not-disturb
+### [notify] [priority-low] [small] Quiet hours / do-not-disturb
 **Summary**: Users can specify time ranges where push/email are suppressed (still captured in the in-app inbox).
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1082,7 +1109,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - Interesting. Lower priority, but sounds like it could be a good idea.
 
-### [notify] Rate limiting & deduplication
+### [notify] [priority-mid] [small] Rate limiting & deduplication
 **Summary**: Prevent notification spam — e.g., 20 DMs in a minute shouldn't yield 20 push notifications.
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1092,7 +1119,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - Yes, absolutely. I don't know the possibilities with web page notifications, but I believe that at least Android notifications can "append" data to existing notifications to alleviate things like this. I would hope that web and iOS could handle things similarly.
 
-### [notify] Party notifications
+### [notify] [priority-hi] [small] Party notifications
 **Summary**: Notify on party events — invite received, you were kicked, promoted, demoted, ownership transferred, member joined/left.
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1102,7 +1129,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a must.
 
-### [notify] DM notifications
+### [notify] [priority-hi] [small] DM notifications
 **Summary**: Notify when a user receives a direct message while they're offline or not looking at chat.
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1112,7 +1139,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a must.
 
-### [notify] Friend-request notifications
+### [notify] [priority-hi] [small] Friend-request notifications
 **Summary**: Notify on incoming friend requests and when an outgoing request is accepted.
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1121,7 +1148,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a must.
 
-### [notify] Trade notifications
+### [notify] [priority-low] [small] Trade notifications
 **Summary**: Notify when a trade is proposed, countered, confirmed, or cancelled involving you.
 **Dependencies**: Notification framework core, existing trade system.
 **Deliverables**:
@@ -1131,7 +1158,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a nice to have.
 
-### [notify] Guild combat notifications
+### [notify] [priority-low] [small] Guild combat notifications
 **Summary**: Notify guild members when tile combat is declared, resolved, won, or lost; include bracket outcomes.
 **Dependencies**: Notification framework core, daily tile combat tick.
 **Deliverables**:
@@ -1141,7 +1168,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a nice to have.
 
-### [notify] Guild event notifications
+### [notify] [priority-hi] [small] Guild event notifications
 **Summary**: Notify on non-combat guild events — invite received, promoted, demoted, guild achievement unlocked, scheduled raid reminder.
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1150,7 +1177,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a must.
 
-### [notify] World event notifications
+### [notify] [priority-low] [small] World event notifications
 **Summary**: Push global announcements — world events starting, timed bosses spawning, server maintenance.
 **Dependencies**: Notification framework core, world events framework.
 **Deliverables**:
@@ -1160,7 +1187,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a nice to have.
 
-### [notify] Quest notifications
+### [notify] [priority-hi] [small] Quest notifications
 **Summary**: Notify on quest progress milestones and daily/weekly resets.
 **Dependencies**: Notification framework core, quest system MVP.
 **Deliverables**:
@@ -1170,7 +1197,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - As a "notification type" to be able to opt into this is a must.
 
-### [notify] Admin broadcast tool
+### [notify] [priority-low] [medium] Admin broadcast tool
 **Summary**: Admin UI to send a one-off notification to all or filtered users (maintenance window, apology, event announcement).
 **Dependencies**: Notification framework core.
 **Deliverables**:
@@ -1185,117 +1212,118 @@ All notification channels are **opt-in** and **granular** — users pick which c
 
 ## Admin & Content Tooling
 
-### [admin] Bulk tile paint & fill
+### [admin] [priority-low] [medium] Bulk tile paint & fill
 **Summary**: Paint multiple tiles at once; rectangular fill; flood fill by zone.
 **Deliverables**: Multi-select tool; fill tools; bulk-save flow.
 **Feedback**:
 - This is a nice to have. Right now each tile probably will be considered manually.
 
-### [admin] Copy/paste tile regions
+### [admin] [priority-low] [medium] Copy/paste tile regions
 **Summary**: Select a hex region, paste elsewhere.
-**Deliverables**: Region select; clipboard; paste with type/zone preserved.**Feedback**:
+**Deliverables**: Region select; clipboard; paste with type/zone preserved.
+**Feedback**:
 - This isn't a terrible idea. Low priority as this kind of works with appending tiles as duplicates is already a thing.
 
-### [admin] Undo/redo in world editor
+### [admin] [priority-hi] [medium] Undo/redo in world editor
 **Summary**: History stack on the admin editor.
 **Deliverables**: Local history; keyboard shortcuts; conflict warning on concurrent edits.
 **Feedback**:
 - This would be really nice to have. Higher priority.
 
-### [admin] Layered map view
+### [admin] [priority-low] [small] Layered map view
 **Summary**: Toggle layers for zones, encounters, shops, tile types.
 **Deliverables**: Layer toggles; rendering variants per layer.
 **Feedback**:
 - Low priority. Kind of makes sense with things like fog of war.
 
-### [admin] Version diff preview
+### [admin] [priority-low] [medium] Version diff preview
 **Summary**: Before publishing, show which tiles/items/monsters changed.
 **Deliverables**: Diff computation between draft and live; UI.
 **Feedback**:
 - Lower priority.
 
-### [admin] Version rollback
+### [admin] [dropped] Version rollback
 **Summary**: Roll back to any previous version.
 **Deliverables**: Rollback action on version list; confirmation; post-rollback redeploy.
 **Feedback**:
 - I think this already exists if you just deploy an older version. This makes me thing of an export/import feature being a nice to have for a version though.
 
-### [admin] Scheduled deploys
+### [admin] [priority-low] [small] Scheduled deploys
 **Summary**: Queue a content deploy for a specific time.
 **Deliverables**: Schedule store; cron worker; admin UI.
 **Feedback**:
 - Lower priority, sounds kind of nice though.
 
-### [admin] Battle simulator
+### [admin] [priority-low] [large] Battle simulator
 **Summary**: Drop party + encounter into admin UI, step through ticks.
 **Deliverables**: Sim harness reusing `CombatEngine`; admin UI to configure party and encounter; play/step/pause; log viewer.
 **Feedback**:
 - This sounds a little complicated, but really nice for balancing. Low priority for now.
 
-### [admin] Balance preview tool
+### [admin] [priority-low] [medium] Balance preview tool
 **Summary**: "If I set X stat to Y, here's how 100 sim runs go."
 **Dependencies**: Battle simulator.
 **Deliverables**: Batch sim runner; win-rate / avg-damage reporting.
 **Feedback**:
 - An extension of the battle simulator. Nice to have, lower priority.
 
-### [admin] Content sanity linter
+### [admin] [priority-mid] [medium] Content sanity linter
 **Summary**: Flags orphan data (tiles without zones, items without cost, monsters without drops, dangling refs).
 **Deliverables**: Linter pass; results panel; one-click fixes where possible.
 **Feedback**:
 - This could be really nice. Maybe this executes whenever a user attempts to publish a version.
 
-### [admin] Skill tree editor
+### [admin] [priority-hi] [large] Skill tree editor
 **Summary**: GUI for authoring skill trees.
 **Deliverables**: Skill tree visualization; edit UI; validation; persistence.
 **Feedback**:
 - I really want this. Higher priority. We'll probably need to build most of the skills as developed features, but at the very least it would be nice to have the ability to view all of the skills at a glance as an admin.
 
-### [admin] Item editor quality-of-life
+### [admin] [priority-low] [small] Item editor quality-of-life
 **Summary**: Stat roll preview; drop-rate simulator.
 **Deliverables**: Preview widgets on item form; sim panel.
 **Feedback**:
 - Lower priority. Will probably be nicer to have in the future.
 
-### [admin] Encounter designer UI
+### [admin] [priority-low] [large] Encounter designer UI
 **Summary**: Build encounters with mixed monster groups and placements.
 **Dependencies**: Encounter redesign (see `ideas/encounters.md`).
 **Deliverables**: Per `ideas/encounters.md`.
 **Feedback**:
 - Nice to have, low priority. This is already basically done.
 
-### [admin] Shop bulk import
+### [admin] [priority-low] [small] Shop bulk import
 **Summary**: Paste JSON to populate shop inventory.
 **Deliverables**: Import UI; validation; diff preview.
 **Feedback**:
 - Lower priority. Would rather have AI tools before this. The bulk import should be able to be performed through an API if we wanted to.
 
-### [admin] Player inspector
+### [admin] [priority-low] [medium] Player inspector
 **Summary**: Full read-only view of a player's state + export.
 **Deliverables**: Inspector modal; export JSON.
 **Feedback**:
 - Lower priority. I see the benefit to this, but not a need at the moment.
 
-### [admin] Impersonate (read-only)
+### [admin] [priority-low] [medium] Impersonate (read-only)
 **Summary**: View what a player sees, for support.
 **Deliverables**: Read-only session fork; audit log of impersonations.
 **Feedback**:
 - This could be beneficial for support purposes. Lower priority at the moment.
 
-### [admin] Mass-mail / gift tool
+### [admin] [priority-mid] [medium] Mass-mail / gift tool
 **Summary**: Send item/gold to all or filtered players.
 **Dependencies**: Player mailbox.
 **Deliverables**: Filter UI; confirmation; batch job; audit log.
 **Feedback**:
 - Ooo, I like the gift tool. That's easier than a trade dialog. The mailbox idea is kind of nice so that a player can see that they have something to receive and who sent it. Mid-high priority.
 
-### [admin] Gift codes
+### [admin] [priority-low] [medium] Gift codes
 **Summary**: Generate redeemable codes.
 **Deliverables**: Code store; redeem endpoint; admin UI for creating/listing.
 **Feedback**:
 - Very low priority, but nice to have way down the road if we have redeemable content.
 
-### [admin] Staging server / env
+### [admin] [priority-low] [large] Staging server / env
 **Summary**: Test content changes on a staging deploy before live.
 **Deliverables**: Env config; deploy pipeline fork; promote-to-live action.
 **Notes**: Infra-flavored; spike first.
@@ -1306,7 +1334,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 
 ## Analytics & Balancing
 
-### [analytics] Event pipeline MVP
+### [analytics] [priority-hi] [large] Event pipeline MVP
 **Summary**: Append-only structured event log covering core player actions.
 **Deliverables**:
 - NDJSON append store in `data/events/`.
@@ -1317,77 +1345,77 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - If this is core to building on top of for other analytics, this is a must have.
 
-### [analytics] Class distribution dashboard
+### [analytics] [priority-mid] [small] Class distribution dashboard
 **Summary**: Admin dashboard: players per class, levels per class.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Query + chart on admin dashboard.
 **Feedback**:
 - This doesn't feel like it needs an event pipeline.
 
-### [analytics] Class XP rate dashboard
+### [analytics] [priority-mid] [small] Class XP rate dashboard
 **Summary**: XP/hour per class — reveals over/underperformers.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Aggregation; chart with historical comparison.
 **Feedback**:
 - Seems like a quick win. Mid priority.
 
-### [analytics] Skill usage frequency dashboard
+### [analytics] [priority-low] [small] Skill usage frequency dashboard
 **Summary**: Which skills are equipped vs. ignored.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Equip/unequip tracking; popularity chart; ignored-skills list.
 **Feedback**:
 - Low priority. Will be somewhat difficult to really make sure we make decisions on this data properly without large sample sizes.
 
-### [analytics] Death / wipe rate dashboard
+### [analytics] [priority-low] [medium] Death / wipe rate dashboard
 **Summary**: By zone, encounter, class composition.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Wipe event; aggregation; hot-spot map overlay.
 **Feedback**:
 - Low priority. Players will probably not be hanging out in areas that are "over their head".
 
-### [analytics] Loot distribution dashboard
+### [analytics] [priority-low] [medium] Loot distribution dashboard
 **Summary**: Drops, equipped, vendored, ignored per item.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Item lifecycle tracking; chart.
 **Feedback**:
 - Not exactly sure what this tells us. Might be interesting to track at the least. Low priority.
 
-### [analytics] Economy health dashboard
+### [analytics] [priority-low] [medium] Economy health dashboard
 **Summary**: Gold inflow/outflow, player gold distribution, price trends.
 **Dependencies**: Event pipeline MVP, auction house (for prices).
 **Deliverables**: Aggregations; charts.
 **Feedback**:
 - Low priority.
 
-### [analytics] Retention cohort dashboard
+### [analytics] [priority-mid] [medium] Retention cohort dashboard
 **Summary**: D1, D7, D30 retention by class, starting zone, etc.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Cohort table; filters.
 **Feedback**:
 - This feels super valuable. We don't have "starting zones" yet. But I would like to see if there are any trends as to why users play, don't play, how often they take breaks, all sorts of information here. Mid-high priority.
 
-### [analytics] Active hours heatmap
+### [analytics] [priority-low] [small] Active hours heatmap
 **Summary**: When are players online?
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Login/logout tracking; heatmap chart.
 **Feedback**:
 - Interesting idea. In theory this could vary per timezone or something, so there may need to be some filters here.
 
-### [analytics] Party composition stats
+### [analytics] [priority-mid] [small] Party composition stats
 **Summary**: Solo vs partied; avg party size; popular class combos.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Aggregations; chart.
 **Feedback**:
 - This could go in conjunction with retention. Which players are quitting while they are groups, in a guild, etc.
 
-### [analytics] New-player funnel
+### [analytics] [priority-mid] [medium] New-player funnel
 **Summary**: Login → class-select → first battle → first level → first party. Where do they drop?
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Funnel chart; per-step drop rate; segmentable by date.
 **Feedback**:
 - Yes, this would be nice. We may be able to track some of this per player as opposed to universally in that player pipeline. There may be some "tags" that players acquire on their firsts. This could eventually possibly lead into quests or achievements as well.
 
-### [analytics] Live metrics dashboard
+### [analytics] [priority-low] [small] Live metrics dashboard
 **Summary**: Real-time online count, active battles, tile occupancy.
 **Deliverables**: In-memory counters; admin UI auto-refresh; no DB dependency.
 **Feedback**:
@@ -1397,57 +1425,57 @@ All notification channels are **opt-in** and **granular** — users pick which c
 
 ## Anti-Cheat & Integrity
 
-### [anticheat] Global WS rate-limit pass
+### [anticheat] [priority-low] [small] Global WS rate-limit pass
 **Summary**: Every WS message handler has a rate limit.
 **Deliverables**: Central limiter; per-message-type budgets; 429-like reply for exceeded limits.
 **Feedback**:
 - Would this be per player? I don't fully follow this one. Sounds like it could be important. Going to say low priority at the moment until player base increases.
 
-### [anticheat] Input-validation audit
+### [anticheat] [priority-low] [medium] Input-validation audit
 **Summary**: Every WS + REST handler validates its payload and rejects malformed input, logging offenders.
 **Deliverables**: Central validator (zod-like); audit pass across all handlers; tests.
 **Feedback**:
 - This sounds like it could be important to save malicious attacks. Let's mark this as a low-mid priority and promote priority if we find issues.
 
-### [anticheat] Device-token overlap detection
+### [anticheat] [priority-mid] [small] Device-token overlap detection
 **Summary**: Surface accounts sharing a device token more loudly (boost/farming heuristic).
 **Deliverables**: Enhanced admin alert; watch-list; allowlist (families share devices — false positive mitigation).
 **Feedback**:
 - Yeah, we can tag any accounts that share the device token more loudly. Mid-priority.
 
-### [anticheat] Trade-abuse heuristics
+### [anticheat] [priority-low] [medium] Trade-abuse heuristics
 **Summary**: Detect chain trades funneling wealth to mains.
 **Dependencies**: Event pipeline MVP.
 **Deliverables**: Trade graph; rules engine flagging suspicious patterns; admin review queue.
 **Feedback**:
 - There shouldn't be "mains" in this game. This is low priority.
 
-### [anticheat] Chat rate limit + spam filter
+### [anticheat] [priority-low] [small] Chat rate limit + spam filter
 **Summary**: Rate-limit outbound chat; basic pattern filter for spam.
 **Deliverables**: Token bucket per user; spam pattern library; offense tracker.
 **Feedback**:
 - This sounds great even though it hasn't been needed quite yet. We already have a block button so per-user can block spammers. Mid-low priority.
 
-### [anticheat] Report queue & disposition workflow
+### [anticheat] [priority-hi] [medium] Report queue & disposition workflow
 **Summary**: Admin queue for player reports with dispositions and audit.
 **Dependencies**: Player report button.
 **Deliverables**: Queue UI; disposition actions (ignore/warn/suspend/ban); history per player.
 **Feedback**:
 - Yes, if we have a report button, this will be high priority following that.
 
-### [anticheat] WebSocket session rotation
+### [anticheat] [priority-low] [medium] WebSocket session rotation
 **Summary**: Rotate session secret periodically; re-auth on rotation.
 **Deliverables**: Rotation schedule; graceful reconnect; test.
 **Feedback**:
 - Sounds like a nice to have. Low priority today.
 
-### [anticheat] Trade confirm nonce
+### [anticheat] [priority-hi] [small] Trade confirm nonce
 **Summary**: Nonce to prevent replay on trade confirm.
 **Deliverables**: Per-trade nonce; server validation.
 **Feedback**:
 - Yes please. High priority if this leaves room for issues/cheating.
 
-### [anticheat] Transparent ban changelog
+### [anticheat] [priority-low] [small] Transparent ban changelog
 **Summary**: Public pseudonymous log of bans/suspensions.
 **Deliverables**: Admin toggle for public log; opt-in disclosure; sanitized view.
 **Feedback**:
@@ -1457,7 +1485,7 @@ All notification channels are **opt-in** and **granular** — users pick which c
 
 ## AI-Assisted Content (MCP)
 
-### [mcp] MCP server scaffold (`idle-party-mcp`)
+### [mcp] [priority-hi] [medium] MCP server scaffold (`idle-party-mcp`)
 **Summary**: Initial MCP server exposing read-only content tools to Claude.
 **Deliverables**:
 - MCP server project skeleton.
@@ -1467,35 +1495,35 @@ All notification channels are **opt-in** and **granular** — users pick which c
 **Feedback**:
 - I like it. High priority.
 
-### [mcp] MCP write tools (draft only)
+### [mcp] [priority-hi] [large] MCP write tools (draft only)
 **Summary**: Add `create_*`, `update_*`, `delete_*` tools that write to drafts, not live.
 **Dependencies**: MCP server scaffold, version system.
 **Deliverables**: Draft-scoped write tools; clear separation of draft/live; admin approval required to publish.
 **Feedback**:
 - Excellent approach. I like the draft-only approach. High priority.
 
-### [mcp] MCP simulate_battle tool
+### [mcp] [priority-low] [medium] MCP simulate_battle tool
 **Summary**: Call the battle simulator via MCP.
 **Dependencies**: Battle simulator, MCP server scaffold.
 **Deliverables**: Tool that takes a party + encounter and returns combat log + outcome.
 **Feedback**:
 - Low priority. If I find that I need simulations then we can rework this one.
 
-### [mcp] MCP balance_stats tool
+### [mcp] [priority-low] [medium] MCP balance_stats tool
 **Summary**: Expose current balance metrics via MCP.
 **Dependencies**: Analytics event pipeline, MCP server scaffold.
 **Deliverables**: Aggregation tool; rate limit.
 **Feedback**:
 - Lower priority. Requires analytics to be built out pretty heavily and well tested beforehand.
 
-### [mcp] MCP propose_version tool
+### [mcp] [dropped] MCP propose_version tool
 **Summary**: Create a draft version with a changelog note.
 **Dependencies**: Version system, MCP write tools.
 **Deliverables**: Draft-creating tool + approval flow.
 **Feedback**:
 - This doesn't feel like a full feature by itself. The write tools should cover this, but we could rework this as "drafts need changelog" for the admin section.
 
-### [mcp] Community content sandbox (far future)
+### [mcp] [dropped] Community content sandbox (far future)
 **Summary**: Let trusted users author content in a sandbox world.
 **Dependencies**: MCP write tools, staging env.
 **Deliverables**: Sandbox env; user-facing flow; upvote + promote to live.
@@ -1506,127 +1534,127 @@ All notification channels are **opt-in** and **granular** — users pick which c
 
 ## Quality of Life
 
-### [qol] Damage numbers in combat
+### [qol] [priority-mid] [small] Damage numbers in combat
 **Summary**: Floating damage numbers above combatants (toggleable).
 **Deliverables**: Render hook; toggle in settings.
 **Feedback**:
 - Mid-high priority. Might be a "quick win".
 
-### [qol] Combat log filters
+### [qol] [priority-mid] [small] Combat log filters
 **Summary**: Filter by damage, heal, skill, loot.
 **Deliverables**: Filter UI; persist selection.
 **Feedback**:
 - This would be nice. May be able to include room change notifications, death announcements, etc. Mid-high priority.
 
-### [qol] Combat log auto-scroll pin
+### [qol] [priority-low] [small] Combat log auto-scroll pin
 **Summary**: Lock to bottom unless user scrolls up.
 **Deliverables**: Scroll detection; pin indicator.
 **Feedback**:
 - Low priority. It already kind of works as is. It is annoying that if we scroll right now that we stop receiving updates, but that prevents the text message from growing infinitely. This is a fine-tuning task.
 
-### [qol] Skill timeline UI
+### [qol] [priority-low] [medium] Skill timeline UI
 **Summary**: Show upcoming active-skill triggers on the combat bar.
 **Deliverables**: Cooldown tracker UI element; per-player skill previews.
 **Feedback**:
 - Oh I like this to see when we cast our active. Mid-low priority. Really if we do a large rework to the combat UI then we could have this per player.
 
-### [qol] Minimap
+### [qol] [dropped] Minimap
 **Summary**: Minimap with party marker and waypoints.
 **Deliverables**: Minimap component; camera sync; toggle.
 **Feedback**:
 - Not needed. With the map being tile based, this doesn't feel necessary.
 
-### [qol] Map path preview
+### [qol] [dropped] Map path preview
 **Summary**: Hover a tile to see the hex path and ETA.
 **Deliverables**: Preview render in WorldMapScene; pathfinder integration.
 **Feedback**:
 - Not needed. We can't estimate arrival times as there is combat along the path. Starting movement to a tile already shows the path.
 
-### [qol] Tile hover tooltips
+### [qol] [priority-low] [medium] Tile hover tooltips
 **Summary**: Hover to see room name, zone, encounters.
 **Deliverables**: Tooltip component; show on hover; hide on move.
 **Feedback**:
 - Hover already tells room name and zone. Showing encounters is a little tricky, maybe. I guess we could show them any of the encounters they've already experienced. If there are encountered they haven't experienced then it could show "unknown" or something. Requires storing which encounters a player has seen per room. We'd have to account for version updates if rooms are updated, so we might need some sort of "version tag" if a room was modified between when they visited the room and now. But really only "changed encounters" and not any other changes to the room. Lots of version information we don't have yet. Low priority.
 
-### [qol] Map search
+### [qol] [priority-low] [medium] Map search
 **Summary**: "Find room: Blacksmith" → camera pans.
 **Deliverables**: Search input; tile index; pan animation.
 **Feedback**:
 - Low priority for now as the game isn't quite big enough. I would think the map should zoom out to allow a player to see the room and their room at the same time. Would require that they have already visited the room as well. Low priority.
 
-### [qol] Gear loadouts
+### [qol] [priority-mid] [medium] Gear loadouts
 **Summary**: Save skill + equipment sets, swap between them.
 **Deliverables**: Loadout data model; per-player storage; UI.
 **Feedback**:
 - Mid priority. This would be really helpful as players move between zones.
 
-### [qol] Item comparison tooltip
+### [qol] [priority-low] [small] Item comparison tooltip
 **Summary**: Hover a new item, see diff vs. currently equipped.
 **Deliverables**: Tooltip diff computation; show green/red deltas.
 **Feedback**:
 - We may want a "item level" calculation eventually. But this is difficult for me as I believe players may want lower item level items if the stats followed their builds. Just try not to make it too "forceful" that they *should* wear the higher item level piece of gear.
 
-### [qol] Auto-equip upgrades (opt-in)
+### [qol] [dropped] Auto-equip upgrades (opt-in)
 **Summary**: Auto-equip items with clearly better stats when the slot isn't locked.
 **Deliverables**: "Better item" heuristic; opt-in setting; log entry on auto-equip.
 **Feedback**:
 - Nooo! Sorry, this is one of the incentives to have players check in once in a while.
 
-### [qol] Bulk sell
+### [qol] [priority-mid] [small] Bulk sell
 **Summary**: Select multiple items at a shop and sell in one click.
 **Deliverables**: Multi-select UI in ShopPopup; confirm dialog.
 **Feedback**:
 - This is a nice to have. Mid priority.
 
-### [qol] Drag to equip/sell
+### [qol] [priority-mid] [small] Drag to equip/sell
 **Summary**: Drag-and-drop in Items screen.
 **Deliverables**: DnD handlers; fallback for mobile.
 **Feedback**:
 - Nice to have. Mid priority.
 
-### [qol] Browser title flash
+### [qol] [priority-low] [small] Browser title flash
 **Summary**: Flash tab title on new message / invite while in background.
 **Deliverables**: Title flasher; cancel on focus.
 **Feedback**:
 - Is this essentially just an upgraded badge icon? Low priority.
 
-### [qol] Unified toast system
+### [qol] [priority-mid] [medium] Unified toast system
 **Summary**: Consolidate ad-hoc toasts into a single component.
 **Deliverables**: Toast API; migrate existing call sites.
 **Feedback**:
 - I like this. Any consolidation in the codebase is beneficial and also helps build towards a more cohesive user experience. Mid priority.
 
-### [qol] Colorblind modes
+### [qol] [priority-low] [small] Colorblind modes
 **Summary**: Alternate palettes for class/rarity colors.
 **Deliverables**: Theme switcher; audit contrast.
 **Feedback**:
 - Low priority until I hear reasons to implement it. Theme switchers sound nice. But still low priority.
 
-### [qol] Font size scale setting
+### [qol] [priority-mid] [small] Font size scale setting
 **Summary**: Larger text option.
 **Deliverables**: CSS scale variable; settings UI.
 **Feedback**:
 - Mid priority. Right now this is a common complain that the fonts are too small.
 
-### [qol] Reduced motion setting
+### [qol] [priority-low] [small] Reduced motion setting
 **Summary**: Disable screen shake / flashes.
 **Deliverables**: Setting; guard all animations behind it.
 **Feedback**:
 - Low priority.
 
-### [qol] Screen reader labels audit
+### [qol] [priority-low] [medium] Screen reader labels audit
 **Summary**: Ensure interactive elements have accessible labels.
 **Deliverables**: Audit pass; add aria labels; test with screen reader.
 **Feedback**:
 - Low priority.
 
-### [qol] i18n scaffold
+### [qol] [priority-low] [large] i18n scaffold
 **Summary**: Extract strings to a table for community translation.
 **Deliverables**: i18n library integration; first-pass extraction; locale switcher.
 **Feedback**:
 - Low priority.
 
-### [qol] Per-tick broadcast perf audit
+### [qol] [priority-low] [medium] Per-tick broadcast perf audit
 **Summary**: Profile state-message fan-out under load.
 **Deliverables**: Benchmarks; batching or diffing improvements.
 **Feedback**:
@@ -1636,47 +1664,47 @@ All notification channels are **opt-in** and **granular** — users pick which c
 
 ## Long Shots / Big Bets
 
-### [bigbet] Native mobile app
+### [bigbet] [priority-low] [large] Native mobile app
 **Summary**: Wrap the web client (or go native) for app-store presence.
 **Notes**: Explicitly out of scope near-term — PWA (see Notifications & PWA) is the mobile path of choice. Revisit only if store presence or device features (background audio, advanced push) demand it.
 **Feedback**:
 - Low priority. Very nice to have, but exponentially slows down development in the early stages.
 
-### [bigbet] PvP arenas
+### [bigbet] [priority-low] [large] PvP arenas
 **Summary**: Party-vs-party arenas, tournaments, seasonal ladders.
 **Dependencies**: Combat engine fairness audit, anti-cheat hardening.
 **Notes**: Huge design effort; do separate design doc before committing.
 **Feedback**:
 - Sounds fun, but balancing and a new combat engine should come first.
 
-### [bigbet] Player housing / guild halls
+### [bigbet] [priority-low] [large] Player housing / guild halls
 **Summary**: Customize a personal or guild tile; invite friends to visit.
 **Dependencies**: Multi-map support.
 **Feedback**:
 - Low priority. Will be an interesting addition at some point in the future, but too many other features far outweight this one.
 
-### [bigbet] Lore / cinematic system
+### [bigbet] [priority-low] [large] Lore / cinematic system
 **Summary**: Scripted cutscenes triggered by quests/boss kills.
 **Feedback**:
 - Cinematics... very big bet. Lore may be easier. We could split this into two tasks. Lore system could probably come sooner. Very low priority on cinematics. Low-mid priority on lore.
 
-### [bigbet] Client mod / theme system
+### [bigbet] [priority-low] [large] Client mod / theme system
 **Summary**: User-contributed cosmetic themes & UI layouts (non-gameplay).
 **Notes**: Needs strict sandboxing.
 **Feedback**:
 - Low priority. Need trusted users to be submitting things.
 
-### [bigbet] Cosmetic money sinks (dyes, pet skins)
+### [bigbet] [priority-low] [medium] Cosmetic money sinks (dyes, pet skins)
 **Summary**: Absorb gold inflation via non-power cosmetics.
 **Feedback**:
 - Low priority. The gold sink sounds interesting, we may develop some other features for this though. I was thinking about some silly "casino" games within the game or something for this. Cosmetics might need to be reserved for real world spending or something.
 
-### [bigbet] Seasonal ladders / resets
+### [bigbet] [priority-low] [large] Seasonal ladders / resets
 **Summary**: Quarterly seasonal resets with cosmetic rewards for top finishers.
 **Feedback**:
 - Low priority. Will be nice in the future to incentivize continued play.
 
-### [bigbet] Cross-shard portal play
+### [bigbet] [priority-low] [large] Cross-shard portal play
 **Summary**: Multiple instanced worlds that can cross-visit via portals.
 **Feedback**:
 - Low priority as we only have one realm/world right now.
@@ -1685,13 +1713,13 @@ All notification channels are **opt-in** and **granular** — users pick which c
 
 ## Meta
 
-### [meta] Monthly backlog grooming
+### [meta] [priority-mid] [small] Monthly backlog grooming
 **Summary**: Review this doc monthly — promote actionable items to GitHub issues, retire stale ones.
 **Deliverables**: Recurring calendar reminder; process notes.
 **Feedback**:
 - I plan to review this regularly.
 
-### [meta] Link implemented items back to PRs
+### [meta] [priority-mid] [small] Link implemented items back to PRs
 **Summary**: When an item ships, strike through and link the PR/design doc.
 **Deliverables**: Convention captured in the file header.
 **Feedback**:
