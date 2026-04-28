@@ -1591,12 +1591,14 @@ export function processPartyTick(state: PartyCombatState): TickResult {
       // Normal monster attack on player
       let target = findTarget(monster.gridPosition, state.players, true);
 
-      // Intercept check: if any player has interceptActive, redirect to them
+      // Intercept check: if any player has interceptActive, redirect to them.
+      // Intercept only redirects the next attack — consume it after firing.
       if (target) {
         const interceptor = state.players.find(p => p.currentHp > 0 && p.interceptActive && p !== target);
         if (interceptor) {
           logEntries.push(`${interceptor.username} intercepts the attack on ${target.username}!`);
           target = interceptor;
+          interceptor.interceptActive = false;
         }
       }
 
@@ -1822,11 +1824,13 @@ function tryExecuteMonsterSkill(
         // Target lowest HP player
         let target = alivePlayers.reduce((low, p) => p.currentHp < low.currentHp ? p : low, alivePlayers[0]);
         if (target) {
-          // Intercept redirect: physical and magical single-target skills can be intercepted
+          // Intercept redirect: physical and magical single-target skills can be intercepted.
+          // Intercept only redirects the next attack — consume it after firing.
           const interceptor = state.players.find(p => p.currentHp > 0 && p.interceptActive && p !== target);
           if (interceptor) {
             logEntries.push(`${interceptor.username} intercepts ${monster.name}'s ${skillDef.name} aimed at ${target.username}!`);
             target = interceptor;
+            interceptor.interceptActive = false;
           }
 
           const dodged = dodgeChance > 0 && Math.random() < dodgeChance;
