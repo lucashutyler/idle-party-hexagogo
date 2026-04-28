@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.27.1',
+    notes: [
+      'Knight Intercept now correctly redirects only the next attack, not every attack until the Knight\'s next turn',
+    ],
+  },
+  {
     version: '2026.04.22.1',
     notes: [
       'Monster skills (Fireball, Assassinate, etc.) now honor your defenses — equipment DR/MR, Knight Guard, Priest Bless, and damage shields all apply',

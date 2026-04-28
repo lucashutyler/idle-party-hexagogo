@@ -469,6 +469,59 @@ describe('Party Combat', () => {
       expect(r2.logEntries[0]).toContain('Bash');
     });
 
+    it('Knight Intercept only redirects ONE attack per cast', () => {
+      const guardSkill = getSkillById('knight_guard')!;
+      const interceptSkill = getSkillById('knight_intercept')!;
+
+      // Two monsters at the same row as the Archer so both target the Archer naturally
+      const monsters = [
+        createMonsterInstance(SEED_MONSTERS.goblin, 2),
+        createMonsterInstance(SEED_MONSTERS.goblin, 2),
+      ];
+      // Beefy monsters so they don't die mid-test
+      monsters.forEach(m => { m.maxHp = 1000; m.currentHp = 1000; m.damage = 5; });
+
+      const knight = makePlayer('Arthur', 0, {
+        className: 'Knight',
+        baseDamage: 1,
+        hp: 500,
+        equippedSkills: [guardSkill, interceptSkill, null, null, null],
+      });
+      const archer = makePlayer('Robin', 2, {
+        className: 'Archer',
+        baseDamage: 1,
+        hp: 500,
+      });
+
+      const state = createPartyCombatState([knight, archer], monsters);
+      const archerInState = state.players.find(p => p.username === 'Robin')!;
+      const knightInState = state.players.find(p => p.username === 'Arthur')!;
+
+      // Tick 1: Archer (col 2 acts first)
+      processPartyTick(state);
+      // Tick 2: Knight casts Intercept (CD 1 → triggers on attackCount 1)
+      const r2 = processPartyTick(state);
+      expect(r2.logEntries.some(l => l.includes('Intercept') || l.includes('intercept'))).toBe(true);
+      expect(knightInState.interceptActive).toBe(true);
+
+      const archerHpBefore = archerInState.currentHp;
+      const knightHpBefore = knightInState.currentHp;
+
+      // Tick 3: Monster 1 attacks → should be redirected to Knight, consuming intercept
+      const r3 = processPartyTick(state);
+      expect(r3.logEntries.some(l => l.includes('intercepts the attack'))).toBe(true);
+      expect(knightInState.interceptActive).toBe(false);
+      expect(archerInState.currentHp).toBe(archerHpBefore);
+      expect(knightInState.currentHp).toBeLessThan(knightHpBefore);
+
+      // Tick 4: Monster 2 attacks → must NOT be redirected; Archer takes the hit
+      const knightHpMid = knightInState.currentHp;
+      const r4 = processPartyTick(state);
+      expect(r4.logEntries.some(l => l.includes('intercepts the attack'))).toBe(false);
+      expect(archerInState.currentHp).toBeLessThan(archerHpBefore);
+      expect(knightInState.currentHp).toBe(knightHpMid);
+    });
+
     it('Priest Minor Heal triggers every attack (CD 1)', () => {
       const blessSkill = getSkillById('priest_bless')!;
       const healSkill = getSkillById('priest_minor_heal')!;
