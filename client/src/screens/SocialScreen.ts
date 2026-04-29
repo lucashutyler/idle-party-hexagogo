@@ -1537,11 +1537,11 @@ export class SocialScreen implements Screen {
 
     const isSelfInitiator = trade ? trade.initiator.username === selfUsername : true;
 
-    // Tradeable items: unequipped inventory items
-    const equipped = this.lastState?.character?.equipment ?? {};
-    const equippedIds = new Set(Object.values(equipped).filter(Boolean) as string[]);
+    // Tradeable items: any item with a positive inventory count.
+    // `inventory` only counts unequipped copies — equipping moves the item into `equipment` —
+    // so a player with 2 copies and 1 equipped still has 1 unequipped copy here, which is tradeable.
     const tradeableItems = Object.entries(inventory)
-      .filter(([id, count]) => (count as number) > 0 && !equippedIds.has(id))
+      .filter(([, count]) => (count as number) > 0)
       .map(([id]) => id);
 
     /** Render a card showing a list of offered items. */
