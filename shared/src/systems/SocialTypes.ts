@@ -62,13 +62,32 @@ export interface TradeOffer {
   items: TradeOfferItem[];
 }
 
+/**
+ * Trades are asynchronous: they persist server-side until both parties confirm or
+ * either cancels. Each player can have multiple proposed trades — listed in
+ * ClientSocialState.proposedTrades. `lastUpdatedBy` indicates who needs to act next:
+ * the OTHER player. (If `lastUpdatedBy === self`, you are waiting on the partner.)
+ */
 export interface TradeState {
   id: string;
   status: TradeStatus;
   initiator: TradeOffer;
   target: TradeOffer | null;
   timestamp: number;
+  /** Username of the player who last took action on this trade (proposed/countered). */
+  lastUpdatedBy: string;
   cancelReason?: string;
+}
+
+// --- Mailbox / Gift System ---
+export interface MailboxEntry {
+  id: string;
+  fromUsername: string;
+  itemId: string;
+  quantity: number;
+  sentAt: number;
+  /** True if this entry is a returned (denied) gift back to the original sender. */
+  returned?: boolean;
 }
 
 // --- Chat System ---
@@ -113,7 +132,10 @@ export interface ClientSocialState {
   allPlayers: PlayerListEntry[];
   blockedUsers: Record<string, BlockLevel>;
   chatPreferences?: ChatPreferences;
-  pendingTrade?: TradeState | null;
+  /** All async trades involving this player (initiated by or targeted at). */
+  proposedTrades?: TradeState[];
+  /** Pending gift entries in this player's mailbox. */
+  mailbox?: MailboxEntry[];
 }
 
 export interface ChatPreferences {
@@ -251,15 +273,35 @@ export interface ClientProposeTradeMessage {
 
 export interface ClientCounterTradeMessage {
   type: 'counter_trade';
+  tradeId: string;
   items: TradeOfferItem[];
 }
 
 export interface ClientConfirmTradeMessage {
   type: 'confirm_trade';
+  tradeId: string;
 }
 
 export interface ClientCancelTradeMessage {
   type: 'cancel_trade';
+  tradeId: string;
+}
+
+export interface ClientSendGiftMessage {
+  type: 'send_gift';
+  targetUsername: string;
+  itemId: string;
+  quantity: number;
+}
+
+export interface ClientAcceptGiftMessage {
+  type: 'accept_gift';
+  entryId: string;
+}
+
+export interface ClientDenyGiftMessage {
+  type: 'deny_gift';
+  entryId: string;
 }
 
 export type ClientSocialMessage =
@@ -290,7 +332,10 @@ export type ClientSocialMessage =
   | ClientProposeTradeMessage
   | ClientCounterTradeMessage
   | ClientConfirmTradeMessage
-  | ClientCancelTradeMessage;
+  | ClientCancelTradeMessage
+  | ClientSendGiftMessage
+  | ClientAcceptGiftMessage
+  | ClientDenyGiftMessage;
 
 // --- Server -> Client messages ---
 export interface ServerSocialStateMessage {

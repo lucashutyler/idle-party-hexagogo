@@ -10,6 +10,7 @@ import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem } from './social/PartySystem.js';
 import { TradeSystem } from './social/TradeSystem.js';
+import { MailboxSystem } from './social/MailboxSystem.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
@@ -27,6 +28,7 @@ export class PlayerManager {
   readonly chat: ChatSystem;
   readonly parties: PartySystem;
   readonly trades: TradeSystem;
+  readonly mailboxes: MailboxSystem;
   readonly partyBattles: PartyBattleManager;
   private getAllUsernames: () => string[];
   private readonly serverVersion = Date.now().toString();
@@ -41,6 +43,7 @@ export class PlayerManager {
     this.guilds = new GuildSystem(guildStore);
     this.parties = new PartySystem();
     this.trades = new TradeSystem();
+    this.mailboxes = new MailboxSystem();
     this.getAllUsernames = () => accountStore.getAllUsernames();
     this.partyBattles = new PartyBattleManager(
       grid,
@@ -48,7 +51,6 @@ export class PlayerManager {
       (username) => this.sessions.get(username),
       (username) => this.sendStateToPlayer(username),
       (members) => {
-        this.cancelTradesOnMove(members);
         this.cancelInvitesOnMove(members);
       },
     );
@@ -89,6 +91,8 @@ export class PlayerManager {
       }
       this.sessions.set(username, session);
       this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
+      const initialMailbox = session.consumeInitialMailbox();
+      if (initialMailbox.length > 0) this.mailboxes.setMailbox(username, initialMailbox);
       this.wireCallbacks(session);
       if (session.hasCharacter()) {
         this.ensureParty(username);
@@ -112,16 +116,7 @@ export class PlayerManager {
       wsSet.delete(ws);
       if (wsSet.size === 0) {
         this.playerConnections.delete(username);
-        // Cancel any active trade when all connections are gone (player fully disconnected)
-        const cancelledTrade = this.trades.cancelTrade(username, 'Player disconnected');
-        if (cancelledTrade) {
-          const partner = cancelledTrade.initiator.username === username
-            ? cancelledTrade.target?.username
-            : cancelledTrade.initiator.username;
-          if (partner) {
-            this.sendStateToPlayer(partner);
-          }
-        }
+        // Trades are async — they persist across disconnect. Nothing to cancel here.
       }
     }
 
@@ -150,12 +145,12 @@ export class PlayerManager {
     const saveStore = store ?? this.store;
     const session = this.sessions.get(username);
 
-    // Cancel any active trade
-    const cancelledTrade = this.trades.cancelTrade(username, 'Player suspended');
-    if (cancelledTrade) {
-      const partner = cancelledTrade.initiator.username === username
-        ? cancelledTrade.target?.username
-        : cancelledTrade.initiator.username;
+    // Cancel all active trades involving this player
+    const cancelledTrades = this.trades.cancelAllForPlayer(username, 'Player suspended');
+    for (const t of cancelledTrades) {
+      const partner = t.initiator.username === username
+        ? t.target?.username
+        : t.initiator.username;
       if (partner) this.sendStateToPlayer(partner);
     }
 
@@ -373,13 +368,15 @@ export class PlayerManager {
         sendChannel: session?.getChatSendChannel() ?? 'zone',
         dmTarget: session?.getChatDmTarget() ?? '',
       },
-      pendingTrade: this.trades.getPlayerTrade(username),
+      proposedTrades: this.trades.getPlayerTrades(username),
+      mailbox: this.mailboxes.getMailbox(username),
     };
   }
 
   /** Wire all callbacks onto a session (social state, battle state, position). */
   private wireCallbacks(session: PlayerSession): void {
     session.getSocialState = () => this.getSocialState(session.username);
+    session.getMailbox = () => this.mailboxes.getMailbox(session.username);
     session.getBattleState = () => {
       const partyId = session.getPartyId();
       if (!partyId) return null;
@@ -582,6 +579,8 @@ export class PlayerManager {
         const session = PlayerSession.fromSaveData(data, this.grid, this.content);
         this.sessions.set(data.username, session);
         this.friends.initPlayer(data.username, session.getFriends(), session.getOutgoingFriendRequests());
+        const initialMailbox = session.consumeInitialMailbox();
+        if (initialMailbox.length > 0) this.mailboxes.setMailbox(data.username, initialMailbox);
         this.wireCallbacks(session);
         validSaves.push(data);
         console.log(`[PlayerManager] Restored session for "${data.username}"`);
@@ -814,22 +813,6 @@ export class PlayerManager {
 
     console.log(`[PlayerManager] Master reset: ${count} players reset to start`);
     return count;
-  }
-
-  /** Cancel trades for all party members when the party moves to a new tile. */
-  private cancelTradesOnMove(members: ReadonlySet<string>): void {
-    for (const username of members) {
-      const cancelled = this.trades.cancelTrade(username, 'Player moved to a different room');
-      if (cancelled) {
-        const partner = cancelled.initiator.username === username
-          ? cancelled.target?.username
-          : cancelled.initiator.username;
-        if (partner) {
-          this.sendStateToPlayer(partner);
-        }
-        this.sendStateToPlayer(username);
-      }
-    }
   }
 
   /** Cancel any pending party invites involving party members that just moved. */

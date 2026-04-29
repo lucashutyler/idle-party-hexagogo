@@ -5,6 +5,7 @@ import { HexGrid, HexTile, offsetToCube, GAME_VERSION } from '@idle-party-rpg/sh
 import { PlayerManager } from './PlayerManager.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
+import { TradeStore } from './social/TradeStore.js';
 import { ContentStore } from './ContentStore.js';
 import { VersionStore } from './VersionStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
@@ -18,6 +19,7 @@ export class GameLoop {
   readonly versionStore: VersionStore;
   private store: GameStateStore;
   private guildStore: GuildStore;
+  private tradeStore: TradeStore;
   private saveInterval?: ReturnType<typeof setInterval>;
   private grid!: HexGrid;
 
@@ -25,6 +27,7 @@ export class GameLoop {
     this.contentStore = new ContentStore();
     this.versionStore = new VersionStore();
     this.guildStore = new GuildStore();
+    this.tradeStore = new TradeStore();
     this.store = store;
   }
 
@@ -72,6 +75,11 @@ export class GameLoop {
     console.log(`[Startup] GuildStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
 
     t = performance.now();
+    const savedTrades = await this.tradeStore.load();
+    this.playerManager.trades.restoreFromSaveData(savedTrades);
+    console.log(`[Startup] TradeStore loaded (${savedTrades.length} trades) in ${(performance.now() - t).toFixed(1)}ms`);
+
+    t = performance.now();
     const saves = await this.store.loadAll();
     console.log(`[Startup] Save files loaded (${saves.length} players) in ${(performance.now() - t).toFixed(1)}ms`);
 
@@ -109,6 +117,7 @@ export class GameLoop {
       console.log(`[GameLoop] Saved ${count} session(s)`);
     }
     await this.guildStore.save();
+    await this.tradeStore.save(this.playerManager.trades.getAllTrades());
     await this.contentStore.save();
     await this.versionStore.save();
   }

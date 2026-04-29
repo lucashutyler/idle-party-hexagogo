@@ -1,9 +1,9 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, ServerEquipBlockedMessage } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerEquipBlockedMessage, MailboxEntry, TradeState } from '@idle-party-rpg/shared';
 import { CLASS_ICONS, UNKNOWN_CLASS_ICON, getOwnedItemIds, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { EquipSlot, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
-import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
+import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon, RARITY_COLORS } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
 
 /** Left column slots (top to bottom). */
@@ -310,6 +310,104 @@ function injectItemsStyles(): void {
         max-width: 380px;
       }
     }
+
+    .items-section-count {
+      color: #888;
+      font-size: 10px;
+      margin-left: 4px;
+    }
+
+    .items-mailbox, .items-trades {
+      margin-top: 8px;
+    }
+
+    .mailbox-list, .trade-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+
+    .mailbox-row, .trade-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      padding: 6px 8px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #1a1a2e;
+      font-size: 11px;
+    }
+    .trade-row-attention {
+      border-color: #d4af37;
+      box-shadow: 0 0 4px rgba(212,175,55,0.3);
+    }
+    .mailbox-info, .trade-row-main {
+      flex: 1;
+      min-width: 0;
+    }
+    .mailbox-from {
+      color: #aaa;
+      font-size: 10px;
+    }
+    .mailbox-note {
+      color: #d77;
+      font-style: italic;
+      margin-left: 4px;
+    }
+    .mailbox-item {
+      margin-top: 2px;
+    }
+    .mailbox-item-qty {
+      color: #888;
+      margin-left: 4px;
+    }
+    .mailbox-warn {
+      color: #d77;
+      font-size: 10px;
+      margin-top: 2px;
+    }
+    .mailbox-actions, .trade-row-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .mailbox-actions button, .trade-row-actions button {
+      padding: 3px 8px;
+      font-size: 10px;
+      min-width: 60px;
+    }
+    .trade-row-partner {
+      font-weight: bold;
+    }
+    .trade-row-status {
+      color: #aaa;
+      font-size: 10px;
+    }
+    .trade-row-attention .trade-row-status {
+      color: #d4af37;
+    }
+    .trade-row-offers {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-top: 4px;
+    }
+    .trade-row-side {
+      font-size: 10px;
+    }
+    .trade-row-label {
+      color: #666;
+      margin-right: 4px;
+    }
+    .trade-row-empty {
+      color: #555;
+      font-style: italic;
+    }
+    .trade-row-item {
+      display: inline-block;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -322,6 +420,8 @@ export class ItemsScreen implements Screen {
 
   private slotsContainer!: HTMLElement;
   private inventoryGrid!: HTMLElement;
+  private mailboxContainer!: HTMLElement;
+  private tradesContainer!: HTMLElement;
   private modalOverlay!: HTMLElement;
   private searchInput!: HTMLInputElement;
   private sortSelect!: HTMLSelectElement;
@@ -338,13 +438,21 @@ export class ItemsScreen implements Screen {
   /** Cached character state for popup actions. */
   private lastEquipment: Record<string, string | null> = {};
   private lastInventory: Record<string, number> = {};
+  private lastMailbox: MailboxEntry[] = [];
+  private lastProposedTrades: TradeState[] = [];
+  private lastUsername = '';
 
   /** Change detection key — only re-render when items actually change. */
   private lastRenderedKey = '';
+  private lastMailboxKey = '';
+  private lastTradesKey = '';
 
   /** Search/sort filter state. */
   private searchFilter = '';
   private sortMode: SortMode = 'rarity';
+
+  /** Callback to open the trade modal in SocialScreen for an existing trade. */
+  private onOpenTrade?: (tradeId: string) => void;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -354,6 +462,11 @@ export class ItemsScreen implements Screen {
 
     injectItemsStyles();
     this.buildDOM();
+  }
+
+  /** Wire callback that opens the trade modal (typically routes to SocialScreen). */
+  setOnOpenTrade(cb: (tradeId: string) => void): void {
+    this.onOpenTrade = cb;
   }
 
   onActivate(): void {
@@ -419,6 +532,8 @@ export class ItemsScreen implements Screen {
           <div class="items-equip-bottom-spacer"></div>
           <div class="items-equip-bottom-right"></div>
         </div>
+        <div class="items-mailbox"></div>
+        <div class="items-trades"></div>
         <div class="items-section-label">Inventory</div>
         <div class="items-search-sort">
           <input type="text" class="items-search-input" placeholder="Search items..." />
@@ -435,9 +550,38 @@ export class ItemsScreen implements Screen {
 
     this.slotsContainer = this.container.querySelector('.items-equip-panel')!;
     this.inventoryGrid = this.container.querySelector('.items-inv-grid')!;
+    this.mailboxContainer = this.container.querySelector('.items-mailbox')!;
+    this.tradesContainer = this.container.querySelector('.items-trades')!;
     this.modalOverlay = this.container.querySelector('.items-modal-overlay')!;
     this.searchInput = this.container.querySelector('.items-search-input')!;
     this.sortSelect = this.container.querySelector('.items-sort-select')!;
+
+    // Delegated click handlers for mailbox / trades sections
+    this.mailboxContainer.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('button[data-mb-action]') as HTMLButtonElement | null;
+      if (!btn) return;
+      const action = btn.getAttribute('data-mb-action');
+      const id = btn.getAttribute('data-entry-id');
+      if (!id) return;
+      if (action === 'accept') this.gameClient.sendAcceptGift(id);
+      if (action === 'deny') this.gameClient.sendDenyGift(id);
+    });
+    this.tradesContainer.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      // Cancel button
+      const cancelBtn = target.closest('button[data-trade-cancel]') as HTMLButtonElement | null;
+      if (cancelBtn) {
+        const id = cancelBtn.getAttribute('data-trade-cancel');
+        if (id) this.gameClient.sendCancelTrade(id);
+        return;
+      }
+      // Open existing trade
+      const row = target.closest('[data-trade-id]') as HTMLElement | null;
+      if (row) {
+        const id = row.getAttribute('data-trade-id');
+        if (id && this.onOpenTrade) this.onOpenTrade(id);
+      }
+    });
 
     this.modalOverlay.addEventListener('click', (e) => {
       if (e.target === this.modalOverlay) this.hideModal();
@@ -488,14 +632,117 @@ export class ItemsScreen implements Screen {
     this.setDefs = state.setDefinitions ?? {};
     this.lastEquipment = { ...char.equipment };
     this.lastInventory = { ...char.inventory };
+    this.lastMailbox = state.social?.mailbox ?? [];
+    this.lastProposedTrades = state.social?.proposedTrades ?? [];
+    this.lastUsername = state.username ?? '';
 
-    // Only re-render when equipment or inventory actually changed
+    // Only re-render equipment/inventory when those actually changed
     const key = JSON.stringify({ e: char.equipment, i: char.inventory });
-    if (key === this.lastRenderedKey) return;
-    this.lastRenderedKey = key;
+    if (key !== this.lastRenderedKey) {
+      this.lastRenderedKey = key;
+      this.renderEquipment(char);
+      this.renderInventory();
+    }
 
-    this.renderEquipment(char);
-    this.renderInventory();
+    const mailboxKey = JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false]));
+    if (mailboxKey !== this.lastMailboxKey) {
+      this.lastMailboxKey = mailboxKey;
+      this.renderMailbox();
+    }
+
+    const tradesKey = JSON.stringify(this.lastProposedTrades.map(t => [t.id, t.status, t.lastUpdatedBy, t.initiator.items.length, t.target?.items.length ?? 0]));
+    if (tradesKey !== this.lastTradesKey) {
+      this.lastTradesKey = tradesKey;
+      this.renderProposedTrades();
+    }
+  }
+
+  private renderMailbox(): void {
+    if (this.lastMailbox.length === 0) {
+      this.mailboxContainer.innerHTML = '';
+      return;
+    }
+    const rows = this.lastMailbox.map(entry => {
+      const def = this.itemDefs[entry.itemId];
+      const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+      const name = def?.name ?? entry.itemId;
+      const fullCount = (this.lastInventory[entry.itemId] ?? 0) + entry.quantity;
+      const willOverflow = fullCount > 99;
+      const note = entry.returned ? '<span class="mailbox-note">(returned)</span>' : '';
+      const overflow = willOverflow
+        ? `<div class="mailbox-warn">Inventory full — would exceed 99 (${this.lastInventory[entry.itemId] ?? 0} + ${entry.quantity})</div>`
+        : '';
+      return `<div class="mailbox-row">
+        <div class="mailbox-info">
+          <div class="mailbox-from">From <strong>${this.escapeHtml(entry.fromUsername)}</strong> ${note}</div>
+          <div class="mailbox-item">
+            <span class="mailbox-item-name" style="color:${color}">${this.escapeHtml(name)}</span>
+            <span class="mailbox-item-qty">×${entry.quantity}</span>
+          </div>
+          ${overflow}
+        </div>
+        <div class="mailbox-actions">
+          <button class="social-action-btn add-friend" data-mb-action="accept" data-entry-id="${this.escapeHtml(entry.id)}"${willOverflow ? ' disabled' : ''}>Accept</button>
+          <button class="social-action-btn remove-friend" data-mb-action="deny" data-entry-id="${this.escapeHtml(entry.id)}">Decline</button>
+        </div>
+      </div>`;
+    }).join('');
+    this.mailboxContainer.innerHTML = `
+      <div class="items-section-label">Mailbox <span class="items-section-count">(${this.lastMailbox.length})</span></div>
+      <div class="mailbox-list">${rows}</div>
+    `;
+  }
+
+  private renderProposedTrades(): void {
+    if (this.lastProposedTrades.length === 0) {
+      this.tradesContainer.innerHTML = '';
+      return;
+    }
+    const rows = this.lastProposedTrades.map(t => {
+      const partner = t.initiator.username === this.lastUsername
+        ? (t.target?.username ?? '')
+        : t.initiator.username;
+      const waitingOnMe = t.lastUpdatedBy !== this.lastUsername;
+      const status = waitingOnMe
+        ? (t.status === 'countered' ? 'Confirm or counter' : 'Awaiting your response')
+        : (t.status === 'countered' ? 'Waiting for partner to confirm' : 'Waiting for partner');
+      const myItems = t.initiator.username === this.lastUsername
+        ? t.initiator.items
+        : (t.target?.items ?? []);
+      const theirItems = t.initiator.username === this.lastUsername
+        ? (t.target?.items ?? [])
+        : t.initiator.items;
+      const summarize = (items: { itemId: string; quantity: number }[]) =>
+        items.length === 0
+          ? '<span class="trade-row-empty">— nothing —</span>'
+          : items.map(({ itemId, quantity }) => {
+              const def = this.itemDefs[itemId];
+              const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+              return `<span class="trade-row-item" style="color:${color}">${this.escapeHtml(def?.name ?? itemId)} ×${quantity}</span>`;
+            }).join(', ');
+      return `<div class="trade-row${waitingOnMe ? ' trade-row-attention' : ''}" data-trade-id="${this.escapeHtml(t.id)}">
+        <div class="trade-row-main">
+          <div class="trade-row-partner">${this.escapeHtml(partner)}</div>
+          <div class="trade-row-status">${this.escapeHtml(status)}</div>
+          <div class="trade-row-offers">
+            <div class="trade-row-side"><span class="trade-row-label">You:</span> ${summarize(myItems)}</div>
+            <div class="trade-row-side"><span class="trade-row-label">Them:</span> ${summarize(theirItems)}</div>
+          </div>
+        </div>
+        <div class="trade-row-actions">
+          <button class="social-action-btn add-friend" data-trade-id="${this.escapeHtml(t.id)}">Open</button>
+          <button class="social-action-btn remove-friend" data-trade-cancel="${this.escapeHtml(t.id)}">Cancel</button>
+        </div>
+      </div>`;
+    }).join('');
+    this.tradesContainer.innerHTML = `
+      <div class="items-section-label">Proposed Trades <span class="items-section-count">(${this.lastProposedTrades.length})</span></div>
+      <div class="trade-list">${rows}</div>
+    `;
+  }
+
+  private escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   private renderEquipment(char: { equipment: Record<string, string | null>; className: string }): void {

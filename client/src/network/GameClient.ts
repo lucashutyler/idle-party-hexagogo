@@ -467,17 +467,31 @@ export class GameClient {
     this.sendRaw({ type: 'propose_trade', targetUsername, items });
   }
 
-  sendCounterTrade(items: TradeOfferItem[]): void {
-    console.log('[Trade] sendCounterTrade →', items);
-    this.sendRaw({ type: 'counter_trade', items });
+  sendCounterTrade(tradeId: string, items: TradeOfferItem[]): void {
+    console.log('[Trade] sendCounterTrade →', tradeId, items);
+    this.sendRaw({ type: 'counter_trade', tradeId, items });
   }
 
-  sendConfirmTrade(): void {
-    this.sendRaw({ type: 'confirm_trade' });
+  sendConfirmTrade(tradeId: string): void {
+    this.sendRaw({ type: 'confirm_trade', tradeId });
   }
 
-  sendCancelTrade(): void {
-    this.sendRaw({ type: 'cancel_trade' });
+  sendCancelTrade(tradeId: string): void {
+    this.sendRaw({ type: 'cancel_trade', tradeId });
+  }
+
+  // --- Gift ---
+
+  sendGift(targetUsername: string, itemId: string, quantity: number): void {
+    this.sendRaw({ type: 'send_gift', targetUsername, itemId, quantity });
+  }
+
+  sendAcceptGift(entryId: string): void {
+    this.sendRaw({ type: 'accept_gift', entryId });
+  }
+
+  sendDenyGift(entryId: string): void {
+    this.sendRaw({ type: 'deny_gift', entryId });
   }
 
   destroy(): void {

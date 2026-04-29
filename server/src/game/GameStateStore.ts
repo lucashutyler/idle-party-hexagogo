@@ -1,4 +1,4 @@
-import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -34,6 +34,8 @@ export interface PlayerSaveData {
   chatHistory?: ChatMessage[];
   chatSendChannel?: string;
   chatDmTarget?: string;
+  /** Pending gift entries awaiting accept/deny in the player's mailbox. */
+  mailbox?: MailboxEntry[];
 }
 
 /**
