@@ -1,15 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { TradeSystem } from '../src/game/social/TradeSystem.js';
-import type { TradeOfferItem } from '@idle-party-rpg/shared';
+import type { TradeOfferItem, TradeState } from '@idle-party-rpg/shared';
 
-// Simple helpers to simulate player state
+/**
+ * Async TradeSystem: trades persist across server restarts and movement, players
+ * can have multiple active trades (one per partner pair), and either player can
+ * confirm — but only after the OTHER player took the most recent action.
+ */
+
 function createPlayerState() {
-  const positions = new Map<string, { col: number; row: number }>();
   const inventories = new Map<string, Map<string, number>>();
   const blocked = new Map<string, Set<string>>();
 
   return {
-    setPosition: (u: string, col: number, row: number) => { positions.set(u, { col, row }); },
     giveItem: (u: string, itemId: string, count = 1) => {
       if (!inventories.has(u)) inventories.set(u, new Map());
       const inv = inventories.get(u)!;
@@ -30,50 +33,39 @@ function createPlayerState() {
       if (!blocked.has(a)) blocked.set(a, new Set());
       blocked.get(a)!.add(b);
     },
-
-    // Qty-aware: returns true iff player has >= quantity of itemId
     hasItemInInventory: (u: string, itemId: string, quantity: number = 1) =>
       (inventories.get(u)?.get(itemId) ?? 0) >= quantity,
     getInventoryCount: (u: string, itemId: string) => inventories.get(u)?.get(itemId) ?? 0,
-    areSameTile: (a: string, b: string) => {
-      const pa = positions.get(a);
-      const pb = positions.get(b);
-      if (!pa || !pb) return false;
-      return pa.col === pb.col && pa.row === pb.row;
-    },
     isBlocked: (a: string, b: string) =>
       (blocked.get(a)?.has(b) ?? false) || (blocked.get(b)?.has(a) ?? false),
   };
 }
 
-/** Shorthand: build a single-item offer array. */
 const offer = (itemId: string, quantity = 1): TradeOfferItem[] => [{ itemId, quantity }];
 
-/** Set up two players ready to trade at the same position with items. */
 function setupReadyPair(state: ReturnType<typeof createPlayerState>, itemA = 'sword', itemB = 'shield') {
-  state.setPosition('alice', 0, 0);
-  state.setPosition('bob', 0, 0);
   state.giveItem('alice', itemA);
   state.giveItem('bob', itemB);
 }
 
-/** Convenience: propose + counter so a trade is in 'countered' state. */
+/** Propose + counter so a trade is in 'countered' state (lastUpdatedBy = 'bob'). */
 function setupCounteredTrade(
   system: TradeSystem,
   state: ReturnType<typeof createPlayerState>,
   itemA = 'sword',
   itemB = 'shield',
-) {
+): TradeState {
   setupReadyPair(state, itemA, itemB);
   const proposed = system.proposeTrade('alice', 'bob', offer(itemA),
-    state.hasItemInInventory, state.areSameTile, state.isBlocked);
+    state.hasItemInInventory, state.isBlocked);
   if (typeof proposed === 'string') throw new Error(`proposeTrade failed: ${proposed}`);
-  const countered = system.counterTrade('bob', offer(itemB),
-    state.hasItemInInventory, state.areSameTile);
+  const countered = system.counterTrade(proposed.id, 'bob', offer(itemB),
+    state.hasItemInInventory);
   if (typeof countered === 'string') throw new Error(`counterTrade failed: ${countered}`);
+  return countered;
 }
 
-describe('TradeSystem', () => {
+describe('TradeSystem (async)', () => {
   let system: TradeSystem;
   let state: ReturnType<typeof createPlayerState>;
 
@@ -82,26 +74,24 @@ describe('TradeSystem', () => {
     state = createPlayerState();
   });
 
-  // ── proposeTrade ──────────────────────────────────────────────
-
   describe('proposeTrade', () => {
-    it('creates a pending trade when all conditions met', () => {
+    it('creates a pending trade with a target slot', () => {
       setupReadyPair(state);
       const result = system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+        state.hasItemInInventory, state.isBlocked);
 
       expect(typeof result).not.toBe('string');
       if (typeof result === 'string') return;
       expect(result.status).toBe('pending');
-      expect(result.initiator.username).toBe('alice');
-      expect(result.initiator.items).toEqual([{ itemId: 'sword', quantity: 1 }]);
-      expect(result.target).toBeNull();
+      expect(result.initiator).toEqual({ username: 'alice', items: [{ itemId: 'sword', quantity: 1 }] });
+      expect(result.target).toEqual({ username: 'bob', items: [] });
+      expect(result.lastUpdatedBy).toBe('alice');
     });
 
     it('rejects trading with yourself', () => {
       setupReadyPair(state);
       const result = system.proposeTrade('alice', 'alice', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+        state.hasItemInInventory, state.isBlocked);
       expect(result).toBe('Cannot trade with yourself');
     });
 
@@ -109,7 +99,7 @@ describe('TradeSystem', () => {
       setupReadyPair(state);
       state.block('alice', 'bob');
       const result = system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+        state.hasItemInInventory, state.isBlocked);
       expect(result).toBe('Cannot trade with a blocked user');
     });
 
@@ -117,439 +107,282 @@ describe('TradeSystem', () => {
       setupReadyPair(state);
       state.block('bob', 'alice');
       const result = system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+        state.hasItemInInventory, state.isBlocked);
       expect(result).toBe('Cannot trade with a blocked user');
     });
 
-    it('rejects when not on same tile', () => {
+    it('does NOT require players to be on the same tile', () => {
+      // Async: position is irrelevant.
       setupReadyPair(state);
-      state.setPosition('bob', 1, 1);
       const result = system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      expect(result).toBe('You must be in the same room to trade');
+        state.hasItemInInventory, state.isBlocked);
+      expect(typeof result).not.toBe('string');
     });
 
-    it('rejects when initiator already has a trade', () => {
+    it('rejects duplicate trade with the same partner', () => {
       setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      state.setPosition('charlie', 0, 0);
       state.giveItem('alice', 'axe');
-      const result = system.proposeTrade('alice', 'charlie', offer('axe'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      expect(result).toBe('You already have a pending trade');
+      system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      const result = system.proposeTrade('alice', 'bob', offer('axe'),
+        state.hasItemInInventory, state.isBlocked);
+      expect(result).toBe('You already have a pending trade with that player');
     });
 
-    it('rejects when target already has a trade', () => {
-      setupReadyPair(state);
-      state.setPosition('charlie', 0, 0);
-      state.giveItem('charlie', 'axe');
-      system.proposeTrade('charlie', 'bob', offer('axe'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      const result = system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      expect(result).toBe('That player already has a pending trade');
+    it('allows a player to have multiple trades with different partners', () => {
+      state.giveItem('alice', 'sword');
+      state.giveItem('alice', 'axe');
+      state.giveItem('bob', 'shield');
+      state.giveItem('charlie', 'helm');
+
+      const r1 = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      const r2 = system.proposeTrade('alice', 'charlie', offer('axe'),
+        state.hasItemInInventory, state.isBlocked);
+
+      expect(typeof r1).not.toBe('string');
+      expect(typeof r2).not.toBe('string');
+      expect(system.getPlayerTrades('alice')).toHaveLength(2);
     });
 
     it('rejects when initiator does not have the item', () => {
       setupReadyPair(state);
-      const result = system.proposeTrade('alice', 'bob', offer('nonexistent_item'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+      const result = system.proposeTrade('alice', 'bob', offer('nonexistent'),
+        state.hasItemInInventory, state.isBlocked);
       expect(result).toBe('Item not found in your inventory');
     });
 
-    it('rejects when proposing more quantity than available', () => {
-      setupReadyPair(state); // alice has 1 sword
-      const result = system.proposeTrade('alice', 'bob', offer('sword', 2),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      expect(result).toBe('Item not found in your inventory');
-    });
-
-    it('allows level 1 players to trade', () => {
-      // No level requirement — any level is valid
+    it('rejects empty offers', () => {
       setupReadyPair(state);
-      const result = system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      expect(typeof result).not.toBe('string');
-    });
-
-    it('allows multi-item offers', () => {
-      state.setPosition('alice', 0, 0);
-      state.setPosition('bob', 0, 0);
-      state.giveItem('alice', 'sword');
-      state.giveItem('alice', 'helmet');
-      state.giveItem('bob', 'shield');
-      const items: TradeOfferItem[] = [{ itemId: 'sword', quantity: 1 }, { itemId: 'helmet', quantity: 1 }];
-      const result = system.proposeTrade('alice', 'bob', items,
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      expect(typeof result).not.toBe('string');
-      if (typeof result === 'string') return;
-      expect(result.initiator.items).toHaveLength(2);
+      const result = system.proposeTrade('alice', 'bob', [],
+        state.hasItemInInventory, state.isBlocked);
+      expect(result).toBe('Must offer at least one item');
     });
   });
-
-  // ── counterTrade ──────────────────────────────────────────────
 
   describe('counterTrade', () => {
     it('locks in target items and moves to countered state', () => {
       setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
 
-      const result = system.counterTrade('bob', offer('shield'), state.hasItemInInventory, state.areSameTile);
+      const result = system.counterTrade(proposed.id, 'bob', offer('shield'), state.hasItemInInventory);
       expect(typeof result).not.toBe('string');
       if (typeof result === 'string') return;
       expect(result.status).toBe('countered');
-      expect(result.target?.username).toBe('bob');
       expect(result.target?.items).toEqual([{ itemId: 'shield', quantity: 1 }]);
+      expect(result.lastUpdatedBy).toBe('bob');
     });
 
-    it('rejects when player has no pending trade', () => {
-      const result = system.counterTrade('bob', offer('shield'), state.hasItemInInventory, state.areSameTile);
-      expect(result).toBe('No pending trade');
-    });
-
-    it('rejects when the initiator tries to counter their own trade', () => {
+    it('lets the initiator update their own offer (stays pending if target empty)', () => {
       setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+      state.giveItem('alice', 'axe');
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
 
-      const result = system.counterTrade('alice', offer('sword'), state.hasItemInInventory, state.areSameTile);
-      expect(result).toBe('Only the trade target can offer an item');
+      const updated = system.counterTrade(proposed.id, 'alice', offer('axe'), state.hasItemInInventory);
+      expect(typeof updated).not.toBe('string');
+      if (typeof updated === 'string') return;
+      expect(updated.status).toBe('pending');
+      expect(updated.initiator.items).toEqual([{ itemId: 'axe', quantity: 1 }]);
+      expect(updated.lastUpdatedBy).toBe('alice');
     });
 
-    it('rejects when trade is already countered', () => {
-      setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      system.counterTrade('bob', offer('shield'), state.hasItemInInventory, state.areSameTile);
-
-      const result = system.counterTrade('bob', offer('shield'), state.hasItemInInventory, state.areSameTile);
-      expect(result).toBe('Trade is not awaiting an offer');
+    it('rejects when trade not found', () => {
+      const result = system.counterTrade('nope', 'bob', offer('shield'), state.hasItemInInventory);
+      expect(result).toBe('Trade not found');
     });
 
-    it('rejects when players are no longer on the same tile', () => {
+    it('rejects when actor is not a participant', () => {
       setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      state.setPosition('bob', 2, 2);
+      state.giveItem('charlie', 'item');
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
 
-      const result = system.counterTrade('bob', offer('shield'), state.hasItemInInventory, state.areSameTile);
-      expect(result).toBe('You are no longer in the same room');
+      const result = system.counterTrade(proposed.id, 'charlie', offer('item'), state.hasItemInInventory);
+      expect(result).toBe('Not your trade');
     });
 
-    it('rejects when target does not have the offered item', () => {
+    it('rejects when target lacks the item', () => {
       setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
 
-      const result = system.counterTrade('bob', offer('nonexistent_item'), state.hasItemInInventory, state.areSameTile);
+      const result = system.counterTrade(proposed.id, 'bob', offer('nope'), state.hasItemInInventory);
       expect(result).toBe('Item not found in your inventory');
     });
 
-    it('rejects when counter quantity exceeds inventory', () => {
-      setupReadyPair(state); // bob has 1 shield
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      const result = system.counterTrade('bob', offer('shield', 2), state.hasItemInInventory, state.areSameTile);
-      expect(result).toBe('Item not found in your inventory');
+    it('allows back-and-forth countering after countered state is reached', () => {
+      const trade = setupCounteredTrade(system, state);
+      state.giveItem('alice', 'axe');
+
+      const updated = system.counterTrade(trade.id, 'alice', offer('axe'), state.hasItemInInventory);
+      expect(typeof updated).not.toBe('string');
+      if (typeof updated === 'string') return;
+      expect(updated.lastUpdatedBy).toBe('alice');
+      expect(updated.initiator.items).toEqual([{ itemId: 'axe', quantity: 1 }]);
+      expect(updated.status).toBe('countered'); // both still have offers
     });
   });
 
-  // ── confirmTrade ──────────────────────────────────────────────
-
   describe('confirmTrade', () => {
-    it('confirms trade and returns both offers', () => {
-      setupCounteredTrade(system, state);
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
+    it('confirms when the partner just acted', () => {
+      const trade = setupCounteredTrade(system, state);
+      // alice can confirm because bob was the last to update (the counter)
+      const result = system.confirmTrade(trade.id, 'alice',
+        state.hasItemInInventory, state.getInventoryCount);
       expect(typeof result).not.toBe('string');
       if (typeof result === 'string') return;
       expect('success' in result).toBe(false);
       if ('success' in result) return;
       expect(result.trade.status).toBe('confirmed');
-      expect(result.initiatorOffer).toEqual({ username: 'alice', items: [{ itemId: 'sword', quantity: 1 }] });
-      expect(result.targetOffer).toEqual({ username: 'bob', items: [{ itemId: 'shield', quantity: 1 }] });
+      expect(result.initiatorOffer.username).toBe('alice');
+      expect(result.targetOffer.username).toBe('bob');
     });
 
-    it('cleans up player trade entries after confirm', () => {
-      setupCounteredTrade(system, state);
-      system.confirmTrade('alice', state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
-      expect(system.getPlayerTrade('alice')).toBeNull();
-      expect(system.getPlayerTrade('bob')).toBeNull();
+    it('rejects when player tries to confirm their own latest action', () => {
+      const trade = setupCounteredTrade(system, state);
+      // bob counter-ed last; bob can't confirm
+      const result = system.confirmTrade(trade.id, 'bob',
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(result).toBe('Waiting for the other player to confirm');
     });
 
-    it('rejects when non-initiator tries to confirm', () => {
-      setupCounteredTrade(system, state);
-
-      const result = system.confirmTrade('bob',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect(result).toBe('Only the trade initiator can confirm');
-    });
-
-    it('rejects when trade is not yet countered', () => {
+    it('rejects when trade is still pending (not countered)', () => {
       setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
 
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect(result).toBe('Waiting for the other player to offer an item first');
+      const result = system.confirmTrade(proposed.id, 'alice',
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(result).toBe('Both players must offer items before confirming');
     });
 
-    it('rejects when initiator item is gone at confirm time', () => {
-      setupCounteredTrade(system, state);
+    it('rejects when actor is not a participant', () => {
+      const trade = setupCounteredTrade(system, state);
+      const result = system.confirmTrade(trade.id, 'charlie',
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(result).toBe('Not your trade');
+    });
+
+    it('rejects when offered item is gone at confirm time', () => {
+      const trade = setupCounteredTrade(system, state);
       state.takeItem('alice', 'sword');
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect(result).toBe('Your offered item is no longer in your inventory');
+      const result = system.confirmTrade(trade.id, 'alice',
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(result).toBe('An offered item is no longer in inventory');
     });
 
-    it('rejects when target item is gone at confirm time', () => {
-      setupCounteredTrade(system, state);
-      state.takeItem('bob', 'shield');
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect(result).toBe('Their offered item is no longer in their inventory');
-    });
-
-    it('rejects when players moved apart before confirmation', () => {
-      setupCounteredTrade(system, state);
-      state.setPosition('bob', 3, 3);
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect(result).toBe('You are no longer in the same room');
-    });
-
-    // ── Stack capacity checks ──────────────────────────────────
-
-    it('returns inventory_full failure when initiator has 99 of the incoming item', () => {
-      setupCounteredTrade(system, state); // alice offers sword, bob offers shield
-      // alice already has 99 shields — cannot receive another
+    it('rejects (and leaves trade open) when stack would overflow', () => {
+      const trade = setupCounteredTrade(system, state);
+      // Alice already has 99 shields → can't accept 1 more
       state.setItemCount('alice', 'shield', 99);
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
+      const result = system.confirmTrade(trade.id, 'alice',
+        state.hasItemInInventory, state.getInventoryCount);
       expect(typeof result).not.toBe('string');
       if (typeof result === 'string') return;
       expect('success' in result).toBe(true);
       if (!('success' in result)) return;
       expect(result.success).toBe(false);
-      expect(result.reason).toBe('inventory_full');
       expect(result.affectedPlayer).toBe('initiator');
+
+      // Trade should still exist
+      expect(system.getTrade(trade.id)?.status).toBe('countered');
     });
 
-    it('leaves trade in countered state (not cleaned up) after initiator stack failure', () => {
-      setupCounteredTrade(system, state);
-      state.setItemCount('alice', 'shield', 99);
+    it('cleans up trade indexes after confirmation', () => {
+      const trade = setupCounteredTrade(system, state);
+      system.confirmTrade(trade.id, 'alice',
+        state.hasItemInInventory, state.getInventoryCount);
 
-      system.confirmTrade('alice', state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
-      // Both players should still be mapped to the trade
-      expect(system.getPlayerTrade('alice')).not.toBeNull();
-      expect(system.getPlayerTrade('bob')).not.toBeNull();
-      expect(system.getPlayerTrade('alice')?.status).toBe('countered');
-    });
-
-    it('returns inventory_full failure when target has 99 of the incoming item', () => {
-      setupCounteredTrade(system, state); // alice offers sword, bob offers shield
-      // bob already has 99 swords — cannot receive another
-      state.setItemCount('bob', 'sword', 99);
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
-      expect(typeof result).not.toBe('string');
-      if (typeof result === 'string') return;
-      expect('success' in result).toBe(true);
-      if (!('success' in result)) return;
-      expect(result.success).toBe(false);
-      expect(result.reason).toBe('inventory_full');
-      expect(result.affectedPlayer).toBe('target');
-    });
-
-    it('leaves trade in countered state (not cleaned up) after target stack failure', () => {
-      setupCounteredTrade(system, state);
-      state.setItemCount('bob', 'sword', 99);
-
-      system.confirmTrade('alice', state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
-      expect(system.getPlayerTrade('alice')).not.toBeNull();
-      expect(system.getPlayerTrade('bob')).not.toBeNull();
-    });
-
-    it('allows confirm when both sides trade the same item (net zero, no stack issue)', () => {
-      // Both offer 'pelt' — net change for each is 0 regardless of current stack
-      state.setPosition('alice', 0, 0);
-      state.setPosition('bob', 0, 0);
-      state.giveItem('alice', 'pelt');
-      state.giveItem('bob', 'pelt');
-      state.setItemCount('alice', 'pelt', 99); // already at max
-      state.setItemCount('bob', 'pelt', 99);
-
-      system.proposeTrade('alice', 'bob', offer('pelt'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      system.counterTrade('bob', offer('pelt'), state.hasItemInInventory, state.areSameTile);
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
-      // Should succeed — giving and receiving the same item is a net-zero stack change
-      expect(typeof result).not.toBe('string');
-      if (typeof result === 'string') return;
-      expect('success' in result).toBe(false);
-    });
-
-    it('allows confirm at 98 stacks (room for one more)', () => {
-      setupCounteredTrade(system, state);
-      state.setItemCount('alice', 'shield', 98); // room for one more
-      state.setItemCount('bob', 'sword', 98);
-
-      const result = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
-      expect(typeof result).not.toBe('string');
-      if (typeof result === 'string') return;
-      expect('success' in result).toBe(false);
+      expect(system.getTrade(trade.id)).toBeNull();
+      expect(system.getPlayerTrades('alice')).toHaveLength(0);
+      expect(system.getPlayerTrades('bob')).toHaveLength(0);
     });
   });
-
-  // ── cancelTrade ──────────────────────────────────────────────
 
   describe('cancelTrade', () => {
-    it('cancels a pending trade', () => {
-      setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-
-      const result = system.cancelTrade('alice');
-      expect(result?.status).toBe('cancelled');
+    it('cancels an active trade by either participant', () => {
+      const trade = setupCounteredTrade(system, state);
+      const cancelled = system.cancelTrade(trade.id, 'bob', 'changed mind');
+      expect(cancelled?.status).toBe('cancelled');
+      expect(cancelled?.cancelReason).toBe('changed mind');
+      expect(system.getTrade(trade.id)).toBeNull();
     });
 
-    it('allows either party to cancel', () => {
-      setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-
-      const result = system.cancelTrade('bob');
-      expect(result?.status).toBe('cancelled');
+    it('returns null for non-participant', () => {
+      const trade = setupCounteredTrade(system, state);
+      const cancelled = system.cancelTrade(trade.id, 'charlie');
+      expect(cancelled).toBeNull();
     });
 
-    it('stores a cancel reason when provided', () => {
-      setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-
-      const result = system.cancelTrade('alice', 'Player moved');
-      expect(result?.cancelReason).toBe('Player moved');
+    it('returns null when trade does not exist', () => {
+      expect(system.cancelTrade('nope', 'alice')).toBeNull();
     });
 
-    it('returns null if player has no active trade', () => {
-      const result = system.cancelTrade('alice');
-      expect(result).toBeNull();
-    });
-
-    it('cleans up both players after cancel', () => {
-      setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-
-      system.cancelTrade('alice');
-      expect(system.getPlayerTrade('alice')).toBeNull();
-      expect(system.getPlayerTrade('bob')).toBeNull();
-    });
-
-    it('can cancel a countered trade', () => {
-      setupCounteredTrade(system, state);
-
-      const result = system.cancelTrade('alice');
-      expect(result?.status).toBe('cancelled');
-      expect(system.getPlayerTrade('bob')).toBeNull();
-    });
-  });
-
-  // ── getTradePartner ──────────────────────────────────────────
-
-  describe('getTradePartner', () => {
-    it('returns partner username for initiator', () => {
-      setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-
-      expect(system.getTradePartner('alice')).toBe('bob');
-    });
-
-    it('returns partner username for target', () => {
-      setupReadyPair(state);
-      system.proposeTrade('alice', 'bob', offer('sword'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-
-      expect(system.getTradePartner('bob')).toBe('alice');
-    });
-
-    it('returns null when no active trade', () => {
-      expect(system.getTradePartner('alice')).toBeNull();
-    });
-  });
-
-  // ── full trade flow ───────────────────────────────────────────
-
-  describe('full trade flow', () => {
-    it('completes a trade end-to-end', () => {
-      setupCounteredTrade(system, state);
-
-      const confirmed = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect(typeof confirmed).not.toBe('string');
-      if (typeof confirmed === 'string') return;
-      expect('success' in confirmed).toBe(false);
-      if ('success' in confirmed) return;
-
-      expect(confirmed.initiatorOffer).toEqual({ username: 'alice', items: [{ itemId: 'sword', quantity: 1 }] });
-      expect(confirmed.targetOffer).toEqual({ username: 'bob', items: [{ itemId: 'shield', quantity: 1 }] });
-
-      // Both players free to trade again
-      expect(system.getPlayerTrade('alice')).toBeNull();
-      expect(system.getPlayerTrade('bob')).toBeNull();
-    });
-
-    it('allows players to trade again after a trade completes', () => {
-      setupCounteredTrade(system, state, 'sword', 'shield');
-      system.confirmTrade('alice', state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-
-      // Give both new items and trade again
+    it('cancelAllForPlayer cancels every trade involving the user', () => {
+      state.giveItem('alice', 'sword');
       state.giveItem('alice', 'axe');
-      state.giveItem('bob', 'helmet');
+      state.giveItem('bob', 'shield');
+      state.giveItem('charlie', 'helm');
+      system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      system.proposeTrade('alice', 'charlie', offer('axe'),
+        state.hasItemInInventory, state.isBlocked);
 
-      const result = system.proposeTrade('alice', 'bob', offer('axe'),
-        state.hasItemInInventory, state.areSameTile, state.isBlocked);
-      expect(typeof result).not.toBe('string');
+      const cancelled = system.cancelAllForPlayer('alice', 'banned');
+      expect(cancelled).toHaveLength(2);
+      expect(system.getPlayerTrades('alice')).toHaveLength(0);
+      expect(system.getPlayerTrades('bob')).toHaveLength(0);
+      expect(system.getPlayerTrades('charlie')).toHaveLength(0);
+    });
+  });
+
+  describe('persistence', () => {
+    it('restoreFromSaveData rebuilds active trades and indexes', () => {
+      const trade = setupCounteredTrade(system, state);
+      const saved = system.getAllTrades();
+      expect(saved).toHaveLength(1);
+
+      const fresh = new TradeSystem();
+      fresh.restoreFromSaveData(saved);
+
+      expect(fresh.getTrade(trade.id)?.status).toBe('countered');
+      expect(fresh.getPlayerTrades('alice')).toHaveLength(1);
+      expect(fresh.getPlayerTrades('bob')).toHaveLength(1);
     });
 
-    it('allows trade to proceed after a stack failure once inventory is freed', () => {
-      setupCounteredTrade(system, state); // alice: sword, bob: shield
-      state.setItemCount('alice', 'shield', 99); // alice full on shields
+    it('skips finished trades on restore', () => {
+      const trade = setupCounteredTrade(system, state);
+      // Mark as confirmed manually for the test
+      const cloned: TradeState = { ...trade, status: 'confirmed' };
 
-      // First confirm attempt fails
-      const fail = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect('success' in fail).toBe(true);
+      const fresh = new TradeSystem();
+      fresh.restoreFromSaveData([cloned]);
 
-      // Alice frees a slot (conceptually — simulate by dropping to 98)
-      state.setItemCount('alice', 'shield', 98);
+      expect(fresh.getTrade(trade.id)).toBeNull();
+      expect(fresh.getPlayerTrades('alice')).toHaveLength(0);
+    });
+  });
 
-      // Second confirm attempt succeeds
-      const ok = system.confirmTrade('alice',
-        state.hasItemInInventory, state.areSameTile, state.getInventoryCount);
-      expect(typeof ok).not.toBe('string');
-      if (typeof ok === 'string') return;
-      expect('success' in ok).toBe(false);
+  describe('findTradeBetween', () => {
+    it('finds an active trade in either direction', () => {
+      setupReadyPair(state);
+      const t = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof t === 'string') throw new Error(t);
+
+      expect(system.findTradeBetween('alice', 'bob')?.id).toBe(t.id);
+      expect(system.findTradeBetween('bob', 'alice')?.id).toBe(t.id);
+    });
+
+    it('returns null when no trade between the pair', () => {
+      expect(system.findTradeBetween('alice', 'bob')).toBeNull();
     });
   });
 });

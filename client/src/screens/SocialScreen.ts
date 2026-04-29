@@ -49,8 +49,16 @@ export class SocialScreen implements Screen {
 
   // Trade modal
   private tradeModalEl: HTMLElement | null = null;
-  private tradePickingItem = false;
   private tradeSelectedItems = new Map<string, number>(); // itemId → quantity
+  /** When viewing an existing trade, the trade ID. null when proposing a new trade. */
+  private tradeActiveId: string | null = null;
+  /** When proposing a new trade, the target username. */
+  private tradeTargetUsername: string | null = null;
+
+  // Gift modal
+  private giftModalEl: HTMLElement | null = null;
+  private giftTargetUsername: string | null = null;
+  private giftSelectedItems = new Map<string, number>(); // itemId → quantity
 
   // Grid drag-to-reposition state
   private gridDragging = false;
@@ -410,15 +418,14 @@ export class SocialScreen implements Screen {
     }
   }
 
-  /** Returns true if the pending trade requires this player's attention. */
+  /** Returns true if any proposed trade requires this player's attention. */
   private tradeNeedsAttention(): boolean {
-    const trade = this.lastSocial?.pendingTrade;
-    if (!trade) return false;
+    const trades = this.lastSocial?.proposedTrades ?? [];
+    if (trades.length === 0) return false;
     const selfUsername = this.lastState?.username ?? '';
-    // Needs attention if: it's a proposal targeting us (need to counter) OR partner countered and we need to confirm
-    if (trade.status === 'pending' && trade.target === null && trade.initiator.username !== selfUsername) return true;
-    if (trade.status === 'countered' && trade.initiator.username === selfUsername) return true;
-    return false;
+    // A trade needs attention if the OTHER player was the last to act on it
+    // (i.e. they proposed/countered and are now waiting on me).
+    return trades.some(t => t.lastUpdatedBy && t.lastUpdatedBy !== selfUsername);
   }
 
   private updateFromState(state: ServerStateMessage): void {
@@ -434,19 +441,7 @@ export class SocialScreen implements Screen {
     // Lightweight badge update — never rebuilds tab bar DOM
     this.updateTabBadges();
 
-    // Auto-open trade modal when a trade is proposed to us
-    const trade = state.social?.pendingTrade;
-    const selfUsername = state.username ?? '';
-    if (trade && !this.tradeModalEl) {
-      // Only auto-open if we're the target of a pending proposal (not the initiator)
-      if (trade.initiator.username !== selfUsername && trade.status === 'pending') {
-        this.renderTradeModal();
-      } else if (trade.initiator.username === selfUsername) {
-        // We proposed — reopen our own modal if it was closed
-        this.renderTradeModal();
-      }
-    }
-    // Update trade modal if visible
+    // Update trade modal if visible (track the active trade by ID)
     if (this.tradeModalEl) this.updateTradeModal();
 
     // Skip party panel updates while grid animation or drag is in progress
@@ -713,16 +708,22 @@ export class SocialScreen implements Screen {
       }
     }
 
-    // Trade — only when same room and not already in a trade
-    const pendingTrade = this.lastSocial?.pendingTrade;
-    const alreadyTrading = pendingTrade != null;
-    if (!sameRoom) {
-      items.push(`<button class="user-popup-item disabled" disabled title="You must be in the same room to trade">Trade</button>`);
-    } else if (alreadyTrading) {
-      items.push(`<button class="user-popup-item disabled" disabled title="You already have an active trade">Trade</button>`);
+    // Trade — async, no same-room restriction. Disabled only if a trade with this
+    // specific player is already active.
+    const proposedTrades = this.lastSocial?.proposedTrades ?? [];
+    const existingTrade = proposedTrades.find(t => {
+      const a = t.initiator.username;
+      const b = t.target?.username;
+      return (a === selfUsername && b === username) || (a === username && b === selfUsername);
+    });
+    if (existingTrade) {
+      items.push(`<button class="user-popup-item disabled" disabled title="You already have a pending trade with this player">Trade</button>`);
     } else {
       items.push(`<button class="user-popup-item" data-popup-action="trade">Trade</button>`);
     }
+
+    // Gift — always available (no same-room or active-trade restriction)
+    items.push(`<button class="user-popup-item" data-popup-action="gift">Send Gift</button>`);
 
     // Block
     if (isBlocked) {
@@ -761,6 +762,7 @@ export class SocialScreen implements Screen {
         case 'block': this.gameClient.sendBlockUser(username, 'all'); break;
         case 'unblock': this.gameClient.sendUnblockUser(username); break;
         case 'trade': console.log('[Trade] openTradeModal triggered for', username); this.openTradeModal(username); break;
+        case 'gift': this.openGiftModal(username); break;
       }
       this.dismissPopup();
     });
@@ -1398,17 +1400,42 @@ export class SocialScreen implements Screen {
 
   // ── Trade Modal ───────────────────────────────────────────────
 
-
-  /** Open the trade modal and propose a trade with the given user. */
+  /**
+   * Open the trade modal. If a trade with `targetUsername` already exists,
+   * resume it; otherwise start composing a new proposal.
+   */
   openTradeModal(targetUsername: string): void {
-    this.tradePickingItem = true;
+    const selfUsername = this.lastState?.username ?? '';
+    const existing = (this.lastSocial?.proposedTrades ?? []).find(t => {
+      const a = t.initiator.username;
+      const b = t.target?.username;
+      return (a === selfUsername && b === targetUsername) || (a === targetUsername && b === selfUsername);
+    });
+    if (existing) {
+      this.openExistingTrade(existing.id);
+      return;
+    }
+    this.tradeActiveId = null;
+    this.tradeTargetUsername = targetUsername;
     this.tradeSelectedItems = new Map();
-    this.renderTradeModal(targetUsername);
+    this.renderTradeModal();
   }
 
-  private renderTradeModal(targetUsername?: string): void {
-    // Clean up any existing modal DOM without resetting tradePickingItem/tradeSelectedItemId,
-    // since callers (openTradeModal) set those before calling us.
+  /** Open the trade modal for an existing trade, identified by trade ID. */
+  openExistingTrade(tradeId: string): void {
+    this.tradeActiveId = tradeId;
+    this.tradeTargetUsername = null;
+    this.tradeSelectedItems = new Map();
+    this.renderTradeModal();
+  }
+
+  /** Find the active trade for this modal in social state. */
+  private getActiveTrade() {
+    if (!this.tradeActiveId) return null;
+    return this.lastSocial?.proposedTrades?.find(t => t.id === this.tradeActiveId) ?? null;
+  }
+
+  private renderTradeModal(): void {
     if (this.tradeModalEl) {
       this.tradeModalEl.remove();
       this.tradeModalEl = null;
@@ -1421,13 +1448,9 @@ export class SocialScreen implements Screen {
     modal.className = 'trade-modal';
     overlay.appendChild(modal);
 
-    // Delegated handler for all modal buttons — the modal lives inside overlay (in document.body,
-    // NOT inside panelContainer), so all button clicks must be handled here.
     overlay.addEventListener('click', (e) => {
-      // Backdrop click — cancel trade or just close
       if (e.target === overlay) {
-        const trade = this.lastSocial?.pendingTrade;
-        if (trade) this.gameClient.sendCancelTrade();
+        // Backdrop click — close without cancelling. Trade persists asynchronously.
         this.dismissTradeModal();
         return;
       }
@@ -1435,21 +1458,21 @@ export class SocialScreen implements Screen {
       const btn = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null;
       if (!btn) return;
 
+      if (btn.matches('.trade-modal-close-btn')) {
+        this.dismissTradeModal();
+        return;
+      }
+
       if (btn.matches('.trade-modal-cancel-btn')) {
-        const trade = this.lastSocial?.pendingTrade;
-        console.log('[Trade] Cancel clicked, active trade:', !!trade);
-        if (trade) {
-          this.gameClient.sendCancelTrade();
-          // Modal closes when server sends back cancelled state via updateFromState
-        } else {
-          this.dismissTradeModal();
-        }
+        const trade = this.getActiveTrade();
+        if (trade) this.gameClient.sendCancelTrade(trade.id);
+        this.dismissTradeModal();
         return;
       }
 
       if (btn.matches('.trade-modal-confirm-btn')) {
-        console.log('[Trade] Confirm trade clicked');
-        this.gameClient.sendConfirmTrade();
+        const trade = this.getActiveTrade();
+        if (trade) this.gameClient.sendConfirmTrade(trade.id);
         return;
       }
 
@@ -1459,7 +1482,6 @@ export class SocialScreen implements Screen {
         const inventory = this.lastState?.character?.inventory ?? {};
         const maxQty = (inventory[itemId] as number) ?? 0;
         const current = this.tradeSelectedItems.get(itemId) ?? 0;
-        console.log('[Trade] +1', itemId, `(${current} → ${Math.min(current + 1, maxQty)})`);
         if (current < maxQty) {
           this.tradeSelectedItems.set(itemId, current + 1);
           this.updateTradeModal();
@@ -1484,23 +1506,17 @@ export class SocialScreen implements Screen {
         const items: TradeOfferItem[] = Array.from(this.tradeSelectedItems.entries())
           .map(([itemId, quantity]) => ({ itemId, quantity }));
         if (items.length === 0) return;
-        const trade = this.lastSocial?.pendingTrade;
-        const selfUsername = this.lastState?.username ?? '';
-        if (trade && trade.status === 'pending' && trade.initiator.username !== selfUsername) {
-          // We're the target — counter
-          this.gameClient.sendCounterTrade(items);
-        } else {
-          // We're the initiator — propose
-          const target = overlay.getAttribute('data-trade-target') ?? '';
-          if (!target) return;
-          this.gameClient.sendProposeTrade(target, items);
+        const trade = this.getActiveTrade();
+        if (trade) {
+          this.gameClient.sendCounterTrade(trade.id, items);
+        } else if (this.tradeTargetUsername) {
+          this.gameClient.sendProposeTrade(this.tradeTargetUsername, items);
         }
+        // Clear local selection — server response will repaint with the new state
+        this.tradeSelectedItems = new Map();
         return;
       }
     });
-
-    // Store target for rendering
-    if (targetUsername) overlay.setAttribute('data-trade-target', targetUsername);
 
     document.body.appendChild(overlay);
     this.tradeModalEl = overlay;
@@ -1513,35 +1529,40 @@ export class SocialScreen implements Screen {
     const modal = overlay.querySelector('.trade-modal');
     if (!modal) return;
 
-    const trade = this.lastSocial?.pendingTrade;
+    const trade = this.getActiveTrade();
     const selfUsername = this.lastState?.username ?? '';
     const itemDefs = this.lastState?.itemDefinitions ?? {};
     const inventory = this.lastState?.character?.inventory ?? {};
+
+    // If a trade was being viewed but is now gone (cancelled/confirmed), close.
+    if (this.tradeActiveId && !trade) {
+      this.dismissTradeModal();
+      return;
+    }
+
+    // If no trade and no target (somehow), close.
+    if (!trade && !this.tradeTargetUsername) {
+      this.dismissTradeModal();
+      return;
+    }
+
     const targetUsername = trade
       ? (trade.initiator.username === selfUsername
-        ? (trade.target?.username ?? overlay.getAttribute('data-trade-target') ?? '')
+        ? (trade.target?.username ?? '')
         : trade.initiator.username)
-      : (overlay.getAttribute('data-trade-target') ?? '');
-
-    // Close if trade ended
-    if (trade?.status === 'cancelled' || trade?.status === 'confirmed') {
-      this.dismissTradeModal();
-      return;
-    }
-
-    // Close if no trade and nothing selected (shouldn't happen normally but guard anyway)
-    if (!trade && !this.tradePickingItem && this.tradeSelectedItems.size === 0) {
-      this.dismissTradeModal();
-      return;
-    }
+      : (this.tradeTargetUsername ?? '');
 
     const isSelfInitiator = trade ? trade.initiator.username === selfUsername : true;
+    const myOffer = trade
+      ? (isSelfInitiator ? trade.initiator.items : (trade.target?.items ?? []))
+      : [];
+    const theirOffer = trade
+      ? (isSelfInitiator ? (trade.target?.items ?? []) : trade.initiator.items)
+      : [];
+    const waitingOnMe = trade ? trade.lastUpdatedBy !== selfUsername : false;
 
-    // Tradeable items: every unequipped copy. `listUnequippedEntries` already excludes
-    // equipped copies — see InventoryView for the invariant.
     const tradeableItems = listUnequippedEntries(inventory).map(([id]) => id);
 
-    /** Render a card showing a list of offered items. */
     const renderOfferCard = (offerItems: TradeOfferItem[], label: string): string => {
       if (offerItems.length === 0) {
         return `<div class="trade-item-card trade-item-empty">
@@ -1562,7 +1583,6 @@ export class SocialScreen implements Screen {
       return `<div class="trade-item-card"><div class="trade-item-label">${label}</div>${rows}</div>`;
     };
 
-    /** Render the +/- quantity picker list. */
     const renderPicker = (): string => {
       if (tradeableItems.length === 0) {
         return '<div class="trade-picker-list"><div class="trade-empty">No tradeable items in inventory</div></div>';
@@ -1596,31 +1616,53 @@ export class SocialScreen implements Screen {
     let html = `<div class="trade-modal-header">Trade with ${this.escapeHtml(targetUsername)}</div>`;
 
     if (!trade) {
-      // Initiator pre-propose: full picker + live offer summary + send button
+      // Composing a new proposal
       html += `
         <div class="trade-picker-label">Select items to offer:</div>
         ${renderPicker()}
         ${renderOfferCard(selItems, 'Your offer')}
         <div class="trade-actions">
           <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Send Trade</button>
-          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+          <button class="social-action-btn remove-friend trade-modal-close-btn">Close</button>
         </div>`;
-    } else if (trade.status === 'pending' && isSelfInitiator) {
-      // Waiting for target to respond
+    } else if (trade.status === 'countered' && waitingOnMe) {
+      // Both offers exist and the OTHER player just countered — confirm or counter back
       html += `
         <div class="trade-offers">
-          ${renderOfferCard(trade.initiator.items, 'Your offer')}
-          ${renderOfferCard([], `${this.escapeHtml(targetUsername)}'s offer`)}
+          ${renderOfferCard(myOffer, 'Your offer')}
+          <div class="trade-vs">⇄</div>
+          ${renderOfferCard(theirOffer, `${this.escapeHtml(targetUsername)}'s offer`)}
         </div>
-        <div class="trade-status">Waiting for ${this.escapeHtml(targetUsername)} to respond...</div>
+        <div class="trade-status">${this.escapeHtml(targetUsername)} updated their offer. Confirm to accept, or counter with new items.</div>
+        <div class="trade-picker-label">Counter with:</div>
+        ${renderPicker()}
         <div class="trade-actions">
-          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+          <button class="social-action-btn add-friend trade-modal-confirm-btn">Confirm Trade</button>
+          <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Counter</button>
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel Trade</button>
+          <button class="social-action-btn trade-modal-close-btn">Close</button>
         </div>`;
-    } else if (trade.status === 'pending' && !isSelfInitiator) {
-      // Target: see initiator's offer, pick counter items
+    } else if (trade.status === 'countered' && !waitingOnMe) {
+      // I last updated; partner needs to act
       html += `
         <div class="trade-offers">
-          ${renderOfferCard(trade.initiator.items, `${this.escapeHtml(targetUsername)} offers`)}
+          ${renderOfferCard(myOffer, 'Your offer')}
+          <div class="trade-vs">⇄</div>
+          ${renderOfferCard(theirOffer, `${this.escapeHtml(targetUsername)}'s offer`)}
+        </div>
+        <div class="trade-status">Waiting for ${this.escapeHtml(targetUsername)} to confirm or counter...</div>
+        <div class="trade-picker-label">Update your offer:</div>
+        ${renderPicker()}
+        <div class="trade-actions">
+          <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Update Offer</button>
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel Trade</button>
+          <button class="social-action-btn trade-modal-close-btn">Close</button>
+        </div>`;
+    } else if (waitingOnMe) {
+      // Pending — partner offered, my slot empty: pick counter items
+      html += `
+        <div class="trade-offers">
+          ${renderOfferCard(theirOffer, `${this.escapeHtml(targetUsername)} offers`)}
           ${renderOfferCard(selItems, 'Your counter')}
         </div>
         <div class="trade-picker-label">Select items to counter with:</div>
@@ -1628,35 +1670,23 @@ export class SocialScreen implements Screen {
         <div class="trade-actions">
           <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Send Back</button>
           <button class="social-action-btn remove-friend trade-modal-cancel-btn">Decline</button>
-        </div>`;
-    } else if (trade.status === 'countered' && isSelfInitiator) {
-      // Confirm: see both offers side by side
-      html += `
-        <div class="trade-offers">
-          ${renderOfferCard(trade.initiator.items, 'Your offer')}
-          <div class="trade-vs">⇄</div>
-          ${renderOfferCard(trade.target!.items, `${this.escapeHtml(targetUsername)}'s offer`)}
-        </div>
-        <div class="trade-actions">
-          <button class="social-action-btn add-friend trade-modal-confirm-btn">Confirm Trade</button>
-          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
-        </div>`;
-    } else if (trade.status === 'countered' && !isSelfInitiator) {
-      // Waiting for initiator to confirm
-      html += `
-        <div class="trade-offers">
-          ${renderOfferCard(trade.target!.items, 'Your offer')}
-          <div class="trade-vs">⇄</div>
-          ${renderOfferCard(trade.initiator.items, `${this.escapeHtml(targetUsername)}'s offer`)}
-        </div>
-        <div class="trade-status">Waiting for ${this.escapeHtml(targetUsername)} to confirm...</div>
-        <div class="trade-actions">
-          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
+          <button class="social-action-btn trade-modal-close-btn">Close</button>
         </div>`;
     } else {
-      html += `<div class="trade-actions">
-        <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel</button>
-      </div>`;
+      // Pending — I sent a proposal, waiting for partner. Allow updating my offer.
+      html += `
+        <div class="trade-offers">
+          ${renderOfferCard(myOffer, 'Your offer')}
+          ${renderOfferCard([], `${this.escapeHtml(targetUsername)}'s offer`)}
+        </div>
+        <div class="trade-status">Waiting for ${this.escapeHtml(targetUsername)} to respond...</div>
+        <div class="trade-picker-label">Update your offer:</div>
+        ${renderPicker()}
+        <div class="trade-actions">
+          <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Update Offer</button>
+          <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel Trade</button>
+          <button class="social-action-btn trade-modal-close-btn">Close</button>
+        </div>`;
     }
 
     modal.innerHTML = html;
@@ -1667,8 +1697,148 @@ export class SocialScreen implements Screen {
       this.tradeModalEl.remove();
       this.tradeModalEl = null;
     }
-    this.tradePickingItem = false;
     this.tradeSelectedItems = new Map();
+    this.tradeActiveId = null;
+    this.tradeTargetUsername = null;
+  }
+
+  // ── Gift Modal ────────────────────────────────────────────────
+
+  openGiftModal(targetUsername: string): void {
+    this.giftTargetUsername = targetUsername;
+    this.giftSelectedItems = new Map();
+    this.renderGiftModal();
+  }
+
+  private renderGiftModal(): void {
+    if (this.giftModalEl) {
+      this.giftModalEl.remove();
+      this.giftModalEl = null;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'trade-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'trade-modal';
+    overlay.appendChild(modal);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) { this.dismissGiftModal(); return; }
+      const btn = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null;
+      if (!btn) return;
+
+      if (btn.matches('.gift-close-btn')) { this.dismissGiftModal(); return; }
+
+      if (btn.matches('.gift-qty-inc')) {
+        const itemId = btn.getAttribute('data-item-id');
+        if (!itemId) return;
+        const inventory = this.lastState?.character?.inventory ?? {};
+        const maxQty = (inventory[itemId] as number) ?? 0;
+        const current = this.giftSelectedItems.get(itemId) ?? 0;
+        if (current < maxQty) {
+          this.giftSelectedItems.set(itemId, current + 1);
+          this.updateGiftModal();
+        }
+        return;
+      }
+
+      if (btn.matches('.gift-qty-dec')) {
+        const itemId = btn.getAttribute('data-item-id');
+        if (!itemId) return;
+        const current = this.giftSelectedItems.get(itemId) ?? 0;
+        if (current > 1) this.giftSelectedItems.set(itemId, current - 1);
+        else this.giftSelectedItems.delete(itemId);
+        this.updateGiftModal();
+        return;
+      }
+
+      if (btn.matches('.gift-send-btn')) {
+        if (!this.giftTargetUsername) return;
+        const target = this.giftTargetUsername;
+        // Send each item entry as its own gift so the mailbox has separate stacks.
+        for (const [itemId, quantity] of this.giftSelectedItems) {
+          this.gameClient.sendGift(target, itemId, quantity);
+        }
+        this.dismissGiftModal();
+        return;
+      }
+    });
+
+    document.body.appendChild(overlay);
+    this.giftModalEl = overlay;
+    this.updateGiftModal();
+  }
+
+  private updateGiftModal(): void {
+    const overlay = this.giftModalEl;
+    if (!overlay) return;
+    const modal = overlay.querySelector('.trade-modal');
+    if (!modal) return;
+
+    const itemDefs = this.lastState?.itemDefinitions ?? {};
+    const inventory = this.lastState?.character?.inventory ?? {};
+    const target = this.giftTargetUsername ?? '';
+    const giftableItems = listUnequippedEntries(inventory).map(([id]) => id);
+
+    const selItems = Array.from(this.giftSelectedItems.entries());
+    const hasSelection = selItems.length > 0;
+
+    const renderPicker = (): string => {
+      if (giftableItems.length === 0) {
+        return '<div class="trade-picker-list"><div class="trade-empty">No giftable items in inventory</div></div>';
+      }
+      const rows = giftableItems.map(id => {
+        const def = itemDefs[id];
+        const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+        const invCount = (inventory[id] as number) ?? 0;
+        const selQty = this.giftSelectedItems.get(id) ?? 0;
+        const effect = def ? getItemEffectText(def) : '';
+        return `<div class="trade-picker-row">
+          <div class="trade-picker-info">
+            <span class="trade-item-name" style="color:${color}">${this.escapeHtml(def?.name ?? id)}</span>
+            ${effect ? `<span class="trade-item-effect-small">${this.escapeHtml(effect)}</span>` : ''}
+          </div>
+          <div class="trade-picker-qty">
+            <span class="trade-item-count">×${invCount}</span>
+            <button class="gift-qty-dec" data-item-id="${this.escapeHtml(id)}"${selQty === 0 ? ' disabled' : ''}>−</button>
+            <span class="trade-qty-val">${selQty}</span>
+            <button class="gift-qty-inc" data-item-id="${this.escapeHtml(id)}"${selQty >= invCount ? ' disabled' : ''}>+</button>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="trade-picker-list">${rows}</div>`;
+    };
+
+    const summaryHtml = selItems.length === 0
+      ? '<div class="trade-item-card trade-item-empty"><div class="trade-item-none">No items selected</div></div>'
+      : `<div class="trade-item-card"><div class="trade-item-label">You will gift</div>${selItems.map(([id, q]) => {
+          const def = itemDefs[id];
+          const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+          return `<div class="trade-offer-row">
+            <span class="trade-offer-name" style="color:${color}">${this.escapeHtml(def?.name ?? id)}</span>
+            <span class="trade-offer-qty">×${q}</span>
+          </div>`;
+        }).join('')}</div>`;
+
+    modal.innerHTML = `
+      <div class="trade-modal-header">Send gift to ${this.escapeHtml(target)}</div>
+      <div class="trade-status">Gifts arrive in their mailbox. They can accept or decline; declined gifts return to your mailbox.</div>
+      <div class="trade-picker-label">Select items to gift:</div>
+      ${renderPicker()}
+      ${summaryHtml}
+      <div class="trade-actions">
+        <button class="social-action-btn add-friend gift-send-btn"${hasSelection ? '' : ' disabled'}>Send Gift</button>
+        <button class="social-action-btn remove-friend gift-close-btn">Cancel</button>
+      </div>
+    `;
+  }
+
+  dismissGiftModal(): void {
+    if (this.giftModalEl) {
+      this.giftModalEl.remove();
+      this.giftModalEl = null;
+    }
+    this.giftTargetUsername = null;
+    this.giftSelectedItems = new Map();
   }
 
   private escapeHtml(s: string): string {

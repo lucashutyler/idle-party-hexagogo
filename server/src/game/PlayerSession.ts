@@ -54,6 +54,7 @@ import type {
   ShopDefinition,
   SkillDefinition,
   SkillLoadout,
+  MailboxEntry,
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
@@ -79,6 +80,10 @@ export class PlayerSession {
   private partyId: string | null = null;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
+  /** Initial mailbox snapshot from save data; live state lives in MailboxSystem. */
+  private initialMailbox: MailboxEntry[] = [];
+  /** Callback to fetch the player's live mailbox from MailboxSystem. */
+  getMailbox?: () => MailboxEntry[];
 
   /** XP rate tracking — in-memory only, resets on server restart. */
   private xpRateStartTime = Date.now();
@@ -389,6 +394,13 @@ export class PlayerSession {
   getChatDmTarget(): string { return this.chatDmTarget; }
   setChatDmTarget(target: string): void { this.chatDmTarget = target; }
 
+  /** Mailbox snapshot from save data — used once at startup to populate MailboxSystem. */
+  consumeInitialMailbox(): MailboxEntry[] {
+    const m = this.initialMailbox;
+    this.initialMailbox = [];
+    return m;
+  }
+
   /** Store a chat message in this player's personal history. */
   addChatMessage(message: ChatMessage): void {
     this.chatHistory.push(message);
@@ -660,6 +672,7 @@ export class PlayerSession {
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
+      mailbox: this.getMailbox ? this.getMailbox() : this.initialMailbox,
     };
   }
 
@@ -753,6 +766,7 @@ export class PlayerSession {
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
+    session['initialMailbox'] = data.mailbox ? [...data.mailbox] : [];
 
     // XP rate tracking — auto-start from session restore time
     session['xpRateStartTime'] = Date.now();

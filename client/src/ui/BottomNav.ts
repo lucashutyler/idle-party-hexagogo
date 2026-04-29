@@ -113,6 +113,18 @@ export class BottomNav {
         this.updateSocialBadge();
       }
 
+      // Items badge: gifts in mailbox or trades needing attention
+      const itemsTab = this.tabButtons.get('items');
+      if (itemsTab && social) {
+        const selfUsername = state.username ?? '';
+        const hasMailbox = (social.mailbox?.length ?? 0) > 0;
+        const tradeNeedsAction = (social.proposedTrades ?? []).some(t =>
+          t.lastUpdatedBy && t.lastUpdatedBy !== selfUsername,
+        );
+        const badge = itemsTab.querySelector('.nav-badge');
+        if (badge) badge.classList.toggle('visible', hasMailbox || tradeNeedsAction);
+      }
+
       lastVisual = visual;
     });
 

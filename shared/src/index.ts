@@ -303,7 +303,11 @@ export type {
   ClientCounterTradeMessage,
   ClientConfirmTradeMessage,
   ClientCancelTradeMessage,
+  ClientSendGiftMessage,
+  ClientAcceptGiftMessage,
+  ClientDenyGiftMessage,
   ServerTradeProposedMessage,
   ServerTradeCancelledMessage,
   ServerTradeCompletedMessage,
+  MailboxEntry,
 } from './systems/SocialTypes.js';

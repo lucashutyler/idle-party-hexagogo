@@ -1140,7 +1140,7 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // --- Trade messages ---
+      // --- Trade messages (asynchronous) ---
 
       if (msg.type === 'propose_trade' && typeof msg.targetUsername === 'string' && Array.isArray(msg.items)) {
         const targetAccount = accountStore.findByUsername(msg.targetUsername);
@@ -1158,7 +1158,6 @@ wss.on('connection', (ws) => {
           msg.targetUsername,
           msg.items,
           (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
-          (a, b) => playerManager.areSameTile(a, b),
           (a, b) => playerManager.isTradeBlocked(a, b),
         );
         if (typeof result === 'string') {
@@ -1170,47 +1169,44 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      if (msg.type === 'counter_trade' && Array.isArray(msg.items)) {
+      if (msg.type === 'counter_trade' && typeof msg.tradeId === 'string' && Array.isArray(msg.items)) {
         if (!msg.items.every((i: unknown) => { const item = i as Record<string, unknown>; return item && typeof item['itemId'] === 'string' && typeof item['quantity'] === 'number' && (item['quantity'] as number) > 0; })) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid trade items' }));
           return;
         }
-        console.log(`[Trade] ${username} countering trade:`, msg.items);
+        console.log(`[Trade] ${username} countering trade ${msg.tradeId}:`, msg.items);
         const result = playerManager.trades.counterTrade(
+          msg.tradeId,
           username,
           msg.items,
           (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
-          (a, b) => playerManager.areSameTile(a, b),
         );
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
-        const partner = playerManager.trades.getTradePartner(username)
-          ?? result.initiator.username;
+        const partner = playerManager.trades.getTradePartner(msg.tradeId, username);
         playerManager.sendStateToPlayer(username);
-        playerManager.sendStateToPlayer(partner);
+        if (partner) playerManager.sendStateToPlayer(partner);
         return;
       }
 
-      if (msg.type === 'confirm_trade') {
-        console.log(`[Trade] ${username} confirming trade`);
+      if (msg.type === 'confirm_trade' && typeof msg.tradeId === 'string') {
+        console.log(`[Trade] ${username} confirming trade ${msg.tradeId}`);
+        const partner = playerManager.trades.getTradePartner(msg.tradeId, username);
         const result = playerManager.trades.confirmTrade(
+          msg.tradeId,
           username,
           (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
-          (a, b) => playerManager.areSameTile(a, b),
           (u, itemId) => playerManager.getSessionByUsername(u)?.getInventoryCount(itemId) ?? 0,
         );
 
         if (typeof result === 'string') {
-          // Simple validation error — inform initiator only; trade state unchanged
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
 
         if ('success' in result) {
-          // Stack-full failure — trade left open in 'countered' state; inform both players
-          const partner = playerManager.trades.getTradePartner(username);
           const initiatorMsg = result.affectedPlayer === 'initiator'
             ? 'Your inventory is full for that item (max 99)'
             : 'Their inventory is full for that item (max 99)';
@@ -1233,8 +1229,6 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // Atomic swap: remove all offered items from each player, then add received items.
-        // Track removals for rollback on partial failure.
         type Removal = { session: typeof initiatorSession; itemId: string; qty: number };
         const removals: Removal[] = [];
 
@@ -1261,7 +1255,6 @@ wss.on('connection', (ws) => {
           removals.push({ session: targetSession, itemId, qty: quantity });
         }
 
-        // Add received items
         for (const { itemId, quantity } of initiatorOffer.items) {
           targetSession.addToInventory(itemId, quantity);
         }
@@ -1269,7 +1262,6 @@ wss.on('connection', (ws) => {
           initiatorSession.addToInventory(itemId, quantity);
         }
 
-        // Combat log: summarize all items exchanged
         const describeItems = (items: typeof initiatorOffer.items) =>
           items.map(({ itemId, quantity }) => {
             const def = gameLoop.contentStore.getItem(itemId);
@@ -1287,15 +1279,104 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      if (msg.type === 'cancel_trade') {
-        const cancelled = playerManager.trades.cancelTrade(username, 'Trade cancelled');
-        if (cancelled) {
-          const partner = cancelled.initiator.username === username
-            ? cancelled.target?.username
-            : cancelled.initiator.username;
-          if (partner) {
-            playerManager.sendStateToPlayer(partner);
-          }
+      if (msg.type === 'cancel_trade' && typeof msg.tradeId === 'string') {
+        const partner = playerManager.trades.getTradePartner(msg.tradeId, username);
+        const cancelled = playerManager.trades.cancelTrade(msg.tradeId, username, 'Trade cancelled');
+        if (cancelled && partner) {
+          playerManager.sendStateToPlayer(partner);
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      // --- Gift / Mailbox messages ---
+
+      if (msg.type === 'send_gift' && typeof msg.targetUsername === 'string' && typeof msg.itemId === 'string' && typeof msg.quantity === 'number') {
+        if (msg.targetUsername === username) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot gift to yourself' }));
+          return;
+        }
+        if (msg.quantity < 1) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid quantity' }));
+          return;
+        }
+        const targetAccount = accountStore.findByUsername(msg.targetUsername);
+        if (!targetAccount) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
+          return;
+        }
+        if (playerManager.isTradeBlocked(username, msg.targetUsername)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot gift to a blocked user' }));
+          return;
+        }
+
+        const senderSession = playerManager.getSessionByUsername(username);
+        if (!senderSession) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        if (!senderSession.removeFromInventory(msg.itemId, msg.quantity)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Not enough items in inventory' }));
+          return;
+        }
+
+        playerManager.mailboxes.addEntry(msg.targetUsername, username, msg.itemId, msg.quantity);
+
+        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
+        const label = msg.quantity > 1 ? `${itemDef?.name ?? msg.itemId} x${msg.quantity}` : (itemDef?.name ?? msg.itemId);
+        senderSession.addLogEntry(`Sent ${label} to ${msg.targetUsername}`, 'unlock');
+
+        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToPlayer(msg.targetUsername);
+        return;
+      }
+
+      if (msg.type === 'accept_gift' && typeof msg.entryId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        const entry = playerManager.mailboxes.findEntry(username, msg.entryId);
+        if (!entry) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Gift not found' }));
+          return;
+        }
+        // Stack capacity check at accept time
+        if (session.getInventoryCount(entry.itemId) + entry.quantity > 99) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full for that item (max 99)' }));
+          return;
+        }
+        if (!session.addToInventory(entry.itemId, entry.quantity)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full for that item (max 99)' }));
+          return;
+        }
+        playerManager.mailboxes.removeEntry(username, msg.entryId);
+
+        const itemDef = gameLoop.contentStore.getItem(entry.itemId);
+        const label = entry.quantity > 1 ? `${itemDef?.name ?? entry.itemId} x${entry.quantity}` : (itemDef?.name ?? entry.itemId);
+        session.addLogEntry(`Accepted ${label} from ${entry.fromUsername}`, 'unlock');
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'deny_gift' && typeof msg.entryId === 'string') {
+        const entry = playerManager.mailboxes.findEntry(username, msg.entryId);
+        if (!entry) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Gift not found' }));
+          return;
+        }
+        playerManager.mailboxes.removeEntry(username, msg.entryId);
+
+        // If this was already a returned gift, drop it (don't ping-pong forever).
+        // Otherwise, return it to the original sender's mailbox.
+        if (!entry.returned) {
+          playerManager.mailboxes.addEntry(entry.fromUsername, username, entry.itemId, entry.quantity, { returned: true });
+          playerManager.sendStateToPlayer(entry.fromUsername);
+        }
+        const session = playerManager.getSessionByUsername(username);
+        if (session) {
+          const itemDef = gameLoop.contentStore.getItem(entry.itemId);
+          const label = entry.quantity > 1 ? `${itemDef?.name ?? entry.itemId} x${entry.quantity}` : (itemDef?.name ?? entry.itemId);
+          session.addLogEntry(`Declined ${label} from ${entry.fromUsername}`, 'move');
         }
         playerManager.sendStateToPlayer(username);
         return;

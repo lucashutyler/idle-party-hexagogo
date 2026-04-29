@@ -1,5 +1,16 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.29.2',
+    notes: [
+      'New: Send Gift action on the user popup — gift items to anyone, no same-room requirement',
+      'Recipients see gifts in a new Mailbox section on the Items tab; Accept adds to inventory, Decline returns to sender',
+      'Gifts that would push a stack over 99 are blocked at Accept time with a warning (not at send time, so they can stay in the mailbox until inventory frees up)',
+      'Trades are now asynchronous! No same-room requirement, both sides can update offers freely, and trades persist across server restarts and movement',
+      'You can now have multiple trades active at once (one per partner) — manage them all from the new Proposed Trades section on the Items tab',
+      'Items tab gets a notification dot when you have mailbox items or a trade waiting on your response',
+    ],
+  },
+  {
     version: '2026.04.29.1',
     notes: [
       'Set piece tooltips now show item names for pieces you don\'t own yet (was showing item GUIDs)',

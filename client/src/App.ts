@@ -344,6 +344,11 @@ export class App {
       socialScreen.showUserPopup(username, anchor);
     });
 
+    // Wire items screen "open trade" click to social screen trade modal
+    itemsScreen.setOnOpenTrade((tradeId) => {
+      socialScreen.openExistingTrade(tradeId);
+    });
+
     // Listen for world content updates (admin deployed a new version)
     this.gameClient.onWorldUpdate(async () => {
       console.log('[App] World updated — reloading world data');
