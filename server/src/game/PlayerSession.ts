@@ -20,6 +20,8 @@ import {
   equipItemForceDestroy,
   EQUIP_SLOTS,
   isTwoHandedEquipped,
+  getOwnedItemIds,
+  hasItemEquipped as inventoryHasItemEquipped,
   getZone,
   createDefaultSkillLoadout,
   SKILL_SLOTS,
@@ -255,18 +257,10 @@ export class PlayerSession {
     if (!this.character) return {};
     const defs: Record<string, ItemDefinition> = {};
 
-    // Inventory items
-    for (const itemId of Object.keys(this.character.inventory)) {
+    // Owned items (unequipped + equipped, deduped)
+    for (const itemId of getOwnedItemIds(this.character.inventory, this.character.equipment)) {
       const def = this.content.getItem(itemId);
       if (def) defs[itemId] = def;
-    }
-
-    // Equipment items
-    for (const itemId of Object.values(this.character.equipment)) {
-      if (itemId) {
-        const def = this.content.getItem(itemId);
-        if (def) defs[itemId] = def;
-      }
     }
 
     // Shop items (so client has defs for buyable items)
@@ -296,11 +290,7 @@ export class PlayerSession {
   /** Build set definitions for sets containing at least one item the player owns. */
   private getOwnedSetDefinitions(): Record<string, SetDefinition> {
     if (!this.character) return {};
-    const ownedItemIds = new Set<string>();
-    for (const itemId of Object.keys(this.character.inventory)) ownedItemIds.add(itemId);
-    for (const itemId of Object.values(this.character.equipment)) {
-      if (itemId) ownedItemIds.add(itemId);
-    }
+    const ownedItemIds = getOwnedItemIds(this.character.inventory, this.character.equipment);
 
     const allSets = this.content.getAllSets();
     const result: Record<string, SetDefinition> = {};
@@ -786,10 +776,7 @@ export class PlayerSession {
   /** Check if the player has a specific item equipped in any slot. */
   hasItemEquipped(itemId: string): boolean {
     if (!this.character) return false;
-    for (const equippedItemId of Object.values(this.character.equipment)) {
-      if (equippedItemId === itemId) return true;
-    }
-    return false;
+    return inventoryHasItemEquipped(itemId, this.character.equipment);
   }
 
   /** Get item IDs locked by the current tile and remaining path (required for traversal). */

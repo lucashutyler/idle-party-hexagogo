@@ -25,7 +25,7 @@ import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
 const app = express();
@@ -572,11 +572,10 @@ wss.on('connection', (ws) => {
 
         // Resolve item definitions for equipped items
         const itemDefs: Record<string, ItemDefinition> = {};
-        for (const itemId of Object.values(profile.equipment)) {
-          if (itemId) {
-            const def = gameLoop.contentStore.getItem(itemId);
-            if (def) itemDefs[itemId] = def;
-          }
+        const equippedItemIds = getEquippedItemIds(profile.equipment);
+        for (const itemId of equippedItemIds) {
+          const def = gameLoop.contentStore.getItem(itemId);
+          if (def) itemDefs[itemId] = def;
         }
 
         // Build party member list
@@ -586,7 +585,6 @@ wss.on('connection', (ws) => {
         });
 
         // Resolve set definitions for sets containing equipped items
-        const equippedItemIds = new Set(Object.values(profile.equipment).filter(Boolean) as string[]);
         const allSets = gameLoop.contentStore.getAllSets();
         const profileSetDefs: Record<string, import('@idle-party-rpg/shared').SetDefinition> = {};
         for (const [id, set] of Object.entries(allSets)) {

@@ -1,6 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import type { ShopDefinition, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
+import { getUnequippedCount, listUnequippedEntries } from '@idle-party-rpg/shared';
 import { renderItemIcon, escapeHtml } from './ItemIcon';
 import { renderItemPopupContent } from './ItemPopup';
 
@@ -77,9 +78,7 @@ export class ShopPopup {
   private computeSellable(state: ServerStateMessage, itemId: string): number {
     const char = state.character;
     if (!char) return 0;
-    let equipped = 0;
-    for (const id of Object.values(char.equipment)) if (id === itemId) equipped++;
-    return Math.max(0, (char.inventory[itemId] ?? 0) - equipped);
+    return getUnequippedCount(itemId, char.inventory);
   }
 
   private setNotice(message: string): void {
@@ -179,22 +178,13 @@ export class ShopPopup {
 
   private renderSellItems(
     inventory: Record<string, number>,
-    equipment: Record<string, string | null>,
+    _equipment: Record<string, string | null>,
     itemDefs: Record<string, ItemDefinition>,
     _setDefs: Record<string, SetDefinition>,
   ): string {
-    // Count how many of each item is equipped (an item can occupy multiple slots)
-    const equippedCounts: Record<string, number> = {};
-    for (const itemId of Object.values(equipment)) {
-      if (itemId) equippedCounts[itemId] = (equippedCounts[itemId] ?? 0) + 1;
-    }
-
-    // Show all inventory items, but reduce sellable qty by equipped count
-    const entries: [string, number][] = [];
-    for (const [id, count] of Object.entries(inventory)) {
-      const sellable = count - (equippedCounts[id] ?? 0);
-      if (sellable > 0) entries.push([id, sellable]);
-    }
+    // Sellable = every unequipped copy. `inventory` already excludes equipped copies
+    // (`equipItem` removes from inventory on equip), so do NOT subtract equipped counts.
+    const entries = listUnequippedEntries(inventory);
 
     if (entries.length === 0) {
       return '<div style="color:#888;text-align:center;padding:16px;">No items to sell</div>';

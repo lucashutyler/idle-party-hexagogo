@@ -112,6 +112,19 @@ export type {
   EquipmentBonuses,
 } from './systems/ItemTypes.js';
 
+// Inventory views (read-only helpers over inventory + equipment)
+export {
+  getEquippedCount,
+  getUnequippedCount,
+  getOwnedCount,
+  hasItemEquipped,
+  hasUnequipped,
+  ownsItem,
+  getEquippedItemIds,
+  getOwnedItemIds,
+  listUnequippedEntries,
+} from './systems/InventoryView.js';
+
 // Monster types
 export {
   SEED_MONSTERS,

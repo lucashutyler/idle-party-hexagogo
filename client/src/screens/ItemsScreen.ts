@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ServerEquipBlockedMessage } from '@idle-party-rpg/shared';
-import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
+import { CLASS_ICONS, UNKNOWN_CLASS_ICON, getOwnedItemIds, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { EquipSlot, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
@@ -597,13 +597,8 @@ export class ItemsScreen implements Screen {
     if (!def) return;
 
     // Build owned/equipped sets for set info display
-    const ownedItemIds = new Set<string>(
-      Object.entries(this.lastInventory).filter(([, c]) => c > 0).map(([id]) => id)
-    );
-    const equippedItemIds = new Set<string>(
-      Object.values(this.lastEquipment).filter((id): id is string => id != null)
-    );
-    for (const eid of equippedItemIds) ownedItemIds.add(eid);
+    const ownedItemIds = getOwnedItemIds(this.lastInventory, this.lastEquipment);
+    const equippedItemIds = getEquippedItemIds(this.lastEquipment);
 
     // Action buttons
     const count = this.lastInventory[itemId] ?? 0;

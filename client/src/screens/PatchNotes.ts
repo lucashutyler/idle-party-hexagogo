@@ -5,6 +5,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'Knight Intercept now correctly redirects only the next attack, not every attack until the Knight\'s next turn',
       'Set piece tooltips now show item names for pieces you don\'t own yet (was showing item GUIDs)',
       'Trade picker now lists every unequipped copy of an item — previously the entire stack was hidden if you had any copy equipped',
+      'Shop sell list has the same fix — unequipped extras of an equipped item are now sellable',
     ],
   },
   {
