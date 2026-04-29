@@ -246,8 +246,12 @@ export class PlayerSession {
     };
   }
 
-  /** Build item definitions for items the player currently owns (inventory + equipment). */
-  private getOwnedItemDefinitions(): Record<string, ItemDefinition> {
+  /**
+   * Build item definitions for items the player currently owns (inventory + equipment),
+   * plus shop items and every piece of any set the player has at least one piece of —
+   * the latter so the set-info popup can render piece names instead of item GUIDs.
+   */
+  private getOwnedItemDefinitions(setDefs: Record<string, SetDefinition>): Record<string, ItemDefinition> {
     if (!this.character) return {};
     const defs: Record<string, ItemDefinition> = {};
 
@@ -272,6 +276,16 @@ export class PlayerSession {
         if (!defs[si.itemId]) {
           const def = this.content.getItem(si.itemId);
           if (def) defs[si.itemId] = def;
+        }
+      }
+    }
+
+    // Set pieces — needed so the popup can render names for unowned pieces of a set the player partially owns.
+    for (const set of Object.values(setDefs)) {
+      for (const itemId of set.itemIds) {
+        if (!defs[itemId]) {
+          const def = this.content.getItem(itemId);
+          if (def) defs[itemId] = def;
         }
       }
     }
@@ -335,6 +349,8 @@ export class PlayerSession {
     const zone = partyZone ? getZone(partyZone, allZones) : null;
     const zoneName = zone ? zone.displayName : (partyZone ?? 'Unknown');
 
+    const setDefs = this.getOwnedSetDefinitions();
+
     return {
       username: this.username,
       party: partyState ?? { col: 0, row: 0, state: 'idle', path: [] },
@@ -347,8 +363,8 @@ export class PlayerSession {
       character: charState,
       zoneName,
       social: this.getSocialState?.(),
-      itemDefinitions: this.getOwnedItemDefinitions(),
-      setDefinitions: this.getOwnedSetDefinitions(),
+      itemDefinitions: this.getOwnedItemDefinitions(setDefs),
+      setDefinitions: setDefs,
       shopDefinition: this.getCurrentShopDefinition(),
     };
   }

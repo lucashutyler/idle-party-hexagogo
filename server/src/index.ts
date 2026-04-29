@@ -570,7 +570,7 @@ wss.on('connection', (ws) => {
         const partyId = targetSession.getPartyId();
         const party = partyId ? playerManager.parties.getParty(partyId) : null;
 
-        // Resolve item definitions for equipped items only
+        // Resolve item definitions for equipped items
         const itemDefs: Record<string, ItemDefinition> = {};
         for (const itemId of Object.values(profile.equipment)) {
           if (itemId) {
@@ -592,6 +592,17 @@ wss.on('connection', (ws) => {
         for (const [id, set] of Object.entries(allSets)) {
           if (set.itemIds.some(itemId => equippedItemIds.has(itemId))) {
             profileSetDefs[id] = set;
+          }
+        }
+
+        // Include defs for every piece of any included set so the popup can render piece names
+        // (otherwise unowned pieces fall back to displaying their item GUID).
+        for (const set of Object.values(profileSetDefs)) {
+          for (const itemId of set.itemIds) {
+            if (!itemDefs[itemId]) {
+              const def = gameLoop.contentStore.getItem(itemId);
+              if (def) itemDefs[itemId] = def;
+            }
           }
         }
 

@@ -1,8 +1,9 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.04.27.1',
+    version: '2026.04.29.1',
     notes: [
       'Knight Intercept now correctly redirects only the next attack, not every attack until the Knight\'s next turn',
+      'Set piece tooltips now show item names for pieces you don\'t own yet (was showing item GUIDs)',
     ],
   },
   {
