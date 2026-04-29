@@ -1,7 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, SKILL_SLOTS, getSkillById } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, SKILL_SLOTS, getSkillById, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
@@ -1537,12 +1537,9 @@ export class SocialScreen implements Screen {
 
     const isSelfInitiator = trade ? trade.initiator.username === selfUsername : true;
 
-    // Tradeable items: unequipped inventory items
-    const equipped = this.lastState?.character?.equipment ?? {};
-    const equippedIds = new Set(Object.values(equipped).filter(Boolean) as string[]);
-    const tradeableItems = Object.entries(inventory)
-      .filter(([id, count]) => (count as number) > 0 && !equippedIds.has(id))
-      .map(([id]) => id);
+    // Tradeable items: every unequipped copy. `listUnequippedEntries` already excludes
+    // equipped copies — see InventoryView for the invariant.
+    const tradeableItems = listUnequippedEntries(inventory).map(([id]) => id);
 
     /** Render a card showing a list of offered items. */
     const renderOfferCard = (offerItems: TradeOfferItem[], label: string): string => {
@@ -1976,10 +1973,7 @@ export class SocialScreen implements Screen {
 
     // Wire equipment square clicks to show read-only item popup
     const setDefs = profile.setDefinitions ?? {};
-    const equippedItemIds = new Set<string>();
-    for (const id of Object.values(profile.equipment)) {
-      if (id) equippedItemIds.add(id);
-    }
+    const equippedItemIds = getEquippedItemIds(profile.equipment);
 
     for (const el of modal.querySelectorAll('.profile-slot-square')) {
       el.addEventListener('click', () => {
