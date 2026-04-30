@@ -345,17 +345,24 @@ export class AdminApp implements AdminContext {
       const name = prompt('Draft name:', seed ? `${seed} (copy)` : '');
       if (!name) return;
       try {
-        await fetch('/api/admin/versions', {
+        const res = await fetch('/api/admin/versions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ name, fromVersionId: this.selectedVersionId ?? this.activeVersionId }),
         });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to create draft');
         await this.refreshVersions();
-        this.refreshStatusBar();
-        this.rerenderTab();
-      } catch {
-        alert('Failed to create draft');
+        if (data.version?.id) {
+          // Auto-select the new draft so the UI immediately enters edit mode.
+          await this.selectVersion(data.version.id);
+        } else {
+          this.refreshStatusBar();
+          this.rerenderTab();
+        }
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to create draft');
       }
     });
   }

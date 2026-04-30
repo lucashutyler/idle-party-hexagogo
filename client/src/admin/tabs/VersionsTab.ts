@@ -102,10 +102,16 @@ export class VersionsTab implements Tab {
     const name = prompt('Draft name:', seed ? `${seed} (copy)` : '');
     if (!name) return;
     try {
-      await postAdmin('/api/admin/versions', { name, fromVersionId: fromId });
+      const data = await postAdmin<{ version?: { id: string } }>(
+        '/api/admin/versions', { name, fromVersionId: fromId });
       await ctx.refreshVersions();
-      ctx.refreshStatusBar();
-      ctx.rerenderTab();
+      if (data.version?.id) {
+        // Auto-select the new draft so subsequent edits target it (and the UI is editable).
+        await ctx.selectVersion(data.version.id);
+      } else {
+        ctx.refreshStatusBar();
+        ctx.rerenderTab();
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to create draft');
     }

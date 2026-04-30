@@ -17,7 +17,7 @@ export class TileTypesTab implements Tab {
 
     const cards = tileTypes.map(t => {
       const itemName = t.requiredItemId ? (items[t.requiredItemId]?.name ?? t.requiredItemId) : '';
-      const ntMarker = t.traversable ? '' : '<span class="tile-type-card-blocked" title="Non-traversable">×</span>';
+      const blockedClass = t.traversable ? '' : ' is-blocked';
       const requiredItemTag = itemName
         ? `<div class="tile-type-card-tag">Requires: ${escapeHtml(itemName)}</div>`
         : '';
@@ -25,13 +25,11 @@ export class TileTypesTab implements Tab {
       const deleteBtn = readOnly ? '' : `<button class="admin-btn admin-btn-sm admin-btn-danger tile-type-delete-btn" data-id="${escapeHtml(t.id)}">Del</button>`;
       return `
         <div class="tile-type-card">
-          <div class="tile-type-card-preview" style="--tile-color:${escapeHtml(t.color)}">
+          <div class="tile-type-card-preview${blockedClass}" style="--tile-color:${escapeHtml(t.color)}" title="${t.traversable ? '' : 'Non-traversable'}">
             <div class="tile-type-card-hex"></div>
             <div class="tile-type-card-icon">${escapeHtml(t.icon)}</div>
-            ${ntMarker}
           </div>
           <div class="tile-type-card-name">${escapeHtml(t.name)}</div>
-          <div class="tile-type-card-id">${escapeHtml(t.id)}</div>
           ${requiredItemTag}
           <div class="tile-type-card-actions">${editBtn}${deleteBtn}</div>
         </div>
@@ -75,16 +73,19 @@ export class TileTypesTab implements Tab {
     ).join('');
 
     const initColor = existing?.color ?? '#888888';
+    const initBlocked = existing ? existing.traversable === false : false;
+    // Auto-generate IDs for new tile types — they're hidden from the UI; only the name matters.
+    const id = existing?.id ?? crypto.randomUUID();
     const bodyHtml = `
       <div class="tile-type-form">
-        <div class="tile-type-form-preview" style="--tile-color:${escapeHtml(initColor)}">
+        <div class="tile-type-form-preview tile-type-card-preview${initBlocked ? ' is-blocked' : ''}" style="--tile-color:${escapeHtml(initColor)}">
           <div class="tile-type-card-hex"></div>
           <div class="tile-type-card-icon" id="ttf-preview-icon">${escapeHtml(existing?.icon ?? '?')}</div>
         </div>
         <div class="admin-form-grid">
-          <label>ID<input id="ttf-id" value="${escapeHtml(existing?.id ?? '')}" ${existing ? 'readonly' : ''}></label>
-          <label>Name<input id="ttf-name" value="${escapeHtml(existing?.name ?? '')}"></label>
-          <label>Icon (emoji)<input id="ttf-icon" value="${escapeHtml(existing?.icon ?? '')}"></label>
+          <input type="hidden" id="ttf-id" value="${escapeHtml(id)}">
+          <label>Name<input type="text" id="ttf-name" value="${escapeHtml(existing?.name ?? '')}"></label>
+          <label>Icon (emoji)<input type="text" id="ttf-icon" value="${escapeHtml(existing?.icon ?? '')}"></label>
           <label class="tile-type-color-field">
             Color
             <span class="tile-type-color-row">
@@ -119,6 +120,7 @@ export class TileTypesTab implements Tab {
     const previewIcon = root.querySelector<HTMLElement>('#ttf-preview-icon');
     const colorInput = root.querySelector<HTMLInputElement>('#ttf-color');
     const colorText = root.querySelector<HTMLElement>('#ttf-color-text');
+    const traversableInput = root.querySelector<HTMLInputElement>('#ttf-traversable');
 
     iconInput?.addEventListener('input', () => {
       if (previewIcon) previewIcon.textContent = iconInput.value || '?';
@@ -126,6 +128,9 @@ export class TileTypesTab implements Tab {
     colorInput?.addEventListener('input', () => {
       if (previewBox) previewBox.style.setProperty('--tile-color', colorInput.value);
       if (colorText) colorText.textContent = colorInput.value;
+    });
+    traversableInput?.addEventListener('change', () => {
+      previewBox?.classList.toggle('is-blocked', !traversableInput.checked);
     });
 
     root.querySelector('#ttf-cancel')?.addEventListener('click', modal.close);

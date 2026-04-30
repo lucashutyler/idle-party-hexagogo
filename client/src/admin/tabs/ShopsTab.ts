@@ -59,7 +59,10 @@ export class ShopsTab implements Tab {
     if (!content) return;
     const isNew = !shop;
     const s = shop ?? { id: '', name: '', inventory: [] };
-    const items = Object.values(content.items);
+    // Alphabetize items by name (case-insensitive) so the inventory list is easy to scan.
+    const items = Object.values(content.items)
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
     const priceMap = new Map<string, number>();
     const inShop = new Set<string>();
@@ -69,7 +72,7 @@ export class ShopsTab implements Tab {
       const checked = inShop.has(item.id);
       const price = priceMap.get(item.id) ?? (item.value ?? 1);
       return `
-        <div class="admin-shop-row">
+        <div class="admin-shop-row" data-item-name="${escapeHtml(item.name.toLowerCase())}">
           <label class="admin-checkbox">
             <input type="checkbox" class="shf-item-check" value="${item.id}" ${checked ? 'checked' : ''}>
             ${escapeHtml(item.name)}
@@ -86,7 +89,15 @@ export class ShopsTab implements Tab {
       </div>
       <fieldset class="admin-form-fieldset">
         <legend>Inventory</legend>
-        <div class="admin-checklist admin-checklist-tall">${itemRows}</div>
+        <div class="admin-checklist-toolbar">
+          <input type="search" id="shf-item-search" placeholder="Search items…" autocomplete="off">
+          <label class="admin-checkbox">
+            <input type="checkbox" id="shf-show-stocked-only">
+            Show only stocked
+          </label>
+          <span id="shf-item-count" class="admin-form-hint"></span>
+        </div>
+        <div class="admin-checklist admin-checklist-tall" id="shf-item-list">${itemRows}</div>
       </fieldset>
       <div class="admin-modal-actions">
         <button class="admin-btn" id="shf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
@@ -99,8 +110,47 @@ export class ShopsTab implements Tab {
       width: '720px',
     });
     const root = modal.body;
+
+    this.wireItemFilter(root);
+
     root.querySelector('#shf-cancel')?.addEventListener('click', modal.close);
     root.querySelector('#shf-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal.close));
+  }
+
+  private wireItemFilter(root: HTMLElement): void {
+    const search = root.querySelector<HTMLInputElement>('#shf-item-search');
+    const stockedOnly = root.querySelector<HTMLInputElement>('#shf-show-stocked-only');
+    const list = root.querySelector<HTMLElement>('#shf-item-list');
+    const countEl = root.querySelector<HTMLElement>('#shf-item-count');
+    if (!list) return;
+
+    const apply = () => {
+      const q = (search?.value ?? '').trim().toLowerCase();
+      const onlyStocked = stockedOnly?.checked ?? false;
+      let shown = 0;
+      let total = 0;
+      list.querySelectorAll<HTMLElement>('.admin-shop-row').forEach(row => {
+        total++;
+        const name = row.dataset.itemName ?? '';
+        const checked = row.querySelector<HTMLInputElement>('.shf-item-check')?.checked ?? false;
+        const matchesQuery = !q || name.includes(q);
+        const matchesStock = !onlyStocked || checked;
+        const visible = matchesQuery && matchesStock;
+        row.style.display = visible ? '' : 'none';
+        if (visible) shown++;
+      });
+      if (countEl) countEl.textContent = shown === total ? `${total} items` : `${shown} of ${total}`;
+    };
+
+    search?.addEventListener('input', apply);
+    stockedOnly?.addEventListener('change', apply);
+    // Re-apply when toggling a checkbox so the "stocked only" filter updates live.
+    list.addEventListener('change', e => {
+      const target = e.target as HTMLElement;
+      if (target.classList?.contains('shf-item-check') && stockedOnly?.checked) apply();
+    });
+
+    apply();
   }
 
   private async saveForm(root: HTMLElement, ctx: AdminContext, close: () => void): Promise<void> {

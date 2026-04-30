@@ -61,8 +61,6 @@ export class MapTab implements Tab {
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private selectedTile: WorldTileDefinition | null = null;
-  /** Sidebar mode — `preview` shows summary, `edit` shows form fields. */
-  private sidebarMode: 'preview' | 'edit' = 'preview';
 
   cleanup(): void {
     if (this.resizeHandler) window.removeEventListener('resize', this.resizeHandler);
@@ -76,7 +74,6 @@ export class MapTab implements Tab {
     this.mapCtx = null;
     this.mapInitialized = false;
     this.selectedTile = null;
-    this.sidebarMode = 'preview';
   }
 
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -215,7 +212,7 @@ export class MapTab implements Tab {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tag = (document.activeElement?.tagName ?? '').toLowerCase();
         if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-        if (this.selectedTile && this.sidebarMode === 'edit') {
+        if (this.selectedTile) {
           e.preventDefault();
           this.deleteSelectedTile(ctx);
         }
@@ -294,7 +291,6 @@ export class MapTab implements Tab {
     const tileDef = this.worldTileDefs.get(clickedKey);
     if (tileDef) {
       this.selectedTile = tileDef;
-      this.sidebarMode = 'preview';
       this.draw(ctx);
       this.renderSidebar(ctx);
       return;
@@ -307,7 +303,6 @@ export class MapTab implements Tab {
       }
     }
     this.selectedTile = null;
-    this.sidebarMode = 'preview';
     this.draw(ctx);
     this.renderSidebar(ctx);
   }
@@ -570,7 +565,7 @@ export class MapTab implements Tab {
     if (!tile) {
       const hint = readOnly
         ? 'Click a room to view details. This version is read-only.'
-        : 'Click a room to view details, or click + to add a new room.';
+        : 'Click a room to edit, or click + to add a new room.';
       sidebar.innerHTML = `
         <div class="admin-map-sidebar-header">Room Editor</div>
         <div class="admin-map-sidebar-placeholder">${hint}</div>
@@ -578,57 +573,7 @@ export class MapTab implements Tab {
       return;
     }
 
-    if (this.sidebarMode === 'preview') {
-      this.renderSidebarPreview(sidebar, ctx, tile);
-    } else {
-      this.renderSidebarEditor(sidebar, ctx, tile);
-    }
-  }
-
-  private renderSidebarPreview(sidebar: HTMLElement, ctx: AdminContext, tile: WorldTileDefinition): void {
-    const content = ctx.getDisplayContent();
-    const tileTypeDef = content?.tileTypes?.[tile.type];
-    const zoneDef = content?.zones[tile.zone];
-    const startTile = content?.world.startTile;
-    const isStart = startTile && startTile.col === tile.col && startTile.row === tile.row;
-    const shop = tile.shopId ? content?.shops?.[tile.shopId] : null;
-    const items = content?.items;
-    const requiredItem = tile.requiredItemId ? items?.[tile.requiredItemId] : null;
-
-    const encounters = (tile.encounterTable ?? []).map(e => {
-      const def = content?.encounters[e.encounterId];
-      return `${escapeHtml(def?.name ?? e.encounterId)} (w:${e.weight})`;
-    }).join(', ');
-
-    const editBtn = ctx.isReadOnly()
-      ? ''
-      : `<button class="admin-btn" id="sidebar-edit-btn">Edit Room</button>`;
-
-    sidebar.innerHTML = `
-      <div class="admin-map-sidebar-header">
-        <span>${escapeHtml(tile.name)}</span>
-        ${isStart ? '<span class="admin-pill admin-pill-gold">★ Start</span>' : ''}
-      </div>
-      <dl class="admin-detail-list admin-detail-list-tight">
-        <div><dt>Type</dt><dd>${escapeHtml(tileTypeDef?.name ?? tile.type)}${tileTypeDef && !tileTypeDef.traversable ? ' <span class="admin-pill">blocked</span>' : ''}</dd></div>
-        <div><dt>Zone</dt><dd>${escapeHtml(zoneDef?.displayName ?? tile.zone)}</dd></div>
-        <div><dt>Coords</dt><dd>(${tile.col}, ${tile.row})</dd></div>
-        ${shop ? `<div><dt>Shop</dt><dd>${escapeHtml(shop.name)}</dd></div>` : ''}
-        ${requiredItem ? `<div><dt>Requires</dt><dd>${escapeHtml(requiredItem.name)}</dd></div>` : ''}
-        ${tile.encounterTable?.length ? `<div><dt>Encounters</dt><dd>${encounters}</dd></div>` : ''}
-      </dl>
-      <div class="admin-map-sidebar-actions">
-        ${editBtn}
-      </div>
-    `;
-
-    sidebar.querySelector('#sidebar-edit-btn')?.addEventListener('click', () => {
-      this.sidebarMode = 'edit';
-      this.renderSidebar(ctx);
-      const nameInput = document.getElementById('sidebar-name') as HTMLInputElement | null;
-      nameInput?.focus();
-      nameInput?.select();
-    });
+    this.renderSidebarEditor(sidebar, ctx, tile);
   }
 
   private renderSidebarEditor(sidebar: HTMLElement, ctx: AdminContext, tile: WorldTileDefinition): void {
@@ -671,8 +616,8 @@ export class MapTab implements Tab {
 
     sidebar.innerHTML = `
       <div class="admin-map-sidebar-header">
-        <span>Edit Room</span>
-        <button class="admin-btn admin-btn-sm admin-btn-secondary" id="sidebar-back" type="button">Back</button>
+        <span>${readOnly ? 'Room Info' : 'Edit Room'}</span>
+        ${isStart ? '<span class="admin-pill admin-pill-gold">★ Start</span>' : ''}
       </div>
       <div class="admin-map-sidebar-fields">
         <label>Room Name<input type="text" id="sidebar-name" value="${escapeHtml(tile.name)}"${disabled}></label>
@@ -750,10 +695,6 @@ export class MapTab implements Tab {
     this.wireEncounterEvents(ctx);
     document.getElementById('sidebar-set-start')?.addEventListener('click', () => this.setAsStartTile(ctx));
     document.getElementById('sidebar-delete')?.addEventListener('click', () => this.deleteSelectedTile(ctx));
-    document.getElementById('sidebar-back')?.addEventListener('click', () => {
-      this.sidebarMode = 'preview';
-      this.renderSidebar(ctx);
-    });
   }
 
   private encounterRowsHtml(tile: WorldTileDefinition, encounters: EncounterDefinition[], readOnly: boolean): string {
@@ -878,7 +819,6 @@ export class MapTab implements Tab {
         `/api/admin/world/tile${ctx.versionQueryParam()}`, newTile);
       this.applyWorldUpdate(ctx, data.world);
       this.selectedTile = this.worldTileDefs.get(`${newTile.col},${newTile.row}`) ?? newTile;
-      this.sidebarMode = 'edit';
       this.draw(ctx);
       this.updateMapTileCount();
       this.renderSidebar(ctx);
@@ -898,7 +838,6 @@ export class MapTab implements Tab {
         { col: this.selectedTile.col, row: this.selectedTile.row });
       this.applyWorldUpdate(ctx, data.world);
       this.selectedTile = null;
-      this.sidebarMode = 'preview';
       this.draw(ctx);
       this.updateMapTileCount();
       this.renderSidebar(ctx);
