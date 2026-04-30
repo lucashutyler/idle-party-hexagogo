@@ -12,6 +12,8 @@ import {
   calculateBaseDamage,
   xpForNextLevel,
   computeEquipmentBonuses,
+  computeActiveSetBonuses,
+  mergeSetBonusesIntoEquip,
   MAX_STACK,
   addItemToInventory,
   equipItem,
@@ -23,6 +25,7 @@ import {
   getOwnedItemIds,
   hasItemEquipped as inventoryHasItemEquipped,
   getZone,
+  setAppliesToClass,
   createDefaultSkillLoadout,
   SKILL_SLOTS,
   getSkillPointsForLevel,
@@ -129,10 +132,19 @@ export class PlayerSession {
   /** Get combat info for the party combat system. Requires character to exist. */
   getCombatInfo(): PartyCombatant {
     if (!this.character) throw new Error('getCombatInfo called on characterless session');
-    const maxHp = calculateMaxHp(this.character.level, this.character.className);
+    const baseMaxHp = calculateMaxHp(this.character.level, this.character.className);
     let baseDamage = calculateBaseDamage(this.character.level, this.character.className);
-    const equipBonuses = computeEquipmentBonuses(this.character.equipment, this.content.getAllItems(), this.character.level);
+    const rawEquipBonuses = computeEquipmentBonuses(this.character.equipment, this.content.getAllItems(), this.character.level);
     const playerDamageType = CLASS_DEFINITIONS[this.character.className].damageType;
+
+    // Compute set bonuses (filtered by class) and merge flat DR/MR/attack into equipBonuses.
+    // Multiplicative bonuses (damagePercent, damageResistancePercent, cooldownReduction)
+    // ride along on `setBonuses` so the combat engine can consume them at the right time.
+    const setResult = computeActiveSetBonuses(this.character.equipment, this.content.getAllSets(), this.character.className);
+    const equipBonuses = mergeSetBonusesIntoEquip(rawEquipBonuses, setResult.bonuses);
+    const flatHp = setResult.bonuses.flatHp ?? 0;
+    const percentHp = setResult.bonuses.percentHp ?? 0;
+    const maxHp = Math.max(1, Math.floor((baseMaxHp + flatHp) * (1 + percentHp / 100)));
 
     // Resolve equipped skill definitions
     const equippedSkills: (SkillDefinition | null)[] = this.character.skillLoadout.equippedSkills.map(
@@ -154,6 +166,7 @@ export class PlayerSession {
       baseDamage,
       playerDamageType,
       equipBonuses,
+      setBonuses: setResult.bonuses,
       gridPosition,
       className: this.character.className,
       level: this.character.level,
@@ -292,7 +305,12 @@ export class PlayerSession {
     return defs;
   }
 
-  /** Build set definitions for sets containing at least one item the player owns. */
+  /**
+   * Build set definitions for sets the player can activate AND owns at least one piece of.
+   * Class-restricted sets that don't include the player's class are excluded — owning a
+   * piece of a Knight set as a Bard does nothing for the Bard, so the popup shouldn't
+   * mention it on their own item view.
+   */
   private getOwnedSetDefinitions(): Record<string, SetDefinition> {
     if (!this.character) return {};
     const ownedItemIds = getOwnedItemIds(this.character.inventory, this.character.equipment);
@@ -300,6 +318,7 @@ export class PlayerSession {
     const allSets = this.content.getAllSets();
     const result: Record<string, SetDefinition> = {};
     for (const [id, set] of Object.entries(allSets)) {
+      if (!setAppliesToClass(set, this.character.className)) continue;
       if (set.itemIds.some(itemId => ownedItemIds.has(itemId))) {
         result[id] = set;
       }
@@ -323,12 +342,18 @@ export class PlayerSession {
 
     let charState: ClientCharacterState | null = null;
     if (this.character) {
+      const baseMaxHp = calculateMaxHp(this.character.level, this.character.className);
+      const setResult = computeActiveSetBonuses(this.character.equipment, this.content.getAllSets(), this.character.className);
+      const flatHp = setResult.bonuses.flatHp ?? 0;
+      const percentHp = setResult.bonuses.percentHp ?? 0;
+      const maxHp = Math.max(1, Math.floor((baseMaxHp + flatHp) * (1 + percentHp / 100)));
+
       charState = {
         className: this.character.className,
         level: this.character.level,
         xp: this.character.xp,
         xpForNextLevel: xpForNextLevel(this.character.level),
-        maxHp: calculateMaxHp(this.character.level, this.character.className),
+        maxHp,
         gold: this.character.gold,
         baseDamage: calculateBaseDamage(this.character.level, this.character.className),
         damageType: CLASS_DEFINITIONS[this.character.className].damageType,

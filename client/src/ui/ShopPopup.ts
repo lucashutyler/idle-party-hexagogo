@@ -227,6 +227,7 @@ export class ShopPopup {
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
       setDefs,
+      className: state.character?.className ?? null,
     });
 
     this.overlay.innerHTML = `
@@ -307,6 +308,7 @@ export class ShopPopup {
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
       setDefs,
+      className: state.character?.className ?? null,
     });
 
     this.overlay.innerHTML = `

@@ -219,6 +219,21 @@ function injectItemsStyles(): void {
       color: #aaa;
       font-style: italic;
     }
+    .item-popup-set-breakpoints {
+      margin-top: 4px;
+    }
+    .item-popup-set-bp {
+      color: #666;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .item-popup-set-bp.unlocked {
+      color: #aaa;
+    }
+    .item-popup-set-bp.active {
+      color: #66bb6a;
+      font-weight: bold;
+    }
     .item-popup-actions {
       margin-top: 12px;
       display: flex;
@@ -438,6 +453,7 @@ export class ItemsScreen implements Screen {
   /** Cached character state for popup actions. */
   private lastEquipment: Record<string, string | null> = {};
   private lastInventory: Record<string, number> = {};
+  private lastClassName = '';
   private lastMailbox: MailboxEntry[] = [];
   private lastProposedTrades: TradeState[] = [];
   private lastUsername = '';
@@ -632,6 +648,7 @@ export class ItemsScreen implements Screen {
     this.setDefs = state.setDefinitions ?? {};
     this.lastEquipment = { ...char.equipment };
     this.lastInventory = { ...char.inventory };
+    this.lastClassName = char.className;
     this.lastMailbox = state.social?.mailbox ?? [];
     this.lastProposedTrades = state.social?.proposedTrades ?? [];
     this.lastUsername = state.username ?? '';
@@ -864,6 +881,7 @@ export class ItemsScreen implements Screen {
       setDefs: this.setDefs,
       ownedItemIds,
       equippedItemIds,
+      className: this.lastClassName || null,
       actionsHtml,
     });
 
