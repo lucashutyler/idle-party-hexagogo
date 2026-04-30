@@ -70,8 +70,30 @@ client/                        @idle-party-rpg/client — Phaser 3 web client
 │   │   ├── SuspensionScreen.ts # "Account suspended" screen with appeal form
 │   │   └── PlaceholderScreen.ts # Reusable "Coming soon" for future tabs
 │   ├── admin/
-│   │   ├── main.ts            # Admin entry point — imports CSS, creates AdminApp
-│   │   └── AdminApp.ts        # World Manager dashboard (fetches from /api/admin/content, map viewer)
+│   │   ├── main.ts            # Admin entry point — imports admin-theme.css, creates AdminApp
+│   │   ├── AdminApp.ts        # World Manager shell (top status bar, sidebar, routing, shared state)
+│   │   ├── AdminContext.ts    # Shared-state interface tabs use to read/mutate
+│   │   ├── api.ts             # fetchAdmin / putAdmin / deleteAdmin / postAdmin / escapeHtml / formatRelativeTime
+│   │   ├── types.ts           # OverviewData, AccountData, ContentData, ContentVersion, TabId, TABS, UiSize
+│   │   ├── components/
+│   │   │   ├── Modal.ts       # openModal helper used by every form
+│   │   │   └── UiSize.ts      # getUiSize/setUiSize/applyUiSize (S/M/L/XL via data-admin-size attr)
+│   │   ├── tabs/              # One file per tab; each implements `Tab` interface (render, optional cleanup)
+│   │   │   ├── Tab.ts
+│   │   │   ├── OverviewTab.ts        # Stats + analytics placeholders (DAU, retention, etc.)
+│   │   │   ├── AccountsTab.ts        # Filters/sort, default sort = Created desc, detail modal
+│   │   │   ├── MonstersTab.ts        # Modal form (was inline panel)
+│   │   │   ├── ItemsTab.ts           # Slot filter + modal form
+│   │   │   ├── SetsTab.ts            # Modal form
+│   │   │   ├── ShopsTab.ts           # Modal form
+│   │   │   ├── ZonesTab.ts           # Modal form (was inline panel)
+│   │   │   ├── EncountersTab.ts      # Modal form, random/explicit grid
+│   │   │   ├── TileTypesTab.ts       # Card grid with hex previews; hex code hidden until edit
+│   │   │   ├── MapTab.ts             # Canvas + sidebar with click-to-preview, Edit button reveals editor
+│   │   │   ├── VersionsTab.ts        # Versions table (most actions also in top status bar)
+│   │   │   └── XpTableTab.ts         # XP curve to Level 100 with k/m/b/t suffix formatting
+│   │   └── styles/
+│   │       └── admin-theme.css       # Utilitarian admin theme (light + dark via prefers-color-scheme)
 │   ├── scenes/
 │   │   └── WorldMapScene.ts   # Phaser scene — hex rendering, input, camera, zone filtering
 │   ├── entities/
@@ -215,7 +237,7 @@ npm run typecheck    # tsc --build (all packages)
 - **Zoom controls**: Mobile-friendly +/- zoom buttons on the map screen, wired to `WorldMapScene.adjustZoom()`.
 - **Floating HP bars**: CombatScreen renders HP bars floating above each combat sprite (players and enemies) arranged in grid formation rows (3 rows based on `gridPosition`). Player labels show username (current player highlighted in gold); monster labels show name only. HP shown as percentage bar only. Dead combatants are dimmed.
 - **Desktop font scaling**: `@media (min-width: 768px)` media query increases font sizes for all UI elements on desktop.
-- **World Manager (admin dashboard)**: Separate client page at `/admin` (dev: `/admin.html`) for viewing server data and game content. Admin auth uses `ADMIN_EMAILS` env var (comma-separated emails). Server-side middleware checks session email against the list (401 if unauthenticated, 403 if not admin). API endpoints at `/api/admin/*` return runtime data (overview stats, accounts with online status) and full unfiltered game content (`GET /api/admin/content` returns all monsters, items, zones, and world data). The map viewer uses HTML5 Canvas with pan/zoom, rendering tiles from the content API. Room names are shown on all tiles (admin sees everything, no fog of war). Built as a separate Vite entry point (`admin.html`) isolated from the game client. **Accounts tab** has filters (hide no-character accounts, active-in-last-N-days, created-in-last-N-days) with live filtered count. Clicking a username opens a detail modal with session history, duplicate device token detection (highlighted in red), deactivate/reactivate buttons, and reactivation request viewer.
+- **World Manager (admin dashboard)**: Separate client page at `/admin` (dev: `/admin.html`) for viewing server data and game content. Admin auth uses `ADMIN_EMAILS` env var (comma-separated emails). Server-side middleware checks session email against the list (401 if unauthenticated, 403 if not admin). API endpoints at `/api/admin/*` return runtime data (overview stats, accounts with online status) and full unfiltered game content (`GET /api/admin/content` returns all monsters, items, zones, and world data). The map viewer uses HTML5 Canvas with pan/zoom, rendering tiles from the content API. Room names are shown on all tiles (admin sees everything, no fog of war). Built as a separate Vite entry point (`admin.html`) isolated from the game client and styled with its own utilitarian theme (`styles/admin-theme.css`) — does NOT share `pixel-theme.css` with the game. **Modular layout**: shell + per-tab modules under `client/src/admin/tabs/`, all sharing state via the `AdminContext` interface. The shell renders a sticky **status bar** (always visible at the top with a version selector + Publish/Deploy/+New Draft buttons), a left **sidebar** (collapsible to a hamburger menu under 900px wide; each item also shows a **UI Size selector** S/M/L/XL persisted to localStorage as `data-admin-size` on `<html>`), and the active tab's content. **All edit forms are popup modals** (Monsters, Items, Sets, Shops, Zones, Encounters, Tile Types) opened via `components/Modal.ts`. **Overview tab** has analytics placeholders (DAU, retention, level distribution, class mix) — coming soon. **Accounts tab** defaults to sort-by-Created desc, has filters (hide no-character accounts, active-in-last-N-days, created-in-last-N-days) with live filtered count. Clicking a username opens a detail modal with session history, duplicate device token detection (highlighted), deactivate/reactivate buttons, and reactivation request viewer. **Tile Types tab** shows real hex-shaped tile previews; the hex color code is hidden until you focus the color picker. **Map tab** sidebar shows a read-only room preview on click; an Edit button reveals editable fields and focuses the room name. **Game** link in the sidebar opens the game in a new tab. Built as a separate Vite entry point (`admin.html`) isolated from the game client.
 - **Social system**: Full social tab (6th tab) with 4 sub-tabs:
   - **Users**: All registered players (not just online) with search, sort (name/status), filter (all/room/zone/friends/guild). Online/offline status dots with group headers when sorted by status. Incoming friend requests shown as a section at the top. Click any username to open a **user popup menu** with contextual actions: Chat (DM), Guild invite, Friend request, Party invite, Block. Class icons shown next to all usernames. Data sourced from `ClientSocialState.allPlayers` (array of `PlayerListEntry` objects with `username` and optional `className`).
   - **Guild**: Create guild (level 20+, 2-20 char name), leave guild. Guild invites are sent via the user popup menu. Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.

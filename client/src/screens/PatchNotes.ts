@@ -1,5 +1,20 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.29.3',
+    notes: [
+      'World Manager: full admin UI overhaul — utilitarian theme, mobile-friendly with a pop-out sidebar, and a UI Size selector (S/M/L/XL) in the sidebar',
+      'Admin status bar at the top of every page lets you switch versions and Publish / Deploy / + New Draft from anywhere — no need to bounce to the Versions tab',
+      'All admin edit forms are now popup modals (Monsters, Items, Sets, Shops, Zones, Encounters, Tile Types) — no more scroll-to-top form panels',
+      'Admin Game link now opens the game in a new tab so you can keep the dashboard open',
+      'Overview page seeded with analytics placeholders (DAU, retention, level distribution, class mix) — coming soon',
+      'Accounts default sort is now newest-first (Created, descending)',
+      'Tile Types tab shows real hex previews of each tile; the hex color code only appears when you focus the color picker',
+      'Map editor now opens a room preview on click; the Edit button reveals editable fields and focuses the room name',
+      'XP Table extended to Level 100 with compact number formatting (k/m/b/t/q)',
+      'Admin code restructured into modular per-tab files (~200–500 lines each) — much friendlier to navigate and extend',
+    ],
+  },
+  {
     version: '2026.04.29.2',
     notes: [
       'New: Send Gift action on the user popup — gift items to anyone, no same-room requirement',
