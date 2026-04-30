@@ -16,6 +16,8 @@ import {
   ALL_CLASS_NAMES,
   MONSTER_SKILL_CATALOG,
   getSetBonusText,
+  getSetDisplayName,
+  migrateLegacySet,
 } from '@idle-party-rpg/shared';
 import type {
   MonsterDefinition,
@@ -34,6 +36,7 @@ import type {
   Resistance,
   MonsterSkillEntry,
   SetDefinition,
+  SetBreakpoint,
   SetBonuses,
   ShopDefinition,
   ShopItem,
@@ -1712,8 +1715,16 @@ export class AdminApp {
     const sets = Object.values(displayContent.sets ?? {});
     const readOnly = this.isReadOnly();
 
-    const rows = sets.map(s => {
-      const bonusSummary = getSetBonusText(s.bonuses);
+    const rows = sets.map(rawSet => {
+      // Be tolerant of legacy snapshots — read through migrateLegacySet for display.
+      const s = migrateLegacySet(rawSet);
+      const bps = s.breakpoints ?? [];
+      const bonusSummary = bps.length === 0
+        ? '(no breakpoints)'
+        : bps.map(bp => `${bp.piecesRequired}pc: ${getSetBonusText(bp.bonuses)}`).join(' · ');
+      const classes = s.classRestriction && s.classRestriction.length > 0
+        ? s.classRestriction.join(', ')
+        : 'Any';
 
       const actions = readOnly ? '' : `
         <td class="monster-actions-cell">
@@ -1724,7 +1735,8 @@ export class AdminApp {
 
       return `
         <tr>
-          <td>${this.escapeHtml(s.name)}</td>
+          <td>${this.escapeHtml(getSetDisplayName(s))}</td>
+          <td>${this.escapeHtml(classes)}</td>
           <td>${s.itemIds.length}</td>
           <td>${this.escapeHtml(bonusSummary)}</td>
           ${actions}
@@ -1748,8 +1760,9 @@ export class AdminApp {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Classes</th>
                 <th>Items</th>
-                <th>Bonus Summary</th>
+                <th>Breakpoints</th>
                 ${actionsHeader}
               </tr>
             </thead>
@@ -1787,14 +1800,19 @@ export class AdminApp {
     });
   }
 
-  private showSetForm(set: SetDefinition | null): void {
+  /** Working state for the set form's breakpoints — kept in memory between re-renders. */
+  private setFormBreakpoints: SetBreakpoint[] = [];
+
+  private showSetForm(rawSet: SetDefinition | null): void {
     const displayContent = this.getDisplayContent();
     if (!displayContent) return;
 
-    const isNew = !set;
-    const s = set ?? { id: '', name: '', itemIds: [], bonuses: {} };
+    const isNew = !rawSet;
+    const s = rawSet ? migrateLegacySet(rawSet) : { id: '', name: '', itemIds: [], breakpoints: [] as SetBreakpoint[] };
+    this.setFormBreakpoints = s.breakpoints.map(bp => ({ piecesRequired: bp.piecesRequired, bonuses: { ...bp.bonuses } }));
     const items = Object.values(displayContent.items);
     const existingItemIds = new Set(s.itemIds);
+    const existingClasses = new Set(s.classRestriction ?? []);
 
     const itemCheckboxes = items.map(item =>
       `<label style="display:block;margin:2px 0;">
@@ -1802,7 +1820,11 @@ export class AdminApp {
       </label>`
     ).join('');
 
-    const b = s.bonuses;
+    const classCheckboxes = ALL_CLASS_NAMES.map(cn =>
+      `<label style="display:inline-block;margin:2px 8px 2px 0;">
+        <input type="checkbox" class="sf-class-check" value="${cn}" ${existingClasses.has(cn) ? 'checked' : ''}> ${cn}
+      </label>`
+    ).join('');
 
     // Remove any existing modal
     document.querySelector('.admin-set-modal-overlay')?.remove();
@@ -1811,33 +1833,28 @@ export class AdminApp {
     overlay.className = 'admin-set-modal-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;overflow-y:auto;display:flex;justify-content:center;align-items:flex-start;';
     overlay.innerHTML = `
-      <div style="max-width:600px;width:100%;margin:40px auto;background:var(--color-bg-panel,#1a1a2e);border:2px solid var(--color-border,#333);padding:20px;border-radius:4px;" class="pixel-panel">
+      <div style="max-width:680px;width:100%;margin:40px auto;background:var(--color-bg-panel,#1a1a2e);border:2px solid var(--color-border,#333);padding:20px;border-radius:4px;" class="pixel-panel">
         <h3>${isNew ? 'Add Set' : `Edit: ${this.escapeHtml(s.name)}`}</h3>
         <input type="hidden" id="sf-id" value="${this.escapeHtml(s.id)}">
         <div class="monster-form-grid">
           <label>Name<input type="text" id="sf-name" value="${this.escapeHtml(s.name)}"></label>
         </div>
         <div style="margin:8px 0;">
-          <label style="display:block;margin-bottom:4px;font-weight:bold;">Items</label>
+          <label style="display:block;margin-bottom:4px;font-weight:bold;">Class Restriction</label>
+          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Leave all unchecked for "any class".</div>
+          <div>${classCheckboxes}</div>
+        </div>
+        <div style="margin:8px 0;">
+          <label style="display:block;margin-bottom:4px;font-weight:bold;">Items <span class="sf-item-count" style="color:#aaa;font-weight:normal;font-size:11px;"></span></label>
           <div style="max-height:200px;overflow-y:auto;border:1px solid var(--color-border,#333);padding:8px;">
             ${itemCheckboxes}
           </div>
         </div>
         <div style="margin:8px 0;">
-          <label style="display:block;margin-bottom:4px;font-weight:bold;">Set Bonuses</label>
-          <div class="monster-form-grid">
-            <label>CD Reduction<input type="number" id="sf-cooldownReduction" value="${b.cooldownReduction ?? 0}" min="0"></label>
-            <label>Damage %<input type="number" id="sf-damagePercent" value="${b.damagePercent ?? 0}" min="0"></label>
-            <label>Dmg Resist %<input type="number" id="sf-damageResistancePercent" value="${b.damageResistancePercent ?? 0}" min="0"></label>
-            <label>DR Min<input type="number" id="sf-drMin" value="${b.damageReductionMin ?? 0}" min="0"></label>
-            <label>DR Max<input type="number" id="sf-drMax" value="${b.damageReductionMax ?? 0}" min="0"></label>
-            <label>MR Min<input type="number" id="sf-mrMin" value="${b.magicReductionMin ?? 0}" min="0"></label>
-            <label>MR Max<input type="number" id="sf-mrMax" value="${b.magicReductionMax ?? 0}" min="0"></label>
-            <label>Atk Min<input type="number" id="sf-atkMin" value="${b.bonusAttackMin ?? 0}" min="0"></label>
-            <label>Atk Max<input type="number" id="sf-atkMax" value="${b.bonusAttackMax ?? 0}" min="0"></label>
-            <label>Flat HP<input type="number" id="sf-flatHp" value="${b.flatHp ?? 0}" min="0"></label>
-            <label>% HP<input type="number" id="sf-percentHp" value="${b.percentHp ?? 0}" min="0"></label>
-          </div>
+          <label style="display:block;margin-bottom:4px;font-weight:bold;">Breakpoints</label>
+          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Each breakpoint unlocks at the listed piece count. Bonuses do NOT stack across tiers — the highest unlocked tier replaces lower ones.</div>
+          <div id="sf-breakpoints-container"></div>
+          <button type="button" class="admin-btn admin-btn-sm" id="sf-add-breakpoint" style="margin-top:6px;">+ Add Breakpoint</button>
         </div>
         <div class="monster-form-actions">
           <button class="admin-btn" id="sf-save">${isNew ? 'Add' : 'Save'}</button>
@@ -1855,9 +1872,99 @@ export class AdminApp {
       overlay.remove();
     });
 
+    const updateItemCount = () => {
+      const checked = document.querySelectorAll('.sf-item-check:checked').length;
+      const countEl = document.querySelector('.sf-item-count');
+      if (countEl) countEl.textContent = `(${checked} selected)`;
+    };
+    updateItemCount();
+    document.querySelectorAll('.sf-item-check').forEach(cb => cb.addEventListener('change', updateItemCount));
+
+    document.getElementById('sf-add-breakpoint')?.addEventListener('click', () => {
+      this.captureSetFormBreakpoints();
+      const totalItems = document.querySelectorAll('.sf-item-check:checked').length || 1;
+      const lastBp = this.setFormBreakpoints.length > 0
+        ? this.setFormBreakpoints[this.setFormBreakpoints.length - 1]
+        : null;
+      const next = Math.min(totalItems, (lastBp?.piecesRequired ?? 0) + 1);
+      this.setFormBreakpoints.push({ piecesRequired: Math.max(1, next), bonuses: {} });
+      this.renderSetFormBreakpoints();
+    });
+
+    this.renderSetFormBreakpoints();
+
     document.getElementById('sf-save')?.addEventListener('click', () => {
       this.saveSetForm();
     });
+  }
+
+  /** Render the breakpoint editor rows from `setFormBreakpoints` state. */
+  private renderSetFormBreakpoints(): void {
+    const container = document.getElementById('sf-breakpoints-container');
+    if (!container) return;
+    if (this.setFormBreakpoints.length === 0) {
+      container.innerHTML = '<div style="color:#888;font-size:11px;padding:8px;">No breakpoints yet — click "Add Breakpoint" to create one.</div>';
+      return;
+    }
+    container.innerHTML = this.setFormBreakpoints.map((bp, idx) => {
+      const b = bp.bonuses;
+      return `
+        <div class="sf-breakpoint-row" data-bp-idx="${idx}" style="border:1px solid #333;padding:8px;margin-bottom:6px;border-radius:4px;background:#161628;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <label style="font-weight:bold;">Tier @ <input type="number" class="sf-bp-pieces" value="${bp.piecesRequired}" min="1" style="width:60px;"> piece(s)</label>
+            <button type="button" class="admin-btn admin-btn-sm admin-btn-danger sf-bp-remove">Remove</button>
+          </div>
+          <div class="monster-form-grid">
+            <label>CD Reduction<input type="number" class="sf-bp-cd" value="${b.cooldownReduction ?? 0}" min="0"></label>
+            <label>Damage %<input type="number" class="sf-bp-dmgPct" value="${b.damagePercent ?? 0}" min="0"></label>
+            <label>Dmg Resist %<input type="number" class="sf-bp-dmgResist" value="${b.damageResistancePercent ?? 0}" min="0"></label>
+            <label>DR Min<input type="number" class="sf-bp-drMin" value="${b.damageReductionMin ?? 0}" min="0"></label>
+            <label>DR Max<input type="number" class="sf-bp-drMax" value="${b.damageReductionMax ?? 0}" min="0"></label>
+            <label>MR Min<input type="number" class="sf-bp-mrMin" value="${b.magicReductionMin ?? 0}" min="0"></label>
+            <label>MR Max<input type="number" class="sf-bp-mrMax" value="${b.magicReductionMax ?? 0}" min="0"></label>
+            <label>Atk Min<input type="number" class="sf-bp-atkMin" value="${b.bonusAttackMin ?? 0}" min="0"></label>
+            <label>Atk Max<input type="number" class="sf-bp-atkMax" value="${b.bonusAttackMax ?? 0}" min="0"></label>
+            <label>Flat HP<input type="number" class="sf-bp-flatHp" value="${b.flatHp ?? 0}" min="0"></label>
+            <label>% HP<input type="number" class="sf-bp-pctHp" value="${b.percentHp ?? 0}" min="0"></label>
+          </div>
+        </div>`;
+    }).join('');
+    container.querySelectorAll('.sf-bp-remove').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const row = (e.currentTarget as HTMLElement).closest('.sf-breakpoint-row') as HTMLElement | null;
+        if (!row) return;
+        this.captureSetFormBreakpoints();
+        const idx = parseInt(row.dataset.bpIdx ?? '-1', 10);
+        if (idx >= 0) {
+          this.setFormBreakpoints.splice(idx, 1);
+          this.renderSetFormBreakpoints();
+        }
+      });
+    });
+  }
+
+  /** Read current breakpoint inputs back into `setFormBreakpoints`. */
+  private captureSetFormBreakpoints(): void {
+    const rows = document.querySelectorAll('.sf-breakpoint-row');
+    const captured: SetBreakpoint[] = [];
+    rows.forEach(row => {
+      const piecesRequired = parseInt((row.querySelector('.sf-bp-pieces') as HTMLInputElement).value, 10) || 1;
+      const num = (sel: string) => parseInt((row.querySelector(sel) as HTMLInputElement)?.value || '0', 10) || 0;
+      const bonuses: SetBonuses = {};
+      const cd = num('.sf-bp-cd'); if (cd) bonuses.cooldownReduction = cd;
+      const dmgPct = num('.sf-bp-dmgPct'); if (dmgPct) bonuses.damagePercent = dmgPct;
+      const dmgResist = num('.sf-bp-dmgResist'); if (dmgResist) bonuses.damageResistancePercent = dmgResist;
+      const drMin = num('.sf-bp-drMin'); const drMax = num('.sf-bp-drMax');
+      if (drMin || drMax) { bonuses.damageReductionMin = drMin; bonuses.damageReductionMax = drMax; }
+      const mrMin = num('.sf-bp-mrMin'); const mrMax = num('.sf-bp-mrMax');
+      if (mrMin || mrMax) { bonuses.magicReductionMin = mrMin; bonuses.magicReductionMax = mrMax; }
+      const atkMin = num('.sf-bp-atkMin'); const atkMax = num('.sf-bp-atkMax');
+      if (atkMin || atkMax) { bonuses.bonusAttackMin = atkMin; bonuses.bonusAttackMax = atkMax; }
+      const flatHp = num('.sf-bp-flatHp'); if (flatHp) bonuses.flatHp = flatHp;
+      const pctHp = num('.sf-bp-pctHp'); if (pctHp) bonuses.percentHp = pctHp;
+      captured.push({ piecesRequired, bonuses });
+    });
+    this.setFormBreakpoints = captured;
   }
 
   private async saveSetForm(): Promise<void> {
@@ -1878,29 +1985,38 @@ export class AdminApp {
       }
     });
 
-    const bonuses: SetBonuses = {};
-    const cooldownReduction = parseInt((document.getElementById('sf-cooldownReduction') as HTMLInputElement)?.value) || 0;
-    const damagePercent = parseInt((document.getElementById('sf-damagePercent') as HTMLInputElement)?.value) || 0;
-    const damageResistancePercent = parseInt((document.getElementById('sf-damageResistancePercent') as HTMLInputElement)?.value) || 0;
-    const drMin = parseInt((document.getElementById('sf-drMin') as HTMLInputElement)?.value) || 0;
-    const drMax = parseInt((document.getElementById('sf-drMax') as HTMLInputElement)?.value) || 0;
-    const mrMin = parseInt((document.getElementById('sf-mrMin') as HTMLInputElement)?.value) || 0;
-    const mrMax = parseInt((document.getElementById('sf-mrMax') as HTMLInputElement)?.value) || 0;
-    const atkMin = parseInt((document.getElementById('sf-atkMin') as HTMLInputElement)?.value) || 0;
-    const atkMax = parseInt((document.getElementById('sf-atkMax') as HTMLInputElement)?.value) || 0;
-    const flatHp = parseInt((document.getElementById('sf-flatHp') as HTMLInputElement)?.value) || 0;
-    const percentHp = parseInt((document.getElementById('sf-percentHp') as HTMLInputElement)?.value) || 0;
+    const classRestriction: string[] = [];
+    document.querySelectorAll('.sf-class-check').forEach(cb => {
+      if ((cb as HTMLInputElement).checked) {
+        classRestriction.push((cb as HTMLInputElement).value);
+      }
+    });
 
-    if (cooldownReduction) bonuses.cooldownReduction = cooldownReduction;
-    if (damagePercent) bonuses.damagePercent = damagePercent;
-    if (damageResistancePercent) bonuses.damageResistancePercent = damageResistancePercent;
-    if (drMin || drMax) { bonuses.damageReductionMin = drMin; bonuses.damageReductionMax = drMax; }
-    if (mrMin || mrMax) { bonuses.magicReductionMin = mrMin; bonuses.magicReductionMax = mrMax; }
-    if (atkMin || atkMax) { bonuses.bonusAttackMin = atkMin; bonuses.bonusAttackMax = atkMax; }
-    if (flatHp) bonuses.flatHp = flatHp;
-    if (percentHp) bonuses.percentHp = percentHp;
+    // Snapshot the breakpoint inputs into setFormBreakpoints, then validate piece counts.
+    this.captureSetFormBreakpoints();
+    const breakpoints = this.setFormBreakpoints.map(bp => ({
+      piecesRequired: bp.piecesRequired,
+      bonuses: { ...bp.bonuses },
+    }));
+    if (breakpoints.length === 0) {
+      alert('At least one breakpoint is required.');
+      return;
+    }
+    for (const bp of breakpoints) {
+      if (bp.piecesRequired < 1 || bp.piecesRequired > Math.max(itemIds.length, 1)) {
+        alert(`Breakpoint piece count ${bp.piecesRequired} is out of range (1..${itemIds.length}).`);
+        return;
+      }
+    }
+    breakpoints.sort((a, b) => a.piecesRequired - b.piecesRequired);
 
-    const setDef: SetDefinition = { id, name, itemIds, bonuses };
+    const setDef: SetDefinition = {
+      id,
+      name,
+      itemIds,
+      breakpoints,
+      ...(classRestriction.length > 0 ? { classRestriction } : {}),
+    };
 
     try {
       const qp = this.versionQueryParam();

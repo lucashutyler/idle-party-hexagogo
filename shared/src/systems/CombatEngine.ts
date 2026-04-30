@@ -3,6 +3,7 @@ import type { MonsterInstance, Resistance, MonsterSkillEntry } from './MonsterTy
 import type { EquipmentBonuses } from './ItemTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type { SkillDefinition } from './SkillTypes.js';
+import type { SetBonuses } from './SetTypes.js';
 import { MONSTER_SKILL_CATALOG } from './MonsterSkills.js';
 
 // --- Types ---
@@ -61,6 +62,13 @@ export interface PartyCombatant {
   baseDamage: number;
   playerDamageType: DamageType;
   equipBonuses?: EquipmentBonuses;
+  /**
+   * Aggregated set bonuses for the highest unlocked breakpoint of every active set,
+   * already filtered by the player's class. Flat DR/MR/attack components are also
+   * pre-merged into `equipBonuses`; this struct carries the multiplicative pieces
+   * (damagePercent, damageResistancePercent, cooldownReduction) the engine consumes.
+   */
+  setBonuses?: SetBonuses;
   gridPosition: PartyGridPosition;
   className: ClassName;
   level: number;
@@ -413,6 +421,9 @@ function getEffectiveCooldown(player: PartyCombatant, skill: SkillDefinition, al
     }
   }
 
+  // Set bonus CDR — self-only (set pieces are personal).
+  cdReduction += player.setBonuses?.cooldownReduction ?? 0;
+
   return Math.max(1, (skill.cooldown ?? 1) - cdReduction);
 }
 
@@ -492,6 +503,12 @@ function computePlayerDamage(
   // Apply War Song permanent bonus
   if (state.warSongBonus > 0) {
     damage = Math.max(1, Math.floor(damage * (1 + state.warSongBonus)));
+  }
+
+  // Apply set damagePercent — additive multiplier on top of base damage.
+  const setDmgPct = player.setBonuses?.damagePercent ?? 0;
+  if (setDmgPct > 0) {
+    damage = Math.max(1, Math.floor(damage * (1 + setDmgPct / 100)));
   }
 
   // Conditional damage bonuses
@@ -730,7 +747,12 @@ function processTickEffects(entity: PartyCombatant | CombatMonster, logEntries: 
         //   physical → equip DR + Knight Guard
         //   magical  → equip MR + Priest Bless
         //   holy     → Priest Bless only (equipment MR doesn't reduce holy)
+        // Set damageResistancePercent applies first, before flat reductions.
         const player = entity as PartyCombatant;
+        const resistPct = player.setBonuses?.damageResistancePercent ?? 0;
+        if (resistPct > 0) {
+          damage = Math.max(0, Math.floor(damage * (1 - resistPct / 100)));
+        }
         let reduction = 0;
         if (damageType === 'physical') {
           reduction += computeEquipReduction(player.equipBonuses);
@@ -1723,6 +1745,13 @@ function applyMonsterDirectDamage(
   logEntries: string[],
   hitLabel: string,
 ): number {
+  // Set damageResistancePercent applies BEFORE flat reductions, per SetBonuses contract.
+  const setResistPct = target.setBonuses?.damageResistancePercent ?? 0;
+  let scaledRaw = rawDamage;
+  if (setResistPct > 0) {
+    scaledRaw = Math.max(0, Math.floor(scaledRaw * (1 - setResistPct / 100)));
+  }
+
   let reduction = 0;
   if (damageType === 'physical') {
     reduction += computeEquipReduction(target.equipBonuses);
@@ -1735,7 +1764,7 @@ function applyMonsterDirectDamage(
     reduction += getMagicalReduction(state.players);
   }
 
-  let damage = Math.max(0, rawDamage - reduction);
+  let damage = Math.max(0, scaledRaw - reduction);
 
   if (target.damageShield > 0) {
     const absorbed = Math.min(damage, target.damageShield);
