@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, TILE_CONFIGS } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -272,9 +272,20 @@ export class ContentStore {
 
   // --- Set CRUD ---
 
-  async addOrUpdateSet(set: SetDefinition): Promise<void> {
-    this.sets.set(set.id, set);
+  /**
+   * Add or update a set. Returns { success, error } — fails if the set conflicts with
+   * existing sets (same item in two sets that share a class).
+   */
+  async addOrUpdateSet(set: SetDefinition): Promise<{ success: boolean; error?: string }> {
+    const migrated = migrateLegacySet(set);
+    const existing = Array.from(this.sets.values()).map(s => migrateLegacySet(s));
+    const errors = findSetConflicts(migrated, existing);
+    if (errors.length > 0) {
+      return { success: false, error: errors.join(' ') };
+    }
+    this.sets.set(migrated.id, migrated);
     await this.save();
+    return { success: true };
   }
 
   async deleteSet(id: string): Promise<{ success: boolean; error?: string }> {
@@ -362,7 +373,7 @@ export class ContentStore {
 
     this.sets.clear();
     if (snapshot.sets) {
-      for (const s of snapshot.sets) this.sets.set(s.id, s);
+      for (const s of snapshot.sets) this.sets.set(s.id, migrateLegacySet(s));
     }
 
     this.shops.clear();
@@ -429,7 +440,7 @@ export class ContentStore {
       try {
         const setsRaw = await fs.readFile(SETS_FILE, 'utf-8');
         const setsArr: SetDefinition[] = JSON.parse(setsRaw);
-        for (const s of setsArr) this.sets.set(s.id, s);
+        for (const s of setsArr) this.sets.set(s.id, migrateLegacySet(s));
       } catch {
         // sets.json doesn't exist yet
       }

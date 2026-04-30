@@ -25,7 +25,7 @@ import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 
 const app = express();
@@ -584,10 +584,13 @@ wss.on('connection', (ws) => {
           return { username: m.username, className: s?.getClassName() ?? undefined, level: s?.getLevel() };
         });
 
-        // Resolve set definitions for sets containing equipped items
+        // Resolve set definitions for sets containing equipped items.
+        // Only include sets the TARGET's class can activate — viewing a Bard's
+        // Knight-restricted item shouldn't surface the Knight set on their profile.
         const allSets = gameLoop.contentStore.getAllSets();
         const profileSetDefs: Record<string, import('@idle-party-rpg/shared').SetDefinition> = {};
         for (const [id, set] of Object.entries(allSets)) {
+          if (!setAppliesToClass(set, profile.className)) continue;
           if (set.itemIds.some(itemId => equippedItemIds.has(itemId))) {
             profileSetDefs[id] = set;
           }

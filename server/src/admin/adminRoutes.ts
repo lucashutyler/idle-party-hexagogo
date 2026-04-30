@@ -7,7 +7,7 @@ import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES, SEED_TILE_TYPES } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
 
@@ -511,11 +511,16 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Add or update a set. Supports ?versionId= for draft editing. */
   router.put('/sets/:id', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
-    const set = req.body;
-    if (!set.id || !set.name || !set.itemIds || !set.bonuses) {
-      res.status(400).json({ error: 'Missing required fields: id, name, itemIds, bonuses' });
+    const raw = req.body;
+    if (!raw || !raw.id || !raw.name || !Array.isArray(raw.itemIds)) {
+      res.status(400).json({ error: 'Missing required fields: id, name, itemIds' });
       return;
     }
+    if (!Array.isArray(raw.breakpoints) && !raw.bonuses) {
+      res.status(400).json({ error: 'Set must include either breakpoints[] or legacy bonuses object' });
+      return;
+    }
+    const set = migrateLegacySet(raw);
 
     if (versionId) {
       const versions = getVersionStore();
@@ -524,6 +529,14 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
       if (!snapshot.sets) snapshot.sets = [];
+
+      // Validate against existing draft sets (other than the one being saved)
+      const existingMigrated = snapshot.sets
+        .filter(s => s.id !== set.id)
+        .map(s => migrateLegacySet(s));
+      const errors = findSetConflicts(set, existingMigrated);
+      if (errors.length > 0) { res.status(400).json({ error: errors.join(' ') }); return; }
+
       const idx = snapshot.sets.findIndex(s => s.id === set.id);
       if (idx >= 0) {
         snapshot.sets[idx] = set;
@@ -536,7 +549,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       res.json({ success: true, sets: setsRecord });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateSet(set);
+      const result = await content.addOrUpdateSet(set);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
       res.json({ success: true, sets: content.getAllSets() });
     }
   });

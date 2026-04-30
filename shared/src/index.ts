@@ -235,10 +235,18 @@ export {
   computeActiveSetBonuses,
   mergeSetBonusesIntoEquip,
   getSetInfoForItem,
+  getSetsForItem,
   getSetBonusText,
+  getSetDisplayName,
+  setAppliesToClass,
+  getActiveBreakpoint,
+  normalizeBreakpoints,
+  findSetConflicts,
+  migrateLegacySet,
 } from './systems/SetTypes.js';
 export type {
   SetBonuses,
+  SetBreakpoint,
   SetDefinition,
 } from './systems/SetTypes.js';
 

@@ -2144,6 +2144,7 @@ export class SocialScreen implements Screen {
     // Wire equipment square clicks to show read-only item popup
     const setDefs = profile.setDefinitions ?? {};
     const equippedItemIds = getEquippedItemIds(profile.equipment);
+    const profileClassName = profile.className;
 
     for (const el of modal.querySelectorAll('.profile-slot-square')) {
       el.addEventListener('click', () => {
@@ -2151,7 +2152,7 @@ export class SocialScreen implements Screen {
         if (!itemId) return;
         const def = profile.itemDefinitions[itemId];
         if (!def) return;
-        this.showProfileItemPopup(def, setDefs, equippedItemIds, el as HTMLElement);
+        this.showProfileItemPopup(def, setDefs, equippedItemIds, profileClassName, el as HTMLElement);
       });
     }
 
@@ -2162,17 +2163,23 @@ export class SocialScreen implements Screen {
     def: ItemDefinition,
     setDefs: Record<string, SetDefinition>,
     equippedItemIds: Set<string>,
+    profileClassName: string,
     _anchor: HTMLElement,
   ): void {
     // Remove any existing popup
     document.querySelector('.profile-item-popup-overlay')?.remove();
 
-    const itemDefs = this.gameClient.lastState?.itemDefinitions ?? {};
+    // Use the profile's item defs (sent with the profile message). Fall back to the
+    // viewer's itemDefinitions only as a last resort — don't merge their item names
+    // into another player's profile.
+    const profileMsg = this.gameClient.lastState;
+    const itemDefs = profileMsg?.itemDefinitions ?? {};
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
       setDefs,
       ownedItemIds: equippedItemIds,
       equippedItemIds,
+      className: profileClassName,
       actionsHtml: '<button class="profile-item-close-btn">Close</button>',
     });
 

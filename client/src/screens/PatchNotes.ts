@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.04.29.3',
+    notes: [
+      'Sets now support breakpoints — partial set rewards at e.g. 2/4 and 4/4 pieces. Item tooltips show every tier and highlight the one currently active',
+      'Sets can be class-restricted — class-locked sets show as "Set Name (Knight)" in tooltips, and only activate for the listed classes',
+      'Items can belong to multiple sets across different classes (e.g., Glowing Crystal Bracers in both a Bard set and a Knight set). The admin panel rejects two sets sharing an item for the same class',
+      'Set bonuses no longer stack within a single set — only the highest unlocked breakpoint applies',
+      'Set bonuses are now actually applied in combat: HP, attack, DR/MR, damage %, damage resistance %, and active-skill cooldown reduction all take effect',
+    ],
+  },
+  {
     version: '2026.04.29.2',
     notes: [
       'New: Send Gift action on the user popup — gift items to anyone, no same-room requirement',

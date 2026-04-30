@@ -1,5 +1,5 @@
 import type { ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { getItemEffectText, getSetInfoForItem, getSetBonusText } from '@idle-party-rpg/shared';
+import { getItemEffectText, getSetsForItem, getSetBonusText, getSetDisplayName, getActiveBreakpoint } from '@idle-party-rpg/shared';
 import { RARITY_COLORS, SLOT_LABELS, SHINY_RARITIES, getItemInitials, escapeHtml } from './ItemIcon';
 
 export interface ItemPopupOptions {
@@ -10,6 +10,11 @@ export interface ItemPopupOptions {
   ownedItemIds?: Set<string>;
   /** Set of item IDs currently equipped */
   equippedItemIds?: Set<string>;
+  /**
+   * Class context for set filtering. When provided, only sets the class can activate
+   * are shown. When omitted, every set containing the item is listed (admin / preview).
+   */
+  className?: string | null;
   /** Action buttons HTML (empty string for read-only view) */
   actionsHtml?: string;
 }
@@ -42,16 +47,23 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     statLines.push(`<div><span class="stat-label">Class</span><span>${def.classRestriction.join(', ')}</span></div>`);
   }
 
-  // Set info section
+  // Set info section — list every applicable set the item belongs to.
   const setDefs = options?.setDefs ?? {};
   const ownedItemIds = options?.ownedItemIds;
   const equippedItemIds = options?.equippedItemIds;
   const itemDefs = options?.itemDefs ?? {};
+  const className = options?.className;
 
-  const setInfo = getSetInfoForItem(def.id, setDefs, ownedItemIds, equippedItemIds);
-  let setHtml = '';
-  if (setInfo) {
-    const piecesHtml = setInfo.set.itemIds.map(pieceId => {
+  const matchingSets = getSetsForItem(def.id, setDefs, className);
+  const setHtmlBlocks = matchingSets.map(set => {
+    let ownedCount = 0;
+    let equippedCount = 0;
+    for (const id of set.itemIds) {
+      if (ownedItemIds?.has(id) || equippedItemIds?.has(id)) ownedCount++;
+      if (equippedItemIds?.has(id)) equippedCount++;
+    }
+
+    const piecesHtml = set.itemIds.map(pieceId => {
       const pieceDef = itemDefs[pieceId];
       const pieceName = pieceDef?.name ?? pieceId;
       const isEquipped = equippedItemIds?.has(pieceId) ?? false;
@@ -60,14 +72,26 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
       const check = isOwned || isEquipped ? (isEquipped ? '&#9745; ' : '&#9744; ') : '&#9744; ';
       return `<div class="item-popup-set-piece ${cssClass}">${check}${escapeHtml(pieceName)}</div>`;
     }).join('');
-    const bonusText = getSetBonusText(setInfo.set.bonuses);
-    setHtml = `
+
+    const activeBp = getActiveBreakpoint(set, equippedCount);
+    const bps = set.breakpoints ?? [];
+    const breakpointLines = bps.map(bp => {
+      const isActive = activeBp && activeBp.piecesRequired === bp.piecesRequired;
+      const isUnlocked = bp.piecesRequired <= equippedCount;
+      const className = isActive ? 'active' : isUnlocked ? 'unlocked' : '';
+      const prefix = isActive ? '&#9656; ' : isUnlocked ? '&#10003; ' : '&#9744; ';
+      return `<div class="item-popup-set-bp ${className}">${prefix}${bp.piecesRequired}pc: ${escapeHtml(getSetBonusText(bp.bonuses))}</div>`;
+    }).join('');
+
+    const headerName = escapeHtml(getSetDisplayName(set));
+
+    return `
       <div class="item-popup-set-section">
-        <div class="item-popup-set-name">${escapeHtml(setInfo.set.name)} (${setInfo.equippedCount}/${setInfo.set.itemIds.length})</div>
+        <div class="item-popup-set-name">${headerName} (${equippedCount}/${set.itemIds.length})</div>
         <div class="item-popup-set-pieces">${piecesHtml}</div>
-        <div class="item-popup-set-bonus">Set bonus: ${bonusText}</div>
+        <div class="item-popup-set-breakpoints">${breakpointLines}</div>
       </div>`;
-  }
+  }).join('');
 
   const actionsHtml = options?.actionsHtml ?? '';
 
@@ -78,7 +102,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     </div>
     <div class="item-popup-name" style="color:${color}">${escapeHtml(def.name)}</div>
     <div class="item-popup-stats">${statLines.join('')}</div>
-    ${setHtml}
+    ${setHtmlBlocks}
     ${actionsHtml ? `<div class="item-popup-actions">${actionsHtml}</div>` : ''}
   `;
 }

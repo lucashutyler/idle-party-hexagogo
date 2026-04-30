@@ -657,6 +657,15 @@ input[type="color"] { padding: 0; height: 32px; width: 56px; }
   gap: 4px;
 }
 .admin-checklist-tall { max-height: 320px; }
+
+.sf-breakpoint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--admin-gap);
+  gap: var(--admin-gap);
+}
+.sf-breakpoint-header input[type="number"] { width: 70px; }
 .admin-checklist-toolbar {
   display: flex;
   align-items: center;
