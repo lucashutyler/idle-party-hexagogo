@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.02.1',
+    notes: [
+      'Bug fix: Priest Blessed Arms holy damage was being mislabeled as physical damage in the combat log when the physical hit was fully resisted. The HP math was always correct; now the log correctly shows "0 physical + X holy" so it\'s clear holy damage isn\'t blocked by physical resistance',
+    ],
+  },
+  {
     version: '2026.04.29.3',
     notes: [
       'Sets now support breakpoints — partial set rewards at e.g. 2/4 and 4/4 pieces. Item tooltips show every tier and highlight the one currently active',
