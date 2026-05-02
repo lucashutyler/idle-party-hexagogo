@@ -609,10 +609,10 @@ function applyDamageToMonster(
   target.currentHp = Math.max(0, target.currentHp - totalDamage);
 
   const verb = skillName ? `uses ${skillName} on` : 'hits';
-  if (holyDamage > 0 && damage > 0) {
+  if (holyDamage > 0) {
     logEntries.push(`${player.username} ${verb} ${target.name} for ${damage} ${player.playerDamageType} + ${holyDamage} holy damage`);
   } else {
-    logEntries.push(`${player.username} ${verb} ${target.name} for ${totalDamage} ${player.playerDamageType} damage`);
+    logEntries.push(`${player.username} ${verb} ${target.name} for ${damage} ${player.playerDamageType} damage`);
   }
 
   // Apply Scorch debuff if Mage has it equipped
