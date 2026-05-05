@@ -6,6 +6,10 @@
     <title>Idle Party RPG</title>
   </head>
   <body>
+    <div id="splash">
+      <img class="splash-logo-img" src="/logo-artwork/idle-party.png" alt="Idle Party RPG"
+           onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='https://placehold.co/520x180/4a5568/f5c842/png?text=Idle+Party+RPG';}else{this.style.display='none';}" />
+    </div>
     <div id="app">
       <div id="screen-container">
         <div id="screen-offline" class="screen"></div>
@@ -19,13 +23,14 @@
         <div id="screen-map" class="screen">
           <div id="game-container"></div>
         </div>
-        <div id="screen-character" class="screen"></div>
         <div id="screen-items" class="screen"></div>
         <div id="screen-social" class="screen"></div>
         <div id="screen-settings" class="screen"></div>
       </div>
+      <div id="persistent-xp-bar"></div>
       <nav id="bottom-nav"></nav>
     </div>
+    <div id="chat-popout-root"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

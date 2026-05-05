@@ -1,7 +1,24 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, CombatLogEntry, ClientCombatAction } from '@idle-party-rpg/shared';
-import { CLASS_ICONS, UNKNOWN_CLASS_ICON, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
+import { classIconHtml, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
+import { artworkUrl, placeholderUrl } from '../ui/assets';
+import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
+
+/** Slugify a name into an artwork id (lowercase + dashes). */
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
+}
+
+/** Build the chain of artwork URLs to try for a monster, ending in placehold.co. */
+function monsterArtSrc(name: string): { real: string; fallback: string } {
+  return { real: artworkUrl('monster', slugify(name)), fallback: placeholderUrl(name, { w: 160, h: 160 }) };
+}
+
+/** Build artwork URLs for a class. */
+function classArtSrc(className: string): { real: string; fallback: string } {
+  return { real: artworkUrl('class', slugify(className)), fallback: placeholderUrl(className, { w: 160, h: 160 }) };
+}
 
 export class CombatScreen implements Screen {
   private container: HTMLElement;
@@ -9,8 +26,6 @@ export class CombatScreen implements Screen {
   private isActive = false;
 
   // DOM references
-  private locationLabel!: HTMLElement;
-  private connectionDot!: HTMLElement;
   private stage!: HTMLElement;
   private playerSide!: HTMLElement;
   private enemySide!: HTMLElement;
@@ -22,11 +37,18 @@ export class CombatScreen implements Screen {
   private runHint!: HTMLElement;
   private runBar!: HTMLElement;
   private runHintTimer?: ReturnType<typeof setTimeout>;
-  private roundLabel!: HTMLElement;
 
   // Last rendered log entry ID — for incremental DOM updates
   private lastRenderedId = -1;
   private lastLog: CombatLogEntry[] = [];
+
+  // Name classification for log coloring. Self is rendered as "You";
+  // party members keep their name in green; enemies in red.
+  // monsterNamesSeen accumulates across the session so older log entries
+  // referencing dead monsters still highlight correctly on re-render.
+  private selfUsername = '';
+  private partyUsernames = new Set<string>();
+  private monsterNamesSeen = new Set<string>();
   private renderedPlayerKey = '';
   private renderedEnemyKey = '';
 
@@ -72,20 +94,21 @@ export class CombatScreen implements Screen {
 
   private buildDOM(): void {
     this.container.innerHTML = `
-      <div class="combat-header">
-        <div class="combat-location">
-          <span class="connection-dot"></span>
-          <span class="location-label">Connecting...</span>
-        </div>
-        <span class="round-label"></span>
-      </div>
       <div class="combat-stage">
-        <div class="combat-side combat-player-side"></div>
-        <div class="combat-vs">\u2694</div>
-        <div class="combat-side combat-enemy-side"></div>
+        <div class="combat-stage-bg"></div>
+        <div class="combat-stage-scrim"></div>
+        <div class="combat-stage-grid">
+          <div class="combat-tray combat-tray-player">
+            <div class="combat-side combat-player-side"></div>
+          </div>
+          <div class="combat-stage-divider"></div>
+          <div class="combat-tray combat-tray-enemy">
+            <div class="combat-side combat-enemy-side"></div>
+          </div>
+        </div>
       </div>
       <div class="combat-run-bar">
-        <button class="combat-run-btn combat-run-locked">\uD83D\uDD12 Run</button>
+        <button class="combat-run-btn combat-run-locked">Run</button>
         <span class="combat-run-hint" style="display:none">Available after ${RUN_AVAILABLE_ROUNDS} combat rounds</span>
       </div>
       <div class="combat-log-wrapper">
@@ -97,8 +120,6 @@ export class CombatScreen implements Screen {
       </div>
     `;
 
-    this.locationLabel = this.container.querySelector('.location-label')!;
-    this.connectionDot = this.container.querySelector('.connection-dot')!;
     this.stage = this.container.querySelector('.combat-stage')!;
     this.playerSide = this.container.querySelector('.combat-player-side')!;
     this.enemySide = this.container.querySelector('.combat-enemy-side')!;
@@ -109,7 +130,6 @@ export class CombatScreen implements Screen {
     this.runBtn = this.container.querySelector('.combat-run-btn')! as HTMLButtonElement;
     this.runHint = this.container.querySelector('.combat-run-hint')!;
     this.runBar = this.container.querySelector('.combat-run-bar')!;
-    this.roundLabel = this.container.querySelector('.round-label')!;
 
     // Auto-pause on user scroll
     this.logContainer.addEventListener('scroll', () => {
@@ -150,13 +170,8 @@ export class CombatScreen implements Screen {
 
   private wireSubscriptions(): void {
     this.gameClient.subscribe((state) => this.handleState(state));
-
-    this.gameClient.onConnection((connected) => {
-      this.connectionDot.classList.toggle('connected', connected);
-      if (!connected) {
-        this.locationLabel.textContent = 'Reconnecting...';
-      }
-    });
+    // Connection state is communicated via the persistent XP bar / nav badges;
+    // no header label here since the combat header was removed.
   }
 
   private handleState(state: ServerStateMessage): void {
@@ -177,12 +192,22 @@ export class CombatScreen implements Screen {
   }
 
   private static classIcon(className: string): string {
-    return CLASS_ICONS[className] ?? UNKNOWN_CLASS_ICON;
+    return classIconHtml(className);
   }
 
   private updateVisuals(state: ServerStateMessage): void {
-    // Location label
-    this.locationLabel.textContent = state.zoneName;
+    // Refresh log-name classification before any log re-render this tick.
+    this.selfUsername = state.username ?? '';
+    const partyMembers = state.social?.party?.members ?? [];
+    this.partyUsernames = new Set(
+      partyMembers.map(m => m.username).filter(u => u !== this.selfUsername),
+    );
+    for (const m of state.battle.combat?.monsters ?? []) {
+      this.monsterNamesSeen.add(m.name);
+    }
+
+    // Combat background — try tile-specific then zone default
+    this.updateCombatBackground(state);
 
     // Stage visual state
     this.stage.classList.remove('fighting', 'victory', 'defeat');
@@ -210,21 +235,63 @@ export class CombatScreen implements Screen {
       this.renderedEnemyKey = enemyKey;
     }
 
-    // Update combatant sprites: class icons for players, dim dead, stun indicator
+    // Update combatant cards: portrait img, class icon (fallback), name, dim dead, stun indicator
     if (combat) {
       for (const p of combat.players) {
-        const el = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"] .combat-member`);
-        if (el) {
-          el.textContent = CombatScreen.classIcon(p.className);
-          el.classList.toggle('dead', p.currentHp <= 0);
-          el.classList.toggle('stunned', !!(p.stunTurns && p.stunTurns > 0));
+        const card = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"]`) as HTMLElement | null;
+        if (card) {
+          card.classList.toggle('dead', p.currentHp <= 0);
+          card.classList.toggle('stunned', !!(p.stunTurns && p.stunTurns > 0));
+          const icon = card.querySelector('.combat-card-icon') as HTMLElement | null;
+          if (icon) icon.innerHTML = CombatScreen.classIcon(p.className);
+          const img = card.querySelector('.combat-card-img') as HTMLImageElement | null;
+          if (img) {
+            const { real, fallback } = classArtSrc(p.className);
+            const desired = real;
+            if (img.dataset.src !== desired) {
+              img.dataset.src = desired;
+              img.dataset.fb = '0';
+              img.src = real;
+              img.onerror = () => {
+                if (img.dataset.fb !== '1') { img.dataset.fb = '1'; img.src = fallback; }
+                else { img.style.display = 'none'; }
+              };
+            }
+          }
+          const nameEl = card.querySelector('.combat-card-name') as HTMLElement | null;
+          if (nameEl) nameEl.textContent = CombatScreen.truncateName(p.username, 10);
         }
       }
       for (const m of combat.monsters) {
-        const el = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"] .combat-member`);
-        if (el) {
-          el.classList.toggle('dead', m.currentHp <= 0);
-          el.classList.toggle('stunned', !!(m.stunTurns && m.stunTurns > 0));
+        const card = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"]`) as HTMLElement | null;
+        if (card) {
+          card.classList.toggle('dead', m.currentHp <= 0);
+          card.classList.toggle('stunned', !!(m.stunTurns && m.stunTurns > 0));
+          const img = card.querySelector('.combat-card-img') as HTMLImageElement | null;
+          if (img) {
+            const { real, fallback } = monsterArtSrc(m.name);
+            if (img.dataset.src !== real) {
+              img.dataset.src = real;
+              img.dataset.fb = '0';
+              img.src = real;
+              img.onerror = () => {
+                if (img.dataset.fb !== '1') { img.dataset.fb = '1'; img.src = fallback; }
+                else { img.style.display = 'none'; }
+              };
+            }
+          }
+          const nameEl = card.querySelector('.combat-card-name') as HTMLElement | null;
+          if (nameEl) {
+            // Allow up to 2 lines for long monster names like "Skeletal Warrior".
+            nameEl.textContent = m.name;
+            nameEl.classList.add('combat-card-name-multiline');
+          }
+          // Wire monster click → popup
+          card.style.cursor = 'pointer';
+          card.onclick = (e) => {
+            e.stopPropagation();
+            this.showMonsterPopup(m, card);
+          };
         }
       }
     }
@@ -243,6 +310,8 @@ export class CombatScreen implements Screen {
    * Render a 3×3 grid layout for one side (players or enemies).
    * Each combatant is placed at its actual grid position (0-8).
    * Empty cells are left as blank space.
+   *
+   * Cards layout: image (top), name (middle, truncated), HP bar (bottom).
    */
   private renderGridSide(
     container: HTMLElement,
@@ -254,15 +323,21 @@ export class CombatScreen implements Screen {
 
     const posSet = new Set(positions);
 
-    // Render all 9 cells (3 rows × 3 cols)
     for (let pos = 0; pos < 9; pos++) {
       if (posSet.has(pos)) {
         const unit = document.createElement('div');
-        unit.className = `combat-unit ${type}-unit`;
+        unit.className = `combat-unit combat-card ${type}-unit ${type === 'player' ? 'party' : 'enemy'}`;
         unit.setAttribute('data-grid', String(pos));
         unit.innerHTML = `
-          <div class="combat-unit-hp"></div>
-          <div class="combat-member ${type === 'player' ? 'party' : 'enemy'}"></div>
+          <div class="combat-card-portrait">
+            <img class="combat-card-img" alt="" />
+            <span class="combat-card-icon"></span>
+            <span class="combat-card-stun" title="Stunned"></span>
+          </div>
+          <div class="combat-card-name"></div>
+          <div class="combat-card-hp">
+            <div class="combat-card-hp-fill"></div>
+          </div>
         `;
         container.appendChild(unit);
       } else {
@@ -270,6 +345,26 @@ export class CombatScreen implements Screen {
         empty.className = 'combat-grid-empty';
         container.appendChild(empty);
       }
+    }
+  }
+
+  private updateCombatBackground(state: ServerStateMessage): void {
+    const bg = this.container.querySelector('.combat-stage-bg') as HTMLElement | null;
+    if (!bg) return;
+    const zone = (state.party?.col != null && state.party?.row != null) ? state.zoneName : '';
+    const zoneId = state.social?.party?.id ? state.social.party.id : zone;
+    // Tile-specific override: combat-bg-artwork/{zoneId}-{col}-{row}.png; zone default: combat-bg-artwork/{zoneId}.png
+    const tileSrc = state.party
+      ? `/combat-bg-artwork/${slugify(zone)}-${state.party.col}-${state.party.row}.png`
+      : '';
+    const zoneSrc = `/combat-bg-artwork/${slugify(zone || zoneId)}.png`;
+    const fallback = placeholderUrl(zone || 'Combat', { w: 800, h: 400, bg: '1a1a2e', fg: '666' });
+    const layered = tileSrc
+      ? `url('${tileSrc}'), url('${zoneSrc}'), url('${fallback}')`
+      : `url('${zoneSrc}'), url('${fallback}')`;
+    if (bg.dataset.bgKey !== layered) {
+      bg.style.backgroundImage = layered;
+      bg.dataset.bgKey = layered;
     }
   }
 
@@ -300,54 +395,73 @@ export class CombatScreen implements Screen {
 
   private updateHpBars(state: ServerStateMessage): void {
     const combat = state.battle.combat;
-    if (!combat) {
-      // Clear all HP labels
-      for (const hp of this.playerSide.querySelectorAll('.combat-unit-hp')) {
-        hp.innerHTML = '';
-      }
-      return;
-    }
+    if (!combat) return;
 
     const selfUsername = state.username;
 
-    // Player HP bars
     for (const p of combat.players) {
-      const unitEl = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"]`) as HTMLElement | null;
-      const hpContainer = unitEl?.querySelector('.combat-unit-hp');
-      if (!hpContainer || !unitEl) continue;
+      const card = this.playerSide.querySelector(`[data-grid="${p.gridPosition}"]`) as HTMLElement | null;
+      if (!card) continue;
+      const fill = card.querySelector('.combat-card-hp-fill') as HTMLElement | null;
       const pct = Math.max(0, (p.currentHp / p.maxHp) * 100);
       const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
+      if (fill) {
+        fill.className = `combat-card-hp-fill ${hpClass}`;
+        fill.style.width = `${pct}%`;
+      }
       const isSelf = p.username === selfUsername;
-      hpContainer.innerHTML = `
-        <div class="combat-hp-label${isSelf ? ' self' : ''}" data-username="${this.escapeHtml(p.username)}">${this.escapeHtml(p.username)}</div>
-        <div class="combat-hp-bar">
-          <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
-        </div>
-      `;
-      // Make the entire player unit clickable for the user popup
-      unitEl.style.cursor = 'pointer';
-      unitEl.setAttribute('data-player-username', p.username);
-      unitEl.onclick = (e) => {
+      card.classList.toggle('self', isSelf);
+      card.setAttribute('data-player-username', p.username);
+      card.onclick = (e) => {
         e.stopPropagation();
-        const label = unitEl.querySelector('.combat-hp-label') as HTMLElement;
-        this.onUserClick?.(p.username, label ?? unitEl);
+        this.onUserClick?.(p.username, card);
       };
     }
 
-    // Enemy HP bars
     for (const m of combat.monsters) {
-      const hpContainer = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"] .combat-unit-hp`);
-      if (!hpContainer) continue;
-      const dead = m.currentHp <= 0;
+      const card = this.enemySide.querySelector(`[data-grid="${m.gridPosition}"]`) as HTMLElement | null;
+      if (!card) continue;
+      const fill = card.querySelector('.combat-card-hp-fill') as HTMLElement | null;
       const pct = Math.max(0, (m.currentHp / m.maxHp) * 100);
       const hpClass = pct <= 25 ? 'critical' : pct <= 50 ? 'low' : '';
-      hpContainer.innerHTML = `
-        <div class="combat-hp-label${dead ? ' dead' : ''}">${this.escapeHtml(m.name)}</div>
-        <div class="combat-hp-bar">
-          <div class="hp-fill ${hpClass}" style="width: ${pct}%"></div>
-        </div>
-      `;
+      if (fill) {
+        fill.className = `combat-card-hp-fill ${hpClass}`;
+        fill.style.width = `${pct}%`;
+      }
     }
+  }
+
+  private showMonsterPopup(monster: { name: string; currentHp: number; maxHp: number }, _anchor: HTMLElement): void {
+    const existing = document.querySelector('.monster-popup-overlay') as HTMLElement | null;
+    if (existing) { release(existing); existing.remove(); }
+    const overlay = document.createElement('div');
+    overlay.className = 'monster-popup-overlay';
+    const { real, fallback } = monsterArtSrc(monster.name);
+    overlay.innerHTML = `
+      <div class="monster-popup">
+        <button class="monster-popup-close" aria-label="Close">×</button>
+        <div class="monster-popup-art">
+          <img src="${real}" alt="${this.escapeHtml(monster.name)}"
+               onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallback}';}else{this.style.display='none';}" />
+        </div>
+        <div class="monster-popup-name">${this.escapeHtml(monster.name)}</div>
+        <div class="monster-popup-hint">Drops, abilities and resistances are unknown — defeat one to learn more.</div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || (e.target as HTMLElement).closest('.monster-popup-close')) {
+        release(overlay);
+        overlay.remove();
+      }
+    });
+    bringToFront(overlay);
+    wireFocusOnInteract(overlay);
+  }
+
+  private static truncateName(name: string, max: number): string {
+    if (name.length <= max) return name;
+    return name.slice(0, max - 1) + '…';
   }
 
   private updateRunButton(state: ServerStateMessage): void {
@@ -355,24 +469,17 @@ export class CombatScreen implements Screen {
     const isFighting = state.battle.visual === 'fighting';
     const roundCount = combat?.roundCount ?? 0;
 
-    // Update round counter
-    if (isFighting && roundCount > 0) {
-      this.roundLabel.textContent = `Round ${roundCount}`;
-      this.roundLabel.style.display = '';
-    } else {
-      this.roundLabel.style.display = 'none';
-    }
-
     // Check if user is owner/leader
     const myRole = state.social?.party?.members.find(m => m.username === state.username)?.role;
     const canRun = myRole === 'owner' || myRole === 'leader';
 
-    if (!isFighting || this.isFullscreen) {
-      this.runBar.style.display = 'none';
-      return;
-    }
+    // The Run bar is always laid out so combat doesn't visually resize
+    // between rounds \u2014 when the bar isn't usable we hide its *contents*
+    // but keep the row in place. Fullscreen log mode is the only exception.
+    this.runBar.style.display = this.isFullscreen ? 'none' : '';
+    this.runBar.classList.toggle('combat-run-bar-empty', !isFighting);
 
-    this.runBar.style.display = '';
+    if (!isFighting) return;
 
     if (!canRun) {
       this.runBtn.classList.add('combat-run-locked');
@@ -449,15 +556,51 @@ export class CombatScreen implements Screen {
   private appendLogEntry(entry: CombatLogEntry): void {
     const div = document.createElement('div');
     div.className = `log-entry ${entry.type}`;
-    div.innerHTML = CombatScreen.formatLogText(this.escapeHtml(entry.text));
+    div.innerHTML = this.formatLogText(this.escapeHtml(entry.text));
     this.logContainer.appendChild(div);
     this.logContainer.scrollTop = this.logContainer.scrollHeight;
   }
 
-  private static formatLogText(escaped: string): string {
-    return escaped.replace(
+  /**
+   * Wrap names + damage types in colored spans. Operates on already-escaped
+   * HTML so substitutions are safe to inject as innerHTML.
+   *
+   * Order matters: self is replaced FIRST and rewritten to "You" so we don't
+   * later match "You" against any other set. Party + enemy names are wrapped
+   * with their original text preserved.
+   */
+  private formatLogText(escaped: string): string {
+    let result = escaped;
+
+    if (this.selfUsername) {
+      const re = new RegExp(`\\b${escapeRegex(this.escapeHtml(this.selfUsername))}(?:'s|s')?\\b`, 'g');
+      result = result.replace(re, (m) => {
+        const possessive = m.endsWith("'s") || m.endsWith("s'");
+        return `<span class="log-name-self">You${possessive ? "'re" : ''}</span>`;
+      });
+    }
+
+    for (const u of this.partyUsernames) {
+      const escU = this.escapeHtml(u);
+      const re = new RegExp(`\\b${escapeRegex(escU)}\\b`, 'g');
+      result = result.replace(re, `<span class="log-name-party">${escU}</span>`);
+    }
+
+    for (const name of this.monsterNamesSeen) {
+      const escName = this.escapeHtml(name);
+      const re = new RegExp(`\\b${escapeRegex(escName)}\\b`, 'g');
+      result = result.replace(re, `<span class="log-name-enemy">${escName}</span>`);
+    }
+
+    result = result.replace(
       /\b(physical|magical|holy)\b/gi,
       (match) => `<span class="dmg-${match.toLowerCase()}">${match}</span>`,
     );
+
+    return result;
   }
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

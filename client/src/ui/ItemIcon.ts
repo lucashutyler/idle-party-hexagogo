@@ -21,10 +21,25 @@ export const RARITY_BORDER_COLORS: Record<string, string> = {
   heirloom: 'rgba(180,180,180,0.4)',
 };
 
+/**
+ * Slot icon image URLs. Replace emoji glyphs that previously decorated
+ * equipment-slot dogears. Drop PNGs into `data/slot-icons/{slot}.png` and
+ * mount `/slot-icons` server-side; missing files fall through to placehold.co.
+ */
 export const SLOT_ICONS: Record<string, string> = {
-  head: '🪖', shoulders: '🦺', chest: '👕', bracers: '⌚', gloves: '🧤',
-  mainhand: '⚔️', offhand: '🛡️', twohanded: '🗡️', foot: '👢',
-  ring: '💍', necklace: '📿', back: '🧣', relic: '🔮',
+  head: '/slot-icons/head.png',
+  shoulders: '/slot-icons/shoulders.png',
+  chest: '/slot-icons/chest.png',
+  bracers: '/slot-icons/bracers.png',
+  gloves: '/slot-icons/gloves.png',
+  mainhand: '/slot-icons/mainhand.png',
+  offhand: '/slot-icons/offhand.png',
+  twohanded: '/slot-icons/twohanded.png',
+  foot: '/slot-icons/foot.png',
+  ring: '/slot-icons/ring.png',
+  necklace: '/slot-icons/necklace.png',
+  back: '/slot-icons/back.png',
+  relic: '/slot-icons/relic.png',
 };
 
 export const SLOT_LABELS: Record<string, string> = {
@@ -58,9 +73,18 @@ export function getItemSetId(itemId: string, setDefs: Record<string, SetDefiniti
   return null;
 }
 
-/** Render the dogear corner element with an optional emoji icon. */
-function renderDogear(emoji: string): string {
-  return `<span class="item-dogear"><span class="item-dogear-icon">${emoji}</span></span>`;
+/**
+ * Render the dogear corner element with a slot icon image.
+ * `slot` is one of EquipSlot; we look up the URL in SLOT_ICONS, fall through
+ * to placehold.co on load failure, and hide the img if even that fails.
+ */
+function renderSlotDogear(slot: string): string {
+  const src = SLOT_ICONS[slot];
+  if (!src) return '';
+  const label = (SLOT_LABELS[slot] ?? slot).slice(0, 8);
+  const placeholder = `https://placehold.co/16x16/2a2a40/e8e8e8/png?text=${encodeURIComponent(label)}`;
+  const onerror = `if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}`;
+  return `<span class="item-dogear"><img class="item-dogear-img" src="${src}" alt="${escapeHtml(label)}" onerror="${onerror}" /></span>`;
 }
 
 export interface ItemIconOptions {
@@ -105,9 +129,8 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
 
   if (options?.showSlotIcon) {
     const slot = options.slotOverride ?? def.equipSlot;
-    const slotIcon = slot ? (SLOT_ICONS[slot] ?? '') : '';
-    if (slotIcon) {
-      inner += renderDogear(slotIcon);
+    if (slot) {
+      inner += renderSlotDogear(slot);
     }
   }
 
@@ -115,15 +138,14 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
 }
 
 /**
- * Render an empty equipment slot icon with a dogear showing the slot emoji.
+ * Render an empty equipment slot icon with a dogear showing the slot icon.
  */
 export function renderEmptySlotIcon(slot: string, options?: { extraClass?: string; dataAttrs?: Record<string, string> }): string {
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
   const dataStr = options?.dataAttrs
     ? Object.entries(options.dataAttrs).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('')
     : '';
-  const slotEmoji = SLOT_ICONS[slot] ?? '';
   const label = SLOT_LABELS[slot] ?? slot;
 
-  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" style="background:#2a2a3a;border-color:rgba(255,255,255,0.08)"${dataStr}>${renderDogear(slotEmoji)}</div>`;
+  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" style="background:#2a2a3a;border-color:rgba(255,255,255,0.08)"${dataStr}>${renderSlotDogear(slot)}</div>`;
 }

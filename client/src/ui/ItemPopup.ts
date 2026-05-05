@@ -17,6 +17,10 @@ export interface ItemPopupOptions {
   className?: string | null;
   /** Action buttons HTML (empty string for read-only view) */
   actionsHtml?: string;
+  /** Extra HTML rendered between the set sections and the action buttons.
+   *  Used to inject the equip-comparison block on inventory popups without
+   *  baking compare logic into this shared renderer. */
+  extraHtml?: string;
 }
 
 /**
@@ -43,16 +47,22 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
   if (def.value != null && def.value > 0) {
     statLines.push(`<div><span class="stat-label">Value</span><span>${def.value}g</span></div>`);
   }
-  if (def.classRestriction && def.classRestriction.length > 0) {
-    statLines.push(`<div><span class="stat-label">Class</span><span>${def.classRestriction.join(', ')}</span></div>`);
-  }
-
   // Set info section — list every applicable set the item belongs to.
   const setDefs = options?.setDefs ?? {};
   const ownedItemIds = options?.ownedItemIds;
   const equippedItemIds = options?.equippedItemIds;
   const itemDefs = options?.itemDefs ?? {};
   const className = options?.className;
+
+  if (def.classRestriction && def.classRestriction.length > 0) {
+    // Color the class names: green if the viewing player can equip the item,
+    // red if not. The wrapper has a data attribute so the equip-restricted
+    // animation can target it for an in-place attention pulse.
+    const allowed = !!className && def.classRestriction.includes(className);
+    const restrictColor = allowed ? '#66bb6a' : '#ff6b6b';
+    const cls = def.classRestriction.map(c => `<span style="color:${restrictColor}">${c}</span>`).join(', ');
+    statLines.push(`<div data-class-restriction="1"><span class="stat-label">Class</span><span>${cls}</span></div>`);
+  }
 
   const matchingSets = getSetsForItem(def.id, setDefs, className);
   const setHtmlBlocks = matchingSets.map(set => {
@@ -94,6 +104,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
   }).join('');
 
   const actionsHtml = options?.actionsHtml ?? '';
+  const extraHtml = options?.extraHtml ?? '';
 
   return `
     <div class="item-popup-artwork${shinyClass}" style="background:${color}">
@@ -103,6 +114,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     <div class="item-popup-name" style="color:${color}">${escapeHtml(def.name)}</div>
     <div class="item-popup-stats">${statLines.join('')}</div>
     ${setHtmlBlocks}
+    ${extraHtml}
     ${actionsHtml ? `<div class="item-popup-actions">${actionsHtml}</div>` : ''}
   `;
 }

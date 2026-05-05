@@ -151,7 +151,7 @@ export const SKILL_SLOTS: SkillSlot[] = [
   { type: 'passive', unlocksAtLevel: 50 },
 ];
 
-/** Skill points are earned every N levels. */
+/** Skills unlock every N levels (treeOrder N → unlocks at level N * 5, except treeOrder 0 which unlocks at level 1). */
 export const LEVELS_PER_SKILL_POINT = 5;
 
 export const SKILL_TREES: Record<string, SkillDefinition[]> = {
@@ -759,19 +759,6 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
 
 // --- Pure functions ---
 
-/** Get skill points earned by a given level (1 per 5 levels). */
-export function getSkillPointsForLevel(level: number): number {
-  return Math.floor(level / LEVELS_PER_SKILL_POINT);
-}
-
-/** Get available (unspent) skill points. First passive is free, rest cost 1 each. */
-export function getAvailableSkillPoints(level: number, unlockedSkills: SkillId[]): number {
-  const totalEarned = getSkillPointsForLevel(level);
-  // First skill is free, so spent = max(0, unlocked - 1)
-  const spent = Math.max(0, unlockedSkills.length - 1);
-  return Math.max(0, totalEarned - spent);
-}
-
 /** Get the level at which a skill becomes learnable (treeOrder 0 = Lv1, others = treeOrder * 5). */
 export function getSkillLearnLevel(treeOrder: number): number {
   return treeOrder === 0 ? 1 : treeOrder * 5;
@@ -785,49 +772,6 @@ export function getUnlockedSkillsForLevel(className: ClassName, level: number): 
     .filter(s => level >= getSkillLearnLevel(s.treeOrder))
     .sort((a, b) => a.treeOrder - b.treeOrder)
     .map(s => s.id);
-}
-
-/** Check if a skill can be unlocked: correct class, sequential order, has points. */
-export function canUnlockSkill(
-  skillId: SkillId,
-  className: ClassName,
-  level: number,
-  unlockedSkills: SkillId[],
-): boolean {
-  const tree = SKILL_TREES[className];
-  if (!tree) return false;
-
-  const skill = tree.find(s => s.id === skillId);
-  if (!skill) return false;
-
-  // Already unlocked
-  if (unlockedSkills.includes(skillId)) return false;
-
-  // Must meet level requirement
-  if (level < getSkillLearnLevel(skill.treeOrder)) return false;
-
-  // Must unlock in tree order — all prior skills must be unlocked
-  for (const s of tree) {
-    if (s.treeOrder < skill.treeOrder && !unlockedSkills.includes(s.id)) {
-      return false;
-    }
-  }
-
-  // Must have available skill points (first skill is free)
-  const availablePoints = getAvailableSkillPoints(level, unlockedSkills);
-  const cost = skill.treeOrder === 0 ? 0 : 1;
-  return availablePoints >= cost;
-}
-
-/** Unlock a skill. Returns updated unlockedSkills, or null if invalid. */
-export function unlockSkill(
-  skillId: SkillId,
-  className: ClassName,
-  level: number,
-  unlockedSkills: SkillId[],
-): SkillId[] | null {
-  if (!canUnlockSkill(skillId, className, level, unlockedSkills)) return null;
-  return [...unlockedSkills, skillId];
 }
 
 /** Check if a skill can be equipped in a given slot. */

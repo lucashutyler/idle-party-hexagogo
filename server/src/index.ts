@@ -139,8 +139,20 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// --- Static files ---
+// --- Static files (drop PNGs into the matching data/<dir>/ to serve real art) ---
 app.use('/item-artwork', express.static(path.resolve('data/item-artwork')));
+app.use('/class-icons', express.static(path.resolve('data/class-icons')));
+app.use('/slot-icons', express.static(path.resolve('data/slot-icons')));
+app.use('/nav-icons', express.static(path.resolve('data/nav-icons')));
+app.use('/logo-artwork', express.static(path.resolve('data/logo-artwork')));
+app.use('/monster-artwork', express.static(path.resolve('data/monster-artwork')));
+app.use('/class-artwork', express.static(path.resolve('data/class-artwork')));
+app.use('/tile-artwork', express.static(path.resolve('data/tile-artwork')));
+app.use('/tile-type-artwork', express.static(path.resolve('data/tile-type-artwork')));
+app.use('/parchment-artwork', express.static(path.resolve('data/parchment-artwork')));
+app.use('/combat-bg-artwork', express.static(path.resolve('data/combat-bg-artwork')));
+app.use('/room-bg-artwork', express.static(path.resolve('data/room-bg-artwork')));
+app.use('/shop-artwork', express.static(path.resolve('data/shop-artwork')));
 
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.resolve(__dirname, '../../client/dist');
@@ -305,19 +317,6 @@ wss.on('connection', (ws) => {
         }
 
         playerManager.partyBattles.escapeBattle(partyId);
-        return;
-      }
-
-      if (msg.type === 'unlock_skill' && typeof msg.skillId === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
-          return;
-        }
-        if (!session.handleUnlockSkill(msg.skillId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot unlock skill' }));
-        }
-        playerManager.sendStateToPlayer(username);
         return;
       }
 

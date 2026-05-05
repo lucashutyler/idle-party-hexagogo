@@ -1,5 +1,5 @@
-import type { TileClickInfo } from '../scenes/WorldMapScene';
-import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
+import type { TileClickInfo } from './CanvasWorldMap';
+import { classIconHtml } from '@idle-party-rpg/shared';
 
 export class TileInfoModal {
   private overlay: HTMLElement;
@@ -38,8 +38,7 @@ export class TileInfoModal {
   }
 
   private static classIcon(className?: string): string {
-    if (!className) return UNKNOWN_CLASS_ICON;
-    return CLASS_ICONS[className] ?? UNKNOWN_CLASS_ICON;
+    return classIconHtml(className);
   }
 
   show(info: TileClickInfo): void {

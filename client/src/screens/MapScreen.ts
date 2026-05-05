@@ -1,18 +1,19 @@
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
-import { TileInfoModal } from '../ui/TileInfoModal';
+import { RoomView } from '../ui/RoomView';
 import { ShopPopup } from '../ui/ShopPopup';
+import { CanvasWorldMap } from '../ui/CanvasWorldMap';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
+  private gameContainer: HTMLElement;
   private gameClient: GameClient;
   private worldCache: WorldCache;
-  private game: import('phaser').Game | null = null;
+  private map: CanvasWorldMap | null = null;
   private unsubscribeState?: () => void;
-  private sceneReady = false;
   private zoomControls?: HTMLElement;
-  private tileModal?: TileInfoModal;
+  private roomView?: RoomView;
   private shopPopup?: ShopPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
@@ -24,6 +25,11 @@ export class MapScreen implements Screen {
     this.gameClient = gameClient;
     this.worldCache = worldCache;
 
+    // The existing #game-container div hosts the canvas.
+    const gc = document.getElementById('game-container');
+    if (!gc) throw new Error('#game-container not found in DOM');
+    this.gameContainer = gc;
+
     this.gameClient.onMoveBlocked((msg) => {
       const names = msg.missingPlayers.join(', ');
       this.showMoveToast(`${msg.itemName} required! Missing: ${names}`);
@@ -34,29 +40,30 @@ export class MapScreen implements Screen {
     this.onUserClickCallback = cb;
   }
 
-  /** Refresh the map from updated WorldCache data. */
-  refreshWorld(): void {
-    const scene = this.getScene();
-    if (scene) {
-      scene.rebuildFromCache();
-      // Re-apply current state (party position, other players, etc.)
-      if (this.gameClient.lastState) {
-        scene.applyServerState(this.gameClient.lastState, true);
-      }
-    }
-    // If scene doesn't exist yet, next createPhaserGame() will build from current cache
+  /** Recenter the camera on the player's party. Used when the user
+   *  re-clicks the Map tab while already on the Map screen. */
+  recenterOnPlayer(): void {
+    this.map?.recenterOnPlayer();
   }
 
-  /** Check if the current player can move (must be owner or leader). */
+  /** Refresh the map from updated WorldCache data. */
+  refreshWorld(): void {
+    if (this.map) {
+      this.map.rebuildFromCache();
+      if (this.gameClient.lastState) {
+        this.map.applyServerState(this.gameClient.lastState, true);
+      }
+    }
+  }
+
   private canMove(): boolean {
     const state = this.gameClient.lastState;
-    if (!state?.social?.party) return true; // solo or no data yet — allow
+    if (!state?.social?.party) return true;
     const me = state.social.party.members.find(m => m.username === state.username);
-    if (!me) return true; // not found — allow
+    if (!me) return true;
     return me.role === 'owner' || me.role === 'leader';
   }
 
-  /** Try to send a move; show toast if not allowed. */
   private tryMove(col: number, row: number): void {
     if (this.canMove()) {
       this.gameClient.sendMove(col, row);
@@ -66,7 +73,6 @@ export class MapScreen implements Screen {
   }
 
   private showMoveToast(message: string): void {
-    // Remove existing toast
     const existing = this.container.querySelector('.map-toast');
     if (existing) existing.remove();
     if (this.moveToastTimeout) clearTimeout(this.moveToastTimeout);
@@ -82,24 +88,12 @@ export class MapScreen implements Screen {
   }
 
   onActivate(): void {
-    if (!this.game) {
-      this.createPhaserGame();
+    if (!this.map) {
+      this.createMap();
     } else {
-      // Wake the game loop and resume the scene
-      this.game.loop.wake();
-      this.game.scene.resume('WorldMapScene');
-
-      // Resize canvas after container is visible (needs a frame for layout)
-      requestAnimationFrame(() => {
-        if (this.game) {
-          this.game.scale.resize(this.container.clientWidth, this.container.clientHeight);
-        }
-      });
-
-      // Snap to current state (no tweens — player expects to see "where I am now")
+      this.map.resume();
       if (this.gameClient.lastState) {
-        const scene = this.game.scene.getScene('WorldMapScene') as import('../scenes/WorldMapScene').WorldMapScene;
-        scene.applyServerState(this.gameClient.lastState, true);
+        this.map.applyServerState(this.gameClient.lastState, true);
       }
     }
 
@@ -107,76 +101,44 @@ export class MapScreen implements Screen {
   }
 
   onDeactivate(): void {
-    if (this.game) {
-      this.game.scene.pause('WorldMapScene');
-      this.game.loop.sleep();
-    }
-
+    if (this.map) this.map.pause();
     this.unsubscribeState?.();
     this.unsubscribeState = undefined;
   }
 
-  private async createPhaserGame(): Promise<void> {
-    // Ensure world data is loaded before creating the scene
+  private async createMap(): Promise<void> {
     if (!this.worldCache.isLoaded) {
       await this.worldCache.loadWorld().catch(err => {
         console.warn('[MapScreen] Failed to load world data:', err);
       });
     }
 
-    const Phaser = await import('phaser');
-    const { WorldMapScene } = await import('../scenes/WorldMapScene');
+    this.map = new CanvasWorldMap(this.gameContainer, this.worldCache);
+    this.map.setSendMove((col, row) => this.tryMove(col, row));
 
-    // Create a scene instance with the world cache injected
-    const sceneInstance = new WorldMapScene(this.worldCache);
-
-    this.game = new Phaser.Game({
-      type: Phaser.AUTO,
-      width: this.container.clientWidth,
-      height: this.container.clientHeight,
-      parent: 'game-container',
-      backgroundColor: '#2d2d44',
-      scene: [sceneInstance],
-      scale: {
-        mode: Phaser.Scale.RESIZE,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
-      },
-    });
-
-    // Wait for scene to be ready before wiring up
-    this.game.events.once('ready', () => {
-      const scene = this.game!.scene.getScene('WorldMapScene') as InstanceType<typeof WorldMapScene>;
-      scene.setSendMove((col, row) => this.tryMove(col, row));
-
-      // Wire tile click handler for modal
-      this.shopPopup = new ShopPopup(this.gameClient);
-      this.tileModal = new TileInfoModal(
-        this.container,
-        (col, row) => { this.tryMove(col, row); },
-        (username, anchor, tileCol, tileRow) => { this.onUserClickCallback?.(username, anchor, tileCol, tileRow); },
-        () => {
-          const state = this.gameClient.lastState;
-          if (state?.shopDefinition) this.shopPopup!.show(state);
-        },
-      );
-      scene.setOnTileClick((tileInfo) => {
-        // Show shop button only if the player is on this tile and it has a shop
+    this.shopPopup = new ShopPopup(this.gameClient);
+    this.roomView = new RoomView(
+      this.container,
+      (col, row) => { this.tryMove(col, row); },
+      (username, anchor, tileCol, tileRow) => { this.onUserClickCallback?.(username, anchor, tileCol, tileRow); },
+      () => {
         const state = this.gameClient.lastState;
-        const playerOnTile = state && state.party.col === tileInfo.col && state.party.row === tileInfo.row;
-        this.tileModal!.hasShop = !!(playerOnTile && state?.shopDefinition);
-        this.tileModal!.show(tileInfo);
-      });
-
-      this.sceneReady = true;
-
-      // Apply last known state so the map doesn't start blank
-      if (this.gameClient.lastState) {
-        scene.applyServerState(this.gameClient.lastState, true);
-      }
-
-      this.createZoomControls();
-      this.subscribeToState();
+        if (state?.shopDefinition) this.shopPopup!.show(state);
+      },
+    );
+    this.map.setOnTileClick((tileInfo) => {
+      const state = this.gameClient.lastState;
+      const playerOnTile = state && state.party.col === tileInfo.col && state.party.row === tileInfo.row;
+      this.roomView!.hasShop = !!(playerOnTile && state?.shopDefinition);
+      this.roomView!.show(tileInfo);
     });
+
+    if (this.gameClient.lastState) {
+      this.map.applyServerState(this.gameClient.lastState, true);
+    }
+
+    this.createZoomControls();
+    this.subscribeToState();
   }
 
   private createZoomControls(): void {
@@ -192,31 +154,23 @@ export class MapScreen implements Screen {
 
     this.zoomControls.querySelector('.map-zoom-in')!.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.getScene()?.adjustZoom(0.2);
+      this.map?.adjustZoom(0.2);
     });
 
     this.zoomControls.querySelector('.map-zoom-out')!.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.getScene()?.adjustZoom(-0.2);
+      this.map?.adjustZoom(-0.2);
     });
   }
 
-  private getScene(): import('../scenes/WorldMapScene').WorldMapScene | null {
-    if (!this.game) return null;
-    return this.game.scene.getScene('WorldMapScene') as import('../scenes/WorldMapScene').WorldMapScene;
-  }
-
   private subscribeToState(): void {
-    // Avoid double-subscribe
     this.unsubscribeState?.();
-
-    if (!this.sceneReady || !this.game) return;
+    if (!this.map) return;
 
     this.unsubscribeState = this.gameClient.subscribe((state) => {
-      const scene = this.game?.scene.getScene('WorldMapScene');
-      if (scene) {
+      if (this.map) {
         const snap = this.gameClient.isInitialState;
-        (scene as import('../scenes/WorldMapScene').WorldMapScene).applyServerState(state, snap);
+        this.map.applyServerState(state, snap);
       }
     });
   }

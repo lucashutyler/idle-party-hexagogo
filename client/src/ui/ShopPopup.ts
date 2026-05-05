@@ -4,6 +4,7 @@ import type { ShopDefinition, ItemDefinition, SetDefinition } from '@idle-party-
 import { getUnequippedCount, listUnequippedEntries } from '@idle-party-rpg/shared';
 import { renderItemIcon, escapeHtml } from './ItemIcon';
 import { renderItemPopupContent } from './ItemPopup';
+import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 
 export class ShopPopup {
   private overlay: HTMLElement;
@@ -24,6 +25,7 @@ export class ShopPopup {
       if (e.target === this.overlay) this.hide();
     });
     document.body.appendChild(this.overlay);
+    wireFocusOnInteract(this.overlay);
   }
 
   show(state: ServerStateMessage): void {
@@ -34,6 +36,7 @@ export class ShopPopup {
     this.notice = null;
     this.renderCurrentView(state);
     this.overlay.style.display = 'flex';
+    bringToFront(this.overlay);
 
     // Subscribe to state updates so the popup reflects post-action state (sold qty, gold, etc.)
     this.unsubscribeState?.();
@@ -47,6 +50,7 @@ export class ShopPopup {
   hide(): void {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = '';
+    release(this.overlay);
     this.unsubscribeState?.();
     this.unsubscribeState = null;
     if (this.noticeTimer !== null) {

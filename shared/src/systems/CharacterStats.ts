@@ -25,20 +25,51 @@ export interface CharacterState {
   inventory: Record<string, number>;
   equipment: Record<string, string | null>;
   skillLoadout: SkillLoadout;
-  skillPoints: number;
 }
 
 // --- Constants ---
 
+/**
+ * Class icon image URLs. Drop PNGs into `data/class-icons/{ClassName}.png`
+ * and add a static mount at `/class-icons` in `server/src/index.ts`.
+ * Missing files fall through to a placehold.co stub via `classIconHtml()`.
+ *
+ * Emoji are no longer used for icons anywhere in the game UI.
+ */
 export const CLASS_ICONS: Record<string, string> = {
-  Knight: '\uD83D\uDEE1\uFE0F',  // 🛡️ shield
-  Archer: '\uD83C\uDFF9',          // 🏹 bow
-  Priest: '\u2625\uFE0F',          // ☥ ankh
-  Mage: '\uD83E\uDE84',            // 🪄 magic wand
-  Bard: '\uD83C\uDFB5',            // 🎵 musical note
+  Knight: '/class-icons/Knight.png',
+  Archer: '/class-icons/Archer.png',
+  Priest: '/class-icons/Priest.png',
+  Mage: '/class-icons/Mage.png',
+  Bard: '/class-icons/Bard.png',
 };
-export const UNKNOWN_CLASS_ICON = '\u2753'; // ❓
-export const SERVER_ICON = '\uD83D\uDDA5\uFE0F'; // 🖥️
+export const UNKNOWN_CLASS_ICON = '/class-icons/Unknown.png';
+export const SERVER_ICON = '/class-icons/Server.png';
+
+/**
+ * Render an inline icon `<img>` as an HTML string. Loads `src`; on error
+ * falls through to a placehold.co stub; hides itself if even that fails.
+ * Drop-in replacement for emoji glyphs in template strings.
+ */
+export function inlineIconHtml(src: string, label: string, extraClass = ''): string {
+  const safeLabel = label.replace(/[^A-Za-z0-9 ]/g, '').slice(0, 10) || '?';
+  const placeholder = `https://placehold.co/24x24/2a2a40/e8e8e8/png?text=${encodeURIComponent(safeLabel)}`;
+  const onerror = `if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}`;
+  const cls = `icon-inline${extraClass ? ' ' + extraClass : ''}`;
+  return `<img class="${cls}" src="${src}" alt="${safeLabel}" onerror="${onerror}" />`;
+}
+
+/** Inline class icon `<img>` HTML — drop-in replacement for the old emoji glyphs. */
+export function classIconHtml(className: string | undefined): string {
+  if (!className) return inlineIconHtml(UNKNOWN_CLASS_ICON, '?', 'icon-class');
+  const src = CLASS_ICONS[className] ?? UNKNOWN_CLASS_ICON;
+  return inlineIconHtml(src, className, 'icon-class');
+}
+
+/** Inline server icon `<img>` HTML — used for the sender icon on system chat messages. */
+export function serverIconHtml(): string {
+  return inlineIconHtml(SERVER_ICON, 'Server', 'icon-server');
+}
 
 export const CLASS_DEFINITIONS: Record<ClassName, ClassDefinition> = {
   Knight: {
@@ -122,7 +153,6 @@ export function createCharacter(className: ClassName): CharacterState {
     inventory: {},
     equipment: { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
     skillLoadout: createDefaultSkillLoadout(className),
-    skillPoints: 0,
   };
 }
 
@@ -136,23 +166,16 @@ export function addGold(char: CharacterState, amount: number): number {
 /**
  * Add XP to a character, leveling up as needed.
  * Mutates `char` in place. Returns info about level-ups.
- * Grants 1 skill point every 5 levels.
+ * Skills auto-unlock at their level milestones (handled by the server).
  */
 export function addXp(char: CharacterState, amount: number): { leveledUp: boolean; levelsGained: number } {
   char.xp += amount;
   let levelsGained = 0;
-  const LEVELS_PER_SKILL_POINT = 5;
 
   while (char.xp >= xpForNextLevel(char.level)) {
     char.xp -= xpForNextLevel(char.level);
-    const oldLevel = char.level;
     char.level++;
     levelsGained++;
-
-    // Grant skill point if crossing a 5-level boundary
-    if (Math.floor(char.level / LEVELS_PER_SKILL_POINT) > Math.floor(oldLevel / LEVELS_PER_SKILL_POINT)) {
-      char.skillPoints++;
-    }
   }
 
   return { leveledUp: levelsGained > 0, levelsGained };

@@ -40,6 +40,9 @@ export class ScreenManager {
     }
 
     this.activeScreenId = id;
+    // Expose the active screen on the body so global CSS can adapt
+    // (e.g. mobile chat sheet replaces the combat log instead of stacking).
+    document.body.dataset.activeScreen = id;
   }
 
   getActiveScreenId(): string | null {

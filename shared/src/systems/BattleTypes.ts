@@ -22,7 +22,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.05.02.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.05.04.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -100,7 +100,6 @@ export interface ClientCharacterState {
   baseDamage: number;
   damageType: string;
   skillLoadout: SkillLoadout;
-  skillPoints: number;
   inventory: Record<string, number>;
   equipment: Record<string, string | null>;
   /** XP rate tracking — in-memory only, resets on server restart. */
@@ -188,11 +187,6 @@ export interface ServerEquipBlockedMessage {
   blockedBySlot: EquipSlot;
 }
 
-export interface ClientUnlockSkillMessage {
-  type: 'unlock_skill';
-  skillId: string;
-}
-
 export interface ClientEquipSkillMessage {
   type: 'equip_skill';
   skillId: string;
@@ -263,7 +257,6 @@ export type ClientMessage =
   | ClientEquipItemForceDestroyMessage
   | ClientSetClassMessage
   | ClientResetXpRateMessage
-  | ClientUnlockSkillMessage
   | ClientEquipSkillMessage
   | ClientUnequipSkillMessage
   | ClientRunMessage

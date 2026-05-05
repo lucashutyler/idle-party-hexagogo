@@ -10,13 +10,14 @@ import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
 import { MapScreen } from './screens/MapScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
-import { CharacterScreen } from './screens/CharacterScreen';
-import { ItemsScreen } from './screens/ItemsScreen';
+import { CharItemsScreen } from './screens/CharItemsScreen';
 import { SocialScreen } from './screens/SocialScreen';
 import { ClassSelectScreen } from './screens/ClassSelectScreen';
 import { SuspensionScreen } from './screens/SuspensionScreen';
 import { BottomNav } from './ui/BottomNav';
 import { ChatLocalStore } from './network/ChatLocalStore';
+import { ChatPopout } from './ui/ChatPopout';
+import { PersistentXpBar } from './ui/PersistentXpBar';
 
 const CONNECTION_ERROR = 'Could not connect to server';
 
@@ -31,14 +32,39 @@ export class App {
   private offlineScreen!: OfflineScreen;
   private suspensionScreen!: SuspensionScreen;
   private navEl!: HTMLElement;
+  private xpBarEl!: HTMLElement;
+  private chatPopout?: ChatPopout;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.screenManager = new ScreenManager();
 
-    // Hide bottom nav until logged in
+    // Hide bottom nav + persistent xp bar until logged in
     this.navEl = document.getElementById('bottom-nav')!;
     this.navEl.style.display = 'none';
+    this.xpBarEl = document.getElementById('persistent-xp-bar')!;
+    this.xpBarEl.style.display = 'none';
+
+    // Splash overlay: minimum 2-second hold, then fade once the window has
+    // finished loading. Whichever takes longer wins — fast loads still see
+    // a full 2 seconds of brand frame; slow loads get held until ready.
+    const startedAt = Date.now();
+    const MIN_HOLD_MS = 2000;
+    const dismissWhenReady = () => {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, MIN_HOLD_MS - elapsed);
+      setTimeout(() => {
+        const splash = document.getElementById('splash');
+        if (!splash || splash.classList.contains('hidden')) return;
+        splash.classList.add('hidden');
+        setTimeout(() => splash.remove(), 600);
+      }, remaining);
+    };
+    if (document.readyState === 'complete') {
+      dismissWhenReady();
+    } else {
+      window.addEventListener('load', dismissWhenReady, { once: true });
+    }
 
     // Offline screen
     this.offlineScreen = new OfflineScreen('screen-offline', () => {
@@ -329,8 +355,7 @@ export class App {
   private enterGame(): void {
     const combatScreen = new CombatScreen('screen-combat', this.gameClient);
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
-    const characterScreen = new CharacterScreen('screen-character', this.gameClient);
-    const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
+    const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore);
     const settingsScreen = new SettingsScreen('screen-settings');
 
@@ -344,8 +369,8 @@ export class App {
       socialScreen.showUserPopup(username, anchor);
     });
 
-    // Wire items screen "open trade" click to social screen trade modal
-    itemsScreen.setOnOpenTrade((tradeId) => {
+    // Wire char/items screen "open trade" click to social screen trade modal
+    charItemsScreen.setOnOpenTrade((tradeId) => {
       socialScreen.openExistingTrade(tradeId);
     });
 
@@ -358,29 +383,97 @@ export class App {
 
     this.screenManager.register('combat', document.getElementById('screen-combat')!, combatScreen);
     this.screenManager.register('map', document.getElementById('screen-map')!, mapScreen);
-    this.screenManager.register('character', document.getElementById('screen-character')!, characterScreen);
-    this.screenManager.register('items', document.getElementById('screen-items')!, itemsScreen);
+    this.screenManager.register('items', document.getElementById('screen-items')!, charItemsScreen);
     this.screenManager.register('social', document.getElementById('screen-social')!, socialScreen);
     this.screenManager.register('settings', document.getElementById('screen-settings')!, settingsScreen);
 
-    // Show bottom nav
+    // Show bottom nav + persistent XP bar
     this.navEl.style.display = '';
+    this.xpBarEl.style.display = '';
 
-    const savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';
+    // Persistent XP bar above nav — visible on every screen
+    new PersistentXpBar(this.gameClient);
 
-    new BottomNav(
+    // Chat popout — global overlay, toggled from the Chat nav tab
+    this.chatPopout = new ChatPopout(this.gameClient);
+
+    // Migrate any legacy 'character' saved screen to the merged 'items' tab.
+    let savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';
+    if (savedScreen === 'character') savedScreen = 'items';
+
+    // Nav icons render as <img> tags (no emoji). Drop PNGs into
+    // data/nav-icons/{id}.png and add an Express mount at /nav-icons in
+    // server/src/index.ts. Missing art falls through to a placehold.co stub.
+    const navImg = (id: string, label: string) => {
+      const placeholder = `https://placehold.co/24x24/2a2a40/e8e8e8/png?text=${encodeURIComponent(label.slice(0, 4))}`;
+      return `<img class="nav-icon-img" src="/nav-icons/${id}.png" alt="${label}"`
+        + ` onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}" />`;
+    };
+    const nav = new BottomNav(
       [
-        { id: 'combat', label: 'Combat', icon: '⚔' },
-        { id: 'map', label: 'Map', icon: '🗺' },
-        { id: 'character', label: 'Char', icon: '👤' },
-        { id: 'items', label: 'Items', icon: '🎒' },
-        { id: 'social', label: 'Social', icon: '💬' },
-        { id: 'settings', label: 'Settings', icon: '⚙' },
+        { id: 'combat', label: 'Combat', icon: navImg('combat', 'Fight') },
+        { id: 'map', label: 'Map', icon: navImg('map', 'Map') },
+        { id: 'items', label: 'Char', icon: navImg('items', 'Char') },
+        // Social opens a fly-out submenu with the three sub-views; the
+        // pill bar inside the screen is gone in favor of this.
+        {
+          id: 'social',
+          label: 'Social',
+          icon: navImg('social', 'Soc'),
+          mode: 'submenu',
+          submenu: [
+            { id: 'party', label: 'Party', badge: 'party-invites' },
+            { id: 'guild', label: 'Guild' },
+            { id: 'users', label: 'Leaderboard', badge: 'friend-requests' },
+          ],
+        },
+        { id: 'settings', label: 'Settings', icon: navImg('settings', 'Set') },
+        // Chat is pinned to the far right as a square overlay button. The
+        // icon is a chevron (▲ when closed → "open me upward", ▼ when open
+        // → "tap to close") so it visually reads as a separate widget, not
+        // another nav destination. CSS swaps the chevron via .overlay-active.
+        {
+          id: 'chat',
+          label: 'Chat',
+          icon: '<span class="nav-chat-chevron"><span class="nav-chat-chevron-up">▲</span><span class="nav-chat-chevron-down">▼</span></span>',
+          mode: 'overlay',
+        },
       ],
       savedScreen,
-      (tabId) => this.screenManager.switchTo(tabId),
+      (tabId, wasActive) => {
+        this.screenManager.switchTo(tabId);
+        // Re-click on Map → recenter on player (the only "tap again" gesture
+        // wired so far; other tabs ignore wasActive).
+        if (tabId === 'map' && wasActive) {
+          mapScreen.recenterOnPlayer();
+        }
+      },
       this.gameClient,
+      (tabId, active) => {
+        if (tabId === 'chat') {
+          if (active) this.chatPopout?.open(); else this.chatPopout?.close();
+        }
+      },
+      (tabId, itemId) => {
+        if (tabId === 'social') {
+          socialScreen.setSubTab(itemId);
+          this.screenManager.switchTo('social');
+          nav.setActive('social');
+          sessionStorage.setItem('activeScreen', 'social');
+        }
+      },
     );
+
+    // Wire popout → nav so closing the popout from its own button clears the
+    // overlay-active state, and unread mail lights up the Chat tab badge.
+    this.chatPopout.setOnClose(() => nav.setOverlayActive('chat', false));
+    this.chatPopout.setOnUnreadChange((hasUnread) => nav.setChatUnread(hasUnread));
+
+    // Restore chat open/closed from the previous session on this browser.
+    if (this.chatPopout.wasOpen()) {
+      this.chatPopout.open();
+      nav.setOverlayActive('chat', true);
+    }
 
     // Switch to saved screen (or combat by default)
     this.screenManager.switchTo(savedScreen);

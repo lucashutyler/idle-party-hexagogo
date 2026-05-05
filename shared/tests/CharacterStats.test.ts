@@ -109,7 +109,6 @@ describe('CharacterStats', () => {
         const char = createCharacter(cn);
         expect(char.skillLoadout.unlockedSkills).toEqual([expectedFirstSkills[cn]]);
         expect(char.skillLoadout.equippedSkills[0]).toBe(expectedFirstSkills[cn]);
-        expect(char.skillPoints).toBe(0);
       }
     });
   });
@@ -151,35 +150,6 @@ describe('CharacterStats', () => {
       expect(result.levelsGained).toBe(2);
     });
 
-    it('grants 1 skill point at level 5', () => {
-      const char = createCharacter('Knight');
-      // Leveling from 4 → 5 should grant a skill point
-      char.level = 4;
-      char.xp = 0;
-      addXp(char, xpForNextLevel(4));
-      expect(char.level).toBe(5);
-      expect(char.skillPoints).toBe(1);
-    });
-
-    it('grants skill points every 5 levels', () => {
-      const char = createCharacter('Knight');
-      // Fast-forward to level 9
-      char.level = 9;
-      char.xp = 0;
-      char.skillPoints = 1; // already got one at level 5
-      addXp(char, xpForNextLevel(9));
-      expect(char.level).toBe(10);
-      expect(char.skillPoints).toBe(2);
-    });
-
-    it('does NOT grant skill point at non-5 boundaries', () => {
-      const char = createCharacter('Knight');
-      char.level = 2;
-      char.xp = 0;
-      addXp(char, xpForNextLevel(2));
-      expect(char.level).toBe(3);
-      expect(char.skillPoints).toBe(0);
-    });
   });
 
   describe('CLASS_DEFINITIONS', () => {

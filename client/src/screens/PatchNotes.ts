@@ -1,5 +1,30 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.04.1',
+    notes: [
+      'UI overhaul — sweeping pass to make the game feel less like a web app and more like a game',
+      'Char and Items screens merged into a single Inventory tab — silhouette + equipped gear + skill loadout above the fold, condensed stat card (ATK/DR/MR/HP) + inventory grid below',
+      'Skill points removed — skills now auto-unlock at their level milestone. Equipping is the only constraint (5 slots, swap freely)',
+      'Skill loadout UI: clicking a slot opens a popup with all unlocked skills of the matching type. Move slot 1 → slot 3 leaves slot 1 empty (no auto-shuffle)',
+      'Inventory grid now groups items with visible headers when sorted by Rarity or Type (Newest stays chronological)',
+      'Stat card abbreviations have click-to-show tooltips — tap ATK/DR/MR/HP to see the long form',
+      'Combat: bare sprites are now cards — image + name + HP bar bundled together. Multi-line names allowed for monsters (e.g. "Skeletal Warrior")',
+      'Click any monster in combat to see its name + image (drops/abilities stay hidden for now)',
+      'Combat backgrounds — per-zone default with optional per-tile override (drop art into /combat-bg-artwork)',
+      'New Chat tab on the bottom nav opens a global chat pop-out. Floating, draggable, freely resizable on desktop; full-screen or bottom-sheet on mobile (toggle with the layout button)',
+      'Combat log stays on the Combat screen (intentionally NOT merged into chat)',
+      'Persistent XP bar lives directly above the bottom nav now, visible on every screen — level on the left, XP fill across',
+      'Bottom nav restyled — depth, fancier borders, glow on the active tab. Now 6 tabs: Combat, Map, Inventory, Social, Chat, Settings',
+      'Social tab reworked — Users renamed to Leaderboard (sort by level), default sub-tab is now Party, Chat sub-tab removed (use the new Chat pop-out)',
+      'Map: Phaser is gone — the world map is now a custom Canvas implementation. Snappier loads, parchment background, tile shadows for depth, scroll bounce-back, 2-finger pinch zoom on mobile, smarter default zoom (≥15 tiles visible)',
+      'Other parties on the map are now flagged per-tile so you can see them at a glance instead of just an aggregate count',
+      'Room popups have three states — current room (full-screen, background art, parties grouped visually), remote room (smaller popup with a Go button), undiscovered room (minimal). Travel-arrival expands the popup to signal you have arrived',
+      'New retro font — Silkscreen + Pixelify Sans replace Press Start 2P, fixing the 6/G readability problem',
+      'New splash + logo placeholders on first load (drop your real artwork in /logo-artwork/ to override)',
+      'Image-everywhere convention — anywhere a name shows, an image can show beside it. Monsters, classes, items, sets, shops, zones, rooms — all read from `/<kind>-artwork/{id}.png` with a placehold.co fallback when art is missing',
+    ],
+  },
+  {
     version: '2026.05.02.1',
     notes: [
       'Bug fix: Priest Blessed Arms holy damage was being mislabeled as physical damage in the combat log when the physical hit was fully resisted. The HP math was always correct; now the log correctly shows "0 physical + X holy" so it\'s clear holy damage isn\'t blocked by physical resistance',

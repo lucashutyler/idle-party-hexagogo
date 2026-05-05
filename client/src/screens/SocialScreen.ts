@@ -1,18 +1,22 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_ICONS, UNKNOWN_CLASS_ICON, SERVER_ICON, getItemEffectText, SKILL_SLOTS, getSkillById, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, classIconHtml, serverIconHtml, getItemEffectText, SKILL_SLOTS, getSkillById, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
+import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
+import { renderAssetImg } from '../ui/assets';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
 
+// Chat sub-tab is gone — replaced by the global pop-out chat. The 'chat' value
+// is still allowed in stored prefs for back-compat; we silently coerce it back
+// to 'party' below.
 const SUB_TABS: { id: SubTab; label: string }[] = [
-  { id: 'users', label: 'Users' },
-  { id: 'guild', label: 'Guild' },
   { id: 'party', label: 'Party' },
-  { id: 'chat', label: 'Chat' },
+  { id: 'guild', label: 'Guild' },
+  { id: 'users', label: 'Leaderboard' },
 ];
 
 export class SocialScreen implements Screen {
@@ -22,25 +26,24 @@ export class SocialScreen implements Screen {
   private isActive = false;
   private activeTab: SubTab = (() => {
     const stored = sessionStorage.getItem('socialSubTab');
-    return stored && SUB_TABS.some(t => t.id === stored) ? stored as SubTab : 'users';
+    if (stored && SUB_TABS.some(t => t.id === stored)) return stored as SubTab;
+    return 'party';
   })();
   private unsubscribe?: () => void;
   private unsubChat?: () => void;
   private unsubSyncChat?: () => void;
 
-  private tabBar!: HTMLElement;
   private panelContainer!: HTMLElement;
   private lastSocial: ClientSocialState | null = null;
   private lastState: ServerStateMessage | null = null;
   private searchQuery = '';
-  private sortBy: 'name' | 'status' = 'status';
+  private sortBy: 'name' | 'status' | 'level' = 'level';
   private filterBy: 'all' | 'friends' | 'guild' | 'room' | 'zone' = 'all';
 
   // Chat state — unified timeline backed by localStorage
   private chatFilters: Set<ChatChannelType>;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
-  private hasUnread = false;
   private chatFocusAfterRender = false;
   private chatPrefsInitialized = false;
 
@@ -100,18 +103,12 @@ export class SocialScreen implements Screen {
 
   onActivate(): void {
     this.isActive = true;
-    this.hasUnread = false;
     this.unsubscribe = this.gameClient.subscribe((state) => {
       if (this.isActive) this.updateFromState(state);
     });
     this.unsubChat = this.gameClient.onChat((msg) => {
       // Add to localStorage-backed store (O(1) dedup)
-      const isNew = this.chatStore.addMessage(msg);
-      if (this.isActive && this.activeTab === 'chat') {
-        if (isNew) this.appendChatMessage(msg);
-      } else if (isNew) {
-        this.hasUnread = true;
-      }
+      this.chatStore.addMessage(msg);
     });
     this.unsubSyncChat = this.gameClient.onSyncChat((messages, full) => {
       this.chatStore.mergeSyncBatch(messages, full);
@@ -132,7 +129,6 @@ export class SocialScreen implements Screen {
         this.chatDmTarget = state.social.chatPreferences.dmTarget;
         this.chatPrefsInitialized = true;
       }
-      this.renderTabBar();
       this.renderPanel();
     }
   }
@@ -152,34 +148,23 @@ export class SocialScreen implements Screen {
   private buildDOM(): void {
     this.container.innerHTML = `
       <div class="social-content">
-        <div class="social-tab-bar"></div>
         <div class="social-panel"></div>
       </div>
     `;
-    this.tabBar = this.container.querySelector('.social-tab-bar')!;
     this.panelContainer = this.container.querySelector('.social-panel')!;
     this.wireDelegatedClicks();
-    this.wireTabBarDelegation();
-    this.renderTabBar();
   }
 
-  /** Delegated click handler on tabBar — survives innerHTML replacements. */
-  private wireTabBarDelegation(): void {
-    this.tabBar.addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest('.social-tab-btn') as HTMLElement | null;
-      if (!btn) return;
-      const tab = btn.getAttribute('data-tab') as SubTab;
-      if (!tab) return;
-      this.activeTab = tab;
-      sessionStorage.setItem('socialSubTab', this.activeTab);
-      if (this.activeTab === 'chat') this.hasUnread = false;
-      // Invalidate all keys so panels render fresh on switch
-      this.lastRenderedUsersKey = '';
-      this.lastRenderedGuildKey = '';
-      this.lastRenderedPartyKey = '';
-      this.renderTabBar();
-      this.renderPanel();
-    });
+  /** Switch sub-view — called by the bottom nav fly-out submenu. */
+  setSubTab(tab: string): void {
+    if (!SUB_TABS.some(t => t.id === tab)) return;
+    if (this.activeTab === tab) return;
+    this.activeTab = tab as SubTab;
+    sessionStorage.setItem('socialSubTab', this.activeTab);
+    this.lastRenderedUsersKey = '';
+    this.lastRenderedGuildKey = '';
+    this.lastRenderedPartyKey = '';
+    if (this.isActive) this.renderPanel();
   }
 
   /** Single delegated click handler on panelContainer — survives innerHTML replacements. */
@@ -192,14 +177,15 @@ export class SocialScreen implements Screen {
       if (nameEl) {
         const username = nameEl.getAttribute('data-username')
           || nameEl.closest('[data-username]')?.getAttribute('data-username');
-        if (username && username !== this.lastState?.username) {
-          this.showUserPopup(username, nameEl);
+        // Clicking your own DM line — route to the recipient instead of self.
+        const dmTarget = nameEl.getAttribute('data-dm-target');
+        if (username === this.lastState?.username && dmTarget) {
+          this.startDm(dmTarget);
           return;
         }
-        // Clicking own name on a DM you sent → start DM with the recipient
-        const dmTarget = nameEl.getAttribute('data-dm-target');
-        if (username && dmTarget) {
-          this.startDm(dmTarget);
+        if (username) {
+          // showUserPopup routes self-clicks to the "this is you" popup.
+          this.showUserPopup(username, nameEl);
           return;
         }
       }
@@ -248,8 +234,8 @@ export class SocialScreen implements Screen {
 
       // Users panel — sort button
       if (btn.matches('.social-sort-btn')) {
-        this.sortBy = this.sortBy === 'name' ? 'status' : 'name';
-        btn.textContent = this.sortBy === 'name' ? '\u25B2 A-Z' : '\u25BC Status';
+        this.sortBy = this.sortBy === 'level' ? 'status' : this.sortBy === 'status' ? 'name' : 'level';
+        btn.textContent = SocialScreen.sortLabel(this.sortBy);
         this.renderUserRows();
         return;
       }
@@ -380,54 +366,6 @@ export class SocialScreen implements Screen {
     document.addEventListener('touchend', (e) => this.onGridDragEnd(e));
   }
 
-  private renderTabBar(): void {
-    const friendRequests = (this.lastSocial?.incomingFriendRequests?.length ?? 0) > 0;
-    const tradeNeedsAction = this.tradeNeedsAttention();
-    this.tabBar.innerHTML = SUB_TABS.map(t => {
-      const chatUnread = t.id === 'chat' && this.hasUnread && this.activeTab !== 'chat';
-      const partyInvites = t.id === 'party' && (this.lastSocial?.pendingInvites?.length ?? 0) > 0;
-      const usersBadge = t.id === 'users' && (friendRequests || tradeNeedsAction);
-      const hasBadge = chatUnread || partyInvites || usersBadge;
-      return `<button class="social-tab-btn${t.id === this.activeTab ? ' active' : ''}" data-tab="${t.id}">${t.label}${hasBadge ? '<span class="social-tab-badge"></span>' : ''}</button>`;
-    }).join('');
-    // Click handlers are delegated via wireTabBarDelegation() — no per-button wiring needed.
-  }
-
-  /** Lightweight badge-only update — toggles badge spans without touching innerHTML. */
-  private updateTabBadges(): void {
-    const social = this.lastSocial;
-    const friendRequests = (social?.incomingFriendRequests?.length ?? 0) > 0;
-    const tradeNeedsAction = this.tradeNeedsAttention();
-    const partyInvites = (social?.pendingInvites?.length ?? 0) > 0;
-    const chatUnread = this.hasUnread && this.activeTab !== 'chat';
-
-    for (const btn of this.tabBar.querySelectorAll('.social-tab-btn')) {
-      const tab = btn.getAttribute('data-tab');
-      const needsBadge =
-        (tab === 'users' && (friendRequests || tradeNeedsAction)) ||
-        (tab === 'party' && partyInvites) ||
-        (tab === 'chat' && chatUnread);
-      const badge = btn.querySelector('.social-tab-badge');
-      if (needsBadge && !badge) {
-        const span = document.createElement('span');
-        span.className = 'social-tab-badge';
-        btn.appendChild(span);
-      } else if (!needsBadge && badge) {
-        badge.remove();
-      }
-    }
-  }
-
-  /** Returns true if any proposed trade requires this player's attention. */
-  private tradeNeedsAttention(): boolean {
-    const trades = this.lastSocial?.proposedTrades ?? [];
-    if (trades.length === 0) return false;
-    const selfUsername = this.lastState?.username ?? '';
-    // A trade needs attention if the OTHER player was the last to act on it
-    // (i.e. they proposed/countered and are now waiting on me).
-    return trades.some(t => t.lastUpdatedBy && t.lastUpdatedBy !== selfUsername);
-  }
-
   private updateFromState(state: ServerStateMessage): void {
     this.lastSocial = state.social ?? null;
     this.lastState = state;
@@ -438,8 +376,8 @@ export class SocialScreen implements Screen {
       this.chatPrefsInitialized = true;
     }
 
-    // Lightweight badge update — never rebuilds tab bar DOM
-    this.updateTabBadges();
+    // (Tab bar is gone — sub-tabs are picked from the bottom-nav fly-out submenu;
+    // its badges are driven from BottomNav's own state subscription.)
 
     // Update trade modal if visible (track the active trade by ID)
     if (this.tradeModalEl) this.updateTradeModal();
@@ -609,8 +547,7 @@ export class SocialScreen implements Screen {
   // ── Class icon helper ────────────────────────────────────────
 
   private classIcon(className?: string): string {
-    if (!className) return UNKNOWN_CLASS_ICON;
-    return CLASS_ICONS[className] ?? UNKNOWN_CLASS_ICON;
+    return classIconHtml(className);
   }
 
   // ── User Popup Menu ──────────────────────────────────────────
@@ -630,7 +567,10 @@ export class SocialScreen implements Screen {
     if (!social) return;
 
     const selfUsername = this.lastState?.username ?? '';
-    if (username === selfUsername) return;
+    if (username === selfUsername) {
+      this.showSelfPopup(anchor);
+      return;
+    }
 
     const friends = new Set(social.friends ?? []);
     const blocked = social.blockedUsers ?? {};
@@ -775,8 +715,76 @@ export class SocialScreen implements Screen {
     document.body.appendChild(overlay);
     document.body.appendChild(popup);
     this.popupOverlay = overlay;
+    // Lift overlay AND the popup itself above whatever it was opened from
+    // (RoomView, Combat, etc). The menu node has its own z-index so it
+    // floats above the dimmed overlay.
+    bringToFront(overlay);
+    bringToFront(popup);
 
     // Adjust if popup goes off-screen
+    requestAnimationFrame(() => {
+      const popupRect = popup.getBoundingClientRect();
+      if (popupRect.right > window.innerWidth) {
+        popup.style.left = `${Math.max(0, rect.right - popupRect.width)}px`;
+      }
+      if (popupRect.bottom > window.innerHeight) {
+        popup.style.top = `${rect.top - popupRect.height - 4}px`;
+      }
+    });
+  }
+
+  /**
+   * Tiny "this is you" popup shown when the player clicks their own name.
+   * Mirrors the user popup's chrome (dim overlay + positioned card) but
+   * has no actions — just identity + a flavor line. Avoids the silent
+   * click-through that felt jarring when poking at your own party member.
+   */
+  private showSelfPopup(anchor: HTMLElement): void {
+    this.dismissPopup();
+
+    const state = this.lastState;
+    const char = state?.character;
+    const username = state?.username ?? '';
+    const className = char?.className ?? '';
+    const level = char?.level ?? 0;
+
+    const flavorLines = [
+      'Tis thyself, brave soul. Look not in mirrors for adventure.',
+      'You gaze upon thine own visage. Stout fellow!',
+      'A noble hero — and curiously vain, to click upon themself.',
+      "'Tis you, dear adventurer. Onward to glory!",
+      "Behold: thyself. The realm's worst raid is lucky to have you.",
+      'Yon reflection is uncommonly handsome today.',
+    ];
+    const flavor = flavorLines[Math.floor(Math.random() * flavorLines.length)];
+
+    const popup = document.createElement('div');
+    popup.className = 'user-popup-menu user-popup-self';
+    popup.innerHTML = `
+      <div class="user-popup-header">
+        <span class="user-popup-name">${classIconHtml(className)} ${this.escapeHtml(username)}</span>
+        ${level ? `<span class="user-popup-level">Lv ${level}</span>` : ''}
+        <span class="user-popup-labels">You</span>
+      </div>
+      <div class="user-popup-self-flavor">${this.escapeHtml(flavor)}</div>
+    `;
+    popup.style.position = 'fixed';
+
+    const rect = anchor.getBoundingClientRect();
+    popup.style.left = `${rect.left}px`;
+    popup.style.top = `${rect.bottom + 4}px`;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'user-popup-overlay';
+    overlay.addEventListener('click', () => this.dismissPopup());
+
+    document.body.appendChild(overlay);
+    document.body.appendChild(popup);
+    this.popupOverlay = overlay;
+    bringToFront(overlay);
+    bringToFront(popup);
+
+    // Same off-screen nudge as showUserPopup.
     requestAnimationFrame(() => {
       const popupRect = popup.getBoundingClientRect();
       if (popupRect.right > window.innerWidth) {
@@ -792,7 +800,11 @@ export class SocialScreen implements Screen {
     if (this.popupOverlay) {
       // Remove both overlay and popup (popup is next sibling)
       const popup = this.popupOverlay.nextElementSibling;
-      if (popup?.classList.contains('user-popup-menu')) popup.remove();
+      if (popup?.classList.contains('user-popup-menu')) {
+        release(popup as HTMLElement);
+        popup.remove();
+      }
+      release(this.popupOverlay);
       this.popupOverlay.remove();
       this.popupOverlay = null;
     }
@@ -816,12 +828,14 @@ export class SocialScreen implements Screen {
     const onlineSet = new Set(social.onlinePlayers ?? []);
     const friends = new Set(social.friends ?? []);
     const blocked = social.blockedUsers ?? {};
-    const selfUsername = this.lastState?.username ?? '';
     const incomingFrom = new Set((social.incomingFriendRequests ?? []).map(r => r.fromUsername));
     const outgoingTo = new Set((social.outgoingFriendRequests ?? []).map(r => r.toUsername));
 
-    // Full player list from all registered accounts (excludes self)
-    const allEntries = (social.allPlayers ?? []).filter(p => p.username !== selfUsername);
+    // Full player list from all registered accounts. The leaderboard is a
+    // standings view — the player needs to see their own row to know where
+    // they sit, so we keep self in the list (highlighted via .self in
+    // renderUserRow). Other social actions on the row no-op for self.
+    const allEntries = social.allPlayers ?? [];
 
     // Build filter sets
     const guildMembers = new Set((social.guildMembers ?? []).map(m => m.username));
@@ -848,6 +862,15 @@ export class SocialScreen implements Screen {
     // Sort
     if (this.sortBy === 'name') {
       players.sort((a, b) => a.username.localeCompare(b.username));
+    } else if (this.sortBy === 'level') {
+      // Leaderboard sort: level desc, then name. (Server may pre-order by raw XP;
+      // we reorder client-side using level which is the only public field.)
+      players.sort((a, b) => {
+        const al = a.level ?? 0;
+        const bl = b.level ?? 0;
+        if (al !== bl) return bl - al;
+        return a.username.localeCompare(b.username);
+      });
     } else {
       players.sort((a, b) => {
         const ao = onlineSet.has(a.username) ? 0 : 1;
@@ -904,7 +927,7 @@ export class SocialScreen implements Screen {
         <input class="social-search" type="text" placeholder="Search..." value="${this.escapeHtml(this.searchQuery)}" />
         <div class="social-toolbar-btns">
           ${filters.map(f => `<button class="social-filter-btn${this.filterBy === f.id ? ' active' : ''}" data-filter="${f.id}">${f.label}</button>`).join('')}
-          <button class="social-sort-btn" title="Sort">${this.sortBy === 'name' ? '\u25B2 A-Z' : '\u25BC Status'}</button>
+          <button class="social-sort-btn" title="Sort">${SocialScreen.sortLabel(this.sortBy)}</button>
         </div>
       </div>
       ${incomingHtml}
@@ -997,20 +1020,33 @@ export class SocialScreen implements Screen {
     const isOnline = onlineSet.has(p.username);
     const hasIncoming = incomingFrom.has(p.username);
     const hasSentTo = outgoingTo.has(p.username);
+    const isSelf = p.username === (this.lastState?.username ?? '');
 
     let statusBadge = '';
-    if (isFriend) statusBadge = '<span class="social-badge friend">Friend</span>';
+    if (isSelf) statusBadge = '<span class="social-badge friend">You</span>';
+    else if (isFriend) statusBadge = '<span class="social-badge friend">Friend</span>';
     else if (hasIncoming) statusBadge = '<span class="social-badge friend">Request</span>';
     else if (hasSentTo) statusBadge = '<span class="social-badge">Pending</span>';
 
-    return `<div class="social-user-row" data-username="${this.escapeHtml(p.username)}">
+    const levelBadge = (p.level !== undefined && p.level !== null)
+      ? `<span class="social-badge level">Lv ${p.level}</span>`
+      : '';
+
+    return `<div class="social-user-row${isSelf ? ' self' : ''}" data-username="${this.escapeHtml(p.username)}">
       <span class="social-status-dot ${isOnline ? 'online' : 'offline'}"></span>
       <span class="social-user-name-clickable" data-username="${this.escapeHtml(p.username)}">${this.classIcon(p.className)} ${this.escapeHtml(p.username)}</span>
       <span class="social-user-badges">
+        ${levelBadge}
         ${statusBadge}
         ${isBlocked ? '<span class="social-badge blocked">Blocked</span>' : ''}
       </span>
     </div>`;
+  }
+
+  private static sortLabel(mode: 'name' | 'status' | 'level'): string {
+    if (mode === 'level') return 'Top';
+    if (mode === 'status') return 'Status';
+    return 'A-Z';
   }
 
   // ── Guild Panel ──────────────────────────────────────────────
@@ -1241,15 +1277,17 @@ export class SocialScreen implements Screen {
     }
   }
 
-  /** Switch to chat tab with DM pre-selected for a user. */
+  /**
+   * Pre-select a DM target. (The chat sub-tab is gone — chat is a global pop-out;
+   * this just records the prefs server-side so when the user opens the popout
+   * the DM target is remembered. The popout itself doesn't yet read prefs at
+   * open-time, but storing them keeps cross-device sync intact.)
+   */
   startDm(username: string): void {
     this.chatSendChannel = 'dm';
     this.chatDmTarget = username;
-    this.activeTab = 'chat';
     this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
     this.chatFocusAfterRender = true;
-    this.renderTabBar();
-    this.renderPanel();
   }
 
 
@@ -1278,7 +1316,7 @@ export class SocialScreen implements Screen {
     return `<div class="social-chat-msg">
       <span class="chat-timestamp" title="${dateFull}">${time}</span>
       <span class="chat-tag chat-color-${msg.channelType} chat-clickable" data-switch-channel="${msg.channelType}">[${tag}]</span>
-      <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}"${dmTargetAttr}>${msg.senderUsername === 'Server' ? SERVER_ICON : this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
+      <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}"${dmTargetAttr}>${msg.senderUsername === 'Server' ? serverIconHtml() : this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
       <span class="social-chat-text">${this.escapeHtml(msg.text)}</span>
     </div>`;
   }
@@ -1367,36 +1405,9 @@ export class SocialScreen implements Screen {
     // All click/input/change/keydown handlers are delegated via wireDelegatedClicks() — no per-element wiring needed.
   }
 
-  /** Append a single chat message to the existing DOM without full re-render. */
-  private appendChatMessage(msg: ChatMessage): void {
-    if (!this.chatFilters.has(msg.channelType)) return;
-
-    // Client-side block filtering
-    const blockedUsers = this.lastSocial?.blockedUsers;
-    if (blockedUsers && msg.senderUsername in blockedUsers) {
-      const level = blockedUsers[msg.senderUsername];
-      if (level === 'all') return;
-      if (level === 'dm' && msg.channelType === 'dm') return;
-    }
-
-    const msgContainer = this.panelContainer.querySelector('.social-chat-messages');
-    if (!msgContainer) return;
-
-    // Remove "No messages yet" placeholder if present
-    const emptyEl = msgContainer.querySelector('.social-empty');
-    if (emptyEl) emptyEl.remove();
-
-    const wasAtBottom = msgContainer.scrollTop + msgContainer.clientHeight >= msgContainer.scrollHeight - 20;
-
-    const div = document.createElement('div');
-    div.innerHTML = this.renderChatMsgHtml(msg);
-    const child = div.firstElementChild;
-    if (child) msgContainer.appendChild(child);
-
-    if (wasAtBottom) {
-      msgContainer.scrollTop = msgContainer.scrollHeight;
-    }
-  }
+  /* `appendChatMessage` and the chat sub-tab are gone — chat lives in the
+     global pop-out now. The renderer / store are kept for any code paths
+     that still want to format a chat row (tooltip previews, etc.). */
 
   // ── Trade Modal ───────────────────────────────────────────────
 
@@ -1520,6 +1531,8 @@ export class SocialScreen implements Screen {
 
     document.body.appendChild(overlay);
     this.tradeModalEl = overlay;
+    bringToFront(overlay);
+    wireFocusOnInteract(overlay);
     this.updateTradeModal();
   }
 
@@ -1694,6 +1707,7 @@ export class SocialScreen implements Screen {
 
   dismissTradeModal(): void {
     if (this.tradeModalEl) {
+      release(this.tradeModalEl);
       this.tradeModalEl.remove();
       this.tradeModalEl = null;
     }
@@ -1765,6 +1779,8 @@ export class SocialScreen implements Screen {
 
     document.body.appendChild(overlay);
     this.giftModalEl = overlay;
+    bringToFront(overlay);
+    wireFocusOnInteract(overlay);
     this.updateGiftModal();
   }
 
@@ -1834,6 +1850,7 @@ export class SocialScreen implements Screen {
 
   dismissGiftModal(): void {
     if (this.giftModalEl) {
+      release(this.giftModalEl);
       this.giftModalEl.remove();
       this.giftModalEl = null;
     }
@@ -1927,7 +1944,7 @@ export class SocialScreen implements Screen {
     // Create ghost
     const ghost = document.createElement('div');
     ghost.className = 'party-drag-ghost';
-    ghost.textContent = `${this.classIcon(this.getPlayerClassName(selfUsername))} ${selfUsername}`;
+    ghost.innerHTML = `${this.classIcon(this.getPlayerClassName(selfUsername))} ${this.escapeHtml(selfUsername)}`;
     document.body.appendChild(ghost);
     this.gridDragGhost = ghost;
 
@@ -2028,7 +2045,11 @@ export class SocialScreen implements Screen {
 
   private renderPlayerProfileModal(profile: PlayerProfileMessage): void {
     // Dismiss any existing profile modal
-    document.querySelector('.player-profile-overlay')?.remove();
+    const existing = document.querySelector('.player-profile-overlay') as HTMLElement | null;
+    if (existing) {
+      release(existing);
+      existing.remove();
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'player-profile-overlay';
@@ -2038,14 +2059,19 @@ export class SocialScreen implements Screen {
     overlay.appendChild(modal);
 
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
+      if (e.target === overlay) {
+        release(overlay);
+        overlay.remove();
+      }
     });
 
-    const icon = CLASS_ICONS[profile.className] ?? UNKNOWN_CLASS_ICON;
+    const icon = classIconHtml(profile.className);
 
     // Equipment section
-    const LEFT_SLOTS = ['head', 'shoulders', 'chest', 'gloves', 'foot'];
-    const RIGHT_SLOTS = ['back', 'necklace', 'bracers', 'ring', 'relic'];
+    // Mainhand/offhand sit at the bottom of their respective columns now —
+    // no separate bottom row. A small CSS gap separates them visually.
+    const LEFT_SLOTS = ['head', 'shoulders', 'chest', 'gloves', 'foot', 'mainhand'];
+    const RIGHT_SLOTS = ['back', 'necklace', 'bracers', 'ring', 'relic', 'offhand'];
 
     const renderProfileSlot = (slot: string) => {
       const itemId = profile.equipment[slot];
@@ -2067,26 +2093,22 @@ export class SocialScreen implements Screen {
 
     const leftSlotsHtml = LEFT_SLOTS.map(renderProfileSlot).join('');
     const rightSlotsHtml = RIGHT_SLOTS.map(renderProfileSlot).join('');
-    const mainhandHtml = renderProfileSlot('mainhand');
-    const offhandHtml = renderProfileSlot('offhand');
+
+    // Class portrait replaces the old CSS silhouette in the equipment panel
+    // center slot. Falls through to placehold.co if the artwork is missing.
+    const portraitHtml = renderAssetImg('class', profile.className, {
+      label: profile.className,
+      width: 360,
+      height: 440,
+      className: 'profile-portrait-img',
+      alt: `${profile.className} portrait`,
+    });
 
     const equipHtml = `
       <div class="profile-equip-panel">
         <div class="profile-equip-col profile-equip-left">${leftSlotsHtml}</div>
-        <div class="profile-equip-figure">
-          <div class="items-figure-body">
-            <div class="fig-head"></div>
-            <div class="fig-neck"></div>
-            <div class="fig-shoulders"><div class="fig-shoulder-l"></div><div class="fig-torso"></div><div class="fig-shoulder-r"></div></div>
-            <div class="fig-arms"><div class="fig-arm-l"></div><div class="fig-waist"><span class="fig-class-icon">${icon}</span></div><div class="fig-arm-r"></div></div>
-            <div class="fig-legs"><div class="fig-leg-l"></div><div class="fig-leg-gap"></div><div class="fig-leg-r"></div></div>
-            <div class="fig-feet"><div class="fig-foot-l"></div><div class="fig-foot-gap"></div><div class="fig-foot-r"></div></div>
-          </div>
-        </div>
+        <div class="profile-equip-figure profile-portrait">${portraitHtml}</div>
         <div class="profile-equip-col profile-equip-right">${rightSlotsHtml}</div>
-        <div class="profile-equip-bottom-left">${mainhandHtml}</div>
-        <div class="profile-equip-bottom-spacer"></div>
-        <div class="profile-equip-bottom-right">${offhandHtml}</div>
       </div>`;
 
 
@@ -2116,7 +2138,7 @@ export class SocialScreen implements Screen {
     // Party members section
     const partyHtml = profile.partyMembers.length > 1
       ? profile.partyMembers.map(m => {
-        const memberIcon = CLASS_ICONS[m.className ?? ''] ?? UNKNOWN_CLASS_ICON;
+        const memberIcon = classIconHtml(m.className);
         const lvl = m.level ? ` Lv ${m.level}` : '';
         return `<div class="profile-party-member">${memberIcon} ${this.escapeHtml(m.username)}${lvl}</div>`;
       }).join('')
@@ -2157,6 +2179,8 @@ export class SocialScreen implements Screen {
     }
 
     document.body.appendChild(overlay);
+    bringToFront(overlay);
+    wireFocusOnInteract(overlay);
   }
 
   private showProfileItemPopup(
@@ -2185,14 +2209,14 @@ export class SocialScreen implements Screen {
 
     const overlay = document.createElement('div');
     overlay.className = 'profile-item-popup-overlay item-popup-overlay';
-    overlay.style.zIndex = '10001';
     overlay.innerHTML = `<div class="item-popup">${popupContent}</div>`;
 
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-    overlay.querySelector('.profile-item-close-btn')!.addEventListener('click', () => overlay.remove());
+    const dismiss = () => { release(overlay); overlay.remove(); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
+    overlay.querySelector('.profile-item-close-btn')!.addEventListener('click', dismiss);
 
     document.body.appendChild(overlay);
+    bringToFront(overlay);
+    wireFocusOnInteract(overlay);
   }
 }
