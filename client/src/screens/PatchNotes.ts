@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.09.1',
+    notes: [
+      'Admin: new Dungeons tab — define dungeons with floors, grid shape, encounter tables, entry requirements (level, item, classes, party size), per-floor rewards, and first-clear rewards. Persists to data/dungeons.json via ContentStore and is included in version snapshots. No game-side runtime yet — wiring follows in a later release',
+    ],
+  },
+  {
     version: '2026.05.02.1',
     notes: [
       'Bug fix: Priest Blessed Arms holy damage was being mislabeled as physical damage in the combat log when the physical hit was fully resisted. The HP math was always correct; now the log correctly shows "0 physical + X holy" so it\'s clear holy damage isn\'t blocked by physical resistance',

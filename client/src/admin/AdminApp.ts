@@ -22,6 +22,7 @@ import { ShopsTab } from './tabs/ShopsTab';
 import { ZonesTab } from './tabs/ZonesTab';
 import { EncountersTab } from './tabs/EncountersTab';
 import { TileTypesTab } from './tabs/TileTypesTab';
+import { DungeonsTab } from './tabs/DungeonsTab';
 import { MapTab } from './tabs/MapTab';
 import { VersionsTab } from './tabs/VersionsTab';
 import { XpTableTab } from './tabs/XpTableTab';
@@ -48,6 +49,7 @@ export class AdminApp implements AdminContext {
     'zones':      new ZonesTab(),
     'encounters': new EncountersTab(),
     'tile-types': new TileTypesTab(),
+    'dungeons':   new DungeonsTab(),
     'map':        new MapTab(),
     'versions':   new VersionsTab(),
     'xp-table':   new XpTableTab(),

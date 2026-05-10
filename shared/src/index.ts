@@ -256,6 +256,19 @@ export type {
   ShopDefinition,
 } from './systems/ShopTypes.js';
 
+// Dungeon types
+export {
+  SEED_DUNGEONS,
+  getDungeon,
+} from './systems/DungeonTypes.js';
+export type {
+  DungeonGridShape,
+  DungeonReward,
+  DungeonFloor,
+  DungeonEntryRequirements,
+  DungeonDefinition,
+} from './systems/DungeonTypes.js';
+
 // Social types
 export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';
 export type {

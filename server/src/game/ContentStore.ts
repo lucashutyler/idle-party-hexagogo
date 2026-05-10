@@ -4,7 +4,8 @@ import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
+import type { DungeonDefinition } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -16,6 +17,7 @@ const ENCOUNTERS_FILE = path.join(DATA_DIR, 'encounters.json');
 const SETS_FILE = path.join(DATA_DIR, 'sets.json');
 const SHOPS_FILE = path.join(DATA_DIR, 'shops.json');
 const TILE_TYPES_FILE = path.join(DATA_DIR, 'tile-types.json');
+const DUNGEONS_FILE = path.join(DATA_DIR, 'dungeons.json');
 
 /**
  * Loads and manages game content from JSON files in data/.
@@ -30,6 +32,7 @@ export class ContentStore {
   private sets = new Map<string, SetDefinition>();
   private shops = new Map<string, ShopDefinition>();
   private tileTypes = new Map<string, TileTypeDefinition>();
+  private dungeons = new Map<string, DungeonDefinition>();
   private world: WorldData = { startTile: { col: 0, row: 0 }, tiles: [] };
 
   async load(): Promise<void> {
@@ -51,6 +54,7 @@ export class ContentStore {
     await fs.writeFile(SETS_FILE, JSON.stringify(Array.from(this.sets.values()), null, 2));
     await fs.writeFile(SHOPS_FILE, JSON.stringify(Array.from(this.shops.values()), null, 2));
     await fs.writeFile(TILE_TYPES_FILE, JSON.stringify(Array.from(this.tileTypes.values()), null, 2));
+    await fs.writeFile(DUNGEONS_FILE, JSON.stringify(Array.from(this.dungeons.values()), null, 2));
   }
 
   // --- Accessors ---
@@ -122,6 +126,16 @@ export class ContentStore {
   getAllTileTypes(): Record<string, TileTypeDefinition> {
     const result: Record<string, TileTypeDefinition> = {};
     for (const [id, def] of this.tileTypes) result[id] = def;
+    return result;
+  }
+
+  getDungeon(id: string): DungeonDefinition | undefined {
+    return this.dungeons.get(id);
+  }
+
+  getAllDungeons(): Record<string, DungeonDefinition> {
+    const result: Record<string, DungeonDefinition> = {};
+    for (const [id, def] of this.dungeons) result[id] = def;
     return result;
   }
 
@@ -339,10 +353,26 @@ export class ContentStore {
     return { success: true };
   }
 
+  // --- Dungeon CRUD ---
+
+  async addOrUpdateDungeon(dungeon: DungeonDefinition): Promise<void> {
+    this.dungeons.set(dungeon.id, dungeon);
+    await this.save();
+  }
+
+  async deleteDungeon(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.dungeons.has(id)) {
+      return { success: false, error: 'Dungeon not found.' };
+    }
+    this.dungeons.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; dungeons: DungeonDefinition[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
@@ -351,12 +381,13 @@ export class ContentStore {
       sets: Array.from(this.sets.values()),
       shops: Array.from(this.shops.values()),
       tileTypes: Array.from(this.tileTypes.values()),
+      dungeons: Array.from(this.dungeons.values()),
       world: JSON.parse(JSON.stringify(this.world)),
     };
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; dungeons?: DungeonDefinition[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -387,6 +418,11 @@ export class ContentStore {
     }
     // Old snapshots predate tile types — keep existing tile types intact
 
+    this.dungeons.clear();
+    if (snapshot.dungeons) {
+      for (const d of snapshot.dungeons) this.dungeons.set(d.id, d);
+    }
+
     this.world = snapshot.world;
 
     // Safety net: ensure every tile has a GUID
@@ -403,7 +439,7 @@ export class ContentStore {
     this.migrateItems();
 
     await this.save();
-    console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.sets.size} sets, ${this.shops.size} shops, ${this.world.tiles.length} tiles`);
+    console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.sets.size} sets, ${this.shops.size} shops, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
   }
 
   // --- Private ---
@@ -464,6 +500,14 @@ export class ContentStore {
         tileTypesSeeded = true;
       }
 
+      try {
+        const dungeonsRaw = await fs.readFile(DUNGEONS_FILE, 'utf-8');
+        const dungeonsArr: DungeonDefinition[] = JSON.parse(dungeonsRaw);
+        for (const d of dungeonsArr) this.dungeons.set(d.id, d);
+      } catch {
+        // dungeons.json doesn't exist yet
+      }
+
       // Migrate: assign GUIDs to any tiles missing an id
       let migrated = 0;
       for (const tile of this.world.tiles) {
@@ -486,7 +530,7 @@ export class ContentStore {
         await this.save();
       }
 
-      console.log(`[ContentStore] Loaded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.world.tiles.length} tiles`);
+      console.log(`[ContentStore] Loaded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
       return true;
     } catch {
       return false;
@@ -631,6 +675,11 @@ export class ContentStore {
       this.tileTypes.set(t.id, t);
     }
 
+    // Dungeons
+    for (const d of Object.values(SEED_DUNGEONS)) {
+      this.dungeons.set(d.id, d);
+    }
+
     // World — Hatchetmill (village), Darkwood (forest), Crystal Caves (dungeon)
     //
     // Layout (offset coords, flat-top hexagons):
@@ -682,6 +731,6 @@ export class ContentStore {
       ],
     };
 
-    console.log(`[ContentStore] Seeded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.world.tiles.length} tiles`);
+    console.log(`[ContentStore] Seeded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
   }
 }
