@@ -221,6 +221,10 @@ export class DungeonsTab implements Tab {
             Boss floor
           </label>
         </div>
+        <div class="df-floor-grid-wrap">
+          <div class="admin-form-hint">Floor layout (${floor.gridShape.cols}×${floor.gridShape.rows}). Cells are placeholders — content tools coming soon.</div>
+          ${this.floorGridHtml(index, floor.gridShape.cols, floor.gridShape.rows)}
+        </div>
         <fieldset class="admin-form-fieldset">
           <legend>Encounter Table <button class="admin-btn admin-btn-sm df-floor-add-enc" type="button" data-floor-index="${index}">+ Encounter</button></legend>
           <div class="df-floor-enc-list" data-floor-index="${index}">${encounterRows}</div>
@@ -230,6 +234,23 @@ export class DungeonsTab implements Tab {
           <div class="df-floor-reward-list" data-floor-index="${index}">${rewardRows}</div>
         </fieldset>
       </fieldset>
+    `;
+  }
+
+  private floorGridHtml(floorIndex: number, cols: number, rows: number): string {
+    const safeCols = Math.max(1, Math.min(9, cols || 1));
+    const safeRows = Math.max(1, Math.min(9, rows || 1));
+    const cells: string[] = [];
+    for (let r = 0; r < safeRows; r++) {
+      for (let c = 0; c < safeCols; c++) {
+        cells.push(`<div class="df-floor-grid-cell" data-col="${c}" data-row="${r}"></div>`);
+      }
+    }
+    return `
+      <div class="df-floor-grid-preview" data-floor-index="${floorIndex}"
+           style="grid-template-columns: repeat(${safeCols}, var(--df-cell-size, 36px));">
+        ${cells.join('')}
+      </div>
     `;
   }
 
@@ -264,6 +285,23 @@ export class DungeonsTab implements Tab {
   private wireFloorControls(root: HTMLElement, encounters: EncounterDefinition[], items: ItemDefinition[]): void {
     root.querySelectorAll<HTMLButtonElement>('.df-floor-remove').forEach(btn => {
       btn.onclick = () => btn.closest('.df-floor')?.remove();
+    });
+    root.querySelectorAll<HTMLElement>('.df-floor').forEach(floorEl => {
+      const floorIndex = floorEl.getAttribute('data-floor-index') ?? '0';
+      const colsInput = floorEl.querySelector<HTMLInputElement>('.df-floor-cols');
+      const rowsInput = floorEl.querySelector<HTMLInputElement>('.df-floor-rows');
+      const refreshGrid = () => {
+        const wrap = floorEl.querySelector<HTMLElement>('.df-floor-grid-wrap');
+        if (!wrap) return;
+        const cols = parseInt(colsInput?.value ?? '3') || 3;
+        const rows = parseInt(rowsInput?.value ?? '3') || 3;
+        const hint = wrap.querySelector('.admin-form-hint');
+        if (hint) hint.textContent = `Floor layout (${cols}×${rows}). Cells are placeholders — content tools coming soon.`;
+        const oldGrid = wrap.querySelector('.df-floor-grid-preview');
+        if (oldGrid) oldGrid.outerHTML = this.floorGridHtml(parseInt(floorIndex), cols, rows);
+      };
+      colsInput?.addEventListener('input', refreshGrid);
+      rowsInput?.addEventListener('input', refreshGrid);
     });
     root.querySelectorAll<HTMLButtonElement>('.df-floor-add-enc').forEach(btn => {
       btn.onclick = () => {

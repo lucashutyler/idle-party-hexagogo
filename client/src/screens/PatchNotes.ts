@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.09.5',
+    notes: [
+      'Admin: each dungeon floor now renders an empty cols×rows grid preview that updates live as you change Grid Cols/Rows. Cells are placeholders — content tools (traps, walls, spawns) come later',
+      'Game: room popup on a dungeon-linked tile now shows a "🚧 Enter Dungeon" button — disabled with a Coming soon! tooltip, so players know the feature exists but is under construction',
+    ],
+  },
+  {
     version: '2026.05.09.4',
     notes: [
       'Admin: every content list (Dungeons, Shops, Sets, Monsters, Items, Zones, Encounters, Tile Types) now has a View action when on a read-only version. Opens the same form, fully populated, but disabled — true CRUD with Read separated from Update. Read-only view footer shows "* Create a new draft to edit"',
