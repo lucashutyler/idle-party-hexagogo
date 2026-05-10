@@ -1,4 +1,4 @@
-import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -36,6 +36,8 @@ export interface PlayerSaveData {
   chatDmTarget?: string;
   /** Pending gift entries awaiting accept/deny in the player's mailbox. */
   mailbox?: MailboxEntry[];
+  /** Per-player FIFO craft queue. Materials are reserved (already deducted from inventory). */
+  craftQueue?: CraftQueueState;
 }
 
 /**

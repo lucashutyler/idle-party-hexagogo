@@ -1,6 +1,7 @@
 import type { EquipSlot, ItemDefinition } from './ItemTypes.js';
 import type { SetDefinition } from './SetTypes.js';
 import type { ShopDefinition } from './ShopTypes.js';
+import type { RecipeDefinition, CraftQueueState, ActiveJobProgress } from './CraftingTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type {
   ClientSocialState,
@@ -22,7 +23,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.05.02.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.05.10.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -146,8 +147,18 @@ export interface ServerStateMessage {
   setDefinitions?: Record<string, SetDefinition>;
   /** Shop definition for the player's current room (if any). */
   shopDefinition?: ShopDefinition;
+  /** Crafting state: visible recipes, queue, and progress on the active job. */
+  crafting?: ClientCraftingState;
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
+}
+
+export interface ClientCraftingState {
+  unlocked: boolean;
+  unlockLevel: number;
+  recipes: RecipeDefinition[];
+  queue: CraftQueueState;
+  activeProgress: ActiveJobProgress | null;
 }
 
 export interface ClientMoveMessage {
@@ -249,6 +260,16 @@ export interface ClientShopSellMessage {
   quantity: number;
 }
 
+export interface ClientCraftQueueMessage {
+  type: 'craft_queue';
+  recipeId: string;
+}
+
+export interface ClientCraftCancelMessage {
+  type: 'craft_cancel';
+  index: number;
+}
+
 export interface ClientSetClassMessage {
   type: 'set_class';
   className: string;
@@ -270,4 +291,6 @@ export type ClientMessage =
   | ClientViewPlayerMessage
   | ClientShopBuyMessage
   | ClientShopSellMessage
+  | ClientCraftQueueMessage
+  | ClientCraftCancelMessage
   | ClientSocialMessage;

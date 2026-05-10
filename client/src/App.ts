@@ -13,6 +13,7 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { CharacterScreen } from './screens/CharacterScreen';
 import { ItemsScreen } from './screens/ItemsScreen';
 import { SocialScreen } from './screens/SocialScreen';
+import { CraftingScreen } from './screens/CraftingScreen';
 import { ClassSelectScreen } from './screens/ClassSelectScreen';
 import { SuspensionScreen } from './screens/SuspensionScreen';
 import { BottomNav } from './ui/BottomNav';
@@ -332,6 +333,7 @@ export class App {
     const characterScreen = new CharacterScreen('screen-character', this.gameClient);
     const itemsScreen = new ItemsScreen('screen-items', this.gameClient);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore);
+    const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
     const settingsScreen = new SettingsScreen('screen-settings');
 
     // Wire map username click to social screen popup
@@ -361,6 +363,7 @@ export class App {
     this.screenManager.register('character', document.getElementById('screen-character')!, characterScreen);
     this.screenManager.register('items', document.getElementById('screen-items')!, itemsScreen);
     this.screenManager.register('social', document.getElementById('screen-social')!, socialScreen);
+    this.screenManager.register('craft', document.getElementById('screen-craft')!, craftingScreen);
     this.screenManager.register('settings', document.getElementById('screen-settings')!, settingsScreen);
 
     // Show bottom nav
@@ -375,6 +378,7 @@ export class App {
         { id: 'character', label: 'Char', icon: '👤' },
         { id: 'items', label: 'Items', icon: '🎒' },
         { id: 'social', label: 'Social', icon: '💬' },
+        { id: 'craft', label: 'Craft', icon: '🔨' },
         { id: 'settings', label: 'Settings', icon: '⚙' },
       ],
       savedScreen,

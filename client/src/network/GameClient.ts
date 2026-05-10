@@ -327,6 +327,16 @@ export class GameClient {
     this.sendRaw({ type: 'shop_sell', itemId, quantity });
   }
 
+  // --- Crafting ---
+
+  sendCraftQueue(recipeId: string): void {
+    this.sendRaw({ type: 'craft_queue', recipeId });
+  }
+
+  sendCraftCancel(index: number): void {
+    this.sendRaw({ type: 'craft_cancel', index });
+  }
+
   // --- View Player ---
 
   sendViewPlayer(username: string): void {

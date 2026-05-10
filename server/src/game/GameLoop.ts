@@ -11,6 +11,7 @@ import { VersionStore } from './VersionStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
+const CRAFT_TICK_MS = 1000;       // Check craft completions every 1s
 const VERSION_FILE = path.resolve('data', 'game-version.txt');
 
 export class GameLoop {
@@ -21,6 +22,7 @@ export class GameLoop {
   private guildStore: GuildStore;
   private tradeStore: TradeStore;
   private saveInterval?: ReturnType<typeof setInterval>;
+  private craftTickInterval?: ReturnType<typeof setInterval>;
   private grid!: HexGrid;
 
   constructor(store: GameStateStore) {
@@ -104,7 +106,12 @@ export class GameLoop {
       this.saveAll().catch(err => console.error('[GameLoop] Periodic save failed:', err));
     }, SAVE_INTERVAL_MS);
 
-    console.log(`[GameLoop] Periodic save every ${SAVE_INTERVAL_MS / 1000}s`);
+    this.craftTickInterval = setInterval(() => {
+      try { this.playerManager.tickAllCrafting(); }
+      catch (err) { console.error('[GameLoop] Craft tick failed:', err); }
+    }, CRAFT_TICK_MS);
+
+    console.log(`[GameLoop] Periodic save every ${SAVE_INTERVAL_MS / 1000}s, craft tick every ${CRAFT_TICK_MS / 1000}s`);
   }
 
   /**
@@ -130,6 +137,12 @@ export class GameLoop {
       clearInterval(this.saveInterval);
       this.saveInterval = undefined;
     }
+    if (this.craftTickInterval) {
+      clearInterval(this.craftTickInterval);
+      this.craftTickInterval = undefined;
+    }
+    // Drain craft completions one last time so jobs that finished between ticks aren't lost.
+    this.playerManager.tickAllCrafting();
 
     this.playerManager.addShutdownLog();
     await this.saveAll();

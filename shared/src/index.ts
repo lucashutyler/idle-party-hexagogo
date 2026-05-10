@@ -219,6 +219,9 @@ export type {
   ClientViewPlayerMessage,
   ClientShopBuyMessage,
   ClientShopSellMessage,
+  ClientCraftQueueMessage,
+  ClientCraftCancelMessage,
+  ClientCraftingState,
   PlayerProfileMessage,
   ServerMessage,
   ClientMessage,
@@ -255,6 +258,30 @@ export type {
   ShopItem,
   ShopDefinition,
 } from './systems/ShopTypes.js';
+
+// Crafting types
+export {
+  CRAFTING_UNLOCK_LEVEL,
+  MAX_CRAFT_QUEUE,
+  SEED_RECIPES,
+  emptyCraftQueue,
+  canQueueRecipe,
+  enqueueRecipe,
+  cancelJobAt,
+  processCompletions,
+  getActiveJobProgress,
+  getVisibleRecipes,
+} from './systems/CraftingTypes.js';
+export type {
+  RecipeIngredient,
+  RecipeResult,
+  RecipeDefinition,
+  CraftJob,
+  CraftQueueState,
+  EnqueueError,
+  CompletedJobEvent,
+  ActiveJobProgress,
+} from './systems/CraftingTypes.js';
 
 // Social types
 export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';

@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.10.1',
+    notes: [
+      'New: Crafting tab! Unlocks at level 20. Each class has a starter recipe, plus one shared recipe anyone can use',
+      'Single FIFO queue (up to 5 jobs). Materials are reserved when you queue a job — cancel anytime to get them back',
+      'Crafting runs in the background like combat — jobs complete on schedule even while you\'re offline',
+    ],
+  },
+  {
     version: '2026.05.02.1',
     notes: [
       'Bug fix: Priest Blessed Arms holy damage was being mislabeled as physical damage in the combat log when the physical hit was fully resisted. The HP math was always correct; now the log correctly shows "0 physical + X holy" so it\'s clear holy damage isn\'t blocked by physical resistance',

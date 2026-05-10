@@ -40,6 +40,8 @@ function createFakeContentStore(): ContentStore {
     getShop: () => undefined,
     getWorld: () => ({ tiles: [], startTile: { col: 0, row: 0 } }),
     getAllSets: () => ({}),
+    getAllRecipes: () => ({}),
+    getRecipe: () => undefined,
   } as unknown as ContentStore;
 }
 

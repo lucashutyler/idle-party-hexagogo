@@ -553,6 +553,45 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // --- Crafting messages ---
+
+      if (msg.type === 'craft_queue' && typeof msg.recipeId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        const result = session.handleCraftQueue(msg.recipeId);
+        if (!result.ok) {
+          const messages: Record<string, string> = {
+            no_character: 'Pick a class first.',
+            unknown_recipe: 'Unknown recipe.',
+            queue_full: 'Craft queue is full.',
+            level_too_low: 'You are not high enough level for this recipe.',
+            class_restricted: 'Your class cannot craft this recipe.',
+            missing_ingredients: 'Missing ingredients.',
+          };
+          ws.send(JSON.stringify({ type: 'error', message: messages[result.reason] ?? 'Cannot queue recipe' }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'craft_cancel' && typeof msg.index === 'number') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        if (!session.handleCraftCancel(msg.index)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot cancel that job' }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
       // --- View player profile ---
       if (msg.type === 'view_player' && typeof msg.username === 'string') {
         const targetSession = playerManager.getSessionByUsername(msg.username);
