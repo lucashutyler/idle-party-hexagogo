@@ -117,6 +117,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       sets: content.getAllSets(),
       shops: content.getAllShops(),
       tileTypes: content.getAllTileTypes(),
+      npcs: content.getAllNpcs(),
       world: content.getWorld(),
     });
   });
@@ -124,7 +125,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Add or update a world tile. Supports ?versionId= for draft editing. */
   router.put('/world/tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
-    const { col, row, type, zone, name, encounterTable, shopId, requiredItemId } = req.body;
+    const { col, row, type, zone, name, encounterTable, shopId, npcId, requiredItemId } = req.body;
     if (col == null || row == null || !type || !zone || !name) {
       res.status(400).json({ error: 'Missing required fields: col, row, type, zone, name' });
       return;
@@ -152,16 +153,16 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const idx = snapshot.world.tiles.findIndex(t => t.col === col && t.row === row);
       if (idx >= 0) {
         // Preserve existing GUID on update
-        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined };
+        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, requiredItemId: requiredItemId || undefined };
       } else {
         // New tile — generate a GUID
-        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined });
+        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, requiredItemId: requiredItemId || undefined });
       }
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ id: '', col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, requiredItemId: requiredItemId || undefined });
+      await content.addOrUpdateTile({ id: '', col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, requiredItemId: requiredItemId || undefined });
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }
@@ -659,6 +660,83 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  // ── NPC endpoints ───────────────────────────────────────
+
+  /** List all NPCs. */
+  router.get('/npcs', (_req, res) => {
+    const content = getContentStore();
+    res.json({ npcs: content.getAllNpcs() });
+  });
+
+  /** Add or update an NPC. Supports ?versionId= for draft editing. */
+  router.put('/npcs/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const npc = req.body;
+    if (!npc.id || !npc.name || !npc.emoji || !npc.greeting) {
+      res.status(400).json({ error: 'Missing required fields: id, name, emoji, greeting' });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.npcs) snapshot.npcs = [];
+      const idx = snapshot.npcs.findIndex(n => n.id === npc.id);
+      if (idx >= 0) {
+        snapshot.npcs[idx] = npc;
+      } else {
+        snapshot.npcs.push(npc);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const npcsRecord: Record<string, typeof npc> = {};
+      for (const n of snapshot.npcs) npcsRecord[n.id] = n;
+      res.json({ success: true, npcs: npcsRecord });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateNpc(npc);
+      res.json({ success: true, npcs: content.getAllNpcs() });
+    }
+  });
+
+  /** Delete an NPC. Supports ?versionId= for draft editing. */
+  router.delete('/npcs/:id', async (req, res) => {
+    const npcId = req.params.id;
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.npcs) snapshot.npcs = [];
+      const idx = snapshot.npcs.findIndex(n => n.id === npcId);
+      if (idx < 0) { res.status(400).json({ error: 'NPC not found.' }); return; }
+      // Block delete if any tile in the snapshot references the NPC
+      const referencingTile = snapshot.world.tiles.find(t => t.npcId === npcId);
+      if (referencingTile) {
+        res.status(400).json({ error: `Cannot delete: NPC is placed in room "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` });
+        return;
+      }
+      snapshot.npcs.splice(idx, 1);
+      await versions.saveSnapshot(versionId, snapshot);
+      const npcsRecord: Record<string, typeof snapshot.npcs[0]> = {};
+      for (const n of snapshot.npcs) npcsRecord[n.id] = n;
+      res.json({ success: true, npcs: npcsRecord });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteNpc(npcId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, npcs: content.getAllNpcs() });
+    }
+  });
+
   // ── Zone endpoints ──────────────────────────────────────
 
   /** List all zones. */
@@ -1015,7 +1093,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const liveTileTypes = getContentStore().getAllTileTypes();
       for (const [id, t] of Object.entries(liveTileTypes)) tileTypesRecord[id] = t;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, world: snapshot.world });
+    const npcsRecord: Record<string, NonNullable<(typeof snapshot.npcs)>[0]> = {};
+    if (snapshot.npcs) {
+      for (const n of snapshot.npcs) npcsRecord[n.id] = n;
+    }
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, npcs: npcsRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */

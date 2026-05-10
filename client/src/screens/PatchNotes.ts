@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.09.1',
+    notes: [
+      'NPC framework: rooms can now have an NPC. A 💬 badge appears over rooms with NPCs on the world map; click the room and "Talk to {NPC}" to read what they have to say',
+      'Admins: new NPCs tab in the World Manager to create NPCs (id, name, emoji, greeting). Assign an NPC to a room from the Map tab\'s room editor',
+      'This is the foundation for the upcoming quest system — quests will be offered by NPCs',
+    ],
+  },
+  {
     version: '2026.05.02.1',
     notes: [
       'Bug fix: Priest Blessed Arms holy damage was being mislabeled as physical damage in the combat log when the physical hit was fully resisted. The HP math was always correct; now the log correctly shows "0 physical + X holy" so it\'s clear holy damage isn\'t blocked by physical resistance',

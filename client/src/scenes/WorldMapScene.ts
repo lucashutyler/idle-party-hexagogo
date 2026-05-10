@@ -68,6 +68,9 @@ export class WorldMapScene extends Phaser.Scene {
   // Tile icons (stored for cleanup on re-render)
   private tileIcons: Phaser.GameObjects.Text[] = [];
 
+  // NPC badges (stored for cleanup on re-render)
+  private npcBadges: Phaser.GameObjects.Text[] = [];
+
   // Map offset (small padding from origin)
   private mapOffsetX = HEX_SIZE;
   private mapOffsetY = HEX_SIZE;
@@ -297,6 +300,10 @@ export class WorldMapScene extends Phaser.Scene {
       icon.destroy();
     }
     this.tileIcons = [];
+    for (const badge of this.npcBadges) {
+      badge.destroy();
+    }
+    this.npcBadges = [];
 
     const corners = getHexCorners(HEX_SIZE);
 
@@ -345,6 +352,20 @@ export class WorldMapScene extends Phaser.Scene {
       // Icons: non-traversable tiles always show their terrain icon,
       // traversable tiles show real type if zone unlocked, clouds if still in fog
       this.drawTileIcon(tile.type, tile.isTraversable, isNonTraversable || isZoneUnlocked, isUnlocked, x, y);
+
+      // NPC badge — only on unlocked tiles, never on fogged tiles (avoid leaking NPC presence)
+      if (isUnlocked) {
+        const tileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
+        if (tileDef?.npcId) {
+          const npc = this.worldCache.getNpc(tileDef.npcId);
+          if (npc) {
+            const badge = this.add.text(x + HEX_SIZE * 0.45, y - HEX_SIZE * 0.45, '💬', { fontSize: '14px' });
+            badge.setOrigin(0.5);
+            badge.setDepth(11);
+            this.npcBadges.push(badge);
+          }
+        }
+      }
     }
 
     // Draw zone boundary lines

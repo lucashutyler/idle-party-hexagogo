@@ -3,6 +3,7 @@ import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
 import { TileInfoModal } from '../ui/TileInfoModal';
 import { ShopPopup } from '../ui/ShopPopup';
+import { NpcTalkPopup } from '../ui/NpcTalkPopup';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -14,6 +15,7 @@ export class MapScreen implements Screen {
   private zoomControls?: HTMLElement;
   private tileModal?: TileInfoModal;
   private shopPopup?: ShopPopup;
+  private npcTalkPopup?: NpcTalkPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
@@ -150,6 +152,7 @@ export class MapScreen implements Screen {
 
       // Wire tile click handler for modal
       this.shopPopup = new ShopPopup(this.gameClient);
+      this.npcTalkPopup = new NpcTalkPopup();
       this.tileModal = new TileInfoModal(
         this.container,
         (col, row) => { this.tryMove(col, row); },
@@ -158,12 +161,17 @@ export class MapScreen implements Screen {
           const state = this.gameClient.lastState;
           if (state?.shopDefinition) this.shopPopup!.show(state);
         },
+        (npc) => { this.npcTalkPopup!.show(npc); },
       );
       scene.setOnTileClick((tileInfo) => {
-        // Show shop button only if the player is on this tile and it has a shop
+        // Show shop / talk buttons only if the player is on this tile
         const state = this.gameClient.lastState;
         const playerOnTile = state && state.party.col === tileInfo.col && state.party.row === tileInfo.row;
         this.tileModal!.hasShop = !!(playerOnTile && state?.shopDefinition);
+        const tileDef = this.worldCache.getTile(tileInfo.col, tileInfo.row);
+        this.tileModal!.npc = (playerOnTile && tileDef?.npcId)
+          ? (this.worldCache.getNpc(tileDef.npcId) ?? null)
+          : null;
         this.tileModal!.show(tileInfo);
       });
 

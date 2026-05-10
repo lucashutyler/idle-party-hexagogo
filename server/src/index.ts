@@ -122,6 +122,11 @@ app.get('/api/world', requireAuth, (req, res) => {
   res.json({ ...worldData, tileTypes: gameLoop.contentStore.getAllTileTypes() });
 });
 
+// NPC definitions (full catalog — small payload, sent once at login)
+app.get('/api/npcs', requireAuth, (_req, res) => {
+  res.json({ npcs: gameLoop.contentStore.getAllNpcs() });
+});
+
 app.use('/api/admin', createAdminRoutes({
   playerManager: () => playerManager,
   accountStore,

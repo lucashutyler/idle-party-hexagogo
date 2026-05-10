@@ -256,6 +256,10 @@ export type {
   ShopDefinition,
 } from './systems/ShopTypes.js';
 
+// NPC types
+export { SEED_NPCS } from './systems/NpcTypes.js';
+export type { NpcDefinition } from './systems/NpcTypes.js';
+
 // Social types
 export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';
 export type {
