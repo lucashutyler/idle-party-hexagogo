@@ -48,6 +48,8 @@ export interface QuestDefinition {
   requiredLevel?: number;
   /** Repeat cadence. Defaults to 'once'. */
   repeat?: QuestRepeat;
+  /** NPC speech shown to the player after they turn in this quest. */
+  completionText?: string;
 }
 
 /**

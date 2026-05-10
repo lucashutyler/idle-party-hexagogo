@@ -14,6 +14,10 @@ export class NpcTalkPopup {
   private gameClient: GameClient;
   private currentNpc: NpcDefinition | null = null;
   private unsubscribe: (() => void) | null = null;
+  /** Quest IDs the player has clicked Turn In on; awaiting confirmation in next state push. */
+  private pendingTurnIns: Set<string> = new Set();
+  /** Completion speech bubbles to render until the player dismisses them. */
+  private completionMessages: { questId: string; questName: string; text: string }[] = [];
 
   constructor(gameClient: GameClient) {
     this.gameClient = gameClient;
@@ -45,6 +49,8 @@ export class NpcTalkPopup {
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.currentNpc = null;
+    this.pendingTurnIns.clear();
+    this.completionMessages = [];
   }
 
   private resolveMonster(id: string): string {
@@ -78,6 +84,28 @@ export class NpcTalkPopup {
     const completedSet = new Set(completed.map(c => c.questId));
     const activeMap = new Map<string, QuestProgressEntry>();
     for (const a of active) activeMap.set(a.questId, a);
+
+    // Detect pending turn-ins that completed this tick → queue completion speech
+    for (const qid of Array.from(this.pendingTurnIns)) {
+      if (!activeMap.has(qid) && completedSet.has(qid)) {
+        const def = defs[qid];
+        const text = def?.completionText?.trim();
+        if (text) {
+          this.completionMessages.push({ questId: qid, questName: def!.name, text });
+        }
+        this.pendingTurnIns.delete(qid);
+      }
+    }
+
+    const completionHtml = this.completionMessages.length > 0
+      ? this.completionMessages.map(m => `
+          <div class="npc-talk-completion" data-quest-id="${this.escape(m.questId)}">
+            <div class="npc-talk-completion-label">Quest complete: ${this.escape(m.questName)}</div>
+            <div class="npc-talk-completion-text">"${this.escape(m.text)}"</div>
+            <button class="npc-talk-completion-dismiss" data-dismiss-completion="${this.escape(m.questId)}" type="button">OK</button>
+          </div>
+        `).join('')
+      : '';
 
     // Quests this NPC offers — split into sections
     const availableQuests: QuestDefinition[] = [];
@@ -135,6 +163,7 @@ export class NpcTalkPopup {
           <div class="npc-talk-name">${this.escape(npc.name)}</div>
         </div>
         <div class="npc-talk-greeting">"${this.escape(npc.greeting)}"</div>
+        ${completionHtml}
         ${readyHtml}
         ${inProgressHtml}
         ${availableHtml}
@@ -156,7 +185,15 @@ export class NpcTalkPopup {
     for (const btn of this.overlay.querySelectorAll<HTMLButtonElement>('[data-quest-turnin]')) {
       btn.addEventListener('click', () => {
         const qid = btn.dataset.questTurnin!;
+        this.pendingTurnIns.add(qid);
         this.gameClient.sendTurnInQuest(qid);
+      });
+    }
+    for (const btn of this.overlay.querySelectorAll<HTMLButtonElement>('[data-dismiss-completion]')) {
+      btn.addEventListener('click', () => {
+        const qid = btn.dataset.dismissCompletion!;
+        this.completionMessages = this.completionMessages.filter(m => m.questId !== qid);
+        this.render(this.gameClient.lastState ?? null);
       });
     }
   }

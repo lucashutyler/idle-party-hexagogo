@@ -220,6 +220,9 @@ export class QuestsTab implements Tab {
         <label>Description
           <textarea id="qf-description" rows="3">${escapeHtml(w.description)}</textarea>
         </label>
+        <label>Completion Text (NPC says this when you turn in)
+          <textarea id="qf-completion-text" rows="2" placeholder="Wow, you did it! Take this as thanks.">${escapeHtml(w.completionText ?? '')}</textarea>
+        </label>
         <fieldset class="admin-form-fieldset">
           <legend>Objectives</legend>
           ${objectiveRows || '<div class="admin-form-hint">No objectives yet.</div>'}
@@ -272,6 +275,7 @@ export class QuestsTab implements Tab {
 
     if (target.id === 'qf-name') this.working.name = target.value;
     else if (target.id === 'qf-description') this.working.description = target.value;
+    else if (target.id === 'qf-completion-text') this.working.completionText = target.value || undefined;
     else if (target.id === 'qf-scope') this.working.scope = target.value as QuestScope;
     else if (target.id === 'qf-repeat') this.working.repeat = target.value as QuestRepeat;
     else if (target.id === 'qf-required-level') {
