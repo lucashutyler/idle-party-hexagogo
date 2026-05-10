@@ -68,7 +68,19 @@ export class NpcsTab implements Tab {
 
   private openForm(npc: NpcDefinition | null, ctx: AdminContext): void {
     const isNew = !npc;
-    const n = npc ?? { id: '', name: '', emoji: '🧙', greeting: '' };
+    const n = npc ?? { id: '', name: '', emoji: '🧙', greeting: '', questIds: [] };
+    const content = ctx.getDisplayContent();
+    const allQuests = content ? Object.values(content.quests ?? {}) : [];
+    const selectedQuests = new Set(n.questIds ?? []);
+
+    const questCheckboxes = allQuests.length > 0
+      ? allQuests.map(q => `
+          <label class="admin-checkbox">
+            <input type="checkbox" class="npcf-quest" value="${escapeHtml(q.id)}" ${selectedQuests.has(q.id) ? 'checked' : ''}>
+            ${escapeHtml(q.name)}
+          </label>
+        `).join('')
+      : '<div class="admin-form-hint">No quests defined yet. Create some on the Quests tab.</div>';
 
     const bodyHtml = `
       <input type="hidden" id="npcf-id" value="${escapeHtml(n.id)}">
@@ -79,6 +91,10 @@ export class NpcsTab implements Tab {
       <label>Greeting
         <textarea id="npcf-greeting" rows="3" placeholder="What this NPC says when you talk to them.">${escapeHtml(n.greeting)}</textarea>
       </label>
+      <fieldset class="admin-form-fieldset">
+        <legend>Quests offered</legend>
+        ${questCheckboxes}
+      </fieldset>
       <div class="admin-modal-actions">
         <button class="admin-btn" id="npcf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
         <button class="admin-btn admin-btn-secondary" id="npcf-cancel" type="button">Cancel</button>
@@ -105,7 +121,12 @@ export class NpcsTab implements Tab {
     if (!greeting) { alert('Greeting is required.'); return; }
     const id = existingId || crypto.randomUUID();
 
-    const npcDef: NpcDefinition = { id, name, emoji, greeting };
+    const questIds: string[] = [];
+    for (const cb of root.querySelectorAll<HTMLInputElement>('.npcf-quest:checked')) {
+      questIds.push(cb.value);
+    }
+
+    const npcDef: NpcDefinition = { id, name, emoji, greeting, questIds: questIds.length > 0 ? questIds : undefined };
     try {
       const data = await putAdmin<{ npcs: Record<string, NpcDefinition> }>(
         `/api/admin/npcs/${encodeURIComponent(id)}${ctx.versionQueryParam()}`, npcDef);

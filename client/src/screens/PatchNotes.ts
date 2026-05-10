@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.09.2',
+    notes: [
+      'Quest system MVP: NPCs can now offer quests. Talk to an NPC to see Available / In Progress / Ready quests. Accept, hunt, turn in for XP / gold / item rewards',
+      'Quest objectives: Kill (slay X of monster Y), Collect (own X of item Y — verified at turn-in, items consumed), Visit (set foot on a specific room)',
+      'Quest scope: "Solo" quests can only be accepted while in a solo party. "Party shared" quests credit every party member who has the quest accepted whenever the party kills/visits',
+      'Quest log card on the Character tab shows your active quests with live progress and a count of completed quests',
+      'Admins: new Quests tab to author quests with objectives, rewards, prerequisites, required level, and once/weekly repeat. Assign quests to NPCs from the NPC edit form',
+    ],
+  },
+  {
     version: '2026.05.09.1',
     notes: [
       'NPC framework: rooms can now have an NPC. A 💬 badge appears over rooms with NPCs on the world map; click the room and "Talk to {NPC}" to read what they have to say',

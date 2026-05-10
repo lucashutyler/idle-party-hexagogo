@@ -118,6 +118,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       shops: content.getAllShops(),
       tileTypes: content.getAllTileTypes(),
       npcs: content.getAllNpcs(),
+      quests: content.getAllQuests(),
       world: content.getWorld(),
     });
   });
@@ -737,6 +738,82 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  // ── Quest endpoints ─────────────────────────────────────
+
+  /** List all quests. */
+  router.get('/quests', (_req, res) => {
+    const content = getContentStore();
+    res.json({ quests: content.getAllQuests() });
+  });
+
+  /** Add or update a quest. Supports ?versionId= for draft editing. */
+  router.put('/quests/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const quest = req.body;
+    if (!quest.id || !quest.name || !quest.scope || !Array.isArray(quest.objectives) || !Array.isArray(quest.rewards)) {
+      res.status(400).json({ error: 'Missing required fields: id, name, scope, objectives, rewards' });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.quests) snapshot.quests = [];
+      const idx = snapshot.quests.findIndex(q => q.id === quest.id);
+      if (idx >= 0) {
+        snapshot.quests[idx] = quest;
+      } else {
+        snapshot.quests.push(quest);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const questsRecord: Record<string, typeof quest> = {};
+      for (const q of snapshot.quests) questsRecord[q.id] = q;
+      res.json({ success: true, quests: questsRecord });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateQuest(quest);
+      res.json({ success: true, quests: content.getAllQuests() });
+    }
+  });
+
+  /** Delete a quest. Supports ?versionId= for draft editing. */
+  router.delete('/quests/:id', async (req, res) => {
+    const questId = req.params.id;
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.quests) snapshot.quests = [];
+      const idx = snapshot.quests.findIndex(q => q.id === questId);
+      if (idx < 0) { res.status(400).json({ error: 'Quest not found.' }); return; }
+      // Block delete if NPC offers it or another quest depends on it
+      const npc = (snapshot.npcs ?? []).find(n => n.questIds?.includes(questId));
+      if (npc) { res.status(400).json({ error: `Cannot delete: quest is offered by NPC "${npc.name}".` }); return; }
+      const dependent = snapshot.quests.find(q => q.prerequisiteQuestIds?.includes(questId));
+      if (dependent) { res.status(400).json({ error: `Cannot delete: quest is a prerequisite of "${dependent.name}".` }); return; }
+      snapshot.quests.splice(idx, 1);
+      await versions.saveSnapshot(versionId, snapshot);
+      const questsRecord: Record<string, typeof snapshot.quests[0]> = {};
+      for (const q of snapshot.quests) questsRecord[q.id] = q;
+      res.json({ success: true, quests: questsRecord });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteQuest(questId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, quests: content.getAllQuests() });
+    }
+  });
+
   // ── Zone endpoints ──────────────────────────────────────
 
   /** List all zones. */
@@ -1097,7 +1174,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (snapshot.npcs) {
       for (const n of snapshot.npcs) npcsRecord[n.id] = n;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, npcs: npcsRecord, world: snapshot.world });
+    const questsRecord: Record<string, NonNullable<(typeof snapshot.quests)>[0]> = {};
+    if (snapshot.quests) {
+      for (const q of snapshot.quests) questsRecord[q.id] = q;
+    }
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, npcs: npcsRecord, quests: questsRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */

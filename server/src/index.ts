@@ -558,6 +558,39 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // --- Quest messages ---
+
+      if (msg.type === 'accept_quest' && typeof msg.questId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        const partySize = playerManager.getPartySize(username);
+        const result = session.handleAcceptQuest(msg.questId, partySize);
+        if (!result.success) {
+          ws.send(JSON.stringify({ type: 'error', message: result.error ?? 'Cannot accept quest' }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'turn_in_quest' && typeof msg.questId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        const result = session.handleTurnInQuest(msg.questId);
+        if (!result.success) {
+          ws.send(JSON.stringify({ type: 'error', message: result.error ?? 'Cannot turn in quest' }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
       // --- View player profile ---
       if (msg.type === 'view_player' && typeof msg.username === 'string') {
         const targetSession = playerManager.getSessionByUsername(msg.username);

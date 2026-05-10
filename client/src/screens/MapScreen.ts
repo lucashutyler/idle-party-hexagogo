@@ -152,7 +152,7 @@ export class MapScreen implements Screen {
 
       // Wire tile click handler for modal
       this.shopPopup = new ShopPopup(this.gameClient);
-      this.npcTalkPopup = new NpcTalkPopup();
+      this.npcTalkPopup = new NpcTalkPopup(this.gameClient);
       this.tileModal = new TileInfoModal(
         this.container,
         (col, row) => { this.tryMove(col, row); },

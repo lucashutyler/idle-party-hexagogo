@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, ClassName, SkillDefinition } from '@idle-party-rpg/shared';
-import { computeEquipmentBonuses, CLASS_ICONS, UNKNOWN_CLASS_ICON, SKILL_TREES, SKILL_SLOTS, LEVELS_PER_SKILL_POINT, getSkillById } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClassName, SkillDefinition, QuestObjective } from '@idle-party-rpg/shared';
+import { computeEquipmentBonuses, CLASS_ICONS, UNKNOWN_CLASS_ICON, SKILL_TREES, SKILL_SLOTS, LEVELS_PER_SKILL_POINT, getSkillById, getObjectiveTarget } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 export class CharacterScreen implements Screen {
@@ -91,6 +91,7 @@ export class CharacterScreen implements Screen {
             Gold: <span class="character-gold-value">0</span> GP
           </div>
           <div class="character-combat-bonuses"></div>
+          <div class="character-quest-log"></div>
           <div class="character-skill-points"></div>
           <div class="character-skill-slots"></div>
           <div class="character-skill-tree"></div>
@@ -181,6 +182,9 @@ export class CharacterScreen implements Screen {
         <span class="character-bonus-value${hasMR ? ' active' : ''}">${hasMR ? `${bonuses.magicReductionMin}-${bonuses.magicReductionMax}` : 'None'}</span>
       </div>
     `;
+
+    // Quest log card
+    this.renderQuestLog(state);
 
     // Skill points
     const availablePoints = char.skillPoints;
@@ -436,5 +440,70 @@ export class CharacterScreen implements Screen {
 
   private escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  private renderQuestLog(state: ServerStateMessage): void {
+    const el = this.container.querySelector('.character-quest-log') as HTMLElement | null;
+    if (!el) return;
+    const active = state.activeQuests ?? [];
+    const completed = state.completedQuests ?? [];
+    const defs = state.questDefinitions ?? {};
+
+    if (active.length === 0 && completed.length === 0) {
+      el.innerHTML = `
+        <div class="quest-log-card">
+          <div class="quest-log-header">Quest Log</div>
+          <div class="quest-log-empty">No quests yet. Talk to NPCs marked with 💬 on the map.</div>
+        </div>
+      `;
+      return;
+    }
+
+    const resolutions = state.questResolutions;
+    const resolveMonster = (id: string) => resolutions?.monsters[id] ?? id;
+    const resolveItem = (id: string) => resolutions?.items[id] ?? id;
+    const resolveTile = (id: string) => {
+      const t = resolutions?.tiles[id];
+      return t ? `${t.name} (${t.col},${t.row})` : 'a specific room';
+    };
+
+    const objectiveText = (obj: QuestObjective, progress: number): string => {
+      const target = getObjectiveTarget(obj);
+      const cap = Math.min(progress, target);
+      if (obj.kind === 'kill') return `Kill ${this.escapeHtml(resolveMonster(obj.monsterId))} (${cap}/${target})`;
+      if (obj.kind === 'collect') return `Collect ${this.escapeHtml(resolveItem(obj.itemId))} (${cap}/${target})`;
+      const place = this.escapeHtml(resolveTile(obj.tileId));
+      return cap >= 1 ? `Visit ${place} — done` : `Visit ${place}`;
+    };
+
+    const rows = active.map(entry => {
+      const def = defs[entry.questId];
+      const name = def?.name ?? entry.questId;
+      const objs = def
+        ? def.objectives.map((o, i) => `<div class="quest-log-objective">• ${objectiveText(o, entry.progress[i] ?? 0)}</div>`).join('')
+        : '';
+      const statusLabel = entry.status === 'ready' ? 'Ready' : entry.status === 'in_progress' ? 'In Progress' : 'Accepted';
+      return `
+        <div class="quest-log-entry">
+          <div class="quest-log-entry-header">
+            <span class="quest-log-entry-name">${this.escapeHtml(name)}</span>
+            <span class="quest-log-status quest-log-status-${entry.status}">${statusLabel}</span>
+          </div>
+          ${objs}
+        </div>
+      `;
+    }).join('');
+
+    const completedSummary = completed.length > 0
+      ? `<div class="quest-log-completed">${completed.length} completed</div>`
+      : '';
+
+    el.innerHTML = `
+      <div class="quest-log-card">
+        <div class="quest-log-header">Quest Log</div>
+        ${rows || '<div class="quest-log-empty">No active quests.</div>'}
+        ${completedSummary}
+      </div>
+    `;
   }
 }
