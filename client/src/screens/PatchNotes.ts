@@ -1,33 +1,8 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.05.09.5',
-    notes: [
-      'Admin: each dungeon floor now renders an empty cols×rows grid preview that updates live as you change Grid Cols/Rows. Cells are placeholders — content tools (traps, walls, spawns) come later',
-      'Game: room popup on a dungeon-linked tile now shows a "🚧 Enter Dungeon" button — disabled with a Coming soon! tooltip, so players know the feature exists but is under construction',
-    ],
-  },
-  {
-    version: '2026.05.09.4',
-    notes: [
-      'Admin: every content list (Dungeons, Shops, Sets, Monsters, Items, Zones, Encounters, Tile Types) now has a View action when on a read-only version. Opens the same form, fully populated, but disabled — true CRUD with Read separated from Update. Read-only view footer shows "* Create a new draft to edit"',
-    ],
-  },
-  {
-    version: '2026.05.09.3',
-    notes: [
-      'Admin: new "⚡ Live (deployed)" entry at the top of the version selector — view the actual live world, monsters, items, etc. without creating a draft. Read-only. Clicking + New Draft while on Live snapshots the live state into a fresh editable draft',
-    ],
-  },
-  {
-    version: '2026.05.09.2',
-    notes: [
-      'Admin: rooms can now be linked to a dungeon via a new Dungeon dropdown in the Map editor sidebar. Stored as `dungeonId` on the world tile. Admin link only — entering a dungeon from the room is not yet wired',
-    ],
-  },
-  {
     version: '2026.05.09.1',
     notes: [
-      'Admin: new Dungeons tab — define dungeons with floors, grid shape, encounter tables, entry requirements (level, item, classes, party size), per-floor rewards, and first-clear rewards. Persists to data/dungeons.json via ContentStore and is included in version snapshots. No game-side runtime yet — wiring follows in a later release',
+      'Rooms can now link to Dungeons, but the feature is still under construction. Expect big challenges ahead!',
     ],
   },
   {
