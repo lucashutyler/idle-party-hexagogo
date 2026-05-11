@@ -1776,6 +1776,15 @@ html, body {
   color: var(--text-secondary);
 }
 
+.tile-modal-dungeon {
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+}
+.tile-modal-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .tile-modal-close:active {
   border-color: var(--text-secondary);
 }

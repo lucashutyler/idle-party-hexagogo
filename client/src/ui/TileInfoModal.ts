@@ -79,6 +79,9 @@ export class TileInfoModal {
       ${playerList}
       <div class="tile-modal-actions">
         ${this.hasShop ? '<button class="tile-modal-btn tile-modal-shop" style="background:#e9bc18;color:#000;">Shop</button>' : ''}
+        ${(info.dungeonId && info.isCurrentTile)
+          ? '<button class="tile-modal-btn tile-modal-dungeon" disabled title="Coming soon!">🚧 Enter Dungeon</button>'
+          : ''}
         <button class="tile-modal-btn tile-modal-move">Go to room</button>
         <button class="tile-modal-btn tile-modal-close">Close</button>
       </div>

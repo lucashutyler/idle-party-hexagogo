@@ -34,12 +34,12 @@ export class EncountersTab implements Tab {
         }).join(', ') || 'No placements';
       }
 
-      const actions = readOnly ? '' : `
-        <td class="admin-actions-cell">
-          <button class="admin-btn admin-btn-sm encounter-edit-btn" data-id="${enc.id}">Edit</button>
-          <button class="admin-btn admin-btn-sm admin-btn-danger encounter-delete-btn" data-id="${enc.id}">Del</button>
-        </td>
-      `;
+      const actions = readOnly
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm encounter-view-btn" data-id="${enc.id}">View</button></td>`
+        : `<td class="admin-actions-cell">
+            <button class="admin-btn admin-btn-sm encounter-edit-btn" data-id="${enc.id}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger encounter-delete-btn" data-id="${enc.id}">Del</button>
+          </td>`;
       return `<tr>
         <td>${escapeHtml(enc.name)}</td>
         <td>${enc.type}</td>
@@ -49,7 +49,7 @@ export class EncountersTab implements Tab {
     }).join('');
 
     const addBtn = readOnly ? '' : '<button class="admin-btn" id="encounter-add-btn">+ Add Encounter</button>';
-    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+    const actionsHeader = '<th>Actions</th>';
 
     container.innerHTML = `
       <div class="admin-page">
@@ -67,7 +67,7 @@ export class EncountersTab implements Tab {
     `;
 
     container.querySelector('#encounter-add-btn')?.addEventListener('click', () => this.openForm(null, ctx));
-    container.querySelectorAll<HTMLButtonElement>('.encounter-edit-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.encounter-edit-btn, .encounter-view-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const enc = ctx.getDisplayContent()?.encounters[btn.dataset.id!];
         if (enc) this.openForm(enc, ctx);
@@ -82,11 +82,12 @@ export class EncountersTab implements Tab {
     const content = ctx.getDisplayContent();
     if (!content) return;
     const isNew = !encounter;
+    const readOnly = ctx.isReadOnly();
     const enc = encounter ?? {
       id: '', name: '', type: 'random' as const, monsterPool: [], roomMax: 9, placements: [],
     };
 
-    const bodyHtml = `
+    const formHtml = `
       <div class="admin-form-grid">
         <label>Name<input type="text" id="enc-name" value="${escapeHtml(enc.name)}"></label>
         <label>Type
@@ -98,14 +99,22 @@ export class EncountersTab implements Tab {
       </div>
       <input type="hidden" id="enc-id" value="${escapeHtml(enc.id)}">
       <div id="enc-body"></div>
-      <div class="admin-modal-actions">
-        <button class="admin-btn" id="enc-save" type="button">${isNew ? 'Add' : 'Save'}</button>
-        <button class="admin-btn admin-btn-secondary" id="enc-cancel" type="button">Cancel</button>
-      </div>
     `;
-
+    const actionsHtml = readOnly
+      ? `<div class="admin-modal-actions admin-modal-actions-readonly">
+          <span class="admin-form-hint admin-modal-readonly-hint">* Create a new draft to edit</span>
+          <button class="admin-btn admin-btn-secondary" id="enc-cancel" type="button">Close</button>
+        </div>`
+      : `<div class="admin-modal-actions">
+          <button class="admin-btn" id="enc-save" type="button">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="enc-cancel" type="button">Cancel</button>
+        </div>`;
+    const bodyHtml = readOnly
+      ? `<fieldset class="admin-form-readonly-wrap" disabled>${formHtml}</fieldset>${actionsHtml}`
+      : `${formHtml}${actionsHtml}`;
+    const titlePrefix = isNew ? 'Add' : (readOnly ? 'View' : 'Edit');
     const modal = openModal({
-      title: isNew ? 'Add Encounter' : `Edit: ${enc.name}`,
+      title: isNew ? 'Add Encounter' : `${titlePrefix}: ${enc.name}`,
       bodyHtml,
       width: '720px',
     });
