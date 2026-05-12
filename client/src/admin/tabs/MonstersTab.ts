@@ -29,12 +29,12 @@ export class MonstersTab implements Tab {
         return `${item?.name ?? d.itemId} (${(d.chance * 100).toFixed(3)}%)`;
       }).join(', ') ?? 'None';
 
-      const actions = readOnly ? '' : `
-        <td class="admin-actions-cell">
-          <button class="admin-btn admin-btn-sm monster-edit-btn" data-id="${m.id}">Edit</button>
-          <button class="admin-btn admin-btn-sm admin-btn-danger monster-delete-btn" data-id="${m.id}">Del</button>
-        </td>
-      `;
+      const actions = readOnly
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm monster-view-btn" data-id="${m.id}">View</button></td>`
+        : `<td class="admin-actions-cell">
+            <button class="admin-btn admin-btn-sm monster-edit-btn" data-id="${m.id}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger monster-delete-btn" data-id="${m.id}">Del</button>
+          </td>`;
 
       return `
         <tr>
@@ -52,7 +52,7 @@ export class MonstersTab implements Tab {
     }).join('');
 
     const addBtn = readOnly ? '' : '<button class="admin-btn" id="monster-add-btn">+ Add Monster</button>';
-    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+    const actionsHeader = '<th>Actions</th>';
 
     container.innerHTML = `
       <div class="admin-page">
@@ -84,7 +84,7 @@ export class MonstersTab implements Tab {
     container.querySelector('#monster-add-btn')?.addEventListener('click', () => {
       this.openForm(null, ctx);
     });
-    container.querySelectorAll<HTMLButtonElement>('.monster-edit-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.monster-edit-btn, .monster-view-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id!;
         const monster = ctx.getDisplayContent()?.monsters[id];
@@ -104,6 +104,7 @@ export class MonstersTab implements Tab {
     if (!content) return;
 
     const isNew = !monster;
+    const readOnly = ctx.isReadOnly();
     const m: MonsterDefinition = monster ?? {
       id: '', name: '', hp: 10, damage: 3, damageType: 'physical',
       xp: 5, goldMin: 1, goldMax: 2, drops: [],
@@ -138,30 +139,38 @@ export class MonstersTab implements Tab {
         <textarea id="mf-description" rows="3">${escapeHtml(m.description ?? '')}</textarea>
       </label>
       <fieldset class="admin-form-fieldset">
-        <legend>Drops <button class="admin-btn admin-btn-sm" id="mf-add-drop" type="button">+ Drop</button></legend>
+        <legend>Drops ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="mf-add-drop" type="button">+ Drop</button>'}</legend>
         <div id="mf-drops-list">${dropRows}</div>
       </fieldset>
       <fieldset class="admin-form-fieldset">
-        <legend>Resistances <button class="admin-btn admin-btn-sm" id="mf-add-resistance" type="button">+ Resistance</button></legend>
+        <legend>Resistances ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="mf-add-resistance" type="button">+ Resistance</button>'}</legend>
         <div id="mf-resistances-list">${resistanceRows}</div>
       </fieldset>
       <fieldset class="admin-form-fieldset">
-        <legend>Skills <button class="admin-btn admin-btn-sm" id="mf-add-skill" type="button">+ Skill</button></legend>
+        <legend>Skills ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="mf-add-skill" type="button">+ Skill</button>'}</legend>
         <div id="mf-skills-list">${skillRows}</div>
       </fieldset>
       <fieldset class="admin-form-fieldset">
         <legend>Artwork</legend>
         ${renderArtworkSection({ kind: 'monster', id: m.id })}
       </fieldset>
-      <div class="admin-modal-actions">
-        <button class="admin-btn" id="mf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
-        <button class="admin-btn admin-btn-secondary" id="mf-cancel" type="button">Cancel</button>
-      </div>
     `;
-
+    const actionsHtml = readOnly
+      ? `<div class="admin-modal-actions admin-modal-actions-readonly">
+          <span class="admin-form-hint admin-modal-readonly-hint">* Create a new draft to edit</span>
+          <button class="admin-btn admin-btn-secondary" id="mf-cancel" type="button">Close</button>
+        </div>`
+      : `<div class="admin-modal-actions">
+          <button class="admin-btn" id="mf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="mf-cancel" type="button">Cancel</button>
+        </div>`;
+    const wrappedBody = readOnly
+      ? `<fieldset class="admin-form-readonly-wrap" disabled>${bodyHtml}</fieldset>${actionsHtml}`
+      : `${bodyHtml}${actionsHtml}`;
+    const titlePrefix = isNew ? 'Add' : (readOnly ? 'View' : 'Edit');
     const modal = openModal({
-      title: isNew ? 'Add Monster' : `Edit: ${m.name}`,
-      bodyHtml,
+      title: isNew ? 'Add Monster' : `${titlePrefix}: ${m.name}`,
+      bodyHtml: wrappedBody,
       width: '720px',
     });
     const root = modal.body;

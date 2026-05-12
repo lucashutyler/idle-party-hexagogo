@@ -27,6 +27,8 @@ export interface TileClickInfo {
   isCurrentTile: boolean;
   playersHere: { username: string; className?: string }[];
   partyMemberUsernames: string[];
+  /** Set if the tile is linked to a dungeon (admin-assigned). Runtime entry not yet wired. */
+  dungeonId?: string;
 }
 
 const PLAYER_COUNT_BADGE_COLOR = '#4a90d9';
@@ -631,6 +633,7 @@ export class WorldMapScene extends Phaser.Scene {
         isCurrentTile,
         playersHere,
         partyMemberUsernames: this.partyMemberUsernames,
+        dungeonId: worldTileDef?.dungeonId,
       });
     } else {
       this.sendMoveFn?.(offset.col, offset.row);

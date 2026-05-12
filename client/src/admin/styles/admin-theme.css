@@ -778,6 +778,29 @@ body.admin-modal-open { overflow: hidden; }
   gap: var(--admin-gap);
   margin-top: var(--admin-gap-loose);
 }
+.admin-modal-actions-readonly { justify-content: space-between; align-items: center; }
+.admin-modal-readonly-hint { font-style: italic; color: var(--admin-text-muted); }
+
+/* ---- Dungeon floor grid preview ---- */
+.df-floor-grid-wrap {
+  margin: var(--admin-gap) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.df-floor-grid-preview {
+  display: grid;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+}
+.df-floor-grid-cell {
+  width: 36px;
+  height: 36px;
+  border: 1px dashed var(--admin-border);
+  border-radius: 4px;
+  background: var(--admin-bg-2);
+}
 
 /* ---- Detail list ---- */
 .admin-detail-list {

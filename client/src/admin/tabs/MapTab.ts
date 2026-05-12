@@ -600,6 +600,10 @@ export class MapTab implements Tab {
     const shopOptions = `<option value="">(none)</option>` + shops.map(s =>
       `<option value="${s.id}"${s.id === (tile.shopId ?? '') ? ' selected' : ''}>${escapeHtml(s.name)}</option>`
     ).join('');
+    const dungeons = content ? Object.values(content.dungeons ?? {}) : [];
+    const dungeonOptions = `<option value="">(none)</option>` + dungeons.map(d =>
+      `<option value="${d.id}"${d.id === (tile.dungeonId ?? '') ? ' selected' : ''}>${escapeHtml(d.name)}</option>`
+    ).join('');
 
     let startBtnHtml = '';
     if (!readOnly) {
@@ -624,6 +628,7 @@ export class MapTab implements Tab {
         <label>Type<select id="sidebar-type"${disabled}>${typeOptions}</select></label>
         <label>Zone<select id="sidebar-zone"${disabled}>${zoneOptions}</select></label>
         <label>Shop<select id="sidebar-shop"${disabled}>${shopOptions}</select></label>
+        <label>Dungeon<select id="sidebar-dungeon"${disabled}>${dungeonOptions}</select></label>
         <label>Required Item (override)
           <select id="sidebar-required-item"${disabled}>
             <option value="">(use type default)</option>
@@ -664,6 +669,13 @@ export class MapTab implements Tab {
       if (!this.selectedTile) return;
       if (shopSelect.value) this.selectedTile.shopId = shopSelect.value;
       else delete this.selectedTile.shopId;
+      this.scheduleSave(ctx);
+    });
+    const dungeonSelect = document.getElementById('sidebar-dungeon') as HTMLSelectElement;
+    dungeonSelect?.addEventListener('change', () => {
+      if (!this.selectedTile) return;
+      if (dungeonSelect.value) this.selectedTile.dungeonId = dungeonSelect.value;
+      else delete this.selectedTile.dungeonId;
       this.scheduleSave(ctx);
     });
     const requiredItemSelect = document.getElementById('sidebar-required-item') as HTMLSelectElement;

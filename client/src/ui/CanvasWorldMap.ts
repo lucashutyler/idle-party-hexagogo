@@ -45,6 +45,9 @@ export interface TileClickInfo {
   isCurrentTile: boolean;
   playersHere: { username: string; className?: string }[];
   partyMemberUsernames: string[];
+  /** Dungeon link for this tile, if any — surfaced by the room info modal so
+   *  players can see a dungeon entrance prompt on the current tile. */
+  dungeonId?: string;
 }
 
 // ─── Render constants ─────────────────────────────────────────
@@ -832,6 +835,7 @@ export class CanvasWorldMap {
         isCurrentTile,
         playersHere,
         partyMemberUsernames: this.partyMemberUsernames,
+        dungeonId: def?.dungeonId,
       });
     } else {
       this.sendMoveFn?.(offset.col, offset.row);

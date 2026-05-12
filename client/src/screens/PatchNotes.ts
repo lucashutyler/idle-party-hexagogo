@@ -46,6 +46,12 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
     ],
   },
   {
+    version: '2026.05.09.1',
+    notes: [
+      'Rooms can now link to Dungeons, but the feature is still under construction. Expect big challenges ahead!',
+    ],
+  },
+  {
     version: '2026.05.04.1',
     notes: [
       'UI overhaul — sweeping pass to make the game feel less like a web app and more like a game',

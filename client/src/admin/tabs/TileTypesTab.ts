@@ -22,7 +22,9 @@ export class TileTypesTab implements Tab {
       const requiredItemTag = itemName
         ? `<div class="tile-type-card-tag">Requires: ${escapeHtml(itemName)}</div>`
         : '';
-      const editBtn = readOnly ? '' : `<button class="admin-btn admin-btn-sm tile-type-edit-btn" data-id="${escapeHtml(t.id)}">Edit</button>`;
+      const editBtn = readOnly
+        ? `<button class="admin-btn admin-btn-sm tile-type-view-btn" data-id="${escapeHtml(t.id)}">View</button>`
+        : `<button class="admin-btn admin-btn-sm tile-type-edit-btn" data-id="${escapeHtml(t.id)}">Edit</button>`;
       const deleteBtn = readOnly ? '' : `<button class="admin-btn admin-btn-sm admin-btn-danger tile-type-delete-btn" data-id="${escapeHtml(t.id)}">Del</button>`;
       return `
         <div class="tile-type-card">
@@ -54,7 +56,7 @@ export class TileTypesTab implements Tab {
       </div>
     `;
 
-    container.querySelectorAll<HTMLButtonElement>('.tile-type-edit-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.tile-type-edit-btn, .tile-type-view-btn').forEach(btn => {
       btn.addEventListener('click', () => this.openModal(btn.dataset.id!, ctx));
     });
     container.querySelectorAll<HTMLButtonElement>('.tile-type-delete-btn').forEach(btn => {
@@ -68,6 +70,7 @@ export class TileTypesTab implements Tab {
     const content = ctx.getDisplayContent();
     if (!content) return;
     const existing = editId ? content.tileTypes?.[editId] ?? null : null;
+    const readOnly = ctx.isReadOnly();
     const items = Object.values(content.items);
     const itemOptions = items.map(i =>
       `<option value="${escapeHtml(i.id)}"${existing?.requiredItemId === i.id ? ' selected' : ''}>${escapeHtml(i.name)}</option>`
@@ -77,7 +80,7 @@ export class TileTypesTab implements Tab {
     const initBlocked = existing ? existing.traversable === false : false;
     // Auto-generate IDs for new tile types — they're hidden from the UI; only the name matters.
     const id = existing?.id ?? crypto.randomUUID();
-    const bodyHtml = `
+    const formHtml = `
       <div class="tile-type-form">
         <div class="tile-type-form-preview tile-type-card-preview${initBlocked ? ' is-blocked' : ''}" style="--tile-color:${escapeHtml(initColor)}">
           <div class="tile-type-card-hex"></div>
@@ -107,14 +110,22 @@ export class TileTypesTab implements Tab {
         <legend>Artwork</legend>
         ${renderArtworkSection({ kind: 'tile-type', id })}
       </fieldset>
-      <div class="admin-modal-actions">
-        <button class="admin-btn" id="ttf-save" type="button">Save</button>
-        <button class="admin-btn admin-btn-secondary" id="ttf-cancel" type="button">Cancel</button>
-      </div>
     `;
-
+    const actionsHtml = readOnly
+      ? `<div class="admin-modal-actions admin-modal-actions-readonly">
+          <span class="admin-form-hint admin-modal-readonly-hint">* Create a new draft to edit</span>
+          <button class="admin-btn admin-btn-secondary" id="ttf-cancel" type="button">Close</button>
+        </div>`
+      : `<div class="admin-modal-actions">
+          <button class="admin-btn" id="ttf-save" type="button">Save</button>
+          <button class="admin-btn admin-btn-secondary" id="ttf-cancel" type="button">Cancel</button>
+        </div>`;
+    const bodyHtml = readOnly
+      ? `<fieldset class="admin-form-readonly-wrap" disabled>${formHtml}</fieldset>${actionsHtml}`
+      : `${formHtml}${actionsHtml}`;
+    const titlePrefix = existing ? (readOnly ? 'View' : 'Edit') : 'New';
     const modal = openModal({
-      title: existing ? `Edit: ${existing.name}` : 'New Tile Type',
+      title: existing ? `${titlePrefix}: ${existing.name}` : 'New Tile Type',
       bodyHtml,
       width: '520px',
     });

@@ -25,12 +25,12 @@ export class ZonesTab implements Tab {
         .map(e => `${encounters[e.encounterId]?.name ?? e.encounterId} (w:${e.weight})`)
         .join(', ');
 
-      const actions = readOnly ? '' : `
-        <td class="admin-actions-cell">
-          <button class="admin-btn admin-btn-sm zone-edit-btn" data-id="${z.id}">Edit</button>
-          <button class="admin-btn admin-btn-sm admin-btn-danger zone-delete-btn" data-id="${z.id}">Del</button>
-        </td>
-      `;
+      const actions = readOnly
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm zone-view-btn" data-id="${z.id}">View</button></td>`
+        : `<td class="admin-actions-cell">
+            <button class="admin-btn admin-btn-sm zone-edit-btn" data-id="${z.id}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger zone-delete-btn" data-id="${z.id}">Del</button>
+          </td>`;
 
       return `
         <tr>
@@ -43,7 +43,7 @@ export class ZonesTab implements Tab {
     }).join('');
 
     const addBtn = readOnly ? '' : '<button class="admin-btn" id="zone-add-btn">+ Add Zone</button>';
-    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+    const actionsHeader = '<th>Actions</th>';
 
     container.innerHTML = `
       <div class="admin-page">
@@ -68,7 +68,7 @@ export class ZonesTab implements Tab {
     `;
 
     container.querySelector('#zone-add-btn')?.addEventListener('click', () => this.openForm(null, ctx));
-    container.querySelectorAll<HTMLButtonElement>('.zone-edit-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.zone-edit-btn, .zone-view-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const zone = ctx.getDisplayContent()?.zones[btn.dataset.id!];
         if (zone) this.openForm(zone, ctx);
@@ -84,11 +84,12 @@ export class ZonesTab implements Tab {
     if (!content) return;
 
     const isNew = !zone;
+    const readOnly = ctx.isReadOnly();
     const z = zone ?? { id: '', displayName: '', levelRange: [1, 1] as [number, number], encounterTable: [] };
     const encounterDefs = Object.values(content.encounters);
     const encRows = z.encounterTable.map((e, i) => this.encounterRowHtml(i, e, encounterDefs)).join('');
 
-    const bodyHtml = `
+    const formHtml = `
       <input type="hidden" id="zf-id" value="${escapeHtml(z.id)}">
       <div class="admin-form-grid">
         <label>Display Name<input type="text" id="zf-name" value="${escapeHtml(z.displayName)}"></label>
@@ -96,21 +97,29 @@ export class ZonesTab implements Tab {
         <label>Level Max<input type="number" id="zf-levelMax" value="${z.levelRange[1]}" min="1"></label>
       </div>
       <fieldset class="admin-form-fieldset">
-        <legend>Encounter Table <button class="admin-btn admin-btn-sm" id="zf-add-encounter" type="button">+ Encounter</button></legend>
+        <legend>Encounter Table ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="zf-add-encounter" type="button">+ Encounter</button>'}</legend>
         <div id="zf-encounters-list">${encRows}</div>
       </fieldset>
       <fieldset class="admin-form-fieldset">
         <legend>Artwork</legend>
         ${renderArtworkSection({ kind: 'zone', id: z.id })}
       </fieldset>
-      <div class="admin-modal-actions">
-        <button class="admin-btn" id="zf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
-        <button class="admin-btn admin-btn-secondary" id="zf-cancel" type="button">Cancel</button>
-      </div>
     `;
-
+    const actionsHtml = readOnly
+      ? `<div class="admin-modal-actions admin-modal-actions-readonly">
+          <span class="admin-form-hint admin-modal-readonly-hint">* Create a new draft to edit</span>
+          <button class="admin-btn admin-btn-secondary" id="zf-cancel" type="button">Close</button>
+        </div>`
+      : `<div class="admin-modal-actions">
+          <button class="admin-btn" id="zf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="zf-cancel" type="button">Cancel</button>
+        </div>`;
+    const bodyHtml = readOnly
+      ? `<fieldset class="admin-form-readonly-wrap" disabled>${formHtml}</fieldset>${actionsHtml}`
+      : `${formHtml}${actionsHtml}`;
+    const titlePrefix = isNew ? 'Add' : (readOnly ? 'View' : 'Edit');
     const modal = openModal({
-      title: isNew ? 'Add Zone' : `Edit: ${z.displayName}`,
+      title: isNew ? 'Add Zone' : `${titlePrefix}: ${z.displayName}`,
       bodyHtml,
       width: '640px',
     });
