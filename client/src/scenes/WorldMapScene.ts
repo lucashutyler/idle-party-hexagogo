@@ -13,6 +13,7 @@ import {
 import type { ServerStateMessage, OtherPlayerState, WorldTileDefinition } from '@idle-party-rpg/shared';
 import type { WorldCache } from '../network/WorldCache';
 import { Party } from '../entities/Party';
+import { getQuestHintsEnabled, onSettingsChange } from '../settings/UserSettings';
 
 export interface TileClickInfo {
   col: number;
@@ -63,12 +64,18 @@ export class WorldMapScene extends Phaser.Scene {
   private zoneBorderGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private highlightGraphics!: Phaser.GameObjects.Graphics;
+  private questHintGraphics!: Phaser.GameObjects.Graphics;
+  private questHintTween?: Phaser.Tweens.Tween;
+  private lastState: ServerStateMessage | null = null;
 
   // Hover tooltip
   private tooltipText?: Phaser.GameObjects.Text;
 
   // Tile icons (stored for cleanup on re-render)
   private tileIcons: Phaser.GameObjects.Text[] = [];
+
+  // NPC badges (stored for cleanup on re-render)
+  private npcBadges: Phaser.GameObjects.Text[] = [];
 
   // Map offset (small padding from origin)
   private mapOffsetX = HEX_SIZE;
@@ -106,6 +113,18 @@ export class WorldMapScene extends Phaser.Scene {
     this.zoneBorderGraphics.setDepth(5);
     this.pathGraphics = this.add.graphics();
     this.highlightGraphics = this.add.graphics();
+    this.questHintGraphics = this.add.graphics();
+    this.questHintGraphics.setDepth(12);
+    this.questHintTween = this.tweens.add({
+      targets: this.questHintGraphics,
+      alpha: { from: 0.4, to: 1 },
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    onSettingsChange(() => this.renderQuestHints());
 
     // Hover tooltip (fixed to camera, above everything)
     this.tooltipText = this.add.text(0, 0, '', {
@@ -147,6 +166,7 @@ export class WorldMapScene extends Phaser.Scene {
 
   /** Apply a state update from the server. */
   applyServerState(state: ServerStateMessage, snap?: boolean): void {
+    this.lastState = state;
     const shouldSnap = snap || this.isFirstState;
 
     // Update unlock state from server; re-render if changed or on snap
@@ -204,7 +224,109 @@ export class WorldMapScene extends Phaser.Scene {
     // Draw zone overlay (needs currentZone to be set)
     this.renderZoneOverlay();
 
+    // Quest hints: highlight quest-giver and visit-objective tiles
+    this.renderQuestHints();
+
     this.isFirstState = false;
+  }
+
+  private renderQuestHints(): void {
+    if (!this.questHintGraphics) return;
+    this.questHintGraphics.clear();
+
+    if (!getQuestHintsEnabled()) {
+      this.questHintTween?.pause();
+      this.questHintGraphics.setAlpha(0);
+      return;
+    }
+
+    const state = this.lastState;
+    if (!state) return;
+
+    const active = state.activeQuests ?? [];
+    if (active.length === 0) {
+      this.questHintTween?.pause();
+      this.questHintGraphics.setAlpha(0);
+      return;
+    }
+
+    const defs = state.questDefinitions ?? {};
+    const resolutions = state.questResolutions;
+    const corners = getHexCorners(HEX_SIZE * 1.05);
+
+    // 1) Quest-giver tiles: any NPC whose questIds intersects active quest IDs.
+    const activeIdSet = new Set(active.map(a => a.questId));
+    const giverHits = new Set<string>();
+    for (const tile of this.worldCache.getTiles()) {
+      if (!tile.npcId) continue;
+      const npc = this.worldCache.getNpc(tile.npcId);
+      if (!npc?.questIds) continue;
+      for (const qid of npc.questIds) {
+        if (activeIdSet.has(qid)) {
+          giverHits.add(`${tile.col},${tile.row}`);
+          break;
+        }
+      }
+    }
+
+    // 2) Visit-objective tiles: from active quest definitions, find unmet visit objectives.
+    const visitHits = new Set<string>();
+    for (const entry of active) {
+      const def = defs[entry.questId];
+      if (!def) continue;
+      for (let i = 0; i < def.objectives.length; i++) {
+        const obj = def.objectives[i];
+        if (obj.kind !== 'visit') continue;
+        if ((entry.progress[i] ?? 0) >= 1) continue; // already done
+        const t = resolutions?.tiles[obj.tileId];
+        if (t) visitHits.add(`${t.col},${t.row}`);
+      }
+    }
+
+    if (giverHits.size === 0 && visitHits.size === 0) {
+      this.questHintTween?.pause();
+      this.questHintGraphics.setAlpha(0);
+      return;
+    }
+
+    // Resume pulsing
+    this.questHintTween?.resume();
+
+    const drawHexOutline = (col: number, row: number, color: number) => {
+      const pixel = cubeToPixel(offsetToCube({ col, row }));
+      const cx = pixel.x + this.mapOffsetX;
+      const cy = pixel.y + this.mapOffsetY;
+
+      // Outer glow
+      this.questHintGraphics.lineStyle(8, color, 0.25);
+      this.questHintGraphics.beginPath();
+      this.questHintGraphics.moveTo(cx + corners[0].x, cy + corners[0].y);
+      for (let i = 1; i < 6; i++) {
+        this.questHintGraphics.lineTo(cx + corners[i].x, cy + corners[i].y);
+      }
+      this.questHintGraphics.closePath();
+      this.questHintGraphics.strokePath();
+
+      // Inner sharp ring
+      this.questHintGraphics.lineStyle(2.5, color, 1);
+      this.questHintGraphics.beginPath();
+      this.questHintGraphics.moveTo(cx + corners[0].x, cy + corners[0].y);
+      for (let i = 1; i < 6; i++) {
+        this.questHintGraphics.lineTo(cx + corners[i].x, cy + corners[i].y);
+      }
+      this.questHintGraphics.closePath();
+      this.questHintGraphics.strokePath();
+    };
+
+    // Visit hints first so giver hints overlay them if they share a tile.
+    for (const key of visitHits) {
+      const [col, row] = key.split(',').map(Number);
+      drawHexOutline(col, row, 0x4a90d9); // blue
+    }
+    for (const key of giverHits) {
+      const [col, row] = key.split(',').map(Number);
+      drawHexOutline(col, row, 0xffc845); // gold
+    }
   }
 
   /** Center the camera on the party sprite. */
@@ -299,6 +421,10 @@ export class WorldMapScene extends Phaser.Scene {
       icon.destroy();
     }
     this.tileIcons = [];
+    for (const badge of this.npcBadges) {
+      badge.destroy();
+    }
+    this.npcBadges = [];
 
     const corners = getHexCorners(HEX_SIZE);
 
@@ -347,6 +473,20 @@ export class WorldMapScene extends Phaser.Scene {
       // Icons: non-traversable tiles always show their terrain icon,
       // traversable tiles show real type if zone unlocked, clouds if still in fog
       this.drawTileIcon(tile.type, tile.isTraversable, isNonTraversable || isZoneUnlocked, isUnlocked, x, y);
+
+      // NPC badge — only on unlocked tiles, never on fogged tiles (avoid leaking NPC presence)
+      if (isUnlocked) {
+        const tileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
+        if (tileDef?.npcId) {
+          const npc = this.worldCache.getNpc(tileDef.npcId);
+          if (npc) {
+            const badge = this.add.text(x + HEX_SIZE * 0.45, y - HEX_SIZE * 0.45, '💬', { fontSize: '14px' });
+            badge.setOrigin(0.5);
+            badge.setDepth(11);
+            this.npcBadges.push(badge);
+          }
+        }
+      }
     }
 
     // Draw zone boundary lines

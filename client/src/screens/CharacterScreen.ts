@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, ClassName, SkillDefinition } from '@idle-party-rpg/shared';
-import { computeEquipmentBonuses, CLASS_ICONS, UNKNOWN_CLASS_ICON, SKILL_TREES, SKILL_SLOTS, LEVELS_PER_SKILL_POINT, getSkillById } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClassName, SkillDefinition, QuestObjective } from '@idle-party-rpg/shared';
+import { computeEquipmentBonuses, CLASS_ICONS, UNKNOWN_CLASS_ICON, SKILL_TREES, SKILL_SLOTS, LEVELS_PER_SKILL_POINT, getSkillById, getObjectiveTarget } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
 export class CharacterScreen implements Screen {
@@ -26,6 +26,14 @@ export class CharacterScreen implements Screen {
 
   private unsubscribe?: () => void;
   private popupOpen = false;
+
+  // Completed quests log UI state (preserved across re-renders)
+  private completedExpanded = false;
+  private completedSearch = '';
+  private completedSort: 'date_desc' | 'date_asc' | 'name_asc' = 'date_desc';
+  private completedFilter: 'all' | 'solo' | 'party_shared' = 'all';
+  private completedPage = 0;
+  private static readonly COMPLETED_PAGE_SIZE = 20;
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -91,9 +99,11 @@ export class CharacterScreen implements Screen {
             Gold: <span class="character-gold-value">0</span> GP
           </div>
           <div class="character-combat-bonuses"></div>
+          <div class="character-quest-log"></div>
           <div class="character-skill-points"></div>
           <div class="character-skill-slots"></div>
           <div class="character-skill-tree"></div>
+          <div class="character-completed-quests"></div>
         </div>
       </div>
     `;
@@ -181,6 +191,10 @@ export class CharacterScreen implements Screen {
         <span class="character-bonus-value${hasMR ? ' active' : ''}">${hasMR ? `${bonuses.magicReductionMin}-${bonuses.magicReductionMax}` : 'None'}</span>
       </div>
     `;
+
+    // Quest log card
+    this.renderQuestLog(state);
+    this.renderCompletedQuests(state);
 
     // Skill points
     const availablePoints = char.skillPoints;
@@ -436,5 +450,216 @@ export class CharacterScreen implements Screen {
 
   private escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  private renderQuestLog(state: ServerStateMessage): void {
+    const el = this.container.querySelector('.character-quest-log') as HTMLElement | null;
+    if (!el) return;
+    const active = state.activeQuests ?? [];
+    const completed = state.completedQuests ?? [];
+    const defs = state.questDefinitions ?? {};
+
+    if (active.length === 0 && completed.length === 0) {
+      el.innerHTML = `
+        <div class="quest-log-card">
+          <div class="quest-log-header">Quest Log</div>
+          <div class="quest-log-empty">No quests yet. Talk to NPCs marked with 💬 on the map.</div>
+        </div>
+      `;
+      return;
+    }
+
+    const resolutions = state.questResolutions;
+    const resolveMonster = (id: string) => resolutions?.monsters[id] ?? id;
+    const resolveItem = (id: string) => resolutions?.items[id] ?? id;
+    const resolveTile = (id: string) => {
+      const t = resolutions?.tiles[id];
+      return t ? `${t.name} (${t.col},${t.row})` : 'a specific room';
+    };
+
+    const objectiveText = (obj: QuestObjective, progress: number): string => {
+      const target = getObjectiveTarget(obj);
+      const cap = Math.min(progress, target);
+      if (obj.kind === 'kill') return `Kill ${this.escapeHtml(resolveMonster(obj.monsterId))} (${cap}/${target})`;
+      if (obj.kind === 'collect') return `Collect ${this.escapeHtml(resolveItem(obj.itemId))} (${cap}/${target})`;
+      const place = this.escapeHtml(resolveTile(obj.tileId));
+      return cap >= 1 ? `Visit ${place} — done` : `Visit ${place}`;
+    };
+
+    const rows = active.map(entry => {
+      const def = defs[entry.questId];
+      const name = def?.name ?? entry.questId;
+      const objs = def
+        ? def.objectives.map((o, i) => `<div class="quest-log-objective">• ${objectiveText(o, entry.progress[i] ?? 0)}</div>`).join('')
+        : '';
+      const statusLabel = entry.status === 'ready' ? 'Ready' : entry.status === 'in_progress' ? 'In Progress' : 'Accepted';
+      return `
+        <div class="quest-log-entry">
+          <div class="quest-log-entry-header">
+            <span class="quest-log-entry-name">${this.escapeHtml(name)}</span>
+            <span class="quest-log-status quest-log-status-${entry.status}">${statusLabel}</span>
+          </div>
+          ${objs}
+        </div>
+      `;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="quest-log-card">
+        <div class="quest-log-header">Quest Log</div>
+        ${rows || '<div class="quest-log-empty">No active quests.</div>'}
+      </div>
+    `;
+  }
+
+  private renderCompletedQuests(state: ServerStateMessage): void {
+    const el = this.container.querySelector('.character-completed-quests') as HTMLElement | null;
+    if (!el) return;
+
+    const completed = state.completedQuests ?? [];
+    const defs = state.questDefinitions ?? {};
+
+    if (completed.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+
+    const chevron = this.completedExpanded ? '▾' : '▸';
+    const headerHtml = `
+      <button class="completed-quests-toggle" type="button">
+        <span class="completed-quests-chevron">${chevron}</span>
+        <span class="quest-log-header">Completed Quests</span>
+        <span class="quest-log-count">${completed.length}</span>
+      </button>
+    `;
+
+    if (!this.completedExpanded) {
+      el.innerHTML = `<div class="quest-log-card">${headerHtml}</div>`;
+      el.querySelector<HTMLButtonElement>('.completed-quests-toggle')?.addEventListener('click', () => {
+        this.completedExpanded = true;
+        this.renderCompletedQuests(state);
+      });
+      return;
+    }
+
+    // Apply filter, search, sort
+    const search = this.completedSearch.trim().toLowerCase();
+    let entries = completed.map(c => ({ ...c, def: defs[c.questId] }));
+
+    if (this.completedFilter !== 'all') {
+      entries = entries.filter(e => e.def?.scope === this.completedFilter);
+    }
+    if (search) {
+      entries = entries.filter(e => (e.def?.name ?? e.questId).toLowerCase().includes(search));
+    }
+
+    entries.sort((a, b) => {
+      if (this.completedSort === 'name_asc') {
+        return (a.def?.name ?? a.questId).localeCompare(b.def?.name ?? b.questId);
+      }
+      const ta = new Date(a.completedAt).getTime();
+      const tb = new Date(b.completedAt).getTime();
+      return this.completedSort === 'date_asc' ? ta - tb : tb - ta;
+    });
+
+    const pageSize = CharacterScreen.COMPLETED_PAGE_SIZE;
+    const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
+    if (this.completedPage >= totalPages) this.completedPage = totalPages - 1;
+    if (this.completedPage < 0) this.completedPage = 0;
+    const start = this.completedPage * pageSize;
+    const pageEntries = entries.slice(start, start + pageSize);
+
+    const fmtDate = (iso: string): string => {
+      const d = new Date(iso);
+      const mon = (d.getMonth() + 1).toString().padStart(2, '0');
+      const day = d.getDate().toString().padStart(2, '0');
+      const yr = d.getFullYear();
+      const h = d.getHours().toString().padStart(2, '0');
+      const m = d.getMinutes().toString().padStart(2, '0');
+      return `${yr}-${mon}-${day} ${h}:${m}`;
+    };
+
+    const rowsHtml = pageEntries.map(e => {
+      const name = e.def?.name ?? e.questId;
+      const scope = e.def?.scope === 'solo' ? 'Solo' : 'Party';
+      return `
+        <div class="quest-log-entry">
+          <div class="quest-log-entry-header">
+            <span class="quest-log-entry-name">${this.escapeHtml(name)}</span>
+            <span class="quest-log-status quest-log-status-ready">${scope}</span>
+          </div>
+          <div class="quest-log-objective">Completed ${fmtDate(e.completedAt)}</div>
+        </div>
+      `;
+    }).join('');
+
+    const noResultsHtml = pageEntries.length === 0
+      ? `<div class="quest-log-empty">No matches.</div>`
+      : '';
+
+    const pagerHtml = totalPages > 1
+      ? `
+        <div class="completed-quests-pager">
+          <button class="admin-btn admin-btn-sm" id="cq-prev" ${this.completedPage <= 0 ? 'disabled' : ''}>‹ Prev</button>
+          <span>Page ${this.completedPage + 1} / ${totalPages}</span>
+          <button class="admin-btn admin-btn-sm" id="cq-next" ${this.completedPage >= totalPages - 1 ? 'disabled' : ''}>Next ›</button>
+        </div>
+      `
+      : '';
+
+    el.innerHTML = `
+      <div class="quest-log-card">
+        ${headerHtml}
+        <div class="completed-quests-toolbar">
+          <input type="search" class="completed-quests-search" placeholder="Search…" value="${this.escapeAttr(this.completedSearch)}">
+          <select class="completed-quests-filter">
+            <option value="all" ${this.completedFilter === 'all' ? 'selected' : ''}>All</option>
+            <option value="party_shared" ${this.completedFilter === 'party_shared' ? 'selected' : ''}>Party</option>
+            <option value="solo" ${this.completedFilter === 'solo' ? 'selected' : ''}>Solo</option>
+          </select>
+          <select class="completed-quests-sort">
+            <option value="date_desc" ${this.completedSort === 'date_desc' ? 'selected' : ''}>Newest first</option>
+            <option value="date_asc" ${this.completedSort === 'date_asc' ? 'selected' : ''}>Oldest first</option>
+            <option value="name_asc" ${this.completedSort === 'name_asc' ? 'selected' : ''}>Name A–Z</option>
+          </select>
+        </div>
+        ${rowsHtml || noResultsHtml}
+        ${pagerHtml}
+      </div>
+    `;
+
+    el.querySelector<HTMLButtonElement>('.completed-quests-toggle')?.addEventListener('click', () => {
+      this.completedExpanded = false;
+      this.renderCompletedQuests(state);
+    });
+    const searchEl = el.querySelector<HTMLInputElement>('.completed-quests-search');
+    searchEl?.addEventListener('input', () => {
+      this.completedSearch = searchEl.value;
+      this.completedPage = 0;
+      this.renderCompletedQuests(state);
+    });
+    const filterEl = el.querySelector<HTMLSelectElement>('.completed-quests-filter');
+    filterEl?.addEventListener('change', () => {
+      this.completedFilter = filterEl.value as typeof this.completedFilter;
+      this.completedPage = 0;
+      this.renderCompletedQuests(state);
+    });
+    const sortEl = el.querySelector<HTMLSelectElement>('.completed-quests-sort');
+    sortEl?.addEventListener('change', () => {
+      this.completedSort = sortEl.value as typeof this.completedSort;
+      this.renderCompletedQuests(state);
+    });
+    el.querySelector('#cq-prev')?.addEventListener('click', () => {
+      this.completedPage = Math.max(0, this.completedPage - 1);
+      this.renderCompletedQuests(state);
+    });
+    el.querySelector('#cq-next')?.addEventListener('click', () => {
+      this.completedPage = Math.min(totalPages - 1, this.completedPage + 1);
+      this.renderCompletedQuests(state);
+    });
+  }
+
+  private escapeAttr(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 }

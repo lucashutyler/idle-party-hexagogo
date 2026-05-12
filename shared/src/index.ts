@@ -219,6 +219,8 @@ export type {
   ClientViewPlayerMessage,
   ClientShopBuyMessage,
   ClientShopSellMessage,
+  ClientAcceptQuestMessage,
+  ClientTurnInQuestMessage,
   PlayerProfileMessage,
   ServerMessage,
   ClientMessage,
@@ -255,6 +257,35 @@ export type {
   ShopItem,
   ShopDefinition,
 } from './systems/ShopTypes.js';
+
+// NPC types
+export { SEED_NPCS } from './systems/NpcTypes.js';
+export type { NpcDefinition } from './systems/NpcTypes.js';
+
+// Quest types
+export {
+  getObjectiveTarget,
+  objectivesComplete,
+  computeStatus,
+  canAcceptQuest,
+  initialProgress,
+} from './systems/QuestTypes.js';
+export type {
+  QuestStatus,
+  QuestScope,
+  QuestRepeat,
+  KillObjective,
+  CollectObjective,
+  VisitObjective,
+  QuestObjective,
+  XpReward,
+  GoldReward,
+  ItemReward,
+  QuestReward,
+  QuestDefinition,
+  QuestProgressEntry,
+  CompletedQuestEntry,
+} from './systems/QuestTypes.js';
 
 // Dungeon types
 export {

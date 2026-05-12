@@ -1,4 +1,4 @@
-import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -36,6 +36,12 @@ export interface PlayerSaveData {
   chatDmTarget?: string;
   /** Pending gift entries awaiting accept/deny in the player's mailbox. */
   mailbox?: MailboxEntry[];
+  /** Active quests the player has accepted (status: accepted/in_progress/ready). */
+  activeQuests?: QuestProgressEntry[];
+  /** Completed (turned-in) quests history. */
+  completedQuests?: CompletedQuestEntry[];
+  /** ISO timestamp of last completion per weekly-repeatable quest ID. */
+  weeklyCompletions?: Record<string, string>;
 }
 
 /**

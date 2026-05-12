@@ -327,6 +327,16 @@ export class GameClient {
     this.sendRaw({ type: 'shop_sell', itemId, quantity });
   }
 
+  // --- Quests ---
+
+  sendAcceptQuest(questId: string): void {
+    this.sendRaw({ type: 'accept_quest', questId });
+  }
+
+  sendTurnInQuest(questId: string): void {
+    this.sendRaw({ type: 'turn_in_quest', questId });
+  }
+
   // --- View Player ---
 
   sendViewPlayer(username: string): void {

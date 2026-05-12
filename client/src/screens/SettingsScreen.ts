@@ -1,6 +1,7 @@
 import type { Screen } from './ScreenManager';
 import { PATCH_NOTES } from './PatchNotes';
 import { logout } from '../network/AuthClient';
+import { getQuestHintsEnabled, setQuestHintsEnabled } from '../settings/UserSettings';
 
 export class SettingsScreen implements Screen {
   private container: HTMLElement;
@@ -15,6 +16,18 @@ export class SettingsScreen implements Screen {
         <div class="settings-header">
           <div class="settings-icon">⚙</div>
           <h2 class="settings-title">Settings</h2>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Player options</div>
+          <ul class="settings-options-list">
+            <li class="settings-option-row">
+              <label class="settings-option">
+                <input type="checkbox" id="toggle-quest-hints" ${getQuestHintsEnabled() ? 'checked' : ''}>
+                <span class="settings-option-label">Quest hints</span>
+              </label>
+              <div class="settings-option-desc">Highlight quest-giver rooms and visit objectives on the map.</div>
+            </li>
+          </ul>
         </div>
         <div class="settings-buttons">
           <button class="pixel-btn settings-btn" id="btn-patch-notes">Patch Notes</button>
@@ -52,6 +65,11 @@ export class SettingsScreen implements Screen {
       patchPanel.style.display = 'none';
       buttonsSection.style.display = '';
       headerSection.style.display = '';
+    });
+
+    const questHintsToggle = this.container.querySelector('#toggle-quest-hints') as HTMLInputElement;
+    questHintsToggle.addEventListener('change', () => {
+      setQuestHintsEnabled(questHintsToggle.checked);
     });
 
     const btnSignOut = this.container.querySelector('#btn-sign-out') as HTMLButtonElement;

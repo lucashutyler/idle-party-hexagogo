@@ -1,4 +1,5 @@
 import type { TileClickInfo } from '../scenes/WorldMapScene';
+import type { NpcDefinition } from '@idle-party-rpg/shared';
 import { CLASS_ICONS, UNKNOWN_CLASS_ICON } from '@idle-party-rpg/shared';
 
 export class TileInfoModal {
@@ -7,18 +8,23 @@ export class TileInfoModal {
   private onMove: (col: number, row: number) => void;
   private onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void;
   private onShopClick?: () => void;
+  private onNpcTalk?: (npc: NpcDefinition) => void;
   /** Whether the player's current tile has a shop. Set externally before showing. */
   hasShop = false;
+  /** NPC on the player's current tile (if any). Set externally before showing. */
+  npc: NpcDefinition | null = null;
 
   constructor(
     parent: HTMLElement,
     onMove: (col: number, row: number) => void,
     onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void,
     onShopClick?: () => void,
+    onNpcTalk?: (npc: NpcDefinition) => void,
   ) {
     this.onMove = onMove;
     this.onUserClick = onUserClick;
     this.onShopClick = onShopClick;
+    this.onNpcTalk = onNpcTalk;
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'tile-modal-overlay';
@@ -71,13 +77,22 @@ export class TileInfoModal {
       ? `<div class="tile-modal-room-name">${this.escapeHtml(info.roomName)}</div>`
       : `<div class="tile-modal-room-name tile-modal-room-unexplored">Unexplored room</div>`;
 
+    const npcHtml = this.npc
+      ? `<div class="tile-modal-npc">
+           <span class="tile-modal-npc-emoji">${this.escapeHtml(this.npc.emoji)}</span>
+           <span class="tile-modal-npc-name">${this.escapeHtml(this.npc.name)}</span>
+         </div>`
+      : '';
+
     this.modal.innerHTML = `
       <div class="tile-modal-header">
         <span class="tile-modal-title">${this.escapeHtml(info.zoneName)}</span>
       </div>
       ${roomNameHtml}
+      ${npcHtml}
       ${playerList}
       <div class="tile-modal-actions">
+        ${this.npc ? `<button class="tile-modal-btn tile-modal-npc-talk" style="background:#7ab8ff;color:#000;">Talk</button>` : ''}
         ${this.hasShop ? '<button class="tile-modal-btn tile-modal-shop" style="background:#e9bc18;color:#000;">Shop</button>' : ''}
         ${(info.dungeonId && info.isCurrentTile)
           ? '<button class="tile-modal-btn tile-modal-dungeon" disabled title="Coming soon!">🚧 Enter Dungeon</button>'
@@ -99,6 +114,12 @@ export class TileInfoModal {
     this.modal.querySelector('.tile-modal-shop')?.addEventListener('click', () => {
       this.hide();
       this.onShopClick?.();
+    });
+
+    this.modal.querySelector('.tile-modal-npc-talk')?.addEventListener('click', () => {
+      const npc = this.npc;
+      this.hide();
+      if (npc) this.onNpcTalk?.(npc);
     });
 
     // Wire clickable usernames to open popup
