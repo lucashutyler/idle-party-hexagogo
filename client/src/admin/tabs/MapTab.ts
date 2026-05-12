@@ -501,6 +501,25 @@ export class MapTab implements Tab {
     c.stroke();
     this.drawNonTraversableMarker(c, tile, sx, sy, zoom, content);
     this.drawStartMarker(c, tile, sx, sy, zoom, content);
+    this.drawNpcMarker(c, tile, sx, sy, zoom, content);
+  }
+
+  private drawNpcMarker(
+    c: CanvasRenderingContext2D, tile: HexTile, sx: number, sy: number, zoom: number,
+    content: ReturnType<AdminContext['getDisplayContent']>,
+  ): void {
+    if (!content) return;
+    const offset = cubeToOffset(tile.coord);
+    const tileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
+    if (!tileDef?.npcId) return;
+    const npc = content.npcs?.[tileDef.npcId];
+    if (!npc) return;
+    c.save();
+    c.font = `${Math.max(8, 14 * zoom)}px sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(npc.emoji, sx + HEX_SIZE * 0.4 * zoom, sy - HEX_SIZE * 0.4 * zoom);
+    c.restore();
   }
 
   private drawHex(c: CanvasRenderingContext2D, corners: { x: number; y: number }[], sx: number, sy: number, zoom: number, scale = 1.0): void {
@@ -600,6 +619,14 @@ export class MapTab implements Tab {
     const shopOptions = `<option value="">(none)</option>` + shops.map(s =>
       `<option value="${s.id}"${s.id === (tile.shopId ?? '') ? ' selected' : ''}>${escapeHtml(s.name)}</option>`
     ).join('');
+    const npcs = content ? Object.values(content.npcs ?? {}) : [];
+    const npcOptions = `<option value="">(none)</option>` + npcs.map(n =>
+      `<option value="${n.id}"${n.id === (tile.npcId ?? '') ? ' selected' : ''}>${escapeHtml(`${n.emoji} ${n.name}`)}</option>`
+    ).join('');
+    const dungeons = content ? Object.values(content.dungeons ?? {}) : [];
+    const dungeonOptions = `<option value="">(none)</option>` + dungeons.map(d =>
+      `<option value="${d.id}"${d.id === (tile.dungeonId ?? '') ? ' selected' : ''}>${escapeHtml(d.name)}</option>`
+    ).join('');
 
     let startBtnHtml = '';
     if (!readOnly) {
@@ -624,6 +651,8 @@ export class MapTab implements Tab {
         <label>Type<select id="sidebar-type"${disabled}>${typeOptions}</select></label>
         <label>Zone<select id="sidebar-zone"${disabled}>${zoneOptions}</select></label>
         <label>Shop<select id="sidebar-shop"${disabled}>${shopOptions}</select></label>
+        <label>NPC<select id="sidebar-npc"${disabled}>${npcOptions}</select></label>
+        <label>Dungeon<select id="sidebar-dungeon"${disabled}>${dungeonOptions}</select></label>
         <label>Required Item (override)
           <select id="sidebar-required-item"${disabled}>
             <option value="">(use type default)</option>
@@ -664,6 +693,21 @@ export class MapTab implements Tab {
       if (!this.selectedTile) return;
       if (shopSelect.value) this.selectedTile.shopId = shopSelect.value;
       else delete this.selectedTile.shopId;
+      this.scheduleSave(ctx);
+    });
+    const npcSelect = document.getElementById('sidebar-npc') as HTMLSelectElement;
+    npcSelect?.addEventListener('change', () => {
+      if (!this.selectedTile) return;
+      if (npcSelect.value) this.selectedTile.npcId = npcSelect.value;
+      else delete this.selectedTile.npcId;
+      this.scheduleSave(ctx);
+      this.draw(ctx);
+    });
+    const dungeonSelect = document.getElementById('sidebar-dungeon') as HTMLSelectElement;
+    dungeonSelect?.addEventListener('change', () => {
+      if (!this.selectedTile) return;
+      if (dungeonSelect.value) this.selectedTile.dungeonId = dungeonSelect.value;
+      else delete this.selectedTile.dungeonId;
       this.scheduleSave(ctx);
     });
     const requiredItemSelect = document.getElementById('sidebar-required-item') as HTMLSelectElement;

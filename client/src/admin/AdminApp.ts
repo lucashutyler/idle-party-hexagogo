@@ -12,6 +12,9 @@ import { fetchAdmin } from './api';
 import { applyUiSize, getUiSize, setUiSize } from './components/UiSize';
 import { closeAllModals } from './components/Modal';
 
+/** Sentinel version id for the "Live (deployed)" view — pulls from the live ContentStore, read-only. */
+const LIVE_VERSION_ID = '__live__';
+
 import type { Tab } from './tabs/Tab';
 import { OverviewTab } from './tabs/OverviewTab';
 import { AccountsTab } from './tabs/AccountsTab';
@@ -20,9 +23,12 @@ import { ItemsTab } from './tabs/ItemsTab';
 import { SetsTab } from './tabs/SetsTab';
 import { ShopsTab } from './tabs/ShopsTab';
 import { RecipesTab } from './tabs/RecipesTab';
+import { NpcsTab } from './tabs/NpcsTab';
+import { QuestsTab } from './tabs/QuestsTab';
 import { ZonesTab } from './tabs/ZonesTab';
 import { EncountersTab } from './tabs/EncountersTab';
 import { TileTypesTab } from './tabs/TileTypesTab';
+import { DungeonsTab } from './tabs/DungeonsTab';
 import { MapTab } from './tabs/MapTab';
 import { VersionsTab } from './tabs/VersionsTab';
 import { XpTableTab } from './tabs/XpTableTab';
@@ -47,9 +53,12 @@ export class AdminApp implements AdminContext {
     'sets':       new SetsTab(),
     'shops':      new ShopsTab(),
     'recipes':    new RecipesTab(),
+    'npcs':       new NpcsTab(),
+    'quests':     new QuestsTab(),
     'zones':      new ZonesTab(),
     'encounters': new EncountersTab(),
     'tile-types': new TileTypesTab(),
+    'dungeons':   new DungeonsTab(),
     'map':        new MapTab(),
     'versions':   new VersionsTab(),
     'xp-table':   new XpTableTab(),
@@ -88,12 +97,12 @@ export class AdminApp implements AdminContext {
       this.activeVersionId = versionsData.activeVersionId ?? null;
 
       const savedVersionId = sessionStorage.getItem('adminVersionId');
-      const initialVersionId = (savedVersionId && this.versions.some(v => v.id === savedVersionId))
-        ? savedVersionId
-        : (this.activeVersionId ?? this.versions[0]?.id ?? null);
-      if (initialVersionId) {
-        await this.loadVersionContent(initialVersionId);
-      }
+      const savedIsLive = savedVersionId === LIVE_VERSION_ID;
+      const savedIsKnown = savedVersionId && this.versions.some(v => v.id === savedVersionId);
+      const initialVersionId = savedIsLive
+        ? LIVE_VERSION_ID
+        : (savedIsKnown ? savedVersionId : (this.activeVersionId ?? this.versions[0]?.id ?? LIVE_VERSION_ID));
+      await this.loadVersionContent(initialVersionId);
 
       const tabFromUrl = this.getTabFromUrl();
       if (tabFromUrl) {
@@ -132,12 +141,13 @@ export class AdminApp implements AdminContext {
   }
 
   isReadOnly(): boolean {
+    if (this.selectedVersionId === LIVE_VERSION_ID) return true;
     const version = this.versions.find(v => v.id === this.selectedVersionId);
     return !version || version.status !== 'draft';
   }
 
   versionQueryParam(): string {
-    if (this.selectedVersionId) {
+    if (this.selectedVersionId && this.selectedVersionId !== LIVE_VERSION_ID) {
       const version = this.versions.find(v => v.id === this.selectedVersionId);
       if (version?.status === 'draft') return `?versionId=${this.selectedVersionId}`;
     }
@@ -260,19 +270,23 @@ export class AdminApp implements AdminContext {
   }
 
   private renderStatusBar(): string {
-    const version = this.versions.find(v => v.id === this.selectedVersionId) ?? null;
+    const isLive = this.selectedVersionId === LIVE_VERSION_ID;
+    const version = isLive ? null : (this.versions.find(v => v.id === this.selectedVersionId) ?? null);
     const isDraft = version?.status === 'draft';
     const isActive = !!version?.isActive;
     const isPublished = version?.status === 'published' && !isActive;
 
-    const statusBadge = !version
-      ? '<span class="version-badge version-badge-none">No version</span>'
-      : isActive
-        ? '<span class="version-badge version-badge-active">Active</span>'
-        : isPublished
-          ? '<span class="version-badge version-badge-published">Published</span>'
-          : '<span class="version-badge version-badge-draft">Draft</span>';
+    const statusBadge = isLive
+      ? '<span class="version-badge version-badge-active">Live (read-only)</span>'
+      : !version
+        ? '<span class="version-badge version-badge-none">No version</span>'
+        : isActive
+          ? '<span class="version-badge version-badge-active">Active</span>'
+          : isPublished
+            ? '<span class="version-badge version-badge-published">Published</span>'
+            : '<span class="version-badge version-badge-draft">Draft</span>';
 
+    const liveOption = `<option value="${LIVE_VERSION_ID}"${isLive ? ' selected' : ''}>⚡ Live (deployed)</option>`;
     const versionOptions = this.versions.map(v => {
       const tag = v.isActive ? '★' : v.status === 'draft' ? '✎' : '✓';
       return `<option value="${v.id}"${v.id === this.selectedVersionId ? ' selected' : ''}>${tag} ${this.escapeAttr(v.name)}</option>`;
@@ -291,7 +305,8 @@ export class AdminApp implements AdminContext {
         <label class="admin-status-version">
           <span class="admin-status-label">Version</span>
           <select id="status-version-select">
-            ${versionOptions || '<option>(none)</option>'}
+            ${liveOption}
+            ${versionOptions}
           </select>
         </label>
         ${statusBadge}
@@ -343,15 +358,20 @@ export class AdminApp implements AdminContext {
     });
 
     document.getElementById('status-new-draft-btn')?.addEventListener('click', async () => {
-      const seed = this.versions.find(v => v.id === this.selectedVersionId)?.name ?? '';
+      const isLive = this.selectedVersionId === LIVE_VERSION_ID;
+      const seedVersion = isLive ? null : this.versions.find(v => v.id === this.selectedVersionId);
+      const seed = seedVersion?.name ?? '';
       const name = prompt('Draft name:', seed ? `${seed} (copy)` : '');
       if (!name) return;
+      // From LIVE: send null so the server snapshots the actual live ContentStore state
+      // (matches what the user is currently viewing). Otherwise fork from the selected version.
+      const fromVersionId = isLive ? null : (this.selectedVersionId ?? this.activeVersionId);
       try {
         const res = await fetch('/api/admin/versions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ name, fromVersionId: this.selectedVersionId ?? this.activeVersionId }),
+          body: JSON.stringify({ name, fromVersionId }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to create draft');
@@ -449,8 +469,11 @@ export class AdminApp implements AdminContext {
   private async loadVersionContent(versionId: string): Promise<void> {
     this.selectedVersionId = versionId;
     sessionStorage.setItem('adminVersionId', versionId);
+    const url = versionId === LIVE_VERSION_ID
+      ? '/api/admin/content'
+      : `/api/admin/versions/${versionId}/content`;
     try {
-      this.versionContent = await fetchAdmin<ContentData>(`/api/admin/versions/${versionId}/content`);
+      this.versionContent = await fetchAdmin<ContentData>(url);
     } catch {
       this.versionContent = null;
     }

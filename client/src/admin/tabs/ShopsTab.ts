@@ -15,17 +15,17 @@ export class ShopsTab implements Tab {
     const readOnly = ctx.isReadOnly();
 
     const rows = shops.map(s => {
-      const actions = readOnly ? '' : `
-        <td class="admin-actions-cell">
-          <button class="admin-btn admin-btn-sm shop-edit-btn" data-id="${s.id}">Edit</button>
-          <button class="admin-btn admin-btn-sm admin-btn-danger shop-delete-btn" data-id="${s.id}">Del</button>
-        </td>
-      `;
+      const actions = readOnly
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm shop-view-btn" data-id="${s.id}">View</button></td>`
+        : `<td class="admin-actions-cell">
+            <button class="admin-btn admin-btn-sm shop-edit-btn" data-id="${s.id}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger shop-delete-btn" data-id="${s.id}">Del</button>
+          </td>`;
       return `<tr><td>${escapeHtml(s.name)}</td><td>${s.inventory.length}</td>${actions}</tr>`;
     }).join('');
 
     const addBtn = readOnly ? '' : '<button class="admin-btn" id="shop-add-btn">+ Add Shop</button>';
-    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+    const actionsHeader = '<th>Actions</th>';
 
     container.innerHTML = `
       <div class="admin-page">
@@ -43,7 +43,7 @@ export class ShopsTab implements Tab {
     `;
 
     container.querySelector('#shop-add-btn')?.addEventListener('click', () => this.openForm(null, ctx));
-    container.querySelectorAll<HTMLButtonElement>('.shop-edit-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.shop-edit-btn, .shop-view-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const shop = (ctx.getDisplayContent()?.shops ?? {})[btn.dataset.id!];
         if (shop) this.openForm(shop, ctx);
@@ -58,6 +58,7 @@ export class ShopsTab implements Tab {
     const content = ctx.getDisplayContent();
     if (!content) return;
     const isNew = !shop;
+    const readOnly = ctx.isReadOnly();
     const s = shop ?? { id: '', name: '', inventory: [] };
     // Alphabetize items by name (case-insensitive) so the inventory list is easy to scan.
     const items = Object.values(content.items)
@@ -82,7 +83,7 @@ export class ShopsTab implements Tab {
       `;
     }).join('');
 
-    const bodyHtml = `
+    const formHtml = `
       <input type="hidden" id="shf-id" value="${escapeHtml(s.id)}">
       <div class="admin-form-grid">
         <label>Name<input type="text" id="shf-name" value="${escapeHtml(s.name)}"></label>
@@ -99,13 +100,22 @@ export class ShopsTab implements Tab {
         </div>
         <div class="admin-checklist admin-checklist-tall" id="shf-item-list">${itemRows}</div>
       </fieldset>
-      <div class="admin-modal-actions">
-        <button class="admin-btn" id="shf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
-        <button class="admin-btn admin-btn-secondary" id="shf-cancel" type="button">Cancel</button>
-      </div>
     `;
+    const actionsHtml = readOnly
+      ? `<div class="admin-modal-actions admin-modal-actions-readonly">
+          <span class="admin-form-hint admin-modal-readonly-hint">* Create a new draft to edit</span>
+          <button class="admin-btn admin-btn-secondary" id="shf-cancel" type="button">Close</button>
+        </div>`
+      : `<div class="admin-modal-actions">
+          <button class="admin-btn" id="shf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="shf-cancel" type="button">Cancel</button>
+        </div>`;
+    const bodyHtml = readOnly
+      ? `<fieldset class="admin-form-readonly-wrap" disabled>${formHtml}</fieldset>${actionsHtml}`
+      : `${formHtml}${actionsHtml}`;
+    const titlePrefix = isNew ? 'Add' : (readOnly ? 'View' : 'Edit');
     const modal = openModal({
-      title: isNew ? 'Add Shop' : `Edit: ${s.name}`,
+      title: isNew ? 'Add Shop' : `${titlePrefix}: ${s.name}`,
       bodyHtml,
       width: '720px',
     });

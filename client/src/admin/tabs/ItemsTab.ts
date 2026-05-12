@@ -61,12 +61,12 @@ export class ItemsTab implements Tab {
       }
       const setName = itemSetMap.get(i.id) ?? '—';
 
-      const actions = readOnly ? '' : `
-        <td class="admin-actions-cell">
-          <button class="admin-btn admin-btn-sm item-edit-btn" data-id="${i.id}">Edit</button>
-          <button class="admin-btn admin-btn-sm admin-btn-danger item-delete-btn" data-id="${i.id}">Del</button>
-        </td>
-      `;
+      const actions = readOnly
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm item-view-btn" data-id="${i.id}">View</button></td>`
+        : `<td class="admin-actions-cell">
+            <button class="admin-btn admin-btn-sm item-edit-btn" data-id="${i.id}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger item-delete-btn" data-id="${i.id}">Del</button>
+          </td>`;
 
       const consumableTag = i.consumable ? ' <span class="admin-form-hint">(consumable)</span>' : '';
       const emojiSwatch = i.iconEmoji
@@ -87,7 +87,7 @@ export class ItemsTab implements Tab {
     }).join('');
 
     const addBtn = readOnly ? '' : '<button class="admin-btn" id="item-add-btn">+ Add Item</button>';
-    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+    const actionsHeader = '<th>Actions</th>';
 
     container.innerHTML = `
       <div class="admin-page">
@@ -124,7 +124,7 @@ export class ItemsTab implements Tab {
     container.querySelector('#item-add-btn')?.addEventListener('click', () => {
       this.openForm(null, ctx);
     });
-    container.querySelectorAll<HTMLButtonElement>('.item-edit-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.item-edit-btn, .item-view-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id!;
         const item = ctx.getDisplayContent()?.items[id];
@@ -141,6 +141,7 @@ export class ItemsTab implements Tab {
 
   private openForm(item: ItemDefinition | null, ctx: AdminContext): void {
     const isNew = !item;
+    const readOnly = ctx.isReadOnly();
     const i = item ?? { id: '', name: '', rarity: 'common' as const };
 
     const rarityOptions = RARITIES.map(r =>
@@ -198,21 +199,31 @@ export class ItemsTab implements Tab {
       <fieldset class="admin-form-fieldset">
         <legend>Artwork</legend>
         ${artworkPreview}
-        <input type="file" id="if-artwork-file" accept="image/png">
-        <div class="admin-modal-actions">
-          <button class="admin-btn admin-btn-sm" id="if-artwork-upload" type="button">Upload</button>
-          <button class="admin-btn admin-btn-sm admin-btn-danger" id="if-artwork-remove" type="button">Remove Artwork</button>
-        </div>
+        ${readOnly ? '' : `
+          <input type="file" id="if-artwork-file" accept="image/png">
+          <div class="admin-modal-actions">
+            <button class="admin-btn admin-btn-sm" id="if-artwork-upload" type="button">Upload</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger" id="if-artwork-remove" type="button">Remove Artwork</button>
+          </div>
+        `}
       </fieldset>
-      <div class="admin-modal-actions">
-        <button class="admin-btn" id="if-save" type="button">${isNew ? 'Add' : 'Save'}</button>
-        <button class="admin-btn admin-btn-secondary" id="if-cancel" type="button">Cancel</button>
-      </div>
     `;
-
+    const actionsHtml = readOnly
+      ? `<div class="admin-modal-actions admin-modal-actions-readonly">
+          <span class="admin-form-hint admin-modal-readonly-hint">* Create a new draft to edit</span>
+          <button class="admin-btn admin-btn-secondary" id="if-cancel" type="button">Close</button>
+        </div>`
+      : `<div class="admin-modal-actions">
+          <button class="admin-btn" id="if-save" type="button">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="if-cancel" type="button">Cancel</button>
+        </div>`;
+    const wrappedBody = readOnly
+      ? `<fieldset class="admin-form-readonly-wrap" disabled>${bodyHtml}</fieldset>${actionsHtml}`
+      : `${bodyHtml}${actionsHtml}`;
+    const titlePrefix = isNew ? 'Add' : (readOnly ? 'View' : 'Edit');
     const modal = openModal({
-      title: isNew ? 'Add Item' : `Edit: ${i.name}`,
-      bodyHtml,
+      title: isNew ? 'Add Item' : `${titlePrefix}: ${i.name}`,
+      bodyHtml: wrappedBody,
       width: '720px',
     });
     const root = modal.body;

@@ -18,6 +18,18 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
     ],
   },
   {
+    version: '2026.05.09.2',
+    notes: [
+      'NPCs have arrived! Rooms with a 💬 badge have someone to talk to — chat them up for quests. Slay, collect, or visit to earn XP, gold, and item rewards',
+    ],
+  },
+  {
+    version: '2026.05.09.1',
+    notes: [
+      'Rooms can now link to Dungeons, but the feature is still under construction. Expect big challenges ahead!',
+    ],
+  },
+  {
     version: '2026.05.02.1',
     notes: [
       'Bug fix: Priest Blessed Arms holy damage was being mislabeled as physical damage in the combat log when the physical hit was fully resisted. The HP math was always correct; now the log correctly shows "0 physical + X holy" so it\'s clear holy damage isn\'t blocked by physical resistance',

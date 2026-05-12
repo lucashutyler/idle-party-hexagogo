@@ -288,6 +288,15 @@ export class PlayerManager {
     };
   }
 
+  /** Get the size of the player's current party (1 = solo). */
+  getPartySize(username: string): number {
+    const session = this.sessions.get(username);
+    const partyId = session?.getPartyId();
+    if (!partyId) return 1;
+    const party = this.parties.getParty(partyId);
+    return party?.members.length ?? 1;
+  }
+
   sendStateToPlayer(username: string): void {
     const wsSet = this.playerConnections.get(username);
     if (!wsSet || wsSet.size === 0) return;

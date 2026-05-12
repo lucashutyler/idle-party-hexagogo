@@ -1,4 +1,4 @@
-import type { WorldTileDefinition, TileTypeDefinition } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, TileTypeDefinition, NpcDefinition } from '@idle-party-rpg/shared';
 
 /**
  * Client-side cache for world data.
@@ -8,6 +8,7 @@ import type { WorldTileDefinition, TileTypeDefinition } from '@idle-party-rpg/sh
 export class WorldCache {
   private tiles = new Map<string, WorldTileDefinition>();
   private tileTypeDefs = new Map<string, TileTypeDefinition>();
+  private npcs = new Map<string, NpcDefinition>();
   private startTile: { col: number; row: number } = { col: 0, row: 0 };
 
   /** Tile GUID → offset key ("col,row") for fast unlock lookups. */
@@ -22,12 +23,15 @@ export class WorldCache {
   /** Previous unlock count — used to detect changes. */
   private lastUnlockedCount = 0;
 
-  /** Load initial world data from the server. */
+  /** Load initial world data + NPC catalog from the server. */
   async loadWorld(): Promise<void> {
-    const res = await fetch('/api/world', { credentials: 'include' });
-    if (!res.ok) throw new Error(`Failed to load world: ${res.status}`);
+    const [worldRes, npcsRes] = await Promise.all([
+      fetch('/api/world', { credentials: 'include' }),
+      fetch('/api/npcs', { credentials: 'include' }),
+    ]);
+    if (!worldRes.ok) throw new Error(`Failed to load world: ${worldRes.status}`);
 
-    const data = await res.json() as {
+    const data = await worldRes.json() as {
       startTile: { col: number; row: number };
       tiles: WorldTileDefinition[];
       tileTypes?: Record<string, TileTypeDefinition>;
@@ -46,6 +50,14 @@ export class WorldCache {
     if (data.tileTypes) {
       for (const def of Object.values(data.tileTypes)) {
         this.tileTypeDefs.set(def.id, def);
+      }
+    }
+
+    this.npcs.clear();
+    if (npcsRes.ok) {
+      const npcData = await npcsRes.json() as { npcs: Record<string, NpcDefinition> };
+      for (const def of Object.values(npcData.npcs ?? {})) {
+        this.npcs.set(def.id, def);
       }
     }
   }
@@ -109,6 +121,11 @@ export class WorldCache {
   /** Get all tile type definitions. */
   getAllTileTypeDefs(): Map<string, TileTypeDefinition> {
     return this.tileTypeDefs;
+  }
+
+  /** Get an NPC definition by ID. */
+  getNpc(id: string): NpcDefinition | undefined {
+    return this.npcs.get(id);
   }
 
   /** Check if world data has been loaded. */

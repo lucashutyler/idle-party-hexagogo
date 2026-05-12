@@ -151,6 +151,20 @@ export interface ServerStateMessage {
   shopDefinition?: ShopDefinition;
   /** Crafting state: visible recipes, queue, and progress on the active job. */
   crafting?: ClientCraftingState;
+  /** Active quests the player has accepted (with live progress / status). */
+  activeQuests?: import('./QuestTypes.js').QuestProgressEntry[];
+  /** Completed quest history (most recent at the end). */
+  completedQuests?: import('./QuestTypes.js').CompletedQuestEntry[];
+  /** Quest definitions the player is currently aware of (active + offered by NPC at current room). */
+  questDefinitions?: Record<string, import('./QuestTypes.js').QuestDefinition>;
+  /** Quest IDs offered by an NPC at the player's current room (for popup display). */
+  offeredQuestIds?: string[];
+  /** Display-name lookups for IDs referenced by the player's active/offered quests. */
+  questResolutions?: {
+    monsters: Record<string, string>;
+    items: Record<string, string>;
+    tiles: Record<string, { name: string; col: number; row: number }>;
+  };
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
 }
@@ -280,6 +294,16 @@ export interface ClientCraftCancelMessage {
   index: number;
 }
 
+export interface ClientAcceptQuestMessage {
+  type: 'accept_quest';
+  questId: string;
+}
+
+export interface ClientTurnInQuestMessage {
+  type: 'turn_in_quest';
+  questId: string;
+}
+
 export interface ClientSetClassMessage {
   type: 'set_class';
   className: string;
@@ -303,4 +327,6 @@ export type ClientMessage =
   | ClientShopSellMessage
   | ClientCraftQueueMessage
   | ClientCraftCancelMessage
+  | ClientAcceptQuestMessage
+  | ClientTurnInQuestMessage
   | ClientSocialMessage;

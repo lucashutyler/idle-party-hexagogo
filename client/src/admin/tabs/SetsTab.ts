@@ -33,12 +33,12 @@ export class SetsTab implements Tab {
       const classes = s.classRestriction && s.classRestriction.length > 0
         ? s.classRestriction.join(', ')
         : 'Any';
-      const actions = readOnly ? '' : `
-        <td class="admin-actions-cell">
-          <button class="admin-btn admin-btn-sm set-edit-btn" data-id="${s.id}">Edit</button>
-          <button class="admin-btn admin-btn-sm admin-btn-danger set-delete-btn" data-id="${s.id}">Del</button>
-        </td>
-      `;
+      const actions = readOnly
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm set-view-btn" data-id="${s.id}">View</button></td>`
+        : `<td class="admin-actions-cell">
+            <button class="admin-btn admin-btn-sm set-edit-btn" data-id="${s.id}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger set-delete-btn" data-id="${s.id}">Del</button>
+          </td>`;
       return `
         <tr>
           <td>${escapeHtml(getSetDisplayName(s))}</td>
@@ -51,7 +51,7 @@ export class SetsTab implements Tab {
     }).join('');
 
     const addBtn = readOnly ? '' : '<button class="admin-btn" id="set-add-btn">+ Add Set</button>';
-    const actionsHeader = readOnly ? '' : '<th>Actions</th>';
+    const actionsHeader = '<th>Actions</th>';
 
     container.innerHTML = `
       <div class="admin-page">
@@ -71,7 +71,7 @@ export class SetsTab implements Tab {
     `;
 
     container.querySelector('#set-add-btn')?.addEventListener('click', () => this.openForm(null, ctx));
-    container.querySelectorAll<HTMLButtonElement>('.set-edit-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.set-edit-btn, .set-view-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id!;
         const set = (ctx.getDisplayContent()?.sets ?? {})[id];
@@ -91,6 +91,7 @@ export class SetsTab implements Tab {
     if (!content) return;
 
     const isNew = !rawSet;
+    const readOnly = ctx.isReadOnly();
     const s = rawSet ? migrateLegacySet(rawSet) : { id: '', name: '', itemIds: [], breakpoints: [] as SetBreakpoint[] };
     this.setFormBreakpoints = s.breakpoints.map(bp => ({
       piecesRequired: bp.piecesRequired,
@@ -116,7 +117,7 @@ export class SetsTab implements Tab {
       </label>`
     ).join('');
 
-    const bodyHtml = `
+    const formHtml = `
       <input type="hidden" id="sf-id" value="${escapeHtml(s.id)}">
       <div class="admin-form-grid">
         <label>Name<input type="text" id="sf-name" value="${escapeHtml(s.name)}"></label>
@@ -131,18 +132,26 @@ export class SetsTab implements Tab {
         <div class="admin-checklist">${itemCheckboxes}</div>
       </fieldset>
       <fieldset class="admin-form-fieldset">
-        <legend>Breakpoints <button class="admin-btn admin-btn-sm" id="sf-add-breakpoint" type="button">+ Add Breakpoint</button></legend>
+        <legend>Breakpoints ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="sf-add-breakpoint" type="button">+ Add Breakpoint</button>'}</legend>
         <div class="admin-form-hint">Each breakpoint unlocks at the listed piece count. Bonuses do NOT stack across tiers — the highest unlocked tier replaces lower ones.</div>
         <div id="sf-breakpoints-container"></div>
       </fieldset>
-      <div class="admin-modal-actions">
-        <button class="admin-btn" id="sf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
-        <button class="admin-btn admin-btn-secondary" id="sf-cancel" type="button">Cancel</button>
-      </div>
     `;
-
+    const actionsHtml = readOnly
+      ? `<div class="admin-modal-actions admin-modal-actions-readonly">
+          <span class="admin-form-hint admin-modal-readonly-hint">* Create a new draft to edit</span>
+          <button class="admin-btn admin-btn-secondary" id="sf-cancel" type="button">Close</button>
+        </div>`
+      : `<div class="admin-modal-actions">
+          <button class="admin-btn" id="sf-save" type="button">${isNew ? 'Add' : 'Save'}</button>
+          <button class="admin-btn admin-btn-secondary" id="sf-cancel" type="button">Cancel</button>
+        </div>`;
+    const bodyHtml = readOnly
+      ? `<fieldset class="admin-form-readonly-wrap" disabled>${formHtml}</fieldset>${actionsHtml}`
+      : `${formHtml}${actionsHtml}`;
+    const titlePrefix = isNew ? 'Add' : (readOnly ? 'View' : 'Edit');
     const modal = openModal({
-      title: isNew ? 'Add Set' : `Edit: ${s.name}`,
+      title: isNew ? 'Add Set' : `${titlePrefix}: ${s.name}`,
       bodyHtml,
       width: '720px',
     });

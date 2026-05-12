@@ -226,6 +226,8 @@ export type {
   ClientCraftQueueMessage,
   ClientCraftCancelMessage,
   ClientCraftingState,
+  ClientAcceptQuestMessage,
+  ClientTurnInQuestMessage,
   PlayerProfileMessage,
   ServerMessage,
   ClientMessage,
@@ -286,6 +288,48 @@ export type {
   CompletedJobEvent,
   ActiveJobProgress,
 } from './systems/CraftingTypes.js';
+
+// NPC types
+export { SEED_NPCS } from './systems/NpcTypes.js';
+export type { NpcDefinition } from './systems/NpcTypes.js';
+
+// Quest types
+export {
+  getObjectiveTarget,
+  objectivesComplete,
+  computeStatus,
+  canAcceptQuest,
+  initialProgress,
+} from './systems/QuestTypes.js';
+export type {
+  QuestStatus,
+  QuestScope,
+  QuestRepeat,
+  KillObjective,
+  CollectObjective,
+  VisitObjective,
+  QuestObjective,
+  XpReward,
+  GoldReward,
+  ItemReward,
+  QuestReward,
+  QuestDefinition,
+  QuestProgressEntry,
+  CompletedQuestEntry,
+} from './systems/QuestTypes.js';
+
+// Dungeon types
+export {
+  SEED_DUNGEONS,
+  getDungeon,
+} from './systems/DungeonTypes.js';
+export type {
+  DungeonGridShape,
+  DungeonReward,
+  DungeonFloor,
+  DungeonEntryRequirements,
+  DungeonDefinition,
+} from './systems/DungeonTypes.js';
 
 // Social types
 export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';

@@ -42,6 +42,10 @@ function createFakeContentStore(): ContentStore {
     getAllSets: () => ({}),
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
+    getAllNpcs: () => ({}),
+    getNpc: () => undefined,
+    getAllQuests: () => ({}),
+    getQuest: () => undefined,
   } as unknown as ContentStore;
 }
 

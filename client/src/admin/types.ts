@@ -8,6 +8,9 @@ import type {
   ShopDefinition,
   TileTypeDefinition,
   RecipeDefinition,
+  NpcDefinition,
+  QuestDefinition,
+  DungeonDefinition,
 } from '@idle-party-rpg/shared';
 
 export interface OverviewData {
@@ -52,6 +55,9 @@ export interface ContentData {
   shops: Record<string, ShopDefinition>;
   tileTypes: Record<string, TileTypeDefinition>;
   recipes: Record<string, RecipeDefinition>;
+  npcs: Record<string, NpcDefinition>;
+  quests: Record<string, QuestDefinition>;
+  dungeons: Record<string, DungeonDefinition>;
   world: WorldData;
 }
 
@@ -73,9 +79,12 @@ export type TabId =
   | 'sets'
   | 'shops'
   | 'recipes'
+  | 'npcs'
+  | 'quests'
   | 'zones'
   | 'encounters'
   | 'tile-types'
+  | 'dungeons'
   | 'map'
   | 'versions'
   | 'xp-table';
@@ -94,9 +103,12 @@ export const TABS: TabDef[] = [
   { id: 'sets',       label: 'Sets',       icon: '✦' },
   { id: 'shops',      label: 'Shops',      icon: '¤' },
   { id: 'recipes',    label: 'Recipes',    icon: '⚒' },
+  { id: 'npcs',       label: 'NPCs',       icon: '☺' },
+  { id: 'quests',     label: 'Quests',     icon: '!' },
   { id: 'zones',      label: 'Zones',      icon: '○' },
   { id: 'encounters', label: 'Encounters', icon: '⚔' },
   { id: 'tile-types', label: 'Tile Types', icon: '■' },
+  { id: 'dungeons',   label: 'Dungeons',   icon: '⛬' },
   { id: 'map',        label: 'Map',        icon: '⌖' },
   { id: 'versions',   label: 'Versions',   icon: '⧉' },
   { id: 'xp-table',   label: 'XP Table',   icon: '✨' },

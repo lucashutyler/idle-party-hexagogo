@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, TileTypeDefinition, RecipeDefinition } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, TileTypeDefinition, RecipeDefinition, NpcDefinition, QuestDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
 
 export type VersionStatus = 'draft' | 'published';
 
@@ -14,6 +14,9 @@ export interface ContentSnapshot {
   shops?: ShopDefinition[];
   tileTypes?: TileTypeDefinition[];
   recipes?: RecipeDefinition[];
+  npcs?: NpcDefinition[];
+  quests?: QuestDefinition[];
+  dungeons?: DungeonDefinition[];
   world: WorldData;
 }
 
@@ -170,6 +173,15 @@ export class VersionStore {
     }
     if (!snapshot.recipes) {
       snapshot.recipes = [];
+    }
+    if (!snapshot.npcs) {
+      snapshot.npcs = [];
+    }
+    if (!snapshot.quests) {
+      snapshot.quests = [];
+    }
+    if (!snapshot.dungeons) {
+      snapshot.dungeons = [];
     }
     const encountersMigrated = migrateSnapshotEncounterTables(snapshot);
     if (encountersMigrated) {

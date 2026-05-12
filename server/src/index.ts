@@ -122,6 +122,11 @@ app.get('/api/world', requireAuth, (req, res) => {
   res.json({ ...worldData, tileTypes: gameLoop.contentStore.getAllTileTypes() });
 });
 
+// NPC definitions (full catalog — small payload, sent once at login)
+app.get('/api/npcs', requireAuth, (_req, res) => {
+  res.json({ npcs: gameLoop.contentStore.getAllNpcs() });
+});
+
 app.use('/api/admin', createAdminRoutes({
   playerManager: () => playerManager,
   accountStore,
@@ -586,6 +591,39 @@ wss.on('connection', (ws) => {
         }
         if (!session.handleCraftCancel(msg.index)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot cancel that job' }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      // --- Quest messages ---
+
+      if (msg.type === 'accept_quest' && typeof msg.questId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        const partySize = playerManager.getPartySize(username);
+        const result = session.handleAcceptQuest(msg.questId, partySize);
+        if (!result.success) {
+          ws.send(JSON.stringify({ type: 'error', message: result.error ?? 'Cannot accept quest' }));
+          return;
+        }
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'turn_in_quest' && typeof msg.questId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        const result = session.handleTurnInQuest(msg.questId);
+        if (!result.success) {
+          ws.send(JSON.stringify({ type: 'error', message: result.error ?? 'Cannot turn in quest' }));
           return;
         }
         playerManager.sendStateToPlayer(username);
