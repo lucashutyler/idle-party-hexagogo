@@ -1,18 +1,10 @@
 # Social system
 
-A 6th bottom-nav tab for friends, guilds, parties, chat, and inter-player exchange.
+The Social bottom-nav tab opens a **fly-out submenu** with three sub-views (Party, Guild, Leaderboard). Chat moved out of Social entirely in the May 2026 overhaul — it's now a global pop-out toggled from a dedicated **Chat** nav button (see [`client.md`](client.md) → ChatPopout).
 
 ## Sub-tabs
 
-### Users
-
-All registered players (not just online) with search, sort (name/status), filter (all/room/zone/friends/guild). Online/offline status dots with group headers when sorted by status. Incoming friend requests shown as a section at the top. Click any username to open a **user popup menu** with contextual actions: Chat (DM), Guild invite, Friend request, Party invite, Block. Class icons shown next to all usernames. Data sourced from `ClientSocialState.allPlayers` (array of `PlayerListEntry` objects with `username` and optional `className`).
-
-### Guild
-
-Create guild (level 20+, 2-20 char name), leave guild. Guild invites are sent via the user popup menu. Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.
-
-### Party
+### Party (default)
 
 Every player is always in a party (solo party auto-created, max 5 members). Three-tier role hierarchy: owner > leader > member. Party creator is owner. Owner can promote/demote leaders, transfer ownership, and kick anyone. Leaders can promote members to leader, kick (including other leaders, but not owner), and move the party. Members cannot invite, kick, or move.
 
@@ -22,9 +14,19 @@ Pending invite flow: owner/leader invites → target sees pending invite with ac
 
 Party events (join, kick, promotion, demotion, ownership change) post personalized chat announcements — the subject sees "You were ..." while others see "<name> was ..." — via `PlayerManager.broadcastPartyEvent` (party channel for in-party recipients, server channel for kicked players who are no longer in the party).
 
-### Chat
+### Guild
 
-WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM). 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). Toggle filter pills to show/hide each channel. Channel selector dropdown for sending (Party/Guild disabled when unavailable; `server` is server-emit-only). DMs are initiated via the user popup menu (clicking a username) which auto-switches to Chat tab with DM pre-selected. Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel. Blocking (`dm` or `all` levels) filters messages server-side.
+Create guild (level 20+, 2-20 char name), leave guild. Guild invites are sent via the user popup menu. Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.
+
+### Leaderboard (was "Users")
+
+All registered players sorted by level descending by default (proxy for XP). Sort cycler: Top → Status → A-Z. Each row shows class icon, name, online dot, level badge. Search + filter chips (all / room / zone / friends / guild). Incoming friend requests still appear as a top section. Click any username for the user popup menu. Data sourced from `ClientSocialState.allPlayers` (`PlayerListEntry` includes `username`, `className?`, `level?`).
+
+## Chat (global pop-out)
+
+Documented in [`client.md`](client.md) under "ChatPopout (global overlay)" — covers the desktop floating-window mode, mobile full/sheet layouts, docking behavior, clickable senders + channel tags, and the body data-attributes that drive the layout. Protocol-level chat behavior:
+
+WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM). 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). Toggle filter pills to show/hide each channel. Channel selector dropdown for sending (Party/Guild disabled when unavailable; `server` is server-emit-only). Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel. Blocking (`dm` or `all` levels) filters messages server-side.
 
 ## User popup menu
 
@@ -52,7 +54,7 @@ On accept, the gift is added to the recipient's inventory (rejected with a warni
 
 ## Social badges
 
-Badge dot (red) on Social bottom-nav tab when there are pending friend requests, party invites, or unread chat. Red dot badges on sub-tabs: Users (incoming friend requests or trade requiring attention), Party (pending invites), and Chat (unread messages).
+Badge dot (red) on the Social bottom-nav tab when there are pending friend requests or party invites. The Chat nav button gets its own unread badge driven by `ChatPopout`. Sub-tab badges: Leaderboard (incoming friend requests or trade requiring attention), Party (pending invites).
 
 ## Social state
 

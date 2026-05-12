@@ -16,7 +16,7 @@ Each `HexTile` has a `zone` string property. `ZoneTypes.ts` defines `ZoneDefinit
 
 ## Monster system
 
-`MonsterTypes.ts` defines `MonsterDefinition` type and `SEED_MONSTERS` catalog (goblin, wolf, bandit, stone_wall) with `drops?: ItemDrop[]` and `damageType: DamageType` per monster, and `createEncounter(zoneId, monsters, zones)` factory with zone-aware weighted encounters. Each `MonsterInstance` has a `gridPosition: PartyGridPosition` for combat grid placement and inherits `damageType` from its definition.
+`MonsterTypes.ts` defines `MonsterDefinition` type and `SEED_MONSTERS` catalog (goblin, wolf, bandit, stone_wall) with `drops?: ItemDrop[]`, `damageType: DamageType`, and an optional `description?: string` (flavor text shown in the in-combat monster popup). `createEncounter(zoneId, monsters, zones)` is the factory with zone-aware weighted encounters. Each `MonsterInstance` has a `gridPosition: PartyGridPosition` for combat grid placement and inherits `damageType` + `description` from its definition. The description rides through the `ClientCombatState` so the popup can render it without an extra fetch.
 
 ## Wall (passive) monsters
 
@@ -77,10 +77,9 @@ The world map is defined in `data/world.json` as an array of `WorldTileDefinitio
 
 Fog of war is driven entirely by the existing `unlockedKeys` from `UnlockSystem` — no separate discovery tracking. Unlock keys are tile GUIDs (not cube coordinates), so renaming/moving tiles in the admin panel invalidates old unlock state. The server sends all tiles to the client; the client determines visibility from `state.unlocked` (sent every tick).
 
-Three-tier rendering:
-- **Unlocked tiles**: full brightness, real icons, room name visible on click.
-- **Zone-unlocked tiles** (zone has at least one unlocked tile): dimmed, real tile type icons shown, room name hidden.
-- **Foggy tiles** (zone not yet unlocked): very dim, cloud icons.
+Three-tier rendering: **unlocked tiles** (full brightness), **zone-unlocked tiles** (dimmed; zone has at least one unlocked tile), **foggy tiles** (very dim; zone not yet unlocked). The darken factor lives in `CanvasWorldMap.drawTile` (`isNonTraversable ? 0.42 : isUnlocked ? 1 : isZoneUnlocked ? 0.55 : 0.32`) and is applied to the tile-type color and to the emoji glyph (via `globalAlpha`) so the three tiers read consistently.
+
+Every tile renders in three layers regardless of unlock state — tile-type color (always), real artwork overlay if uploaded (per-tile `/tile-artwork/{tileId}.png` then per-type `/tile-type-artwork/{type}.png`), otherwise the tile-type emoji glyph. No `placehold.co` fallback at the canvas layer — missing art falls through to the emoji rather than masking the background color with a stub. See [`client.md`](client.md) → "Canvas world map" for the perf details (hex-clipped sprite cache + pre-blurred shadow).
 
 **Non-traversable tiles** (mountains, water, hedges, volcanoes) always render in a fixed dimmed style with their terrain icon — they are unaffected by fog of war or unlock state. Zone names are always visible on all tiles. Players can click and attempt to travel to any visible tile regardless of fog state. Zone unlock is computed client-side by `WorldCache.updateUnlocked()` from the unlock keys.
 
@@ -94,7 +93,7 @@ Data-driven content type stored in `data/tile-types.json`, managed by ContentSto
 
 ## WorldCache (client)
 
-`WorldCache` (`client/src/network/WorldCache.ts`) is the client-side cache for world data. Loaded once from `GET /api/world` on login (in parallel with WS connect). Stores all tiles, start position, and computes unlock state from `state.unlocked` tile GUIDs each tick. `updateUnlocked(tileIds)` maps GUIDs→offset coordinates via a reverse index, tracks which tiles and zones are unlocked, and returns whether the set changed (triggering re-render). The `WorldMapScene` builds its `HexGrid` from WorldCache data.
+`WorldCache` (`client/src/network/WorldCache.ts`) is the client-side cache for world data. Loaded once from `GET /api/world` on login (in parallel with WS connect). Stores all tiles, start position, tile-type defs, NPC catalog, and computes unlock state from `state.unlocked` tile GUIDs each tick. `updateUnlocked(tileIds)` maps GUIDs→offset coordinates via a reverse index, tracks which tiles and zones are unlocked, and returns whether the set changed (triggering re-render). `CanvasWorldMap` builds its `HexGrid` from WorldCache data.
 
 ## Content versioning
 
