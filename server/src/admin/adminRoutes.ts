@@ -504,6 +504,52 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  // ── Generic CRM artwork upload/delete ──────────────────────
+  // Single endpoint handles every content kind so new content types don't
+  // need their own bespoke routes. The admin client posts to
+  // `/api/admin/artwork/:kind/:id` with a PNG file.
+  /** Map of allowed kinds → on-disk folder. New kinds just add a row here. */
+  const ARTWORK_KINDS: Record<string, string> = {
+    item: 'data/item-artwork',
+    monster: 'data/monster-artwork',
+    set: 'data/set-artwork',
+    shop: 'data/shop-artwork',
+    zone: 'data/zone-artwork',
+    'tile-type': 'data/tile-type-artwork',
+  };
+
+  /** Validate + write a square PNG into the appropriate kind folder. */
+  router.post('/artwork/:kind/:id', artworkUpload.single('artwork'), async (req, res) => {
+    const dir = ARTWORK_KINDS[req.params.kind];
+    if (!dir) { res.status(400).json({ error: `Unknown artwork kind: ${req.params.kind}` }); return; }
+    if (!req.file) { res.status(400).json({ error: 'No file uploaded.' }); return; }
+    if (req.file.mimetype !== 'image/png') { res.status(400).json({ error: 'Only PNG files are accepted.' }); return; }
+
+    // Validate PNG is square via the IHDR chunk (offset 16 width, 20 height).
+    const buf = req.file.buffer;
+    if (buf.length < 24) { res.status(400).json({ error: 'Invalid PNG file.' }); return; }
+    const w = buf.readUInt32BE(16);
+    const h = buf.readUInt32BE(20);
+    if (w !== h) { res.status(400).json({ error: `Image must be square. Got ${w}x${h}.` }); return; }
+
+    const artworkDir = path.resolve(dir);
+    await fs.mkdir(artworkDir, { recursive: true });
+    await fs.writeFile(path.join(artworkDir, `${req.params.id}.png`), buf);
+    res.json({ success: true });
+  });
+
+  router.delete('/artwork/:kind/:id', async (req, res) => {
+    const dir = ARTWORK_KINDS[req.params.kind];
+    if (!dir) { res.status(400).json({ error: `Unknown artwork kind: ${req.params.kind}` }); return; }
+    const artworkPath = path.resolve(dir, `${req.params.id}.png`);
+    try {
+      await fs.unlink(artworkPath);
+      res.json({ success: true });
+    } catch {
+      res.json({ success: true }); // Already doesn't exist, that's fine
+    }
+  });
+
   // ── Set endpoints ──────────────────────────────────────
 
   /** List all sets. */

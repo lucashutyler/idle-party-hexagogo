@@ -1,5 +1,18 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.11.1',
+    notes: [
+      'Admin: artwork upload added to all CRM entities (monsters, sets, shops, zones, tile types) — same pipeline as items',
+      'Monster popup now shows an optional flavor description (set in the admin monster form); the placeholder "drops/abilities/resistances are unknown" hint is gone',
+      'Settings: Sign Out / Patch Notes buttons now use the pixel font (were defaulting to Arial)',
+      'Chat: clicking a sender name opens the user popup; clicking a channel tag (Global, Zone, Room, Party, Guild, DM) switches your composer to that channel. Server messages stay plain text. Per-channel colors preserved on the new clickable variants.',
+      'Mobile chat: docks at the bottom of the screen instead of overlaying content — the active screen shrinks above so the visible center stays centered; the bottom nav + XP bar stay pinned at the viewport bottom. Drop shadows removed on mobile so the chat reads as a top-level layout bar rather than a floating popup',
+      'Combat: restored the lunge / hit-flash / dodge-sidestep animations on combatant cards. On mobile, the attack lunge no longer clips combatants out of view at the tray edge.',
+      'Map: tiles now layer in three stages — tile-type color (always), real artwork overlay if uploaded, otherwise the tile-type emoji. Tile artwork is baked into hex-clipped offscreen sprites on first load and the map drop-shadow is pre-blurred once per grid change, so pan/zoom stays smooth on mobile.',
+      'Dev: vite proxy now forwards every artwork mount (parchment, monster, class, set, shop, zone, tile-type, combat-bg, room-bg, logo, nav/class/slot icons), not just /item-artwork — previously the other paths fell through to the SPA index in dev.',
+    ],
+  },
+  {
     version: '2026.05.10.2',
     notes: [
       'Crafting skill! Each class now has its own craft skill (Knight=Smithing, Archer=Fletching, Priest=Inscription, Mage=Alchemy, Bard=Tinkering). Each finished craft grants XP toward your skill level',
@@ -27,6 +40,31 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
     version: '2026.05.09.1',
     notes: [
       'Rooms can now link to Dungeons, but the feature is still under construction. Expect big challenges ahead!',
+    ],
+  },
+  {
+    version: '2026.05.04.1',
+    notes: [
+      'UI overhaul — sweeping pass to make the game feel less like a web app and more like a game',
+      'Char and Items screens merged into a single Inventory tab — silhouette + equipped gear + skill loadout above the fold, condensed stat card (ATK/DR/MR/HP) + inventory grid below',
+      'Skill points removed — skills now auto-unlock at their level milestone. Equipping is the only constraint (5 slots, swap freely)',
+      'Skill loadout UI: clicking a slot opens a popup with all unlocked skills of the matching type. Move slot 1 → slot 3 leaves slot 1 empty (no auto-shuffle)',
+      'Inventory grid now groups items with visible headers when sorted by Rarity or Type (Newest stays chronological)',
+      'Stat card abbreviations have click-to-show tooltips — tap ATK/DR/MR/HP to see the long form',
+      'Combat: bare sprites are now cards — image + name + HP bar bundled together. Multi-line names allowed for monsters (e.g. "Skeletal Warrior")',
+      'Click any monster in combat to see its name + image (drops/abilities stay hidden for now)',
+      'Combat backgrounds — per-zone default with optional per-tile override (drop art into /combat-bg-artwork)',
+      'New Chat tab on the bottom nav opens a global chat pop-out. Floating, draggable, freely resizable on desktop; full-screen or bottom-sheet on mobile (toggle with the layout button)',
+      'Combat log stays on the Combat screen (intentionally NOT merged into chat)',
+      'Persistent XP bar lives directly above the bottom nav now, visible on every screen — level on the left, XP fill across',
+      'Bottom nav restyled — depth, fancier borders, glow on the active tab. Now 6 tabs: Combat, Map, Inventory, Social, Chat, Settings',
+      'Social tab reworked — Users renamed to Leaderboard (sort by level), default sub-tab is now Party, Chat sub-tab removed (use the new Chat pop-out)',
+      'Map: Phaser is gone — the world map is now a custom Canvas implementation. Snappier loads, parchment background, tile shadows for depth, scroll bounce-back, 2-finger pinch zoom on mobile, smarter default zoom (≥15 tiles visible)',
+      'Other parties on the map are now flagged per-tile so you can see them at a glance instead of just an aggregate count',
+      'Room popups have three states — current room (full-screen, background art, parties grouped visually), remote room (smaller popup with a Go button), undiscovered room (minimal). Travel-arrival expands the popup to signal you have arrived',
+      'New retro font — Silkscreen + Pixelify Sans replace Press Start 2P, fixing the 6/G readability problem',
+      'New splash + logo placeholders on first load (drop your real artwork in /logo-artwork/ to override)',
+      'Image-everywhere convention — anywhere a name shows, an image can show beside it. Monsters, classes, items, sets, shops, zones, rooms — all read from `/<kind>-artwork/{id}.png` with a placehold.co fallback when art is missing',
     ],
   },
   {

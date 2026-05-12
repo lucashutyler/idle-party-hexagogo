@@ -7,6 +7,7 @@ import type {
 } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
+import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
 export class ZonesTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -99,6 +100,10 @@ export class ZonesTab implements Tab {
         <legend>Encounter Table ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="zf-add-encounter" type="button">+ Encounter</button>'}</legend>
         <div id="zf-encounters-list">${encRows}</div>
       </fieldset>
+      <fieldset class="admin-form-fieldset">
+        <legend>Artwork</legend>
+        ${renderArtworkSection({ kind: 'zone', id: z.id })}
+      </fieldset>
     `;
     const actionsHtml = readOnly
       ? `<div class="admin-modal-actions admin-modal-actions-readonly">
@@ -133,6 +138,7 @@ export class ZonesTab implements Tab {
 
     this.wireRemovers(root);
     root.querySelector('#zf-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal.close));
+    wireArtworkSection(root, { kind: 'zone', id: z.id });
   }
 
   private wireRemovers(root: HTMLElement): void {

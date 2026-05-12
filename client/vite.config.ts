@@ -36,10 +36,25 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
-      '/item-artwork': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
+      // Every artwork kind served by the server's express static mounts
+      // needs a matching proxy entry — otherwise vite swallows the request
+      // and returns the SPA index.html. Keep this list in sync with the
+      // static mounts in server/src/index.ts.
+      '/item-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/monster-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/class-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/tile-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/tile-type-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/set-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/shop-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/zone-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/logo-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/parchment-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/combat-bg-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/room-bg-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/nav-icons': { target: 'http://localhost:3001', changeOrigin: true },
+      '/class-icons': { target: 'http://localhost:3001', changeOrigin: true },
+      '/slot-icons': { target: 'http://localhost:3001', changeOrigin: true },
     },
   },
   resolve: {

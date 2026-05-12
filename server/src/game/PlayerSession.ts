@@ -28,9 +28,7 @@ import {
   setAppliesToClass,
   createDefaultSkillLoadout,
   SKILL_SLOTS,
-  getSkillPointsForLevel,
   getUnlockedSkillsForLevel,
-  unlockSkill,
   equipSkillInSlot,
   unequipSkillFromSlot,
   getSkillById,
@@ -528,7 +526,6 @@ export class PlayerSession {
         baseDamage: calculateBaseDamage(this.character.level, this.character.className),
         damageType: CLASS_DEFINITIONS[this.character.className].damageType,
         skillLoadout: this.character.skillLoadout,
-        skillPoints: this.character.skillPoints,
         inventory: { ...this.character.inventory },
         equipment: { ...this.character.equipment },
         xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
@@ -834,7 +831,6 @@ export class PlayerSession {
     }
     this.character.className = className;
     this.character.skillLoadout = createDefaultSkillLoadout(className);
-    this.character.skillPoints = getSkillPointsForLevel(this.character.level);
     this.autoUnlockSkills();
     this.addLogEntry(`Class changed to ${className}!`, 'battle');
   }
@@ -846,29 +842,6 @@ export class PlayerSession {
     if (!this.character) return;
     const available = getUnlockedSkillsForLevel(this.character.className, this.character.level);
     this.character.skillLoadout.unlockedSkills = available;
-  }
-
-  handleUnlockSkill(skillId: string): boolean {
-    if (!this.character) return false;
-    const result = unlockSkill(
-      skillId,
-      this.character.className,
-      this.character.level,
-      this.character.skillLoadout.unlockedSkills,
-    );
-    if (!result) return false;
-
-    const skill = getSkillById(skillId);
-    if (!skill) return false;
-
-    // First passive (treeOrder 0) is free, rest cost 1 point
-    if (skill.treeOrder > 0) {
-      if (this.character.skillPoints <= 0) return false;
-      this.character.skillPoints--;
-    }
-
-    this.character.skillLoadout.unlockedSkills = result;
-    return true;
   }
 
   handleEquipSkill(skillId: string, slotIndex: number): boolean {
@@ -964,7 +937,6 @@ export class PlayerSession {
         inventory: { ...this.character.inventory },
         equipment: { ...this.character.equipment },
         skillLoadout: { ...this.character.skillLoadout },
-        skillPoints: this.character.skillPoints,
         craftLevel: this.character.craftLevel,
         craftXp: this.character.craftXp,
       } : undefined,
@@ -1047,11 +1019,6 @@ export class PlayerSession {
         skillLoadout.equippedSkills.push(null);
       }
 
-      // Migrate skill points: if old save has no skillPoints, compute from level
-      const skillPoints = data.character.skillPoints !== undefined
-        ? data.character.skillPoints
-        : Math.max(0, getSkillPointsForLevel(data.character.level) - Math.max(0, skillLoadout.unlockedSkills.length - 1));
-
       session['character'] = {
         className,
         level: data.character.level,
@@ -1062,7 +1029,6 @@ export class PlayerSession {
           ? { ...data.character.equipment }
           : { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
         skillLoadout,
-        skillPoints,
         craftLevel: data.character.craftLevel ?? 1,
         craftXp: data.character.craftXp ?? 0,
       };

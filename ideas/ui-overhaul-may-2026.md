@@ -26,6 +26,69 @@ Settled in this brainstorm — included for reference so future notes don't re-l
 
 None — all open items have been resolved. New questions can be added here as implementation begins.
 
+## Implementation Status — 2026.05.04
+
+This document was used as a scratchpad during the all-in-one implementation pass. Below is a snapshot of what shipped vs. what still needs your input. Code is in version `2026.05.04.1`.
+
+### Shipped in this pass
+
+- Foundation
+  - New `client/src/ui/assets.ts` helper: `artworkUrl(kind, id)` + `placeholderUrl(name)` + `renderAssetImg(kind, id, opts)`. Asset pipeline is `/<kind>-artwork/{id}.png` mirroring the existing `/item-artwork/`. Fallback is `placehold.co`.
+  - Font swapped from `Press Start 2P` to `Silkscreen` (body) + `Pixelify Sans` (display headings) — fixes 6/G ambiguity.
+  - Splash overlay added (`#splash` in `index.html`) — auto-dismisses on app boot. Replace `/logo-artwork/idle-party.png` to set the real logo.
+- Bottom nav
+  - Restyled with depth, gold glow on active, hover states, animated active bar.
+  - New 6-tab order: Combat / Map / Inventory / Social / Chat / Settings.
+  - Chat is an overlay tab — clicking it toggles the chat pop-out instead of switching screens.
+- Persistent XP bar
+  - Sits directly above the bottom nav, visible on every game screen. Level badge on the left, fill across; no raw numbers (those live on the Inventory screen).
+- Chat pop-out
+  - Floating, draggable, freely resizable on desktop (viewport-clamped, geometry persisted to localStorage).
+  - Mobile: full-screen or bottom-sheet, toggled via a layout button in the header (preference persisted).
+  - Filters per channel, color-coded timeline, server `sync_chat` on first connect.
+- Combat screen
+  - Sprites → cards (image + name + HP bar). Player shows class portrait or class icon fallback; monsters show monster art or placeholder.
+  - Monster click → popup (name + image only). Drops/abilities/resistances stay hidden.
+  - Per-zone combat background image with optional per-tile override (`/combat-bg-artwork/{zoneSlug}.png` and `/combat-bg-artwork/{zoneSlug}-{col}-{row}.png`). Falls through to placehold.co.
+- Map (Phaser → Canvas)
+  - New `client/src/ui/CanvasWorldMap.ts`. `WorldMapScene.ts` and Phaser are no longer used (Phaser is still in `package.json` for now — safe to remove later if desired).
+  - Parchment background, tile shadows, scroll bounce-back, smarter default zoom (≥15 tiles on the shorter dimension), 2-finger pinch zoom on mobile.
+  - Other-party flags per occupied tile (deterministic color hash by `col,row`). Includes "+N" badge on the player's own tile so other-room players aren't hidden by the party bubble.
+- Room popup → `RoomView`
+  - Replaces `TileInfoModal`. Three states: full-screen current room (background art, parties grouped), smaller remote-room popup, undiscovered.
+  - Arrival transition: when the popup transitions from a remote-room view to a current-room view at the same coordinates, it expands with a spring animation.
+- Char + Items merge
+  - `CharItemsScreen.ts` is the single scrollable screen. Hero card on top, condensed stat card with abbreviation tooltips, inventory grid below.
+- Skill points removed
+  - `CharacterState.skillPoints` deleted. Skills auto-unlock at their level milestone. Equipping (5 slots) is the only constraint. Old saves still load (legacy field is ignored on read).
+- Inventory grouping headers
+  - Sort by Rarity or Type renders visible group headers; Newest stays chronological.
+- Social tab rework
+  - Default sub-tab → Party. Users renamed → Leaderboard (sort cycler: Top → Status → A-Z; Top defaults to level desc as a public proxy for XP). Chat sub-tab removed.
+
+### Things needing your input
+
+These are items that are stubbed/placeholder and benefit from your involvement before they look right:
+
+1. **Logo + splash artwork.** The splash screen reaches for `/logo-artwork/idle-party.png` and falls back to a placehold.co panel. Drop the real logo PNG into `data/logo-artwork/idle-party.png` (and add an Express static mount for `/logo-artwork` like the existing `/item-artwork` mount in `server/src/index.ts:143`).
+2. **Static-asset mounts on the server.** `/item-artwork` is the only existing mount. The new conventions reference these paths — please decide which you want to mount and add `app.use('/<kind>-artwork', express.static(path.resolve('data/<kind>-artwork')))` to `server/src/index.ts` for each:
+   - `/logo-artwork` (splash logo, favicon)
+   - `/monster-artwork` (combat monster cards & monster popup)
+   - `/class-artwork` (class portraits in combat + Inventory hero card)
+   - `/tile-artwork` and `/tile-type-artwork` (canvas map per-tile / per-type icons)
+   - `/zone-artwork` (zone metadata, future use)
+   - `/set-artwork` (set tooltips, future use)
+   - `/shop-artwork` (room view shop button)
+   - `/parchment-artwork` (canvas map ground texture)
+   - `/combat-bg-artwork` (per-zone / per-tile combat backgrounds)
+   - `/room-bg-artwork` (per-zone / per-tile room view backgrounds)
+3. **Font choice — confirm or veto.** Silkscreen + Pixelify Sans were chosen for clearer digits. If you want a different pairing, change `--pixel-font` and `--display-font` in `client/src/styles/pixel-theme.css` and update the `@import url(...)` line. (Glyph audit remaining: confirm 0/O, 1/l/I, 5/S in your environment look fine.)
+4. **Tagline copy on the splash.** Currently reads "An idle RPG for the worst raid in the realm." Swap it via `client/index.html` `.splash-tagline`.
+5. **Phaser cleanup.** I left Phaser in `package.json` and `WorldMapScene.ts` in place to keep the diff small. Once you've confirmed the Canvas map is good, you can `npm rm phaser` and delete `client/src/scenes/WorldMapScene.ts` and `client/src/entities/Party.ts`.
+6. **Server-side leaderboard sort.** The brainstorm wanted server-side XP-based ordering. The client currently sorts by **level** (the only public field on `PlayerListEntry`) as a proxy. To honor the original design, expose XP server-side as a sort key only (don't include it in the response), and pre-order `allPlayers` in `PlayerManager.getSocialState`. Low priority because the visible row already shows level only.
+7. **Party flags — partyId.** `OtherPlayerState` doesn't carry `partyId`, so flags are colored per-tile, not per-party. To get one-flag-per-distinct-party-on-a-tile, add `partyId?: string` to `OtherPlayerState` in `shared/src/systems/BattleTypes.ts` and populate it server-side in `PlayerManager`.
+8. **Chat broadcast announcement.** Per project memory, every patch notes update should announce the new version in server chat. The `GameLoop` already broadcasts on `GAME_VERSION` change (`server/src/game/GameLoop.ts:97`), and I bumped `GAME_VERSION` to `2026.05.04.1`, so this happens automatically on next server start. No manual message needed — but if you want the announcement copy to be more flavorful for this huge release, edit `GameLoop.ts:98`.
+
 ## Task List
 
 Roughly ordered by independence (top items can ship without depending on others). Each can be a standalone PR/branch.

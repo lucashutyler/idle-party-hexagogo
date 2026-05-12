@@ -4,6 +4,7 @@ import type { ShopDefinition, ItemDefinition, SetDefinition } from '@idle-party-
 import { getUnequippedCount, listUnequippedEntries } from '@idle-party-rpg/shared';
 import { renderItemIcon, escapeHtml } from './ItemIcon';
 import { renderItemPopupContent } from './ItemPopup';
+import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 
 export class ShopPopup {
   private overlay: HTMLElement;
@@ -14,6 +15,10 @@ export class ShopPopup {
   private notice: string | null = null;
   private noticeTimer: number | null = null;
   private unsubscribeState: (() => void) | null = null;
+  /** Hash of the inputs that drove the most recent render. State ticks
+   *  whose inputs match this skip the re-render entirely so item-artwork
+   *  <img> elements aren't recreated and don't flicker the initials placeholder. */
+  private lastRenderKey: string = '';
 
   constructor(gameClient: GameClient) {
     this.gameClient = gameClient;
@@ -24,6 +29,7 @@ export class ShopPopup {
       if (e.target === this.overlay) this.hide();
     });
     document.body.appendChild(this.overlay);
+    wireFocusOnInteract(this.overlay);
   }
 
   show(state: ServerStateMessage): void {
@@ -34,6 +40,7 @@ export class ShopPopup {
     this.notice = null;
     this.renderCurrentView(state);
     this.overlay.style.display = 'flex';
+    bringToFront(this.overlay);
 
     // Subscribe to state updates so the popup reflects post-action state (sold qty, gold, etc.)
     this.unsubscribeState?.();
@@ -47,8 +54,12 @@ export class ShopPopup {
   hide(): void {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = '';
+    release(this.overlay);
     this.unsubscribeState?.();
     this.unsubscribeState = null;
+    // Reset the render-cache so the next time the popup opens it
+    // re-renders fresh (player may have visited a different shop).
+    this.lastRenderKey = '';
     if (this.noticeTimer !== null) {
       window.clearTimeout(this.noticeTimer);
       this.noticeTimer = null;
@@ -59,6 +70,24 @@ export class ShopPopup {
   private renderCurrentView(state: ServerStateMessage): void {
     const shop = state.shopDefinition;
     if (!shop) return;
+
+    // Skip re-render if nothing the popup cares about changed. State ticks
+    // arrive once per second and were re-creating the img elements every
+    // time, causing the item-initials placeholder to flicker as the artwork
+    // re-loaded.
+    const key = JSON.stringify({
+      view: this.view,
+      mode: this.mode,
+      notice: this.notice,
+      shopId: shop.id,
+      shopInv: shop.inventory,
+      gold: state.character?.gold ?? 0,
+      inv: state.character?.inventory ?? {},
+      eq: state.character?.equipment ?? {},
+    });
+    if (key === this.lastRenderKey) return;
+    this.lastRenderKey = key;
+
     if (this.view.kind === 'grid') {
       this.renderGrid(state, shop);
     } else if (this.view.kind === 'buy') {

@@ -9,6 +9,7 @@ import {
 import type { SetDefinition, SetBreakpoint, SetBonuses } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
+import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
 export class SetsTab implements Tab {
   /** Working state for the set form's breakpoints — kept across re-renders inside one modal. */
@@ -136,6 +137,10 @@ export class SetsTab implements Tab {
         <div class="admin-form-hint">Each breakpoint unlocks at the listed piece count. Bonuses do NOT stack across tiers — the highest unlocked tier replaces lower ones.</div>
         <div id="sf-breakpoints-container"></div>
       </fieldset>
+      <fieldset class="admin-form-fieldset">
+        <legend>Artwork</legend>
+        ${renderArtworkSection({ kind: 'set', id: s.id })}
+      </fieldset>
     `;
     const actionsHtml = readOnly
       ? `<div class="admin-modal-actions admin-modal-actions-readonly">
@@ -179,6 +184,7 @@ export class SetsTab implements Tab {
     this.renderBreakpoints(root);
     root.querySelector('#sf-cancel')?.addEventListener('click', modal.close);
     root.querySelector('#sf-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal.close));
+    wireArtworkSection(root, { kind: 'set', id: s.id });
   }
 
   private renderBreakpoints(root: HTMLElement): void {

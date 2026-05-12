@@ -10,6 +10,7 @@ import type {
 } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
+import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
 export class MonstersTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -134,6 +135,9 @@ export class MonstersTab implements Tab {
           Passive (wall — never attacks, doesn't count toward victory)
         </label>
       </div>
+      <label class="admin-form-fullrow">Description (optional)
+        <textarea id="mf-description" rows="3">${escapeHtml(m.description ?? '')}</textarea>
+      </label>
       <fieldset class="admin-form-fieldset">
         <legend>Drops ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="mf-add-drop" type="button">+ Drop</button>'}</legend>
         <div id="mf-drops-list">${dropRows}</div>
@@ -145,6 +149,10 @@ export class MonstersTab implements Tab {
       <fieldset class="admin-form-fieldset">
         <legend>Skills ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="mf-add-skill" type="button">+ Skill</button>'}</legend>
         <div id="mf-skills-list">${skillRows}</div>
+      </fieldset>
+      <fieldset class="admin-form-fieldset">
+        <legend>Artwork</legend>
+        ${renderArtworkSection({ kind: 'monster', id: m.id })}
       </fieldset>
     `;
     const actionsHtml = readOnly
@@ -206,6 +214,8 @@ export class MonstersTab implements Tab {
     root.querySelector('#mf-save')?.addEventListener('click', () => {
       this.saveForm(root, ctx, modal.close);
     });
+
+    wireArtworkSection(root, { kind: 'monster', id: m.id });
   }
 
   private wireRowRemovers(root: HTMLElement, btnSel: string, rowSel: string): void {
@@ -305,6 +315,7 @@ export class MonstersTab implements Tab {
     });
 
     const passive = (root.querySelector('#mf-passive') as HTMLInputElement).checked;
+    const description = (root.querySelector('#mf-description') as HTMLTextAreaElement).value.trim();
 
     const monster: MonsterDefinition = {
       id, name, hp, damage, damageType, xp, goldMin, goldMax,
@@ -312,6 +323,7 @@ export class MonstersTab implements Tab {
       resistances: resistances.length > 0 ? resistances : undefined,
       skills: skills.length > 0 ? skills : undefined,
       passive: passive ? true : undefined,
+      description: description || undefined,
     };
 
     try {

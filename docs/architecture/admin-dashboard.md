@@ -18,7 +18,9 @@ Built as a separate Vite entry point (`admin.html`) isolated from the game clien
 
 **Density tokens** (`--admin-pad-page-{x,y}`, `--admin-pad-cell-{x,y}`, `--admin-pad-section`, `--admin-pad-btn-{x,y}`, `--admin-pad-input-{x,y}`, `--admin-gap-loose`, `--admin-gap`, `--admin-gap-tight`, plus `--admin-sidebar-width` and `--admin-topbar-height`) scale with the UI size, so picking Small tightens every padding/gap on the page (table rows, fieldsets, modal padding, sidebar, topbar, etc.) — not just font size.
 
-**All edit forms are popup modals** (Monsters, Items, Sets, Shops, Zones, Encounters, Tile Types, Dungeons) opened via `components/Modal.ts`; modal inputs use `--admin-bg-2` background by default with a focus state on `--admin-panel`.
+**All edit forms are popup modals** (Monsters, Items, Sets, Shops, Zones, Encounters, Tile Types, Dungeons, NPCs, Quests, Recipes) opened via `components/Modal.ts`; modal inputs use `--admin-bg-2` background by default with a focus state on `--admin-panel`.
+
+**CRM artwork upload pipeline**: items, monsters, sets, shops, zones, and tile types all share the same artwork upload UI inside their edit modal — see `client/src/admin/components/ArtworkSection.ts` (renders preview + file picker + upload/remove buttons) and the single generic server endpoint `POST/DELETE /api/admin/artwork/:kind/:id` in `server/src/admin/adminRoutes.ts` (validates PNG + enforces square via IHDR, writes to `server/data/<kind>-artwork/{id}.png`). Adding artwork support to a new content kind is one row in `ARTWORK_KINDS` on the server + the `renderArtworkSection({ kind, id }) / wireArtworkSection(root, { kind, id })` pair in the tab's edit modal + an Express static mount + a vite proxy entry.
 
 The map viewer uses HTML5 Canvas with pan/zoom, rendering tiles from the content API. Room names are shown on all tiles (admin sees everything, no fog of war).
 

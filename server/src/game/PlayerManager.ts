@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { HexGrid, offsetToCube, cubeDistance, cubeToKey, CLASS_ICONS } from '@idle-party-rpg/shared';
+import { HexGrid, offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
 import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -251,8 +251,7 @@ export class PlayerManager {
 
   /** Broadcast a global welcome message when a new player picks their class. */
   broadcastWelcome(username: string, className: ClassName): void {
-    const icon = CLASS_ICONS[className] ?? '';
-    const text = `Welcome our new ${className}, ${username}, to the world! ${icon}`;
+    const text = `Welcome our new ${className}, ${username}, to the world!`;
     const recipients = Array.from(this.sessions.entries())
       .filter(([, s]) => s.hasCharacter())
       .map(([u]) => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));

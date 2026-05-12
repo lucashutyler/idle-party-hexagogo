@@ -372,6 +372,7 @@ export class PartyBattleManager {
         maxHp: m.maxHp,
         gridPosition: m.gridPosition,
         stunTurns: m.stunTurns > 0 ? m.stunTurns : undefined,
+        description: m.description,
       })),
       tickCount: combat.tickCount,
       roundCount: combat.roundCount,

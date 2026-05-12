@@ -269,10 +269,6 @@ export class GameClient {
     this.sendRaw({ type: 'run' });
   }
 
-  sendUnlockSkill(skillId: string): void {
-    this.sendRaw({ type: 'unlock_skill', skillId });
-  }
-
   sendEquipSkill(skillId: string, slotIndex: number): void {
     this.sendRaw({ type: 'equip_skill', skillId, slotIndex });
   }

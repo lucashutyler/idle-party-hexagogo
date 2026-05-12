@@ -103,7 +103,7 @@ Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into
 
 ```
 shared/           Pure logic, types, seed data — compiled first, used by client + server
-client/           Phaser 3 web client — tab-based UI, mobile-friendly, admin dashboard
+client/           Vanilla TS web client — HTML5 Canvas world map, DOM UI, mobile-friendly, admin dashboard
 server/           Node.js game server — persistent 24/7 game state, auth, WebSocket, ContentStore
 data/             Runtime JSON content files (monsters, items, zones, world map — auto-seeded)
 ```
@@ -143,9 +143,9 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 ### Characters & Parties
 - [x] Party entity with movement
 - [x] Individual character creation (one per player, class selection on first login)
-- [x] Character stats (STR, INT, WIS, DEX, CON, CHA — fixed per class, no stat increases on level-up)
-- [x] XP and leveling system (10 XP per victory, 100*level XP to next)
-- [x] Character screen (stats, XP bar, class passive info)
+- [x] Character stats (HP + base damage scale linearly per class — no STR/INT/etc., no stat allocation on level-up)
+- [x] XP and leveling system (`floor(18000 * L^1.2 * 1.06^L)` XP to next level)
+- [x] Inventory tab (merged Char + Items — hero card, equipped gear, skill loadout, stat card, inventory grid)
 - [x] Class system (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong together)
 - [x] Damage types (physical/magical on monsters, Knight reduces physical, Priest reduces magical)
 - [ ] Henchmen (hireable NPCs for solo players)
@@ -156,11 +156,11 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Party combat rewards (XP, gold, loot per member on victory)
 
 ### Social
-- [x] Social tab with sub-tabs (Users, Guild, Party, Chat)
+- [x] Social tab with fly-out submenu (Party / Guild / Leaderboard); Chat is a global pop-out from a dedicated Chat nav button
 - [x] Online player list with search, sort, filter
 - [x] Friends system (request-based two-way: send/accept/decline/revoke, auto-accept cross-requests)
 - [x] Guild system (create at level 20+, join, leave, invite)
-- [x] Chat system (unified timeline, 6 channels: Room/Zone/Party/Guild/Global/DM, per-user persistent history, timestamps)
+- [x] Chat system (unified timeline, 7 channels: Room/Zone/Party/Guild/Global/DM/Server, per-user persistent history, timestamps, clickable senders + channel tags, mobile-docked or desktop floating)
 - [x] User blocking (DM-only or all messages)
 - [x] Unread message indicators
 - [x] Social badge notifications (bottom nav dot + sub-tab badges for friend requests, party invites, unread chat)
@@ -185,9 +185,10 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [ ] Class-specific multi-tier recipe trees
 
 ### Quests
-- [ ] Quest system framework
-- [ ] Quest types (kill, fetch, explore, escort)
-- [ ] Quest rewards
+- [x] Quest system framework (NPC-offered, accept/turn-in flow, server-tracked progress, save/restore)
+- [x] Quest types (kill, collect, visit)
+- [x] Quest rewards (XP, gold, item)
+- [x] Quest scope (solo party only OR party-shared), prerequisites, weekly-repeatable
 - [ ] Quest chains / storylines
 
 ### Server
@@ -205,26 +206,31 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 
 ### UI
 - [x] Login screen with email input + username choice screen
-- [x] Map tab with hex rendering
-- [x] Other players visible on map (zone-filtered, count badges for other zones)
+- [x] Map tab with hex rendering (HTML5 Canvas, lazy-created on first Map visit)
+- [x] Other players visible on map (per-tile flags within same zone, +N badge for other-room players on your tile)
 - [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
-- [x] Tab-based bottom navigation (Combat, Map, Character, Items, Social, Craft, Settings)
+- [x] Bottom navigation: Combat, Map, Char (merged Char+Items), Craft, Social (submenu), Settings, Chat (overlay)
 - [x] Mobile-first responsive design
-- [x] Pixel/retro RPG visual style (Press Start 2P font)
-- [x] Combat screen with floating HP bars above sprites and combat log
-- [x] Lazy-loaded Phaser (Map tab only loads on first visit)
+- [x] Pixel/retro RPG visual style (Silkscreen + Pixelify Sans)
+- [x] Combat cards with portrait + name + HP bar; per-zone backgrounds; lunge/hit/dodge animations
+- [x] Image-everywhere convention (`/<kind>-artwork/{id}.png` with placeholder fallback) for items, monsters, classes, tiles, sets, shops, zones, rooms
 - [x] Nav bar battle status indicators (pulse/flash on combat events)
 - [x] Server unavailable / offline screen with retry
 - [x] Desktop font scaling (larger fonts on desktop via media query)
-- [x] Mobile zoom controls (+/- buttons on map)
-- [x] Tile click modal (tile info, "Move here" button, players on tile)
+- [x] Mobile zoom controls (+/- buttons on map) + 2-finger pinch zoom
+- [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, shop/talk affordances), remote discovered (small popup with Go button), undiscovered (minimal)
+- [x] Global chat pop-out (floating/draggable/resizable on desktop, docked bottom-sheet on mobile)
+- [x] Persistent XP bar above the bottom nav, visible on every screen
+- [x] ModalStack click-order z-index across all overlays
 
 ### World Manager
 - [x] Separate admin client (World Manager dashboard at /admin)
 - [x] Content versioning (draft→publish→deploy pipeline with immutable snapshots)
-- [x] Monster editor
+- [x] Monster editor (with optional flavor description shown in combat popup)
 - [x] Area/zone editor
-- [ ] Quest editor
+- [x] Quest editor (Quests tab; NPCs tab links quests to NPCs)
+- [x] Recipe editor (Recipes tab — author/edit crafting recipes without touching JSON)
+- [x] CRM artwork upload pipeline (items / monsters / sets / shops / zones / tile types share one upload endpoint + UI)
 - [x] Game designer access only
 
 ### Infrastructure

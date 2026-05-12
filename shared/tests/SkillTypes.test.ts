@@ -2,16 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   SKILL_SLOTS,
   SKILL_TREES,
-  LEVELS_PER_SKILL_POINT,
-  getSkillPointsForLevel,
-  getAvailableSkillPoints,
-  canUnlockSkill,
-  unlockSkill,
   canEquipSkill,
   equipSkillInSlot,
   unequipSkillFromSlot,
   createDefaultSkillLoadout,
   getSkillById,
+  getSkillLearnLevel,
+  getUnlockedSkillsForLevel,
 } from '../src/systems/SkillTypes';
 
 describe('SkillTypes', () => {
@@ -41,72 +38,34 @@ describe('SkillTypes', () => {
     });
   });
 
-  describe('getSkillPointsForLevel', () => {
-    it('returns 0 for levels 1-4', () => {
-      for (let l = 1; l <= 4; l++) {
-        expect(getSkillPointsForLevel(l)).toBe(0);
-      }
+  describe('getSkillLearnLevel', () => {
+    it('treeOrder 0 unlocks at level 1', () => {
+      expect(getSkillLearnLevel(0)).toBe(1);
     });
 
-    it('returns 1 for levels 5-9', () => {
-      expect(getSkillPointsForLevel(5)).toBe(1);
-      expect(getSkillPointsForLevel(9)).toBe(1);
+    it('treeOrder 1 unlocks at level 5', () => {
+      expect(getSkillLearnLevel(1)).toBe(5);
     });
 
-    it('returns 2 for levels 10-14', () => {
-      expect(getSkillPointsForLevel(10)).toBe(2);
+    it('treeOrder 10 unlocks at level 50', () => {
+      expect(getSkillLearnLevel(10)).toBe(50);
     });
   });
 
-  describe('getAvailableSkillPoints', () => {
-    it('first skill is free, so 0 points at level 1 with 1 unlocked', () => {
-      expect(getAvailableSkillPoints(1, ['knight_guard'])).toBe(0);
+  describe('getUnlockedSkillsForLevel', () => {
+    it('Knight at level 1 has only the first skill unlocked', () => {
+      const unlocked = getUnlockedSkillsForLevel('Knight', 1);
+      expect(unlocked).toEqual(['knight_guard']);
     });
 
-    it('level 5 with 1 skill = 1 available point', () => {
-      expect(getAvailableSkillPoints(5, ['knight_guard'])).toBe(1);
+    it('Knight at level 5 has first two skills unlocked', () => {
+      const unlocked = getUnlockedSkillsForLevel('Knight', 5);
+      expect(unlocked).toEqual(['knight_guard', 'knight_bash']);
     });
 
-    it('level 5 with 2 skills = 0 available points', () => {
-      expect(getAvailableSkillPoints(5, ['knight_guard', 'knight_bash'])).toBe(0);
-    });
-  });
-
-  describe('canUnlockSkill', () => {
-    it('allows unlocking first skill at level 1 (free)', () => {
-      expect(canUnlockSkill('knight_guard', 'Knight', 1, [])).toBe(true);
-    });
-
-    it('rejects unlocking already-unlocked skill', () => {
-      expect(canUnlockSkill('knight_guard', 'Knight', 1, ['knight_guard'])).toBe(false);
-    });
-
-    it('rejects unlocking second skill without points', () => {
-      expect(canUnlockSkill('knight_bash', 'Knight', 1, ['knight_guard'])).toBe(false);
-    });
-
-    it('allows unlocking second skill at level 5 with points', () => {
-      expect(canUnlockSkill('knight_bash', 'Knight', 5, ['knight_guard'])).toBe(true);
-    });
-
-    it('rejects skipping tree order', () => {
-      expect(canUnlockSkill('knight_bash', 'Knight', 5, [])).toBe(false);
-    });
-
-    it('rejects wrong class skill', () => {
-      expect(canUnlockSkill('mage_burn', 'Knight', 1, [])).toBe(false);
-    });
-  });
-
-  describe('unlockSkill', () => {
-    it('returns updated array on success', () => {
-      const result = unlockSkill('knight_guard', 'Knight', 1, []);
-      expect(result).toEqual(['knight_guard']);
-    });
-
-    it('returns null on failure', () => {
-      const result = unlockSkill('knight_bash', 'Knight', 1, []);
-      expect(result).toBeNull();
+    it('Knight at level 50 has all 11 skills unlocked', () => {
+      const unlocked = getUnlockedSkillsForLevel('Knight', 50);
+      expect(unlocked).toHaveLength(11);
     });
   });
 
