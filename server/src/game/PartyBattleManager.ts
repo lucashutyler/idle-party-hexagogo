@@ -92,6 +92,8 @@ export class PartyBattleManager {
           this.handleBattleEnd(partyId, result);
         },
         onMove: () => {
+          const allQuests = this.content.getAllQuests();
+          const tileId = serverParty.tile.id;
           for (const m of members) {
             const s = this.getSession(m);
             if (s) {
@@ -101,6 +103,7 @@ export class PartyBattleManager {
               const tileDef = this.content.getTileById(serverParty.tile.id);
               const rName = tileDef?.name ?? '';
               s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
+              s.quests.applyVisit(tileId, allQuests);
             }
           }
           this.onMembersMoved?.(members);
@@ -176,6 +179,8 @@ export class PartyBattleManager {
           this.handleBattleEnd(partyId, result);
         },
         onMove: () => {
+          const allQuests = this.content.getAllQuests();
+          const tileId = serverParty.tile.id;
           for (const m of members) {
             const s = this.getSession(m);
             if (s) {
@@ -185,6 +190,7 @@ export class PartyBattleManager {
               const tileDef = this.content.getTileById(serverParty.tile.id);
               const rName = tileDef?.name ?? '';
               s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
+              s.quests.applyVisit(tileId, allQuests);
             }
           }
           this.onMembersMoved?.(members);
@@ -560,6 +566,18 @@ export class PartyBattleManager {
           { xp: splitXp, gold: splitGold, items: memberItems.get(username)! },
           entry.serverParty.tile,
         );
+      }
+
+      // Quest hooks: credit every dead monster to every party member with active kill objectives.
+      if (combat) {
+        const allQuests = this.content.getAllQuests();
+        for (const m of combat.monsters) {
+          for (const username of members) {
+            const session = this.getSession(username);
+            if (!session) continue;
+            session.quests.applyKill(m.id, allQuests);
+          }
+        }
       }
     } else {
       for (const username of entry.members) {

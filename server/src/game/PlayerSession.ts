@@ -59,6 +59,9 @@ import type {
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
+import { QuestSystem } from './QuestSystem.js';
+import type { QuestEvent } from './QuestSystem.js';
+import type { QuestDefinition, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
 
 const MAX_LOG_ENTRIES = 1000;
 const MAX_SAVE_LOG_ENTRIES = 1000;
@@ -85,6 +88,8 @@ export class PlayerSession {
   private initialMailbox: MailboxEntry[] = [];
   /** Callback to fetch the player's live mailbox from MailboxSystem. */
   getMailbox?: () => MailboxEntry[];
+  /** Per-player quest tracking. */
+  quests: QuestSystem;
 
   /** XP rate tracking — in-memory only, resets on server restart. */
   private xpRateStartTime = Date.now();
@@ -111,10 +116,11 @@ export class PlayerSession {
   /** Callback to get the remaining movement path — set by PlayerManager. */
   getCurrentPath?: () => HexTile[];
 
-  constructor(username: string, grid: HexGrid, content: ContentStore) {
+  constructor(username: string, grid: HexGrid, content: ContentStore, onQuestEvent?: (event: QuestEvent) => void) {
     this.username = username;
     this.grid = grid;
     this.content = content;
+    this.quests = new QuestSystem(username, onQuestEvent);
 
     const startPos = content.getStartTile();
     const startCoord = offsetToCube(startPos);
@@ -333,6 +339,156 @@ export class PlayerSession {
     return this.content.getShop(tile.shopId);
   }
 
+  /** Get the NPC definition for the player's current tile, if any. */
+  private getCurrentNpc(): import('@idle-party-rpg/shared').NpcDefinition | undefined {
+    const pos = this.getPosition();
+    const world = this.content.getWorld();
+    const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
+    if (!tile?.npcId) return undefined;
+    return this.content.getNpc(tile.npcId);
+  }
+
+  /** Quest data block for the state message: active progress, completed history, defs, offered IDs. */
+  private buildQuestState(): {
+    activeQuests: QuestProgressEntry[];
+    completedQuests: CompletedQuestEntry[];
+    questDefinitions: Record<string, QuestDefinition>;
+    offeredQuestIds: string[];
+    questResolutions: {
+      monsters: Record<string, string>;
+      items: Record<string, string>;
+      tiles: Record<string, { name: string; col: number; row: number }>;
+    };
+  } {
+    const allQuests = this.content.getAllQuests();
+
+    // Recompute collect progress before exposing state
+    this.quests.recomputeCollect(allQuests, (itemId) => this.getInventoryCount(itemId));
+
+    const npc = this.getCurrentNpc();
+    const offeredQuestIds = npc?.questIds ?? [];
+
+    const activeProgress = this.quests.getActiveProgress();
+
+    // Build a definitions record containing every quest the player has accepted, completed, or is being offered
+    const defs: Record<string, QuestDefinition> = {};
+    for (const entry of activeProgress) {
+      const def = allQuests[entry.questId];
+      if (def) defs[entry.questId] = def;
+    }
+    for (const c of this.quests.getCompleted()) {
+      const def = allQuests[c.questId];
+      if (def) defs[c.questId] = def;
+    }
+    for (const qid of offeredQuestIds) {
+      const def = allQuests[qid];
+      if (def) defs[qid] = def;
+    }
+
+    // Resolve display names for every monster/item/tile referenced by these quests + reward items
+    const monsterNames: Record<string, string> = {};
+    const itemNames: Record<string, string> = {};
+    const tileLookups: Record<string, { name: string; col: number; row: number }> = {};
+    for (const def of Object.values(defs)) {
+      for (const obj of def.objectives) {
+        if (obj.kind === 'kill') {
+          const m = this.content.getMonster(obj.monsterId);
+          if (m) monsterNames[obj.monsterId] = m.name;
+        } else if (obj.kind === 'collect') {
+          const it = this.content.getItem(obj.itemId);
+          if (it) itemNames[obj.itemId] = it.name;
+        } else if (obj.kind === 'visit') {
+          const tile = this.content.getTileById(obj.tileId);
+          if (tile) tileLookups[obj.tileId] = { name: tile.name, col: tile.col, row: tile.row };
+        }
+      }
+      for (const r of def.rewards) {
+        if (r.kind === 'item') {
+          const it = this.content.getItem(r.itemId);
+          if (it) itemNames[r.itemId] = it.name;
+        }
+      }
+    }
+
+    return {
+      activeQuests: activeProgress,
+      completedQuests: this.quests.getCompleted(),
+      questDefinitions: defs,
+      offeredQuestIds,
+      questResolutions: { monsters: monsterNames, items: itemNames, tiles: tileLookups },
+    };
+  }
+
+  // --- Quest action handlers (called by PlayerManager) ---
+
+  handleAcceptQuest(questId: string, partySize: number): { success: boolean; error?: string } {
+    if (!this.character) return { success: false, error: 'No character.' };
+    const npc = this.getCurrentNpc();
+    if (!npc || !(npc.questIds ?? []).includes(questId)) {
+      return { success: false, error: 'Quest not offered here.' };
+    }
+    const def = this.content.getQuest(questId);
+    if (!def) return { success: false, error: 'Quest not found.' };
+
+    const reason = this.quests.accept(def, { playerLevel: this.character.level, partySize });
+    if (reason) return { success: false, error: reason };
+    this.addLogEntry(`Accepted quest: ${def.name}`, 'battle');
+    return { success: true };
+  }
+
+  handleTurnInQuest(questId: string): { success: boolean; error?: string } {
+    if (!this.character) return { success: false, error: 'No character.' };
+    const npc = this.getCurrentNpc();
+    if (!npc || !(npc.questIds ?? []).includes(questId)) {
+      return { success: false, error: 'Must be at the NPC who offered this quest.' };
+    }
+    const def = this.content.getQuest(questId);
+    if (!def) return { success: false, error: 'Quest not found.' };
+
+    const result = this.quests.turnIn(
+      questId,
+      this.content.getAllQuests(),
+      (itemId, count) => this.removeFromInventory(itemId, count),
+      (itemId) => this.getInventoryCount(itemId),
+    );
+    if (!result.success) return { success: false, error: result.error };
+
+    // Grant rewards
+    let totalXp = 0;
+    let totalGold = 0;
+    const grantedItems: string[] = [];
+    for (const reward of result.rewards ?? []) {
+      if (reward.kind === 'xp') totalXp += reward.amount;
+      else if (reward.kind === 'gold') totalGold += reward.amount;
+      else if (reward.kind === 'item') {
+        for (let i = 0; i < reward.quantity; i++) {
+          if (this.addOneToInventory(reward.itemId)) grantedItems.push(reward.itemId);
+        }
+      }
+    }
+    if (totalGold > 0) {
+      addGold(this.character, totalGold);
+      this.addLogEntry(`+${totalGold} Gold (quest reward)`, 'victory');
+    }
+    for (const itemId of grantedItems) {
+      const itemDef = this.content.getItem(itemId);
+      if (itemDef) this.addLogEntry(`Quest reward: ${itemDef.name}`, 'victory');
+    }
+    if (totalXp > 0) {
+      const { leveledUp, levelsGained } = addXp(this.character, totalXp);
+      this.xpRateXpTotal += totalXp;
+      this.addLogEntry(`+${totalXp} XP (quest reward)`, 'victory');
+      if (leveledUp) {
+        for (let i = 0; i < levelsGained; i++) {
+          this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
+        }
+        this.autoUnlockSkills();
+      }
+    }
+    this.addLogEntry(`Completed quest: ${def.name}`, 'victory');
+    return { success: true };
+  }
+
   getState(otherPlayers: OtherPlayerState[]): Omit<ServerStateMessage, 'type' | 'serverVersion'> {
     const battleState = this.getBattleState?.();
     const partyState = this.getPartyPositionState?.();
@@ -367,6 +523,7 @@ export class PlayerSession {
     const zoneName = zone ? zone.displayName : (partyZone ?? 'Unknown');
 
     const setDefs = this.getOwnedSetDefinitions();
+    const questBlock = this.buildQuestState();
 
     return {
       username: this.username,
@@ -383,6 +540,11 @@ export class PlayerSession {
       itemDefinitions: this.getOwnedItemDefinitions(setDefs),
       setDefinitions: setDefs,
       shopDefinition: this.getCurrentShopDefinition(),
+      activeQuests: questBlock.activeQuests,
+      completedQuests: questBlock.completedQuests,
+      questDefinitions: questBlock.questDefinitions,
+      offeredQuestIds: questBlock.offeredQuestIds,
+      questResolutions: questBlock.questResolutions,
     };
   }
 
@@ -670,6 +832,9 @@ export class PlayerSession {
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
       mailbox: this.getMailbox ? this.getMailbox() : this.initialMailbox,
+      activeQuests: this.quests.toSaveData().active,
+      completedQuests: this.quests.toSaveData().completed,
+      weeklyCompletions: this.quests.toSaveData().weeklyCompletions,
     };
   }
 
@@ -681,6 +846,7 @@ export class PlayerSession {
     data: PlayerSaveData,
     grid: HexGrid,
     content: ContentStore,
+    onQuestEvent?: (event: QuestEvent) => void,
   ): PlayerSession {
     // Build session via Object.create to bypass constructor
     const session = Object.create(PlayerSession.prototype) as PlayerSession;
@@ -688,6 +854,12 @@ export class PlayerSession {
     session['grid'] = grid;
     session['content'] = content;
     session['battleCount'] = data.battleCount;
+    session.quests = new QuestSystem(data.username, onQuestEvent);
+    session.quests.loadFromSaveData({
+      active: data.activeQuests ?? [],
+      completed: data.completedQuests ?? [],
+      weeklyCompletions: data.weeklyCompletions ?? {},
+    });
     // Migrate old log entries without IDs and restore the counter
     const restoredLog = data.combatLog.slice(-MAX_LOG_ENTRIES);
     let maxId = 0;

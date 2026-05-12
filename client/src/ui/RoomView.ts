@@ -1,4 +1,5 @@
 import type { TileClickInfo } from './CanvasWorldMap';
+import type { NpcDefinition } from '@idle-party-rpg/shared';
 import { classIconHtml } from '@idle-party-rpg/shared';
 import { renderAssetImg } from './assets';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
@@ -20,8 +21,11 @@ export class RoomView {
   private onMove: (col: number, row: number) => void;
   private onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void;
   private onShopClick?: () => void;
+  private onNpcTalk?: (npc: NpcDefinition) => void;
   /** Whether the player's current tile has a shop. Set externally before showing. */
   hasShop = false;
+  /** NPC on the player's current tile (if any). Set externally before showing. */
+  npc: NpcDefinition | null = null;
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
 
@@ -30,10 +34,12 @@ export class RoomView {
     onMove: (col: number, row: number) => void,
     onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void,
     onShopClick?: () => void,
+    onNpcTalk?: (npc: NpcDefinition) => void,
   ) {
     this.onMove = onMove;
     this.onUserClick = onUserClick;
     this.onShopClick = onShopClick;
+    this.onNpcTalk = onNpcTalk;
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'room-view-overlay';
@@ -129,6 +135,10 @@ export class RoomView {
       ? `<button class="room-view-action room-view-action-shop">${renderAssetImg('shop', info.zoneId, { className: 'room-view-action-icon', label: 'Shop' })}<span>Shop</span></button>`
       : '';
 
+    const talkButton = this.npc
+      ? `<button class="room-view-action room-view-action-talk"><span class="room-view-action-icon room-view-action-icon-emoji">${this.escapeHtml(this.npc.emoji)}</span><span>Talk to ${this.escapeHtml(this.npc.name)}</span></button>`
+      : '';
+
     this.modal.innerHTML = `
       <div class="room-view-bg" style="${bgStyle}"></div>
       <div class="room-view-scrim"></div>
@@ -144,6 +154,7 @@ export class RoomView {
           ${otherSection}
         </div>
         <div class="room-view-actions">
+          ${talkButton}
           ${shopButton}
         </div>
       </div>
@@ -154,6 +165,12 @@ export class RoomView {
     this.modal.querySelector('.room-view-action-shop')?.addEventListener('click', () => {
       this.hide();
       this.onShopClick?.();
+    });
+
+    this.modal.querySelector('.room-view-action-talk')?.addEventListener('click', () => {
+      const npc = this.npc;
+      this.hide();
+      if (npc) this.onNpcTalk?.(npc);
     });
 
     for (const el of this.modal.querySelectorAll('.room-party-member')) {

@@ -4,8 +4,10 @@ import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
+import type { NpcDefinition } from '@idle-party-rpg/shared';
+import type { QuestDefinition } from '@idle-party-rpg/shared';
 import type { DungeonDefinition } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_NPCS, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -17,6 +19,8 @@ const ENCOUNTERS_FILE = path.join(DATA_DIR, 'encounters.json');
 const SETS_FILE = path.join(DATA_DIR, 'sets.json');
 const SHOPS_FILE = path.join(DATA_DIR, 'shops.json');
 const TILE_TYPES_FILE = path.join(DATA_DIR, 'tile-types.json');
+const NPCS_FILE = path.join(DATA_DIR, 'npcs.json');
+const QUESTS_FILE = path.join(DATA_DIR, 'quests.json');
 const DUNGEONS_FILE = path.join(DATA_DIR, 'dungeons.json');
 
 /**
@@ -32,6 +36,8 @@ export class ContentStore {
   private sets = new Map<string, SetDefinition>();
   private shops = new Map<string, ShopDefinition>();
   private tileTypes = new Map<string, TileTypeDefinition>();
+  private npcs = new Map<string, NpcDefinition>();
+  private quests = new Map<string, QuestDefinition>();
   private dungeons = new Map<string, DungeonDefinition>();
   private world: WorldData = { startTile: { col: 0, row: 0 }, tiles: [] };
 
@@ -54,6 +60,8 @@ export class ContentStore {
     await fs.writeFile(SETS_FILE, JSON.stringify(Array.from(this.sets.values()), null, 2));
     await fs.writeFile(SHOPS_FILE, JSON.stringify(Array.from(this.shops.values()), null, 2));
     await fs.writeFile(TILE_TYPES_FILE, JSON.stringify(Array.from(this.tileTypes.values()), null, 2));
+    await fs.writeFile(NPCS_FILE, JSON.stringify(Array.from(this.npcs.values()), null, 2));
+    await fs.writeFile(QUESTS_FILE, JSON.stringify(Array.from(this.quests.values()), null, 2));
     await fs.writeFile(DUNGEONS_FILE, JSON.stringify(Array.from(this.dungeons.values()), null, 2));
   }
 
@@ -126,6 +134,26 @@ export class ContentStore {
   getAllTileTypes(): Record<string, TileTypeDefinition> {
     const result: Record<string, TileTypeDefinition> = {};
     for (const [id, def] of this.tileTypes) result[id] = def;
+    return result;
+  }
+
+  getNpc(id: string): NpcDefinition | undefined {
+    return this.npcs.get(id);
+  }
+
+  getAllNpcs(): Record<string, NpcDefinition> {
+    const result: Record<string, NpcDefinition> = {};
+    for (const [id, def] of this.npcs) result[id] = def;
+    return result;
+  }
+
+  getQuest(id: string): QuestDefinition | undefined {
+    return this.quests.get(id);
+  }
+
+  getAllQuests(): Record<string, QuestDefinition> {
+    const result: Record<string, QuestDefinition> = {};
+    for (const [id, def] of this.quests) result[id] = def;
     return result;
   }
 
@@ -332,6 +360,54 @@ export class ContentStore {
     return { success: true };
   }
 
+  // --- NPC CRUD ---
+
+  async addOrUpdateNpc(npc: NpcDefinition): Promise<void> {
+    this.npcs.set(npc.id, npc);
+    await this.save();
+  }
+
+  async deleteNpc(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.npcs.has(id)) {
+      return { success: false, error: 'NPC not found.' };
+    }
+    const referencingTile = this.world.tiles.find(t => t.npcId === id);
+    if (referencingTile) {
+      return { success: false, error: `Cannot delete: NPC is placed in room "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` };
+    }
+    this.npcs.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
+  // --- Quest CRUD ---
+
+  async addOrUpdateQuest(quest: QuestDefinition): Promise<void> {
+    this.quests.set(quest.id, quest);
+    await this.save();
+  }
+
+  async deleteQuest(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.quests.has(id)) {
+      return { success: false, error: 'Quest not found.' };
+    }
+    // Block delete if any NPC offers this quest
+    for (const npc of this.npcs.values()) {
+      if (npc.questIds?.includes(id)) {
+        return { success: false, error: `Cannot delete: quest is offered by NPC "${npc.name}".` };
+      }
+    }
+    // Block delete if any other quest depends on this one
+    for (const q of this.quests.values()) {
+      if (q.prerequisiteQuestIds?.includes(id)) {
+        return { success: false, error: `Cannot delete: quest is a prerequisite of "${q.name}".` };
+      }
+    }
+    this.quests.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
   // --- Tile Type CRUD ---
 
   async addOrUpdateTileType(def: TileTypeDefinition): Promise<void> {
@@ -372,7 +448,7 @@ export class ContentStore {
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; dungeons: DungeonDefinition[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
@@ -381,13 +457,15 @@ export class ContentStore {
       sets: Array.from(this.sets.values()),
       shops: Array.from(this.shops.values()),
       tileTypes: Array.from(this.tileTypes.values()),
+      npcs: Array.from(this.npcs.values()),
+      quests: Array.from(this.quests.values()),
       dungeons: Array.from(this.dungeons.values()),
       world: JSON.parse(JSON.stringify(this.world)),
     };
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; dungeons?: DungeonDefinition[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -417,6 +495,16 @@ export class ContentStore {
       for (const t of snapshot.tileTypes) this.tileTypes.set(t.id, t);
     }
     // Old snapshots predate tile types — keep existing tile types intact
+
+    this.npcs.clear();
+    if (snapshot.npcs) {
+      for (const n of snapshot.npcs) this.npcs.set(n.id, n);
+    }
+
+    this.quests.clear();
+    if (snapshot.quests) {
+      for (const q of snapshot.quests) this.quests.set(q.id, q);
+    }
 
     this.dungeons.clear();
     if (snapshot.dungeons) {
@@ -498,6 +586,23 @@ export class ContentStore {
         // tile-types.json doesn't exist yet — seed from defaults
         for (const t of SEED_TILE_TYPES) this.tileTypes.set(t.id, t);
         tileTypesSeeded = true;
+      }
+
+      try {
+        const npcsRaw = await fs.readFile(NPCS_FILE, 'utf-8');
+        const npcsArr: NpcDefinition[] = JSON.parse(npcsRaw);
+        for (const n of npcsArr) this.npcs.set(n.id, n);
+      } catch {
+        // npcs.json doesn't exist yet — start empty (intentionally not seeded
+        // on existing installs; dev-only seed lives in seedDefaults())
+      }
+
+      try {
+        const questsRaw = await fs.readFile(QUESTS_FILE, 'utf-8');
+        const questsArr: QuestDefinition[] = JSON.parse(questsRaw);
+        for (const q of questsArr) this.quests.set(q.id, q);
+      } catch {
+        // quests.json doesn't exist yet — start empty
       }
 
       try {
@@ -673,6 +778,13 @@ export class ContentStore {
     // Tile Types
     for (const t of SEED_TILE_TYPES) {
       this.tileTypes.set(t.id, t);
+    }
+
+    // NPCs — dev only. Production deploys boot with no NPCs; admins create them.
+    if (process.env.NODE_ENV !== 'production') {
+      for (const n of Object.values(SEED_NPCS)) {
+        this.npcs.set(n.id, n);
+      }
     }
 
     // Dungeons

@@ -667,6 +667,69 @@ html, body {
   margin-top: 16px;
 }
 
+.settings-section {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-section-title {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.settings-options-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-option-row {
+  background: var(--bg-panel-light);
+  border: 2px solid var(--border-pixel);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-family: var(--pixel-font);
+}
+
+.settings-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-gold);
+  cursor: pointer;
+}
+
+.settings-option-label {
+  font-size: 10px;
+  color: var(--text-primary);
+}
+
+.settings-option-desc {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  padding-left: 26px;
+}
+
 .settings-btn {
   width: 100%;
   padding: 12px 16px;
@@ -1858,10 +1921,12 @@ html, body {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+  flex-wrap: wrap;
 }
 
 .tile-modal-btn {
-  flex: 1;
+  flex: 1 1 80px;
+  min-width: 80px;
   padding: 8px;
   font-family: var(--pixel-font);
   font-size: 11px;
@@ -1896,6 +1961,374 @@ html, body {
 
 .tile-modal-close:active {
   border-color: var(--text-secondary);
+}
+
+.tile-modal-npc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-panel-light);
+  border: 1px solid var(--border-color);
+  margin-top: 4px;
+}
+
+.tile-modal-npc-emoji {
+  font-size: 16px;
+}
+
+.tile-modal-npc-name {
+  font-size: 8px;
+  color: var(--accent-blue);
+}
+
+/* ── NPC Talk Popup ──────────────────────────────────────── */
+
+.npc-talk-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.8);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+
+.npc-talk-modal {
+  background: var(--bg-panel);
+  border: 2px solid var(--border-pixel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 360px;
+  width: 90%;
+}
+
+.npc-talk-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.npc-talk-portrait-emoji {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.npc-talk-portrait-img {
+  width: 56px;
+  height: 56px;
+  image-rendering: pixelated;
+}
+
+.npc-talk-name {
+  font-family: var(--pixel-font);
+  font-size: 12px;
+  color: var(--accent-gold);
+}
+
+.npc-talk-greeting {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-style: italic;
+}
+
+.npc-talk-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.npc-talk-btn {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  padding: 8px 16px;
+  background: var(--bg-panel-light);
+  color: var(--text-primary);
+  border: 2px solid var(--border-pixel);
+  cursor: pointer;
+}
+
+.npc-talk-btn:active {
+  border-color: var(--accent-gold);
+}
+
+.npc-talk-btn-primary {
+  background: var(--accent-gold);
+  color: #000;
+}
+
+.npc-quest-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.npc-quest-section-title {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+}
+
+.npc-quest-section-empty {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.npc-quest-card {
+  background: var(--bg-panel-light);
+  border: 2px solid var(--border-pixel);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.npc-quest-card-ready {
+  border-color: var(--accent-gold);
+}
+
+.npc-quest-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.npc-quest-card-name {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--text-primary);
+}
+
+.npc-quest-card-desc {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.npc-quest-card-objectives {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.npc-quest-objective {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+}
+
+.npc-quest-card-rewards {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--accent-gold);
+}
+
+.npc-quest-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.npc-quest-status-pill {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  text-transform: uppercase;
+}
+
+.npc-quest-status-accepted { color: var(--text-secondary); }
+.npc-quest-status-in_progress { color: var(--accent-blue); }
+.npc-quest-status-ready { color: var(--accent-gold); border-color: var(--accent-gold); }
+
+.npc-quest-scope-pill {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  text-transform: uppercase;
+}
+
+.npc-quest-scope-solo { color: var(--text-secondary); }
+.npc-quest-scope-party { color: var(--accent-green); }
+
+.npc-talk-completion {
+  background: var(--bg-panel);
+  border: 2px solid var(--accent-gold);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.npc-talk-completion-label {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--accent-gold);
+  text-transform: uppercase;
+}
+
+.npc-talk-completion-text {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-style: italic;
+}
+
+.npc-talk-completion-dismiss {
+  align-self: flex-end;
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  padding: 4px 12px;
+  background: var(--accent-gold);
+  color: #000;
+  border: 2px solid var(--border-pixel);
+  cursor: pointer;
+}
+
+/* ── Quest Log card on Character screen ──────────────────── */
+
+.quest-log-card {
+  background: var(--bg-panel-light);
+  border: 2px solid var(--border-pixel);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.quest-log-header {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+}
+
+.quest-log-empty {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.quest-log-entry {
+  background: var(--bg-panel);
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quest-log-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.quest-log-entry-name {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-primary);
+}
+
+.quest-log-status {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  text-transform: uppercase;
+}
+
+.quest-log-status-accepted { color: var(--text-secondary); }
+.quest-log-status-in_progress { color: var(--accent-blue); }
+.quest-log-status-ready { color: var(--accent-gold); border-color: var(--accent-gold); }
+
+.quest-log-objective {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  color: var(--text-secondary);
+}
+
+.quest-log-completed {
+  font-family: var(--pixel-font);
+  font-size: 7px;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.quest-log-count {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+
+.completed-quests-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+  font-family: var(--pixel-font);
+}
+
+.completed-quests-toggle:hover .quest-log-header {
+  color: var(--accent-gold);
+}
+
+.completed-quests-chevron {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+  width: 10px;
+  display: inline-block;
+}
+
+.completed-quests-toolbar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.completed-quests-search,
+.completed-quests-filter,
+.completed-quests-sort {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 4px 6px;
+  flex: 1 1 auto;
+  min-width: 80px;
+}
+
+.completed-quests-search { flex: 2 1 100px; }
+
+.completed-quests-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--text-secondary);
+  margin-top: 4px;
 }
 
 /* ── Login Screen ────────────────────────────────────────── */

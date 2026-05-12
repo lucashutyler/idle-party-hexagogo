@@ -4,6 +4,7 @@ import type { Screen } from './ScreenManager';
 import { RoomView } from '../ui/RoomView';
 import { ShopPopup } from '../ui/ShopPopup';
 import { CanvasWorldMap } from '../ui/CanvasWorldMap';
+import { NpcTalkPopup } from '../ui/NpcTalkPopup';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -15,6 +16,7 @@ export class MapScreen implements Screen {
   private zoomControls?: HTMLElement;
   private roomView?: RoomView;
   private shopPopup?: ShopPopup;
+  private npcTalkPopup?: NpcTalkPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
@@ -117,6 +119,7 @@ export class MapScreen implements Screen {
     this.map.setSendMove((col, row) => this.tryMove(col, row));
 
     this.shopPopup = new ShopPopup(this.gameClient);
+    this.npcTalkPopup = new NpcTalkPopup(this.gameClient);
     this.roomView = new RoomView(
       this.container,
       (col, row) => { this.tryMove(col, row); },
@@ -125,11 +128,16 @@ export class MapScreen implements Screen {
         const state = this.gameClient.lastState;
         if (state?.shopDefinition) this.shopPopup!.show(state);
       },
+      (npc) => { this.npcTalkPopup!.show(npc); },
     );
     this.map.setOnTileClick((tileInfo) => {
       const state = this.gameClient.lastState;
       const playerOnTile = state && state.party.col === tileInfo.col && state.party.row === tileInfo.row;
       this.roomView!.hasShop = !!(playerOnTile && state?.shopDefinition);
+      const tileDef = this.worldCache.getTile(tileInfo.col, tileInfo.row);
+      this.roomView!.npc = (playerOnTile && tileDef?.npcId)
+        ? (this.worldCache.getNpc(tileDef.npcId) ?? null)
+        : null;
       this.roomView!.show(tileInfo);
     });
 

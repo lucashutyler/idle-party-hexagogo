@@ -7,6 +7,8 @@ import type {
   SetDefinition,
   ShopDefinition,
   TileTypeDefinition,
+  NpcDefinition,
+  QuestDefinition,
   DungeonDefinition,
 } from '@idle-party-rpg/shared';
 
@@ -51,6 +53,8 @@ export interface ContentData {
   sets: Record<string, SetDefinition>;
   shops: Record<string, ShopDefinition>;
   tileTypes: Record<string, TileTypeDefinition>;
+  npcs: Record<string, NpcDefinition>;
+  quests: Record<string, QuestDefinition>;
   dungeons: Record<string, DungeonDefinition>;
   world: WorldData;
 }
@@ -72,6 +76,8 @@ export type TabId =
   | 'items'
   | 'sets'
   | 'shops'
+  | 'npcs'
+  | 'quests'
   | 'zones'
   | 'encounters'
   | 'tile-types'
@@ -93,6 +99,8 @@ export const TABS: TabDef[] = [
   { id: 'items',      label: 'Items',      icon: '❖' },
   { id: 'sets',       label: 'Sets',       icon: '✦' },
   { id: 'shops',      label: 'Shops',      icon: '¤' },
+  { id: 'npcs',       label: 'NPCs',       icon: '☺' },
+  { id: 'quests',     label: 'Quests',     icon: '!' },
   { id: 'zones',      label: 'Zones',      icon: '○' },
   { id: 'encounters', label: 'Encounters', icon: '⚔' },
   { id: 'tile-types', label: 'Tile Types', icon: '■' },
