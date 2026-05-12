@@ -1,48 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.05.11.7',
-    notes: [
-      'Chat: clickable channel tags + sender names lost their per-channel color when I converted them to buttons. Removed the color: inherit override so the channel/sender class colors apply again.',
-      'Map performance: tile artwork is now baked into hex-clipped offscreen sprites on first load instead of clipping + drawing the raw image every frame on every visible tile. The map shadow is also pre-blurred once per grid change. On phones with many art-bearing tiles this is roughly the difference between "stuttery on pan/zoom" and "smooth".',
-    ],
-  },
-  {
-    version: '2026.05.11.6',
-    notes: [
-      'Mobile chat docking: the bottom nav + XP bar were sliding up behind the chat sheet (flex packed them right under the shrunk screen-container). Pushed them to the actual viewport bottom with margin-top:auto and accounted for their height in the screen-container shrink, so the chat now slots cleanly between the screen content and the nav.',
-    ],
-  },
-  {
-    version: '2026.05.11.5',
-    notes: [
-      'Dev: vite proxy was only forwarding /auth, /api, and /item-artwork to the backend, so every other artwork kind (parchment, monster, class, set, shop, zone, tile-type, combat-bg, room-bg, logo, nav/class/slot icons) silently fell through to the SPA index in dev. Added explicit proxy entries for every static mount.',
-    ],
-  },
-  {
-    version: '2026.05.11.4',
-    notes: [
-      'Combat (mobile): the attack lunge no longer briefly clips combatants out of view. The tray\'s clipping box was hiding the cards as they animated inward on phones — switched it to overflow: visible on narrow viewports so the lunge extends into the inter-tray gap.',
-    ],
-  },
-  {
-    version: '2026.05.11.3',
-    notes: [
-      'Chat: clicking a sender name opens the user popup; clicking a channel tag (Global, Zone, Room, Party, Guild, DM) switches your composer to that channel. Server messages stay plain text.',
-      'Combat: restored the lunge / hit-flash / dodge-sidestep animations on combatant cards (the underlying selector was looking for an old DOM node that no longer exists)',
-    ],
-  },
-  {
-    version: '2026.05.11.2',
-    notes: [
-      'Settings: Sign Out / Patch Notes buttons now use the pixel font (were defaulting to Arial)',
-      'Mobile chat: docks at the bottom of the screen instead of overlaying content — the active screen now shrinks above so the visible center stays centered. Drop shadows removed on mobile so the chat reads as a top-level layout bar rather than a floating popup',
-    ],
-  },
-  {
     version: '2026.05.11.1',
     notes: [
       'Admin: artwork upload added to all CRM entities (monsters, sets, shops, zones, tile types) — same pipeline as items',
-      'Monster popup now shows an optional flavor description (set in the admin monster form) and no longer shows the placeholder "drops/abilities/resistances are unknown" hint',
+      'Monster popup now shows an optional flavor description (set in the admin monster form); the placeholder "drops/abilities/resistances are unknown" hint is gone',
+      'Settings: Sign Out / Patch Notes buttons now use the pixel font (were defaulting to Arial)',
+      'Chat: clicking a sender name opens the user popup; clicking a channel tag (Global, Zone, Room, Party, Guild, DM) switches your composer to that channel. Server messages stay plain text. Per-channel colors preserved on the new clickable variants.',
+      'Mobile chat: docks at the bottom of the screen instead of overlaying content — the active screen shrinks above so the visible center stays centered; the bottom nav + XP bar stay pinned at the viewport bottom. Drop shadows removed on mobile so the chat reads as a top-level layout bar rather than a floating popup',
+      'Combat: restored the lunge / hit-flash / dodge-sidestep animations on combatant cards. On mobile, the attack lunge no longer clips combatants out of view at the tray edge.',
+      'Map: tiles now layer in three stages — tile-type color (always), real artwork overlay if uploaded, otherwise the tile-type emoji. Tile artwork is baked into hex-clipped offscreen sprites on first load and the map drop-shadow is pre-blurred once per grid change, so pan/zoom stays smooth on mobile.',
+      'Dev: vite proxy now forwards every artwork mount (parchment, monster, class, set, shop, zone, tile-type, combat-bg, room-bg, logo, nav/class/slot icons), not just /item-artwork — previously the other paths fell through to the SPA index in dev.',
     ],
   },
   {

@@ -1147,16 +1147,18 @@ export class CanvasWorldMap {
     }
     c.closePath();
 
-    // Try per-tile artwork for unlocked traversable tiles.
-    let drewArtwork = false;
-    if (isUnlocked && tile.isTraversable) {
-      drewArtwork = this.tryDrawTileArtwork(tile, sx, sy, z, corners);
-    }
+    // Always paint the tile-type color first so every tile has a solid
+    // background — artwork (when present) overlays on top, and the emoji
+    // glyph (when no artwork) sits above the color. Previously discovered
+    // tiles relied on placehold.co stubs as artwork, so the background color
+    // never showed for them.
+    c.fillStyle = fillColor;
+    c.fill();
 
-    if (!drewArtwork) {
-      c.fillStyle = fillColor;
-      c.fill();
-    }
+    // Try per-tile or per-type artwork. Real art only — no placehold.co
+    // fallback. When art is missing we want to fall through to the emoji
+    // glyph, not paste a "MissingTexture" placeholder.
+    const drewArtwork = this.tryDrawTileArtwork(tile, sx, sy, z, corners);
 
     // Outline.
     c.strokeStyle = isUnlocked ? 'rgba(26,26,46,0.5)' : 'rgba(10,10,30,0.3)';
@@ -1165,13 +1167,15 @@ export class CanvasWorldMap {
 
     c.restore();
 
-    // Icon (drawn on top of tile fill — fall-back when no artwork).
+    // Emoji glyph on top of the tile color when there's no real artwork.
     if (!drewArtwork) {
-      this.drawTileIcon(tile, sx, sy, z, isNonTraversable, isZoneUnlocked, isUnlocked);
+      this.drawTileIcon(tile, sx, sy, z, darkenFactor);
     }
   }
 
-  /** Try to draw per-tile or per-type artwork. Returns true if drawn. */
+  /** Try to draw per-tile or per-type artwork. Returns true if drawn.
+   *  Only real artwork counts — no placehold.co fallback. Tiles without
+   *  uploaded art fall through to the emoji glyph in `drawTileIcon`. */
   private tryDrawTileArtwork(
     tile: HexTile, sx: number, sy: number, z: number,
     corners: { x: number; y: number }[],
@@ -1180,20 +1184,15 @@ export class CanvasWorldMap {
     const def = this.worldTileDefs.get(`${offset.col},${offset.row}`);
     const tileId = def?.id ?? '';
 
-    const candidates: { url: string; fallback: string | null }[] = [];
-    if (tileId) {
-      const real = artworkUrl('tile', tileId);
-      const ph = placeholderUrl(tileId, { w: 128, h: 128 });
-      candidates.push({ url: real, fallback: ph });
-    }
-    const typeReal = artworkUrl('tile-type', tile.type);
-    candidates.push({ url: typeReal, fallback: null });
+    const candidates: string[] = [];
+    if (tileId) candidates.push(artworkUrl('tile', tileId));
+    candidates.push(artworkUrl('tile-type', tile.type));
 
     let img: HTMLImageElement | null = null;
     let imgUrl = '';
-    for (const cand of candidates) {
-      img = this.imageCache.get(cand.url, cand.fallback, () => { /* repaint on next RAF */ });
-      if (img) { imgUrl = cand.url; break; }
+    for (const url of candidates) {
+      img = this.imageCache.get(url, null, () => { /* repaint on next RAF */ });
+      if (img) { imgUrl = url; break; }
     }
     if (!img) return false;
 
@@ -1260,13 +1259,23 @@ export class CanvasWorldMap {
     return canvas;
   }
 
+  /** Render the tile-type emoji centered in the hex. Used when no real
+   *  artwork exists for the tile (or its type). Darkened with the same
+   *  factor as the fill so foggy / non-traversable tiles read consistently. */
   private drawTileIcon(
-    _tile: HexTile, _sx: number, _sy: number, _z: number,
-    _isNonTraversable: boolean, _isZoneUnlocked: boolean, _isUnlocked: boolean,
+    tile: HexTile, sx: number, sy: number, z: number, darkenFactor: number,
   ): void {
-    // Emoji glyphs are no longer used as tile icons. Tile artwork (when
-    // present) is rendered via the per-tile <img> art layer; foggy and
-    // un-art'd tiles fall back to the colored hex without a glyph overlay.
+    const typeDef = this.worldCache.getTileTypeDef(tile.type);
+    const icon = typeDef?.icon;
+    if (!icon) return;
+    const c = this.ctx;
+    c.save();
+    c.globalAlpha = Math.max(0.35, darkenFactor);
+    c.font = `${Math.round(24 * z)}px sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(icon, sx, sy);
+    c.restore();
   }
 
   private drawZoneOverlay(corners: { x: number; y: number }[], ox: number, oy: number, z: number): void {
