@@ -652,6 +652,17 @@ html, body {
   font-size: 56px;
 }
 
+/* Settings header now uses the same nav icon as the bottom-nav Settings tab
+   (loaded from /nav-icons/settings.png with a placehold.co fallback) instead
+   of a raw emoji glyph. Sized larger than the nav button itself. */
+.settings-icon-img {
+  width: 96px;
+  height: 96px;
+  image-rendering: pixelated;
+  object-fit: contain;
+  display: block;
+}
+
 .settings-title {
   font-family: var(--pixel-font);
   font-size: 17px;
@@ -728,6 +739,68 @@ html, body {
   line-height: 1.6;
   color: var(--text-secondary);
   padding-left: 26px;
+}
+
+/* Player Options popup — fixed-overlay modal opened from the Settings screen.
+   Same visual treatment as the in-screen Player options section it replaced
+   (toggle rows on a panel background); presented as a centered modal so the
+   underlying screen stays focused. */
+.player-options-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--pixel-font);
+  padding: 20px;
+}
+.player-options-modal {
+  background: var(--bg-panel);
+  border: 2px solid var(--border-pixel);
+  box-shadow:
+    inset -2px -2px 0 rgba(0, 0, 0, 0.3),
+    inset 2px 2px 0 rgba(255, 255, 255, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  width: 100%;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.player-options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-panel-light);
+  border-bottom: 2px solid var(--border-pixel);
+}
+.player-options-title {
+  font-family: var(--display-font);
+  font-size: 14px;
+  color: var(--accent-gold);
+  letter-spacing: 1px;
+  text-shadow: 1px 1px 0 #000;
+}
+.player-options-close {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-family: var(--pixel-font);
+}
+.player-options-close:hover {
+  background: rgba(245, 200, 66, 0.15);
+  color: var(--accent-gold);
+}
+.player-options-modal .settings-options-list {
+  padding: 12px;
 }
 
 .settings-btn {
