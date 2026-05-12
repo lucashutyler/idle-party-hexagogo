@@ -219,6 +219,15 @@ export class CanvasWorldMap {
 
   // Image cache (shared across renders).
   private imageCache = new ImageCache();
+  /** Per-URL cache of hex-clipped tile sprites. The canvas `clip()` operation
+   *  forces software rasterization in most browsers; doing it once per image
+   *  (when the image loads) instead of once per tile per frame is the
+   *  difference between "smooth" and "feels stuttery" when many tiles have
+   *  artwork. Keyed by the source image URL. */
+  private hexSpriteCache = new Map<string, HTMLCanvasElement>();
+  /** Pre-blurred copy of the map silhouette so the per-frame shadow blit
+   *  doesn't have to apply the (expensive) canvas blur filter every frame. */
+  private shadowBlurredCanvas: HTMLCanvasElement | null = null;
   private parchmentPattern: CanvasPattern | null = null;
   private parchmentLoading = false;
   /** Cached silhouette of the entire map, baked at zoom=1 in world-coord
@@ -339,6 +348,7 @@ export class CanvasWorldMap {
     this.grid = this.buildGridFromCache();
     // Grid changed → silhouette is stale; rebake on next draw.
     this.shadowBounds = null;
+    this.shadowBlurredCanvas = null;
   }
 
   /** Tear down listeners and stop rendering. */
@@ -565,6 +575,20 @@ export class CanvasWorldMap {
       this.pointerActive = true;
       this.onPointerDown(e.clientX, e.clientY);
     });
+    // Hover-tracking on the canvas itself (instant tooltip on hover, no
+    // delay). updateHover is cheap — just hit-tests the cursor against the
+    // grid and toggles the tooltip element.
+    this.canvas.addEventListener('mousemove', e => {
+      this.onPointerMove(e.clientX, e.clientY);
+    });
+    this.canvas.addEventListener('mouseleave', () => {
+      this.hoverCol = null;
+      this.hoverRow = null;
+      this.hideTooltip();
+    });
+    // Window-level mousemove keeps the drag-pan working when the cursor
+    // drifts off the canvas mid-drag. Gated on pointerActive so it only
+    // updates while a drag is actually in flight.
     window.addEventListener('mousemove', e => {
       if (!this.pointerActive) return;
       this.onPointerMove(e.clientX, e.clientY);
@@ -736,23 +760,22 @@ export class CanvasWorldMap {
   }
 
   private showTooltip(tile: HexTile): void {
-    const off = cubeToOffset(tile.coord);
-    const def = this.worldTileDefs.get(`${off.col},${off.row}`);
-
-    let label: string;
+    // Tooltip only shows for unlocked, traversable tiles. Undiscovered and
+    // non-navigable tiles render no tooltip — there's nothing useful to
+    // identify yet (room names aren't known until you reach them).
     if (!tile.isTraversable) {
-      label = this.worldCache.getTileTypeDef(tile.type)?.name ?? tile.type;
-    } else {
-      const zoneName = def?.zoneName ?? def?.zone ?? tile.zone;
-      const isSameZone = tile.zone === this.currentZone;
-      if (isSameZone) {
-        const isUnlocked = this.worldCache.isUnlocked(off.col, off.row);
-        if (isUnlocked && def?.name) label = `${zoneName}\n${def.name}`;
-        else label = `${zoneName}\nUndiscovered`;
-      } else {
-        label = zoneName;
-      }
+      this.hideTooltip();
+      return;
     }
+    const off = cubeToOffset(tile.coord);
+    if (!this.worldCache.isUnlocked(off.col, off.row)) {
+      this.hideTooltip();
+      return;
+    }
+    const def = this.worldTileDefs.get(`${off.col},${off.row}`);
+    const zoneName = def?.zoneName ?? def?.zone ?? tile.zone;
+    const roomName = def?.name ?? '';
+    const label = roomName ? `${zoneName}: ${roomName}` : zoneName;
 
     this.tooltipEl.textContent = label;
     const dpr = window.devicePixelRatio || 1;
@@ -970,6 +993,16 @@ export class CanvasWorldMap {
     const buf = this.shadowCanvas;
     if (!bounds || !buf) return;
 
+    // Pre-blur the silhouette into a separate offscreen so the per-frame draw
+    // is a cheap drawImage instead of an expensive canvas-blur-filter pass.
+    // We blur at zoom=1 (world coords) and rely on drawImage scaling for the
+    // current zoom — visually identical, but ~10× faster on mobile GPUs.
+    if (!this.shadowBlurredCanvas) {
+      this.shadowBlurredCanvas = this.bakeBlurredShadow(buf);
+    }
+    const blurred = this.shadowBlurredCanvas;
+    if (!blurred) return;
+
     const SHADOW_OFFSET_X = 40;
     const SHADOW_OFFSET_Y = 60;
     const SHADOW_SCALE = 0.88;
@@ -983,12 +1016,45 @@ export class CanvasWorldMap {
     const centerNudgeX = (bounds.w * z - drawW) / 2;
     const centerNudgeY = (bounds.h * z - drawH) / 2;
 
+    // The pre-blurred canvas is padded by `BLUR_PAD` source pixels on each
+    // side so the blur halo wasn't cropped during bake. Shift the draw rect
+    // by that padding (scaled to current zoom × SHADOW_SCALE) so the
+    // silhouette content lands at the same screen position as before.
+    const padShift = CanvasWorldMap.BLUR_PAD * z * SHADOW_SCALE;
+    const blurredDrawW = drawW + 2 * padShift;
+    const blurredDrawH = drawH + 2 * padShift;
+
     const c = this.ctx;
     c.save();
     c.globalAlpha = 0.5;
-    c.filter = `blur(${Math.max(4, 10 * z)}px)`;
-    c.drawImage(buf, screenX + centerNudgeX, screenY + centerNudgeY, drawW, drawH);
+    c.drawImage(
+      blurred,
+      screenX + centerNudgeX - padShift,
+      screenY + centerNudgeY - padShift,
+      blurredDrawW,
+      blurredDrawH,
+    );
     c.restore();
+  }
+
+  private static readonly BLUR_RADIUS = 10;
+  private static readonly BLUR_PAD = 30; // 3× BLUR_RADIUS — fits the blur halo
+
+  /**
+   * Bake a blurred copy of the silhouette into an oversized offscreen canvas
+   * (so the blur isn't cropped at the edges). Done once per grid change.
+   */
+  private bakeBlurredShadow(silhouette: HTMLCanvasElement): HTMLCanvasElement | null {
+    const pad = CanvasWorldMap.BLUR_PAD;
+    const out = document.createElement('canvas');
+    out.width = silhouette.width + pad * 2;
+    out.height = silhouette.height + pad * 2;
+    const ctx = out.getContext('2d');
+    if (!ctx) return null;
+    ctx.filter = `blur(${CanvasWorldMap.BLUR_RADIUS}px)`;
+    ctx.drawImage(silhouette, pad, pad);
+    ctx.filter = 'none';
+    return out;
   }
 
   /**
@@ -1120,31 +1186,74 @@ export class CanvasWorldMap {
     candidates.push({ url: typeReal, fallback: null });
 
     let img: HTMLImageElement | null = null;
+    let imgUrl = '';
     for (const cand of candidates) {
       img = this.imageCache.get(cand.url, cand.fallback, () => { /* repaint on next RAF */ });
-      if (img) break;
+      if (img) { imgUrl = cand.url; break; }
     }
     if (!img) return false;
 
+    // Bake the image into a hex-clipped offscreen sprite the first time we
+    // see this URL. The per-frame work then collapses to a single drawImage
+    // — no clip(), no path rebuild — which on mobile is roughly an order of
+    // magnitude faster than clipping + drawing the raw image every frame.
+    const sprite = this.getHexSprite(imgUrl, img);
+
     const c = this.ctx;
-    c.save();
-    c.clip();
-    // Hex bounding box width = 2*size, height = sqrt(3)*size.
+    // Hex bounding box: width = 2 * size, height = sqrt(3) * size.
     const w = HEX_SIZE * 2 * z;
     const h = Math.sqrt(3) * HEX_SIZE * z;
-    c.drawImage(img, sx - w / 2, sy - h / 2, w, h);
-    c.restore();
-    // Re-stroke handled by caller via the closed path stroking below tryDrawTileArtwork.
-    // The caller used save+beginPath+closePath, so calling clip() consumed the path.
-    // Rebuild the path for the outline stroke now.
-    c.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const cx = sx + corners[i].x * z;
-      const cy = sy + corners[i].y * z;
-      if (i === 0) c.moveTo(cx, cy); else c.lineTo(cx, cy);
-    }
-    c.closePath();
+    c.drawImage(sprite, sx - w / 2, sy - h / 2, w, h);
+
+    // The caller built its hex path before calling us and expects it to still
+    // be live for the outline stroke. drawImage() doesn't consume the path,
+    // but we no longer call clip(), so the path is still intact for the
+    // caller — no need to rebuild. Keep this `corners` parameter so the
+    // signature stays stable for future changes.
+    void corners;
     return true;
+  }
+
+  /**
+   * Return a hex-clipped offscreen sprite for the given image, baking it on
+   * first request. The sprite is sized to the hex bounding-box aspect (2 :
+   * sqrt(3)) so per-frame drawImage scaling produces no distortion.
+   */
+  private getHexSprite(url: string, img: HTMLImageElement): HTMLCanvasElement {
+    const cached = this.hexSpriteCache.get(url);
+    if (cached) return cached;
+    // Bake size: chosen so the sprite stays crisp at typical max zoom (~4×
+    // default). HEX_SIZE * 4 (= 160) for width matches what a zoomed-in hex
+    // occupies on screen; height follows the hex aspect (sqrt(3)/2).
+    const SPRITE_W = HEX_SIZE * 4;
+    const SPRITE_H = Math.round(SPRITE_W * Math.sqrt(3) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = SPRITE_W;
+    canvas.height = SPRITE_H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      // Degenerate fallback: cache an empty canvas so we don't retry every frame.
+      this.hexSpriteCache.set(url, canvas);
+      return canvas;
+    }
+    // Build a hex path that exactly fills the sprite bounding box.
+    // Hex bbox at "size" s: width = 2s, height = sqrt(3)*s. We want 2s = SPRITE_W
+    // and sqrt(3)*s = SPRITE_H — both yield s = SPRITE_W / 2 (since aspect matches).
+    const s = SPRITE_W / 2;
+    const cx = SPRITE_W / 2;
+    const cy = SPRITE_H / 2;
+    const cors = getHexCorners(s);
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const x = cx + cors[i].x;
+      const y = cy + cors[i].y;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(img, 0, 0, SPRITE_W, SPRITE_H);
+    this.hexSpriteCache.set(url, canvas);
+    return canvas;
   }
 
   private drawTileIcon(

@@ -600,6 +600,19 @@ input[type="color"] { padding: 0; height: 32px; width: 56px; }
 }
 .admin-form-checkbox input { width: auto; }
 
+.admin-form-fullrow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--admin-gap-tight);
+  font-size: 0.9em;
+  color: var(--admin-text-muted);
+  margin-bottom: var(--admin-gap-loose);
+}
+.admin-form-fullrow textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
 .admin-form-fieldset {
   margin: var(--admin-gap-loose) 0;
   padding: var(--admin-pad-section);

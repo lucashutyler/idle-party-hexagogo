@@ -1028,15 +1028,19 @@ export class SocialScreen implements Screen {
     else if (hasIncoming) statusBadge = '<span class="social-badge friend">Request</span>';
     else if (hasSentTo) statusBadge = '<span class="social-badge">Pending</span>';
 
-    const levelBadge = (p.level !== undefined && p.level !== null)
-      ? `<span class="social-badge level">Lv ${p.level}</span>`
+    // Level sits to the LEFT of the name as plain inline text — not a
+    // pill — separated by a thin dash. Color-only emphasis (gold against
+    // the muted text). Keeping it outside the clickable name span so the
+    // username hit-target stays tight.
+    const levelText = (p.level !== undefined && p.level !== null)
+      ? `<span class="social-user-level">Lv ${p.level}</span><span class="social-user-sep">—</span>`
       : '';
 
     return `<div class="social-user-row${isSelf ? ' self' : ''}" data-username="${this.escapeHtml(p.username)}">
       <span class="social-status-dot ${isOnline ? 'online' : 'offline'}"></span>
+      ${levelText}
       <span class="social-user-name-clickable" data-username="${this.escapeHtml(p.username)}">${this.classIcon(p.className)} ${this.escapeHtml(p.username)}</span>
       <span class="social-user-badges">
-        ${levelBadge}
         ${statusBadge}
         ${isBlocked ? '<span class="social-badge blocked">Blocked</span>' : ''}
       </span>

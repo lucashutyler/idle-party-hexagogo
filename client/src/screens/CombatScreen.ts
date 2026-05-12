@@ -1,4 +1,5 @@
 import type { GameClient } from '../network/GameClient';
+import type { WorldCache } from '../network/WorldCache';
 import type { ServerStateMessage, CombatLogEntry, ClientCombatAction } from '@idle-party-rpg/shared';
 import { classIconHtml, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
@@ -23,6 +24,7 @@ function classArtSrc(className: string): { real: string; fallback: string } {
 export class CombatScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
+  private worldCache: WorldCache;
   private isActive = false;
 
   // DOM references
@@ -36,6 +38,7 @@ export class CombatScreen implements Screen {
   private runBtn!: HTMLButtonElement;
   private runHint!: HTMLElement;
   private runBar!: HTMLElement;
+  private runLocationLabel!: HTMLElement;
   private runHintTimer?: ReturnType<typeof setTimeout>;
 
   // Last rendered log entry ID — for incremental DOM updates
@@ -59,11 +62,12 @@ export class CombatScreen implements Screen {
   // Username click callback
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
-  constructor(containerId: string, gameClient: GameClient) {
+  constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
+    this.worldCache = worldCache;
 
     this.buildDOM();
     this.wireSubscriptions();
@@ -110,6 +114,7 @@ export class CombatScreen implements Screen {
       <div class="combat-run-bar">
         <button class="combat-run-btn combat-run-locked">Run</button>
         <span class="combat-run-hint" style="display:none">Available after ${RUN_AVAILABLE_ROUNDS} combat rounds</span>
+        <span class="combat-run-location"></span>
       </div>
       <div class="combat-log-wrapper">
         <div class="combat-log-controls">
@@ -130,6 +135,7 @@ export class CombatScreen implements Screen {
     this.runBtn = this.container.querySelector('.combat-run-btn')! as HTMLButtonElement;
     this.runHint = this.container.querySelector('.combat-run-hint')!;
     this.runBar = this.container.querySelector('.combat-run-bar')!;
+    this.runLocationLabel = this.container.querySelector('.combat-run-location')!;
 
     // Auto-pause on user scroll
     this.logContainer.addEventListener('scroll', () => {
@@ -208,6 +214,9 @@ export class CombatScreen implements Screen {
 
     // Combat background — try tile-specific then zone default
     this.updateCombatBackground(state);
+
+    // Zone : Room label in the run bar.
+    this.updateLocationLabel(state);
 
     // Stage visual state
     this.stage.classList.remove('fighting', 'victory', 'defeat');
@@ -368,26 +377,44 @@ export class CombatScreen implements Screen {
     }
   }
 
+  /** Set the "Zone: Room name" label that lives next to the Run button. */
+  private updateLocationLabel(state: ServerStateMessage): void {
+    if (!this.runLocationLabel) return;
+    const zone = state.zoneName ?? '';
+    const tile = state.party
+      ? this.worldCache.getTile(state.party.col, state.party.row)
+      : null;
+    const room = tile?.name ?? '';
+    const text = zone && room ? `${zone}: ${room}` : (zone || room);
+    this.runLocationLabel.textContent = text;
+  }
+
   private updateCombatAnimations(action: ClientCombatAction | null, visual: string): void {
-    // Clear all animation classes
+    // Clear all animation classes. Force reflow before re-adding so the same
+    // class triggers a fresh animation cycle if hit twice in a row.
     for (const el of this.container.querySelectorAll('.attacking, .hit, .dodged')) {
       el.classList.remove('attacking', 'hit', 'dodged');
     }
 
     if (!action || visual !== 'fighting') return;
 
-    // Apply attacking class to the attacker
+    // Apply attacking class to the attacker card.
     const attackerSide = action.attackerSide === 'player' ? this.playerSide : this.enemySide;
-    const attackerEl = attackerSide.querySelector(`[data-grid="${action.attackerPos}"] .combat-member`);
+    const attackerEl = attackerSide.querySelector(`[data-grid="${action.attackerPos}"]`) as HTMLElement | null;
     if (attackerEl) {
+      // Restart the animation by reading offsetWidth (forces reflow)
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      void attackerEl.offsetWidth;
       attackerEl.classList.add('attacking');
     }
 
-    // Apply hit/dodged class to the target
+    // Apply hit/dodged class to the target card.
     if (action.targetPos !== null && action.targetSide) {
       const targetSide = action.targetSide === 'player' ? this.playerSide : this.enemySide;
-      const targetEl = targetSide.querySelector(`[data-grid="${action.targetPos}"] .combat-member`);
+      const targetEl = targetSide.querySelector(`[data-grid="${action.targetPos}"]`) as HTMLElement | null;
       if (targetEl) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        void targetEl.offsetWidth;
         targetEl.classList.add(action.dodged ? 'dodged' : 'hit');
       }
     }
@@ -431,12 +458,16 @@ export class CombatScreen implements Screen {
     }
   }
 
-  private showMonsterPopup(monster: { name: string; currentHp: number; maxHp: number }, _anchor: HTMLElement): void {
+  private showMonsterPopup(monster: { name: string; currentHp: number; maxHp: number; description?: string }, _anchor: HTMLElement): void {
     const existing = document.querySelector('.monster-popup-overlay') as HTMLElement | null;
     if (existing) { release(existing); existing.remove(); }
     const overlay = document.createElement('div');
     overlay.className = 'monster-popup-overlay';
     const { real, fallback } = monsterArtSrc(monster.name);
+    const description = monster.description?.trim();
+    const descriptionHtml = description
+      ? `<div class="monster-popup-description">${this.escapeHtml(description)}</div>`
+      : '';
     overlay.innerHTML = `
       <div class="monster-popup">
         <button class="monster-popup-close" aria-label="Close">×</button>
@@ -445,7 +476,7 @@ export class CombatScreen implements Screen {
                onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallback}';}else{this.style.display='none';}" />
         </div>
         <div class="monster-popup-name">${this.escapeHtml(monster.name)}</div>
-        <div class="monster-popup-hint">Drops, abilities and resistances are unknown — defeat one to learn more.</div>
+        ${descriptionHtml}
       </div>
     `;
     document.body.appendChild(overlay);
@@ -473,15 +504,23 @@ export class CombatScreen implements Screen {
     const myRole = state.social?.party?.members.find(m => m.username === state.username)?.role;
     const canRun = myRole === 'owner' || myRole === 'leader';
 
-    // The Run bar is always laid out so combat doesn't visually resize
-    // between rounds \u2014 when the bar isn't usable we hide its *contents*
-    // but keep the row in place. Fullscreen log mode is the only exception.
+    // The Run bar is always visible so combat doesn't resize between
+    // rounds. When combat ends the button stays in place but is disabled
+    // so the player still sees their party hasn't fled. Fullscreen log
+    // mode is the only case where the bar disappears entirely.
     this.runBar.style.display = this.isFullscreen ? 'none' : '';
-    this.runBar.classList.toggle('combat-run-bar-empty', !isFighting);
+    this.runBar.classList.remove('combat-run-bar-empty');
 
-    if (!isFighting) return;
+    if (!isFighting) {
+      this.runBtn.disabled = true;
+      this.runBtn.classList.add('combat-run-locked');
+      this.runBtn.textContent = '\uD83D\uDD12 Run';
+      this.runHint.textContent = '';
+      return;
+    }
 
     if (!canRun) {
+      this.runBtn.disabled = true;
       this.runBtn.classList.add('combat-run-locked');
       this.runBtn.textContent = '\uD83D\uDD12 Run';
       this.runHint.textContent = 'Only the party owner or a leader can run';
@@ -489,6 +528,7 @@ export class CombatScreen implements Screen {
     }
 
     const available = roundCount >= RUN_AVAILABLE_ROUNDS;
+    this.runBtn.disabled = !available;
     this.runBtn.classList.toggle('combat-run-locked', !available);
     this.runBtn.textContent = available ? 'Run' : '\uD83D\uDD12 Run';
     this.runHint.textContent = `Available after ${RUN_AVAILABLE_ROUNDS} combat rounds`;

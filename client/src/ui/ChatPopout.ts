@@ -75,6 +75,8 @@ export class ChatPopout {
   private onClose?: () => void;
   /** Callback the bottom nav uses to update its unread badge. */
   private onUnreadChange?: (hasUnread: boolean) => void;
+  /** Callback to open the user popup when a sender name is clicked in the timeline. */
+  private onUserClick?: (username: string, anchor: HTMLElement) => void;
   private hasUnread = false;
 
   constructor(gameClient: GameClient) {
@@ -125,6 +127,9 @@ export class ChatPopout {
     this.onUnreadChange = cb;
     cb(this.hasUnread);
   }
+  setOnUserClick(cb: (username: string, anchor: HTMLElement) => void): void {
+    this.onUserClick = cb;
+  }
 
   open(): void {
     if (this.isOpen) return;
@@ -155,6 +160,7 @@ export class ChatPopout {
     this.window.style.display = 'none';
     release(this.window);
     delete document.body.dataset.chatOpen;
+    delete document.body.dataset.chatLayout;
     this.persistOpenState();
     this.onClose?.();
   }
@@ -226,6 +232,7 @@ export class ChatPopout {
     this.wireSend();
     this.wireChannelChange();
     this.wireLayoutToggle();
+    this.wireTimelineClicks();
 
     // Refocus to top of stack on any pointer interaction with the window.
     wireFocusOnInteract(this.window);
@@ -433,10 +440,14 @@ export class ChatPopout {
   private applyMobileLayout(): void {
     if (!this.isMobile()) {
       this.window.classList.remove('chat-popout-mobile-full', 'chat-popout-mobile-sheet');
+      delete document.body.dataset.chatLayout;
       return;
     }
     this.window.classList.toggle('chat-popout-mobile-full', this.mobileLayout === 'full');
     this.window.classList.toggle('chat-popout-mobile-sheet', this.mobileLayout === 'sheet');
+    // Expose layout to CSS so the screen container can dock under the sheet
+    // instead of being overlaid by it.
+    document.body.dataset.chatLayout = this.mobileLayout;
     this.window.style.left = '';
     this.window.style.top = '';
     this.window.style.right = '';
@@ -497,14 +508,61 @@ export class ChatPopout {
     const tag = CHANNEL_LABELS[msg.channelType] ?? msg.channelType;
     const sender = this.escapeHtml(msg.senderUsername || 'Server');
     const text = this.escapeHtml(msg.text);
+    // Server messages render as plain spans (no popup / no channel switch);
+    // everything else gets clickable tag (switch send channel) and sender
+    // (open user popup).
+    const isServer = msg.channelType === 'server';
+    const tagHtml = isServer
+      ? `<span class="chat-msg-tag">[${tag}]</span>`
+      : `<button type="button" class="chat-msg-tag chat-msg-tag-btn" data-channel="${msg.channelType}" data-channel-id="${this.escapeHtml(msg.channelId ?? '')}" data-sender="${sender}">[${tag}]</button>`;
+    const senderHtml = isServer
+      ? `<span class="chat-msg-sender">${sender}:</span>`
+      : `<button type="button" class="chat-msg-sender chat-msg-sender-btn" data-user="${sender}">${sender}:</button>`;
     return `
       <div class="chat-msg" style="--ch-color:${color}">
         <span class="chat-msg-time">${time}</span>
-        <span class="chat-msg-tag">[${tag}]</span>
-        <span class="chat-msg-sender">${sender}:</span>
+        ${tagHtml}
+        ${senderHtml}
         <span class="chat-msg-text">${text}</span>
       </div>
     `;
+  }
+
+  private wireTimelineClicks(): void {
+    this.timelineEl.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const senderBtn = target.closest<HTMLElement>('.chat-msg-sender-btn');
+      if (senderBtn) {
+        const username = senderBtn.dataset.user;
+        if (username) this.onUserClick?.(username, senderBtn);
+        return;
+      }
+      const tagBtn = target.closest<HTMLElement>('.chat-msg-tag-btn');
+      if (tagBtn) {
+        const channel = tagBtn.dataset.channel as ChatChannelType | undefined;
+        if (!channel) return;
+        this.selectSendChannel(channel, tagBtn.dataset.channelId ?? '', tagBtn.dataset.sender ?? '');
+      }
+    });
+  }
+
+  /**
+   * Switch the composer to the given channel (and for DMs, populate the
+   * target with the "other party" inferred from the clicked message).
+   */
+  private selectSendChannel(channel: ChatChannelType, channelId: string, sender: string): void {
+    if (channel === 'server') return;
+    this.channelSelect.value = channel;
+    // dispatch change so the DM target field shows/hides as needed
+    this.channelSelect.dispatchEvent(new Event('change'));
+    if (channel === 'dm') {
+      const me = this.gameClient.lastState?.username;
+      // If this DM was sent by me, the "other party" is channelId; otherwise
+      // it's the sender. Either way the DM target is the *other* participant.
+      const target = (sender && me && sender === me) ? channelId : sender;
+      if (target) this.dmInput.value = target;
+    }
+    this.inputEl.focus();
   }
 
   private formatTime(ts: number): string {

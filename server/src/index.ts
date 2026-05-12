@@ -153,6 +153,8 @@ app.use('/parchment-artwork', express.static(path.resolve('data/parchment-artwor
 app.use('/combat-bg-artwork', express.static(path.resolve('data/combat-bg-artwork')));
 app.use('/room-bg-artwork', express.static(path.resolve('data/room-bg-artwork')));
 app.use('/shop-artwork', express.static(path.resolve('data/shop-artwork')));
+app.use('/set-artwork', express.static(path.resolve('data/set-artwork')));
+app.use('/zone-artwork', express.static(path.resolve('data/zone-artwork')));
 
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.resolve(__dirname, '../../client/dist');

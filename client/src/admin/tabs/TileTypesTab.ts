@@ -3,6 +3,7 @@ import type { AdminContext } from '../AdminContext';
 import type { TileTypeDefinition } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin, postAdmin } from '../api';
 import { openModal } from '../components/Modal';
+import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
 export class TileTypesTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -102,6 +103,10 @@ export class TileTypesTab implements Tab {
           </label>
         </div>
       </div>
+      <fieldset class="admin-form-fieldset">
+        <legend>Artwork</legend>
+        ${renderArtworkSection({ kind: 'tile-type', id })}
+      </fieldset>
       <div class="admin-modal-actions">
         <button class="admin-btn" id="ttf-save" type="button">Save</button>
         <button class="admin-btn admin-btn-secondary" id="ttf-cancel" type="button">Cancel</button>
@@ -132,6 +137,8 @@ export class TileTypesTab implements Tab {
     traversableInput?.addEventListener('change', () => {
       previewBox?.classList.toggle('is-blocked', !traversableInput.checked);
     });
+
+    wireArtworkSection(root, { kind: 'tile-type', id });
 
     root.querySelector('#ttf-cancel')?.addEventListener('click', modal.close);
     root.querySelector('#ttf-save')?.addEventListener('click', async () => {

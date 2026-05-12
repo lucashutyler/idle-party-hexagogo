@@ -353,7 +353,7 @@ export class App {
   }
 
   private enterGame(): void {
-    const combatScreen = new CombatScreen('screen-combat', this.gameClient);
+    const combatScreen = new CombatScreen('screen-combat', this.gameClient, this.worldCache);
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore);
@@ -396,6 +396,9 @@ export class App {
 
     // Chat popout — global overlay, toggled from the Chat nav tab
     this.chatPopout = new ChatPopout(this.gameClient);
+    this.chatPopout.setOnUserClick((username, anchor) => {
+      socialScreen.showUserPopup(username, anchor);
+    });
 
     // Migrate any legacy 'character' saved screen to the merged 'items' tab.
     let savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';

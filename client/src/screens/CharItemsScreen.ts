@@ -132,13 +132,13 @@ function injectCharItemsStyles(): void {
     .charitems-skill-slot.filled.passive { border-color: #5c8a5c; }
     .charitems-skill-slot.filled.active { border-color: #c89b3c; }
     .charitems-skill-slot-name {
-      font-size: 8px;
+      font-size: 11px;
       color: var(--text-primary);
       line-height: 1.1;
       word-break: break-word;
     }
     .charitems-skill-slot-meta {
-      font-size: 6px;
+      font-size: 8px;
       color: var(--text-dim);
       text-transform: uppercase;
     }
@@ -167,12 +167,12 @@ function injectCharItemsStyles(): void {
       gap: 8px;
     }
     .charitems-skill-popup-title {
-      font-size: 11px;
+      font-size: 14px;
       color: var(--accent-gold);
       margin-bottom: 4px;
     }
     .charitems-skill-popup-empty {
-      font-size: 9px;
+      font-size: 12px;
       color: var(--text-dim);
       font-style: italic;
       text-align: center;
@@ -194,16 +194,16 @@ function injectCharItemsStyles(): void {
     .charitems-skill-row.passive { border-left: 4px solid #5c8a5c; }
     .charitems-skill-row.active { border-left: 4px solid #c89b3c; }
     .charitems-skill-row-name {
-      font-size: 10px;
+      font-size: 13px;
       color: #f5f5f5;
     }
     .charitems-skill-row-meta {
-      font-size: 7px;
+      font-size: 10px;
       color: #888;
       text-transform: uppercase;
     }
     .charitems-skill-row-desc {
-      font-size: 8px;
+      font-size: 11px;
       color: #bbb;
       line-height: 1.3;
     }
@@ -220,7 +220,7 @@ function injectCharItemsStyles(): void {
       color: #e8e8e8;
       cursor: pointer;
       font-family: inherit;
-      font-size: 9px;
+      font-size: 12px;
       border-radius: 4px;
     }
     .charitems-skill-popup-btn:hover { background: #3a3a55; }
@@ -243,14 +243,14 @@ function injectCharItemsStyles(): void {
       gap: 2px;
     }
     .charitems-stat-label {
-      font-size: 8px;
+      font-size: 11px;
       color: var(--text-secondary);
       cursor: help;
       text-decoration: underline dotted;
       letter-spacing: 1px;
     }
     .charitems-stat-value {
-      font-size: 10px;
+      font-size: 13px;
       color: var(--text-primary);
     }
     .charitems-stat-tooltip {
@@ -259,7 +259,7 @@ function injectCharItemsStyles(): void {
       color: #e8e8e8;
       padding: 8px 12px;
       border-radius: 4px;
-      font-size: 9px;
+      font-size: 12px;
       max-width: 220px;
       line-height: 1.4;
       z-index: 2000;
@@ -268,7 +268,7 @@ function injectCharItemsStyles(): void {
     }
     .charitems-stat-tooltip-title {
       color: var(--accent-gold);
-      font-size: 10px;
+      font-size: 13px;
       margin-bottom: 4px;
     }
 
@@ -276,7 +276,7 @@ function injectCharItemsStyles(): void {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      font-size: 9px;
+      font-size: 12px;
       color: var(--text-secondary);
     }
     .charitems-meta-row strong { color: var(--text-primary); }
@@ -300,7 +300,7 @@ function injectCharItemsStyles(): void {
       display: flex;
       gap: 6px;
       align-items: center;
-      font-size: 7px;
+      font-size: 10px;
       color: var(--text-dim);
     }
     .charitems-xp-rate-reset {
@@ -312,14 +312,14 @@ function injectCharItemsStyles(): void {
       background: var(--bg-panel);
       border: 1px dashed var(--border-pixel);
       padding: 8px;
-      font-size: 8px;
+      font-size: 11px;
       color: var(--text-secondary);
       line-height: 1.4;
     }
 
     .charitems-inv-group-header {
       grid-column: 1 / -1;
-      font-size: 8px;
+      font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 1px;
       color: var(--text-secondary);
@@ -369,8 +369,7 @@ function injectItemsStyles(): void {
        stacking context so they cannot bleed up over the chat popout. */
     .item-square { isolation: isolate; }
     .item-square-initials {
-      font-size: 14px;
-      font-weight: bold;
+      font-size: 17px;
       color: rgba(255,255,255,0.85);
       text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
       z-index: 1;
@@ -395,7 +394,7 @@ function injectItemsStyles(): void {
       justify-content: center;
     }
     .item-dogear-icon {
-      font-size: 11px;
+      font-size: 14px;
       line-height: 1;
       pointer-events: none;
     }
@@ -407,13 +406,13 @@ function injectItemsStyles(): void {
       height: 16px;
     }
     .item-square-empty .item-dogear-icon {
-      font-size: 10px;
+      font-size: 13px;
     }
     .item-square-qty {
       position: absolute;
       top: 1px;
       right: 2px;
-      font-size: 8px;
+      font-size: 11px;
       color: #fff;
       background: rgba(0,0,0,0.6);
       padding: 0 2px;
@@ -426,7 +425,7 @@ function injectItemsStyles(): void {
       position: absolute;
       top: 1px;
       left: 2px;
-      font-size: 8px;
+      font-size: 11px;
       color: #e9bc18;
       pointer-events: none;
       z-index: 2;
@@ -487,30 +486,29 @@ function injectItemsStyles(): void {
       object-fit: contain;
     }
     .item-popup-artwork .item-popup-initials {
-      font-size: 28px;
-      font-weight: bold;
+      font-size: 32px;
       color: rgba(255,255,255,0.85);
       text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
     }
-    .item-popup-name { text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 8px; }
-    .item-popup-stats { font-size: 12px; margin-bottom: 8px; line-height: 1.6; }
+    .item-popup-name { text-align: center; font-size: 19px; margin-bottom: 8px; }
+    .item-popup-stats { font-size: 15px; margin-bottom: 8px; line-height: 1.6; }
     .item-popup-stats div { display: flex; justify-content: space-between; }
     .item-popup-stats .stat-label { color: #999; }
-    .item-popup-set-section { border-top: 1px solid #333; padding-top: 8px; margin-top: 8px; font-size: 12px; }
-    .item-popup-set-name { font-weight: bold; color: #e9bc18; margin-bottom: 4px; }
+    .item-popup-set-section { border-top: 1px solid #333; padding-top: 8px; margin-top: 8px; font-size: 15px; }
+    .item-popup-set-name { color: #e9bc18; margin-bottom: 4px; }
     .item-popup-set-pieces { margin-bottom: 4px; }
     .item-popup-set-piece { color: #888; margin-left: 8px; }
     .item-popup-set-piece.owned { color: #ccc; }
     .item-popup-set-piece.equipped { color: #66bb6a; }
     .item-popup-set-bonus { color: #aaa; font-style: italic; }
     .item-popup-set-breakpoints { margin-top: 4px; }
-    .item-popup-set-bp { color: #666; font-size: 11px; line-height: 1.4; }
+    .item-popup-set-bp { color: #666; font-size: 14px; line-height: 1.4; }
     .item-popup-set-bp.unlocked { color: #aaa; }
-    .item-popup-set-bp.active { color: #66bb6a; font-weight: bold; }
+    .item-popup-set-bp.active { color: #66bb6a; }
     .item-popup-actions { margin-top: 12px; display: flex; gap: 8px; justify-content: center; }
     .item-popup-actions button {
       padding: 6px 16px; border-radius: 4px; border: 1px solid #555;
-      background: #2a2a40; color: #e8e8e8; cursor: pointer; font-family: inherit; font-size: 12px;
+      background: #2a2a40; color: #e8e8e8; cursor: pointer; font-family: inherit; font-size: 15px;
     }
     .item-popup-actions button:hover { background: #3a3a55; }
     .item-popup-actions button.danger { border-color: #a33; color: #f88; }
@@ -530,11 +528,11 @@ function injectItemsStyles(): void {
     .items-search-sort input {
       flex: 1; min-width: 0; padding: 4px 8px; border-radius: 4px;
       border: 1px solid #555; background: #1a1a2e; color: #e8e8e8;
-      font-family: inherit; font-size: 11px;
+      font-family: inherit; font-size: 14px;
     }
     .items-search-sort select {
       padding: 4px 6px; border-radius: 4px; border: 1px solid #555;
-      background: #1a1a2e; color: #e8e8e8; font-family: inherit; font-size: 11px;
+      background: #1a1a2e; color: #e8e8e8; font-family: inherit; font-size: 14px;
     }
 
     .items-inv-grid {
@@ -551,38 +549,38 @@ function injectItemsStyles(): void {
         gap: 6px;
       }
       .items-equip-slot-square { width: 52px; height: 52px; }
-      .item-square-initials { font-size: 16px; }
+      .item-square-initials { font-size: 19px; }
       .item-dogear { width: 22px; height: 22px; }
-      .item-dogear-icon { font-size: 13px; }
-      .item-square-qty { font-size: 9px; }
+      .item-dogear-icon { font-size: 16px; }
+      .item-square-qty { font-size: 12px; }
       .item-popup { max-width: 380px; }
     }
 
-    .items-section-count { color: #888; font-size: 10px; margin-left: 4px; }
+    .items-section-count { color: #888; font-size: 13px; margin-left: 4px; }
     .items-mailbox, .items-trades { margin-top: 8px; }
     .mailbox-list, .trade-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
     .mailbox-row, .trade-row {
       display: flex; gap: 6px; align-items: center; padding: 6px 8px;
-      border: 1px solid #444; border-radius: 4px; background: #1a1a2e; font-size: 11px;
+      border: 1px solid #444; border-radius: 4px; background: #1a1a2e; font-size: 14px;
     }
     .trade-row-attention { border-color: #d4af37; box-shadow: 0 0 4px rgba(212,175,55,0.3); }
     .mailbox-info, .trade-row-main { flex: 1; min-width: 0; }
-    .mailbox-from { color: #aaa; font-size: 10px; }
+    .mailbox-from { color: #aaa; font-size: 13px; }
     .mailbox-note { color: #d77; font-style: italic; margin-left: 4px; }
     .mailbox-item { margin-top: 2px; }
     .mailbox-item-qty { color: #888; margin-left: 4px; }
-    .mailbox-warn { color: #d77; font-size: 10px; margin-top: 2px; }
+    .mailbox-warn { color: #d77; font-size: 13px; margin-top: 2px; }
     .mailbox-actions, .trade-row-actions {
       display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
     }
     .mailbox-actions button, .trade-row-actions button {
-      padding: 3px 8px; font-size: 10px; min-width: 60px;
+      padding: 3px 8px; font-size: 13px; min-width: 60px;
     }
-    .trade-row-partner { font-weight: bold; }
-    .trade-row-status { color: #aaa; font-size: 10px; }
+    .trade-row-partner { }
+    .trade-row-status { color: #aaa; font-size: 13px; }
     .trade-row-attention .trade-row-status { color: #d4af37; }
     .trade-row-offers { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
-    .trade-row-side { font-size: 10px; }
+    .trade-row-side { font-size: 13px; }
     .trade-row-label { color: #666; margin-right: 4px; }
     .trade-row-empty { color: #555; font-style: italic; }
     .trade-row-item { display: inline-block; }
@@ -1068,7 +1066,7 @@ export class CharItemsScreen implements Screen {
     overlay.innerHTML = `
       <div class="charitems-skill-popup">
         <div class="charitems-skill-popup-title">Slot ${slotIndex + 1} &middot; ${slot.type} (Lv ${slot.unlocksAtLevel}+)</div>
-        ${equippedNow ? `<div style="font-size:9px;color:var(--text-secondary)">Currently: <strong>${this.escapeHtml(equippedNow.name)}</strong></div>` : ''}
+        ${equippedNow ? `<div style="font-size: 12px;color:var(--text-secondary)">Currently: <strong>${this.escapeHtml(equippedNow.name)}</strong></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:6px;">${rowsHtml}</div>
         <div class="charitems-skill-popup-actions">
           <button class="charitems-skill-popup-btn cancel-btn">Cancel</button>
@@ -1607,7 +1605,7 @@ export class CharItemsScreen implements Screen {
     const tooltip = document.createElement('div');
     tooltip.className = 'items-slot-tooltip';
     tooltip.textContent = label;
-    tooltip.style.cssText = 'position:fixed;background:#222;color:#e8e8e8;padding:4px 10px;border-radius:4px;font-size:11px;z-index:1000;pointer-events:none;border:1px solid #555;white-space:nowrap;';
+    tooltip.style.cssText = 'position:fixed;background:#222;color:#e8e8e8;padding:4px 10px;border-radius:4px;font-size: 14px;z-index:1000;pointer-events:none;border:1px solid #555;white-space:nowrap;';
     document.body.appendChild(tooltip);
     const rect = anchor.getBoundingClientRect();
     tooltip.style.left = `${rect.left + rect.width / 2 - tooltip.offsetWidth / 2}px`;

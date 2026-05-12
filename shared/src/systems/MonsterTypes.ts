@@ -30,6 +30,8 @@ export interface MonsterDefinition {
   skills?: MonsterSkillEntry[];
   /** Passive monsters (e.g. walls) never attack and don't count toward victory. */
   passive?: boolean;
+  /** Optional flavor text shown in the monster popup. */
+  description?: string;
 }
 
 export interface MonsterInstance {
@@ -49,6 +51,8 @@ export interface MonsterInstance {
   skillCooldowns?: Record<string, number>;
   /** Passive monsters (e.g. walls) never attack and don't count toward victory. */
   passive?: boolean;
+  /** Optional flavor text shown in the monster popup. */
+  description?: string;
 }
 
 // --- Seed data (used as defaults when data files don't exist) ---
@@ -147,6 +151,7 @@ export function createMonsterInstance(def: MonsterDefinition, gridPosition: Part
     }
   }
   if (def.passive) instance.passive = true;
+  if (def.description) instance.description = def.description;
   return instance;
 }
 
