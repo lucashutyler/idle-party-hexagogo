@@ -4912,6 +4912,11 @@ html, body {
 .item-popup-artwork .item-square-initials {
   font-size: 32px;
 }
+.item-popup-emoji {
+  font-size: 56px;
+  line-height: 1;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
 .item-popup-name {
   font-size: 19px;
   margin-bottom: 8px;

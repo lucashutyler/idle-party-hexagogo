@@ -512,6 +512,20 @@ export class PlayerManager {
     return this.sessions.size;
   }
 
+  /**
+   * Tick all sessions' craft queues. Sessions whose queues advance receive a state push
+   * (only if currently online — otherwise the next reconnect will push state anyway).
+   */
+  tickAllCrafting(now: number = Date.now()): void {
+    for (const [username, session] of this.sessions) {
+      if (session.processCraftCompletions(now)) {
+        if (this.playerConnections.has(username)) {
+          this.sendStateToPlayer(username);
+        }
+      }
+    }
+  }
+
   get connectionCount(): number {
     let count = 0;
     for (const wsSet of this.playerConnections.values()) {

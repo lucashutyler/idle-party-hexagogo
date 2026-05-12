@@ -22,6 +22,7 @@ import { MonstersTab } from './tabs/MonstersTab';
 import { ItemsTab } from './tabs/ItemsTab';
 import { SetsTab } from './tabs/SetsTab';
 import { ShopsTab } from './tabs/ShopsTab';
+import { RecipesTab } from './tabs/RecipesTab';
 import { NpcsTab } from './tabs/NpcsTab';
 import { QuestsTab } from './tabs/QuestsTab';
 import { ZonesTab } from './tabs/ZonesTab';
@@ -51,6 +52,7 @@ export class AdminApp implements AdminContext {
     'items':      new ItemsTab(),
     'sets':       new SetsTab(),
     'shops':      new ShopsTab(),
+    'recipes':    new RecipesTab(),
     'npcs':       new NpcsTab(),
     'quests':     new QuestsTab(),
     'zones':      new ZonesTab(),

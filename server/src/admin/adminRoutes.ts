@@ -117,6 +117,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       sets: content.getAllSets(),
       shops: content.getAllShops(),
       tileTypes: content.getAllTileTypes(),
+      recipes: content.getAllRecipes(),
       npcs: content.getAllNpcs(),
       quests: content.getAllQuests(),
       dungeons: content.getAllDungeons(),
@@ -705,6 +706,93 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         return;
       }
       res.json({ success: true, shops: content.getAllShops() });
+    }
+  });
+
+  // ── Recipe endpoints ──────────────────────────────────────
+
+  /** List all recipes. */
+  router.get('/recipes', (_req, res) => {
+    const content = getContentStore();
+    res.json({ recipes: content.getAllRecipes() });
+  });
+
+  /** Add or update a recipe. Supports ?versionId= for draft editing. */
+  router.put('/recipes/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const recipe = req.body;
+    if (!recipe.id || !recipe.name || typeof recipe.durationSeconds !== 'number'
+        || !Array.isArray(recipe.ingredients) || !recipe.result) {
+      res.status(400).json({ error: 'Missing required fields: id, name, durationSeconds, ingredients[], result' });
+      return;
+    }
+    if (recipe.durationSeconds <= 0) {
+      res.status(400).json({ error: 'durationSeconds must be > 0' });
+      return;
+    }
+    if (recipe.ingredients.length === 0) {
+      res.status(400).json({ error: 'At least one ingredient is required' });
+      return;
+    }
+    for (const ing of recipe.ingredients) {
+      if (!ing.itemId || typeof ing.quantity !== 'number' || ing.quantity <= 0) {
+        res.status(400).json({ error: 'Each ingredient requires: itemId, quantity > 0' });
+        return;
+      }
+    }
+    if (!recipe.result.itemId || typeof recipe.result.quantity !== 'number' || recipe.result.quantity <= 0) {
+      res.status(400).json({ error: 'result requires: itemId, quantity > 0' });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.recipes) snapshot.recipes = [];
+      const idx = snapshot.recipes.findIndex(r => r.id === recipe.id);
+      if (idx >= 0) snapshot.recipes[idx] = recipe;
+      else snapshot.recipes.push(recipe);
+      await versions.saveSnapshot(versionId, snapshot);
+      const recipesRecord: Record<string, typeof recipe> = {};
+      for (const r of snapshot.recipes) recipesRecord[r.id] = r;
+      res.json({ success: true, recipes: recipesRecord });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateRecipe(recipe);
+      res.json({ success: true, recipes: content.getAllRecipes() });
+    }
+  });
+
+  /** Delete a recipe. Supports ?versionId= for draft editing. */
+  router.delete('/recipes/:id', async (req, res) => {
+    const recipeId = req.params.id;
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (!snapshot.recipes) snapshot.recipes = [];
+      const idx = snapshot.recipes.findIndex(r => r.id === recipeId);
+      if (idx < 0) { res.status(400).json({ error: 'Recipe not found.' }); return; }
+      snapshot.recipes.splice(idx, 1);
+      await versions.saveSnapshot(versionId, snapshot);
+      const recipesRecord: Record<string, typeof snapshot.recipes[0]> = {};
+      for (const r of snapshot.recipes) recipesRecord[r.id] = r;
+      res.json({ success: true, recipes: recipesRecord });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteRecipe(recipeId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, recipes: content.getAllRecipes() });
     }
   });
 
@@ -1300,6 +1388,14 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const liveTileTypes = getContentStore().getAllTileTypes();
       for (const [id, t] of Object.entries(liveTileTypes)) tileTypesRecord[id] = t;
     }
+    const recipesRecord: Record<string, NonNullable<(typeof snapshot.recipes)>[0]> = {};
+    if (snapshot.recipes && snapshot.recipes.length > 0) {
+      for (const r of snapshot.recipes) recipesRecord[r.id] = r;
+    } else {
+      // Old snapshots predate recipes — seed from live content so admin shows what's in-game.
+      const liveRecipes = getContentStore().getAllRecipes();
+      for (const [id, r] of Object.entries(liveRecipes)) recipesRecord[id] = r;
+    }
     const npcsRecord: Record<string, NonNullable<(typeof snapshot.npcs)>[0]> = {};
     if (snapshot.npcs) {
       for (const n of snapshot.npcs) npcsRecord[n.id] = n;
@@ -1312,7 +1408,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (snapshot.dungeons) {
       for (const d of snapshot.dungeons) dungeonsRecord[d.id] = d;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, world: snapshot.world });
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, recipes: recipesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */

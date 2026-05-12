@@ -17,6 +17,12 @@ export interface ItemDefinition {
   magicReductionMin?: number;
   magicReductionMax?: number;
   value?: number;
+  /** True if this is a consumable (e.g., potion). No effect yet — placeholder for the consumables framework. */
+  consumable?: boolean;
+  /** Override icon emoji (e.g., '🧪' for potions). Falls back to slot-based icon when omitted. */
+  iconEmoji?: string;
+  /** CSS color string used as the icon background tint (e.g., '#c0392b' for a red potion). */
+  iconColor?: string;
 }
 
 export interface ItemDrop {
@@ -257,6 +263,15 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
     rarity: 'rare',
     equipSlot: 'foot',
     value: 1,
+  },
+  lesser_red_potion: {
+    id: 'lesser_red_potion',
+    name: 'Lesser Red Potion',
+    rarity: 'common',
+    consumable: true,
+    iconEmoji: '🧪',
+    iconColor: '#c0392b',
+    value: 2,
   },
 };
 

@@ -25,6 +25,10 @@ export interface CharacterState {
   inventory: Record<string, number>;
   equipment: Record<string, string | null>;
   skillLoadout: SkillLoadout;
+  /** Crafting skill level (per-class craft skill — see CRAFT_SKILL_NAMES). */
+  craftLevel: number;
+  /** Crafting skill XP toward next level. */
+  craftXp: number;
 }
 
 // --- Constants ---
@@ -124,6 +128,19 @@ export const ALL_CLASS_NAMES: ClassName[] = ['Knight', 'Archer', 'Priest', 'Mage
 
 export const MAX_GOLD = 999_999_999;
 
+/** Per-class crafting skill name (the player's only craft skill — they have one for life). */
+export const CRAFT_SKILL_NAMES: Record<ClassName, string> = {
+  Knight: 'Smithing',
+  Archer: 'Fletching',
+  Priest: 'Inscription',
+  Mage: 'Alchemy',
+  Bard: 'Tinkering',
+};
+
+export function getCraftSkillName(className: ClassName): string {
+  return CRAFT_SKILL_NAMES[className];
+}
+
 // --- Pure functions ---
 
 /** Max HP = baseHp + (level - 1) * hpPerLevel. */
@@ -143,6 +160,11 @@ export function xpForNextLevel(level: number): number {
   return Math.floor(18000 * Math.pow(level, 1.2) * Math.pow(1.06, level));
 }
 
+/** Crafting XP required to advance from `level` to `level + 1`. Gentle linear-ish curve. */
+export function xpForCraftLevel(level: number): number {
+  return Math.floor(100 * Math.pow(level, 1.3));
+}
+
 /** Create a fresh Level 1 character of the given class. */
 export function createCharacter(className: ClassName): CharacterState {
   return {
@@ -153,6 +175,8 @@ export function createCharacter(className: ClassName): CharacterState {
     inventory: {},
     equipment: { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
     skillLoadout: createDefaultSkillLoadout(className),
+    craftLevel: 1,
+    craftXp: 0,
   };
 }
 
@@ -161,6 +185,22 @@ export function addGold(char: CharacterState, amount: number): number {
   const before = char.gold;
   char.gold = Math.min(char.gold + amount, MAX_GOLD);
   return char.gold - before;
+}
+
+/**
+ * Add craft XP to a character, leveling up the craft skill as needed.
+ * Mutates `char` in place. Returns info about level-ups.
+ */
+export function addCraftXp(char: CharacterState, amount: number): { leveledUp: boolean; levelsGained: number } {
+  if (amount <= 0) return { leveledUp: false, levelsGained: 0 };
+  char.craftXp += amount;
+  let levelsGained = 0;
+  while (char.craftXp >= xpForCraftLevel(char.craftLevel)) {
+    char.craftXp -= xpForCraftLevel(char.craftLevel);
+    char.craftLevel++;
+    levelsGained++;
+  }
+  return { leveledUp: levelsGained > 0, levelsGained };
 }
 
 /**

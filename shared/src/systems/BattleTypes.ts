@@ -1,6 +1,7 @@
 import type { EquipSlot, ItemDefinition } from './ItemTypes.js';
 import type { SetDefinition } from './SetTypes.js';
 import type { ShopDefinition } from './ShopTypes.js';
+import type { RecipeDefinition, CraftQueueState, ActiveJobProgress } from './CraftingTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type {
   ClientSocialState,
@@ -106,6 +107,8 @@ export interface ClientCharacterState {
   equipment: Record<string, string | null>;
   /** XP rate tracking — in-memory only, resets on server restart. */
   xpRate: { startTime: number; totalXp: number };
+  craftLevel: number;
+  craftXp: number;
 }
 
 export interface ClientResetXpRateMessage {
@@ -147,6 +150,8 @@ export interface ServerStateMessage {
   setDefinitions?: Record<string, SetDefinition>;
   /** Shop definition for the player's current room (if any). */
   shopDefinition?: ShopDefinition;
+  /** Crafting state: visible recipes, queue, and progress on the active job. */
+  crafting?: ClientCraftingState;
   /** Active quests the player has accepted (with live progress / status). */
   activeQuests?: import('./QuestTypes.js').QuestProgressEntry[];
   /** Completed quest history (most recent at the end). */
@@ -163,6 +168,22 @@ export interface ServerStateMessage {
   };
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
+}
+
+export interface ClientCraftingState {
+  unlocked: boolean;
+  unlockLevel: number;
+  recipes: RecipeDefinition[];
+  queue: CraftQueueState;
+  activeProgress: ActiveJobProgress | null;
+  /** Per-class craft skill name (Smithing, Alchemy, etc.). */
+  skillName: string;
+  skillLevel: number;
+  skillXp: number;
+  skillXpForNext: number;
+  /** Item definitions for every ingredient and result referenced by `recipes` — needed so the
+   *  client can render names even for items the player doesn't own yet. */
+  itemDefs: Record<string, ItemDefinition>;
 }
 
 export interface ClientMoveMessage {
@@ -259,6 +280,16 @@ export interface ClientShopSellMessage {
   quantity: number;
 }
 
+export interface ClientCraftQueueMessage {
+  type: 'craft_queue';
+  recipeId: string;
+}
+
+export interface ClientCraftCancelMessage {
+  type: 'craft_cancel';
+  index: number;
+}
+
 export interface ClientAcceptQuestMessage {
   type: 'accept_quest';
   questId: string;
@@ -289,6 +320,8 @@ export type ClientMessage =
   | ClientViewPlayerMessage
   | ClientShopBuyMessage
   | ClientShopSellMessage
+  | ClientCraftQueueMessage
+  | ClientCraftCancelMessage
   | ClientAcceptQuestMessage
   | ClientTurnInQuestMessage
   | ClientSocialMessage;

@@ -18,6 +18,12 @@ const REAP_INTERVAL = 10 * 60 * 1000; // 10 minutes
 export class JsonSessionStore extends session.Store {
   private dir: string;
   private reapTimer?: ReturnType<typeof setInterval>;
+  /**
+   * Per-sid write queue. Concurrent set()/touch() calls for the same session were racing
+   * on the shared `<sid>.json.tmp` path — first rename succeeded, second hit ENOENT.
+   * Serialize writes per session so each rename sees its own tmp file.
+   */
+  private writeQueue = new Map<string, Promise<void>>();
 
   constructor(dir: string) {
     super();
@@ -116,12 +122,24 @@ export class JsonSessionStore extends session.Store {
   }
 
   private async writeSession(sid: string, data: session.SessionData): Promise<void> {
-    await this.ensureDir();
-    const json = JSON.stringify(data, null, 2);
-    const target = this.filePath(sid);
-    const tmp = `${target}.tmp`;
-    await writeFile(tmp, json, 'utf-8');
-    await rename(tmp, target);
+    const prev = this.writeQueue.get(sid) ?? Promise.resolve();
+    const next = prev.catch(() => { /* swallow: we still want our turn */ }).then(async () => {
+      await this.ensureDir();
+      const json = JSON.stringify(data, null, 2);
+      const target = this.filePath(sid);
+      const tmp = `${target}.tmp`;
+      await writeFile(tmp, json, 'utf-8');
+      await rename(tmp, target);
+    });
+    this.writeQueue.set(sid, next);
+    try {
+      await next;
+    } finally {
+      // Only clear if no later write replaced ours (latest-wins housekeeping).
+      if (this.writeQueue.get(sid) === next) {
+        this.writeQueue.delete(sid);
+      }
+    }
   }
 
   private async deleteSession(sid: string): Promise<void> {

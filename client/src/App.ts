@@ -12,6 +12,7 @@ import { MapScreen } from './screens/MapScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { CharItemsScreen } from './screens/CharItemsScreen';
 import { SocialScreen } from './screens/SocialScreen';
+import { CraftingScreen } from './screens/CraftingScreen';
 import { ClassSelectScreen } from './screens/ClassSelectScreen';
 import { SuspensionScreen } from './screens/SuspensionScreen';
 import { BottomNav } from './ui/BottomNav';
@@ -357,6 +358,7 @@ export class App {
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore);
+    const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
     const settingsScreen = new SettingsScreen('screen-settings');
 
     // Wire map username click to social screen popup
@@ -385,6 +387,7 @@ export class App {
     this.screenManager.register('map', document.getElementById('screen-map')!, mapScreen);
     this.screenManager.register('items', document.getElementById('screen-items')!, charItemsScreen);
     this.screenManager.register('social', document.getElementById('screen-social')!, socialScreen);
+    this.screenManager.register('craft', document.getElementById('screen-craft')!, craftingScreen);
     this.screenManager.register('settings', document.getElementById('screen-settings')!, settingsScreen);
 
     // Show bottom nav + persistent XP bar
@@ -417,6 +420,7 @@ export class App {
         { id: 'combat', label: 'Combat', icon: navImg('combat', 'Fight') },
         { id: 'map', label: 'Map', icon: navImg('map', 'Map') },
         { id: 'items', label: 'Char', icon: navImg('items', 'Char') },
+        { id: 'craft', label: 'Craft', icon: navImg('craft', 'Craft') },
         // Social opens a fly-out submenu with the three sub-views; the
         // pill bar inside the screen is gone in favor of this.
         {

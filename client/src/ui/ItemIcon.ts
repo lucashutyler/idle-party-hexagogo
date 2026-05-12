@@ -106,7 +106,7 @@ export interface ItemIconOptions {
  */
 export function renderItemIcon(itemId: string, def: ItemDefinition, options?: ItemIconOptions): string {
   const rarity = def.rarity ?? 'common';
-  const bgColor = RARITY_COLORS[rarity] ?? '#e8e8e8';
+  const bgColor = def.iconColor ?? RARITY_COLORS[rarity] ?? '#e8e8e8';
   const borderColor = RARITY_BORDER_COLORS[rarity] ?? 'rgba(180,180,180,0.25)';
   const shinyClass = SHINY_RARITIES.has(rarity) ? ` item-rarity-${rarity}` : '';
   const initials = getItemInitials(def.name);
@@ -116,8 +116,14 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
     ? Object.entries(options.dataAttrs).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('')
     : '';
 
-  let inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
+  // Custom emoji icon (e.g., potions): render emoji centered, skip artwork lookup + initials.
+  let inner: string;
+  if (def.iconEmoji) {
+    inner = `<span class="item-square-emoji">${escapeHtml(def.iconEmoji)}</span>`;
+  } else {
+    inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
     <span class="item-square-initials">${initials}</span>`;
+  }
 
   if (options?.showSetIndicator && options.setDefs && getItemSetId(itemId, options.setDefs)) {
     inner += `<span class="item-square-set">S</span>`;
