@@ -4,10 +4,11 @@ import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
+import type { RecipeDefinition } from '@idle-party-rpg/shared';
 import type { NpcDefinition } from '@idle-party-rpg/shared';
 import type { QuestDefinition } from '@idle-party-rpg/shared';
 import type { DungeonDefinition } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_NPCS, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -19,6 +20,7 @@ const ENCOUNTERS_FILE = path.join(DATA_DIR, 'encounters.json');
 const SETS_FILE = path.join(DATA_DIR, 'sets.json');
 const SHOPS_FILE = path.join(DATA_DIR, 'shops.json');
 const TILE_TYPES_FILE = path.join(DATA_DIR, 'tile-types.json');
+const RECIPES_FILE = path.join(DATA_DIR, 'recipes.json');
 const NPCS_FILE = path.join(DATA_DIR, 'npcs.json');
 const QUESTS_FILE = path.join(DATA_DIR, 'quests.json');
 const DUNGEONS_FILE = path.join(DATA_DIR, 'dungeons.json');
@@ -36,6 +38,7 @@ export class ContentStore {
   private sets = new Map<string, SetDefinition>();
   private shops = new Map<string, ShopDefinition>();
   private tileTypes = new Map<string, TileTypeDefinition>();
+  private recipes = new Map<string, RecipeDefinition>();
   private npcs = new Map<string, NpcDefinition>();
   private quests = new Map<string, QuestDefinition>();
   private dungeons = new Map<string, DungeonDefinition>();
@@ -60,6 +63,7 @@ export class ContentStore {
     await fs.writeFile(SETS_FILE, JSON.stringify(Array.from(this.sets.values()), null, 2));
     await fs.writeFile(SHOPS_FILE, JSON.stringify(Array.from(this.shops.values()), null, 2));
     await fs.writeFile(TILE_TYPES_FILE, JSON.stringify(Array.from(this.tileTypes.values()), null, 2));
+    await fs.writeFile(RECIPES_FILE, JSON.stringify(Array.from(this.recipes.values()), null, 2));
     await fs.writeFile(NPCS_FILE, JSON.stringify(Array.from(this.npcs.values()), null, 2));
     await fs.writeFile(QUESTS_FILE, JSON.stringify(Array.from(this.quests.values()), null, 2));
     await fs.writeFile(DUNGEONS_FILE, JSON.stringify(Array.from(this.dungeons.values()), null, 2));
@@ -134,6 +138,16 @@ export class ContentStore {
   getAllTileTypes(): Record<string, TileTypeDefinition> {
     const result: Record<string, TileTypeDefinition> = {};
     for (const [id, def] of this.tileTypes) result[id] = def;
+    return result;
+  }
+
+  getRecipe(id: string): RecipeDefinition | undefined {
+    return this.recipes.get(id);
+  }
+
+  getAllRecipes(): Record<string, RecipeDefinition> {
+    const result: Record<string, RecipeDefinition> = {};
+    for (const [id, def] of this.recipes) result[id] = def;
     return result;
   }
 
@@ -415,6 +429,22 @@ export class ContentStore {
     await this.save();
   }
 
+  // --- Recipe CRUD ---
+
+  async addOrUpdateRecipe(recipe: RecipeDefinition): Promise<void> {
+    this.recipes.set(recipe.id, recipe);
+    await this.save();
+  }
+
+  async deleteRecipe(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.recipes.has(id)) {
+      return { success: false, error: 'Recipe not found.' };
+    }
+    this.recipes.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
   async deleteTileType(id: string): Promise<{ success: boolean; error?: string }> {
     if (!this.tileTypes.has(id)) {
       return { success: false, error: 'Tile type not found.' };
@@ -448,7 +478,7 @@ export class ContentStore {
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; recipes: RecipeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
@@ -457,6 +487,7 @@ export class ContentStore {
       sets: Array.from(this.sets.values()),
       shops: Array.from(this.shops.values()),
       tileTypes: Array.from(this.tileTypes.values()),
+      recipes: Array.from(this.recipes.values()),
       npcs: Array.from(this.npcs.values()),
       quests: Array.from(this.quests.values()),
       dungeons: Array.from(this.dungeons.values()),
@@ -465,7 +496,7 @@ export class ContentStore {
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -495,6 +526,12 @@ export class ContentStore {
       for (const t of snapshot.tileTypes) this.tileTypes.set(t.id, t);
     }
     // Old snapshots predate tile types — keep existing tile types intact
+
+    if (snapshot.recipes) {
+      this.recipes.clear();
+      for (const r of snapshot.recipes) this.recipes.set(r.id, r);
+    }
+    // Old snapshots predate recipes — keep existing intact
 
     this.npcs.clear();
     if (snapshot.npcs) {
@@ -588,6 +625,17 @@ export class ContentStore {
         tileTypesSeeded = true;
       }
 
+      let recipesSeeded = false;
+      try {
+        const recipesRaw = await fs.readFile(RECIPES_FILE, 'utf-8');
+        const recipesArr: RecipeDefinition[] = JSON.parse(recipesRaw);
+        for (const r of recipesArr) this.recipes.set(r.id, r);
+      } catch {
+        // recipes.json doesn't exist yet — seed from defaults
+        for (const r of Object.values(SEED_RECIPES)) this.recipes.set(r.id, r);
+        recipesSeeded = true;
+      }
+
       try {
         const npcsRaw = await fs.readFile(NPCS_FILE, 'utf-8');
         const npcsArr: NpcDefinition[] = JSON.parse(npcsRaw);
@@ -631,7 +679,7 @@ export class ContentStore {
       // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
       const itemsMigrated = this.migrateItems();
 
-      if (migrated > 0 || encountersMigrated || itemsMigrated || tileTypesSeeded) {
+      if (migrated > 0 || encountersMigrated || itemsMigrated || tileTypesSeeded || recipesSeeded) {
         await this.save();
       }
 
@@ -778,6 +826,11 @@ export class ContentStore {
     // Tile Types
     for (const t of SEED_TILE_TYPES) {
       this.tileTypes.set(t.id, t);
+    }
+
+    // Recipes
+    for (const r of Object.values(SEED_RECIPES)) {
+      this.recipes.set(r.id, r);
     }
 
     // NPCs — dev only. Production deploys boot with no NPCs; admins create them.

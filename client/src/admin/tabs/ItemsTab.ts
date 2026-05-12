@@ -7,6 +7,15 @@ import { openModal } from '../components/Modal';
 
 const RARITIES: ItemRarity[] = ['janky', 'common', 'uncommon', 'rare', 'epic', 'legendary', 'heirloom'];
 
+// Curated palette for icon emojis (potions, reagents, scrolls, food, misc consumables).
+const ITEM_EMOJI_PALETTE = [
+  '🧪', '⚗️', '🧫', '🧬', '💊', '🩸', '💧', '🌿', '🍄', '🌹',
+  '🍷', '🍶', '🥃', '🍵', '☕', '🥤', '🧃', '🍯', '🥛', '🍼',
+  '🔥', '❄️', '⚡', '✨', '💫', '🌟', '🌀', '☄️', '🌙', '☀️',
+  '🦴', '👁', '🪶', '🍞', '🍎', '🍇', '🍓', '🥩', '🧀', '🥖',
+  '📜', '🗝', '🔮', '💎', '🔱', '⚱️', '🏺', '🪔', '🧿', '⚙',
+];
+
 export class ItemsTab implements Tab {
   private slotFilter = 'all';
 
@@ -59,12 +68,17 @@ export class ItemsTab implements Tab {
             <button class="admin-btn admin-btn-sm admin-btn-danger item-delete-btn" data-id="${i.id}">Del</button>
           </td>`;
 
+      const consumableTag = i.consumable ? ' <span class="admin-form-hint">(consumable)</span>' : '';
+      const emojiSwatch = i.iconEmoji
+        ? `<span class="admin-thumb" style="display:inline-flex;align-items:center;justify-content:center;background:${i.iconColor ?? '#888'};border-radius:3px">${escapeHtml(i.iconEmoji)}</span>`
+        : `<img src="/item-artwork/${i.id}.png" class="admin-thumb" onerror="this.style.display='none'">`;
+
       return `
         <tr>
-          <td><img src="/item-artwork/${i.id}.png" class="admin-thumb" onerror="this.style.display='none'">${escapeHtml(i.name)}</td>
+          <td>${emojiSwatch}${escapeHtml(i.name)}${consumableTag}</td>
           <td><span class="rarity-${i.rarity}">${i.rarity}</span></td>
-          <td>${i.equipSlot ?? '—'}</td>
-          <td>${effects.length > 0 ? effects.join(', ') : 'Material'}</td>
+          <td>${i.equipSlot ?? (i.consumable ? 'consumable' : '—')}</td>
+          <td>${effects.length > 0 ? effects.join(', ') : (i.consumable ? 'Coming soon' : 'Material')}</td>
           <td>${i.value ?? 1}</td>
           <td>${escapeHtml(setName)}</td>
           ${actions}
@@ -165,6 +179,20 @@ export class ItemsTab implements Tab {
         <label>Value<input type="number" id="if-value" value="${i.value ?? 1}" min="0"></label>
       </div>
       <fieldset class="admin-form-fieldset">
+        <legend>Display & Type</legend>
+        <div class="admin-form-grid">
+          <label class="admin-form-checkbox">
+            <input type="checkbox" id="if-consumable" ${i.consumable ? 'checked' : ''}>
+            Consumable (potion etc. — shows "not usable yet" tooltip)
+          </label>
+          <label>Icon Emoji <input type="text" id="if-iconEmoji" value="${escapeHtml(i.iconEmoji ?? '')}" placeholder="🧪" maxlength="8"></label>
+          <label>Icon Color <input type="color" id="if-iconColor" value="${escapeHtml(i.iconColor ?? '#888888')}"></label>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">
+          ${ITEM_EMOJI_PALETTE.map(e => `<button type="button" class="if-emoji-pick" data-emoji="${escapeHtml(e)}" title="${escapeHtml(e)}" style="font-size:1.3em;padding:4px 6px;background:var(--admin-panel);border:1px solid var(--admin-border);border-radius:var(--admin-radius-sm);cursor:pointer;line-height:1">${escapeHtml(e)}</button>`).join('')}
+        </div>
+      </fieldset>
+      <fieldset class="admin-form-fieldset">
         <legend>Class Restriction</legend>
         <div class="admin-checkbox-row">${classCheckboxes}</div>
       </fieldset>
@@ -204,6 +232,14 @@ export class ItemsTab implements Tab {
     root.querySelector('#if-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal.close));
     root.querySelector('#if-artwork-upload')?.addEventListener('click', () => this.uploadArtwork(root));
     root.querySelector('#if-artwork-remove')?.addEventListener('click', () => this.removeArtwork(root));
+
+    // Emoji palette: clicking a swatch sets the iconEmoji input.
+    const emojiInput = root.querySelector<HTMLInputElement>('#if-iconEmoji');
+    root.querySelectorAll<HTMLButtonElement>('.if-emoji-pick').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (emojiInput) emojiInput.value = btn.dataset.emoji ?? '';
+      });
+    });
   }
 
   private async uploadArtwork(root: HTMLElement): Promise<void> {
@@ -259,6 +295,9 @@ export class ItemsTab implements Tab {
     const magicReductionMin = parseInt((root.querySelector('#if-mrMin') as HTMLInputElement).value) || 0;
     const magicReductionMax = parseInt((root.querySelector('#if-mrMax') as HTMLInputElement).value) || 0;
     const value = parseInt((root.querySelector('#if-value') as HTMLInputElement).value) || 1;
+    const consumable = (root.querySelector('#if-consumable') as HTMLInputElement).checked;
+    const iconEmoji = (root.querySelector('#if-iconEmoji') as HTMLInputElement).value.trim();
+    const iconColorRaw = (root.querySelector('#if-iconColor') as HTMLInputElement).value;
 
     if (!name) { alert('Name is required.'); return; }
     const content = ctx.getDisplayContent();
@@ -280,6 +319,10 @@ export class ItemsTab implements Tab {
     if (damageReductionMin > 0 || damageReductionMax > 0) { item.damageReductionMin = damageReductionMin; item.damageReductionMax = damageReductionMax; }
     if (magicReductionMin > 0 || magicReductionMax > 0) { item.magicReductionMin = magicReductionMin; item.magicReductionMax = magicReductionMax; }
     if (value !== 1) item.value = value;
+    if (consumable) item.consumable = true;
+    if (iconEmoji) item.iconEmoji = iconEmoji;
+    // Only persist iconColor if the user has set an emoji (otherwise the default rarity color applies).
+    if (iconEmoji && iconColorRaw && iconColorRaw !== '#888888') item.iconColor = iconColorRaw;
 
     try {
       const data = await putAdmin<{ items: Record<string, ItemDefinition> }>(

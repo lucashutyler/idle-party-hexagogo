@@ -7,6 +7,7 @@ import type {
   SetDefinition,
   ShopDefinition,
   TileTypeDefinition,
+  RecipeDefinition,
   NpcDefinition,
   QuestDefinition,
   DungeonDefinition,
@@ -53,6 +54,7 @@ export interface ContentData {
   sets: Record<string, SetDefinition>;
   shops: Record<string, ShopDefinition>;
   tileTypes: Record<string, TileTypeDefinition>;
+  recipes: Record<string, RecipeDefinition>;
   npcs: Record<string, NpcDefinition>;
   quests: Record<string, QuestDefinition>;
   dungeons: Record<string, DungeonDefinition>;
@@ -76,6 +78,7 @@ export type TabId =
   | 'items'
   | 'sets'
   | 'shops'
+  | 'recipes'
   | 'npcs'
   | 'quests'
   | 'zones'
@@ -99,6 +102,7 @@ export const TABS: TabDef[] = [
   { id: 'items',      label: 'Items',      icon: '❖' },
   { id: 'sets',       label: 'Sets',       icon: '✦' },
   { id: 'shops',      label: 'Shops',      icon: '¤' },
+  { id: 'recipes',    label: 'Recipes',    icon: '⚒' },
   { id: 'npcs',       label: 'NPCs',       icon: '☺' },
   { id: 'quests',     label: 'Quests',     icon: '!' },
   { id: 'zones',      label: 'Zones',      icon: '○' },

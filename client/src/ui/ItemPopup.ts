@@ -24,7 +24,7 @@ export interface ItemPopupOptions {
  * Useful for embedding in other modals.
  */
 export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupOptions): string {
-  const color = RARITY_COLORS[def.rarity] ?? '#e8e8e8';
+  const color = def.iconColor ?? RARITY_COLORS[def.rarity] ?? '#e8e8e8';
   const initials = getItemInitials(def.name);
   const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
 
@@ -36,8 +36,13 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
   }
   if (def.equipSlot) {
     statLines.push(`<div><span class="stat-label">Slot</span><span>${SLOT_LABELS[def.equipSlot] ?? def.equipSlot}</span></div>`);
+  } else if (def.consumable) {
+    statLines.push(`<div><span class="stat-label">Type</span><span>Consumable</span></div>`);
   } else {
     statLines.push(`<div><span class="stat-label">Type</span><span>Material</span></div>`);
+  }
+  if (def.consumable) {
+    statLines.push(`<div><span class="stat-label">Use</span><span style="color:#f6c177">Not usable yet — coming soon!</span></div>`);
   }
   statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1)}</span></div>`);
   if (def.value != null && def.value > 0) {
@@ -95,10 +100,14 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 
   const actionsHtml = options?.actionsHtml ?? '';
 
+  const artworkInner = def.iconEmoji
+    ? `<span class="item-popup-emoji">${escapeHtml(def.iconEmoji)}</span>`
+    : `<img src="/item-artwork/${def.id}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
+      <span class="item-popup-initials">${initials}</span>`;
+
   return `
     <div class="item-popup-artwork${shinyClass}" style="background:${color}">
-      <img src="/item-artwork/${def.id}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
-      <span class="item-popup-initials">${initials}</span>
+      ${artworkInner}
     </div>
     <div class="item-popup-name" style="color:${color}">${escapeHtml(def.name)}</div>
     <div class="item-popup-stats">${statLines.join('')}</div>

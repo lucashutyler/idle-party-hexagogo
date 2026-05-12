@@ -42,12 +42,16 @@ export {
   UNKNOWN_CLASS_ICON,
   SERVER_ICON,
   ALL_CLASS_NAMES,
+  CRAFT_SKILL_NAMES,
+  getCraftSkillName,
   MAX_GOLD,
   xpForNextLevel,
+  xpForCraftLevel,
   calculateMaxHp,
   calculateBaseDamage,
   createCharacter,
   addXp,
+  addCraftXp,
   addGold,
 } from './systems/CharacterStats.js';
 export type {
@@ -219,6 +223,9 @@ export type {
   ClientViewPlayerMessage,
   ClientShopBuyMessage,
   ClientShopSellMessage,
+  ClientCraftQueueMessage,
+  ClientCraftCancelMessage,
+  ClientCraftingState,
   ClientAcceptQuestMessage,
   ClientTurnInQuestMessage,
   PlayerProfileMessage,
@@ -257,6 +264,30 @@ export type {
   ShopItem,
   ShopDefinition,
 } from './systems/ShopTypes.js';
+
+// Crafting types
+export {
+  CRAFTING_UNLOCK_LEVEL,
+  MAX_CRAFT_QUEUE,
+  SEED_RECIPES,
+  emptyCraftQueue,
+  canQueueRecipe,
+  enqueueRecipe,
+  cancelJobAt,
+  processCompletions,
+  getActiveJobProgress,
+  getVisibleRecipes,
+} from './systems/CraftingTypes.js';
+export type {
+  RecipeIngredient,
+  RecipeResult,
+  RecipeDefinition,
+  CraftJob,
+  CraftQueueState,
+  EnqueueError,
+  CompletedJobEvent,
+  ActiveJobProgress,
+} from './systems/CraftingTypes.js';
 
 // NPC types
 export { SEED_NPCS } from './systems/NpcTypes.js';

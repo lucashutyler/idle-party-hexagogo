@@ -175,6 +175,15 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Trading between players (asynchronous multi-item trades, no same-room requirement, persists across server restarts)
 - [x] Item gifting (mailbox-based, accept/deny, declined gifts return to sender)
 
+### Crafting
+- [x] Crafting framework (per-player FIFO queue, materials reserved at queue time, offline progression, save/restore)
+- [x] Recipe definitions in `data/recipes.json` (one starter recipe per class + one shared recipe + Mage potion)
+- [x] Per-class crafting skill (Smithing/Fletching/Inscription/Alchemy/Tinkering) with XP per craft, no level cap
+- [x] Admin Recipes tab (full CRUD without editing JSON)
+- [x] Mage alchemy starter recipe + consumable item type (potions render as colored emoji, marked "not usable yet")
+- [ ] Consumables framework (actually use potions)
+- [ ] Class-specific multi-tier recipe trees
+
 ### Quests
 - [ ] Quest system framework
 - [ ] Quest types (kill, fetch, explore, escort)
@@ -199,7 +208,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Map tab with hex rendering
 - [x] Other players visible on map (zone-filtered, count badges for other zones)
 - [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
-- [x] Tab-based bottom navigation (Combat, Map, Character, Items, Social, Settings)
+- [x] Tab-based bottom navigation (Combat, Map, Character, Items, Social, Craft, Settings)
 - [x] Mobile-first responsive design
 - [x] Pixel/retro RPG visual style (Press Start 2P font)
 - [x] Combat screen with floating HP bars above sprites and combat log

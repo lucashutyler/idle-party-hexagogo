@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   xpForNextLevel,
+  xpForCraftLevel,
   calculateMaxHp,
   calculateBaseDamage,
   createCharacter,
   addXp,
+  addCraftXp,
+  getCraftSkillName,
+  CRAFT_SKILL_NAMES,
   ALL_CLASS_NAMES,
   CLASS_DEFINITIONS,
 } from '../src/systems/CharacterStats';
@@ -210,6 +214,59 @@ describe('CharacterStats', () => {
         expect(def.baseHp).toBeGreaterThan(0);
         expect(def.baseDamage).toBeGreaterThan(0);
       }
+    });
+  });
+
+  describe('Craft skill', () => {
+    it('every class has a craft skill name', () => {
+      for (const cn of ALL_CLASS_NAMES) {
+        expect(CRAFT_SKILL_NAMES[cn]).toBeTruthy();
+        expect(getCraftSkillName(cn)).toBe(CRAFT_SKILL_NAMES[cn]);
+      }
+    });
+
+    it('xpForCraftLevel grows with level', () => {
+      expect(xpForCraftLevel(2)).toBeGreaterThan(xpForCraftLevel(1));
+      expect(xpForCraftLevel(5)).toBeGreaterThan(xpForCraftLevel(2));
+    });
+
+    it('createCharacter starts craft skill at level 1, 0 xp', () => {
+      const c = createCharacter('Mage');
+      expect(c.craftLevel).toBe(1);
+      expect(c.craftXp).toBe(0);
+    });
+
+    it('addCraftXp accumulates without leveling when below threshold', () => {
+      const c = createCharacter('Mage');
+      const result = addCraftXp(c, 10);
+      expect(result.leveledUp).toBe(false);
+      expect(c.craftLevel).toBe(1);
+      expect(c.craftXp).toBe(10);
+    });
+
+    it('addCraftXp levels up when threshold crossed', () => {
+      const c = createCharacter('Mage');
+      const need = xpForCraftLevel(1);
+      const result = addCraftXp(c, need + 5);
+      expect(result.leveledUp).toBe(true);
+      expect(c.craftLevel).toBe(2);
+      expect(c.craftXp).toBe(5);
+    });
+
+    it('addCraftXp can level multiple times in one call', () => {
+      const c = createCharacter('Mage');
+      const need = xpForCraftLevel(1) + xpForCraftLevel(2) + xpForCraftLevel(3);
+      const result = addCraftXp(c, need);
+      expect(result.levelsGained).toBe(3);
+      expect(c.craftLevel).toBe(4);
+    });
+
+    it('addCraftXp ignores non-positive amounts', () => {
+      const c = createCharacter('Mage');
+      const result = addCraftXp(c, 0);
+      expect(result.leveledUp).toBe(false);
+      expect(c.craftLevel).toBe(1);
+      expect(c.craftXp).toBe(0);
     });
   });
 });

@@ -51,6 +51,13 @@ function injectItemsStyles(): void {
       text-align: center;
       line-height: 1;
     }
+    .item-square-emoji {
+      font-size: 24px;
+      line-height: 1;
+      z-index: 1;
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
     /* Dogear corner — square tab in bottom-right with emoji */
     .item-dogear {
       position: absolute;

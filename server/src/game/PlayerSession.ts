@@ -34,6 +34,16 @@ import {
   equipSkillInSlot,
   unequipSkillFromSlot,
   getSkillById,
+  emptyCraftQueue,
+  enqueueRecipe,
+  cancelJobAt,
+  processCompletions,
+  getActiveJobProgress,
+  getVisibleRecipes,
+  CRAFTING_UNLOCK_LEVEL,
+  addCraftXp,
+  xpForCraftLevel,
+  getCraftSkillName,
 } from '@idle-party-rpg/shared';
 import type {
   ServerStateMessage,
@@ -58,6 +68,9 @@ import type {
   SkillDefinition,
   SkillLoadout,
   MailboxEntry,
+  CraftQueueState,
+  ClientCraftingState,
+  EnqueueError,
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
@@ -86,6 +99,7 @@ export class PlayerSession {
   private partyId: string | null = null;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
+  private craftQueue: CraftQueueState = emptyCraftQueue();
   /** Initial mailbox snapshot from save data; live state lives in MailboxSystem. */
   private initialMailbox: MailboxEntry[] = [];
   /** Callback to fetch the player's live mailbox from MailboxSystem. */
@@ -518,6 +532,8 @@ export class PlayerSession {
         inventory: { ...this.character.inventory },
         equipment: { ...this.character.equipment },
         xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
+        craftLevel: this.character.craftLevel,
+        craftXp: this.character.craftXp,
       };
     }
 
@@ -543,12 +559,113 @@ export class PlayerSession {
       itemDefinitions: this.getOwnedItemDefinitions(setDefs),
       setDefinitions: setDefs,
       shopDefinition: this.getCurrentShopDefinition(),
+      crafting: this.getCraftingState(),
       activeQuests: questBlock.activeQuests,
       completedQuests: questBlock.completedQuests,
       questDefinitions: questBlock.questDefinitions,
       offeredQuestIds: questBlock.offeredQuestIds,
       questResolutions: questBlock.questResolutions,
     };
+  }
+
+  // ── Crafting ──────────────────────────────────────
+
+  getCraftingState(now: number = Date.now()): ClientCraftingState | undefined {
+    if (!this.character) return undefined;
+    const recipes = this.content.getAllRecipes();
+    const visible = getVisibleRecipes(recipes, this.character.className);
+    const unlockLevel = CRAFTING_UNLOCK_LEVEL;
+    const unlocked = this.character.level >= unlockLevel;
+
+    // Collect every item def referenced by visible recipes (ingredients + results), so the
+    // client can show readable names even for items the player doesn't own yet.
+    const allItems = this.content.getAllItems();
+    const itemDefs: Record<string, ItemDefinition> = {};
+    for (const recipe of visible) {
+      const resultDef = allItems[recipe.result.itemId];
+      if (resultDef) itemDefs[recipe.result.itemId] = resultDef;
+      for (const ing of recipe.ingredients) {
+        const ingDef = allItems[ing.itemId];
+        if (ingDef) itemDefs[ing.itemId] = ingDef;
+      }
+    }
+
+    return {
+      unlocked,
+      unlockLevel,
+      recipes: visible,
+      queue: { activeStartedAtMs: this.craftQueue.activeStartedAtMs, jobs: [...this.craftQueue.jobs] },
+      activeProgress: getActiveJobProgress(recipes, this.craftQueue, now),
+      skillName: getCraftSkillName(this.character.className),
+      skillLevel: this.character.craftLevel,
+      skillXp: this.character.craftXp,
+      skillXpForNext: xpForCraftLevel(this.character.craftLevel),
+      itemDefs,
+    };
+  }
+
+  /** Process completed jobs and add results to inventory (with combat log entries). Returns true if anything completed. */
+  processCraftCompletions(now: number = Date.now()): boolean {
+    if (!this.character) return false;
+    if (this.craftQueue.jobs.length === 0) return false;
+    const recipes = this.content.getAllRecipes();
+    const items = this.content.getAllItems();
+    const events = processCompletions(recipes, this.character.inventory, this.craftQueue, now);
+    if (events.length === 0) return false;
+    let totalCraftXp = 0;
+    for (const ev of events) {
+      const itemDef = items[ev.resultItemId];
+      const itemName = itemDef?.name ?? ev.resultItemId;
+      if (ev.quantityProduced > 0) {
+        const qtyStr = ev.quantityProduced > 1 ? `x${ev.quantityProduced}` : '';
+        this.addLogEntry(`Crafted ${itemName}${qtyStr}.`, 'unlock');
+      }
+      if (ev.quantityLost > 0) {
+        this.addLogEntry(`Crafted ${itemName} but inventory full — lost ${ev.quantityLost}.`, 'damage');
+      }
+      const recipe = recipes[ev.recipeId];
+      if (recipe?.xpReward) totalCraftXp += recipe.xpReward;
+    }
+    if (totalCraftXp > 0) {
+      const skillName = getCraftSkillName(this.character.className);
+      const result = addCraftXp(this.character, totalCraftXp);
+      if (result.leveledUp) {
+        this.addLogEntry(`${skillName} reached level ${this.character.craftLevel}!`, 'levelup');
+      }
+    }
+    return true;
+  }
+
+  handleCraftQueue(recipeId: string, now: number = Date.now()): { ok: true } | { ok: false; reason: EnqueueError | 'no_character' | 'unknown_recipe' } {
+    if (!this.character) return { ok: false, reason: 'no_character' };
+    const recipe = this.content.getRecipe(recipeId);
+    if (!recipe) return { ok: false, reason: 'unknown_recipe' };
+    // Drain completions first so the queue accurately reflects current state.
+    this.processCraftCompletions(now);
+    const result = enqueueRecipe(
+      recipe,
+      this.character.inventory,
+      this.craftQueue,
+      this.character.className,
+      this.character.level,
+      now,
+    );
+    if (!result.ok) return result;
+    this.addLogEntry(`Started crafting ${recipe.name}.`, 'battle');
+    return { ok: true };
+  }
+
+  handleCraftCancel(index: number, now: number = Date.now()): boolean {
+    if (!this.character) return false;
+    this.processCraftCompletions(now);
+    const recipes = this.content.getAllRecipes();
+    const job = this.craftQueue.jobs[index];
+    const recipe = job ? recipes[job.recipeId] : undefined;
+    const ok = cancelJobAt(index, recipes, this.character.inventory, this.craftQueue, now);
+    if (ok && recipe) {
+      this.addLogEntry(`Cancelled craft: ${recipe.name}.`, 'battle');
+    }
+    return ok;
   }
 
   getPosition(): { col: number; row: number } {
@@ -848,6 +965,8 @@ export class PlayerSession {
         equipment: { ...this.character.equipment },
         skillLoadout: { ...this.character.skillLoadout },
         skillPoints: this.character.skillPoints,
+        craftLevel: this.character.craftLevel,
+        craftXp: this.character.craftXp,
       } : undefined,
       friends: [...this.friends],
       outgoingFriendRequests: [...this.outgoingFriendRequests],
@@ -860,6 +979,7 @@ export class PlayerSession {
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
       mailbox: this.getMailbox ? this.getMailbox() : this.initialMailbox,
+      craftQueue: { activeStartedAtMs: this.craftQueue.activeStartedAtMs, jobs: [...this.craftQueue.jobs] },
       activeQuests: this.quests.toSaveData().active,
       completedQuests: this.quests.toSaveData().completed,
       weeklyCompletions: this.quests.toSaveData().weeklyCompletions,
@@ -943,6 +1063,8 @@ export class PlayerSession {
           : { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
         skillLoadout,
         skillPoints,
+        craftLevel: data.character.craftLevel ?? 1,
+        craftXp: data.character.craftXp ?? 0,
       };
     } else {
       // Invalid or legacy class — no character (will force class selection on login)
@@ -964,6 +1086,11 @@ export class PlayerSession {
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
     session['initialMailbox'] = data.mailbox ? [...data.mailbox] : [];
+
+    // Restore craft queue (lazy completion happens on next tick)
+    session['craftQueue'] = data.craftQueue
+      ? { activeStartedAtMs: data.craftQueue.activeStartedAtMs, jobs: [...data.craftQueue.jobs] }
+      : emptyCraftQueue();
 
     // XP rate tracking — auto-start from session restore time
     session['xpRateStartTime'] = Date.now();
