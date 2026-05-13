@@ -150,8 +150,18 @@ export class ChatPopout {
     this.persistOpenState();
     requestAnimationFrame(() => {
       this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
-      this.inputEl.focus();
+      // Mobile: don't grab focus on open — that pops the soft keyboard over
+      // the timeline, so the user can't read the messages they just opened.
+      if (!this.isMobile()) this.inputEl.focus();
     });
+  }
+
+  /** Open the popout and pre-fill the composer for a DM to `username`. */
+  openDm(username: string): void {
+    this.open();
+    this.channelSelect.value = 'dm';
+    this.dmInput.value = username;
+    this.dmInput.style.display = '';
   }
 
   close(): void {
