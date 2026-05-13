@@ -15,7 +15,9 @@ import {
   classIconHtml,
   SKILL_SLOTS,
   CLASS_DEFINITIONS,
+  SKILL_TREES,
   getSkillById,
+  getSkillLearnLevel,
   getOwnedItemIds,
   getEquippedItemIds,
 } from '@idle-party-rpg/shared';
@@ -193,6 +195,16 @@ function injectCharItemsStyles(): void {
     }
     .charitems-skill-row.passive { border-left: 4px solid #5c8a5c; }
     .charitems-skill-row.active { border-left: 4px solid #c89b3c; }
+    .charitems-skill-row.locked {
+      opacity: 0.55;
+      cursor: default;
+    }
+    .charitems-skill-row.locked:hover { border-color: #333; }
+    .charitems-skill-row-locklabel {
+      font-size: 10px;
+      color: var(--accent-gold, #c89b3c);
+      text-transform: uppercase;
+    }
     .charitems-skill-row-name {
       font-size: 13px;
       color: #f5f5f5;
@@ -1033,18 +1045,28 @@ export class CharItemsScreen implements Screen {
     const equippedNow = equippedId ? getSkillById(equippedId) : null;
 
     const equippedIds = new Set(char.skillLoadout.equippedSkills.filter(Boolean) as string[]);
-    const candidates: SkillDefinition[] = [];
-    for (const id of char.skillLoadout.unlockedSkills) {
-      const skill = getSkillById(id);
-      if (!skill) continue;
+    const unlockedIds = new Set(char.skillLoadout.unlockedSkills);
+    const classTree = SKILL_TREES[char.className] ?? [];
+
+    // Build a single list of candidates (unlocked + future-locked) so the
+    // player can see what's coming. Locked rows are visually dimmed and
+    // non-clickable; unlocked rows behave as before.
+    type Candidate = { skill: SkillDefinition; locked: boolean };
+    const candidates: Candidate[] = [];
+    for (const skill of classTree) {
       if (skill.type !== slot.type) continue;
-      // Allow showing the currently-equipped skill so it's visible (but disabled — clicking does nothing)
-      if (equippedIds.has(id) && id !== equippedId) continue;
-      candidates.push(skill);
+      const isUnlocked = unlockedIds.has(skill.id);
+      if (isUnlocked) {
+        // Hide already-equipped-elsewhere unlocked skills (the existing rule).
+        if (equippedIds.has(skill.id) && skill.id !== equippedId) continue;
+        candidates.push({ skill, locked: false });
+      } else {
+        candidates.push({ skill, locked: true });
+      }
     }
 
     // Sort by treeOrder (level acquired)
-    candidates.sort((a, b) => a.treeOrder - b.treeOrder);
+    candidates.sort((a, b) => a.skill.treeOrder - b.skill.treeOrder);
 
     const overlay = document.createElement('div');
     overlay.className = 'charitems-skill-popup-overlay';
@@ -1053,11 +1075,21 @@ export class CharItemsScreen implements Screen {
     if (candidates.length === 0) {
       rowsHtml = `<div class="charitems-skill-popup-empty">No other ${slot.type} skills available.</div>`;
     } else {
-      rowsHtml = candidates.map(s => {
+      rowsHtml = candidates.map(({ skill: s, locked }) => {
         const isCurrent = s.id === equippedId;
-        return `<div class="charitems-skill-row ${s.type}" data-skill-id="${s.id}" ${isCurrent ? 'data-current="1"' : ''}>
+        const learnLevel = getSkillLearnLevel(s.treeOrder);
+        const classes = ['charitems-skill-row', s.type];
+        if (locked) classes.push('locked');
+        const attrs = locked
+          ? `data-locked="1"`
+          : `data-skill-id="${s.id}" ${isCurrent ? 'data-current="1"' : ''}`;
+        const tagline = locked
+          ? `<div class="charitems-skill-row-locklabel">Unlocks at Lv ${learnLevel}</div>`
+          : '';
+        return `<div class="${classes.join(' ')}" ${attrs}>
           <div class="charitems-skill-row-name">${this.escapeHtml(s.name)}${isCurrent ? ' &middot; equipped' : ''}</div>
           <div class="charitems-skill-row-meta">${s.type}${s.cooldown ? ` &middot; CD ${s.cooldown}` : ''}</div>
+          ${tagline}
           <div class="charitems-skill-row-desc">${this.escapeHtml(s.description)}</div>
         </div>`;
       }).join('');
@@ -1092,6 +1124,7 @@ export class CharItemsScreen implements Screen {
 
     overlay.querySelectorAll<HTMLElement>('.charitems-skill-row').forEach(row => {
       row.addEventListener('click', () => {
+        if (row.getAttribute('data-locked') === '1') return;
         const id = row.getAttribute('data-skill-id');
         const isCurrent = row.getAttribute('data-current') === '1';
         if (!id || isCurrent) return;

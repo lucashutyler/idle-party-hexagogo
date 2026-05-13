@@ -511,8 +511,11 @@ export class CombatScreen implements Screen {
     this.runBar.style.display = this.isFullscreen ? 'none' : '';
     this.runBar.classList.remove('combat-run-bar-empty');
 
+    // Never set `disabled` on the run button \u2014 disabled <button>s swallow
+    // click events on mobile, which kills the locked-state hint tap. We use
+    // the .combat-run-locked class for visual state instead and gate the
+    // click handler on the class.
     if (!isFighting) {
-      this.runBtn.disabled = true;
       this.runBtn.classList.add('combat-run-locked');
       this.runBtn.textContent = '\uD83D\uDD12 Run';
       this.runHint.textContent = '';
@@ -520,7 +523,6 @@ export class CombatScreen implements Screen {
     }
 
     if (!canRun) {
-      this.runBtn.disabled = true;
       this.runBtn.classList.add('combat-run-locked');
       this.runBtn.textContent = '\uD83D\uDD12 Run';
       this.runHint.textContent = 'Only the party owner or a leader can run';
@@ -528,7 +530,6 @@ export class CombatScreen implements Screen {
     }
 
     const available = roundCount >= RUN_AVAILABLE_ROUNDS;
-    this.runBtn.disabled = !available;
     this.runBtn.classList.toggle('combat-run-locked', !available);
     this.runBtn.textContent = available ? 'Run' : '\uD83D\uDD12 Run';
     this.runHint.textContent = `Available after ${RUN_AVAILABLE_ROUNDS} combat rounds`;

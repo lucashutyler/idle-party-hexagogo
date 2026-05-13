@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.13.1',
+    notes: [
+      'Trade modal: the item picker now uses a frozen inventory snapshot taken when you open the modal, so the global tick no longer rebuilds the list and yanks you back to the top. The server validates the offer at submission time, as before',
+      'Chat with user: clicking Chat on a user popup now opens the global chat pop-out pre-filled for a DM to that player',
+      'Mobile chat: opening the chat pop-out no longer steals focus / pops the soft keyboard over the timeline — tap the input when you actually want to type',
+      'Combat: tapping the locked Run button on mobile shows the "Available after 5 rounds" hint again (the disabled attribute was swallowing the click)',
+      'Skill slot picker: future skills you have not unlocked yet show up as dimmed rows with "Unlocks at Lv X" so you can preview what is coming',
+    ],
+  },
+  {
     version: '2026.05.11.1',
     notes: [
       'Admin: artwork upload added to all CRM entities (monsters, sets, shops, zones, tile types) — same pipeline as items',

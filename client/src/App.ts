@@ -476,6 +476,13 @@ export class App {
     this.chatPopout.setOnClose(() => nav.setOverlayActive('chat', false));
     this.chatPopout.setOnUnreadChange((hasUnread) => nav.setChatUnread(hasUnread));
 
+    // Wire user-popup "Chat" action → open the chat popout in DM mode and
+    // light up the Chat nav button.
+    socialScreen.setOnDmRequest((username) => {
+      this.chatPopout?.openDm(username);
+      nav.setOverlayActive('chat', true);
+    });
+
     // Restore chat open/closed from the previous session on this browser.
     if (this.chatPopout.wasOpen()) {
       this.chatPopout.open();
