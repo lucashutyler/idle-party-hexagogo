@@ -1,6 +1,6 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.05.13.1',
+    version: '2026.05.13.2',
     notes: [
       'Map performance improvements — panning and zooming is smoother, especially on larger maps and mobile.',
       'Map shadow fixed on larger maps — no more drifting inside the island. The shadow now reads as a single drop from the same direction at every zoom level.',
@@ -8,6 +8,16 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'You can now click a far room in your zone that has other players on it and see who\'s there (grouped by party, same as your current room).',
       'Missing artwork no longer flashes the broken-image icon while loading. Item slots, nav icons, portraits, and popups stay tidy and fade in once the art is ready.',
       'Combat log: fixed "You has fallen!" → "You have fallen!"',
+    ],
+  },
+  {
+    version: '2026.05.13.1',
+    notes: [
+      'Trade modal: the item picker now uses a frozen inventory snapshot taken when you open the modal, so the global tick no longer rebuilds the list and yanks you back to the top. The server validates the offer at submission time, as before',
+      'Chat with user: clicking Chat on a user popup now opens the global chat pop-out pre-filled for a DM to that player',
+      'Mobile chat: opening the chat pop-out no longer steals focus / pops the soft keyboard over the timeline — tap the input when you actually want to type',
+      'Combat: tapping the locked Run button on mobile shows the "Available after 5 rounds" hint again (the disabled attribute was swallowing the click)',
+      'Skill slot picker: future skills you have not unlocked yet show up as dimmed rows with "Unlocks at Lv X" so you can preview what is coming',
     ],
   },
   {

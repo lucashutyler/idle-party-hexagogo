@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
 import { MAX_PARTY_SIZE, classIconHtml, serverIconHtml, getItemEffectText, SKILL_SLOTS, getSkillById, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
@@ -50,6 +50,9 @@ export class SocialScreen implements Screen {
   // User popup
   private popupOverlay: HTMLElement | null = null;
 
+  /** Wired by App.ts to open the chat popout pre-filled for a DM target. */
+  private onDmRequest?: (username: string) => void;
+
   // Trade modal
   private tradeModalEl: HTMLElement | null = null;
   private tradeSelectedItems = new Map<string, number>(); // itemId → quantity
@@ -57,6 +60,19 @@ export class SocialScreen implements Screen {
   private tradeActiveId: string | null = null;
   /** When proposing a new trade, the target username. */
   private tradeTargetUsername: string | null = null;
+  /**
+   * Inventory frozen at modal-open time. The picker renders from this snapshot
+   * for the modal's whole lifetime so the global state tick doesn't disturb
+   * the user's selection (issue #342). The server is the authority on whether
+   * the offer is still valid at submission time.
+   */
+  private tradeInventorySnapshot: Record<string, number> | null = null;
+  /**
+   * Last-rendered trade-state fingerprint. Tick-driven updates skip the
+   * innerHTML rewrite when this hasn't changed, which is the common case
+   * while the user is choosing items.
+   */
+  private lastTradeRenderKey = '';
 
   // Gift modal
   private giftModalEl: HTMLElement | null = null;
@@ -1282,16 +1298,20 @@ export class SocialScreen implements Screen {
   }
 
   /**
-   * Pre-select a DM target. (The chat sub-tab is gone — chat is a global pop-out;
-   * this just records the prefs server-side so when the user opens the popout
-   * the DM target is remembered. The popout itself doesn't yet read prefs at
-   * open-time, but storing them keeps cross-device sync intact.)
+   * Open the chat popout pre-filled for a DM to `username`. Also persists
+   * the choice as the user's chat preferences for cross-device sync.
    */
   startDm(username: string): void {
     this.chatSendChannel = 'dm';
     this.chatDmTarget = username;
     this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
     this.chatFocusAfterRender = true;
+    this.onDmRequest?.(username);
+  }
+
+  /** Wire an external handler that opens the global chat popout to a DM. */
+  setOnDmRequest(cb: (username: string) => void): void {
+    this.onDmRequest = cb;
   }
 
 
@@ -1433,6 +1453,7 @@ export class SocialScreen implements Screen {
     this.tradeActiveId = null;
     this.tradeTargetUsername = targetUsername;
     this.tradeSelectedItems = new Map();
+    this.snapshotInventoryForTrade();
     this.renderTradeModal();
   }
 
@@ -1441,7 +1462,14 @@ export class SocialScreen implements Screen {
     this.tradeActiveId = tradeId;
     this.tradeTargetUsername = null;
     this.tradeSelectedItems = new Map();
+    this.snapshotInventoryForTrade();
     this.renderTradeModal();
+  }
+
+  private snapshotInventoryForTrade(): void {
+    const inv = this.lastState?.character?.inventory ?? {};
+    this.tradeInventorySnapshot = { ...inv };
+    this.lastTradeRenderKey = '';
   }
 
   /** Find the active trade for this modal in social state. */
@@ -1494,7 +1522,7 @@ export class SocialScreen implements Screen {
       if (btn.matches('.trade-qty-inc')) {
         const itemId = btn.getAttribute('data-item-id');
         if (!itemId) return;
-        const inventory = this.lastState?.character?.inventory ?? {};
+        const inventory = this.tradeInventorySnapshot ?? {};
         const maxQty = (inventory[itemId] as number) ?? 0;
         const current = this.tradeSelectedItems.get(itemId) ?? 0;
         if (current < maxQty) {
@@ -1549,7 +1577,18 @@ export class SocialScreen implements Screen {
     const trade = this.getActiveTrade();
     const selfUsername = this.lastState?.username ?? '';
     const itemDefs = this.lastState?.itemDefinitions ?? {};
-    const inventory = this.lastState?.character?.inventory ?? {};
+    // Inventory comes from the frozen snapshot, not live state. The picker
+    // and qty buttons all reference this snapshot, so the tick can't move
+    // items out from under the user's selection. The server validates the
+    // offer at submission time (issue #342).
+    const inventory = this.tradeInventorySnapshot ?? {};
+
+    // Skip the re-render entirely when nothing the user can see has changed.
+    // Without this, every server tick wipes innerHTML and resets scroll, focus,
+    // etc., even when the active trade and the local selection are identical.
+    const renderKey = this.computeTradeRenderKey(trade);
+    if (renderKey === this.lastTradeRenderKey) return;
+    this.lastTradeRenderKey = renderKey;
 
     // If a trade was being viewed but is now gone (cancelled/confirmed), close.
     if (this.tradeActiveId && !trade) {
@@ -1709,6 +1748,30 @@ export class SocialScreen implements Screen {
     modal.innerHTML = html;
   }
 
+  /**
+   * Fingerprint of the trade state + local selection. Used to skip the
+   * tick-driven re-render when nothing has actually changed.
+   */
+  private computeTradeRenderKey(trade: TradeState | null): string {
+    const selStr = Array.from(this.tradeSelectedItems.entries())
+      .map(([id, qty]) => `${id}:${qty}`)
+      .sort()
+      .join(',');
+    if (!trade) {
+      return `new|${this.tradeTargetUsername ?? ''}|${selStr}`;
+    }
+    const offerStr = (items: TradeOfferItem[]): string =>
+      items.map(i => `${i.itemId}:${i.quantity}`).sort().join(',');
+    return [
+      trade.id,
+      trade.status,
+      trade.lastUpdatedBy,
+      offerStr(trade.initiator.items),
+      offerStr(trade.target?.items ?? []),
+      selStr,
+    ].join('|');
+  }
+
   dismissTradeModal(): void {
     if (this.tradeModalEl) {
       release(this.tradeModalEl);
@@ -1718,6 +1781,8 @@ export class SocialScreen implements Screen {
     this.tradeSelectedItems = new Map();
     this.tradeActiveId = null;
     this.tradeTargetUsername = null;
+    this.tradeInventorySnapshot = null;
+    this.lastTradeRenderKey = '';
   }
 
   // ── Gift Modal ────────────────────────────────────────────────
