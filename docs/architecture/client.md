@@ -28,15 +28,19 @@ Each player has a `PlayerSession` with character state, unlocks, combat log, and
 
 **Tile layering**: every tile renders in three stages — tile-type color (always; darkened per fog/zone-unlock factor), real artwork overlay if uploaded (`/tile-artwork/{id}.png` → `/tile-type-artwork/{type}.png`, NO placehold.co fallback so missing art falls through), otherwise the tile-type emoji glyph centered in the hex. Tile artwork is baked into hex-clipped offscreen sprites in `hexSpriteCache` on first load — the per-frame work then collapses to a single `drawImage(sprite)` with no `clip()` call, which on mobile is roughly an order of magnitude faster.
 
-**Map drop-shadow**: silhouette baked once at zoom=1 in world coords, pre-blurred into a padded offscreen (`bakeBlurredShadow`) so the per-frame draw is a cheap `drawImage` instead of a `c.filter = blur(...)` pass. Rebuilds on grid change via `rebuildFromCache()`.
+**Static-layer cache**: the full static composite (tile fills + artwork + outlines + zone overlay + zone borders) is baked once into `staticCanvas` at zoom=1 in world coords. Per-frame, `draw()` blits this single image instead of iterating every tile through three passes (`drawTile` → `drawZoneOverlay` → `drawZoneBorders`). The cache is invalidated (`staticDirty = true`) on grid rebuild, unlock-set change, current-zone change, and artwork image-load. The draw helpers each take a `ctx` + `cull` parameter so the same code paths render either to the main canvas (with viewport culling) or into the bake (without).
+
+**Map drop-shadow**: silhouette baked once at zoom=1 in world coords, pre-blurred into a padded offscreen (`bakeBlurredShadow`) so the per-frame draw is a cheap `drawImage` instead of a `c.filter = blur(...)` pass. Rebuilds on grid change via `rebuildFromCache()`. The shadow draws at 1:1 with the tile silhouette (no scale-shrink — that drifted the shadow inside the map on larger islands) and the offset is in world units so it scales naturally with zoom.
 
 ## RoomView (replaces TileInfoModal)
 
 Clicking a tile opens `client/src/ui/RoomView.ts` with three states:
 
-- **Current room (you're here)** — near-full-screen, background image (`/room-bg-artwork/{zoneId}-{col}-{row}.png` with `/room-bg-artwork/{zoneId}.png` fallback), parties grouped visually (your party + other parties), shop/talk affordances, click any player to open the user popup.
-- **Remote room (discovered)** — smaller centered popup with name/type/player count and a "Go to room" button.
+- **Current room (you're here)** — near-full-screen, background image (`/room-bg-artwork/{zoneId}-{col}-{row}.png` with `/room-bg-artwork/{zoneId}.png` fallback), party-grouped player list (your party in a gold-bordered box, then one bordered box per other party), shop/talk affordances, click any player to open the user popup.
+- **Remote room (discovered)** — smaller centered popup with name/type, the same party-grouped player list (when other parties' players are on the tile), and a "Go to room" button.
 - **Undiscovered** — same small popup with an "unexplored" hint.
+
+Grouping logic lives in `RoomView.groupPlayersByParty` and depends on `partyId` arriving on each `OtherPlayerState`. Each rendered tile passes through `renderPartyBox(members, label, partyClass)`.
 
 Travelling from a remote-room view to your party arriving at that tile triggers an arrival expand animation (`.room-view-arrival` class with timed CSS transition). Shop and NPC affordances on the current-room view are gated on `playerOnTile && state?.shopDefinition` / `tileDef?.npcId` respectively — wired in `MapScreen.setOnTileClick`.
 
@@ -72,6 +76,8 @@ Per-turn animations (`updateCombatAnimations`) toggle `.attacking` / `.hit` / `.
 
 `client/src/ui/assets.ts` exposes `artworkUrl(kind, id)`, `placeholderUrl(name, opts?)`, and `renderAssetImg(kind, id, opts)`. Convention: `/<kind>-artwork/{id}.png`, falling through to `placehold.co` (and finally to the surrounding background color via CSS) so layouts always have shape. Active kinds: `item`, `monster`, `class`, `tile`, `tile-type`, `zone`, `set`, `shop`, `logo`, `parchment`, `combat-bg`, `room-bg`. Each kind requires an Express static mount in `server/src/index.ts` AND a matching `/X-artwork` entry in the vite dev proxy (`client/vite.config.ts`) — missing proxy entries silently fall through to the SPA index in dev.
 
+**Fade-in on fallback**: every fallback-capable `<img>` (renderAssetImg, item-square art, slot dogear, item popup, nav icon) renders with inline `opacity:0` and an `onload` handler that flips it to `1`. The browser never paints its broken-image glyph during the swap from a 404 real source to the placehold.co fallback — the surrounding slot's background / initials stand in until either the real or placeholder load resolves. A 120 ms `transition: opacity` is set on the affected image classes so the reveal feels smooth rather than snapping.
+
 ## Browser tab resume
 
 On `visibilitychange` → visible, the client sends `request_state` for an immediate server response (no waiting for the next battle cycle). The party position snaps instantly; the camera pans smoothly (500ms).
@@ -90,7 +96,7 @@ Hex distance heuristic with cross-track tie-breaker.
 
 ## Other players on map
 
-Each state message includes `otherPlayers: { username, col, row, zone, className? }[]`. `CanvasWorldMap` renders party flags per occupied tile in the same zone (deterministic color hash so distinct parties read distinctly), and a "+N" badge on the player's own tile so other-room players aren't hidden behind the party bubble. Positions update on each player's own battle cycle.
+Each state message includes `otherPlayers: { username, col, row, zone, className?, partyId? }[]`. `CanvasWorldMap` renders party flags per occupied tile in the same zone (deterministic color hash so distinct parties read distinctly), and a "+N" badge on the player's own tile so other-room players aren't hidden behind the party bubble. Positions update on each player's own battle cycle. `partyId` flows through to `TileClickInfo.playersHere` so `RoomView` can group co-located players into one box per party.
 
 ## Zoom controls
 

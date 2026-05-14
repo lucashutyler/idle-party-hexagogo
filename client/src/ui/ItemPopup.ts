@@ -113,7 +113,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 
   const artworkInner = def.iconEmoji
     ? `<span class="item-popup-emoji">${escapeHtml(def.iconEmoji)}</span>`
-    : `<img src="/item-artwork/${def.id}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
+    : `<img src="/item-artwork/${def.id}.png" style="opacity:0" onerror="this.style.display='none'" onload="this.style.opacity='1';this.nextElementSibling.style.display='none'" alt="">
       <span class="item-popup-initials">${initials}</span>`;
 
   return `

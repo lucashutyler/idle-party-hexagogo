@@ -1,5 +1,16 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.13.2',
+    notes: [
+      'Map performance improvements — panning and zooming is smoother, especially on larger maps and mobile.',
+      'Map shadow fixed on larger maps — no more drifting inside the island. The shadow now reads as a single drop from the same direction at every zoom level.',
+      'Room popup: other players are now grouped by party — each visible party gets its own box with its members inside, instead of one lump of "other parties".',
+      'You can now click a far room in your zone that has other players on it and see who\'s there (grouped by party, same as your current room).',
+      'Missing artwork no longer flashes the broken-image icon while loading. Item slots, nav icons, portraits, and popups stay tidy and fade in once the art is ready.',
+      'Combat log: fixed "You has fallen!" → "You have fallen!"',
+    ],
+  },
+  {
     version: '2026.05.13.1',
     notes: [
       'Trade modal: the item picker now uses a frozen inventory snapshot taken when you open the modal, so the global tick no longer rebuilds the list and yanks you back to the top. The server validates the offer at submission time, as before',

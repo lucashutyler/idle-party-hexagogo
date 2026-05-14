@@ -106,29 +106,14 @@ export class RoomView {
     // through gracefully via the second URL.
     const bgStyle = `background-image: url('${tileBgUrl}'), url('${zoneBgUrl}'); background-size: cover; background-position: center;`;
 
-    // Group players by who's in your party vs others
-    const partyPlayers = info.playersHere.filter(p => info.partyMemberUsernames.includes(p.username));
-    const otherPlayers = info.playersHere.filter(p => !info.partyMemberUsernames.includes(p.username));
+    const grouped = this.groupPlayersByParty(info.playersHere, info.partyMemberUsernames);
 
-    const renderParty = (players: { username: string; className?: string }[], label: string, partyClass: string): string => {
-      if (players.length === 0) return '';
-      const tiles = players.map(p => `
-        <div class="room-party-member" data-username="${this.escapeHtml(p.username)}">
-          <span class="room-party-member-icon">${RoomView.classIcon(p.className)}</span>
-          <span class="room-party-member-name">${this.escapeHtml(p.username)}</span>
-        </div>
-      `).join('');
-      return `
-        <div class="room-party-group ${partyClass}">
-          <div class="room-party-group-label">${label}</div>
-          <div class="room-party-group-tiles">${tiles}</div>
-        </div>
-      `;
-    };
-
-    const partySection = renderParty(partyPlayers, 'Your party', 'room-party-self');
-    const otherSection = otherPlayers.length > 0
-      ? `<div class="room-party-other-label">Other parties here</div>${renderParty(otherPlayers, '', 'room-party-other')}`
+    const partySection = grouped.mine.length > 0
+      ? this.renderPartyBox(grouped.mine, 'Your party', 'room-party-self')
+      : '';
+    const otherBoxes = grouped.others.map(g => this.renderPartyBox(g.members, null, 'room-party-other')).join('');
+    const otherSection = otherBoxes
+      ? `<div class="room-party-other-label">Other parties here</div>${otherBoxes}`
       : '';
 
     const shopButton = this.hasShop
@@ -186,9 +171,16 @@ export class RoomView {
   private renderRemoteRoom(info: TileClickInfo): void {
     this.modal.className = 'room-view room-view-remote';
 
-    const playersHere = info.playersHere.length;
-    const playersHereLine = playersHere > 0
-      ? `<div class="room-view-meta">${playersHere} player${playersHere === 1 ? '' : 's'} here</div>`
+    const grouped = this.groupPlayersByParty(info.playersHere, info.partyMemberUsernames);
+    const mineBox = grouped.mine.length > 0
+      ? this.renderPartyBox(grouped.mine, 'Your party', 'room-party-self')
+      : '';
+    const otherBoxes = grouped.others.map(g => this.renderPartyBox(g.members, null, 'room-party-other')).join('');
+    const partiesBlock = (mineBox || otherBoxes)
+      ? `<div class="room-view-parties">
+           ${mineBox}
+           ${otherBoxes ? `<div class="room-party-other-label">Other parties here</div>${otherBoxes}` : ''}
+         </div>`
       : '';
 
     const undiscoveredNote = !info.roomName || info.roomName === 'Unexplored Room'
@@ -203,7 +195,7 @@ export class RoomView {
       <button class="room-view-close" aria-label="Close">×</button>
       <div class="room-view-zone">${this.escapeHtml(info.zoneName)}</div>
       <div class="room-view-name">${this.escapeHtml(info.roomName || 'Unexplored Room')}</div>
-      ${playersHereLine}
+      ${partiesBlock}
       ${shopHint}
       ${undiscoveredNote}
       <div class="room-view-actions">
@@ -218,6 +210,77 @@ export class RoomView {
       this.onMove(info.col, info.row);
       this.hide();
     });
+    // Clickable usernames also work in the remote-room popup.
+    for (const el of this.modal.querySelectorAll('.room-party-member')) {
+      el.addEventListener('click', () => {
+        const username = el.getAttribute('data-username');
+        if (username && this.onUserClick) {
+          this.onUserClick(username, el as HTMLElement, info.col, info.row);
+        }
+      });
+    }
+  }
+
+  /**
+   * Group co-located players into "my party" + per-party other-party buckets.
+   * `partyMemberUsernames` identifies the viewer's party so members of it
+   * always land in `mine` (even if their `partyId` field is briefly stale
+   * during join/leave transitions). Other players are bucketed by `partyId`;
+   * any without a known partyId share a synthetic 'unknown' bucket so they
+   * still appear rather than silently dropping.
+   */
+  private groupPlayersByParty(
+    players: { username: string; className?: string; partyId?: string }[],
+    partyMemberUsernames: string[],
+  ): {
+    mine: { username: string; className?: string }[];
+    others: { partyId: string; members: { username: string; className?: string }[] }[];
+  } {
+    const myUsernames = new Set(partyMemberUsernames);
+    const mine: { username: string; className?: string }[] = [];
+    const otherMap = new Map<string, { partyId: string; members: { username: string; className?: string }[] }>();
+    const unknown: { username: string; className?: string }[] = [];
+
+    for (const p of players) {
+      if (myUsernames.has(p.username)) {
+        mine.push({ username: p.username, className: p.className });
+      } else if (p.partyId) {
+        let group = otherMap.get(p.partyId);
+        if (!group) {
+          group = { partyId: p.partyId, members: [] };
+          otherMap.set(p.partyId, group);
+        }
+        group.members.push({ username: p.username, className: p.className });
+      } else {
+        unknown.push({ username: p.username, className: p.className });
+      }
+    }
+
+    const others = Array.from(otherMap.values());
+    if (unknown.length > 0) others.push({ partyId: 'unknown', members: unknown });
+    return { mine, others };
+  }
+
+  /** Render a single party box with optional header label. */
+  private renderPartyBox(
+    members: { username: string; className?: string }[],
+    label: string | null,
+    partyClass: string,
+  ): string {
+    if (members.length === 0) return '';
+    const tiles = members.map(p => `
+      <div class="room-party-member" data-username="${this.escapeHtml(p.username)}">
+        <span class="room-party-member-icon">${RoomView.classIcon(p.className)}</span>
+        <span class="room-party-member-name">${this.escapeHtml(p.username)}</span>
+      </div>
+    `).join('');
+    const labelHtml = label ? `<div class="room-party-group-label">${this.escapeHtml(label)}</div>` : '';
+    return `
+      <div class="room-party-group ${partyClass}">
+        ${labelHtml}
+        <div class="room-party-group-tiles">${tiles}</div>
+      </div>
+    `;
   }
 
   hide(): void {

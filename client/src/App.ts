@@ -412,7 +412,10 @@ export class App {
     // server/src/index.ts. Missing art falls through to a placehold.co stub.
     const navImg = (id: string, label: string) => {
       const placeholder = `https://placehold.co/24x24/2a2a40/e8e8e8/png?text=${encodeURIComponent(label.slice(0, 4))}`;
-      return `<img class="nav-icon-img" src="/nav-icons/${id}.png" alt="${label}"`
+      // opacity:0 until a load resolves so a missing PNG doesn't flash the
+      // browser's broken-image glyph during the swap to the placehold stub.
+      return `<img class="nav-icon-img" src="/nav-icons/${id}.png" alt="${label}" style="opacity:0"`
+        + ` onload="this.style.opacity='1'"`
         + ` onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}" />`;
     };
     const nav = new BottomNav(

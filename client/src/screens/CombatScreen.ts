@@ -619,6 +619,10 @@ export class CombatScreen implements Screen {
         const possessive = m.endsWith("'s") || m.endsWith("s'");
         return `<span class="log-name-self">You${possessive ? "'re" : ''}</span>`;
       });
+      // Server-emitted log entries are written third-person ("Lucas has fallen!");
+      // after the self-substitution that reads as "You has fallen!". Rewrite the
+      // verb conjugation that follows a self-span so it reads as 2nd person.
+      result = result.replace(/(<span class="log-name-self">You<\/span>) has\b/g, '$1 have');
     }
 
     for (const u of this.partyUsernames) {

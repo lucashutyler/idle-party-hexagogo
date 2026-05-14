@@ -503,7 +503,14 @@ export class PlayerManager {
       if (username === excludeUsername) continue;
       if (!session.hasCharacter()) continue;
       const pos = session.getPosition();
-      others.push({ username, col: pos.col, row: pos.row, zone: session.getZone(), className: session.getClassName() ?? undefined });
+      others.push({
+        username,
+        col: pos.col,
+        row: pos.row,
+        zone: session.getZone(),
+        className: session.getClassName() ?? undefined,
+        partyId: session.getPartyId() ?? undefined,
+      });
     }
     return others;
   }
