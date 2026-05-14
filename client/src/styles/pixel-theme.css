@@ -4875,6 +4875,17 @@ html, body {
   object-fit: contain;
   image-rendering: pixelated;
 }
+/* Fade-in for fallback-capable images. Inline `opacity:0` on render → `opacity:1`
+ * once a load resolves (real artwork or placehold fallback). The transition
+ * keeps the reveal from snapping, and the initial 0 hides the browser's
+ * broken-image glyph during the swap. Affects every image that participates
+ * in the assets.ts / ItemIcon fallback dance. */
+.item-square-img,
+.item-popup-artwork img,
+.item-dogear-img,
+.nav-icon-img {
+  transition: opacity 0.12s linear;
+}
 .item-square-initials {
   font-size: 17px;
   color: #fff;
@@ -6224,6 +6235,7 @@ html, body {
   border: 1px solid var(--border-pixel);
   border-radius: 4px;
   padding: 8px;
+  text-align: left;
 }
 .room-party-self {
   border-color: var(--accent-gold);

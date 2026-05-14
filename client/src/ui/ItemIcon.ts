@@ -77,6 +77,11 @@ export function getItemSetId(itemId: string, setDefs: Record<string, SetDefiniti
  * Render the dogear corner element with a slot icon image.
  * `slot` is one of EquipSlot; we look up the URL in SLOT_ICONS, fall through
  * to placehold.co on load failure, and hide the img if even that fails.
+ *
+ * The img starts at opacity:0 and only reveals on successful load (real
+ * artwork OR placehold.co fallback). That hides the broken-image flash
+ * the browser would otherwise paint between the 404 and the fallback
+ * request resolving.
  */
 function renderSlotDogear(slot: string): string {
   const src = SLOT_ICONS[slot];
@@ -84,7 +89,8 @@ function renderSlotDogear(slot: string): string {
   const label = (SLOT_LABELS[slot] ?? slot).slice(0, 8);
   const placeholder = `https://placehold.co/16x16/2a2a40/e8e8e8/png?text=${encodeURIComponent(label)}`;
   const onerror = `if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}`;
-  return `<span class="item-dogear"><img class="item-dogear-img" src="${src}" alt="${escapeHtml(label)}" onerror="${onerror}" /></span>`;
+  const onload = `this.style.opacity='1'`;
+  return `<span class="item-dogear"><img class="item-dogear-img" src="${src}" alt="${escapeHtml(label)}" style="opacity:0" onload="${onload}" onerror="${onerror}" /></span>`;
 }
 
 export interface ItemIconOptions {
@@ -121,7 +127,10 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   if (def.iconEmoji) {
     inner = `<span class="item-square-emoji">${escapeHtml(def.iconEmoji)}</span>`;
   } else {
-    inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" onerror="this.style.display='none'" onload="this.nextElementSibling.style.display='none'" alt="">
+    // img starts at opacity:0 so a missing PNG never flashes the browser's
+    // broken-image glyph; the initials sibling acts as the visible placeholder
+    // until onload reveals the real artwork.
+    inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" style="opacity:0" onerror="this.style.display='none'" onload="this.style.opacity='1';this.nextElementSibling.style.display='none'" alt="">
     <span class="item-square-initials">${initials}</span>`;
   }
 

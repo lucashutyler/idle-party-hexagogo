@@ -43,7 +43,7 @@ export interface TileClickInfo {
   isUnlocked: boolean;
   isSameZone: boolean;
   isCurrentTile: boolean;
-  playersHere: { username: string; className?: string }[];
+  playersHere: { username: string; className?: string; partyId?: string }[];
   partyMemberUsernames: string[];
   /** Dungeon link for this tile, if any — surfaced by the room info modal so
    *  players can see a dungeon entrance prompt on the current tile. */
@@ -239,6 +239,14 @@ export class CanvasWorldMap {
   private shadowCanvas: HTMLCanvasElement | null = null;
   /** World-space bounds the cached silhouette covers. */
   private shadowBounds: { minX: number; minY: number; w: number; h: number } | null = null;
+  /** Cached composite of the static map layer — every tile (fill + artwork +
+   *  outline) plus the zone overlay and zone borders — baked once at zoom=1 in
+   *  world-coord space. Each frame the draw loop blits this single image
+   *  instead of iterating every tile. Invalidated by grid rebuilds, unlock
+   *  changes, current-zone changes, and artwork image loads. */
+  private staticCanvas: HTMLCanvasElement | null = null;
+  private staticBounds: { minX: number; minY: number; w: number; h: number } | null = null;
+  private staticDirty = true;
 
   constructor(container: HTMLElement, worldCache: WorldCache) {
     this.container = container;
@@ -331,7 +339,11 @@ export class CanvasWorldMap {
     this.playerCol = state.party.col;
     this.playerRow = state.party.row;
     const myTile = this.grid.getTile(offsetToCube({ col: state.party.col, row: state.party.row }));
+    const prevZone = this.currentZone;
     this.currentZone = myTile?.zone ?? '';
+    // Zone overlay depends on `currentZone`, so a zone crossing invalidates
+    // the static layer cache.
+    if (this.currentZone !== prevZone) this.staticDirty = true;
 
     this.partyMemberUsernames = (state.social?.party?.members ?? []).map(m => m.username);
     this.lastOtherPlayers = state.otherPlayers;
@@ -349,9 +361,6 @@ export class CanvasWorldMap {
   /** Rebuild the grid from updated WorldCache data. */
   rebuildFromCache(): void {
     this.grid = this.buildGridFromCache();
-    // Grid changed → silhouette is stale; rebake on next draw.
-    this.shadowBounds = null;
-    this.shadowBlurredCanvas = null;
   }
 
   /** Tear down listeners and stop rendering. */
@@ -396,6 +405,11 @@ export class CanvasWorldMap {
       grid.addTile(tile);
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }
+
+    // Caches keyed on grid geometry are now stale.
+    this.shadowBounds = null;
+    this.shadowBlurredCanvas = null;
+    this.staticDirty = true;
 
     return grid;
   }
@@ -818,7 +832,7 @@ export class CanvasWorldMap {
     const playersHere = isSameZone
       ? this.lastOtherPlayers
         .filter(p => p.col === offset.col && p.row === offset.row)
-        .map(p => ({ username: p.username, className: p.className }))
+        .map(p => ({ username: p.username, className: p.className, partyId: p.partyId }))
       : [];
 
     if (this.onTileClickFn) {
@@ -951,16 +965,10 @@ export class CanvasWorldMap {
     // top remain fully opaque.
     this.drawMapShadow(corners, ox, oy, z);
 
-    for (const tile of this.grid.getAllTiles()) {
-      if (tile.type === 'void') continue;
-      this.drawTile(tile, corners, ox, oy, z);
-    }
-
-    // Zone overlay (darken non-current-zone traversable tiles).
-    this.drawZoneOverlay(corners, ox, oy, z);
-
-    // Zone borders.
-    this.drawZoneBorders(corners, ox, oy, z);
+    // Static map composite — tiles + zone overlay + zone borders — baked
+    // into a single image. One drawImage per frame instead of iterating
+    // every tile through three passes.
+    this.drawStaticLayer(ox, oy, z);
 
     // Path trail.
     this.drawPath(ox, oy, z);
@@ -973,6 +981,81 @@ export class CanvasWorldMap {
 
     // Player party.
     this.drawParty(ox, oy, z);
+  }
+
+  /**
+   * Bake (if needed) and blit the static map composite. The composite is
+   * sized to the grid's bounding box at zoom=1 in world coords; per frame we
+   * just scale it to the current zoom. Rebakes only when the grid, unlock
+   * set, current zone, or an artwork image changes.
+   */
+  private drawStaticLayer(ox: number, oy: number, z: number): void {
+    if (this.staticDirty || !this.staticCanvas || !this.staticBounds) {
+      this.bakeStaticLayer();
+    }
+    if (!this.staticCanvas || !this.staticBounds) return;
+    const b = this.staticBounds;
+    this.ctx.drawImage(
+      this.staticCanvas,
+      b.minX * z + ox,
+      b.minY * z + oy,
+      b.w * z,
+      b.h * z,
+    );
+  }
+
+  private bakeStaticLayer(): void {
+    const tiles = this.grid.getAllTiles().filter(t => t.type !== 'void');
+    if (tiles.length === 0) {
+      this.staticCanvas = null;
+      this.staticBounds = null;
+      this.staticDirty = false;
+      return;
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const t of tiles) {
+      const p = t.pixelPosition;
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    // Margin must fit hex corners (HEX_SIZE) plus the widest stroke we draw
+    // inside the bake (zone-border outer glow at ~4px world units, padded
+    // for round caps) so nothing gets clipped at the edges.
+    const margin = HEX_SIZE + 8;
+    const bx = Math.floor(minX - margin);
+    const by = Math.floor(minY - margin);
+    const bw = Math.ceil(maxX - minX + margin * 2);
+    const bh = Math.ceil(maxY - minY + margin * 2);
+
+    if (!this.staticCanvas) this.staticCanvas = document.createElement('canvas');
+    this.staticCanvas.width = bw;
+    this.staticCanvas.height = bh;
+    const ctx = this.staticCanvas.getContext('2d');
+    if (!ctx) {
+      this.staticDirty = false;
+      return;
+    }
+    ctx.clearRect(0, 0, bw, bh);
+
+    const corners = getHexCorners(HEX_SIZE);
+    // Bake at zoom=1 in world coords; the per-frame blit applies the camera
+    // zoom via drawImage scaling. ox/oy here just translate world (0,0) to
+    // the buffer's pixel origin.
+    const bakeOx = -bx;
+    const bakeOy = -by;
+    const bakeZ = 1;
+
+    for (const tile of tiles) {
+      this.drawTile(ctx, tile, corners, bakeOx, bakeOy, bakeZ, false);
+    }
+    this.drawZoneOverlay(ctx, corners, bakeOx, bakeOy, bakeZ, false);
+    this.drawZoneBorders(ctx, corners, bakeOx, bakeOy, bakeZ, false);
+
+    this.staticBounds = { minX: bx, minY: by, w: bw, h: bh };
+    this.staticDirty = false;
   }
 
   /**
@@ -1007,24 +1090,24 @@ export class CanvasWorldMap {
     const blurred = this.shadowBlurredCanvas;
     if (!blurred) return;
 
-    const SHADOW_OFFSET_X = 40;
-    const SHADOW_OFFSET_Y = 60;
-    const SHADOW_SCALE = 0.88;
+    // Sun-cast model: parallel rays at a fixed angle, so the shadow has the
+    // same world-space offset everywhere on the map and the silhouette is
+    // the exact same size as the map itself. Offset is in world units so it
+    // scales naturally with zoom (zoom in → shadow extends further behind
+    // each tile, matching what you'd see in a real scene).
+    const SHADOW_OFFSET_X_WORLD = 40;
+    const SHADOW_OFFSET_Y_WORLD = 60;
 
-    // World → screen for the buffer's top-left corner, then add shadow offset
-    // and a center-nudge to shrink the silhouette around its own center.
-    const screenX = bounds.minX * z + ox + SHADOW_OFFSET_X;
-    const screenY = bounds.minY * z + oy + SHADOW_OFFSET_Y;
-    const drawW = bounds.w * z * SHADOW_SCALE;
-    const drawH = bounds.h * z * SHADOW_SCALE;
-    const centerNudgeX = (bounds.w * z - drawW) / 2;
-    const centerNudgeY = (bounds.h * z - drawH) / 2;
+    const screenX = bounds.minX * z + ox + SHADOW_OFFSET_X_WORLD * z;
+    const screenY = bounds.minY * z + oy + SHADOW_OFFSET_Y_WORLD * z;
+    const drawW = bounds.w * z;
+    const drawH = bounds.h * z;
 
     // The pre-blurred canvas is padded by `BLUR_PAD` source pixels on each
     // side so the blur halo wasn't cropped during bake. Shift the draw rect
-    // by that padding (scaled to current zoom × SHADOW_SCALE) so the
-    // silhouette content lands at the same screen position as before.
-    const padShift = CanvasWorldMap.BLUR_PAD * z * SHADOW_SCALE;
+    // by that padding (scaled to current zoom) so the silhouette content
+    // lands at the right screen position.
+    const padShift = CanvasWorldMap.BLUR_PAD * z;
     const blurredDrawW = drawW + 2 * padShift;
     const blurredDrawH = drawH + 2 * padShift;
 
@@ -1033,8 +1116,8 @@ export class CanvasWorldMap {
     c.globalAlpha = 0.5;
     c.drawImage(
       blurred,
-      screenX + centerNudgeX - padShift,
-      screenY + centerNudgeY - padShift,
+      screenX - padShift,
+      screenY - padShift,
       blurredDrawW,
       blurredDrawH,
     );
@@ -1115,11 +1198,15 @@ export class CanvasWorldMap {
     this.shadowBounds = { minX: bx, minY: by, w: bw, h: bh };
   }
 
-  private drawTile(tile: HexTile, corners: { x: number; y: number }[], ox: number, oy: number, z: number): void {
+  private drawTile(
+    ctx: CanvasRenderingContext2D,
+    tile: HexTile, corners: { x: number; y: number }[], ox: number, oy: number, z: number,
+    cull: boolean,
+  ): void {
     const p = tile.pixelPosition;
     const sx = p.x * z + ox;
     const sy = p.y * z + oy;
-    if (!this.inCanvasBounds(sx, sy, z)) return;
+    if (cull && !this.inCanvasBounds(sx, sy, z)) return;
 
     const offset = cubeToOffset(tile.coord);
     const isNonTraversable = !tile.isTraversable;
@@ -1135,41 +1222,40 @@ export class CanvasWorldMap {
       ? this.colorToHex(tile.color)
       : this.darkenColorHex(this.colorToHex(tile.color), darkenFactor);
 
-    const c = this.ctx;
-    c.save();
+    ctx.save();
 
     // Build hex path
-    c.beginPath();
+    ctx.beginPath();
     for (let i = 0; i < 6; i++) {
       const cx = sx + corners[i].x * z;
       const cy = sy + corners[i].y * z;
-      if (i === 0) c.moveTo(cx, cy); else c.lineTo(cx, cy);
+      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
     }
-    c.closePath();
+    ctx.closePath();
 
     // Always paint the tile-type color first so every tile has a solid
     // background — artwork (when present) overlays on top, and the emoji
     // glyph (when no artwork) sits above the color. Previously discovered
     // tiles relied on placehold.co stubs as artwork, so the background color
     // never showed for them.
-    c.fillStyle = fillColor;
-    c.fill();
+    ctx.fillStyle = fillColor;
+    ctx.fill();
 
     // Try per-tile or per-type artwork. Real art only — no placehold.co
     // fallback. When art is missing we want to fall through to the emoji
     // glyph, not paste a "MissingTexture" placeholder.
-    const drewArtwork = this.tryDrawTileArtwork(tile, sx, sy, z, corners);
+    const drewArtwork = this.tryDrawTileArtwork(ctx, tile, sx, sy, z, corners);
 
     // Outline.
-    c.strokeStyle = isUnlocked ? 'rgba(26,26,46,0.5)' : 'rgba(10,10,30,0.3)';
-    c.lineWidth = Math.max(1, 2 * z);
-    c.stroke();
+    ctx.strokeStyle = isUnlocked ? 'rgba(26,26,46,0.5)' : 'rgba(10,10,30,0.3)';
+    ctx.lineWidth = Math.max(1, 2 * z);
+    ctx.stroke();
 
-    c.restore();
+    ctx.restore();
 
     // Emoji glyph on top of the tile color when there's no real artwork.
     if (!drewArtwork) {
-      this.drawTileIcon(tile, sx, sy, z, darkenFactor);
+      this.drawTileIcon(ctx, tile, sx, sy, z, darkenFactor);
     }
   }
 
@@ -1177,6 +1263,7 @@ export class CanvasWorldMap {
    *  Only real artwork counts — no placehold.co fallback. Tiles without
    *  uploaded art fall through to the emoji glyph in `drawTileIcon`. */
   private tryDrawTileArtwork(
+    ctx: CanvasRenderingContext2D,
     tile: HexTile, sx: number, sy: number, z: number,
     corners: { x: number; y: number }[],
   ): boolean {
@@ -1191,7 +1278,9 @@ export class CanvasWorldMap {
     let img: HTMLImageElement | null = null;
     let imgUrl = '';
     for (const url of candidates) {
-      img = this.imageCache.get(url, null, () => { /* repaint on next RAF */ });
+      // When the artwork loads later, invalidate the static-layer bake so the
+      // next frame rebakes with the image included.
+      img = this.imageCache.get(url, null, () => { this.staticDirty = true; });
       if (img) { imgUrl = url; break; }
     }
     if (!img) return false;
@@ -1202,11 +1291,10 @@ export class CanvasWorldMap {
     // magnitude faster than clipping + drawing the raw image every frame.
     const sprite = this.getHexSprite(imgUrl, img);
 
-    const c = this.ctx;
     // Hex bounding box: width = 2 * size, height = sqrt(3) * size.
     const w = HEX_SIZE * 2 * z;
     const h = Math.sqrt(3) * HEX_SIZE * z;
-    c.drawImage(sprite, sx - w / 2, sy - h / 2, w, h);
+    ctx.drawImage(sprite, sx - w / 2, sy - h / 2, w, h);
 
     // The caller built its hex path before calling us and expects it to still
     // be live for the outline stroke. drawImage() doesn't consume the path,
@@ -1263,26 +1351,29 @@ export class CanvasWorldMap {
    *  artwork exists for the tile (or its type). Darkened with the same
    *  factor as the fill so foggy / non-traversable tiles read consistently. */
   private drawTileIcon(
+    ctx: CanvasRenderingContext2D,
     tile: HexTile, sx: number, sy: number, z: number, darkenFactor: number,
   ): void {
     const typeDef = this.worldCache.getTileTypeDef(tile.type);
     const icon = typeDef?.icon;
     if (!icon) return;
-    const c = this.ctx;
-    c.save();
-    c.globalAlpha = Math.max(0.35, darkenFactor);
-    c.font = `${Math.round(24 * z)}px sans-serif`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(icon, sx, sy);
-    c.restore();
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.35, darkenFactor);
+    ctx.font = `${Math.round(24 * z)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon, sx, sy);
+    ctx.restore();
   }
 
-  private drawZoneOverlay(corners: { x: number; y: number }[], ox: number, oy: number, z: number): void {
+  private drawZoneOverlay(
+    ctx: CanvasRenderingContext2D,
+    corners: { x: number; y: number }[], ox: number, oy: number, z: number,
+    cull: boolean,
+  ): void {
     if (!this.currentZone) return;
-    const c = this.ctx;
-    c.save();
-    c.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
     for (const tile of this.grid.getAllTiles()) {
       if (tile.type === 'void') continue;
       if (!tile.isTraversable) continue;
@@ -1290,37 +1381,40 @@ export class CanvasWorldMap {
       const p = tile.pixelPosition;
       const sx = p.x * z + ox;
       const sy = p.y * z + oy;
-      if (!this.inCanvasBounds(sx, sy, z)) continue;
+      if (cull && !this.inCanvasBounds(sx, sy, z)) continue;
 
-      c.beginPath();
+      ctx.beginPath();
       for (let i = 0; i < 6; i++) {
         const cx = sx + corners[i].x * z;
         const cy = sy + corners[i].y * z;
-        if (i === 0) c.moveTo(cx, cy); else c.lineTo(cx, cy);
+        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
       }
-      c.closePath();
-      c.fill();
+      ctx.closePath();
+      ctx.fill();
     }
-    c.restore();
+    ctx.restore();
   }
 
-  private drawZoneBorders(corners: { x: number; y: number }[], ox: number, oy: number, z: number): void {
-    const c = this.ctx;
+  private drawZoneBorders(
+    ctx: CanvasRenderingContext2D,
+    corners: { x: number; y: number }[], ox: number, oy: number, z: number,
+    cull: boolean,
+  ): void {
     const processed = new Set<string>();
 
-    c.save();
-    c.lineCap = 'round';
+    ctx.save();
+    ctx.lineCap = 'round';
 
     // Outer glow pass.
-    c.strokeStyle = 'rgba(255,170,0,0.3)';
-    c.lineWidth = Math.max(2, 4 * z);
+    ctx.strokeStyle = 'rgba(255,170,0,0.3)';
+    ctx.lineWidth = Math.max(2, 4 * z);
     for (const tile of this.grid.getAllTiles()) {
       if (tile.type === 'void') continue;
       const neighbors = getNeighbors(tile.coord);
       const p = tile.pixelPosition;
       const sx = p.x * z + ox;
       const sy = p.y * z + oy;
-      if (!this.inCanvasBounds(sx, sy, z, 3)) continue;
+      if (cull && !this.inCanvasBounds(sx, sy, z, 3)) continue;
       for (let dir = 0; dir < 6; dir++) {
         const nb = this.grid.getTile(neighbors[dir]);
         if (!nb || nb.zone === tile.zone) continue;
@@ -1328,24 +1422,24 @@ export class CanvasWorldMap {
         if (processed.has(key)) continue;
         processed.add(key);
         const [ci0, ci1] = DIR_TO_EDGE[dir];
-        c.beginPath();
-        c.moveTo(sx + corners[ci0].x * z, sy + corners[ci0].y * z);
-        c.lineTo(sx + corners[ci1].x * z, sy + corners[ci1].y * z);
-        c.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sx + corners[ci0].x * z, sy + corners[ci0].y * z);
+        ctx.lineTo(sx + corners[ci1].x * z, sy + corners[ci1].y * z);
+        ctx.stroke();
       }
     }
 
     // Inner bright pass.
     processed.clear();
-    c.strokeStyle = 'rgba(255,204,68,0.7)';
-    c.lineWidth = Math.max(1.5, 2 * z);
+    ctx.strokeStyle = 'rgba(255,204,68,0.7)';
+    ctx.lineWidth = Math.max(1.5, 2 * z);
     for (const tile of this.grid.getAllTiles()) {
       if (tile.type === 'void') continue;
       const neighbors = getNeighbors(tile.coord);
       const p = tile.pixelPosition;
       const sx = p.x * z + ox;
       const sy = p.y * z + oy;
-      if (!this.inCanvasBounds(sx, sy, z, 3)) continue;
+      if (cull && !this.inCanvasBounds(sx, sy, z, 3)) continue;
       for (let dir = 0; dir < 6; dir++) {
         const nb = this.grid.getTile(neighbors[dir]);
         if (!nb || nb.zone === tile.zone) continue;
@@ -1353,14 +1447,14 @@ export class CanvasWorldMap {
         if (processed.has(key)) continue;
         processed.add(key);
         const [ci0, ci1] = DIR_TO_EDGE[dir];
-        c.beginPath();
-        c.moveTo(sx + corners[ci0].x * z, sy + corners[ci0].y * z);
-        c.lineTo(sx + corners[ci1].x * z, sy + corners[ci1].y * z);
-        c.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sx + corners[ci0].x * z, sy + corners[ci0].y * z);
+        ctx.lineTo(sx + corners[ci1].x * z, sy + corners[ci1].y * z);
+        ctx.stroke();
       }
     }
 
-    c.restore();
+    ctx.restore();
   }
 
   private drawPath(ox: number, oy: number, z: number): void {

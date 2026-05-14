@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.05.13.1',
+    notes: [
+      'Map: the entire static map (tile colors, artwork, outlines, zone tint, zone borders) is now baked once into a single offscreen image and blitted per frame — the draw loop no longer iterates every tile through three passes. Re-bakes only happen when the grid, your unlock set, your current zone, or an artwork image changes.',
+      'Map: drop shadow now matches the tile silhouette exactly (no more 12% shrink that drifted the shadow inside the map on larger islands). Shadow offset is in world units, so it scales with zoom — the "sun far away" feel stays consistent at every zoom level.',
+      'Map room popup: other players are now grouped into one box per party instead of a single "Other parties" lump — each visible party gets its own bordered tile with its members inside. Works for both your current room and remote rooms in your zone (clicking a far tile with player flags now lists who\'s there, with the same per-party grouping).',
+      'Images: missing artwork no longer flashes the browser\'s broken-image glyph during the fallback swap. Item icons, slot dogears, item popups, nav icons, and asset images all fade in once a real load resolves; the slot\'s background / initials stand in for the missing art while it loads.',
+      'Combat log: dying as the viewer no longer reads "You has fallen!" — the self-substitution now conjugates "has" → "have" so it reads as proper 2nd person.',
+    ],
+  },
+  {
     version: '2026.05.11.1',
     notes: [
       'Admin: artwork upload added to all CRM entities (monsters, sets, shops, zones, tile types) — same pipeline as items',

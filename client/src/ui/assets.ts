@@ -55,19 +55,25 @@ export interface AssetImgOpts {
 
 /**
  * Render an `<img>` HTML string that loads the real artwork first, then
- * falls back to a placehold.co URL on error. The wrapping `<span>` carries
- * a background color so the slot has shape even if both image lookups fail.
+ * falls back to a placehold.co URL on error. The img starts at opacity:0
+ * and only reveals on successful load (whether real or fallback) so the
+ * browser's broken-image glyph never flashes between a 404 and the
+ * fallback completing. Callers should size the slot via CSS (className)
+ * or inline style so the layout space is preserved while loading.
  */
 export function renderAssetImg(kind: AssetKind, id: string, opts?: AssetImgOpts): string {
   const real = artworkUrl(kind, id);
   const label = opts?.label ?? id;
   const fallback = placeholderUrl(label, { w: opts?.width, h: opts?.height });
   const cls = opts?.className ? ` class="${opts.className}"` : '';
-  const style = opts?.style ? ` style="${opts.style}"` : '';
+  // Prepend opacity:0 to any caller-provided inline style. onload below
+  // restores opacity once the (real or fallback) image is in.
+  const inlineStyle = `opacity:0;${opts?.style ?? ''}`;
   const alt = opts?.alt ?? label;
   // Fallback chain: real → placehold.co → hide the img (background color shows through).
   const onerror = `if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallback}';}else{this.style.display='none';}`;
-  return `<img${cls}${style} src="${real}" alt="${escapeAttr(alt)}" onerror="${onerror}" loading="lazy" decoding="async" />`;
+  const onload = `this.style.opacity='1'`;
+  return `<img${cls} style="${inlineStyle}" src="${real}" alt="${escapeAttr(alt)}" onload="${onload}" onerror="${onerror}" loading="lazy" decoding="async" />`;
 }
 
 function escapeAttr(s: string): string {
