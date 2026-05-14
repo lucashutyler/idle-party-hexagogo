@@ -30,7 +30,7 @@ WoW-style unified timeline with all channels in one scrollable view, color-coded
 
 ## User popup menu
 
-A contextual popup shown when clicking any username across the app (Users tab, Guild/Party members, TileInfoModal players, chat sender names). Shows player level in the header. Actions: View Player, Chat (DM), Guild Invite / "In Guild", Add Friend / Accept / Decline / Revoke / "Friends", Party Invite / "In Party" / "Different Room", Trade, Block / Unblock. Trade is **not** room-gated — trades are async (see below). Dismissed on outside click or after action. Implemented as a positioned absolute div in `SocialScreen`.
+A contextual popup shown when clicking any username across the app (Users tab, Guild/Party members, RoomView party tiles, chat sender names). Shows player level in the header. Actions: View Player, Chat (DM), Guild Invite / "In Guild", Add Friend / Accept / Decline / Revoke / "Friends", Party Invite / "In Party" / "Different Room", Trade, Block / Unblock. Trade is **not** room-gated — trades are async (see below). Dismissed on outside click or after action. Implemented as a positioned absolute div in `SocialScreen`.
 
 ## View Player profile
 
