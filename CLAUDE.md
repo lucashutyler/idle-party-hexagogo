@@ -68,7 +68,11 @@ When adding or changing any per-player game state (new systems, new fields on `P
 
 ### Patch notes
 
-Every time a feature or fix is released, prepend an entry to the `PATCH_NOTES` array in `client/src/screens/PatchNotes.ts`. Version format: `YYYY.MM.DD.N` where `N` is the release number for that day (starting at 1). Each entry has a `version` string and a `notes: string[]` of bullet points.
+Every PR that ships a user-visible change adds (or appends to) **one entry** in the `PATCH_NOTES` array at the top of `client/src/screens/PatchNotes.ts` — don't fragment a single PR's bullets across multiple version entries. Version format: `YYYY.MM.DD.N` where `N` is the release number for that day (starting at 1); if today's `.N` already exists from an earlier PR, bump to `.N+1`. Each entry has a `version` string and a `notes: string[]`.
+
+**Bullets must be player-facing and non-technical** — describe what changed from a player's perspective, not the implementation. Replace jargon like "static-layer bake", "world units", "self-substitution" with phrases like "map performance improvements", or omit entirely if there's nothing useful to say to a player. Technical detail belongs in the PR description and `docs/architecture/`, not in patch notes.
+
+Also bump `GAME_VERSION` in `shared/src/systems/BattleTypes.ts` to match. The server's version-change detector (`GameLoop.init`) then auto-broadcasts the update in server chat on next boot, so no manual broadcast wiring is needed.
 
 ### Data folder convention
 
