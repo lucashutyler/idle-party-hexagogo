@@ -1,8 +1,8 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.05.13.2',
+    version: '2026.05.13.3',
     notes: [
-      'Map performance improvements — panning and zooming is smoother, especially on larger maps and mobile.',
+      'Map is now rendered with WebGL — panning and zooming should feel substantially smoother on every device, especially mobile and larger maps. Idle map screens cost effectively zero performance now.',
       'Map shadow fixed on larger maps — no more drifting inside the island. The shadow now reads as a single drop from the same direction at every zoom level.',
       'Room popup: other players are now grouped by party — each visible party gets its own box with its members inside, instead of one lump of "other parties".',
       'You can now click a far room in your zone that has other players on it and see who\'s there (grouped by party, same as your current room).',

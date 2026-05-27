@@ -1,4 +1,4 @@
-import type { TileClickInfo } from './CanvasWorldMap';
+import type { TileClickInfo } from './ThreeWorldMap';
 import type { NpcDefinition } from '@idle-party-rpg/shared';
 import { classIconHtml } from '@idle-party-rpg/shared';
 import { renderAssetImg } from './assets';

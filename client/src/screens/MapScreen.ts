@@ -3,7 +3,7 @@ import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
 import { RoomView } from '../ui/RoomView';
 import { ShopPopup } from '../ui/ShopPopup';
-import { CanvasWorldMap } from '../ui/CanvasWorldMap';
+import { ThreeWorldMap } from '../ui/ThreeWorldMap';
 import { NpcTalkPopup } from '../ui/NpcTalkPopup';
 
 export class MapScreen implements Screen {
@@ -11,7 +11,7 @@ export class MapScreen implements Screen {
   private gameContainer: HTMLElement;
   private gameClient: GameClient;
   private worldCache: WorldCache;
-  private map: CanvasWorldMap | null = null;
+  private map: ThreeWorldMap | null = null;
   private unsubscribeState?: () => void;
   private zoomControls?: HTMLElement;
   private roomView?: RoomView;
@@ -115,7 +115,7 @@ export class MapScreen implements Screen {
       });
     }
 
-    this.map = new CanvasWorldMap(this.gameContainer, this.worldCache);
+    this.map = new ThreeWorldMap(this.gameContainer, this.worldCache);
     this.map.setSendMove((col, row) => this.tryMove(col, row));
 
     this.shopPopup = new ShopPopup(this.gameClient);

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as an npm-workspaces monorepo: `shared/` (pure logic + types), `client/` (vanilla TS + HTML5 Canvas world map + DOM UI), `server/` (Node + WebSocket).
+Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as an npm-workspaces monorepo: `shared/` (pure logic + types), `client/` (vanilla TS + three.js world map + DOM UI), `server/` (Node + WebSocket).
 
 ## Branch Policy
 
@@ -44,7 +44,7 @@ Use `Glob`/`Grep`/`ls` to navigate the source tree — no point duplicating it h
 - [`docs/architecture/content.md`](docs/architecture/content.md) — `ContentStore`, parameterized shared functions, zones, monsters, walls, items, `InventoryView`, sets, dungeons, shops, world map, fog of war, item-gated tiles, tile types, `WorldCache`, content versioning.
 - [`docs/architecture/social.md`](docs/architecture/social.md) — Social tab sub-tabs (Party/Guild/Leaderboard, with Chat as a global pop-out from the Chat nav button), user popup, View Player, async trades, gift mailbox, social badges, `ClientSocialState`.
 - [`docs/architecture/auth.md`](docs/architecture/auth.md) — magic-link auth flow, WS session-cookie auth, `_dt` device fingerprinting, account deactivation/appeals.
-- [`docs/architecture/client.md`](docs/architecture/client.md) — multi-screen DOM shell, `GameClient` subscriber pattern, Canvas world map, RoomView, ChatPopout, bottom nav structure, CharItems merged tab, persistent XP bar, image-everywhere convention, ModalStack, browser tab resume, hex coordinates, A* pathfinding, visual style, UI state persistence.
+- [`docs/architecture/client.md`](docs/architecture/client.md) — multi-screen DOM shell, `GameClient` subscriber pattern, three.js world map + DOM overlay split, RoomView, ChatPopout, bottom nav structure, CharItems merged tab, persistent XP bar, image-everywhere convention, ModalStack, browser tab resume, hex coordinates, A* pathfinding, visual style, UI state persistence.
 - [`docs/architecture/admin-dashboard.md`](docs/architecture/admin-dashboard.md) — World Manager layout, density tokens, modal forms, per-tab notes.
 - [`docs/architecture/persistence.md`](docs/architecture/persistence.md) — `PlayerSaveData` schema, `GameStateStore`/`JsonFileStore`, swappable-store data folder convention.
 
