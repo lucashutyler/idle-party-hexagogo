@@ -2,7 +2,7 @@
 
 ## Multi-screen app shell
 
-DOM-based screen switching (Phaser fully removed from runtime in the May 2026 overhaul — the package is still in `package.json` until cleanup, but nothing imports it). `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-creates the three.js world map on first visit. A persistent XP bar sits directly above the bottom nav, visible on every game screen.
+DOM-based screen switching. `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-creates the three.js world map on first visit. A persistent XP bar sits directly above the bottom nav, visible on every game screen.
 
 ## Bottom nav structure
 
