@@ -169,15 +169,11 @@ interface PartyAssignment {
 }
 
 /**
- * Group `count` bots into mixed-size parties (some solo, some small,
- * some at the 5-cap). Mirrors the "always in a party" invariant.
- *
- * Distribution:
- *   ~30% solo (party of 1)
- *   ~30% duo (party of 2)
- *   ~20% trio (party of 3)
- *   ~15% quartet (party of 4)
- *   ~5%  full (party of 5)
+ * Group `count` bots into uniformly-random parties of 1-5. Each party
+ * size is picked with equal probability (20% each); the last party
+ * gets clamped to whatever's left so total members lands at `count`.
+ * Mirrors the "always in a party" invariant — every bot ends up in
+ * exactly one party.
  */
 function assignParties(count: number, rng: () => number): PartyAssignment[] {
   const out: PartyAssignment[] = [];
@@ -185,13 +181,8 @@ function assignParties(count: number, rng: () => number): PartyAssignment[] {
   let partyIndex = 0;
   while (bot < count) {
     const remaining = count - bot;
-    const r = rng();
-    let size: number;
-    if (r < 0.30) size = 1;
-    else if (r < 0.60) size = 2;
-    else if (r < 0.80) size = 3;
-    else if (r < 0.95) size = 4;
-    else size = 5;
+    // Uniform 1..5, then clamp so we don't overshoot the bot count.
+    let size = 1 + Math.floor(rng() * 5);
     size = Math.min(size, remaining);
 
     const partyId = `seed_party_${String(partyIndex).padStart(3, '0')}`;
