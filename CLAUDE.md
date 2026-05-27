@@ -36,6 +36,8 @@ npm run typecheck    # tsc --build (all packages)
 
 **Worktree build quirk**: The worktree has no `node_modules` — npm workspace symlinks resolve through the main repo's `node_modules`, which points to the main repo's `shared/dist/`. If the worktree's shared source has diverged from main, `tsc` will see stale types and report false errors. The shared build script auto-detects worktrees and copies `dist/` to the main repo after `tsc`, so `npm run build` handles this automatically.
 
+**Dev seed**: when `NODE_ENV !== 'production'`, `GameLoop.init` calls into `server/src/game/DevSeed.ts`, which procedurally injects 20 extra zones / ~1000 rooms (`shared/src/seed/SeedDevWorld.ts`) and 100 bot players grouped into ~30 parties. Both passes are idempotent — the content pass checks for a marker zone (`dev_sunscar_plains`) before merging, and the player pass probes `bot_001`'s save file. To re-seed, delete `data/world.json` + `data/zones.json` (for content) or `data/bot_*.json` (for bots). Bots live in dev zones (col 30+, far from the production starting island) so they don't crowd the real player.
+
 ## Architecture
 
 Use `Glob`/`Grep`/`ls` to navigate the source tree — no point duplicating it here. For deeper context on specific subsystems, read the topic docs on demand:

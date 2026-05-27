@@ -9,6 +9,7 @@ import { TradeStore } from './social/TradeStore.js';
 import { ContentStore } from './ContentStore.js';
 import { VersionStore } from './VersionStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
+import { seedDevContent, seedDevPlayers } from './DevSeed.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
 const CRAFT_TICK_MS = 1000;       // Check craft completions every 1s
@@ -44,6 +45,13 @@ export class GameLoop {
     t = performance.now();
     await this.contentStore.load();
     console.log(`[Startup] ContentStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
+
+    // Dev-only: inject 20 procedurally-generated zones and ~1000 rooms
+    // so the map has real scale to work against. Idempotent — re-runs
+    // skip the merge if the marker zone is already present.
+    if (process.env.NODE_ENV !== 'production') {
+      await seedDevContent(this.contentStore);
+    }
 
     t = performance.now();
     await this.versionStore.load();
@@ -84,6 +92,15 @@ export class GameLoop {
     t = performance.now();
     const saves = await this.store.loadAll();
     console.log(`[Startup] Save files loaded (${saves.length} players) in ${(performance.now() - t).toFixed(1)}ms`);
+
+    // Dev-only: drop 100 bot saves on disk if they don't exist yet,
+    // then fold them into the saves array so restoreFromSaveData
+    // builds the in-memory sessions (= they show up as other players
+    // on the map).
+    if (process.env.NODE_ENV !== 'production') {
+      const newBots = await seedDevPlayers(this.store, accountStore, this.contentStore.getWorld().tiles);
+      if (newBots.length > 0) saves.push(...newBots);
+    }
 
     if (saves.length > 0) {
       t = performance.now();

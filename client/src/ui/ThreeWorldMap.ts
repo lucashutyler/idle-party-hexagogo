@@ -1105,6 +1105,16 @@ export class ThreeWorldMap {
    * world coords. Three.js then uploads this as a texture; pan/zoom is
    * a free GPU-side matrix update.
    */
+  /**
+   * Max bake canvas dimension in pixels. Conservatively chosen so the
+   * resulting texture fits inside the WebGL `MAX_TEXTURE_SIZE` cap of
+   * essentially every desktop GPU (and most modern mobile devices).
+   * Beyond this we scale the bake down proportionally — the static
+   * layer goes slightly blurry at high zoom but the renderer keeps
+   * working on sprawling dev maps.
+   */
+  private static readonly MAX_BAKE_DIM = 8192;
+
   private bakeStaticLayer(): void {
     const tiles = this.grid.getAllTiles().filter(t => t.type !== 'void');
     if (tiles.length === 0) {
@@ -1125,8 +1135,17 @@ export class ThreeWorldMap {
     const margin = HEX_SIZE + 8;
     const bx = Math.floor(minX - margin);
     const by = Math.floor(minY - margin);
-    const bw = Math.ceil(maxX - minX + margin * 2);
-    const bh = Math.ceil(maxY - minY + margin * 2);
+    const worldW = Math.ceil(maxX - minX + margin * 2);
+    const worldH = Math.ceil(maxY - minY + margin * 2);
+
+    // If the world bounds exceed the max bake dim, downscale the bake
+    // (and account for it when the plane mesh samples the texture).
+    // The plane mesh is sized to `worldW × worldH` in scene units, so a
+    // smaller bake just means the texture is sampled at lower density —
+    // the visual position of every tile stays correct.
+    const scale = Math.min(1, ThreeWorldMap.MAX_BAKE_DIM / Math.max(worldW, worldH));
+    const bw = Math.ceil(worldW * scale);
+    const bh = Math.ceil(worldH * scale);
 
     if (!this.staticCanvas) this.staticCanvas = document.createElement('canvas');
     this.staticCanvas.width = bw;
@@ -1139,9 +1158,12 @@ export class ThreeWorldMap {
     ctx.clearRect(0, 0, bw, bh);
 
     const corners = getHexCorners(HEX_SIZE);
-    const bakeOx = -bx;
-    const bakeOy = -by;
-    const bakeZ = 1;
+    // Bake-space coords: (worldX − bx) * scale. The drawTile/overlay/
+    // borders helpers take an (ox, oy, z) trio that they apply as
+    // `worldX * z + ox`, so we can fold the bake's downscale into `z`.
+    const bakeZ = scale;
+    const bakeOx = -bx * scale;
+    const bakeOy = -by * scale;
 
     for (const tile of tiles) {
       this.drawTile(ctx, tile, corners, bakeOx, bakeOy, bakeZ);
@@ -1149,8 +1171,16 @@ export class ThreeWorldMap {
     this.drawZoneOverlay(ctx, corners, bakeOx, bakeOy, bakeZ);
     this.drawZoneBorders(ctx, corners, bakeOx, bakeOy, bakeZ);
 
-    this.staticBounds = { minX: bx, minY: by, w: bw, h: bh };
+    // Bounds stay in world units (the mesh is sized in world units).
+    this.staticBounds = { minX: bx, minY: by, w: worldW, h: worldH };
     this.staticDirty = false;
+
+    if (scale < 1) {
+      console.log(
+        `[ThreeWorldMap] Static bake downscaled to ${(scale * 100).toFixed(1)}% ` +
+        `(${bw}×${bh} from ${worldW}×${worldH}) to stay under the ${ThreeWorldMap.MAX_BAKE_DIM}px cap.`,
+      );
+    }
   }
 
   private bakeShadow(): void {
@@ -1174,8 +1204,16 @@ export class ThreeWorldMap {
     const margin = HEX_SIZE + 2;
     const bx = Math.floor(minX - margin);
     const by = Math.floor(minY - margin);
-    const bw = Math.ceil(maxX - minX + margin * 2);
-    const bh = Math.ceil(maxY - minY + margin * 2);
+    const worldW = Math.ceil(maxX - minX + margin * 2);
+    const worldH = Math.ceil(maxY - minY + margin * 2);
+
+    // Same downscale-to-fit story as the static layer — the shadow
+    // mesh is sized in world units, so a smaller source canvas just
+    // means slightly softer edges (which is fine for a blurred shadow
+    // silhouette anyway).
+    const scale = Math.min(1, ThreeWorldMap.MAX_BAKE_DIM / Math.max(worldW, worldH));
+    const bw = Math.ceil(worldW * scale);
+    const bh = Math.ceil(worldH * scale);
 
     if (!this.shadowCanvas) this.shadowCanvas = document.createElement('canvas');
     this.shadowCanvas.width = bw;
@@ -1188,11 +1226,11 @@ export class ThreeWorldMap {
     sctx.beginPath();
     for (const tile of tiles) {
       const p = tile.pixelPosition;
-      const sx = p.x - bx;
-      const sy = p.y - by;
+      const sx = (p.x - bx) * scale;
+      const sy = (p.y - by) * scale;
       for (let i = 0; i < 6; i++) {
-        const cx = sx + corners[i].x;
-        const cy = sy + corners[i].y;
+        const cx = sx + corners[i].x * scale;
+        const cy = sy + corners[i].y * scale;
         if (i === 0) sctx.moveTo(cx, cy); else sctx.lineTo(cx, cy);
       }
       sctx.closePath();
@@ -1200,6 +1238,8 @@ export class ThreeWorldMap {
     sctx.fill('nonzero');
 
     // Pre-blurred copy: pad on each side so the blur halo isn't cropped.
+    // Pad scales with the bake's downscale so the halo stays a fixed
+    // visual size relative to the silhouette.
     const pad = SHADOW_BLUR_PAD;
     const blurred = document.createElement('canvas');
     blurred.width = bw + pad * 2;
@@ -1211,7 +1251,9 @@ export class ThreeWorldMap {
       bctx.filter = 'none';
     }
     this.shadowBlurredCanvas = blurred;
-    this.shadowBounds = { minX: bx, minY: by, w: bw, h: bh };
+    // Bounds stay in world units so the shadow mesh is sized in scene
+    // units (the bake canvas is scaled down but the mesh isn't).
+    this.shadowBounds = { minX: bx, minY: by, w: worldW, h: worldH };
   }
 
   // ─── Bake helpers (Canvas2D draws into the offscreen bake) ───

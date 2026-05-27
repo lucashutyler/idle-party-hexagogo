@@ -285,6 +285,25 @@ export class ContentStore {
     await this.save();
   }
 
+  /**
+   * Bulk-merge generated content (used by the dev seed). Adds the given
+   * zones + tiles to the in-memory maps and persists once at the end —
+   * much cheaper than 1000 individual `addOrUpdateTile` calls. Skips
+   * any tile whose (col,row) already has a tile so a partial re-seed
+   * doesn't clobber existing content.
+   */
+  async mergeSeedContent(zones: ZoneDefinition[], tiles: WorldTileDefinition[]): Promise<void> {
+    for (const z of zones) this.zones.set(z.id, z);
+    const occupied = new Set(this.world.tiles.map(t => `${t.col},${t.row}`));
+    for (const t of tiles) {
+      const key = `${t.col},${t.row}`;
+      if (occupied.has(key)) continue;
+      this.world.tiles.push(t);
+      occupied.add(key);
+    }
+    await this.save();
+  }
+
   async deleteZone(id: string): Promise<{ success: boolean; error?: string }> {
     if (!this.zones.has(id)) {
       return { success: false, error: 'Zone not found.' };
