@@ -856,14 +856,13 @@ export class ThreeWorldMap {
       return;
     }
     const off = cubeToOffset(tile.coord);
-    if (!this.worldCache.isUnlocked(off.col, off.row)) {
-      this.hideTooltip();
-      return;
-    }
     const def = this.worldTileDefs.get(`${off.col},${off.row}`);
+    const isUnlocked = this.worldCache.isUnlocked(off.col, off.row);
     const zoneName = def?.zoneName ?? def?.zone ?? tile.zone;
-    const roomName = def?.name ?? '';
-    const label = roomName ? `${zoneName}: ${roomName}` : zoneName;
+    // Unexplored traversable tiles still get a tooltip — matches the room
+    // popup, which labels them "{zone}: Unexplored Room".
+    const roomName = isUnlocked && def?.name ? def.name : 'Unexplored Room';
+    const label = `${zoneName}: ${roomName}`;
 
     this.tooltipEl.textContent = label;
     this.tooltipEl.style.left = `${this.mousePixelX + 12}px`;

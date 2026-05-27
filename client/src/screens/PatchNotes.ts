@@ -3,6 +3,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
     version: '2026.05.26.1',
     notes: [
       'Map is now rendered with WebGL — panning and zooming should feel substantially smoother on every device, especially mobile and larger maps. Idle map screens cost effectively zero performance now.',
+      'Map: hovering an unexplored room now shows a tooltip again ("{zone}: Unexplored Room"), matching the room popup.',
     ],
   },
   {
