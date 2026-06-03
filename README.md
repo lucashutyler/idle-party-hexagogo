@@ -103,7 +103,7 @@ Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into
 
 ```
 shared/           Pure logic, types, seed data — compiled first, used by client + server
-client/           Vanilla TS web client — HTML5 Canvas world map, DOM UI, mobile-friendly, admin dashboard
+client/           Vanilla TS web client — three.js world map, DOM UI, mobile-friendly, admin dashboard
 server/           Node.js game server — persistent 24/7 game state, auth, WebSocket, ContentStore
 data/             Runtime JSON content files (monsters, items, zones, world map — auto-seeded)
 ```
@@ -206,7 +206,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 
 ### UI
 - [x] Login screen with email input + username choice screen
-- [x] Map tab with hex rendering (HTML5 Canvas, lazy-created on first Map visit)
+- [x] Map tab with hex rendering (three.js WebGL canvas + HTML overlay, lazy-created on first Map visit)
 - [x] Other players visible on map (per-tile flags within same zone, +N badge for other-room players on your tile)
 - [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
 - [x] Bottom navigation: Combat, Map, Char (merged Char+Items), Craft, Social (submenu), Settings, Chat (overlay)

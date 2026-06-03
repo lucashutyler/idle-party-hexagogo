@@ -2,7 +2,7 @@
 
 ## Multi-screen app shell
 
-DOM-based screen switching (Phaser fully removed from runtime in the May 2026 overhaul — the package is still in `package.json` until cleanup, but nothing imports it). `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-creates the Canvas world map on first visit. A persistent XP bar sits directly above the bottom nav, visible on every game screen.
+DOM-based screen switching. `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-creates the three.js world map on first visit. A persistent XP bar sits directly above the bottom nav, visible on every game screen.
 
 ## Bottom nav structure
 
@@ -22,15 +22,23 @@ Each player has a `PlayerSession` with character state, unlocks, combat log, and
 
 `subscribe(cb)` / `onConnection(cb)` return unsubscribe functions. Multiple screens listen concurrently. `lastState` cache lets late-mounting screens read current state immediately. Connection is deferred until `connect()` is called (after auth).
 
-## Canvas world map
+## World map (three.js)
 
-`client/src/ui/CanvasWorldMap.ts` renders the world map with HTML5 Canvas — parchment background, hex tiles with a single unioned drop shadow, zone borders/overlays, path tween, player party, and per-tile flags for other parties present. Pan via mouse drag / touch drag, zoom via wheel / pinch / on-screen +/− buttons. Smarter default zoom targets ≥15 tiles along the shorter dimension. Scroll bounce-back lets the user overdrag ~25% then springs back. The map pauses its render loop when the screen is inactive.
+`client/src/ui/ThreeWorldMap.ts` renders the world map with **three.js (WebGL)** plus a sibling HTML overlay. The split:
 
-**Tile layering**: every tile renders in three stages — tile-type color (always; darkened per fog/zone-unlock factor), real artwork overlay if uploaded (`/tile-artwork/{id}.png` → `/tile-type-artwork/{type}.png`, NO placehold.co fallback so missing art falls through), otherwise the tile-type emoji glyph centered in the hex. Tile artwork is baked into hex-clipped offscreen sprites in `hexSpriteCache` on first load — the per-frame work then collapses to a single `drawImage(sprite)` with no `clip()` call, which on mobile is roughly an order of magnitude faster.
+- **WebGL canvas** owns the static layers only — parchment background, drop shadow, baked tile composite. These are uploaded as textures and the per-frame work collapses to a camera-matrix update; pan/zoom are essentially free GPU operations.
+- **`.three-map-overlay` HTML div** sits on top of the canvas and hosts every *dynamic* element — party sprite, other-player flags, count badges, hover highlight, path preview. The overlay carries a single `transform: translate(W/2, H/2) scale(zoom) translate(-camX, -camY)` mirroring the three.js camera, so a single style update moves every child together when the user pans/zooms (no per-child JS). Children are absolutely positioned in world coords (`left:Xpx; top:Ypx`) and centered via `translate(-50%, -50%)`.
+- **Tooltip** is a separate cursor-positioned `.canvas-map-tooltip` element (no map transform).
 
-**Static-layer cache**: the full static composite (tile fills + artwork + outlines + zone overlay + zone borders) is baked once into `staticCanvas` at zoom=1 in world coords. Per-frame, `draw()` blits this single image instead of iterating every tile through three passes (`drawTile` → `drawZoneOverlay` → `drawZoneBorders`). The cache is invalidated (`staticDirty = true`) on grid rebuild, unlock-set change, current-zone change, and artwork image-load. The draw helpers each take a `ctx` + `cull` parameter so the same code paths render either to the main canvas (with viewport culling) or into the bake (without).
+**Render-on-demand**: there's no always-on RAF loop. `requestRender()` schedules a single render on the next animation frame, coalescing multiple state pushes into one. An anim loop runs only while the spring-back is active (overdrag → bounce). Party movement and the party pulse live entirely in CSS (`transition: left/top 400ms ease-in-out` on `.three-map-party` matches `MOVE_DURATION`; pulse is a CSS keyframe), so they don't drive any JS or WebGL work. Idle map screens cost effectively zero.
 
-**Map drop-shadow**: silhouette baked once at zoom=1 in world coords, pre-blurred into a padded offscreen (`bakeBlurredShadow`) so the per-frame draw is a cheap `drawImage` instead of a `c.filter = blur(...)` pass. Rebuilds on grid change via `rebuildFromCache()`. The shadow draws at 1:1 with the tile silhouette (no scale-shrink — that drifted the shadow inside the map on larger islands) and the offset is in world units so it scales naturally with zoom.
+**Tile layering** (unchanged from the prior Canvas2D renderer): every tile renders in three stages — tile-type color (always; darkened per fog/zone-unlock factor), real artwork overlay if uploaded (`/tile-artwork/{id}.png` → `/tile-type-artwork/{type}.png`, NO placehold.co fallback so missing art falls through), otherwise the tile-type emoji glyph centered in the hex. Tile artwork is baked into hex-clipped offscreen sprites in `hexSpriteCache` on first load — the bake then draws each sprite with a single `drawImage(sprite)` (no `clip()` call).
+
+**Static-layer bake → texture**: the full static composite (tile fills + artwork + outlines + zone overlay + zone borders) is baked once into an offscreen canvas at zoom=1 in world coords, wrapped as a `THREE.CanvasTexture`, and rendered as a single textured quad in the WebGL scene. The cache is invalidated (`staticDirty = true`) on grid rebuild, unlock-set change, current-zone change, and artwork image-load — invalidation triggers a re-bake + texture re-upload on the next `render()`. Compared to the prior Canvas2D approach, the per-frame blit is replaced by a GPU-side transform on an already-uploaded texture, which is what drives the perf win.
+
+**Map drop-shadow**: silhouette baked at zoom=1 in world coords, pre-blurred into a padded offscreen, uploaded as a CanvasTexture, drawn as a black-tinted quad at 50% alpha at z=1. Offset is in world units (40, 60) so it scales naturally with zoom — no scale-shrink (which used to drift the shadow inside the map on larger islands).
+
+**Parchment**: a fixed 8000×8000 plane at z=0 with the tiled parchment texture. Each frame its world position is set to `camWorld × (1 − 0.3)` so it follows the camera at 70% rate — i.e. apparent shift on screen is only 30% of the world's, giving the "deeper" parallax feel.
 
 ## RoomView (replaces TileInfoModal)
 
@@ -96,7 +104,7 @@ Hex distance heuristic with cross-track tie-breaker.
 
 ## Other players on map
 
-Each state message includes `otherPlayers: { username, col, row, zone, className?, partyId? }[]`. `CanvasWorldMap` renders party flags per occupied tile in the same zone (deterministic color hash so distinct parties read distinctly), and a "+N" badge on the player's own tile so other-room players aren't hidden behind the party bubble. Positions update on each player's own battle cycle. `partyId` flows through to `TileClickInfo.playersHere` so `RoomView` can group co-located players into one box per party.
+Each state message includes `otherPlayers: { username, col, row, zone, className?, partyId? }[]`. `ThreeWorldMap` renders party flags per occupied tile in the same zone (deterministic color hash so distinct parties read distinctly), and a "+N" badge on the player's own tile so other-room players aren't hidden behind the party bubble. Positions update on each player's own battle cycle. `partyId` flows through to `TileClickInfo.playersHere` so `RoomView` can group co-located players into one box per party.
 
 ## Zoom controls
 

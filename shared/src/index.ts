@@ -170,6 +170,18 @@ export type {
   ZoneDefinition,
 } from './systems/ZoneTypes.js';
 
+// Dev seed (procedural world generator)
+export {
+  generateDevWorld,
+  DEV_SEED_VERSION,
+  DEV_ZONE_PREFIX,
+  DEV_SEED_MARKER_ZONE_ID,
+} from './seed/SeedDevWorld.js';
+export type {
+  DevWorldOutput,
+  GenerateOptions as GenerateDevWorldOptions,
+} from './seed/SeedDevWorld.js';
+
 // Combat engine
 export {
   createPartyCombatState,

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as an npm-workspaces monorepo: `shared/` (pure logic + types), `client/` (vanilla TS + HTML5 Canvas world map + DOM UI), `server/` (Node + WebSocket).
+Idle Party RPG — a multiplayer idle RPG on a hexagonal world map. Characters fight, move, and progress 24/7 whether the player is connected or not. Built as an npm-workspaces monorepo: `shared/` (pure logic + types), `client/` (vanilla TS + three.js world map + DOM UI), `server/` (Node + WebSocket).
 
 ## Branch Policy
 
@@ -34,7 +34,14 @@ npm run test:shared  # Shared package tests only
 npm run typecheck    # tsc --build (all packages)
 ```
 
-**Worktree build quirk**: The worktree has no `node_modules` — npm workspace symlinks resolve through the main repo's `node_modules`, which points to the main repo's `shared/dist/`. If the worktree's shared source has diverged from main, `tsc` will see stale types and report false errors. The shared build script auto-detects worktrees and copies `dist/` to the main repo after `tsc`, so `npm run build` handles this automatically.
+**Worktree build quirk**: The worktree has no `node_modules` — npm workspace symlinks resolve through the main repo's `node_modules`, which points to the main repo's `shared/dist/`. Two failure modes follow from this, both invisible to a local `npm run typecheck` but caught by CI's `npm ci`:
+
+- **Stale `shared/dist`**: If the worktree's shared source has diverged from main, `tsc` sees stale types and reports false errors. The shared build script auto-detects worktrees and copies `dist/` back to the main repo after `tsc`, so `npm run build` handles this automatically.
+- **Removed deps still resolve**: `npm uninstall <pkg> --workspace=...` updates the worktree's `package.json` but doesn't touch the main repo's `node_modules`, so any orphan `import` of `<pkg>` still type-checks locally even though the package is no longer declared. CI does a clean `npm ci` and explodes.
+
+**Whenever you remove a dependency**, before pushing: `grep -rn "from ['\"]<pkg>['\"]\\|require(['\"]<pkg>['\"]" client/src server/src shared/src` to find orphan imports the local typecheck won't catch. Delete the orphan files (or restore the dep) before committing.
+
+**Dev seed**: when `NODE_ENV !== 'production'`, `GameLoop.init` calls into `server/src/game/DevSeed.ts`, which procedurally injects 20 extra zones / ~1000 rooms (`shared/src/seed/SeedDevWorld.ts`) and 100 bot players grouped into ~30 parties. Both passes are idempotent — the content pass checks for a marker zone (`dev_sunscar_plains`) before merging, and the player pass probes `bot_001`'s save file. To re-seed, delete `data/world.json` + `data/zones.json` (for content) or `data/bot_*.json` (for bots). Bots live in dev zones (col 30+, far from the production starting island) so they don't crowd the real player.
 
 ## Architecture
 
@@ -44,7 +51,7 @@ Use `Glob`/`Grep`/`ls` to navigate the source tree — no point duplicating it h
 - [`docs/architecture/content.md`](docs/architecture/content.md) — `ContentStore`, parameterized shared functions, zones, monsters, walls, items, `InventoryView`, sets, dungeons, shops, world map, fog of war, item-gated tiles, tile types, `WorldCache`, content versioning.
 - [`docs/architecture/social.md`](docs/architecture/social.md) — Social tab sub-tabs (Party/Guild/Leaderboard, with Chat as a global pop-out from the Chat nav button), user popup, View Player, async trades, gift mailbox, social badges, `ClientSocialState`.
 - [`docs/architecture/auth.md`](docs/architecture/auth.md) — magic-link auth flow, WS session-cookie auth, `_dt` device fingerprinting, account deactivation/appeals.
-- [`docs/architecture/client.md`](docs/architecture/client.md) — multi-screen DOM shell, `GameClient` subscriber pattern, Canvas world map, RoomView, ChatPopout, bottom nav structure, CharItems merged tab, persistent XP bar, image-everywhere convention, ModalStack, browser tab resume, hex coordinates, A* pathfinding, visual style, UI state persistence.
+- [`docs/architecture/client.md`](docs/architecture/client.md) — multi-screen DOM shell, `GameClient` subscriber pattern, three.js world map + DOM overlay split, RoomView, ChatPopout, bottom nav structure, CharItems merged tab, persistent XP bar, image-everywhere convention, ModalStack, browser tab resume, hex coordinates, A* pathfinding, visual style, UI state persistence.
 - [`docs/architecture/admin-dashboard.md`](docs/architecture/admin-dashboard.md) — World Manager layout, density tokens, modal forms, per-tab notes.
 - [`docs/architecture/persistence.md`](docs/architecture/persistence.md) — `PlayerSaveData` schema, `GameStateStore`/`JsonFileStore`, swappable-store data folder convention.
 

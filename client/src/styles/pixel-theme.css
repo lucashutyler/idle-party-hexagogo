@@ -1802,7 +1802,8 @@ html, body {
 
 /* ── Canvas Map ─────────────────────────────────────────── */
 
-.canvas-world-map {
+.canvas-world-map,
+.three-world-map {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1811,13 +1812,128 @@ html, body {
   cursor: grab;
   touch-action: none;
   background: #3a2a1a;
-  image-rendering: pixelated;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
 
-.canvas-world-map:active {
+.canvas-world-map { image-rendering: pixelated; }
+
+.canvas-world-map:active,
+.three-world-map:active {
   cursor: grabbing;
+}
+
+/* ── three.js Map overlay (party / flags / hover / path) ─────
+ *
+ * The overlay sits on top of the WebGL canvas and carries a single
+ * transform that mirrors the three.js camera:
+ *   translate(W/2, H/2) · scale(zoom) · translate(-camX, -camY)
+ * Children are absolutely positioned at their world coords (left:Xpx,
+ * top:Ypx) and centered on that point via translate(-50%, -50%) — so a
+ * single style update on the overlay moves every child together when
+ * the user pans/zooms, with no per-child JS.
+ *
+ * pointer-events: none means clicks/hovers fall through to the canvas
+ * (which owns hit-testing and tile selection).
+ */
+.three-map-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
+  overflow: hidden;
+}
+
+.three-map-party,
+.three-map-hover,
+.three-map-path > *,
+.three-map-flags > * {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Party sprite — pulse via CSS, position via JS. Movement between tiles
+ * is a 400ms transition (matches MOVE_DURATION in shared/BattleTypes).
+ * data-snap="1" disables the transition for snap renders (first paint,
+ * zone change). */
+.three-map-party {
+  width: 30px;
+  height: 30px;
+  transition: left 400ms ease-in-out, top 400ms ease-in-out;
+}
+.three-map-party[data-snap="1"] { transition: none; }
+.three-map-party-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #44ff88;
+  border: 3px solid #fff;
+  box-shadow: 0 0 8px rgba(0,0,0,0.5);
+  animation: three-map-party-pulse 1600ms ease-in-out infinite alternate;
+}
+.three-map-party[data-visual="fighting"] .three-map-party-inner {
+  background: #ffaa44;
+  animation: three-map-party-throb 300ms ease-in-out infinite alternate;
+}
+.three-map-party[data-visual="defeat"] .three-map-party-inner {
+  background: #ff6b6b;
+  animation: none;
+}
+@keyframes three-map-party-pulse {
+  from { transform: scale(0.96); }
+  to { transform: scale(1.04); }
+}
+@keyframes three-map-party-throb {
+  from { transform: scale(1); }
+  to { transform: scale(1.2); }
+}
+
+/* Hover highlight — SVG hex outline. Color flips on traversable. */
+.three-map-hover {
+  width: 80px;
+  height: 70px;
+  color: rgba(255,255,255,0.85);
+}
+.three-map-hover[data-traversable="0"] { color: rgba(255,102,102,0.85); }
+.three-map-hover svg { display: block; overflow: visible; }
+
+/* Path preview — small yellow hexes for steps, green dot for dest. */
+.three-map-path-step {
+  width: 24px;
+  height: 21px;
+  background: rgba(255,255,0,0.4);
+  clip-path: polygon(100% 50%, 75% 100%, 25% 100%, 0% 50%, 25% 0%, 75% 0%);
+}
+.three-map-path-dest {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(0,255,0,0.6);
+}
+
+/* Other-player flag — SVG pole + triangular flag, color hashed by tile. */
+.three-map-flag {
+  width: 24px;
+  height: 32px;
+  /* Sits above the hex center: the SVG's pole-top is at y=2 and the
+   * flag dangles down from there. Centered horizontally via the
+   * shared translate(-50%, -50%) on overlay children. */
+}
+.three-map-flag svg { display: block; overflow: visible; }
+
+/* Count badge — small text bubble for "+N" or "×N" on flag stacks. */
+.three-map-badge {
+  background: #4a90d9;
+  color: #fff;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
 }
 
 .canvas-map-tooltip {

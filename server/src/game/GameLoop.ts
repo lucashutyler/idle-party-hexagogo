@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { HexGrid, HexTile, offsetToCube, GAME_VERSION } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, GAME_VERSION, DEV_SEED_MARKER_ZONE_ID } from '@idle-party-rpg/shared';
 import { PlayerManager } from './PlayerManager.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
@@ -9,6 +9,7 @@ import { TradeStore } from './social/TradeStore.js';
 import { ContentStore } from './ContentStore.js';
 import { VersionStore } from './VersionStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
+import { seedDevContent, seedDevPlayers } from './DevSeed.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
 const CRAFT_TICK_MS = 1000;       // Check craft completions every 1s
@@ -45,17 +46,51 @@ export class GameLoop {
     await this.contentStore.load();
     console.log(`[Startup] ContentStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
 
+    // Dev-only: inject 20 procedurally-generated zones and ~1000 rooms
+    // so the map has real scale to work against. Idempotent — re-runs
+    // skip the merge if the marker zone is already present in the live
+    // ContentStore. (Version-snapshot sync happens below.)
+    const isDev = process.env.NODE_ENV !== 'production';
+    let devContentAdded = false;
+    if (isDev) {
+      devContentAdded = await seedDevContent(this.contentStore);
+    }
+
     t = performance.now();
     await this.versionStore.load();
     console.log(`[Startup] VersionStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
 
     // Ensure at least one active version exists (first boot / fresh install)
-    if (!this.versionStore.getActiveVersionId()) {
+    const activeId = this.versionStore.getActiveVersionId();
+    if (!activeId) {
       const snapshot = this.contentStore.toSnapshot();
       const version = await this.versionStore.createDraft('1', null, snapshot);
       await this.versionStore.publish(version.id);
       await this.versionStore.setActive(version.id);
       console.log(`[GameLoop] Created initial version "1" (${version.id})`);
+    } else if (isDev) {
+      // In dev, keep the active version's snapshot in sync with the
+      // live ContentStore whenever the dev seed has been applied.
+      // Catches two cases:
+      //   (a) the seed just ran this boot (devContentAdded === true)
+      //   (b) the seed ran on a prior boot but the active version
+      //       was created before the dev seed code existed, so its
+      //       snapshot still doesn't contain the dev marker zone
+      // Without this, an admin deploy of the active version would
+      // play back the stale snapshot and wipe the dev content.
+      let needsSync = devContentAdded;
+      if (!needsSync) {
+        try {
+          const snap = await this.versionStore.loadSnapshot(activeId);
+          needsSync = !snap.zones.some(z => z.id === DEV_SEED_MARKER_ZONE_ID);
+        } catch (err) {
+          console.warn('[GameLoop] Could not load active version snapshot for sync check:', err);
+        }
+      }
+      if (needsSync) {
+        await this.versionStore.saveSnapshot(activeId, this.contentStore.toSnapshot());
+        console.log(`[GameLoop] Synced active version snapshot with dev seed content (${activeId})`);
+      }
     }
 
     // Build hex grid from content store world data
@@ -84,6 +119,15 @@ export class GameLoop {
     t = performance.now();
     const saves = await this.store.loadAll();
     console.log(`[Startup] Save files loaded (${saves.length} players) in ${(performance.now() - t).toFixed(1)}ms`);
+
+    // Dev-only: drop 100 bot saves on disk if they don't exist yet,
+    // then fold them into the saves array so restoreFromSaveData
+    // builds the in-memory sessions (= they show up as other players
+    // on the map).
+    if (process.env.NODE_ENV !== 'production') {
+      const newBots = await seedDevPlayers(this.store, accountStore, this.contentStore.getWorld().tiles);
+      if (newBots.length > 0) saves.push(...newBots);
+    }
 
     if (saves.length > 0) {
       t = performance.now();
