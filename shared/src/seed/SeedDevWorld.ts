@@ -22,6 +22,14 @@
 import { TileType } from '../hex/HexTile.js';
 import type { WorldTileDefinition } from '../hex/MapSchema.js';
 import type { ZoneDefinition } from '../systems/ZoneTypes.js';
+import {
+  type CubeCoord,
+  cubeDistance,
+  cubeRound,
+  cubeToOffset,
+  getNeighbors,
+  offsetToCube,
+} from '../hex/HexUtils.js';
 
 /** Bumped when the generator's output structure changes. */
 export const DEV_SEED_VERSION = 1;
@@ -263,23 +271,78 @@ const THEMES: readonly ZoneTheme[] = [
 // zone's generator places its tiles. Adjacent dev zones therefore
 // have a comfortable buffer of empty cells between them too.
 
-const DEV_REGION_START_COL = 30;
-const DEV_REGION_START_ROW = 0;
-const ZONES_PER_ROW = 5;
-// Tight regions keep the static-layer bake under ~8000×7000 pixels at
-// zoom=1, which fits comfortably inside the WebGL texture cap on any
-// modern desktop GPU. Per-zone styles still get enough room to read
-// distinctly (a 20-wide × 25-tall cell box per zone). Bumping these
-// also bumps the bake canvas — watch the WebGL limit if you do.
+// Dev zones radiate from the production starting town in a hub-and-
+// spoke layout. Hub center matches the production start tile
+// (col 2, row 2 = "Town Square" in hatchetmill). RING_RADIUS is the
+// hex-cell distance from the hub to each zone's center; with 20
+// zones spaced 18° apart, this puts zone centers ~9 cells apart on
+// the ring (zones may overlap slightly — mergeSeedContent skips
+// colliding cells, so it's first-write-wins). Smaller radius would
+// crowd the ring; larger pushes the perimeter past the bake cap.
+const HUB_COL = 2;
+const HUB_ROW = 2;
+const RING_RADIUS_CELLS = 30;
+// REGION_WIDTH/HEIGHT now govern only the *internal* extent each
+// style generator works inside — the box around a zone's center
+// within which its cells are placed.
 const REGION_WIDTH = 20;
 const REGION_HEIGHT = 25;
 
-function regionCenter(zoneIndex: number): { col: number; row: number } {
-  const gx = zoneIndex % ZONES_PER_ROW;
-  const gy = Math.floor(zoneIndex / ZONES_PER_ROW);
+// ─── Connectivity ─────────────────────────────────────────────────
+//
+// The per-zone style generators produce visually pleasing layouts but
+// don't guarantee that every traversable tile is reachable from every
+// other one — `scattered` zones often produce isolated clusters,
+// `archipelago` zones are disconnected by design, and adjacent zones
+// sit in disjoint coord regions with empty cells between them. Since
+// players can't fly across gaps (no teleport yet), we run a post-
+// generation pass that BFS-walks from a known anchor and bridges any
+// disconnected traversable tile back to the main component via a
+// hex-line of plains tiles.
+
+/** Tile types a player can stand on / walk through. */
+const TRAVERSABLE_TYPES = new Set<string>([
+  TileType.Plains, TileType.Forest, TileType.Town,
+  TileType.Dungeon, TileType.Desert, TileType.LavaField, TileType.Beach,
+]);
+
+/** Sits hex-adjacent to the production map's easternmost tile (Crystal
+ *  Chamber at col 6, row 2 in the seeded prod world), so once we
+ *  ensure every dev tile is reachable from this anchor, the whole
+ *  world reads as one connected component. */
+const BRIDGE_ANCHOR = { col: 7, row: 2 };
+
+/** Bridge tiles (and the anchor) live in a dedicated "approach" zone
+ *  so they don't intrude on the themed zones they pass through. */
+const BRIDGE_ZONE_ID = `${DEV_ZONE_PREFIX}approach`;
+const BRIDGE_ZONE_NAME = 'Old Roads';
+
+const BRIDGE_TILE_NAMES = [
+  'Worn Trail', 'Old Path', 'Wayward Road', 'Dusty Track',
+  'Forgotten Way', 'Lonely Mile', 'Caravan Stretch', 'Pilgrim Step',
+];
+
+/** Hex-line: returns the chain of cube coords from a to b inclusive. */
+function hexLine(a: CubeCoord, b: CubeCoord): CubeCoord[] {
+  const N = cubeDistance(a, b);
+  if (N === 0) return [a];
+  const out: CubeCoord[] = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    out.push(cubeRound({
+      q: a.q + (b.q - a.q) * t,
+      r: a.r + (b.r - a.r) * t,
+      s: a.s + (b.s - a.s) * t,
+    }));
+  }
+  return out;
+}
+
+function regionCenter(zoneIndex: number, totalZones: number): { col: number; row: number } {
+  const angle = (zoneIndex / totalZones) * 2 * Math.PI;
   return {
-    col: DEV_REGION_START_COL + gx * REGION_WIDTH + Math.floor(REGION_WIDTH / 2),
-    row: DEV_REGION_START_ROW + gy * REGION_HEIGHT + Math.floor(REGION_HEIGHT / 2),
+    col: Math.round(HUB_COL + Math.cos(angle) * RING_RADIUS_CELLS),
+    row: Math.round(HUB_ROW + Math.sin(angle) * RING_RADIUS_CELLS),
   };
 }
 
@@ -517,7 +580,7 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
       levelRange: theme.levelRange,
     });
 
-    const center = regionCenter(i);
+    const center = regionCenter(i, THEMES.length);
     const cellSet = genCellsForStyle(theme.style, rng, center, theme.targetTiles);
 
     const usedNames = new Set<string>();
@@ -545,5 +608,160 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
     }
   }
 
+  // The "Old Roads" approach zone holds the anchor + all bridge tiles
+  // that the connectivity pass adds below. Empty encounter table — no
+  // combat on the road.
+  zones.push({
+    id: BRIDGE_ZONE_ID,
+    displayName: BRIDGE_ZONE_NAME,
+    encounterTable: [],
+    levelRange: [1, 1],
+  });
+
+  // Ring-layout zones can overlap. ContentStore.mergeSeedContent is
+  // first-write-wins on (col,row) collisions, so we dedupe here before
+  // the connectivity pass — otherwise the pass would happily patch
+  // tiles that the merge will silently drop, and the resulting world
+  // would have disconnected pockets where a later-zone traversable
+  // looked patched but the first-zone non-traversable actually lands.
+  const seen = new Set<string>();
+  const deduped: WorldTileDefinition[] = [];
+  for (const t of tiles) {
+    const k = `${t.col},${t.row}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    deduped.push(t);
+  }
+  tiles.length = 0;
+  tiles.push(...deduped);
+
+  ensureConnectivity(tiles, rng, idFactory);
+
   return { zones, tiles };
+}
+
+/**
+ * Walk every traversable tile from the BRIDGE_ANCHOR via hex-adjacency
+ * BFS; for each disconnected traversable tile found, draw a hex-line
+ * of plains tiles back to the nearest reachable tile. Mutates `tiles`
+ * in place. Idempotent if called twice — already-reachable tiles are
+ * left alone.
+ */
+function ensureConnectivity(
+  tiles: WorldTileDefinition[],
+  rng: () => number,
+  idFactory: () => string,
+): void {
+  const tileAt = new Map<string, WorldTileDefinition>();
+  for (const t of tiles) tileAt.set(`${t.col},${t.row}`, t);
+
+  const isTraversable = (t: WorldTileDefinition | undefined): boolean =>
+    !!t && TRAVERSABLE_TYPES.has(t.type);
+
+  // Plant the anchor if missing. The production world's eastern edge
+  // (col 6, row 2 = Crystal Chamber) is hex-adjacent to col 7, row 2,
+  // so once dev is connected through this anchor, prod ↔ dev is one
+  // walkable component.
+  const anchorKey = `${BRIDGE_ANCHOR.col},${BRIDGE_ANCHOR.row}`;
+  if (!tileAt.has(anchorKey)) {
+    const anchorTile: WorldTileDefinition = {
+      id: idFactory(),
+      col: BRIDGE_ANCHOR.col,
+      row: BRIDGE_ANCHOR.row,
+      type: TileType.Plains,
+      zone: BRIDGE_ZONE_ID,
+      name: 'Crossroads',
+    };
+    tiles.push(anchorTile);
+    tileAt.set(anchorKey, anchorTile);
+  }
+
+  const bfs = (): Set<string> => {
+    const reachable = new Set<string>();
+    if (!isTraversable(tileAt.get(anchorKey))) return reachable;
+    const queue: { col: number; row: number }[] = [
+      { col: BRIDGE_ANCHOR.col, row: BRIDGE_ANCHOR.row },
+    ];
+    reachable.add(anchorKey);
+    while (queue.length) {
+      const cur = queue.shift()!;
+      const cube = offsetToCube(cur);
+      for (const ncube of getNeighbors(cube)) {
+        const noff = cubeToOffset(ncube);
+        const nkey = `${noff.col},${noff.row}`;
+        if (reachable.has(nkey)) continue;
+        if (!isTraversable(tileAt.get(nkey))) continue;
+        reachable.add(nkey);
+        queue.push(noff);
+      }
+    }
+    return reachable;
+  };
+
+  let reachable = bfs();
+  let bridgesMade = 0;
+  // Safety cap: with ~1000 tiles and worst-case 20-ish components,
+  // we shouldn't need more than 100 iterations. If we hit the cap,
+  // something is very wrong with the data — fail loud in the log.
+  const MAX_ITER = 200;
+  for (let iter = 0; iter < MAX_ITER; iter++) {
+    // Find any disconnected traversable tile.
+    let disconnected: WorldTileDefinition | undefined;
+    for (const t of tiles) {
+      if (!isTraversable(t)) continue;
+      if (!reachable.has(`${t.col},${t.row}`)) { disconnected = t; break; }
+    }
+    if (!disconnected) break;
+
+    // Find the closest reachable tile (in hex distance) to bridge from.
+    const discCube = offsetToCube({ col: disconnected.col, row: disconnected.row });
+    let nearestKey = '';
+    let nearestDist = Infinity;
+    for (const r of reachable) {
+      const [rc, rr] = r.split(',').map(Number);
+      const d = cubeDistance(offsetToCube({ col: rc, row: rr }), discCube);
+      if (d < nearestDist) { nearestDist = d; nearestKey = r; }
+    }
+    if (!nearestKey) break;
+    const [nc, nr] = nearestKey.split(',').map(Number);
+
+    // Draw a hex line nearest → disconnected, filling missing cells
+    // with plains tiles and overwriting any non-traversable tile in
+    // the way (the road "cuts through" the wall — mountain becomes
+    // plains, etc.). Tiles that are already traversable stay put,
+    // their zone unchanged, so the bridge weaves naturally through
+    // any zone interior it passes.
+    const path = hexLine(offsetToCube({ col: nc, row: nr }), discCube);
+    for (const cube of path) {
+      const off = cubeToOffset(cube);
+      const k = `${off.col},${off.row}`;
+      const existing = tileAt.get(k);
+      if (existing && TRAVERSABLE_TYPES.has(existing.type)) continue;
+      if (existing) {
+        existing.type = TileType.Plains;
+        // Leave name + zone alone — preserves visual continuity inside
+        // the zone the bridge is cutting through.
+      } else {
+        const newTile: WorldTileDefinition = {
+          id: idFactory(),
+          col: off.col,
+          row: off.row,
+          type: TileType.Plains,
+          zone: BRIDGE_ZONE_ID,
+          name: BRIDGE_TILE_NAMES[Math.floor(rng() * BRIDGE_TILE_NAMES.length)],
+        };
+        tiles.push(newTile);
+        tileAt.set(k, newTile);
+      }
+    }
+    bridgesMade++;
+    reachable = bfs();
+  }
+
+  if (bridgesMade > 0) {
+    // Useful diagnostic; the server prints zone/tile counts after this
+    // returns, but bridge count is worth surfacing on its own.
+    // eslint-disable-next-line no-console
+    console.log(`[SeedDevWorld] Connectivity pass added ${bridgesMade} bridge(s).`);
+  }
 }
