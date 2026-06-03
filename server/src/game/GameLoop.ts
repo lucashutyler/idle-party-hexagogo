@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { HexGrid, HexTile, offsetToCube, GAME_VERSION } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, GAME_VERSION, DEV_SEED_MARKER_ZONE_ID } from '@idle-party-rpg/shared';
 import { PlayerManager } from './PlayerManager.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
@@ -48,9 +48,12 @@ export class GameLoop {
 
     // Dev-only: inject 20 procedurally-generated zones and ~1000 rooms
     // so the map has real scale to work against. Idempotent — re-runs
-    // skip the merge if the marker zone is already present.
-    if (process.env.NODE_ENV !== 'production') {
-      await seedDevContent(this.contentStore);
+    // skip the merge if the marker zone is already present in the live
+    // ContentStore. (Version-snapshot sync happens below.)
+    const isDev = process.env.NODE_ENV !== 'production';
+    let devContentAdded = false;
+    if (isDev) {
+      devContentAdded = await seedDevContent(this.contentStore);
     }
 
     t = performance.now();
@@ -58,12 +61,36 @@ export class GameLoop {
     console.log(`[Startup] VersionStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
 
     // Ensure at least one active version exists (first boot / fresh install)
-    if (!this.versionStore.getActiveVersionId()) {
+    const activeId = this.versionStore.getActiveVersionId();
+    if (!activeId) {
       const snapshot = this.contentStore.toSnapshot();
       const version = await this.versionStore.createDraft('1', null, snapshot);
       await this.versionStore.publish(version.id);
       await this.versionStore.setActive(version.id);
       console.log(`[GameLoop] Created initial version "1" (${version.id})`);
+    } else if (isDev) {
+      // In dev, keep the active version's snapshot in sync with the
+      // live ContentStore whenever the dev seed has been applied.
+      // Catches two cases:
+      //   (a) the seed just ran this boot (devContentAdded === true)
+      //   (b) the seed ran on a prior boot but the active version
+      //       was created before the dev seed code existed, so its
+      //       snapshot still doesn't contain the dev marker zone
+      // Without this, an admin deploy of the active version would
+      // play back the stale snapshot and wipe the dev content.
+      let needsSync = devContentAdded;
+      if (!needsSync) {
+        try {
+          const snap = await this.versionStore.loadSnapshot(activeId);
+          needsSync = !snap.zones.some(z => z.id === DEV_SEED_MARKER_ZONE_ID);
+        } catch (err) {
+          console.warn('[GameLoop] Could not load active version snapshot for sync check:', err);
+        }
+      }
+      if (needsSync) {
+        await this.versionStore.saveSnapshot(activeId, this.contentStore.toSnapshot());
+        console.log(`[GameLoop] Synced active version snapshot with dev seed content (${activeId})`);
+      }
     }
 
     // Build hex grid from content store world data
