@@ -3,6 +3,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
     version: '2026.06.02.1',
     notes: [
       'Map: your party marker, movement path, hover outline, and other players\' flags now show up on rooms away from your starting area again — they were being hidden once you travelled out a bit.',
+      'Room popup: when a room is packed with players, the list of parties now scrolls inside the popup instead of growing past the screen — the close and action buttons always stay visible.',
     ],
   },
   {

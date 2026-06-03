@@ -6245,8 +6245,11 @@ html, body {
 }
 .room-view-remote {
   width: min(360px, 90vw);
+  max-height: 90vh;
   padding: 16px;
   text-align: center;
+  display: flex;
+  flex-direction: column;
 }
 .room-view-current {
   width: min(680px, 95vw);
@@ -6275,7 +6278,9 @@ html, body {
   display: flex;
   flex-direction: column;
   padding: 16px;
-  overflow-y: auto;
+  /* hidden (not auto) so the party list is the sole scroll region — keeps
+   * the header and action buttons pinned instead of scrolling them away. */
+  overflow: hidden;
   gap: 12px;
 }
 .room-view-close {
@@ -6343,6 +6348,12 @@ html, body {
   flex-direction: column;
   gap: 12px;
   margin: 8px 0;
+  /* The party list is the bounded scroll region: it shrinks (and scrolls
+   * internally) when there are too many players to fit, so the popup never
+   * grows past its container and shoves the action buttons off-screen. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .room-party-other-label {
   font-size: 12px;
