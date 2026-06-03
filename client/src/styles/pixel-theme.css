@@ -1844,7 +1844,13 @@ html, body {
   pointer-events: none;
   transform-origin: 0 0;
   will-change: transform;
-  overflow: hidden;
+  /* Children are positioned at *world* coords and the overlay carries the
+   * camera transform. overflow must stay visible: clipping here happens in
+   * the overlay's untransformed local box (viewport-sized at the origin),
+   * which would hide any element whose world coords fall outside it — i.e.
+   * every tile beyond the starting area. #game-container's overflow:hidden
+   * clips the truly off-screen overflow instead. */
+  overflow: visible;
 }
 
 .three-map-party,

@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.06.02.1',
+    notes: [
+      'Map: your party marker, movement path, hover outline, and other players\' flags now show up on rooms away from your starting area again — they were being hidden once you travelled out a bit.',
+    ],
+  },
+  {
     version: '2026.05.26.1',
     notes: [
       'Map is now rendered with WebGL — panning and zooming should feel substantially smoother on every device, especially mobile and larger maps. Idle map screens cost effectively zero performance now.',
