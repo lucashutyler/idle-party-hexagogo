@@ -8,6 +8,9 @@ import {
   getZone,
   rollDrops,
   getSkillById,
+  validateDungeonEntry,
+  rollDungeonRewards,
+  rewardAppliesToClass,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -16,18 +19,35 @@ import type {
   ServerPartyState,
   ServerBattleState,
   ClientCombatState,
+  DungeonRunInfo,
+  DungeonEntryMemberInfo,
+  DungeonReward,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
 import type { PlayerSession } from './PlayerSession.js';
 import type { ContentStore } from './ContentStore.js';
 
+/** Live state of a party's active dungeon run. Lives on the battle entry. */
+export interface DungeonRunState {
+  dungeonId: string;
+  /** 0-based index into the dungeon's `floors` array. */
+  currentFloorIndex: number;
+  /** Overworld room the party returns to on completion, wipe, or bail-out. */
+  entrance: { col: number; row: number };
+}
+
 interface PartyBattleEntry {
   partyId: string;
   serverParty: ServerParty;
   battleTimer: ServerBattleTimer;
   members: Set<string>;
+  /** Present only while the party is inside a dungeon. */
+  dungeonRun?: DungeonRunState;
 }
+
+/** Result of a dungeon entry attempt. */
+export type DungeonEntryResult = { success: true } | { success: false; error: string };
 
 export class PartyBattleManager {
   private entries = new Map<string, PartyBattleEntry>();
@@ -248,6 +268,8 @@ export class PartyBattleManager {
   escapeBattle(partyId: string): boolean {
     const entry = this.entries.get(partyId);
     if (!entry) return false;
+    // Can't flee a floor fight — you're locked in a dungeon instance (use leaveDungeon to bail).
+    if (entry.dungeonRun) return false;
     if (entry.battleTimer.currentState !== 'battle') return false;
 
     for (const m of entry.members) {
@@ -275,6 +297,9 @@ export class PartyBattleManager {
   handleMove(partyId: string, col: number, row: number): { success: true } | { success: false; missingItemId?: string; missingPlayers?: string[] } {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false };
+
+    // Parties are locked inside a dungeon instance — no overworld movement.
+    if (entry.dungeonRun) return { success: false };
 
     const coord = offsetToCube({ col, row });
     const tile = this.grid.getTile(coord);
@@ -440,6 +465,10 @@ export class PartyBattleManager {
   relocateParty(partyId: string, newTile: HexTile): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
+    // A forced relocation (e.g. content deploy) ends any active dungeon run —
+    // otherwise the party stays movement-locked on a fresh tile fighting stale
+    // dungeon-floor encounters.
+    entry.dungeonRun = undefined;
     entry.serverParty.relocateTo(newTile);
     entry.battleTimer.restartBattle();
   }
@@ -482,6 +511,21 @@ export class PartyBattleManager {
     }
 
     const zone = entry.serverParty.tile.zone;
+
+    // Inside a dungeon: encounters come from the current floor's table, not the tile.
+    if (entry.dungeonRun) {
+      const dungeon = this.content.getDungeon(entry.dungeonRun.dungeonId);
+      const floor = dungeon?.floors[entry.dungeonRun.currentFloorIndex];
+      if (floor) {
+        const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, floor.encounterTable);
+        return createPartyCombatState(players, monsters);
+      }
+      // Dungeon/floor vanished (e.g. content deploy) — abandon the run so the
+      // party isn't stuck (movement stays blocked while dungeonRun is set) and
+      // fall through to a normal tile encounter at their current position.
+      entry.dungeonRun = undefined;
+    }
+
     const tileId = entry.serverParty.tile.id;
     const tileDef = this.content.getTileById(tileId);
     const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, tileDef?.encounterTable);
@@ -565,6 +609,8 @@ export class PartyBattleManager {
         session.handleVictory(
           { xp: splitXp, gold: splitGold, items: memberItems.get(username)! },
           entry.serverParty.tile,
+          // Dungeon floors aren't overworld tiles — don't unlock neighbours mid-run.
+          { unlockTiles: !entry.dungeonRun },
         );
       }
 
@@ -579,16 +625,278 @@ export class PartyBattleManager {
           }
         }
       }
+
+      // Dungeon: grant floor rewards, then advance to the next floor or complete the run.
+      if (entry.dungeonRun) {
+        this.handleDungeonFloorCleared(entry);
+      }
     } else {
       for (const username of entry.members) {
         const session = this.getSession(username);
         if (!session) continue;
         session.addLogEntry('Defeat...', 'defeat');
       }
+
+      // Dungeon: a wipe fails the run — eject the party to the entrance room.
+      if (entry.dungeonRun) {
+        this.handleDungeonDefeat(entry);
+      }
     }
 
     for (const m of entry.members) {
       this.broadcastToMember(m);
+    }
+  }
+
+  // --- Dungeon runtime ---
+
+  /**
+   * Attempt to enter a dungeon with the party currently standing on its
+   * entrance room. Validates entry requirements, consumes the entry item if
+   * configured, and starts floor 1. The whole party enters together.
+   */
+  enterDungeon(partyId: string, dungeonId: string): DungeonEntryResult {
+    const entry = this.entries.get(partyId);
+    if (!entry) return { success: false, error: 'No party.' };
+    if (entry.dungeonRun) return { success: false, error: 'Already in a dungeon.' };
+
+    const dungeon = this.content.getDungeon(dungeonId);
+    if (!dungeon) return { success: false, error: 'Dungeon not found.' };
+
+    // The party must be standing on a room linked to this dungeon.
+    const tile = entry.serverParty.tile;
+    const tileDef = this.content.getTileById(tile.id);
+    if (tileDef?.dungeonId !== dungeonId) {
+      return { success: false, error: 'You must be at the dungeon entrance.' };
+    }
+
+    const req = dungeon.entryRequirements;
+    const requiredItemId = req?.requiredItemId;
+    const consumes = !!req?.consumeRequiredItem;
+
+    // Gather per-member info for the shared validator.
+    const memberInfos: DungeonEntryMemberInfo[] = [];
+    for (const username of entry.members) {
+      const session = this.getSession(username);
+      if (!session) continue;
+      const className = session.getClassName();
+      if (!className) return { success: false, error: `${username} has no class yet.` };
+      let hasRequiredItem = true;
+      if (requiredItemId) {
+        const inInventory = session.getInventoryCount(requiredItemId) >= 1;
+        // Consumed items must come from inventory; otherwise equipped also counts.
+        hasRequiredItem = consumes ? inInventory : (inInventory || session.hasItemEquipped(requiredItemId));
+      }
+      memberInfos.push({ username, level: session.getLevel(), className, hasRequiredItem });
+    }
+
+    const requiredItemName = requiredItemId ? this.content.getItem(requiredItemId)?.name : undefined;
+    const reason = validateDungeonEntry(dungeon, memberInfos, requiredItemName);
+    if (reason) return { success: false, error: reason };
+
+    // Consume the entry item from every member (validation guarantees it's present).
+    if (requiredItemId && consumes) {
+      for (const username of entry.members) {
+        this.getSession(username)?.removeOneFromInventory(requiredItemId);
+      }
+    }
+
+    // Drop any in-flight overworld movement so a leftover destination can't pull
+    // the party off the floor when a battle resolves.
+    entry.serverParty.clearDestination();
+
+    entry.dungeonRun = {
+      dungeonId,
+      currentFloorIndex: 0,
+      entrance: cubeToOffset(entry.serverParty.position),
+    };
+
+    const totalFloors = dungeon.floors.length;
+    for (const username of entry.members) {
+      const session = this.getSession(username);
+      if (!session) continue;
+      session.addLogEntry(`Entered ${dungeon.name} — floor 1 of ${totalFloors}!`, 'battle');
+    }
+
+    // Rebuild combat from floor 1.
+    entry.battleTimer.restartBattle();
+    for (const m of entry.members) this.broadcastToMember(m);
+    return { success: true };
+  }
+
+  /** Voluntarily leave (bail out of) the current dungeon, returning to the entrance room. */
+  leaveDungeon(partyId: string): boolean {
+    const entry = this.entries.get(partyId);
+    if (!entry || !entry.dungeonRun) return false;
+
+    const dungeon = this.content.getDungeon(entry.dungeonRun.dungeonId);
+    const name = dungeon?.name ?? 'the dungeon';
+    for (const username of entry.members) {
+      this.getSession(username)?.addLogEntry(`Left ${name}.`, 'move');
+    }
+
+    const entranceTile = this.resolveEntranceTile(entry);
+    this.exitDungeon(entry, entranceTile);
+    // Mid-battle bail-out — restart so overworld combat resumes immediately.
+    entry.battleTimer.restartBattle();
+    for (const m of entry.members) this.broadcastToMember(m);
+    return true;
+  }
+
+  /** Get the client-facing dungeon run info for the state message (null if not in a dungeon). */
+  getDungeonRunInfo(partyId: string): DungeonRunInfo | null {
+    const entry = this.entries.get(partyId);
+    if (!entry || !entry.dungeonRun) return null;
+    const dungeon = this.content.getDungeon(entry.dungeonRun.dungeonId);
+    if (!dungeon) return null;
+    const floor = dungeon.floors[entry.dungeonRun.currentFloorIndex];
+    return {
+      dungeonId: entry.dungeonRun.dungeonId,
+      name: dungeon.name,
+      floor: entry.dungeonRun.currentFloorIndex + 1,
+      totalFloors: dungeon.floors.length,
+      isBossFloor: !!floor?.isBoss,
+    };
+  }
+
+  /** Get dungeon run save data for a party (used for PlayerSession save). */
+  getDungeonSaveData(partyId: string): DungeonRunState | null {
+    const entry = this.entries.get(partyId);
+    if (!entry || !entry.dungeonRun) return null;
+    return {
+      dungeonId: entry.dungeonRun.dungeonId,
+      currentFloorIndex: entry.dungeonRun.currentFloorIndex,
+      entrance: { ...entry.dungeonRun.entrance },
+    };
+  }
+
+  /**
+   * Restore a saved dungeon run onto an already-created battle entry (startup).
+   * Validates the dungeon/floor still exist, then restarts combat on the saved floor.
+   */
+  restoreDungeonRun(partyId: string, run: DungeonRunState): void {
+    const entry = this.entries.get(partyId);
+    if (!entry) return;
+    const dungeon = this.content.getDungeon(run.dungeonId);
+    // Content may have changed under us — drop the run if the dungeon/floor is gone.
+    if (!dungeon || run.currentFloorIndex >= dungeon.floors.length) return;
+    entry.serverParty.clearDestination();
+    entry.dungeonRun = {
+      dungeonId: run.dungeonId,
+      currentFloorIndex: run.currentFloorIndex,
+      entrance: { ...run.entrance },
+    };
+    entry.battleTimer.restartBattle();
+  }
+
+  // --- Private dungeon helpers ---
+
+  /** Resolve the entrance HexTile for a run, falling back to the party's current tile. */
+  private resolveEntranceTile(entry: PartyBattleEntry): HexTile {
+    if (entry.dungeonRun) {
+      const tile = this.grid.getTile(offsetToCube(entry.dungeonRun.entrance));
+      if (tile) return tile;
+    }
+    return entry.serverParty.tile;
+  }
+
+  /**
+   * End a dungeon run: clear run state and relocate the party to `toTile`.
+   * Does NOT touch the battle timer — callers decide whether to restart (bail-out)
+   * or let the in-flight result→next-battle cycle pick up overworld combat.
+   */
+  private exitDungeon(entry: PartyBattleEntry, toTile: HexTile): void {
+    entry.dungeonRun = undefined;
+    entry.serverParty.relocateTo(toTile);
+  }
+
+  /** Victory inside a dungeon: grant floor rewards, then advance or complete. */
+  private handleDungeonFloorCleared(entry: PartyBattleEntry): void {
+    const run = entry.dungeonRun;
+    if (!run) return;
+    const dungeon = this.content.getDungeon(run.dungeonId);
+    if (!dungeon) {
+      this.exitDungeon(entry, this.resolveEntranceTile(entry));
+      return;
+    }
+
+    const floor = dungeon.floors[run.currentFloorIndex];
+
+    // Bonus floor-clear rewards (per member, in addition to monster loot).
+    if (floor?.rewards && floor.rewards.length > 0) {
+      this.grantDungeonRewards(entry, floor.rewards, 'Floor reward');
+    }
+
+    run.currentFloorIndex += 1;
+
+    if (run.currentFloorIndex >= dungeon.floors.length) {
+      // Final floor cleared — dungeon complete.
+      for (const username of entry.members) {
+        const session = this.getSession(username);
+        if (!session) continue;
+        session.addLogEntry(`Cleared ${dungeon.name}!`, 'victory');
+        // One-time first-clear rewards, per player.
+        if (!session.hasDungeonCleared(dungeon.id)) {
+          session.markDungeonCleared(dungeon.id);
+          if (dungeon.firstClearGold && dungeon.firstClearGold > 0) {
+            session.grantGold(dungeon.firstClearGold);
+            session.addLogEntry(`First-clear bonus: +${dungeon.firstClearGold} Gold!`, 'victory');
+          }
+          if (dungeon.firstClearXp && dungeon.firstClearXp > 0) {
+            session.grantXp(dungeon.firstClearXp, `First-clear bonus: +${dungeon.firstClearXp} XP!`);
+          }
+          const eligibleFirstClear = (dungeon.firstClearRewards ?? []).filter(r => rewardAppliesToClass(r, session.getClassName()));
+          const drops = rollDungeonRewards(eligibleFirstClear);
+          for (const { itemId, quantity } of drops) {
+            const itemDef = this.content.getItem(itemId);
+            if (!itemDef) continue;
+            for (let i = 0; i < quantity; i++) {
+              if (session.addOneToInventory(itemId)) {
+                session.addLogEntry(`First-clear reward: ${itemDef.name}!`, 'victory');
+              }
+            }
+          }
+        }
+      }
+      this.exitDungeon(entry, this.resolveEntranceTile(entry));
+    } else {
+      const nextFloor = run.currentFloorIndex + 1;
+      for (const username of entry.members) {
+        this.getSession(username)?.addLogEntry(`Descending to floor ${nextFloor} of ${dungeon.floors.length}...`, 'battle');
+      }
+      // dungeonRun persists; the next triggerBattle builds the next floor's encounter.
+    }
+  }
+
+  /** Defeat inside a dungeon: log and eject the party to the entrance room. */
+  private handleDungeonDefeat(entry: PartyBattleEntry): void {
+    const run = entry.dungeonRun;
+    if (!run) return;
+    const dungeon = this.content.getDungeon(run.dungeonId);
+    const name = dungeon?.name ?? 'the dungeon';
+    for (const username of entry.members) {
+      this.getSession(username)?.addLogEntry(`Wiped in ${name} — driven back to the entrance.`, 'defeat');
+    }
+    this.exitDungeon(entry, this.resolveEntranceTile(entry));
+  }
+
+  /** Roll a reward table once per member (respecting per-reward class restrictions) and grant the results. */
+  private grantDungeonRewards(entry: PartyBattleEntry, rewards: DungeonReward[], label: string): void {
+    for (const username of entry.members) {
+      const session = this.getSession(username);
+      if (!session) continue;
+      const className = session.getClassName();
+      const eligible = rewards.filter(r => rewardAppliesToClass(r, className));
+      const drops = rollDungeonRewards(eligible);
+      for (const { itemId, quantity } of drops) {
+        const itemDef = this.content.getItem(itemId);
+        if (!itemDef) continue;
+        for (let i = 0; i < quantity; i++) {
+          if (session.addOneToInventory(itemId)) {
+            session.addLogEntry(`${label}: ${itemDef.name}!`, 'victory');
+          }
+        }
+      }
     }
   }
 }

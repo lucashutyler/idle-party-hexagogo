@@ -158,6 +158,7 @@ export class PlayerManager {
     if (session) {
       const partyId = session.getPartyId();
       const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
+      const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
       let partyInfo: { role: PartyRole; gridPosition: number } | undefined;
       if (partyId) {
         const party = this.parties.getParty(partyId);
@@ -166,7 +167,7 @@ export class PlayerManager {
           if (member) partyInfo = { role: member.role, gridPosition: member.gridPosition };
         }
       }
-      const saveData = session.toSaveData(movementData ?? undefined, partyInfo);
+      const saveData = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData);
       await saveStore.saveAll([saveData]);
     }
 
@@ -415,6 +416,11 @@ export class PlayerManager {
       if (!partyId) return [];
       return this.partyBattles.getPath(partyId);
     };
+    session.getDungeonState = () => {
+      const partyId = session.getPartyId();
+      if (!partyId) return null;
+      return this.partyBattles.getDungeonRunInfo(partyId);
+    };
   }
 
   /** Ensure a player is in a party. Auto-creates a solo party if needed. */
@@ -487,6 +493,38 @@ export class PlayerManager {
     }
   }
 
+  /**
+   * Handle a dungeon entry request. The whole party enters together.
+   * Returns an error string on failure, or null on success.
+   */
+  handleEnterDungeon(username: string, col: number, row: number, dungeonId: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return 'No session.';
+    const partyId = session.getPartyId();
+    if (!partyId) return 'No party.';
+
+    // The party must actually be standing on the requested entrance room.
+    const pos = this.partyBattles.getPosition(partyId);
+    if (!pos || pos.col !== col || pos.row !== row) {
+      return 'You must be at the dungeon entrance.';
+    }
+
+    const result = this.partyBattles.enterDungeon(partyId, dungeonId);
+    if (!result.success) return result.error;
+
+    // State for every member is pushed by enterDungeon's broadcast.
+    return null;
+  }
+
+  /** Handle a dungeon bail-out request. Returns true if the party left a dungeon. */
+  handleLeaveDungeon(username: string): boolean {
+    const session = this.sessions.get(username);
+    if (!session) return false;
+    const partyId = session.getPartyId();
+    if (!partyId) return false;
+    return this.partyBattles.leaveDungeon(partyId);
+  }
+
   /** Check if two players are on the same tile (uses party positions). */
   areSameTile(a: string, b: string): boolean {
     const sa = this.sessions.get(a);
@@ -503,6 +541,7 @@ export class PlayerManager {
       if (username === excludeUsername) continue;
       if (!session.hasCharacter()) continue;
       const pos = session.getPosition();
+      const dungeon = session.getDungeonState?.();
       others.push({
         username,
         col: pos.col,
@@ -510,6 +549,8 @@ export class PlayerManager {
         zone: session.getZone(),
         className: session.getClassName() ?? undefined,
         partyId: session.getPartyId() ?? undefined,
+        inDungeon: dungeon ? true : undefined,
+        dungeonName: dungeon?.name,
       });
     }
     return others;
@@ -549,6 +590,7 @@ export class PlayerManager {
     for (const session of this.sessions.values()) {
       const partyId = session.getPartyId();
       const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
+      const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
 
       // Get party role/position info
       let partyInfo: { role: 'owner' | 'leader' | 'member'; gridPosition: number } | undefined;
@@ -562,7 +604,7 @@ export class PlayerManager {
         }
       }
 
-      data.push(session.toSaveData(movementData ?? undefined, partyInfo));
+      data.push(session.toSaveData(movementData ?? undefined, partyInfo, dungeonData));
     }
     return data;
   }
@@ -692,6 +734,11 @@ export class PlayerManager {
         this.partyBattles.addMember(party.id, members[i].username);
       }
 
+      // Resume an in-progress dungeon run (uses the owner's saved run).
+      if (ownerData.dungeonRun) {
+        this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
+      }
+
       console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
     }
 
@@ -719,6 +766,12 @@ export class PlayerManager {
         .filter((t): t is NonNullable<typeof t> => t !== null);
 
       this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue);
+
+      // Resume an in-progress dungeon run for this solo player.
+      if (data.dungeonRun) {
+        const partyId = this.sessions.get(data.username)?.getPartyId();
+        if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
+      }
     }
 
     if (saves.length > 0) {

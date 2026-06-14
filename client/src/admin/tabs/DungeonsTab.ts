@@ -155,6 +155,11 @@ export class DungeonsTab implements Tab {
 
       <fieldset class="admin-form-fieldset">
         <legend>First-Clear Rewards ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="df-add-first-clear" type="button">+ Reward</button>'}</legend>
+        <div class="admin-form-hint">Granted once per player on the first ever clear. XP and Gold are flat bonuses; item rewards roll by chance.</div>
+        <div class="admin-form-grid">
+          <label>Bonus XP<input type="number" id="df-first-clear-xp" value="${d.firstClearXp ?? ''}" min="0"></label>
+          <label>Bonus Gold<input type="number" id="df-first-clear-gold" value="${d.firstClearGold ?? ''}" min="0"></label>
+        </div>
         <div id="df-first-clear-list">${firstClearRows}</div>
       </fieldset>
     `;
@@ -271,6 +276,12 @@ export class DungeonsTab implements Tab {
     const options = `<option value="">—</option>` + items.map(i =>
       `<option value="${i.id}" ${i.id === reward.itemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
     ).join('');
+    const classChecks = ALL_CLASS_NAMES.map(cn => `
+      <label class="admin-checkbox">
+        <input type="checkbox" class="df-reward-class" value="${cn}" ${reward.classRestriction?.includes(cn) ? 'checked' : ''}>
+        ${cn}
+      </label>
+    `).join('');
     return `
       <div class="admin-form-row df-reward-row" data-prefix="${prefix}" data-row-index="${index}">
         <select class="df-reward-item">${options}</select>
@@ -278,6 +289,7 @@ export class DungeonsTab implements Tab {
         <label>Min<input type="number" class="df-reward-min" value="${reward.minQty ?? 1}" min="1"></label>
         <label>Max<input type="number" class="df-reward-max" value="${reward.maxQty ?? 1}" min="1"></label>
         <button class="admin-btn admin-btn-sm admin-btn-danger df-reward-remove" type="button">×</button>
+        <div class="df-reward-classes"><span class="admin-form-hint">Classes (none = any):</span>${classChecks}</div>
       </div>
     `;
   }
@@ -352,6 +364,22 @@ export class DungeonsTab implements Tab {
     });
   }
 
+  /** Parse one reward row into a DungeonReward, or null if it has no item / invalid chance. */
+  private parseRewardRow(row: HTMLElement): DungeonReward | null {
+    const itemId = (row.querySelector('.df-reward-item') as HTMLSelectElement).value;
+    const chance = parseFloat((row.querySelector('.df-reward-chance') as HTMLInputElement).value);
+    if (!itemId || !Number.isFinite(chance)) return null;
+    const minQty = parseInt((row.querySelector('.df-reward-min') as HTMLInputElement).value) || 1;
+    const maxQty = parseInt((row.querySelector('.df-reward-max') as HTMLInputElement).value) || 1;
+    const reward: DungeonReward = { itemId, chance, minQty, maxQty };
+    const classRestriction: ClassName[] = [];
+    row.querySelectorAll<HTMLInputElement>('.df-reward-class').forEach(cb => {
+      if (cb.checked) classRestriction.push(cb.value as ClassName);
+    });
+    if (classRestriction.length) reward.classRestriction = classRestriction;
+    return reward;
+  }
+
   private async saveForm(root: HTMLElement, ctx: AdminContext, modal: ModalHandle): Promise<void> {
     const existingId = (root.querySelector('#df-id') as HTMLInputElement).value.trim();
     const name = (root.querySelector('#df-name') as HTMLInputElement).value.trim();
@@ -373,11 +401,8 @@ export class DungeonsTab implements Tab {
       });
       const rewards: DungeonReward[] = [];
       floorEl.querySelectorAll<HTMLElement>('.df-reward-row').forEach(row => {
-        const itemId = (row.querySelector('.df-reward-item') as HTMLSelectElement).value;
-        const chance = parseFloat((row.querySelector('.df-reward-chance') as HTMLInputElement).value);
-        const minQty = parseInt((row.querySelector('.df-reward-min') as HTMLInputElement).value) || 1;
-        const maxQty = parseInt((row.querySelector('.df-reward-max') as HTMLInputElement).value) || 1;
-        if (itemId && Number.isFinite(chance)) rewards.push({ itemId, chance, minQty, maxQty });
+        const r = this.parseRewardRow(row);
+        if (r) rewards.push(r);
       });
       const floor: DungeonFloor = {
         floorNumber,
@@ -413,17 +438,19 @@ export class DungeonsTab implements Tab {
 
     const firstClearRewards: DungeonReward[] = [];
     root.querySelectorAll<HTMLElement>('#df-first-clear-list .df-reward-row').forEach(row => {
-      const itemId = (row.querySelector('.df-reward-item') as HTMLSelectElement).value;
-      const chance = parseFloat((row.querySelector('.df-reward-chance') as HTMLInputElement).value);
-      const minQty = parseInt((row.querySelector('.df-reward-min') as HTMLInputElement).value) || 1;
-      const maxQty = parseInt((row.querySelector('.df-reward-max') as HTMLInputElement).value) || 1;
-      if (itemId && Number.isFinite(chance)) firstClearRewards.push({ itemId, chance, minQty, maxQty });
+      const r = this.parseRewardRow(row);
+      if (r) firstClearRewards.push(r);
     });
+
+    const firstClearXp = parseInt((root.querySelector('#df-first-clear-xp') as HTMLInputElement).value);
+    const firstClearGold = parseInt((root.querySelector('#df-first-clear-gold') as HTMLInputElement).value);
 
     const dungeon: DungeonDefinition = { id, name, floors };
     if (description) dungeon.description = description;
     if (Object.keys(reqs).length) dungeon.entryRequirements = reqs;
     if (firstClearRewards.length) dungeon.firstClearRewards = firstClearRewards;
+    if (Number.isFinite(firstClearXp) && firstClearXp > 0) dungeon.firstClearXp = firstClearXp;
+    if (Number.isFinite(firstClearGold) && firstClearGold > 0) dungeon.firstClearGold = firstClearGold;
 
     try {
       const data = await putAdmin<{ dungeons: Record<string, DungeonDefinition> }>(

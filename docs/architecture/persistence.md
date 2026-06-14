@@ -12,6 +12,7 @@ Saved state per player (`PlayerSaveData`):
 - `chatHistory` (last 1000 messages), `chatSendChannel`, `chatDmTarget`
 - `mailbox` (pending gift entries)
 - `activeQuests`, `completedQuests`, `weeklyCompletions` — quest state (see `docs/architecture/content.md` Quest system)
+- `dungeonRun` (`{ dungeonId, currentFloorIndex, entrance }`) — active dungeon run, so an in-progress dive continues offline and across restarts; `clearedDungeons` (string[]) — dungeons this player has cleared at least once, gating one-time first-clear rewards (see `docs/architecture/content.md` Dungeon system). `dungeonRun` is sourced from the `PartyBattleManager` entry at save time and re-applied via `restoreDungeonRun` after the party's battle entry is rebuilt on restore.
 
 The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment.
 

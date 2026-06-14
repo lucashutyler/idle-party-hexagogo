@@ -909,7 +909,7 @@ export class ContentStore {
         { id: crypto.randomUUID(), col: 4, row: 3, type: TileType.Plains, zone: 'darkwood', name: 'Overgrown Trail' },
 
         // Crystal Caves
-        { id: crypto.randomUUID(), col: 5, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Cave Entrance' },
+        { id: crypto.randomUUID(), col: 5, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Cave Entrance', dungeonId: 'crystal_caves_trial' },
         { id: crypto.randomUUID(), col: 6, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Glittering Tunnel' },
         { id: crypto.randomUUID(), col: 6, row: 2, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Crystal Chamber' },
       ],

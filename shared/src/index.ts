@@ -332,6 +332,9 @@ export type {
 export {
   SEED_DUNGEONS,
   getDungeon,
+  validateDungeonEntry,
+  rollDungeonRewards,
+  rewardAppliesToClass,
 } from './systems/DungeonTypes.js';
 export type {
   DungeonGridShape,
@@ -339,6 +342,8 @@ export type {
   DungeonFloor,
   DungeonEntryRequirements,
   DungeonDefinition,
+  DungeonRunInfo,
+  DungeonEntryMemberInfo,
 } from './systems/DungeonTypes.js';
 
 // Social types

@@ -41,6 +41,8 @@ npm run typecheck    # tsc --build (all packages)
 
 **Whenever you remove a dependency**, before pushing: `grep -rn "from ['\"]<pkg>['\"]\\|require(['\"]<pkg>['\"]" client/src server/src shared/src` to find orphan imports the local typecheck won't catch. Delete the orphan files (or restore the dep) before committing.
 
+- **Missing deps in a fresh worktree**: if `npm run typecheck` reports `Cannot find module 'X'` (TS2307) for a real dependency (e.g. `three`, `happy-dom`), the worktree's `node_modules` is incomplete — run `npm install` in the worktree once to populate it, then re-run. Don't treat such an error as a code problem until you've confirmed the package actually resolves.
+
 **Dev seed**: when `NODE_ENV !== 'production'`, `GameLoop.init` calls into `server/src/game/DevSeed.ts`, which procedurally injects 20 extra zones / ~1000 rooms (`shared/src/seed/SeedDevWorld.ts`) and 100 bot players grouped into ~30 parties. Both passes are idempotent — the content pass checks for a marker zone (`dev_sunscar_plains`) before merging, and the player pass probes `bot_001`'s save file. To re-seed, delete `data/world.json` + `data/zones.json` (for content) or `data/bot_*.json` (for bots). Bots live in dev zones (col 30+, far from the production starting island) so they don't crowd the real player.
 
 ## Architecture

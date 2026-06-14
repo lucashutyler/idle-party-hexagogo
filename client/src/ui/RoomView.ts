@@ -1,5 +1,5 @@
 import type { TileClickInfo } from './ThreeWorldMap';
-import type { NpcDefinition } from '@idle-party-rpg/shared';
+import type { NpcDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
 import { classIconHtml } from '@idle-party-rpg/shared';
 import { renderAssetImg } from './assets';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
@@ -22,10 +22,13 @@ export class RoomView {
   private onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void;
   private onShopClick?: () => void;
   private onNpcTalk?: (npc: NpcDefinition) => void;
+  private onEnterDungeon?: (dungeon: DungeonDefinition) => void;
   /** Whether the player's current tile has a shop. Set externally before showing. */
   hasShop = false;
   /** NPC on the player's current tile (if any). Set externally before showing. */
   npc: NpcDefinition | null = null;
+  /** Dungeon linked to the player's current tile (if any). Set externally before showing. */
+  dungeon: DungeonDefinition | null = null;
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
 
@@ -35,11 +38,13 @@ export class RoomView {
     onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void,
     onShopClick?: () => void,
     onNpcTalk?: (npc: NpcDefinition) => void,
+    onEnterDungeon?: (dungeon: DungeonDefinition) => void,
   ) {
     this.onMove = onMove;
     this.onUserClick = onUserClick;
     this.onShopClick = onShopClick;
     this.onNpcTalk = onNpcTalk;
+    this.onEnterDungeon = onEnterDungeon;
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'room-view-overlay';
@@ -109,9 +114,9 @@ export class RoomView {
     const grouped = this.groupPlayersByParty(info.playersHere, info.partyMemberUsernames);
 
     const partySection = grouped.mine.length > 0
-      ? this.renderPartyBox(grouped.mine, 'Your party', 'room-party-self')
+      ? this.renderPartyBox(grouped.mine, 'Your party', 'room-party-self', grouped.mineDungeonName)
       : '';
-    const otherBoxes = grouped.others.map(g => this.renderPartyBox(g.members, null, 'room-party-other')).join('');
+    const otherBoxes = grouped.others.map(g => this.renderPartyBox(g.members, null, 'room-party-other', g.dungeonName)).join('');
     const otherSection = otherBoxes
       ? `<div class="room-party-other-label">Other parties here</div>${otherBoxes}`
       : '';
@@ -122,6 +127,10 @@ export class RoomView {
 
     const talkButton = this.npc
       ? `<button class="room-view-action room-view-action-talk"><span class="room-view-action-icon room-view-action-icon-emoji">${this.escapeHtml(this.npc.emoji)}</span><span>Talk to ${this.escapeHtml(this.npc.name)}</span></button>`
+      : '';
+
+    const dungeonButton = this.dungeon
+      ? `<button class="room-view-action room-view-action-dungeon"><span class="room-view-action-icon room-view-action-icon-emoji">🗝️</span><span>Enter ${this.escapeHtml(this.dungeon.name)}</span></button>`
       : '';
 
     this.modal.innerHTML = `
@@ -139,6 +148,7 @@ export class RoomView {
           ${otherSection}
         </div>
         <div class="room-view-actions">
+          ${dungeonButton}
           ${talkButton}
           ${shopButton}
         </div>
@@ -158,6 +168,12 @@ export class RoomView {
       if (npc) this.onNpcTalk?.(npc);
     });
 
+    this.modal.querySelector('.room-view-action-dungeon')?.addEventListener('click', () => {
+      const dungeon = this.dungeon;
+      this.hide();
+      if (dungeon) this.onEnterDungeon?.(dungeon);
+    });
+
     for (const el of this.modal.querySelectorAll('.room-party-member')) {
       el.addEventListener('click', () => {
         const username = el.getAttribute('data-username');
@@ -173,9 +189,9 @@ export class RoomView {
 
     const grouped = this.groupPlayersByParty(info.playersHere, info.partyMemberUsernames);
     const mineBox = grouped.mine.length > 0
-      ? this.renderPartyBox(grouped.mine, 'Your party', 'room-party-self')
+      ? this.renderPartyBox(grouped.mine, 'Your party', 'room-party-self', grouped.mineDungeonName)
       : '';
-    const otherBoxes = grouped.others.map(g => this.renderPartyBox(g.members, null, 'room-party-other')).join('');
+    const otherBoxes = grouped.others.map(g => this.renderPartyBox(g.members, null, 'room-party-other', g.dungeonName)).join('');
     const partiesBlock = (mineBox || otherBoxes)
       ? `<div class="room-view-parties">
            ${mineBox}
@@ -230,20 +246,24 @@ export class RoomView {
    * still appear rather than silently dropping.
    */
   private groupPlayersByParty(
-    players: { username: string; className?: string; partyId?: string }[],
+    players: { username: string; className?: string; partyId?: string; dungeonName?: string }[],
     partyMemberUsernames: string[],
   ): {
     mine: { username: string; className?: string }[];
-    others: { partyId: string; members: { username: string; className?: string }[] }[];
+    mineDungeonName?: string;
+    others: { partyId: string; members: { username: string; className?: string }[]; dungeonName?: string }[];
   } {
     const myUsernames = new Set(partyMemberUsernames);
     const mine: { username: string; className?: string }[] = [];
-    const otherMap = new Map<string, { partyId: string; members: { username: string; className?: string }[] }>();
+    let mineDungeonName: string | undefined;
+    const otherMap = new Map<string, { partyId: string; members: { username: string; className?: string }[]; dungeonName?: string }>();
     const unknown: { username: string; className?: string }[] = [];
+    let unknownDungeonName: string | undefined;
 
     for (const p of players) {
       if (myUsernames.has(p.username)) {
         mine.push({ username: p.username, className: p.className });
+        if (p.dungeonName) mineDungeonName = p.dungeonName;
       } else if (p.partyId) {
         let group = otherMap.get(p.partyId);
         if (!group) {
@@ -251,21 +271,24 @@ export class RoomView {
           otherMap.set(p.partyId, group);
         }
         group.members.push({ username: p.username, className: p.className });
+        if (p.dungeonName) group.dungeonName = p.dungeonName;
       } else {
         unknown.push({ username: p.username, className: p.className });
+        if (p.dungeonName) unknownDungeonName = p.dungeonName;
       }
     }
 
     const others = Array.from(otherMap.values());
-    if (unknown.length > 0) others.push({ partyId: 'unknown', members: unknown });
-    return { mine, others };
+    if (unknown.length > 0) others.push({ partyId: 'unknown', members: unknown, dungeonName: unknownDungeonName });
+    return { mine, mineDungeonName, others };
   }
 
-  /** Render a single party box with optional header label. */
+  /** Render a single party box with optional header label and dungeon tag. */
   private renderPartyBox(
     members: { username: string; className?: string }[],
     label: string | null,
     partyClass: string,
+    dungeonName?: string,
   ): string {
     if (members.length === 0) return '';
     const tiles = members.map(p => `
@@ -274,10 +297,14 @@ export class RoomView {
         <span class="room-party-member-name">${this.escapeHtml(p.username)}</span>
       </div>
     `).join('');
+    const dungeonTag = dungeonName
+      ? `<div class="room-party-dungeon-tag">🗝️ Delving ${this.escapeHtml(dungeonName)}</div>`
+      : '';
     const labelHtml = label ? `<div class="room-party-group-label">${this.escapeHtml(label)}</div>` : '';
     return `
       <div class="room-party-group ${partyClass}">
         ${labelHtml}
+        ${dungeonTag}
         <div class="room-party-group-tiles">${tiles}</div>
       </div>
     `;

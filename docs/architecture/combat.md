@@ -91,3 +91,7 @@ Any damage to a Knight (direct attack, AoE skill, single-target skill, or DoT ti
 ## Battle state machines
 
 `ServerBattleTimer` (`battle` | `result`), `ServerParty` (`idle` | `moving` | `in_battle`). Each party's battle loop runs continuously and never stops: `battle` → `result` (`RESULT_PAUSE = 600ms` celebration/move window) → `battle` → … Movement happens instantly at the start of the result window; the client animates the tween during the celebration pause. Battle duration is determined by tick-based HP combat (1s per tick).
+
+## Dungeon combat mode
+
+A party inside a dungeon reuses this exact loop — the only differences are driven by `PartyBattleManager` reading the entry's `dungeonRun`: encounters come from the current floor's `encounterTable` (not the tile), victory advances the floor / completes the run rather than unlocking neighbours, and a wipe ejects the party to the entrance instead of retrying in place. Because the party has no destination inside a dungeon, the loop just re-triggers combat on the same floor until it's cleared. See `docs/architecture/content.md` → Dungeon system for the full lifecycle.

@@ -127,6 +127,11 @@ app.get('/api/npcs', requireAuth, (_req, res) => {
   res.json({ npcs: gameLoop.contentStore.getAllNpcs() });
 });
 
+// Dungeon definitions (full catalog — used by the room popup + entry confirm UI)
+app.get('/api/dungeons', requireAuth, (_req, res) => {
+  res.json({ dungeons: gameLoop.contentStore.getAllDungeons() });
+});
+
 app.use('/api/admin', createAdminRoutes({
   playerManager: () => playerManager,
   accountStore,
@@ -324,6 +329,57 @@ wss.on('connection', (ws) => {
         }
 
         playerManager.partyBattles.escapeBattle(partyId);
+        return;
+      }
+
+      if (msg.type === 'enter_dungeon' && typeof msg.col === 'number' && typeof msg.row === 'number' && typeof msg.dungeonId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        const partyId = session.getPartyId();
+        if (!partyId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No party' }));
+          return;
+        }
+
+        // Only owners and leaders can take the party into a dungeon.
+        const party = playerManager.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === username);
+          if (!member || !canMove(member.role)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can enter a dungeon' }));
+            return;
+          }
+        }
+
+        const error = playerManager.handleEnterDungeon(username, msg.col, msg.row, msg.dungeonId);
+        if (error) {
+          ws.send(JSON.stringify({ type: 'error', message: error }));
+        }
+        return;
+      }
+
+      if (msg.type === 'leave_dungeon') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        const partyId = session.getPartyId();
+        if (!partyId) return;
+
+        // Only owners and leaders can pull the party out of a dungeon.
+        const party = playerManager.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === username);
+          if (!member || !canMove(member.role)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can leave a dungeon' }));
+            return;
+          }
+        }
+
+        playerManager.handleLeaveDungeon(username);
         return;
       }
 
@@ -998,6 +1054,13 @@ wss.on('connection', (ws) => {
       if (msg.type === 'accept_party_invite' && typeof msg.partyId === 'string') {
         const session = playerManager.getSessionByUsername(username);
         const oldPartyId = session?.getPartyId() ?? null;
+
+        // Can't join a party mid-dungeon — entry requirements are validated for
+        // the whole party at entry time, and all members must be present.
+        if (playerManager.partyBattles.getDungeonRunInfo(msg.partyId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'That party is in a dungeon right now.' }));
+          return;
+        }
 
         const result = playerManager.parties.acceptInvite(
           username,

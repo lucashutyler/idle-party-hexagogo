@@ -14,6 +14,7 @@ import type {
   ServerTradeCompletedMessage,
 } from './SocialTypes.js';
 import type { SkillLoadout } from './SkillTypes.js';
+import type { DungeonRunInfo } from './DungeonTypes.js';
 
 
 export type BattleTimerState = 'battle' | 'result';
@@ -23,7 +24,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.06.02.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.06.14.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -125,6 +126,10 @@ export interface OtherPlayerState {
    *  modal can group co-located players into per-party boxes. Absent only
    *  in the brief transient window where a session has no party assigned. */
   partyId?: string;
+  /** True while this player's party is inside a dungeon (parked at the entrance room). */
+  inDungeon?: boolean;
+  /** Name of the dungeon this player's party is currently delving (when inDungeon). */
+  dungeonName?: string;
 }
 
 export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup';
@@ -170,6 +175,8 @@ export interface ServerStateMessage {
     items: Record<string, string>;
     tiles: Record<string, { name: string; col: number; row: number }>;
   };
+  /** Active dungeon run state (floor progress) — present only while the party is inside a dungeon. */
+  dungeon?: DungeonRunInfo;
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
 }
@@ -309,6 +316,19 @@ export interface ClientSetClassMessage {
   className: string;
 }
 
+export interface ClientEnterDungeonMessage {
+  type: 'enter_dungeon';
+  /** Entrance room coordinates (must match the party's current room). */
+  col: number;
+  row: number;
+  /** Dungeon to enter — must match the room's linked `dungeonId`. */
+  dungeonId: string;
+}
+
+export interface ClientLeaveDungeonMessage {
+  type: 'leave_dungeon';
+}
+
 export type ClientMessage =
   | ClientMoveMessage
   | ClientRequestStateMessage
@@ -328,4 +348,6 @@ export type ClientMessage =
   | ClientCraftCancelMessage
   | ClientAcceptQuestMessage
   | ClientTurnInQuestMessage
+  | ClientEnterDungeonMessage
+  | ClientLeaveDungeonMessage
   | ClientSocialMessage;

@@ -191,6 +191,15 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Quest scope (solo party only OR party-shared), prerequisites, weekly-repeatable
 - [ ] Quest chains / storylines
 
+### Dungeons
+- [x] Dungeon data model + admin CRUD (floors, grid shape, encounter tables, entry requirements, rewards)
+- [x] Dungeon instance runtime (one private instance per party, floor progression, exit/bail-out, eject-on-wipe, offline-persistent)
+- [x] Entry requirements enforcement (level, required/consumable item, classes, party size — clear rejection messages)
+- [x] Dungeon-specific loot (per-floor bonus rewards + one-time first-clear rewards per player)
+- [ ] Non-3×3 grid shapes (arbitrary combat rectangles)
+- [ ] Dungeon boss rooms, time limits, lockouts/cooldowns
+- [ ] Dungeon tokens + rotating vendor, leaderboards, roguelike variant
+
 ### Server
 - [x] Node.js/TypeScript server
 - [x] Per-player game state (independent battle timers, movement, unlocks)
@@ -218,7 +227,8 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Server unavailable / offline screen with retry
 - [x] Desktop font scaling (larger fonts on desktop via media query)
 - [x] Mobile zoom controls (+/- buttons on map) + 2-finger pinch zoom
-- [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, shop/talk affordances), remote discovered (small popup with Go button), undiscovered (minimal)
+- [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, shop/talk/dungeon affordances), remote discovered (small popup with Go button), undiscovered (minimal)
+- [x] Dungeon entry popup + in-combat dungeon banner (floor progress + Leave Dungeon)
 - [x] Global chat pop-out (floating/draggable/resizable on desktop, docked bottom-sheet on mobile)
 - [x] Persistent XP bar above the bottom nav, visible on every screen
 - [x] ModalStack click-order z-index across all overlays

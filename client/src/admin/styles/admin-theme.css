@@ -646,6 +646,16 @@ input[type="color"] { padding: 0; height: 32px; width: 56px; }
 .admin-form-hint { color: var(--admin-text-muted); font-size: 0.85em; }
 .admin-form-coords { font-family: monospace; color: var(--admin-text-muted); padding: 4px 0; }
 
+/* Per-reward class restriction checkboxes wrap onto their own full-width line. */
+.df-reward-classes {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding-left: 4px;
+}
+
 .admin-checkbox {
   display: inline-flex;
   align-items: center;

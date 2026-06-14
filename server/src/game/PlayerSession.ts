@@ -95,6 +95,8 @@ export class PlayerSession {
   private blockedUsers: Record<string, BlockLevel> = {};
   private guildId: string | null = null;
   private partyId: string | null = null;
+  /** Dungeon IDs this player has cleared at least once (for one-time first-clear rewards). */
+  private clearedDungeons = new Set<string>();
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
   private craftQueue: CraftQueueState = emptyCraftQueue();
@@ -129,6 +131,9 @@ export class PlayerSession {
 
   /** Callback to get the remaining movement path — set by PlayerManager. */
   getCurrentPath?: () => HexTile[];
+
+  /** Callback to get the active dungeon run state — set by PlayerManager. */
+  getDungeonState?: () => import('@idle-party-rpg/shared').DungeonRunInfo | null;
 
   constructor(username: string, grid: HexGrid, content: ContentStore, onQuestEvent?: (event: QuestEvent) => void) {
     this.username = username;
@@ -206,14 +211,24 @@ export class PlayerSession {
     };
   }
 
-  /** Handle victory rewards (called by PartyBattleManager with pre-split rewards). */
-  handleVictory(rewards: { xp: number; gold: number; items: string[] }, tile: HexTile): void {
+  /**
+   * Handle victory rewards (called by PartyBattleManager with pre-split rewards).
+   * Set `options.unlockTiles = false` to skip adjacent-tile unlocking (dungeon
+   * floors aren't overworld tiles).
+   */
+  handleVictory(
+    rewards: { xp: number; gold: number; items: string[] },
+    tile: HexTile,
+    options?: { unlockTiles?: boolean },
+  ): void {
     if (!this.character) return;
     this.addLogEntry('Victory!', 'victory');
 
-    const unlocked = this.unlockSystem.unlockAdjacentTiles(tile);
-    if (unlocked.length > 0) {
-      this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
+    if (options?.unlockTiles !== false) {
+      const unlocked = this.unlockSystem.unlockAdjacentTiles(tile);
+      if (unlocked.length > 0) {
+        this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
+      }
     }
 
     if (rewards.gold > 0) {
@@ -562,6 +577,7 @@ export class PlayerSession {
       questDefinitions: questBlock.questDefinitions,
       offeredQuestIds: questBlock.offeredQuestIds,
       questResolutions: questBlock.questResolutions,
+      dungeon: this.getDungeonState?.() ?? undefined,
     };
   }
 
@@ -786,10 +802,39 @@ export class PlayerSession {
     addGold(this.character, amount);
   }
 
+  /**
+   * Grant XP from a non-combat source (e.g. dungeon first-clear bonus). Handles
+   * level-ups, skill auto-unlocks, and XP-rate tracking. Pass `logText` to emit
+   * a combat-log line for the award.
+   */
+  grantXp(amount: number, logText?: string): void {
+    if (!this.character || amount <= 0) return;
+    const { leveledUp, levelsGained } = addXp(this.character, amount);
+    this.xpRateXpTotal += amount;
+    if (logText) this.addLogEntry(logText, 'victory');
+    if (leveledUp) {
+      for (let i = 0; i < levelsGained; i++) {
+        this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
+      }
+      this.autoUnlockSkills();
+    }
+  }
+
   getLevel(): number { return this.character?.level ?? 0; }
 
   getClassName(): ClassName | null { return this.character?.className ?? null; }
   getSkillLoadout(): SkillLoadout | null { return this.character?.skillLoadout ?? null; }
+
+  // ── Dungeon clear tracking ──────────────────────────────────────
+
+  /** Whether this player has ever cleared the given dungeon (gates first-clear rewards). */
+  hasDungeonCleared(dungeonId: string): boolean { return this.clearedDungeons.has(dungeonId); }
+
+  /** Record a dungeon as cleared by this player. */
+  markDungeonCleared(dungeonId: string): void { this.clearedDungeons.add(dungeonId); }
+
+  /** All dungeon IDs this player has cleared (for persistence). */
+  getClearedDungeons(): string[] { return [...this.clearedDungeons]; }
 
   /** Returns publicly visible profile data (no HP, damage, gold, inventory). */
   getPublicProfile(): { className: string; level: number; equipment: Record<string, string | null>; skillLoadout: SkillLoadout } | null {
@@ -895,6 +940,7 @@ export class PlayerSession {
     this.logIdCounter = 0;
     this.unlockSystem = new UnlockSystem(this.grid, startTile);
     this.partyId = null;
+    this.clearedDungeons.clear();
 
     this.addLogEntry('The world has been reset! Starting fresh...', 'battle');
   }
@@ -918,7 +964,11 @@ export class PlayerSession {
   }, partyInfo?: {
     role: 'owner' | 'leader' | 'member';
     gridPosition: number;
-  }): PlayerSaveData {
+  }, dungeonRun?: {
+    dungeonId: string;
+    currentFloorIndex: number;
+    entrance: { col: number; row: number };
+  } | null): PlayerSaveData {
     const pos = movementData?.position ?? this.getPosition();
 
     return {
@@ -955,6 +1005,8 @@ export class PlayerSession {
       activeQuests: this.quests.toSaveData().active,
       completedQuests: this.quests.toSaveData().completed,
       weeklyCompletions: this.quests.toSaveData().weeklyCompletions,
+      dungeonRun: dungeonRun ?? undefined,
+      clearedDungeons: [...this.clearedDungeons],
     };
   }
 
@@ -1048,6 +1100,7 @@ export class PlayerSession {
     session['blockedUsers'] = data.blockedUsers ? { ...data.blockedUsers } : {};
     session['guildId'] = data.guildId ?? null;
     session['partyId'] = null; // Parties are transient, not restored across restarts
+    session['clearedDungeons'] = new Set(data.clearedDungeons ?? []);
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';

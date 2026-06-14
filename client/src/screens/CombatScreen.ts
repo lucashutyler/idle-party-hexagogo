@@ -40,6 +40,10 @@ export class CombatScreen implements Screen {
   private runBar!: HTMLElement;
   private runLocationLabel!: HTMLElement;
   private runHintTimer?: ReturnType<typeof setTimeout>;
+  private dungeonBar!: HTMLElement;
+  private dungeonNameLabel!: HTMLElement;
+  private dungeonFloorLabel!: HTMLElement;
+  private dungeonLeaveBtn!: HTMLButtonElement;
 
   // Last rendered log entry ID — for incremental DOM updates
   private lastRenderedId = -1;
@@ -111,6 +115,13 @@ export class CombatScreen implements Screen {
           </div>
         </div>
       </div>
+      <div class="combat-dungeon-bar" style="display:none">
+        <div class="combat-dungeon-info">
+          <span class="combat-dungeon-name"></span>
+          <span class="combat-dungeon-floor"></span>
+        </div>
+        <button class="combat-dungeon-leave" type="button">Leave Dungeon</button>
+      </div>
       <div class="combat-run-bar">
         <button class="combat-run-btn combat-run-locked">Run</button>
         <span class="combat-run-hint" style="display:none">Available after ${RUN_AVAILABLE_ROUNDS} combat rounds</span>
@@ -136,6 +147,10 @@ export class CombatScreen implements Screen {
     this.runHint = this.container.querySelector('.combat-run-hint')!;
     this.runBar = this.container.querySelector('.combat-run-bar')!;
     this.runLocationLabel = this.container.querySelector('.combat-run-location')!;
+    this.dungeonBar = this.container.querySelector('.combat-dungeon-bar')!;
+    this.dungeonNameLabel = this.container.querySelector('.combat-dungeon-name')!;
+    this.dungeonFloorLabel = this.container.querySelector('.combat-dungeon-floor')!;
+    this.dungeonLeaveBtn = this.container.querySelector('.combat-dungeon-leave')! as HTMLButtonElement;
 
     // Auto-pause on user scroll
     this.logContainer.addEventListener('scroll', () => {
@@ -171,6 +186,13 @@ export class CombatScreen implements Screen {
       } else {
         this.gameClient.sendRun();
       }
+    });
+
+    // Leave Dungeon — owner/leader only (gated by class, not `disabled`, so the
+    // tap isn't swallowed on mobile).
+    this.dungeonLeaveBtn.addEventListener('click', () => {
+      if (this.dungeonLeaveBtn.classList.contains('combat-dungeon-leave-locked')) return;
+      this.gameClient.sendLeaveDungeon();
     });
   }
 
@@ -313,6 +335,33 @@ export class CombatScreen implements Screen {
 
     // Round counter and run button
     this.updateRunButton(state);
+
+    // Dungeon banner (overrides the run bar while inside a dungeon)
+    this.updateDungeonBar(state);
+  }
+
+  /**
+   * Show the dungeon banner (name + floor progress + Leave) while the party is
+   * inside a dungeon, hiding the normal run bar. Leave is owner/leader-only.
+   */
+  private updateDungeonBar(state: ServerStateMessage): void {
+    const d = state.dungeon;
+    if (!d) {
+      this.dungeonBar.style.display = 'none';
+      return;
+    }
+
+    // The run bar is hidden by updateRunButton when state.dungeon is set; here
+    // we only own the dungeon banner.
+    this.dungeonBar.style.display = this.isFullscreen ? 'none' : '';
+
+    this.dungeonNameLabel.textContent = d.name;
+    this.dungeonFloorLabel.textContent = `Floor ${d.floor} / ${d.totalFloors}${d.isBossFloor ? ' · Boss' : ''}`;
+
+    const myRole = state.social?.party?.members.find(m => m.username === state.username)?.role;
+    const canLeave = myRole === 'owner' || myRole === 'leader';
+    this.dungeonLeaveBtn.classList.toggle('combat-dungeon-leave-locked', !canLeave);
+    this.dungeonLeaveBtn.title = canLeave ? '' : 'Only the party owner or a leader can leave';
   }
 
   /**
@@ -496,6 +545,14 @@ export class CombatScreen implements Screen {
   }
 
   private updateRunButton(state: ServerStateMessage): void {
+    // Inside a dungeon the run bar is replaced by the dungeon banner — hide it
+    // here so run-bar visibility has a single owner (no implicit dependency on
+    // updateDungeonBar running afterward).
+    if (state.dungeon) {
+      this.runBar.style.display = 'none';
+      return;
+    }
+
     const combat = state.battle.combat;
     const isFighting = state.battle.visual === 'fighting';
     const roundCount = combat?.roundCount ?? 0;

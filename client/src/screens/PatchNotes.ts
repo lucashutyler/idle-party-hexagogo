@@ -1,5 +1,19 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.06.14.1',
+    notes: [
+      'Dungeons are open for business! Stand on a dungeon room and tap "Enter" — your whole party dives in together and fights through its floors.',
+      'Each dungeon is a private run for your party: clear a floor and you automatically descend to the next, all the way to the final floor.',
+      'Beat the last floor to complete the dungeon. Floors can hand out bonus loot, and the first time you ever clear a dungeon you get a special one-time reward.',
+      'Dungeons can require a minimum/maximum level, certain classes, a party size, or a key item to enter — some keys are consumed on the way in.',
+      'Wipe inside a dungeon and your party is driven back to the entrance — regroup and try again.',
+      'Tap "Leave Dungeon" any time to bail out back to the entrance. Your run keeps going even while you\'re offline, just like the rest of the world.',
+      'Parties delving a dungeon now show a 🗝️ marker on the map at the entrance, and the room popup tells you which dungeon they\'re in.',
+      'First-clear rewards can now include bonus XP and gold, on top of any item rewards.',
+      'Dungeon rewards can be restricted by class, so a Knight and a Bard can earn different loot from the same dungeon.',
+    ],
+  },
+  {
     version: '2026.06.02.1',
     notes: [
       'Map: your party marker, movement path, hover outline, and other players\' flags now show up on rooms away from your starting area again — they were being hidden once you travelled out a bit.',

@@ -588,6 +588,56 @@ html, body {
   margin-right: auto;
 }
 
+/* ── In-dungeon banner (replaces run bar inside a dungeon) ── */
+.combat-dungeon-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  flex-shrink: 0;
+  min-height: 30px;
+  background: rgba(107, 76, 107, 0.28);
+  border-top: 1px solid #6b4c6b;
+}
+.combat-dungeon-info {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.combat-dungeon-name {
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  color: #d3a8d3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.combat-dungeon-floor {
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.combat-dungeon-leave {
+  background: none;
+  border: 1px solid #6b4c6b;
+  color: #d3a8d3;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 12px;
+  font-family: inherit;
+}
+.combat-dungeon-leave:not(.combat-dungeon-leave-locked):hover {
+  color: #fff;
+  border-color: #d3a8d3;
+}
+.combat-dungeon-leave.combat-dungeon-leave-locked {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .round-label {
   color: var(--text-dim);
   font-size: inherit;
@@ -1942,6 +1992,13 @@ html, body {
   white-space: nowrap;
 }
 
+/* Dungeon key — marks a tile whose party is currently delving its dungeon. */
+.three-map-dungeon-key {
+  font-size: 14px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.8));
+}
+
 .canvas-map-tooltip {
   position: absolute;
   pointer-events: none;
@@ -2252,6 +2309,100 @@ html, body {
 .npc-talk-btn-primary {
   background: var(--accent-gold);
   color: #000;
+}
+
+/* ── Dungeon entry confirmation popup ──────────────────────── */
+.dungeon-entry-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+.dungeon-entry-modal {
+  background: var(--bg-panel);
+  border: 2px solid #6b4c6b;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 360px;
+  width: 90%;
+}
+.dungeon-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dungeon-entry-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+.dungeon-entry-title {
+  font-family: var(--pixel-font);
+  font-size: 13px;
+  color: #d3a8d3;
+}
+.dungeon-entry-desc {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-style: italic;
+}
+.dungeon-entry-meta {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+.dungeon-entry-reqs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-pixel);
+}
+.dungeon-entry-reqs-title {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--accent-gold);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.dungeon-entry-req {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  color: var(--text-primary);
+}
+.dungeon-entry-warning {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.dungeon-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dungeon-entry-btn {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  padding: 8px 16px;
+  background: var(--bg-panel-light);
+  color: var(--text-primary);
+  border: 2px solid var(--border-pixel);
+  cursor: pointer;
+}
+.dungeon-entry-btn:active {
+  border-color: #d3a8d3;
+}
+.dungeon-entry-enter {
+  background: #6b4c6b;
+  color: #fff;
+  border-color: #6b4c6b;
 }
 
 .npc-quest-section {
@@ -6384,6 +6535,12 @@ html, body {
 .room-party-other .room-party-group-label {
   color: var(--text-secondary);
 }
+.room-party-dungeon-tag {
+  font-size: 11px;
+  color: #d3a8d3;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
 .room-party-group-tiles {
   display: flex;
   flex-wrap: wrap;
@@ -6439,6 +6596,15 @@ html, body {
 .room-view-action-cancel:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
+}
+.room-view-action-dungeon {
+  color: #d3a8d3;
+  border-color: #6b4c6b;
+}
+.room-view-action-dungeon:hover {
+  background: #6b4c6b;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(107, 76, 107, 0.6);
 }
 .room-view-action-icon {
   width: 18px;

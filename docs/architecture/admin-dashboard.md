@@ -31,5 +31,5 @@ The map viewer uses HTML5 Canvas with pan/zoom, rendering tiles from the content
 - **Tile Types**: shows real hex-shaped tile previews (non-traversable types render with a red hex ring around the colored hex — the canvas map keeps its own red-X marker); IDs are hidden in the UI and auto-generated as GUIDs on create — only the tile name is editable. The color picker hex code is hidden until the picker is focused.
 - **Map**: sidebar opens the room editor directly when a tile is clicked (no preview/edit toggle); Backspace/Delete deletes the selected room when not focused in a field.
 - **Shop edit modal**: sorts items alphabetically and includes a search box plus a "Show only stocked" toggle to filter the inventory checklist.
-- **Dungeons**: list table with a modal form that supports floors (with grid shape, encounter table, per-floor rewards, boss flag), entry requirements (level/item/classes/party size), and first-clear rewards.
+- **Dungeons**: list table with a modal form that supports floors (with grid shape, encounter table, per-floor rewards, boss flag), entry requirements (level/item/classes/party size), and first-clear rewards (flat bonus XP/gold + item rewards). Every item reward row (floor or first-clear) has per-reward class checkboxes ("none = any") so loot can be routed by class.
 - **Game** link in the sidebar opens the game in a new tab.
