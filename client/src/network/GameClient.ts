@@ -269,6 +269,16 @@ export class GameClient {
     this.sendRaw({ type: 'run' });
   }
 
+  // --- Dungeons ---
+
+  sendEnterDungeon(col: number, row: number, dungeonId: string): void {
+    this.sendRaw({ type: 'enter_dungeon', col, row, dungeonId });
+  }
+
+  sendLeaveDungeon(): void {
+    this.sendRaw({ type: 'leave_dungeon' });
+  }
+
   sendEquipSkill(skillId: string, slotIndex: number): void {
     this.sendRaw({ type: 'equip_skill', skillId, slotIndex });
   }

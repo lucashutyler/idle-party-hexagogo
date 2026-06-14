@@ -46,6 +46,14 @@ export interface PlayerSaveData {
   completedQuests?: CompletedQuestEntry[];
   /** ISO timestamp of last completion per weekly-repeatable quest ID. */
   weeklyCompletions?: Record<string, string>;
+  /** Active dungeon run (floor progress + entrance), restored across restarts. */
+  dungeonRun?: {
+    dungeonId: string;
+    currentFloorIndex: number;
+    entrance: { col: number; row: number };
+  };
+  /** Dungeon IDs this player has cleared at least once (gates first-clear rewards). */
+  clearedDungeons?: string[];
 }
 
 /**

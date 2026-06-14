@@ -58,7 +58,7 @@ export interface TileClickInfo {
   isUnlocked: boolean;
   isSameZone: boolean;
   isCurrentTile: boolean;
-  playersHere: { username: string; className?: string; partyId?: string }[];
+  playersHere: { username: string; className?: string; partyId?: string; dungeonName?: string }[];
   partyMemberUsernames: string[];
   dungeonId?: string;
 }
@@ -897,7 +897,7 @@ export class ThreeWorldMap {
     const playersHere = isSameZone
       ? this.lastOtherPlayers
         .filter(p => p.col === offset.col && p.row === offset.row)
-        .map(p => ({ username: p.username, className: p.className, partyId: p.partyId }))
+        .map(p => ({ username: p.username, className: p.className, partyId: p.partyId, dungeonName: p.dungeonName }))
       : [];
 
     if (this.onTileClickFn) {
@@ -1530,14 +1530,18 @@ export class ThreeWorldMap {
     }
 
     const partySet = new Set(this.partyMemberUsernames);
-    const tileGroups = new Map<string, { col: number; row: number; count: number }>();
+    const tileGroups = new Map<string, { col: number; row: number; count: number; inDungeon: boolean }>();
     for (const other of this.lastOtherPlayers) {
       if (other.zone !== this.currentZone) continue;
       if (partySet.has(other.username)) continue;
       const key = `${other.col},${other.row}`;
       const existing = tileGroups.get(key);
-      if (existing) existing.count++;
-      else tileGroups.set(key, { col: other.col, row: other.row, count: 1 });
+      if (existing) {
+        existing.count++;
+        if (other.inDungeon) existing.inDungeon = true;
+      } else {
+        tileGroups.set(key, { col: other.col, row: other.row, count: 1, inDungeon: !!other.inDungeon });
+      }
     }
 
     const html: string[] = [];
@@ -1564,6 +1568,13 @@ export class ThreeWorldMap {
             `<div class="three-map-badge" style="left:${p.x + HEX_SIZE * 0.55}px;top:${p.y + HEX_SIZE * 0.55}px">×${group.count}</div>`,
           );
         }
+      }
+      // A party delving a dungeon parks at its entrance — mark the tile so other
+      // players can tell they're inside, not just standing around.
+      if (group.inDungeon) {
+        html.push(
+          `<div class="three-map-dungeon-key" title="A party is in the dungeon" style="left:${p.x - HEX_SIZE * 0.5}px;top:${p.y - HEX_SIZE * 0.45}px">🗝️</div>`,
+        );
       }
     }
     this.flagsEl.innerHTML = html.join('');

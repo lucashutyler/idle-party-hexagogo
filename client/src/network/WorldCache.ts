@@ -1,4 +1,4 @@
-import type { WorldTileDefinition, TileTypeDefinition, NpcDefinition } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, TileTypeDefinition, NpcDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
 
 /**
  * Client-side cache for world data.
@@ -9,6 +9,7 @@ export class WorldCache {
   private tiles = new Map<string, WorldTileDefinition>();
   private tileTypeDefs = new Map<string, TileTypeDefinition>();
   private npcs = new Map<string, NpcDefinition>();
+  private dungeons = new Map<string, DungeonDefinition>();
   private startTile: { col: number; row: number } = { col: 0, row: 0 };
 
   /** Tile GUID → offset key ("col,row") for fast unlock lookups. */
@@ -23,11 +24,12 @@ export class WorldCache {
   /** Previous unlock count — used to detect changes. */
   private lastUnlockedCount = 0;
 
-  /** Load initial world data + NPC catalog from the server. */
+  /** Load initial world data + NPC + dungeon catalogs from the server. */
   async loadWorld(): Promise<void> {
-    const [worldRes, npcsRes] = await Promise.all([
+    const [worldRes, npcsRes, dungeonsRes] = await Promise.all([
       fetch('/api/world', { credentials: 'include' }),
       fetch('/api/npcs', { credentials: 'include' }),
+      fetch('/api/dungeons', { credentials: 'include' }),
     ]);
     if (!worldRes.ok) throw new Error(`Failed to load world: ${worldRes.status}`);
 
@@ -59,6 +61,16 @@ export class WorldCache {
       for (const def of Object.values(npcData.npcs ?? {})) {
         this.npcs.set(def.id, def);
       }
+    }
+
+    this.dungeons.clear();
+    if (dungeonsRes.ok) {
+      const dungeonData = await dungeonsRes.json() as { dungeons: Record<string, DungeonDefinition> };
+      for (const def of Object.values(dungeonData.dungeons ?? {})) {
+        this.dungeons.set(def.id, def);
+      }
+    } else {
+      console.warn(`[WorldCache] Failed to load dungeons: ${dungeonsRes.status} — dungeon entrances will show no Enter button`);
     }
   }
 
@@ -126,6 +138,11 @@ export class WorldCache {
   /** Get an NPC definition by ID. */
   getNpc(id: string): NpcDefinition | undefined {
     return this.npcs.get(id);
+  }
+
+  /** Get a dungeon definition by ID. */
+  getDungeon(id: string): DungeonDefinition | undefined {
+    return this.dungeons.get(id);
   }
 
   /** Check if world data has been loaded. */

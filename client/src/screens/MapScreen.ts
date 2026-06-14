@@ -5,6 +5,7 @@ import { RoomView } from '../ui/RoomView';
 import { ShopPopup } from '../ui/ShopPopup';
 import { ThreeWorldMap } from '../ui/ThreeWorldMap';
 import { NpcTalkPopup } from '../ui/NpcTalkPopup';
+import { DungeonEntryPopup } from '../ui/DungeonEntryPopup';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -17,6 +18,7 @@ export class MapScreen implements Screen {
   private roomView?: RoomView;
   private shopPopup?: ShopPopup;
   private npcTalkPopup?: NpcTalkPopup;
+  private dungeonEntryPopup?: DungeonEntryPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
@@ -67,6 +69,11 @@ export class MapScreen implements Screen {
   }
 
   private tryMove(col: number, row: number): void {
+    // Parties are locked inside a dungeon instance — bail out first to travel.
+    if (this.gameClient.lastState?.dungeon) {
+      this.showMoveToast('Leave the dungeon before traveling');
+      return;
+    }
     if (this.canMove()) {
       this.gameClient.sendMove(col, row);
     } else {
@@ -120,6 +127,7 @@ export class MapScreen implements Screen {
 
     this.shopPopup = new ShopPopup(this.gameClient);
     this.npcTalkPopup = new NpcTalkPopup(this.gameClient);
+    this.dungeonEntryPopup = new DungeonEntryPopup(this.gameClient);
     this.roomView = new RoomView(
       this.container,
       (col, row) => { this.tryMove(col, row); },
@@ -129,6 +137,13 @@ export class MapScreen implements Screen {
         if (state?.shopDefinition) this.shopPopup!.show(state);
       },
       (npc) => { this.npcTalkPopup!.show(npc); },
+      (dungeon) => {
+        const state = this.gameClient.lastState;
+        if (!state) return;
+        if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
+        if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can enter'); return; }
+        this.dungeonEntryPopup!.show(dungeon, state.party.col, state.party.row);
+      },
     );
     this.map.setOnTileClick((tileInfo) => {
       const state = this.gameClient.lastState;
@@ -137,6 +152,10 @@ export class MapScreen implements Screen {
       const tileDef = this.worldCache.getTile(tileInfo.col, tileInfo.row);
       this.roomView!.npc = (playerOnTile && tileDef?.npcId)
         ? (this.worldCache.getNpc(tileDef.npcId) ?? null)
+        : null;
+      // Only offer dungeon entry when standing on the entrance and not already inside one.
+      this.roomView!.dungeon = (playerOnTile && !state?.dungeon && tileDef?.dungeonId)
+        ? (this.worldCache.getDungeon(tileDef.dungeonId) ?? null)
         : null;
       this.roomView!.show(tileInfo);
     });
