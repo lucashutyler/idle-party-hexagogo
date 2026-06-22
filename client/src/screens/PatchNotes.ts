@@ -5,6 +5,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'Some rooms now lead to whole new maps! Step onto a passage — like a manhole into the sewers beneath a town — and tap "Enter" to travel there with your party. A room can offer several exits, so you might choose between, say, the sewers or a watchtower.',
       'You only see the map you\'re currently on; other maps stay hidden until you travel to them, then build up their own fog-of-war as you explore.',
       'Travelling moves your whole party at once and drops you on a specific room of the destination map. Find the way back to return.',
+      'Custom monster artwork and combat backgrounds now show up correctly in battle.',
     ],
   },
   {

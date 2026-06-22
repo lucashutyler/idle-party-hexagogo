@@ -50,6 +50,8 @@ export interface ClientPlayerCombatant {
 }
 
 export interface ClientMonsterState {
+  /** Monster definition id (its artwork key). Same for all instances of a type. */
+  id: string;
   name: string;
   currentHp: number;
   maxHp: number;
