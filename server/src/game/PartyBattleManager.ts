@@ -392,6 +392,7 @@ export class PartyBattleManager {
         stunTurns: p.stunTurns > 0 ? p.stunTurns : undefined,
       })),
       monsters: combat.monsters.map(m => ({
+        id: m.id,
         name: m.name,
         currentHp: m.currentHp,
         maxHp: m.maxHp,

@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.06.21.2',
+    notes: [
+      'Custom monster artwork now shows up in battle — art uploaded in the admin was being matched by name instead of the monster\'s saved id, so it never appeared for newer monsters.',
+      'Combat backgrounds now use a zone\'s uploaded artwork (matched by the zone\'s id), with per-room overrides still taking priority.',
+    ],
+  },
+  {
     version: '2026.06.14.1',
     notes: [
       'Dungeons are open for business! Stand on a dungeon room and tap "Enter" — your whole party dives in together and fights through its floors.',
