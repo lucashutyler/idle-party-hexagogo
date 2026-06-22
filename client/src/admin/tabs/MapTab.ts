@@ -22,8 +22,7 @@ import type {
 
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
-import { escapeHtml, putAdmin, postAdmin, deleteAdmin } from '../api';
-import { openModal } from '../components/Modal';
+import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 
 // Maps CUBE_DIRECTIONS index → hex corner indices for the shared edge.
 const DIR_TO_EDGE: [number, number][] = [
@@ -89,14 +88,12 @@ export class MapTab implements Tab {
     const mapOptions = maps.map(m =>
       `<option value="${escapeHtml(m.id)}"${m.id === this.selectedMapId ? ' selected' : ''}>${escapeHtml(m.name)}</option>`
     ).join('');
-    const newMapBtn = `<button class="admin-btn admin-btn-sm" id="map-new" type="button"${ctx.isReadOnly() ? ' disabled title="Switch to a draft version to create maps"' : ''}>+ New Map</button>`;
     container.innerHTML = `
       <div class="admin-page admin-page-map">
         <div class="admin-map-layout">
           <div class="admin-map-canvas-area">
             <div class="admin-map-controls">
               <select id="map-selector" class="admin-select admin-select-sm" title="Switch map">${mapOptions}</select>
-              ${newMapBtn}
               <span id="map-tile-count" class="admin-map-tile-count">${this.mapTiles.length} rooms</span>
               <button class="admin-btn admin-btn-sm" id="map-zoom-in">+</button>
               <button class="admin-btn admin-btn-sm" id="map-zoom-out">−</button>
@@ -276,7 +273,6 @@ export class MapTab implements Tab {
     (document.getElementById('map-selector') as HTMLSelectElement | null)?.addEventListener('change', (e) => {
       this.switchMap(ctx, (e.target as HTMLSelectElement).value);
     });
-    document.getElementById('map-new')?.addEventListener('click', () => this.promptNewMap(ctx));
 
     this.mapCanvas.addEventListener('mousemove', e => {
       if (this.isDragging) return;
@@ -372,43 +368,6 @@ export class MapTab implements Tab {
     } catch (err) {
       this.showSidebarError(err instanceof Error ? err.message : 'Network error');
     }
-  }
-
-  /** Prompt for a new map's id + name, create it, and switch to it. */
-  private promptNewMap(ctx: AdminContext): void {
-    if (ctx.isReadOnly()) return;
-    const modal = openModal({
-      title: 'New Map',
-      width: '420px',
-      bodyHtml: `
-        <div class="admin-form-grid">
-          <label>Name<input type="text" id="new-map-name" placeholder="Sewers"></label>
-          <label>ID (lowercase, no spaces)<input type="text" id="new-map-id" placeholder="sewers"></label>
-        </div>
-        <div id="new-map-error" class="admin-map-sidebar-error"></div>
-        <div class="admin-modal-actions"><button class="admin-btn admin-btn-primary" id="new-map-create" type="button">Create Map</button></div>
-      `,
-    });
-    const nameInput = modal.body.querySelector('#new-map-name') as HTMLInputElement;
-    const idInput = modal.body.querySelector('#new-map-id') as HTMLInputElement;
-    const errorEl = modal.body.querySelector('#new-map-error') as HTMLElement;
-    nameInput?.addEventListener('input', () => {
-      if (!idInput.dataset.touched) idInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    });
-    idInput?.addEventListener('input', () => { idInput.dataset.touched = '1'; });
-    modal.body.querySelector('#new-map-create')?.addEventListener('click', async () => {
-      const name = nameInput.value.trim();
-      const id = idInput.value.trim();
-      if (!name || !id) { errorEl.textContent = 'Name and ID are required.'; return; }
-      try {
-        const data = await postAdmin<{ world: WorldData }>(`/api/admin/world/map${ctx.versionQueryParam()}`, { id, name });
-        this.applyWorldUpdate(ctx, data.world);
-        modal.close();
-        this.switchMap(ctx, id);
-      } catch (err) {
-        errorEl.textContent = err instanceof Error ? err.message : 'Network error';
-      }
-    });
   }
 
   private handleMapClick(ctx: AdminContext, mx: number, my: number): void {

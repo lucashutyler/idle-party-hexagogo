@@ -278,7 +278,8 @@ export class ContentStore {
     }
     const idx = this.world.maps.findIndex(m => m.id === map.id);
     if (idx >= 0) {
-      this.world.maps[idx] = map;
+      // Update (rename): change the name but keep the existing start tile.
+      this.world.maps[idx] = { ...this.world.maps[idx], name: map.name };
     } else {
       this.world.maps.push(map);
     }
