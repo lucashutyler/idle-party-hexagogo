@@ -89,7 +89,7 @@ export class MapTab implements Tab {
     const mapOptions = maps.map(m =>
       `<option value="${escapeHtml(m.id)}"${m.id === this.selectedMapId ? ' selected' : ''}>${escapeHtml(m.name)}</option>`
     ).join('');
-    const newMapBtn = ctx.isReadOnly() ? '' : `<button class="admin-btn admin-btn-sm" id="map-new" type="button">+ New Map</button>`;
+    const newMapBtn = `<button class="admin-btn admin-btn-sm" id="map-new" type="button"${ctx.isReadOnly() ? ' disabled title="Switch to a draft version to create maps"' : ''}>+ New Map</button>`;
     container.innerHTML = `
       <div class="admin-page admin-page-map">
         <div class="admin-map-layout">
@@ -376,6 +376,7 @@ export class MapTab implements Tab {
 
   /** Prompt for a new map's id + name, create it, and switch to it. */
   private promptNewMap(ctx: AdminContext): void {
+    if (ctx.isReadOnly()) return;
     const modal = openModal({
       title: 'New Map',
       width: '420px',
@@ -796,12 +797,11 @@ export class MapTab implements Tab {
     const linksHtml = links.length
       ? links.map(linkRow).join('')
       : `<div class="admin-form-hint">No transitions. Link this room to rooms on other maps.</div>`;
-    const transitionSectionHtml = readOnly
-      ? (links.length ? `<div class="admin-map-transition"><div class="admin-form-label-text">Map Transitions</div>${linksHtml}</div>` : '')
-      : `<div class="admin-map-transition">
+    const addTransitionBtn = `<button class="admin-btn admin-btn-sm" id="sidebar-link-transition" type="button"${readOnly ? ' disabled title="Switch to a draft version to edit"' : ''}>${this.pickTransition ? 'Cancel linking…' : '+ Add transition'}</button>`;
+    const transitionSectionHtml = `<div class="admin-map-transition">
           <div class="admin-form-label-text">Map Transitions</div>
           ${linksHtml}
-          <button class="admin-btn admin-btn-sm" id="sidebar-link-transition" type="button">${this.pickTransition ? 'Cancel linking…' : '+ Add transition'}</button>
+          ${addTransitionBtn}
         </div>`;
 
     let startBtnHtml = '';
@@ -917,6 +917,7 @@ export class MapTab implements Tab {
     document.getElementById('sidebar-set-start')?.addEventListener('click', () => this.setAsStartTile(ctx));
     document.getElementById('sidebar-delete')?.addEventListener('click', () => this.deleteSelectedTile(ctx));
     document.getElementById('sidebar-link-transition')?.addEventListener('click', () => {
+      if (ctx.isReadOnly()) return;
       this.pickTransition = this.pickTransition ? null : (this.selectedTile ? { sourceTile: this.selectedTile } : null);
       this.updatePickBanner();
       this.renderSidebar(ctx);
