@@ -186,7 +186,8 @@ export class ThreeWorldMap {
   // Image cache (shared across renders).
   private imageCache = new ImageCache();
   private hexSpriteCache = new Map<string, HTMLCanvasElement>();
-  private parchmentLoading = false;
+  /** Map id whose parchment texture is currently loaded/loading (per-map backgrounds). */
+  private parchmentMapId: string | null = null;
 
   // Grid + content.
   private grid: HexGrid = new HexGrid();
@@ -349,7 +350,7 @@ export class ThreeWorldMap {
 
     // ── Grid + content ───────────────────────────────────────
     this.grid = this.buildGridFromCache();
-    this.loadParchment();
+    this.loadParchment(this.worldCache.getCurrentMapId());
     this.attachInput();
 
     this.resizeHandler = () => this.handleResize();
@@ -403,6 +404,7 @@ export class ThreeWorldMap {
     // across a discontinuity between two unrelated grids.
     const mapChanged = this.worldCache.setCurrentMap(state.currentMapId);
     const shouldSnap = snap || this.isFirstState || mapChanged;
+    if (mapChanged) this.loadParchment(state.currentMapId);
 
     const unlockedChanged = this.worldCache.updateUnlocked(state.unlocked);
     if (unlockedChanged || shouldSnap) {
@@ -1606,18 +1608,28 @@ export class ThreeWorldMap {
     return h % 360;
   }
 
-  private loadParchment(): void {
-    if (this.parchmentLoading) return;
-    this.parchmentLoading = true;
+  /**
+   * Load the parchment background for `mapId` (each map can have its own,
+   * uploaded in the admin Maps tab → `/parchment-artwork/{mapId}.png`).
+   * Re-entrant: a no-op if that map's parchment is already loaded/loading, and
+   * reloads when the party switches maps. Stale loads (map switched again
+   * mid-fetch) are discarded.
+   */
+  private loadParchment(mapId: string): void {
+    if (this.parchmentMapId === mapId) return;
+    this.parchmentMapId = mapId;
     const loader = new THREE.TextureLoader();
-    const url = artworkUrl('parchment', 'overworld');
+    const url = artworkUrl('parchment', mapId);
     const fallback = placeholderUrl('parchment', { w: 256, h: 256, bg: '3a2a1a', fg: '5a4a3a' });
     const onLoaded = (tex: THREE.Texture) => {
+      // A later map switch already superseded this load — drop it.
+      if (this.parchmentMapId !== mapId) { tex.dispose(); return; }
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       tex.colorSpace = THREE.SRGBColorSpace;
       // Repeat across the large parchment plane so the texture tiles.
       tex.repeat.set(8000 / 256, 8000 / 256);
+      this.parchmentTexture?.dispose();
       this.parchmentTexture = tex;
       this.parchmentMaterial.map = tex;
       // Once textured, clear the fallback solid color (otherwise it tints

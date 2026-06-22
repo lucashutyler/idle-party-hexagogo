@@ -3,6 +3,7 @@ import type { AdminContext } from '../AdminContext';
 import type { WorldData, WorldMapMeta } from '@idle-party-rpg/shared';
 import { escapeHtml, postAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
+import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
 /**
  * Maps management tab — create / rename / delete the world's maps.
@@ -37,7 +38,7 @@ export class MapsTab implements Tab {
           <td>${escapeHtml(m.id)}</td>
           <td>${count}</td>
           <td class="admin-actions-cell">
-            <button class="admin-btn admin-btn-sm maps-rename-btn" data-id="${escapeHtml(m.id)}"${roDisabled}>Rename</button>
+            <button class="admin-btn admin-btn-sm maps-edit-btn" data-id="${escapeHtml(m.id)}">Edit</button>
             <button class="admin-btn admin-btn-sm admin-btn-danger maps-delete-btn" data-id="${escapeHtml(m.id)}"${delDisabled}>Del</button>
           </td>
         </tr>`;
@@ -62,10 +63,10 @@ export class MapsTab implements Tab {
     `;
 
     container.querySelector('#maps-add-btn')?.addEventListener('click', () => this.promptCreate(ctx));
-    container.querySelectorAll<HTMLButtonElement>('.maps-rename-btn').forEach(btn => {
+    container.querySelectorAll<HTMLButtonElement>('.maps-edit-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const map = maps.find(m => m.id === btn.dataset.id);
-        if (map) this.promptRename(ctx, map);
+        if (map) this.promptEditMap(ctx, map);
       });
     });
     container.querySelectorAll<HTMLButtonElement>('.maps-delete-btn').forEach(btn => {
@@ -113,33 +114,47 @@ export class MapsTab implements Tab {
     });
   }
 
-  private promptRename(ctx: AdminContext, map: WorldMapMeta): void {
-    if (ctx.isReadOnly()) return;
+  private promptEditMap(ctx: AdminContext, map: WorldMapMeta): void {
+    const readOnly = ctx.isReadOnly();
+    const dis = readOnly ? ' disabled' : '';
+    // Renaming flows through versioning (draft only); artwork is a live global
+    // asset, so the background uploader works regardless of draft mode.
+    const nameActions = readOnly
+      ? '<div class="admin-form-hint">Switch to a draft version to rename this map.</div>'
+      : '<div class="admin-modal-actions"><button class="admin-btn admin-btn-primary" id="edit-map-save" type="button">Save name</button></div>';
     const modal = openModal({
-      title: `Rename "${escapeHtml(map.name)}"`,
-      width: '420px',
+      title: `Edit "${escapeHtml(map.name)}"`,
+      width: '460px',
       bodyHtml: `
         <div class="admin-form-grid">
-          <label>Name<input type="text" id="rename-map-name" value="${escapeHtml(map.name)}"></label>
+          <label>Name<input type="text" id="edit-map-name" value="${escapeHtml(map.name)}"${dis}></label>
         </div>
-        <div id="rename-map-error" class="admin-map-sidebar-error"></div>
-        <div class="admin-modal-actions"><button class="admin-btn admin-btn-primary" id="rename-map-save" type="button">Save</button></div>
+        <div id="edit-map-error" class="admin-map-sidebar-error"></div>
+        ${nameActions}
+        <fieldset class="admin-form-fieldset">
+          <legend>Map background (parchment)</legend>
+          <p class="admin-form-hint">Tiling texture drawn behind this map. Square PNG.</p>
+          ${renderArtworkSection({ kind: 'parchment', id: map.id })}
+        </fieldset>
       `,
     });
-    const nameInput = modal.body.querySelector('#rename-map-name') as HTMLInputElement;
-    const errorEl = modal.body.querySelector('#rename-map-error') as HTMLElement;
-    modal.body.querySelector('#rename-map-save')?.addEventListener('click', async () => {
-      const name = nameInput.value.trim();
-      if (!name) { errorEl.textContent = 'Name is required.'; return; }
-      try {
-        // Same id → server updates the name only.
-        const data = await postAdmin<{ world: WorldData }>(`/api/admin/world/map${ctx.versionQueryParam()}`, { id: map.id, name });
-        modal.close();
-        await this.applyWorld(ctx, data.world);
-      } catch (err) {
-        errorEl.textContent = err instanceof Error ? err.message : 'Network error';
-      }
-    });
+    wireArtworkSection(modal.body, { kind: 'parchment', id: map.id });
+    if (!readOnly) {
+      const nameInput = modal.body.querySelector('#edit-map-name') as HTMLInputElement;
+      const errorEl = modal.body.querySelector('#edit-map-error') as HTMLElement;
+      modal.body.querySelector('#edit-map-save')?.addEventListener('click', async () => {
+        const name = nameInput.value.trim();
+        if (!name) { errorEl.textContent = 'Name is required.'; return; }
+        try {
+          // Same id → server updates the name only.
+          const data = await postAdmin<{ world: WorldData }>(`/api/admin/world/map${ctx.versionQueryParam()}`, { id: map.id, name });
+          modal.close();
+          await this.applyWorld(ctx, data.world);
+        } catch (err) {
+          errorEl.textContent = err instanceof Error ? err.message : 'Network error';
+        }
+      });
+    }
   }
 
   private async deleteMap(ctx: AdminContext, id: string): Promise<void> {

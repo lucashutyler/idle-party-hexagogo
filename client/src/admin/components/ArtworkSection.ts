@@ -16,7 +16,7 @@
 
 export interface ArtworkSectionOpts {
   /** Server kind id — picks the folder. */
-  kind: 'item' | 'monster' | 'set' | 'shop' | 'zone' | 'tile-type';
+  kind: 'item' | 'monster' | 'set' | 'shop' | 'zone' | 'tile-type' | 'parchment';
   /** The entity id whose artwork is being edited. Empty for unsaved entities. */
   id: string;
   /** DOM id prefix so multiple sections can coexist; defaults to `if-art-${kind}`. */

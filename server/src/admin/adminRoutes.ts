@@ -594,6 +594,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     shop: 'data/shop-artwork',
     zone: 'data/zone-artwork',
     'tile-type': 'data/tile-type-artwork',
+    parchment: 'data/parchment-artwork',
   };
 
   /** Validate + write a square PNG into the appropriate kind folder. */
