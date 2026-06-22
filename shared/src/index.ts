@@ -28,8 +28,8 @@ export { HexGrid } from './hex/HexGrid.js';
 export { HexPathfinder } from './hex/HexPathfinder.js';
 
 // Map
-export { WORLD_MAP } from './hex/MapSchema.js';
-export type { MapSchema, TileDefinition, WorldTileDefinition, WorldData } from './hex/MapSchema.js';
+export { WORLD_MAP, DEFAULT_MAP_ID, migrateWorldData } from './hex/MapSchema.js';
+export type { MapSchema, TileDefinition, WorldTileDefinition, WorldData, WorldMapMeta } from './hex/MapSchema.js';
 export { generateWorldMap, getStartingPosition } from './hex/MapData.js';
 
 // Systems

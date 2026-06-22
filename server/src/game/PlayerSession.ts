@@ -72,6 +72,7 @@ import type {
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
+import type { WorldGrids } from './WorldGrids.js';
 import { QuestSystem } from './QuestSystem.js';
 import type { QuestEvent } from './QuestSystem.js';
 import type { QuestDefinition, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
@@ -82,7 +83,7 @@ const MAX_CHAT_HISTORY = 1000;
 
 export class PlayerSession {
   username: string;
-  private grid: HexGrid;
+  private grids: WorldGrids;
   private content: ContentStore;
   private unlockSystem: UnlockSystem;
   private combatLog: CombatLogEntry[] = [];
@@ -123,6 +124,9 @@ export class PlayerSession {
   /** Callback to get zone — set by PlayerManager. */
   getPartyZone?: () => string | null;
 
+  /** Callback to get the party's current mapId — set by PlayerManager. */
+  getPartyMapId?: () => string | null;
+
   /** Callback to get position — set by PlayerManager. */
   getPartyPosition?: () => { col: number; row: number } | null;
 
@@ -135,21 +139,48 @@ export class PlayerSession {
   /** Callback to get the active dungeon run state — set by PlayerManager. */
   getDungeonState?: () => import('@idle-party-rpg/shared').DungeonRunInfo | null;
 
-  constructor(username: string, grid: HexGrid, content: ContentStore, onQuestEvent?: (event: QuestEvent) => void) {
+  constructor(username: string, grids: WorldGrids, content: ContentStore, onQuestEvent?: (event: QuestEvent) => void) {
     this.username = username;
-    this.grid = grid;
+    this.grids = grids;
     this.content = content;
     this.quests = new QuestSystem(username, onQuestEvent);
 
     const startPos = content.getStartTile();
     const startCoord = offsetToCube(startPos);
-    const startTile = this.grid.getTile(startCoord);
+    // New players spawn on the world's default map.
+    const startTile = this.defaultGrid().getTile(startCoord);
 
     if (!startTile) {
       throw new Error('Invalid starting position');
     }
 
-    this.unlockSystem = new UnlockSystem(this.grid, startTile);
+    this.unlockSystem = new UnlockSystem(this.defaultGrid(), startTile);
+  }
+
+  /** The world's default (spawn) map grid — used for spawn / starting-tile lookups. */
+  private defaultGrid(): HexGrid {
+    return this.grids.getOrThrow(this.content.getWorld().defaultMapId);
+  }
+
+  /** The grid for the map the party is currently on (falls back to the default map). */
+  private currentGrid(): HexGrid {
+    const mapId = this.getPartyMapId?.() ?? this.content.getWorld().defaultMapId;
+    return this.grids.get(mapId) ?? this.defaultGrid();
+  }
+
+  /** The map the party is currently on. */
+  getMapId(): string {
+    return this.getPartyMapId?.() ?? this.content.getWorld().defaultMapId;
+  }
+
+  /**
+   * Re-seat unlocks on the map the party just switched to and reveal the arrival
+   * area. The party's mapId must already be switched before this is called (the
+   * grid is resolved from the party's current mapId).
+   */
+  switchMapGrid(arrivalTile: HexTile): void {
+    this.unlockSystem = UnlockSystem.fromKeys(this.currentGrid(), this.getUnlockedKeys());
+    this.forceUnlockTileArea(arrivalTile);
   }
 
   /** Get combat info for the party combat system. Requires character to exist. */
@@ -285,6 +316,8 @@ export class PlayerSession {
    */
   getWorldData(): {
     startTile: { col: number; row: number };
+    defaultMapId: string;
+    maps: import('@idle-party-rpg/shared').WorldMapMeta[];
     tiles: import('@idle-party-rpg/shared').WorldTileDefinition[];
   } {
     const world = this.content.getWorld();
@@ -292,6 +325,8 @@ export class PlayerSession {
 
     return {
       startTile: world.startTile,
+      defaultMapId: world.defaultMapId,
+      maps: world.maps,
       tiles: world.tiles.map(wt => {
         const zone = getZone(wt.zone, allZones);
         return { ...wt, zoneName: zone?.displayName ?? wt.zone };
@@ -561,7 +596,8 @@ export class PlayerSession {
       party: partyState ?? { col: 0, row: 0, state: 'idle', path: [] },
       battle: battleState ?? { state: 'battle', visual: 'none', duration: 0 },
       unlocked: this.unlockSystem.getUnlockedKeys(),
-      mapSize: this.grid.size,
+      mapSize: this.currentGrid().size,
+      currentMapId: this.getMapId(),
       otherPlayers,
       combatLog: this.combatLog,
       battleCount: this.battleCount,
@@ -920,7 +956,7 @@ export class PlayerSession {
   /** Force-unlock a tile and its adjacent tiles (for relocation after deploy). */
   forceUnlockTileArea(tile: HexTile): void {
     this.unlockSystem.forceUnlock(tile);
-    const neighbors = this.grid.getTraversableNeighbors(tile.coord);
+    const neighbors = this.currentGrid().getTraversableNeighbors(tile.coord);
     for (const neighbor of neighbors) {
       this.unlockSystem.forceUnlock(neighbor);
     }
@@ -938,7 +974,8 @@ export class PlayerSession {
     this.battleCount = 0;
     this.combatLog = [];
     this.logIdCounter = 0;
-    this.unlockSystem = new UnlockSystem(this.grid, startTile);
+    // Master reset returns everyone to the default map's start tile.
+    this.unlockSystem = new UnlockSystem(this.defaultGrid(), startTile);
     this.partyId = null;
     this.clearedDungeons.clear();
 
@@ -948,7 +985,7 @@ export class PlayerSession {
   getStartingTile(): HexTile {
     const startPos = this.content.getStartTile();
     const startCoord = offsetToCube(startPos);
-    const tile = this.grid.getTile(startCoord);
+    const tile = this.defaultGrid().getTile(startCoord);
     if (!tile) throw new Error('Invalid starting position');
     return tile;
   }
@@ -959,6 +996,7 @@ export class PlayerSession {
 
   toSaveData(movementData?: {
     position: { col: number; row: number };
+    mapId: string;
     target: { col: number; row: number } | null;
     movementQueue: { col: number; row: number }[];
   }, partyInfo?: {
@@ -977,6 +1015,7 @@ export class PlayerSession {
       combatLog: this.combatLog.slice(-MAX_SAVE_LOG_ENTRIES),
       unlockedKeys: this.unlockSystem.getUnlockedKeys(),
       position: { col: pos.col, row: pos.row },
+      mapId: movementData?.mapId ?? this.getMapId(),
       target: movementData?.target ?? null,
       movementQueue: movementData?.movementQueue ?? [],
       character: this.character ? {
@@ -1016,15 +1055,17 @@ export class PlayerSession {
    */
   static fromSaveData(
     data: PlayerSaveData,
-    grid: HexGrid,
+    grids: WorldGrids,
     content: ContentStore,
     onQuestEvent?: (event: QuestEvent) => void,
   ): PlayerSession {
     // Build session via Object.create to bypass constructor
     const session = Object.create(PlayerSession.prototype) as PlayerSession;
     (session as { username: string }).username = data.username;
-    session['grid'] = grid;
+    session['grids'] = grids;
     session['content'] = content;
+    // Resolve the grid for the saved map (legacy saves → default map) for unlock seeding.
+    const grid = grids.get(data.mapId ?? content.getWorld().defaultMapId) ?? grids.getOrThrow(content.getWorld().defaultMapId);
     session['battleCount'] = data.battleCount;
     session.quests = new QuestSystem(data.username, onQuestEvent);
     session.quests.loadFromSaveData({

@@ -11,9 +11,15 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 }
 
-/** Build the chain of artwork URLs to try for a monster, ending in placehold.co. */
-function monsterArtSrc(name: string): { real: string; fallback: string } {
-  return { real: artworkUrl('monster', slugify(name)), fallback: placeholderUrl(name, { w: 160, h: 160 }) };
+/**
+ * Build the chain of artwork URLs to try for a monster, ending in placehold.co.
+ * Art is keyed by the monster's definition id (matching the admin upload, which
+ * saves to `/monster-artwork/{id}.png`); falls back to a name slug for any older
+ * art dropped in by name.
+ */
+function monsterArtSrc(monster: { id?: string; name: string }): { real: string; fallback: string } {
+  const key = monster.id || slugify(monster.name);
+  return { real: artworkUrl('monster', key), fallback: placeholderUrl(monster.name, { w: 160, h: 160 }) };
 }
 
 /** Build artwork URLs for a class. */
@@ -300,7 +306,7 @@ export class CombatScreen implements Screen {
           card.classList.toggle('stunned', !!(m.stunTurns && m.stunTurns > 0));
           const img = card.querySelector('.combat-card-img') as HTMLImageElement | null;
           if (img) {
-            const { real, fallback } = monsterArtSrc(m.name);
+            const { real, fallback } = monsterArtSrc(m);
             if (img.dataset.src !== real) {
               img.dataset.src = real;
               img.dataset.fb = '0';
@@ -409,17 +415,21 @@ export class CombatScreen implements Screen {
   private updateCombatBackground(state: ServerStateMessage): void {
     const bg = this.container.querySelector('.combat-stage-bg') as HTMLElement | null;
     if (!bg) return;
-    const zone = (state.party?.col != null && state.party?.row != null) ? state.zoneName : '';
-    const zoneId = state.social?.party?.id ? state.social.party.id : zone;
-    // Tile-specific override: combat-bg-artwork/{zoneId}-{col}-{row}.png; zone default: combat-bg-artwork/{zoneId}.png
-    const tileSrc = state.party
-      ? `/combat-bg-artwork/${slugify(zone)}-${state.party.col}-${state.party.row}.png`
-      : '';
-    const zoneSrc = `/combat-bg-artwork/${slugify(zone || zoneId)}.png`;
-    const fallback = placeholderUrl(zone || 'Combat', { w: 800, h: 400, bg: '1a1a2e', fg: '666' });
-    const layered = tileSrc
-      ? `url('${tileSrc}'), url('${zoneSrc}'), url('${fallback}')`
-      : `url('${zoneSrc}'), url('${fallback}')`;
+    const zoneName = (state.party?.col != null && state.party?.row != null) ? (state.zoneName ?? '') : '';
+    // The zone id is the current room's `zone` tag — admin art is keyed by it
+    // (matching `/zone-artwork/{id}` and `/combat-bg-artwork/{id}` uploads),
+    // not by a slugified display name.
+    const tile = state.party ? this.worldCache.getTile(state.party.col, state.party.row) : null;
+    const zoneId = tile?.zone ?? '';
+    const enc = encodeURIComponent;
+    // Layered background, first found wins:
+    //   per-room combat bg → zone combat bg → zone artwork (admin upload) → placeholder.
+    const layers: string[] = [];
+    if (state.party && zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}-${state.party.col}-${state.party.row}.png`);
+    if (zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}.png`);
+    if (zoneId) layers.push(`/zone-artwork/${enc(zoneId)}.png`);
+    layers.push(placeholderUrl(zoneName || 'Combat', { w: 800, h: 400, bg: '1a1a2e', fg: '666' }));
+    const layered = layers.map(u => `url('${u}')`).join(', ');
     if (bg.dataset.bgKey !== layered) {
       bg.style.backgroundImage = layered;
       bg.dataset.bgKey = layered;
@@ -507,12 +517,12 @@ export class CombatScreen implements Screen {
     }
   }
 
-  private showMonsterPopup(monster: { name: string; currentHp: number; maxHp: number; description?: string }, _anchor: HTMLElement): void {
+  private showMonsterPopup(monster: { id?: string; name: string; currentHp: number; maxHp: number; description?: string }, _anchor: HTMLElement): void {
     const existing = document.querySelector('.monster-popup-overlay') as HTMLElement | null;
     if (existing) { release(existing); existing.remove(); }
     const overlay = document.createElement('div');
     overlay.className = 'monster-popup-overlay';
-    const { real, fallback } = monsterArtSrc(monster.name);
+    const { real, fallback } = monsterArtSrc(monster);
     const description = monster.description?.trim();
     const descriptionHtml = description
       ? `<div class="monster-popup-description">${this.escapeHtml(description)}</div>`

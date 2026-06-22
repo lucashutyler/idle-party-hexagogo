@@ -24,7 +24,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.06.14.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.06.21.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -50,6 +50,8 @@ export interface ClientPlayerCombatant {
 }
 
 export interface ClientMonsterState {
+  /** Monster definition id (its artwork key). Same for all instances of a type. */
+  id: string;
   name: string;
   currentHp: number;
   maxHp: number;
@@ -120,6 +122,8 @@ export interface OtherPlayerState {
   username: string;
   col: number;
   row: number;
+  /** Which map this player is on. Clients hide players that aren't on the viewer's current map. */
+  mapId?: string;
   zone: string;
   className?: string;
   /** The party this player belongs to. Surfaced to the client so the map
@@ -147,6 +151,8 @@ export interface ServerStateMessage {
   battle: ServerBattleState;
   unlocked: string[];
   mapSize: number;
+  /** The map the player's party is currently on. The client renders only this map's rooms. */
+  currentMapId: string;
   otherPlayers: OtherPlayerState[];
   combatLog: CombatLogEntry[];
   battleCount: number;
@@ -329,6 +335,12 @@ export interface ClientLeaveDungeonMessage {
   type: 'leave_dungeon';
 }
 
+/** Travel through one of the current room's transitions (identified by target room GUID). */
+export interface ClientEnterTransitionMessage {
+  type: 'enter_transition';
+  tileId: string;
+}
+
 export type ClientMessage =
   | ClientMoveMessage
   | ClientRequestStateMessage
@@ -350,4 +362,5 @@ export type ClientMessage =
   | ClientTurnInQuestMessage
   | ClientEnterDungeonMessage
   | ClientLeaveDungeonMessage
+  | ClientEnterTransitionMessage
   | ClientSocialMessage;

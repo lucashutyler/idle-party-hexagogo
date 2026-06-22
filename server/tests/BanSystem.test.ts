@@ -5,6 +5,8 @@ import type { GameStateStore, PlayerSaveData } from '../src/game/GameStateStore.
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
 import { HexGrid, HexTile, offsetToCube } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
+import type { WorldGrids } from '../src/game/WorldGrids.js';
+import { wrapGrids, fakeWorldMeta } from './testGrids.js';
 
 // --- Minimal fakes ---
 
@@ -34,6 +36,7 @@ function createFakeContentStore(): ContentStore {
     getAllEncounters: () => ({
       auto_goblin: { id: 'auto_goblin', name: 'Goblins', type: 'random', monsterPool: [{ monsterId: 'goblin', min: 1, max: 1 }], roomMax: 9 },
     }),
+    getWorld: () => ({ tiles: [], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),
   } as unknown as ContentStore;
 }
 
@@ -70,12 +73,12 @@ function createFakeGuildStore(): GuildStore {
 // --- Tests ---
 
 describe('Ban System', () => {
-  let grid: HexGrid;
+  let grids: WorldGrids;
   let content: ContentStore;
   let guildStore: GuildStore;
 
   beforeEach(() => {
-    grid = createFakeGrid();
+    grids = wrapGrids(createFakeGrid());
     content = createFakeContentStore();
     guildStore = createFakeGuildStore();
   });
@@ -102,7 +105,7 @@ describe('Ban System', () => {
 
       const accountStore = createFakeAccountStore(accounts);
       const store = createFakeStore();
-      const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+      const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
       const saves: PlayerSaveData[] = [
         {
@@ -156,7 +159,7 @@ describe('Ban System', () => {
 
       const accountStore = createFakeAccountStore(accounts);
       const store = createFakeStore();
-      const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+      const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
       const saves: PlayerSaveData[] = [
         {
@@ -203,7 +206,7 @@ describe('Ban System', () => {
 
       const accountStore = createFakeAccountStore(accounts);
       const store = createFakeStore();
-      const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+      const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
       // Simulate save data from after Alice was unbanned and played —
       // she's at a non-start position (col:1, row:0) in a party with Bob
@@ -278,7 +281,7 @@ describe('Ban System', () => {
       const store = createFakeStore();
 
       // First restart — restore Alice at non-start position
-      const pm1 = new PlayerManager(grid, content, guildStore, accountStore, store);
+      const pm1 = new PlayerManager(grids, content, guildStore, accountStore, store);
       pm1.restoreFromSaveData([{
         username: 'alice',
         battleCount: 70,
@@ -300,7 +303,7 @@ describe('Ban System', () => {
       expect(saveData[0].position).toEqual({ col: 1, row: 0 });
 
       // Second restart — restore from the save data produced above
-      const pm2 = new PlayerManager(grid, content, guildStore, accountStore, store);
+      const pm2 = new PlayerManager(grids, content, guildStore, accountStore, store);
       pm2.restoreFromSaveData(saveData);
 
       const session2 = pm2.getSessionByUsername('alice')!;
@@ -326,7 +329,7 @@ describe('Ban System', () => {
 
       const accountStore = createFakeAccountStore(accounts);
       const store = createFakeStore();
-      const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+      const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
       // Restore alice's session
       pm.restoreFromSaveData([{

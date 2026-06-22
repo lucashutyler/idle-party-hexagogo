@@ -7,7 +7,7 @@ import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES, SEED_TILE_TYPES, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES, migrateLegacySet, findSetConflicts, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
 
@@ -128,11 +128,19 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Add or update a world tile. Supports ?versionId= for draft editing. */
   router.put('/world/tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
-    const { col, row, type, zone, name, encounterTable, shopId, npcId, dungeonId, requiredItemId } = req.body;
+    const { col, row, type, zone, name, encounterTable, shopId, npcId, dungeonId, requiredItemId, transitions } = req.body;
     if (col == null || row == null || !type || !zone || !name) {
       res.status(400).json({ error: 'Missing required fields: col, row, type, zone, name' });
       return;
     }
+
+    // Normalize optional map transition links (drop malformed/empty entries).
+    const tileTransitions = Array.isArray(transitions)
+      ? transitions
+          .filter((t: { mapId?: unknown; tileId?: unknown }) => t && t.mapId && t.tileId)
+          .map((t: { mapId: string; tileId: string }) => ({ mapId: t.mapId, tileId: t.tileId }))
+      : undefined;
+    const tileTransitionsOrUndef = tileTransitions && tileTransitions.length > 0 ? tileTransitions : undefined;
 
     // Validate optional encounter table entries
     if (encounterTable != null && Array.isArray(encounterTable)) {
@@ -146,6 +154,8 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
 
     // Only include encounterTable if it has entries
     const tileEncounterTable = Array.isArray(encounterTable) && encounterTable.length > 0 ? encounterTable : undefined;
+    // Which map this tile belongs to. Clients that predate multi-map omit it → default map.
+    const tileMapId = (req.body.mapId as string) || DEFAULT_MAP_ID;
 
     if (versionId) {
       const versions = getVersionStore();
@@ -153,19 +163,19 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.world.tiles.findIndex(t => t.col === col && t.row === row);
+      const idx = snapshot.world.tiles.findIndex(t => t.mapId === tileMapId && t.col === col && t.row === row);
       if (idx >= 0) {
         // Preserve existing GUID on update
-        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined };
+        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef };
       } else {
         // New tile — generate a GUID
-        snapshot.world.tiles.push({ id: crypto.randomUUID(), col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined });
+        snapshot.world.tiles.push({ id: crypto.randomUUID(), mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef });
       }
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ id: '', col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined });
+      await content.addOrUpdateTile({ id: '', mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef });
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }
@@ -175,6 +185,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   router.delete('/world/tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
     const { col, row } = req.body;
+    const tileMapId = (req.body.mapId as string) || DEFAULT_MAP_ID;
     if (col == null || row == null) {
       res.status(400).json({ error: 'Missing required fields: col, row' });
       return;
@@ -187,18 +198,20 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
       const { startTile } = snapshot.world;
-      if (startTile.col === col && startTile.row === row) {
+      if (tileMapId === snapshot.world.defaultMapId && startTile.col === col && startTile.row === row) {
         res.status(400).json({ error: 'Cannot delete the start tile.' });
         return;
       }
-      const idx = snapshot.world.tiles.findIndex(t => t.col === col && t.row === row);
+      const idx = snapshot.world.tiles.findIndex(t => t.mapId === tileMapId && t.col === col && t.row === row);
       if (idx < 0) { res.status(400).json({ error: 'Tile not found.' }); return; }
+      const inbound = snapshot.world.tiles.find(t => t.transitions?.some(tr => tr.tileId === snapshot.world.tiles[idx].id));
+      if (inbound) { res.status(400).json({ error: `A transition in "${inbound.name}" links to this room. Remove it first.` }); return; }
       snapshot.world.tiles.splice(idx, 1);
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      const result = await content.deleteTile(col, row);
+      const result = await content.deleteTile(tileMapId, col, row);
       if (!result.success) {
         res.status(400).json({ error: result.error });
         return;
@@ -208,7 +221,10 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
-  /** Set the start tile. Supports ?versionId= for draft editing. */
+  /**
+   * Set a map's start tile. Defaults to the default map (the global spawn) when
+   * `mapId` is omitted. Supports ?versionId= for draft editing.
+   */
   router.put('/world/start-tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
     const { col, row } = req.body;
@@ -223,19 +239,81 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
-      const tile = snapshot.world.tiles.find(t => t.col === col && t.row === row);
+      const mapId = (req.body.mapId as string) || snapshot.world.defaultMapId;
+      const tile = snapshot.world.tiles.find(t => t.mapId === mapId && t.col === col && t.row === row);
       if (!tile) { res.status(400).json({ error: 'Tile not found.' }); return; }
-      snapshot.world.startTile = { col, row };
+      const meta = snapshot.world.maps.find(m => m.id === mapId);
+      if (meta) meta.startTile = { col, row };
+      if (mapId === snapshot.world.defaultMapId) snapshot.world.startTile = { col, row };
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      const result = await content.setStartTile(col, row);
+      const mapId = (req.body.mapId as string) || content.getWorld().defaultMapId;
+      const result = await content.setMapStartTile(mapId, col, row);
       if (!result.success) {
         res.status(400).json({ error: result.error });
         return;
       }
       res.json({ success: true, world: content.getWorld() });
+    }
+  });
+
+  /** Create or rename a map. Supports ?versionId= for draft editing. */
+  router.post('/world/map', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const { id, name, startTile } = req.body;
+    if (!id || !name) {
+      res.status(400).json({ error: 'Missing required fields: id, name' });
+      return;
+    }
+    const meta = { id: id as string, name: name as string, startTile: startTile ?? { col: 0, row: 0 } };
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      const idx = snapshot.world.maps.findIndex(m => m.id === meta.id);
+      if (idx >= 0) snapshot.world.maps[idx] = { ...snapshot.world.maps[idx], name: meta.name };
+      else snapshot.world.maps.push(meta);
+      await versions.saveSnapshot(versionId, snapshot);
+      res.json({ success: true, world: snapshot.world });
+    } else {
+      const content = getContentStore();
+      const result = await content.addOrUpdateMap(meta);
+      if (!result.success) { res.status(400).json({ error: result.error }); return; }
+      const relocated = rebuildGrid();
+      res.json({ success: true, world: content.getWorld(), relocated });
+    }
+  });
+
+  /** Delete a map (must have no rooms and no inbound transitions). Supports ?versionId=. */
+  router.delete('/world/map', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const { id } = req.body;
+    if (!id) { res.status(400).json({ error: 'Missing required field: id' }); return; }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (id === snapshot.world.defaultMapId) { res.status(400).json({ error: 'Cannot delete the default map.' }); return; }
+      if (snapshot.world.tiles.some(t => t.mapId === id)) { res.status(400).json({ error: "Delete or move this map's rooms first." }); return; }
+      const inbound = snapshot.world.tiles.find(t => t.transitions?.some(tr => tr.mapId === id));
+      if (inbound) { res.status(400).json({ error: `A transition in "${inbound.name}" still leads to this map. Remove it first.` }); return; }
+      snapshot.world.maps = snapshot.world.maps.filter(m => m.id !== id);
+      await versions.saveSnapshot(versionId, snapshot);
+      res.json({ success: true, world: snapshot.world });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteMap(id as string);
+      if (!result.success) { res.status(400).json({ error: result.error }); return; }
+      const relocated = rebuildGrid();
+      res.json({ success: true, world: content.getWorld(), relocated });
     }
   });
 
@@ -516,6 +594,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     shop: 'data/shop-artwork',
     zone: 'data/zone-artwork',
     'tile-type': 'data/tile-type-artwork',
+    parchment: 'data/parchment-artwork',
   };
 
   /** Validate + write a square PNG into the appropriate kind folder. */

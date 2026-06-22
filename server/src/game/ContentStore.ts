@@ -1,14 +1,14 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, WorldMapMeta, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
 import type { RecipeDefinition } from '@idle-party-rpg/shared';
 import type { NpcDefinition } from '@idle-party-rpg/shared';
 import type { QuestDefinition } from '@idle-party-rpg/shared';
 import type { DungeonDefinition } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -42,7 +42,12 @@ export class ContentStore {
   private npcs = new Map<string, NpcDefinition>();
   private quests = new Map<string, QuestDefinition>();
   private dungeons = new Map<string, DungeonDefinition>();
-  private world: WorldData = { startTile: { col: 0, row: 0 }, tiles: [] };
+  private world: WorldData = {
+    startTile: { col: 0, row: 0 },
+    maps: [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile: { col: 0, row: 0 } }],
+    defaultMapId: DEFAULT_MAP_ID,
+    tiles: [],
+  };
 
   async load(): Promise<void> {
     const exists = await this.tryLoadAll();
@@ -196,7 +201,8 @@ export class ContentStore {
   // --- Tile CRUD ---
 
   async addOrUpdateTile(tile: WorldTileDefinition): Promise<void> {
-    const idx = this.world.tiles.findIndex(t => t.col === tile.col && t.row === tile.row);
+    // Tiles are unique per (mapId, col, row) — two maps may share a (col, row).
+    const idx = this.world.tiles.findIndex(t => t.mapId === tile.mapId && t.col === tile.col && t.row === tile.row);
     if (idx >= 0) {
       // Preserve existing GUID on update
       tile.id = this.world.tiles[idx].id;
@@ -209,15 +215,21 @@ export class ContentStore {
     await this.save();
   }
 
-  async deleteTile(col: number, row: number): Promise<{ success: boolean; error?: string }> {
-    const { startTile } = this.world;
-    if (startTile.col === col && startTile.row === row) {
+  async deleteTile(mapId: string, col: number, row: number): Promise<{ success: boolean; error?: string }> {
+    if (mapId === this.world.defaultMapId && this.world.startTile.col === col && this.world.startTile.row === row) {
       return { success: false, error: 'Cannot delete the start tile. Assign a different start tile first.' };
     }
 
-    const idx = this.world.tiles.findIndex(t => t.col === col && t.row === row);
+    const idx = this.world.tiles.findIndex(t => t.mapId === mapId && t.col === col && t.row === row);
     if (idx < 0) {
       return { success: false, error: 'Tile not found.' };
+    }
+
+    // Block deletion if another room's transition links to this one (dangling link).
+    const victim = this.world.tiles[idx];
+    const inbound = this.world.tiles.find(t => t.transitions?.some(tr => tr.tileId === victim.id));
+    if (inbound) {
+      return { success: false, error: `A transition in "${inbound.name}" links to this room. Remove it first.` };
     }
 
     this.world.tiles.splice(idx, 1);
@@ -225,8 +237,18 @@ export class ContentStore {
     return { success: true };
   }
 
+  /** Set the global spawn tile (a room on the default map). */
   async setStartTile(col: number, row: number): Promise<{ success: boolean; error?: string }> {
-    const tile = this.world.tiles.find(t => t.col === col && t.row === row);
+    return this.setMapStartTile(this.world.defaultMapId, col, row);
+  }
+
+  /** Set a specific map's start (centering/fallback) tile; also the global spawn for the default map. */
+  async setMapStartTile(mapId: string, col: number, row: number): Promise<{ success: boolean; error?: string }> {
+    const meta = this.world.maps.find(m => m.id === mapId);
+    if (!meta) {
+      return { success: false, error: 'Map not found.' };
+    }
+    const tile = this.world.tiles.find(t => t.mapId === mapId && t.col === col && t.row === row);
     if (!tile) {
       return { success: false, error: 'Tile not found.' };
     }
@@ -235,7 +257,52 @@ export class ContentStore {
     if (!isTraversable) {
       return { success: false, error: 'Start tile must be traversable.' };
     }
-    this.world.startTile = { col, row };
+    meta.startTile = { col, row };
+    if (mapId === this.world.defaultMapId) {
+      this.world.startTile = { col, row };
+    }
+    await this.save();
+    return { success: true };
+  }
+
+  // --- Map CRUD ---
+
+  getMaps(): WorldMapMeta[] {
+    return this.world.maps;
+  }
+
+  /** Create or rename a map. New maps start with no tiles; the admin adds rooms tagged with `id`. */
+  async addOrUpdateMap(map: WorldMapMeta): Promise<{ success: boolean; error?: string }> {
+    if (!map.id) {
+      return { success: false, error: 'Map id is required.' };
+    }
+    const idx = this.world.maps.findIndex(m => m.id === map.id);
+    if (idx >= 0) {
+      // Update (rename): change the name but keep the existing start tile.
+      this.world.maps[idx] = { ...this.world.maps[idx], name: map.name };
+    } else {
+      this.world.maps.push(map);
+    }
+    await this.save();
+    return { success: true };
+  }
+
+  async deleteMap(mapId: string): Promise<{ success: boolean; error?: string }> {
+    if (mapId === this.world.defaultMapId) {
+      return { success: false, error: 'Cannot delete the default map.' };
+    }
+    if (this.world.tiles.some(t => t.mapId === mapId)) {
+      return { success: false, error: "Delete or move this map's rooms first." };
+    }
+    const inbound = this.world.tiles.find(t => t.transitions?.some(tr => tr.mapId === mapId));
+    if (inbound) {
+      return { success: false, error: `A transition in "${inbound.name}" still leads to this map. Remove it first.` };
+    }
+    const idx = this.world.maps.findIndex(m => m.id === mapId);
+    if (idx < 0) {
+      return { success: false, error: 'Map not found.' };
+    }
+    this.world.maps.splice(idx, 1);
     await this.save();
     return { success: true };
   }
@@ -568,6 +635,8 @@ export class ContentStore {
     }
 
     this.world = snapshot.world;
+    // Normalize legacy snapshots (no mapId / maps) into the multi-map shape.
+    migrateWorldData(this.world);
 
     // Safety net: ensure every tile has a GUID
     for (const tile of this.world.tiles) {
@@ -692,13 +761,16 @@ export class ContentStore {
         console.log(`[ContentStore] Assigned GUIDs to ${migrated} tiles (migration)`);
       }
 
+      // Normalize legacy single-map worlds into the multi-map shape (mapId / maps / defaultMapId)
+      const worldMigrated = migrateWorldData(this.world);
+
       // Migrate old-format encounter tables (monsterId → encounterId)
       const encountersMigrated = this.migrateEncounterTables();
 
       // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
       const itemsMigrated = this.migrateItems();
 
-      if (migrated > 0 || encountersMigrated || itemsMigrated || tileTypesSeeded || recipesSeeded) {
+      if (migrated > 0 || worldMigrated || encountersMigrated || itemsMigrated || tileTypesSeeded || recipesSeeded) {
         await this.save();
       }
 
@@ -891,27 +963,29 @@ export class ContentStore {
 
     this.world = {
       startTile: { col: 2, row: 2 },
+      maps: [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile: { col: 2, row: 2 } }],
+      defaultMapId: DEFAULT_MAP_ID,
       tiles: [
         // Hatchetmill
-        { id: crypto.randomUUID(), col: 2, row: 2, type: TileType.Plains, zone: 'hatchetmill', name: 'Town Square' },
-        { id: crypto.randomUUID(), col: 1, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'Blacksmith' },
-        { id: crypto.randomUUID(), col: 3, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'General Store' },
-        { id: crypto.randomUUID(), col: 2, row: 1, type: TileType.Town, zone: 'hatchetmill', name: "Healer's Hut" },
-        { id: crypto.randomUUID(), col: 1, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Dirt Road' },
-        { id: crypto.randomUUID(), col: 3, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Village Green' },
-        { id: crypto.randomUUID(), col: 2, row: 3, type: TileType.Plains, zone: 'hatchetmill', name: 'Old Well' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 2, row: 2, type: TileType.Plains, zone: 'hatchetmill', name: 'Town Square' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 1, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'Blacksmith' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 3, row: 2, type: TileType.Town, zone: 'hatchetmill', name: 'General Store' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 2, row: 1, type: TileType.Town, zone: 'hatchetmill', name: "Healer's Hut" },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 1, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Dirt Road' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 3, row: 1, type: TileType.Plains, zone: 'hatchetmill', name: 'Village Green' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 2, row: 3, type: TileType.Plains, zone: 'hatchetmill', name: 'Old Well' },
 
         // Darkwood
-        { id: crypto.randomUUID(), col: 4, row: 2, type: TileType.Plains, zone: 'darkwood', name: 'Woodland Edge' },
-        { id: crypto.randomUUID(), col: 5, row: 2, type: TileType.Forest, zone: 'darkwood', name: 'Forest Path' },
-        { id: crypto.randomUUID(), col: 5, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Thick Trees' },
-        { id: crypto.randomUUID(), col: 4, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Mossy Clearing' },
-        { id: crypto.randomUUID(), col: 4, row: 3, type: TileType.Plains, zone: 'darkwood', name: 'Overgrown Trail' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 4, row: 2, type: TileType.Plains, zone: 'darkwood', name: 'Woodland Edge' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 5, row: 2, type: TileType.Forest, zone: 'darkwood', name: 'Forest Path' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 5, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Thick Trees' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 4, row: 1, type: TileType.Forest, zone: 'darkwood', name: 'Mossy Clearing' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 4, row: 3, type: TileType.Plains, zone: 'darkwood', name: 'Overgrown Trail' },
 
         // Crystal Caves
-        { id: crypto.randomUUID(), col: 5, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Cave Entrance', dungeonId: 'crystal_caves_trial' },
-        { id: crypto.randomUUID(), col: 6, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Glittering Tunnel' },
-        { id: crypto.randomUUID(), col: 6, row: 2, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Crystal Chamber' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 5, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Cave Entrance', dungeonId: 'crystal_caves_trial' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 6, row: 3, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Glittering Tunnel' },
+        { id: crypto.randomUUID(), mapId: DEFAULT_MAP_ID, col: 6, row: 2, type: TileType.Dungeon, zone: 'crystal_caves', name: 'Crystal Chamber' },
       ],
     };
 

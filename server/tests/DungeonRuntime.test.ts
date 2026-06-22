@@ -3,8 +3,9 @@ import { PlayerManager } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
-import { HexGrid, HexTile, offsetToCube } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
+import { wrapGrids, fakeWorldMeta } from './testGrids.js';
 import type { DungeonDefinition, WorldTileDefinition, ClassName } from '@idle-party-rpg/shared';
 import WebSocket from 'ws';
 
@@ -35,7 +36,7 @@ function createFakeGrid(): HexGrid {
 }
 
 function createFakeContentStore(dungeon: DungeonDefinition): ContentStore {
-  const entranceTile: WorldTileDefinition = { id: ENTRANCE_TILE_ID, col: 0, row: 0, type: 'dungeon', zone: 'crystal_caves', name: 'Cave Entrance', dungeonId: DUNGEON_ID };
+  const entranceTile: WorldTileDefinition = { id: ENTRANCE_TILE_ID, mapId: DEFAULT_MAP_ID, col: 0, row: 0, type: 'dungeon', zone: 'crystal_caves', name: 'Cave Entrance', dungeonId: DUNGEON_ID };
   return {
     getStartTile: () => ({ col: 0, row: 0 }),
     getMonster: () => ({ id: 'goblin', name: 'Goblin', hp: 10, damage: 2, drops: [], damageType: 'physical' }),
@@ -48,7 +49,7 @@ function createFakeContentStore(dungeon: DungeonDefinition): ContentStore {
     getTileById: (id: string) => (id === ENTRANCE_TILE_ID ? entranceTile : undefined),
     getAllShops: () => ({}),
     getShop: () => undefined,
-    getWorld: () => ({ tiles: [entranceTile], startTile: { col: 0, row: 0 } }),
+    getWorld: () => ({ tiles: [entranceTile], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),
     getAllSets: () => ({}),
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
@@ -94,7 +95,7 @@ function createFakeWs(): WebSocket {
 async function setup(dungeon = makeDungeon(), className: ClassName = 'Knight'): Promise<{ pm: PlayerManager; partyId: string; grid: HexGrid }> {
   const grid = createFakeGrid();
   const content = createFakeContentStore(dungeon);
-  const pm = new PlayerManager(grid, content, createFakeGuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+  const pm = new PlayerManager(wrapGrids(grid), content, createFakeGuildStore(), createFakeAccountStore(['alice']), createFakeStore());
   const session = await pm.login(createFakeWs(), 'alice');
   session.setClass(className);
   pm.ensureParty('alice');
@@ -120,7 +121,7 @@ describe('Dungeon runtime (PartyBattleManager via PlayerManager)', () => {
   it('blocks entry when not standing on the dungeon entrance', async () => {
     const { pm, partyId, grid } = await setup();
     // Relocate the party to a non-entrance room.
-    pm.partyBattles.relocateParty(partyId, grid.getTile(offsetToCube({ col: 1, row: 0 }))!);
+    pm.partyBattles.relocateParty(partyId, grid.getTile(offsetToCube({ col: 1, row: 0 }))!, DEFAULT_MAP_ID);
     const result = pm.partyBattles.enterDungeon(partyId, DUNGEON_ID);
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error).toMatch(/entrance/i);
@@ -255,7 +256,7 @@ describe('Dungeon runtime (PartyBattleManager via PlayerManager)', () => {
     // While in the dungeon, movement is locked.
     expect(pm.partyBattles.handleMove(partyId, 1, 0).success).toBe(false);
 
-    pm.partyBattles.relocateParty(partyId, grid.getTile(offsetToCube({ col: 1, row: 0 }))!);
+    pm.partyBattles.relocateParty(partyId, grid.getTile(offsetToCube({ col: 1, row: 0 }))!, DEFAULT_MAP_ID);
     // The run is cleared, so the party is no longer dungeon-locked.
     expect(pm.partyBattles.getDungeonRunInfo(partyId)).toBeNull();
   });
@@ -263,7 +264,7 @@ describe('Dungeon runtime (PartyBattleManager via PlayerManager)', () => {
   it('surfaces inDungeon + dungeonName to other players via getOtherPlayers', async () => {
     const grid = createFakeGrid();
     const content = createFakeContentStore(makeDungeon());
-    const pm = new PlayerManager(grid, content, createFakeGuildStore(), createFakeAccountStore(['alice', 'bob']), createFakeStore());
+    const pm = new PlayerManager(wrapGrids(grid), content, createFakeGuildStore(), createFakeAccountStore(['alice', 'bob']), createFakeStore());
     const alice = await pm.login(createFakeWs(), 'alice');
     alice.setClass('Knight');
     pm.ensureParty('alice');

@@ -12,14 +12,16 @@ export class ServerParty {
   private targetTile: HexTile | null = null;
   private movementQueue: HexTile[] = [];
   private state: PartyState = 'idle';
+  private mapId: string;
 
   onStateChange?: (state: PartyState) => void;
   onTileReached?: (tile: HexTile) => void;
   onDestinationReached?: () => void;
 
-  constructor(grid: HexGrid, startTile: HexTile) {
+  constructor(grid: HexGrid, startTile: HexTile, mapId: string) {
     this.pathfinder = new HexPathfinder(grid);
     this.currentTile = startTile;
+    this.mapId = mapId;
   }
 
   /**
@@ -30,8 +32,9 @@ export class ServerParty {
     currentTile: HexTile,
     targetTile: HexTile | null,
     movementQueue: HexTile[],
+    mapId: string,
   ): ServerParty {
-    const party = new ServerParty(grid, currentTile);
+    const party = new ServerParty(grid, currentTile, mapId);
     party.targetTile = targetTile;
     party.movementQueue = movementQueue;
     return party;
@@ -39,6 +42,11 @@ export class ServerParty {
 
   get position(): CubeCoord {
     return this.currentTile.coord;
+  }
+
+  /** The map this party is currently on. */
+  get currentMapId(): string {
+    return this.mapId;
   }
 
   get tile(): HexTile {
@@ -106,6 +114,19 @@ export class ServerParty {
 
   /** Force-relocate the party to a new tile, clearing all movement state. */
   relocateTo(tile: HexTile): void {
+    this.currentTile = tile;
+    this.targetTile = null;
+    this.movementQueue = [];
+  }
+
+  /**
+   * Move the party to a different map: swap the pathfinder to the new map's grid,
+   * snap to `tile`, and clear all movement state. `relocateTo` alone is insufficient
+   * because the pathfinder is bound to a single grid.
+   */
+  switchMap(grid: HexGrid, tile: HexTile, mapId: string): void {
+    this.pathfinder = new HexPathfinder(grid);
+    this.mapId = mapId;
     this.currentTile = tile;
     this.targetTile = null;
     this.movementQueue = [];

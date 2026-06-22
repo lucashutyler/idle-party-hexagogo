@@ -85,6 +85,7 @@ export type TabId =
   | 'encounters'
   | 'tile-types'
   | 'dungeons'
+  | 'maps'
   | 'map'
   | 'versions'
   | 'xp-table';
@@ -109,7 +110,8 @@ export const TABS: TabDef[] = [
   { id: 'encounters', label: 'Encounters', icon: '⚔' },
   { id: 'tile-types', label: 'Tile Types', icon: '■' },
   { id: 'dungeons',   label: 'Dungeons',   icon: '⛬' },
-  { id: 'map',        label: 'Map',        icon: '⌖' },
+  { id: 'maps',       label: 'Maps',       icon: '▤' },
+  { id: 'map',        label: 'Map Editor', icon: '⌖' },
   { id: 'versions',   label: 'Versions',   icon: '⧉' },
   { id: 'xp-table',   label: 'XP Table',   icon: '✨' },
 ];

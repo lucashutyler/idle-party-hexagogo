@@ -10,6 +10,7 @@ import {
   getNeighbor,
   TILE_CONFIGS,
   HEX_SIZE,
+  DEFAULT_MAP_ID,
 } from '@idle-party-rpg/shared';
 import type {
   CubeCoord,
@@ -61,6 +62,10 @@ export class MapTab implements Tab {
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private selectedTile: WorldTileDefinition | null = null;
+  /** Which map the editor is currently showing. */
+  private selectedMapId: string = DEFAULT_MAP_ID;
+  /** When set, the next room click links it as `sourceTile`'s transition target. */
+  private pickTransition: { sourceTile: WorldTileDefinition } | null = null;
 
   cleanup(): void {
     if (this.resizeHandler) window.removeEventListener('resize', this.resizeHandler);
@@ -78,17 +83,24 @@ export class MapTab implements Tab {
 
   render(container: HTMLElement, ctx: AdminContext): void {
     this.rebuildMapData(ctx);
+    const content = ctx.getDisplayContent();
+    const maps = content?.world.maps ?? [];
+    const mapOptions = maps.map(m =>
+      `<option value="${escapeHtml(m.id)}"${m.id === this.selectedMapId ? ' selected' : ''}>${escapeHtml(m.name)}</option>`
+    ).join('');
     container.innerHTML = `
       <div class="admin-page admin-page-map">
         <div class="admin-map-layout">
           <div class="admin-map-canvas-area">
             <div class="admin-map-controls">
-              <span id="map-tile-count" class="admin-map-tile-count">World Map (${this.mapTiles.length} rooms)</span>
+              <select id="map-selector" class="admin-select admin-select-sm" title="Switch map">${mapOptions}</select>
+              <span id="map-tile-count" class="admin-map-tile-count">${this.mapTiles.length} rooms</span>
               <button class="admin-btn admin-btn-sm" id="map-zoom-in">+</button>
               <button class="admin-btn admin-btn-sm" id="map-zoom-out">−</button>
               <button class="admin-btn admin-btn-sm" id="map-reset">Reset</button>
               <span id="map-hover-info" class="admin-map-info"></span>
             </div>
+            <div id="map-pick-banner" class="admin-map-pick-banner" style="display:none"></div>
             <canvas id="admin-map-canvas"></canvas>
           </div>
           <div class="admin-map-sidebar" id="admin-map-sidebar"></div>
@@ -97,14 +109,21 @@ export class MapTab implements Tab {
     `;
     this.initMapCanvas(ctx);
     this.renderSidebar(ctx);
+    this.updatePickBanner();
   }
 
   private rebuildMapData(ctx: AdminContext): void {
     const content = ctx.getDisplayContent();
     if (!content) return;
+    // Default to the world's spawn map; fall back if the selected map was deleted.
+    const maps = content.world.maps ?? [];
+    if (!maps.some(m => m.id === this.selectedMapId)) {
+      this.selectedMapId = content.world.defaultMapId ?? maps[0]?.id ?? DEFAULT_MAP_ID;
+    }
     this.worldTileDefs.clear();
     const tiles: HexTile[] = [];
     for (const tileDef of content.world.tiles) {
+      if (tileDef.mapId !== this.selectedMapId) continue;
       const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
       tiles.push(new HexTile(coord, tileDef.type, tileDef.zone));
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
@@ -120,6 +139,13 @@ export class MapTab implements Tab {
       occupied.add(`${offset.col},${offset.row}`);
     }
     const adjacent = new Map<string, AdjacentSlot>();
+    // A brand-new (empty) map has no tiles to be adjacent to — offer a single
+    // starter slot at the origin so the first room can be placed.
+    if (this.mapTiles.length === 0) {
+      adjacent.set('0,0', { col: 0, row: 0, coord: offsetToCube({ col: 0, row: 0 }) });
+      this.adjacentSlots = Array.from(adjacent.values());
+      return;
+    }
     for (const tile of this.mapTiles) {
       for (const neighborCoord of getNeighbors(tile.coord)) {
         const offset = cubeToOffset(neighborCoord);
@@ -209,6 +235,13 @@ export class MapTab implements Tab {
 
     this.keydownHandler = (e: KeyboardEvent) => {
       if (ctx.isReadOnly()) return;
+      if (e.key === 'Escape' && this.pickTransition) {
+        e.preventDefault();
+        this.pickTransition = null;
+        this.updatePickBanner();
+        this.renderSidebar(ctx);
+        return;
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tag = (document.activeElement?.tagName ?? '').toLowerCase();
         if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
@@ -237,6 +270,9 @@ export class MapTab implements Tab {
       };
       this.draw(ctx);
     });
+    (document.getElementById('map-selector') as HTMLSelectElement | null)?.addEventListener('change', (e) => {
+      this.switchMap(ctx, (e.target as HTMLSelectElement).value);
+    });
 
     this.mapCanvas.addEventListener('mousemove', e => {
       if (this.isDragging) return;
@@ -248,7 +284,8 @@ export class MapTab implements Tab {
   private getStartTilePixel(ctx: AdminContext): { x: number; y: number } {
     const content = ctx.getDisplayContent();
     if (content) {
-      const { col, row } = content.world.startTile;
+      const meta = content.world.maps?.find(m => m.id === this.selectedMapId);
+      const { col, row } = meta?.startTile ?? content.world.startTile;
       return cubeToPixel(offsetToCube({ col, row }));
     }
     return { x: 0, y: 0 };
@@ -277,7 +314,60 @@ export class MapTab implements Tab {
 
   private updateMapTileCount(): void {
     const el = document.getElementById('map-tile-count');
-    if (el) el.textContent = `World Map (${this.mapTiles.length} rooms)`;
+    if (el) el.textContent = `${this.mapTiles.length} rooms`;
+  }
+
+  /** Show/hide the "click a room to link" banner while in transition-pick mode. */
+  private updatePickBanner(): void {
+    const banner = document.getElementById('map-pick-banner');
+    if (!banner) return;
+    if (this.pickTransition) {
+      banner.style.display = '';
+      banner.textContent = `Linking "${this.pickTransition.sourceTile.name}" — switch maps if needed, then click the destination room. (Esc to cancel)`;
+    } else {
+      banner.style.display = 'none';
+      banner.textContent = '';
+    }
+  }
+
+  /** Switch the editor to a different map (full re-render keeps the selector in sync). */
+  private switchMap(ctx: AdminContext, mapId: string): void {
+    if (mapId === this.selectedMapId) return;
+    this.selectedMapId = mapId;
+    this.selectedTile = null;
+    this.mapInitialized = false; // re-center on the new map's start
+    ctx.rerenderTab();
+  }
+
+  /** Finish a transition pick: link the source room to the clicked target room. */
+  private async completeTransitionPick(ctx: AdminContext, target: WorldTileDefinition): Promise<void> {
+    const pick = this.pickTransition;
+    if (!pick) return;
+    const source = pick.sourceTile;
+    this.pickTransition = null;
+    if (target.id === source.id) {
+      this.updatePickBanner();
+      this.renderSidebar(ctx);
+      return; // a room can't transition to itself
+    }
+    if (!source.transitions) source.transitions = [];
+    if (!source.transitions.some(t => t.tileId === target.id && t.mapId === this.selectedMapId)) {
+      source.transitions.push({ mapId: this.selectedMapId, tileId: target.id });
+    }
+    try {
+      const data = await putAdmin<{ world: WorldData }>(
+        `/api/admin/world/tile${ctx.versionQueryParam()}`, source);
+      this.applyWorldUpdate(ctx, data.world);
+      // Return to the source room's map and reselect it so the link is visible.
+      this.selectedMapId = source.mapId;
+      this.mapInitialized = false;
+      ctx.rerenderTab();
+      this.selectedTile = this.worldTileDefs.get(`${source.col},${source.row}`) ?? null;
+      this.draw(ctx);
+      this.renderSidebar(ctx);
+    } catch (err) {
+      this.showSidebarError(err instanceof Error ? err.message : 'Network error');
+    }
   }
 
   private handleMapClick(ctx: AdminContext, mx: number, my: number): void {
@@ -289,6 +379,13 @@ export class MapTab implements Tab {
     const clickedKey = `${clickedOffset.col},${clickedOffset.row}`;
 
     const tileDef = this.worldTileDefs.get(clickedKey);
+
+    // Transition pick mode: the next room click becomes the source tile's target.
+    if (this.pickTransition && tileDef) {
+      this.completeTransitionPick(ctx, tileDef);
+      return;
+    }
+
     if (tileDef) {
       this.selectedTile = tileDef;
       this.draw(ctx);
@@ -477,6 +574,8 @@ export class MapTab implements Tab {
       }
       this.drawNonTraversableMarker(c, selectedHexTile, sx, sy, zoom, content);
       this.drawStartMarker(c, selectedHexTile, sx, sy, zoom, content);
+      this.drawNpcMarker(c, selectedHexTile, sx, sy, zoom, content);
+      this.drawTransitionMarker(c, selectedHexTile, sx, sy, zoom);
     }
   }
 
@@ -502,6 +601,7 @@ export class MapTab implements Tab {
     this.drawNonTraversableMarker(c, tile, sx, sy, zoom, content);
     this.drawStartMarker(c, tile, sx, sy, zoom, content);
     this.drawNpcMarker(c, tile, sx, sy, zoom, content);
+    this.drawTransitionMarker(c, tile, sx, sy, zoom);
   }
 
   private drawNpcMarker(
@@ -562,7 +662,9 @@ export class MapTab implements Tab {
   ): void {
     if (!content) return;
     const offset = cubeToOffset(tile.coord);
-    if (content.world.startTile.col === offset.col && content.world.startTile.row === offset.row) {
+    const meta = content.world.maps?.find(m => m.id === this.selectedMapId);
+    const start = meta?.startTile ?? content.world.startTile;
+    if (start.col === offset.col && start.row === offset.row) {
       c.save();
       c.font = `${Math.max(10, 16 * zoom)}px sans-serif`;
       c.textAlign = 'center';
@@ -571,6 +673,20 @@ export class MapTab implements Tab {
       c.fillText('★', sx, sy);
       c.restore();
     }
+  }
+
+  private drawTransitionMarker(
+    c: CanvasRenderingContext2D, tile: HexTile, sx: number, sy: number, zoom: number,
+  ): void {
+    const offset = cubeToOffset(tile.coord);
+    const tileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
+    if (!tileDef?.transitions?.length) return;
+    c.save();
+    c.font = `${Math.max(8, 14 * zoom)}px sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('🕳️', sx - HEX_SIZE * 0.4 * zoom, sy - HEX_SIZE * 0.4 * zoom);
+    c.restore();
   }
 
   // ---- Sidebar ----
@@ -598,8 +714,9 @@ export class MapTab implements Tab {
   private renderSidebarEditor(sidebar: HTMLElement, ctx: AdminContext, tile: WorldTileDefinition): void {
     const content = ctx.getDisplayContent();
     const zones = content ? Object.values(content.zones) : [];
-    const startTile = content?.world.startTile;
-    const isStart = startTile && startTile.col === tile.col && startTile.row === tile.row;
+    const mapMeta = content?.world.maps?.find(m => m.id === this.selectedMapId);
+    const startTile = mapMeta?.startTile ?? content?.world.startTile;
+    const isStart = !!startTile && startTile.col === tile.col && startTile.row === tile.row;
     const tileTypeDefs = content ? Object.values(content.tileTypes ?? {}) : [];
     const tileTypeDef = content?.tileTypes?.[tile.type];
     const isTraversable = tileTypeDef ? tileTypeDef.traversable : (TILE_CONFIGS[tile.type as TileType]?.traversable ?? false);
@@ -628,6 +745,26 @@ export class MapTab implements Tab {
       `<option value="${d.id}"${d.id === (tile.dungeonId ?? '') ? ' selected' : ''}>${escapeHtml(d.name)}</option>`
     ).join('');
 
+    // Map transitions — a room may link to several rooms on other maps.
+    const links = tile.transitions ?? [];
+    const linkRow = (link: { mapId: string; tileId: string }, idx: number): string => {
+      const destTile = content?.world.tiles.find(t => t.id === link.tileId);
+      const destMap = content?.world.maps?.find(m => m.id === link.mapId);
+      const label = `→ ${escapeHtml(destMap?.name ?? link.mapId)}: ${escapeHtml(destTile?.name ?? '(missing room)')}`;
+      return readOnly
+        ? `<div class="admin-form-hint">${label}</div>`
+        : `<div class="admin-map-transition-row"><span class="admin-form-hint">${label}</span><button class="admin-btn admin-btn-sm" data-remove-transition="${idx}" type="button">Remove</button></div>`;
+    };
+    const linksHtml = links.length
+      ? links.map(linkRow).join('')
+      : `<div class="admin-form-hint">No transitions. Link this room to rooms on other maps.</div>`;
+    const addTransitionBtn = `<button class="admin-btn admin-btn-sm" id="sidebar-link-transition" type="button"${readOnly ? ' disabled title="Switch to a draft version to edit"' : ''}>${this.pickTransition ? 'Cancel linking…' : '+ Add transition'}</button>`;
+    const transitionSectionHtml = `<div class="admin-map-transition">
+          <div class="admin-form-label-text">Map Transitions</div>
+          ${linksHtml}
+          ${addTransitionBtn}
+        </div>`;
+
     let startBtnHtml = '';
     if (!readOnly) {
       startBtnHtml = isStart
@@ -653,6 +790,7 @@ export class MapTab implements Tab {
         <label>Shop<select id="sidebar-shop"${disabled}>${shopOptions}</select></label>
         <label>NPC<select id="sidebar-npc"${disabled}>${npcOptions}</select></label>
         <label>Dungeon<select id="sidebar-dungeon"${disabled}>${dungeonOptions}</select></label>
+        ${transitionSectionHtml}
         <label>Required Item (override)
           <select id="sidebar-required-item"${disabled}>
             <option value="">(use type default)</option>
@@ -739,6 +877,23 @@ export class MapTab implements Tab {
     this.wireEncounterEvents(ctx);
     document.getElementById('sidebar-set-start')?.addEventListener('click', () => this.setAsStartTile(ctx));
     document.getElementById('sidebar-delete')?.addEventListener('click', () => this.deleteSelectedTile(ctx));
+    document.getElementById('sidebar-link-transition')?.addEventListener('click', () => {
+      if (ctx.isReadOnly()) return;
+      this.pickTransition = this.pickTransition ? null : (this.selectedTile ? { sourceTile: this.selectedTile } : null);
+      this.updatePickBanner();
+      this.renderSidebar(ctx);
+    });
+    for (const el of document.querySelectorAll('[data-remove-transition]')) {
+      el.addEventListener('click', () => {
+        if (!this.selectedTile?.transitions) return;
+        const idx = Number(el.getAttribute('data-remove-transition'));
+        this.selectedTile.transitions.splice(idx, 1);
+        if (this.selectedTile.transitions.length === 0) delete this.selectedTile.transitions;
+        this.scheduleSave(ctx);
+        this.draw(ctx);
+        this.renderSidebar(ctx);
+      });
+    }
   }
 
   private encounterRowsHtml(tile: WorldTileDefinition, encounters: EncounterDefinition[], readOnly: boolean): string {
@@ -847,9 +1002,15 @@ export class MapTab implements Tab {
       }
     }
     if (defaultZone === 'unknown') defaultZone = fallbackZone;
+    // First room on a fresh map has no neighbors to inherit from — fall back to any zone.
+    if (defaultZone === 'unknown') {
+      const content = ctx.getDisplayContent();
+      defaultZone = Object.keys(content?.zones ?? {})[0] ?? 'unknown';
+    }
 
     const newTile: WorldTileDefinition = {
       id: '',
+      mapId: this.selectedMapId,
       col: slot.col,
       row: slot.row,
       type: this.selectedTile?.type ?? 'plains',
@@ -879,7 +1040,7 @@ export class MapTab implements Tab {
     try {
       const data = await deleteAdmin<{ world: WorldData }>(
         `/api/admin/world/tile${ctx.versionQueryParam()}`,
-        { col: this.selectedTile.col, row: this.selectedTile.row });
+        { mapId: this.selectedTile.mapId, col: this.selectedTile.col, row: this.selectedTile.row });
       this.applyWorldUpdate(ctx, data.world);
       this.selectedTile = null;
       this.draw(ctx);
@@ -895,7 +1056,7 @@ export class MapTab implements Tab {
     try {
       const data = await putAdmin<{ world: WorldData }>(
         `/api/admin/world/start-tile${ctx.versionQueryParam()}`,
-        { col: this.selectedTile.col, row: this.selectedTile.row });
+        { mapId: this.selectedTile.mapId, col: this.selectedTile.col, row: this.selectedTile.row });
       this.applyWorldUpdate(ctx, data.world);
       this.draw(ctx);
       this.renderSidebar(ctx);

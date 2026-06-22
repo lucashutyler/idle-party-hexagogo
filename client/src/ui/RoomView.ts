@@ -23,12 +23,15 @@ export class RoomView {
   private onShopClick?: () => void;
   private onNpcTalk?: (npc: NpcDefinition) => void;
   private onEnterDungeon?: (dungeon: DungeonDefinition) => void;
+  private onEnterTransition?: (tileId: string) => void;
   /** Whether the player's current tile has a shop. Set externally before showing. */
   hasShop = false;
   /** NPC on the player's current tile (if any). Set externally before showing. */
   npc: NpcDefinition | null = null;
   /** Dungeon linked to the player's current tile (if any). Set externally before showing. */
   dungeon: DungeonDefinition | null = null;
+  /** Map transitions on the player's current tile. Set externally before showing. */
+  transitions: { tileId: string; name: string }[] = [];
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
 
@@ -39,12 +42,14 @@ export class RoomView {
     onShopClick?: () => void,
     onNpcTalk?: (npc: NpcDefinition) => void,
     onEnterDungeon?: (dungeon: DungeonDefinition) => void,
+    onEnterTransition?: (tileId: string) => void,
   ) {
     this.onMove = onMove;
     this.onUserClick = onUserClick;
     this.onShopClick = onShopClick;
     this.onNpcTalk = onNpcTalk;
     this.onEnterDungeon = onEnterDungeon;
+    this.onEnterTransition = onEnterTransition;
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'room-view-overlay';
@@ -133,6 +138,10 @@ export class RoomView {
       ? `<button class="room-view-action room-view-action-dungeon"><span class="room-view-action-icon room-view-action-icon-emoji">🗝️</span><span>Enter ${this.escapeHtml(this.dungeon.name)}</span></button>`
       : '';
 
+    const transitionButtons = this.transitions
+      .map(t => `<button class="room-view-action room-view-action-transition" data-transition-tile="${this.escapeHtml(t.tileId)}"><span class="room-view-action-icon room-view-action-icon-emoji">🕳️</span><span>Enter ${this.escapeHtml(t.name)}</span></button>`)
+      .join('');
+
     this.modal.innerHTML = `
       <div class="room-view-bg" style="${bgStyle}"></div>
       <div class="room-view-scrim"></div>
@@ -148,6 +157,7 @@ export class RoomView {
           ${otherSection}
         </div>
         <div class="room-view-actions">
+          ${transitionButtons}
           ${dungeonButton}
           ${talkButton}
           ${shopButton}
@@ -173,6 +183,14 @@ export class RoomView {
       this.hide();
       if (dungeon) this.onEnterDungeon?.(dungeon);
     });
+
+    for (const el of this.modal.querySelectorAll('.room-view-action-transition')) {
+      el.addEventListener('click', () => {
+        const tileId = el.getAttribute('data-transition-tile');
+        this.hide();
+        if (tileId) this.onEnterTransition?.(tileId);
+      });
+    }
 
     for (const el of this.modal.querySelectorAll('.room-party-member')) {
       el.addEventListener('click', () => {

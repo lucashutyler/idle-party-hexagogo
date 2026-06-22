@@ -4,8 +4,10 @@ import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore, PlayerSaveData } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
 import { PlayerSession } from '../src/game/PlayerSession.js';
-import { HexGrid, HexTile, offsetToCube } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
+import type { WorldGrids } from '../src/game/WorldGrids.js';
+import { wrapGrids, fakeWorldMeta } from './testGrids.js';
 import WebSocket from 'ws';
 
 // --- Minimal fakes (matching BanSystem.test.ts patterns) ---
@@ -38,7 +40,7 @@ function createFakeContentStore(): ContentStore {
     getTileById: () => undefined,
     getAllShops: () => ({}),
     getShop: () => undefined,
-    getWorld: () => ({ tiles: [], startTile: { col: 0, row: 0 } }),
+    getWorld: () => ({ tiles: [], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),
     getAllSets: () => ({}),
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
@@ -103,23 +105,23 @@ function activeAccounts(...usernames: string[]): Record<string, Account> {
 // --- Tests ---
 
 describe('PlayerSession — new player detection', () => {
-  let grid: HexGrid;
+  let grids: WorldGrids;
   let content: ContentStore;
 
   beforeEach(() => {
-    grid = createFakeGrid();
+    grids = wrapGrids(createFakeGrid());
     content = createFakeContentStore();
   });
 
   it('new session has no character (isNewPlayer = true)', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     expect(session.isNewPlayer()).toBe(true);
     expect(session.hasCharacter()).toBe(false);
     expect(session.getClassName()).toBeNull();
   });
 
   it('selecting a class creates the character', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     expect(session.setClass('Knight')).toBe(true);
     expect(session.isNewPlayer()).toBe(false);
     expect(session.hasCharacter()).toBe(true);
@@ -127,13 +129,13 @@ describe('PlayerSession — new player detection', () => {
   });
 
   it('isNewPlayer is unaffected by battle count', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     for (let i = 0; i < 50; i++) session.incrementBattleCount();
     expect(session.isNewPlayer()).toBe(true);
   });
 
   it('forceSetClass on characterless session creates character (no welcome)', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     expect(session.isNewPlayer()).toBe(true);
     session.forceSetClass('Mage');
     // Character now exists — admin created it
@@ -144,7 +146,7 @@ describe('PlayerSession — new player detection', () => {
   });
 
   it('setClass only works once (first class selection)', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     expect(session.setClass('Knight')).toBe(true);
     expect(session.setClass('Mage')).toBe(false);
     expect(session.getClassName()).toBe('Knight');
@@ -161,7 +163,7 @@ describe('PlayerSession — new player detection', () => {
       movementQueue: [],
       character: { className: 'Archer', level: 5, xp: 1000 },
     };
-    const session = PlayerSession.fromSaveData(saveData, grid, content);
+    const session = PlayerSession.fromSaveData(saveData, grids, content);
     expect(session.isNewPlayer()).toBe(false);
     expect(session.hasCharacter()).toBe(true);
     expect(session.getClassName()).toBe('Archer');
@@ -178,7 +180,7 @@ describe('PlayerSession — new player detection', () => {
       movementQueue: [],
       character: { className: 'Adventurer', level: 1, xp: 0 },
     };
-    const session = PlayerSession.fromSaveData(saveData, grid, content);
+    const session = PlayerSession.fromSaveData(saveData, grids, content);
     expect(session.isNewPlayer()).toBe(true);
     expect(session.hasCharacter()).toBe(false);
     expect(session.getClassName()).toBeNull();
@@ -194,17 +196,17 @@ describe('PlayerSession — new player detection', () => {
       target: null,
       movementQueue: [],
     };
-    const session = PlayerSession.fromSaveData(saveData, grid, content);
+    const session = PlayerSession.fromSaveData(saveData, grids, content);
     expect(session.isNewPlayer()).toBe(true);
     expect(session.hasCharacter()).toBe(false);
   });
 
   it('masterReset preserves the chosen class', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     session.setClass('Priest');
     expect(session.getClassName()).toBe('Priest');
 
-    const startTile = grid.getTile(offsetToCube({ col: 0, row: 0 }))!;
+    const startTile = grids.getOrThrow(DEFAULT_MAP_ID).getTile(offsetToCube({ col: 0, row: 0 }))!;
     session.resetForMasterReset(startTile);
     expect(session.hasCharacter()).toBe(true);
     expect(session.getClassName()).toBe('Priest');
@@ -212,13 +214,13 @@ describe('PlayerSession — new player detection', () => {
   });
 
   it('getState returns null character when no class selected', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     const state = session.getState([]);
     expect(state.character).toBeNull();
   });
 
   it('getState returns character data after class selection', () => {
-    const session = new PlayerSession('alice', grid, content);
+    const session = new PlayerSession('alice', grids, content);
     session.setClass('Bard');
     const state = session.getState([]);
     expect(state.character).not.toBeNull();
@@ -227,13 +229,13 @@ describe('PlayerSession — new player detection', () => {
 });
 
 describe('Welcome message broadcast', () => {
-  let grid: HexGrid;
+  let grids: WorldGrids;
   let content: ContentStore;
   let guildStore: GuildStore;
   let store: GameStateStore;
 
   beforeEach(() => {
-    grid = createFakeGrid();
+    grids = wrapGrids(createFakeGrid());
     content = createFakeContentStore();
     guildStore = createFakeGuildStore();
     store = createFakeStore();
@@ -242,7 +244,7 @@ describe('Welcome message broadcast', () => {
   it('broadcastWelcome sends a server chat message to all sessions with characters', async () => {
     const accounts = activeAccounts('alice', 'bob');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     pm.restoreFromSaveData([{
       username: 'bob',
@@ -282,7 +284,7 @@ describe('Welcome message broadcast', () => {
   it('characterless players do not receive broadcast messages', async () => {
     const accounts = activeAccounts('alice', 'bob');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     // Both alice and bob connect as new (no character)
     const aliceWs = createFakeWs();
@@ -314,7 +316,7 @@ describe('Welcome message broadcast', () => {
       },
     };
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     pm.restoreFromSaveData([
       {
@@ -347,7 +349,7 @@ describe('Welcome message broadcast', () => {
   it('admin forceSetClass does NOT trigger a welcome message', async () => {
     const accounts = activeAccounts('alice', 'bob');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     pm.restoreFromSaveData([{
       username: 'alice',
@@ -382,13 +384,13 @@ describe('Welcome message broadcast', () => {
 });
 
 describe('Characterless player exclusion', () => {
-  let grid: HexGrid;
+  let grids: WorldGrids;
   let content: ContentStore;
   let guildStore: GuildStore;
   let store: GameStateStore;
 
   beforeEach(() => {
-    grid = createFakeGrid();
+    grids = wrapGrids(createFakeGrid());
     content = createFakeContentStore();
     guildStore = createFakeGuildStore();
     store = createFakeStore();
@@ -402,7 +404,7 @@ describe('Characterless player exclusion', () => {
   it('new player has no party before choosing class', async () => {
     const accounts = activeAccounts('alice');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     const ws = createFakeWs();
     const session = await pm.login(ws, 'alice');
@@ -414,7 +416,7 @@ describe('Characterless player exclusion', () => {
   it('new player does not appear in otherPlayers list', async () => {
     const accounts = activeAccounts('alice', 'bob');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     pm.restoreFromSaveData([{
       username: 'bob',
@@ -438,7 +440,7 @@ describe('Characterless player exclusion', () => {
   it('player gets party after choosing class', async () => {
     const accounts = activeAccounts('alice');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     const ws = createFakeWs();
     const session = await pm.login(ws, 'alice');
@@ -454,7 +456,7 @@ describe('Characterless player exclusion', () => {
   it('characterless player does not accumulate battle count', async () => {
     const accounts = activeAccounts('alice');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     const ws = createFakeWs();
     const session = await pm.login(ws, 'alice');
@@ -468,7 +470,7 @@ describe('Characterless player exclusion', () => {
   it('player participates in combat after choosing a class', async () => {
     const accounts = activeAccounts('alice');
     const accountStore = createFakeAccountStore(accounts);
-    const pm = new PlayerManager(grid, content, guildStore, accountStore, store);
+    const pm = new PlayerManager(grids, content, guildStore, accountStore, store);
 
     const ws = createFakeWs();
     const session = await pm.login(ws, 'alice');

@@ -30,6 +30,7 @@ import { EncountersTab } from './tabs/EncountersTab';
 import { TileTypesTab } from './tabs/TileTypesTab';
 import { DungeonsTab } from './tabs/DungeonsTab';
 import { MapTab } from './tabs/MapTab';
+import { MapsTab } from './tabs/MapsTab';
 import { VersionsTab } from './tabs/VersionsTab';
 import { XpTableTab } from './tabs/XpTableTab';
 
@@ -59,6 +60,7 @@ export class AdminApp implements AdminContext {
     'encounters': new EncountersTab(),
     'tile-types': new TileTypesTab(),
     'dungeons':   new DungeonsTab(),
+    'maps':       new MapsTab(),
     'map':        new MapTab(),
     'versions':   new VersionsTab(),
     'xp-table':   new XpTableTab(),

@@ -362,6 +362,36 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      if (msg.type === 'enter_transition' && typeof msg.tileId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+
+        const partyId = session.getPartyId();
+        if (!partyId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No party' }));
+          return;
+        }
+
+        // Only owners and leaders can take the party through a transition.
+        const party = playerManager.parties.getParty(partyId);
+        if (party) {
+          const member = party.members.find(m => m.username === username);
+          if (!member || !canMove(member.role)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can travel' }));
+            return;
+          }
+        }
+
+        const error = playerManager.handleEnterTransition(username, msg.tileId);
+        if (error) {
+          ws.send(JSON.stringify({ type: 'error', message: error }));
+        }
+        return;
+      }
+
       if (msg.type === 'leave_dungeon') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) return;
