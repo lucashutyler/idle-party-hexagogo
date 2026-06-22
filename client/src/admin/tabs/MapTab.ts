@@ -574,6 +574,8 @@ export class MapTab implements Tab {
       }
       this.drawNonTraversableMarker(c, selectedHexTile, sx, sy, zoom, content);
       this.drawStartMarker(c, selectedHexTile, sx, sy, zoom, content);
+      this.drawNpcMarker(c, selectedHexTile, sx, sy, zoom, content);
+      this.drawTransitionMarker(c, selectedHexTile, sx, sy, zoom);
     }
   }
 
