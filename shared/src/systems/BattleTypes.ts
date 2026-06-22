@@ -333,9 +333,10 @@ export interface ClientLeaveDungeonMessage {
   type: 'leave_dungeon';
 }
 
-/** Travel through the transition on the party's current room to another map. */
+/** Travel through one of the current room's transitions (identified by target room GUID). */
 export interface ClientEnterTransitionMessage {
   type: 'enter_transition';
+  tileId: string;
 }
 
 export type ClientMessage =

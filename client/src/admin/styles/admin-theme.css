@@ -1020,6 +1020,12 @@ body.admin-modal-open { overflow: hidden; }
   padding: var(--admin-gap) 0;
   border-top: 1px dashed var(--admin-border);
 }
+.admin-map-transition-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--admin-gap);
+}
 .admin-form-label-text {
   font-size: 0.9em;
   font-weight: 600;

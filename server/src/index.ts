@@ -362,7 +362,7 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      if (msg.type === 'enter_transition') {
+      if (msg.type === 'enter_transition' && typeof msg.tileId === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) {
           ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
@@ -385,7 +385,7 @@ wss.on('connection', (ws) => {
           }
         }
 
-        const error = playerManager.handleEnterTransition(username);
+        const error = playerManager.handleEnterTransition(username, msg.tileId);
         if (error) {
           ws.send(JSON.stringify({ type: 'error', message: error }));
         }

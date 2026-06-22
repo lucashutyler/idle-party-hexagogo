@@ -55,6 +55,23 @@ describe('migrateWorldData', () => {
     expect(caves).toEqual({ id: 'crystal_caves', name: 'Crystal Caves', startTile: { col: 5, row: 7 } });
   });
 
+  it('upgrades a legacy single `transitionsTo` into the `transitions` array', () => {
+    const world = {
+      startTile: { col: 0, row: 0 },
+      defaultMapId: DEFAULT_MAP_ID,
+      maps: [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile: { col: 0, row: 0 } }],
+      tiles: [
+        { id: 'manhole', mapId: DEFAULT_MAP_ID, col: 0, row: 0, type: 'town', zone: 'z', name: 'Manhole', transitionsTo: { mapId: 'sewers', tileId: 'sewer-1' } },
+      ],
+    } as unknown as WorldData;
+
+    const changed = migrateWorldData(world);
+
+    expect(changed).toBe(true);
+    expect(world.tiles[0].transitions).toEqual([{ mapId: 'sewers', tileId: 'sewer-1' }]);
+    expect((world.tiles[0] as { transitionsTo?: unknown }).transitionsTo).toBeUndefined();
+  });
+
   it('is idempotent across repeated runs', () => {
     const world = legacyWorld();
     expect(migrateWorldData(world)).toBe(true);

@@ -128,16 +128,19 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Add or update a world tile. Supports ?versionId= for draft editing. */
   router.put('/world/tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
-    const { col, row, type, zone, name, encounterTable, shopId, npcId, dungeonId, requiredItemId, transitionsTo } = req.body;
+    const { col, row, type, zone, name, encounterTable, shopId, npcId, dungeonId, requiredItemId, transitions } = req.body;
     if (col == null || row == null || !type || !zone || !name) {
       res.status(400).json({ error: 'Missing required fields: col, row, type, zone, name' });
       return;
     }
 
-    // Normalize an optional map transition link.
-    const tileTransition = (transitionsTo && transitionsTo.mapId && transitionsTo.tileId)
-      ? { mapId: transitionsTo.mapId as string, tileId: transitionsTo.tileId as string }
+    // Normalize optional map transition links (drop malformed/empty entries).
+    const tileTransitions = Array.isArray(transitions)
+      ? transitions
+          .filter((t: { mapId?: unknown; tileId?: unknown }) => t && t.mapId && t.tileId)
+          .map((t: { mapId: string; tileId: string }) => ({ mapId: t.mapId, tileId: t.tileId }))
       : undefined;
+    const tileTransitionsOrUndef = tileTransitions && tileTransitions.length > 0 ? tileTransitions : undefined;
 
     // Validate optional encounter table entries
     if (encounterTable != null && Array.isArray(encounterTable)) {
@@ -163,16 +166,16 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const idx = snapshot.world.tiles.findIndex(t => t.mapId === tileMapId && t.col === col && t.row === row);
       if (idx >= 0) {
         // Preserve existing GUID on update
-        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitionsTo: tileTransition };
+        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef };
       } else {
         // New tile — generate a GUID
-        snapshot.world.tiles.push({ id: crypto.randomUUID(), mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitionsTo: tileTransition });
+        snapshot.world.tiles.push({ id: crypto.randomUUID(), mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef });
       }
       await versions.saveSnapshot(versionId, snapshot);
       res.json({ success: true, world: snapshot.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ id: '', mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitionsTo: tileTransition });
+      await content.addOrUpdateTile({ id: '', mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef });
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }
@@ -201,7 +204,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       }
       const idx = snapshot.world.tiles.findIndex(t => t.mapId === tileMapId && t.col === col && t.row === row);
       if (idx < 0) { res.status(400).json({ error: 'Tile not found.' }); return; }
-      const inbound = snapshot.world.tiles.find(t => t.transitionsTo?.tileId === snapshot.world.tiles[idx].id);
+      const inbound = snapshot.world.tiles.find(t => t.transitions?.some(tr => tr.tileId === snapshot.world.tiles[idx].id));
       if (inbound) { res.status(400).json({ error: `A transition in "${inbound.name}" links to this room. Remove it first.` }); return; }
       snapshot.world.tiles.splice(idx, 1);
       await versions.saveSnapshot(versionId, snapshot);
@@ -300,7 +303,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const snapshot = await versions.loadSnapshot(versionId);
       if (id === snapshot.world.defaultMapId) { res.status(400).json({ error: 'Cannot delete the default map.' }); return; }
       if (snapshot.world.tiles.some(t => t.mapId === id)) { res.status(400).json({ error: "Delete or move this map's rooms first." }); return; }
-      const inbound = snapshot.world.tiles.find(t => t.transitionsTo?.mapId === id);
+      const inbound = snapshot.world.tiles.find(t => t.transitions?.some(tr => tr.mapId === id));
       if (inbound) { res.status(400).json({ error: `A transition in "${inbound.name}" still leads to this map. Remove it first.` }); return; }
       snapshot.world.maps = snapshot.world.maps.filter(m => m.id !== id);
       await versions.saveSnapshot(versionId, snapshot);

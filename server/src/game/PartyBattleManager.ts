@@ -327,13 +327,14 @@ export class PartyBattleManager {
    * (mapId, tileId): swap the party's grid + position, reveal the arrival area
    * for every member, and start a fresh battle on the new map.
    */
-  enterTransition(partyId: string): { success: true } | { success: false; error: string } {
+  enterTransition(partyId: string, targetTileId: string): { success: true } | { success: false; error: string } {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
     if (entry.dungeonRun) return { success: false, error: "Can't travel from inside a dungeon." };
 
     const fromDef = this.content.getTileById(entry.serverParty.tile.id);
-    const link = fromDef?.transitionsTo;
+    // The current room must actually offer a transition to the requested target.
+    const link = fromDef?.transitions?.find(t => t.tileId === targetTileId);
     if (!link) return { success: false, error: 'Nothing to enter here.' };
 
     const destGrid = this.grids.get(link.mapId);

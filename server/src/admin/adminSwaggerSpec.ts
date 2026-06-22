@@ -83,11 +83,14 @@ const sharedComponents = {
         type: { type: 'string', enum: ['plains', 'forest', 'mountain', 'water', 'town', 'dungeon', 'desert', 'swamp'] },
         zone: { type: 'string' },
         name: { type: 'string', example: 'Town Square' },
-        transitionsTo: {
-          type: 'object',
-          description: 'Optional link to a room on another map (manhole → sewers).',
-          required: ['mapId', 'tileId'],
-          properties: { mapId: { type: 'string' }, tileId: { type: 'string', description: 'Target room GUID' } },
+        transitions: {
+          type: 'array',
+          description: 'Links to rooms on other maps (e.g. manhole → sewers). A room may have several exits.',
+          items: {
+            type: 'object',
+            required: ['mapId', 'tileId'],
+            properties: { mapId: { type: 'string' }, tileId: { type: 'string', description: 'Target room GUID' } },
+          },
         },
       },
     },

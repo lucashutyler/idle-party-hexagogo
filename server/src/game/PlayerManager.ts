@@ -543,12 +543,12 @@ export class PlayerManager {
    * the transition on its current room. Returns an error string on failure, or
    * null on success.
    */
-  handleEnterTransition(username: string): string | null {
+  handleEnterTransition(username: string, targetTileId: string): string | null {
     const session = this.sessions.get(username);
     if (!session) return 'No session.';
     const partyId = session.getPartyId();
     if (!partyId) return 'No party.';
-    const result = this.partyBattles.enterTransition(partyId);
+    const result = this.partyBattles.enterTransition(partyId, targetTileId);
     return result.success ? null : result.error;
   }
 

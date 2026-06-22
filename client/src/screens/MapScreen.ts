@@ -152,12 +152,12 @@ export class MapScreen implements Screen {
         if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can enter'); return; }
         this.dungeonEntryPopup!.show(dungeon, state.party.col, state.party.row);
       },
-      () => {
+      (tileId: string) => {
         const state = this.gameClient.lastState;
         if (!state) return;
         if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
         if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can travel'); return; }
-        this.gameClient.sendEnterTransition();
+        this.gameClient.sendEnterTransition(tileId);
       },
     );
     this.map.setOnTileClick((tileInfo) => {
@@ -172,10 +172,10 @@ export class MapScreen implements Screen {
       this.roomView!.dungeon = (playerOnTile && !state?.dungeon && tileDef?.dungeonId)
         ? (this.worldCache.getDungeon(tileDef.dungeonId) ?? null)
         : null;
-      // Offer map travel when standing on a room with a transition link.
-      this.roomView!.transition = (playerOnTile && !state?.dungeon && tileDef?.transitionsTo)
-        ? { name: this.resolveTransitionName(tileDef.transitionsTo) }
-        : null;
+      // Offer map travel for each transition on the current room.
+      this.roomView!.transitions = (playerOnTile && !state?.dungeon && tileDef?.transitions)
+        ? tileDef.transitions.map(t => ({ tileId: t.tileId, name: this.resolveTransitionName(t) }))
+        : [];
       this.roomView!.show(tileInfo);
     });
 

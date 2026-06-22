@@ -354,7 +354,10 @@ export class MapTab implements Tab {
       this.renderSidebar(ctx);
       return; // a room can't transition to itself
     }
-    source.transitionsTo = { mapId: this.selectedMapId, tileId: target.id };
+    if (!source.transitions) source.transitions = [];
+    if (!source.transitions.some(t => t.tileId === target.id && t.mapId === this.selectedMapId)) {
+      source.transitions.push({ mapId: this.selectedMapId, tileId: target.id });
+    }
     try {
       const data = await putAdmin<{ world: WorldData }>(
         `/api/admin/world/tile${ctx.versionQueryParam()}`, source);
@@ -715,7 +718,7 @@ export class MapTab implements Tab {
   ): void {
     const offset = cubeToOffset(tile.coord);
     const tileDef = this.worldTileDefs.get(`${offset.col},${offset.row}`);
-    if (!tileDef?.transitionsTo) return;
+    if (!tileDef?.transitions?.length) return;
     c.save();
     c.font = `${Math.max(8, 14 * zoom)}px sans-serif`;
     c.textAlign = 'center';
@@ -780,22 +783,25 @@ export class MapTab implements Tab {
       `<option value="${d.id}"${d.id === (tile.dungeonId ?? '') ? ' selected' : ''}>${escapeHtml(d.name)}</option>`
     ).join('');
 
-    // Map transition (link this room to a room on another map).
-    const link = tile.transitionsTo;
-    const destTile = link ? content?.world.tiles.find(t => t.id === link.tileId) : undefined;
-    const destMap = link ? content?.world.maps?.find(m => m.id === link.mapId) : undefined;
-    const linkLabel = link
-      ? `→ ${escapeHtml(destMap?.name ?? link.mapId)}: ${escapeHtml(destTile?.name ?? '(missing room)')}`
-      : '';
+    // Map transitions — a room may link to several rooms on other maps.
+    const links = tile.transitions ?? [];
+    const linkRow = (link: { mapId: string; tileId: string }, idx: number): string => {
+      const destTile = content?.world.tiles.find(t => t.id === link.tileId);
+      const destMap = content?.world.maps?.find(m => m.id === link.mapId);
+      const label = `→ ${escapeHtml(destMap?.name ?? link.mapId)}: ${escapeHtml(destTile?.name ?? '(missing room)')}`;
+      return readOnly
+        ? `<div class="admin-form-hint">${label}</div>`
+        : `<div class="admin-map-transition-row"><span class="admin-form-hint">${label}</span><button class="admin-btn admin-btn-sm" data-remove-transition="${idx}" type="button">Remove</button></div>`;
+    };
+    const linksHtml = links.length
+      ? links.map(linkRow).join('')
+      : `<div class="admin-form-hint">No transitions. Link this room to rooms on other maps.</div>`;
     const transitionSectionHtml = readOnly
-      ? (link ? `<div class="admin-form-coords">Transition ${linkLabel}</div>` : '')
+      ? (links.length ? `<div class="admin-map-transition"><div class="admin-form-label-text">Map Transitions</div>${linksHtml}</div>` : '')
       : `<div class="admin-map-transition">
-          <div class="admin-form-label-text">Map Transition</div>
-          ${link
-            ? `<div class="admin-form-hint">${linkLabel}</div>
-               <button class="admin-btn admin-btn-sm" id="sidebar-clear-transition" type="button">Clear transition</button>`
-            : `<div class="admin-form-hint">Link this room to a room on another map.</div>`}
-          <button class="admin-btn admin-btn-sm" id="sidebar-link-transition" type="button">${this.pickTransition ? 'Cancel linking…' : 'Link target room'}</button>
+          <div class="admin-form-label-text">Map Transitions</div>
+          ${linksHtml}
+          <button class="admin-btn admin-btn-sm" id="sidebar-link-transition" type="button">${this.pickTransition ? 'Cancel linking…' : '+ Add transition'}</button>
         </div>`;
 
     let startBtnHtml = '';
@@ -915,13 +921,17 @@ export class MapTab implements Tab {
       this.updatePickBanner();
       this.renderSidebar(ctx);
     });
-    document.getElementById('sidebar-clear-transition')?.addEventListener('click', () => {
-      if (!this.selectedTile) return;
-      delete this.selectedTile.transitionsTo;
-      this.scheduleSave(ctx);
-      this.draw(ctx);
-      this.renderSidebar(ctx);
-    });
+    for (const el of document.querySelectorAll('[data-remove-transition]')) {
+      el.addEventListener('click', () => {
+        if (!this.selectedTile?.transitions) return;
+        const idx = Number(el.getAttribute('data-remove-transition'));
+        this.selectedTile.transitions.splice(idx, 1);
+        if (this.selectedTile.transitions.length === 0) delete this.selectedTile.transitions;
+        this.scheduleSave(ctx);
+        this.draw(ctx);
+        this.renderSidebar(ctx);
+      });
+    }
   }
 
   private encounterRowsHtml(tile: WorldTileDefinition, encounters: EncounterDefinition[], readOnly: boolean): string {

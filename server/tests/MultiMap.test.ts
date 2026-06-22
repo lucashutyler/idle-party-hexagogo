@@ -22,7 +22,7 @@ function makeWorld(): WorldData {
       { id: 'sewers', name: 'Sewers', startTile: { col: 0, row: 0 } },
     ],
     tiles: [
-      { id: MANHOLE_ID, mapId: 'overworld', col: 0, row: 0, type: 'town', zone: 'town', name: 'Manhole', transitionsTo: { mapId: 'sewers', tileId: SEWER_ENTRANCE_ID } },
+      { id: MANHOLE_ID, mapId: 'overworld', col: 0, row: 0, type: 'town', zone: 'town', name: 'Manhole', transitions: [{ mapId: 'sewers', tileId: SEWER_ENTRANCE_ID }, { mapId: 'sewers', tileId: 'sewer-tunnel' }] },
       { id: 'overworld-road', mapId: 'overworld', col: 1, row: 0, type: 'plains', zone: 'town', name: 'Road' },
       { id: SEWER_ENTRANCE_ID, mapId: 'sewers', col: 0, row: 0, type: 'plains', zone: 'sewer', name: 'Sewer Entrance' },
       { id: 'sewer-tunnel', mapId: 'sewers', col: 1, row: 0, type: 'plains', zone: 'sewer', name: 'Sewer Tunnel' },
@@ -139,7 +139,7 @@ describe('Cross-map transitions', () => {
     const { pm, session, partyId } = await setup();
     expect(session.getMapId()).toBe('overworld');
 
-    const error = pm.handleEnterTransition('alice');
+    const error = pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
     expect(error).toBeNull();
 
     expect(session.getMapId()).toBe('sewers');
@@ -151,10 +151,19 @@ describe('Cross-map transitions', () => {
 
   it('writes the current map into save data after travelling', async () => {
     const { pm, session, partyId } = await setup();
-    pm.handleEnterTransition('alice');
+    pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
     const movement = pm.partyBattles.getMovementSaveData(partyId)!;
     expect(movement.mapId).toBe('sewers');
     expect(session.toSaveData(movement).mapId).toBe('sewers');
+  });
+
+  it('honors the chosen exit when a room has multiple transitions', async () => {
+    const { pm, session, partyId } = await setup();
+    // The manhole links to both the sewer entrance and the sewer tunnel — pick the tunnel.
+    const error = pm.handleEnterTransition('alice', 'sewer-tunnel');
+    expect(error).toBeNull();
+    expect(session.getMapId()).toBe('sewers');
+    expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 1, row: 0 }); // sewer-tunnel
   });
 
   it('rejects travel from a room with no transition', async () => {
@@ -162,7 +171,7 @@ describe('Cross-map transitions', () => {
     // Place the party on the plain road room (no transition), then try to travel.
     const road = grids.getOrThrow('overworld').getTileById('overworld-road')!;
     pm.partyBattles.relocateParty(partyId, road, 'overworld');
-    const error = pm.handleEnterTransition('alice');
+    const error = pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
     expect(error).toMatch(/nothing to enter/i);
   });
 });

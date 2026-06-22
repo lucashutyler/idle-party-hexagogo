@@ -227,7 +227,7 @@ export class ContentStore {
 
     // Block deletion if another room's transition links to this one (dangling link).
     const victim = this.world.tiles[idx];
-    const inbound = this.world.tiles.find(t => t.transitionsTo?.tileId === victim.id);
+    const inbound = this.world.tiles.find(t => t.transitions?.some(tr => tr.tileId === victim.id));
     if (inbound) {
       return { success: false, error: `A transition in "${inbound.name}" links to this room. Remove it first.` };
     }
@@ -293,7 +293,7 @@ export class ContentStore {
     if (this.world.tiles.some(t => t.mapId === mapId)) {
       return { success: false, error: "Delete or move this map's rooms first." };
     }
-    const inbound = this.world.tiles.find(t => t.transitionsTo?.mapId === mapId);
+    const inbound = this.world.tiles.find(t => t.transitions?.some(tr => tr.mapId === mapId));
     if (inbound) {
       return { success: false, error: `A transition in "${inbound.name}" still leads to this map. Remove it first.` };
     }

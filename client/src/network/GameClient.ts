@@ -279,9 +279,9 @@ export class GameClient {
     this.sendRaw({ type: 'leave_dungeon' });
   }
 
-  /** Travel through the transition on the party's current room to another map. */
-  sendEnterTransition(): void {
-    this.sendRaw({ type: 'enter_transition' });
+  /** Travel through the current room's transition to the target room (by GUID). */
+  sendEnterTransition(tileId: string): void {
+    this.sendRaw({ type: 'enter_transition', tileId });
   }
 
   sendEquipSkill(skillId: string, slotIndex: number): void {

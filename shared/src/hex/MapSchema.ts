@@ -44,10 +44,11 @@ export interface WorldTileDefinition {
   /** Item ID required to traverse. Overrides the tile type default if set. */
   requiredItemId?: string;
   /**
-   * If present, a party standing on this room can travel to another map's room.
-   * The target is identified by stable GUID so it survives col/row edits.
+   * Rooms this room can travel to (e.g. a manhole into the sewers, plus stairs to
+   * a tower). Each target is identified by stable GUID so it survives col/row
+   * edits; a room may have several exits.
    */
-  transitionsTo?: { mapId: string; tileId: string };
+  transitions?: { mapId: string; tileId: string }[];
 }
 
 /**
@@ -93,10 +94,19 @@ export const DEFAULT_MAP_ID = 'overworld';
 export function migrateWorldData(world: WorldData): boolean {
   let changed = false;
 
-  // 1. Every tile must carry a mapId.
+  // 1. Every tile must carry a mapId; legacy single `transitionsTo` → `transitions[]`.
   for (const tile of world.tiles) {
     if (!tile.mapId) {
       tile.mapId = DEFAULT_MAP_ID;
+      changed = true;
+    }
+    const legacy = (tile as { transitionsTo?: { mapId: string; tileId: string } }).transitionsTo;
+    if (legacy) {
+      if (!tile.transitions) tile.transitions = [];
+      if (!tile.transitions.some(t => t.tileId === legacy.tileId && t.mapId === legacy.mapId)) {
+        tile.transitions.push(legacy);
+      }
+      delete (tile as { transitionsTo?: unknown }).transitionsTo;
       changed = true;
     }
   }
