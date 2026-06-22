@@ -128,6 +128,7 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Data-driven content (ContentStore: monsters, items, zones, world in JSON files)
 - [x] Server-driven map state (per-player fog of war, room names, tile discovery)
 - [x] Multiple regions/zones with border transitions
+- [x] Multi-map / interior maps (rooms link to a room on another map via a transition; one HexGrid per map; admin authoring) — overworld map-select still to come (#168)
 
 ### Combat
 Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both sides. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.

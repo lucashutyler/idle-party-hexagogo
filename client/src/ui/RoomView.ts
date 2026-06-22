@@ -23,12 +23,15 @@ export class RoomView {
   private onShopClick?: () => void;
   private onNpcTalk?: (npc: NpcDefinition) => void;
   private onEnterDungeon?: (dungeon: DungeonDefinition) => void;
+  private onEnterTransition?: () => void;
   /** Whether the player's current tile has a shop. Set externally before showing. */
   hasShop = false;
   /** NPC on the player's current tile (if any). Set externally before showing. */
   npc: NpcDefinition | null = null;
   /** Dungeon linked to the player's current tile (if any). Set externally before showing. */
   dungeon: DungeonDefinition | null = null;
+  /** Map transition on the player's current tile (if any). Set externally before showing. */
+  transition: { name: string } | null = null;
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
 
@@ -39,12 +42,14 @@ export class RoomView {
     onShopClick?: () => void,
     onNpcTalk?: (npc: NpcDefinition) => void,
     onEnterDungeon?: (dungeon: DungeonDefinition) => void,
+    onEnterTransition?: () => void,
   ) {
     this.onMove = onMove;
     this.onUserClick = onUserClick;
     this.onShopClick = onShopClick;
     this.onNpcTalk = onNpcTalk;
     this.onEnterDungeon = onEnterDungeon;
+    this.onEnterTransition = onEnterTransition;
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'room-view-overlay';
@@ -133,6 +138,10 @@ export class RoomView {
       ? `<button class="room-view-action room-view-action-dungeon"><span class="room-view-action-icon room-view-action-icon-emoji">🗝️</span><span>Enter ${this.escapeHtml(this.dungeon.name)}</span></button>`
       : '';
 
+    const transitionButton = this.transition
+      ? `<button class="room-view-action room-view-action-transition"><span class="room-view-action-icon room-view-action-icon-emoji">🕳️</span><span>Enter ${this.escapeHtml(this.transition.name)}</span></button>`
+      : '';
+
     this.modal.innerHTML = `
       <div class="room-view-bg" style="${bgStyle}"></div>
       <div class="room-view-scrim"></div>
@@ -148,6 +157,7 @@ export class RoomView {
           ${otherSection}
         </div>
         <div class="room-view-actions">
+          ${transitionButton}
           ${dungeonButton}
           ${talkButton}
           ${shopButton}
@@ -172,6 +182,11 @@ export class RoomView {
       const dungeon = this.dungeon;
       this.hide();
       if (dungeon) this.onEnterDungeon?.(dungeon);
+    });
+
+    this.modal.querySelector('.room-view-action-transition')?.addEventListener('click', () => {
+      this.hide();
+      this.onEnterTransition?.();
     });
 
     for (const el of this.modal.querySelectorAll('.room-party-member')) {

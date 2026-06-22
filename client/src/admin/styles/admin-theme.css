@@ -998,6 +998,33 @@ body.admin-modal-open { overflow: hidden; }
   border-bottom: 1px solid var(--admin-border);
   flex-wrap: wrap;
 }
+.admin-map-controls select {
+  background: var(--admin-panel);
+  color: var(--admin-text);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+  padding: 4px 8px;
+  font-size: 0.9em;
+}
+.admin-map-pick-banner {
+  padding: 8px 12px;
+  background: #2c3a4a;
+  color: #cfe3f5;
+  border-bottom: 1px solid #4c5e6b;
+  font-size: 0.9em;
+}
+.admin-map-transition {
+  display: flex;
+  flex-direction: column;
+  gap: var(--admin-gap-tight);
+  padding: var(--admin-gap) 0;
+  border-top: 1px dashed var(--admin-border);
+}
+.admin-form-label-text {
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--admin-text-muted);
+}
 .admin-map-tile-count {
   font-weight: 600;
 }

@@ -9,6 +9,8 @@ export interface PlayerSaveData {
   combatLog: CombatLogEntry[];
   unlockedKeys: string[];
   position: { col: number; row: number };
+  /** Map the party is on. Absent on legacy saves → defaults to the world's default map. */
+  mapId?: string;
   target: { col: number; row: number } | null;
   movementQueue: { col: number; row: number }[];
   character?: {

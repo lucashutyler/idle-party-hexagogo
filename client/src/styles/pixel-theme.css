@@ -6606,6 +6606,15 @@ html, body {
   color: #fff;
   box-shadow: 0 0 10px rgba(107, 76, 107, 0.6);
 }
+.room-view-action-transition {
+  color: #a8c8d3;
+  border-color: #4c5e6b;
+}
+.room-view-action-transition:hover {
+  background: #4c5e6b;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(76, 94, 107, 0.6);
+}
 .room-view-action-icon {
   width: 18px;
   height: 18px;

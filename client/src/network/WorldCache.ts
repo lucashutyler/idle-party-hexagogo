@@ -1,28 +1,35 @@
-import type { WorldTileDefinition, TileTypeDefinition, NpcDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
+import { DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
 
 /**
  * Client-side cache for world data.
  * Loaded once from GET /api/world on login.
- * Fog of war is determined by state.unlocked (sent every tick).
+ *
+ * A world holds multiple maps; the client only renders the map the party is
+ * currently on (`currentMapId`, driven by the server state message). Tiles are
+ * indexed by `mapId:col:row` so rooms at the same (col,row) on different maps
+ * don't collide. Fog of war is determined by state.unlocked (sent every tick).
  */
 export class WorldCache {
+  /** Keyed by "mapId:col:row". */
   private tiles = new Map<string, WorldTileDefinition>();
+  /** Global GUID → tile, for cross-map lookups (e.g. transition targets). */
+  private tilesByGuid = new Map<string, WorldTileDefinition>();
   private tileTypeDefs = new Map<string, TileTypeDefinition>();
   private npcs = new Map<string, NpcDefinition>();
   private dungeons = new Map<string, DungeonDefinition>();
   private startTile: { col: number; row: number } = { col: 0, row: 0 };
+  private maps: WorldMapMeta[] = [];
+  private currentMapId: string = DEFAULT_MAP_ID;
 
-  /** Tile GUID → offset key ("col,row") for fast unlock lookups. */
-  private idToOffsetKey = new Map<string, string>();
-
-  /** Offset-format keys ("col,row") for unlocked tiles. */
+  /** Offset-format keys ("col,row") for unlocked tiles on the current map. */
   private unlockedOffsetKeys = new Set<string>();
 
-  /** Zone IDs that have at least one unlocked tile. */
+  /** Zone IDs that have at least one unlocked tile on the current map. */
   private unlockedZones = new Set<string>();
 
-  /** Previous unlock count — used to detect changes. */
-  private lastUnlockedCount = 0;
+  /** Previous unlock count — used to detect changes (-1 forces a recompute). */
+  private lastUnlockedCount = -1;
 
   /** Load initial world data + NPC + dungeon catalogs from the server. */
   async loadWorld(): Promise<void> {
@@ -35,18 +42,24 @@ export class WorldCache {
 
     const data = await worldRes.json() as {
       startTile: { col: number; row: number };
+      defaultMapId?: string;
+      maps?: WorldMapMeta[];
       tiles: WorldTileDefinition[];
       tileTypes?: Record<string, TileTypeDefinition>;
     };
 
     this.startTile = data.startTile;
-    this.tiles.clear();
-    this.idToOffsetKey.clear();
-    for (const tile of data.tiles) {
-      const offsetKey = `${tile.col},${tile.row}`;
-      this.tiles.set(offsetKey, tile);
-      this.idToOffsetKey.set(tile.id, offsetKey);
+    this.maps = data.maps ?? [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile: data.startTile }];
+    if (!this.maps.some(m => m.id === this.currentMapId)) {
+      this.currentMapId = data.defaultMapId ?? this.maps[0]?.id ?? DEFAULT_MAP_ID;
     }
+    this.tiles.clear();
+    this.tilesByGuid.clear();
+    for (const tile of data.tiles) {
+      this.tiles.set(`${tile.mapId}:${tile.col},${tile.row}`, tile);
+      this.tilesByGuid.set(tile.id, tile);
+    }
+    this.lastUnlockedCount = -1; // force fog recompute against the (possibly new) tile set
 
     this.tileTypeDefs.clear();
     if (data.tileTypes) {
@@ -85,19 +98,42 @@ export class WorldCache {
     this.unlockedOffsetKeys.clear();
     this.unlockedZones.clear();
 
+    // Unlock GUIDs span every map the player has visited; only the current
+    // map's unlocks affect what the renderer shows.
     for (const id of tileIds) {
-      const offsetKey = this.idToOffsetKey.get(id);
-      if (!offsetKey) continue; // Unknown tile ID (stale save or deleted tile)
-
-      this.unlockedOffsetKeys.add(offsetKey);
-
-      const tile = this.tiles.get(offsetKey);
-      if (tile) {
-        this.unlockedZones.add(tile.zone);
-      }
+      const tile = this.tilesByGuid.get(id);
+      if (!tile || tile.mapId !== this.currentMapId) continue;
+      this.unlockedOffsetKeys.add(`${tile.col},${tile.row}`);
+      this.unlockedZones.add(tile.zone);
     }
 
     return true;
+  }
+
+  /**
+   * Switch the rendered map. Returns true if it changed (caller should rebuild
+   * the grid + recompute fog). Forces the next updateUnlocked to recompute even
+   * if the unlock count is unchanged.
+   */
+  setCurrentMap(mapId: string): boolean {
+    if (mapId === this.currentMapId) return false;
+    this.currentMapId = mapId;
+    this.lastUnlockedCount = -1;
+    return true;
+  }
+
+  getCurrentMapId(): string {
+    return this.currentMapId;
+  }
+
+  /** Metadata for every map in the world. */
+  getMaps(): WorldMapMeta[] {
+    return this.maps;
+  }
+
+  /** Look up any tile by its stable GUID, across all maps. */
+  getTileByGuid(id: string): WorldTileDefinition | undefined {
+    return this.tilesByGuid.get(id);
   }
 
   /** Check if a tile is unlocked (player can move to it). */
@@ -110,14 +146,18 @@ export class WorldCache {
     return this.unlockedZones.has(zone);
   }
 
-  /** Get all tiles in the cache. */
+  /** Get all tiles on the current map. */
   getTiles(): WorldTileDefinition[] {
-    return Array.from(this.tiles.values());
+    const result: WorldTileDefinition[] = [];
+    for (const tile of this.tiles.values()) {
+      if (tile.mapId === this.currentMapId) result.push(tile);
+    }
+    return result;
   }
 
-  /** Get a specific tile by offset coordinates. */
+  /** Get a specific tile on the current map by offset coordinates. */
   getTile(col: number, row: number): WorldTileDefinition | undefined {
-    return this.tiles.get(`${col},${row}`);
+    return this.tiles.get(`${this.currentMapId}:${col},${row}`);
   }
 
   /** Get the start tile position. */

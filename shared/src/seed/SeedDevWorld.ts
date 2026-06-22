@@ -20,6 +20,7 @@
  */
 
 import { TileType } from '../hex/HexTile.js';
+import { DEFAULT_MAP_ID } from '../hex/MapSchema.js';
 import type { WorldTileDefinition } from '../hex/MapSchema.js';
 import type { ZoneDefinition } from '../systems/ZoneTypes.js';
 import {
@@ -599,6 +600,7 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
 
       tiles.push({
         id: idFactory(),
+        mapId: DEFAULT_MAP_ID,
         col,
         row,
         type: tileType,
@@ -666,6 +668,7 @@ function ensureConnectivity(
   if (!tileAt.has(anchorKey)) {
     const anchorTile: WorldTileDefinition = {
       id: idFactory(),
+      mapId: DEFAULT_MAP_ID,
       col: BRIDGE_ANCHOR.col,
       row: BRIDGE_ANCHOR.row,
       type: TileType.Plains,
@@ -744,6 +747,7 @@ function ensureConnectivity(
       } else {
         const newTile: WorldTileDefinition = {
           id: idFactory(),
+          mapId: DEFAULT_MAP_ID,
           col: off.col,
           row: off.row,
           type: TileType.Plains,

@@ -24,6 +24,8 @@ export interface TileDefinition {
 export interface WorldTileDefinition {
   /** Stable GUID — survives admin saves, only changes when a tile is deleted & re-created. */
   id: string;
+  /** Which map this tile belongs to. Legacy data is normalized to DEFAULT_MAP_ID on load. */
+  mapId: string;
   col: number;
   row: number;
   type: string;
@@ -41,14 +43,102 @@ export interface WorldTileDefinition {
   dungeonId?: string;
   /** Item ID required to traverse. Overrides the tile type default if set. */
   requiredItemId?: string;
+  /**
+   * If present, a party standing on this room can travel to another map's room.
+   * The target is identified by stable GUID so it survives col/row edits.
+   */
+  transitionsTo?: { mapId: string; tileId: string };
+}
+
+/**
+ * Metadata for a single map in a multi-map world.
+ */
+export interface WorldMapMeta {
+  id: string;
+  name: string;
+  /** Default centering / fallback arrival tile for this map. */
+  startTile: { col: number; row: number };
 }
 
 /**
  * World data — the full world definition loaded from data/world.json.
+ *
+ * A world is a collection of independent hex maps. Each tile is tagged with a
+ * `mapId`; the `maps` registry holds per-map metadata. `startTile` is the global
+ * spawn point (a room on `defaultMapId`). Legacy single-map worlds are migrated
+ * by {@link migrateWorldData} into a one-entry (`overworld`) registry.
  */
 export interface WorldData {
   startTile: { col: number; row: number };
+  /** Registry of maps. Always populated after migration. */
+  maps: WorldMapMeta[];
+  /** Map new players spawn on. Defaults to DEFAULT_MAP_ID. */
+  defaultMapId: string;
   tiles: WorldTileDefinition[];
+}
+
+/** Canonical id for the single map every legacy world is normalized into. */
+export const DEFAULT_MAP_ID = 'overworld';
+
+/**
+ * Normalize a (possibly legacy) WorldData in place so multi-map invariants hold:
+ *  - every tile gets a `mapId` (default {@link DEFAULT_MAP_ID})
+ *  - `defaultMapId` defaults to {@link DEFAULT_MAP_ID}
+ *  - `maps` is synthesized to cover every mapId present on tiles (plus the
+ *    default map), seeding the default map's `startTile` from `world.startTile`
+ *    and other maps' from their first tile
+ *
+ * Idempotent. Returns true if anything changed, so callers can re-persist.
+ */
+export function migrateWorldData(world: WorldData): boolean {
+  let changed = false;
+
+  // 1. Every tile must carry a mapId.
+  for (const tile of world.tiles) {
+    if (!tile.mapId) {
+      tile.mapId = DEFAULT_MAP_ID;
+      changed = true;
+    }
+  }
+
+  // 2. Default spawn map.
+  if (!world.defaultMapId) {
+    world.defaultMapId = DEFAULT_MAP_ID;
+    changed = true;
+  }
+
+  // 3. Maps registry must cover the default map and every mapId seen on a tile.
+  if (!Array.isArray(world.maps)) {
+    world.maps = [];
+    changed = true;
+  }
+  const known = new Set(world.maps.map(m => m.id));
+  const needed = new Set<string>([world.defaultMapId]);
+  for (const tile of world.tiles) needed.add(tile.mapId);
+
+  for (const mapId of needed) {
+    if (known.has(mapId)) continue;
+    let startTile = { col: world.startTile.col, row: world.startTile.row };
+    if (mapId !== world.defaultMapId) {
+      const first = world.tiles.find(t => t.mapId === mapId);
+      startTile = first ? { col: first.col, row: first.row } : { col: 0, row: 0 };
+    }
+    world.maps.push({ id: mapId, name: defaultMapName(mapId), startTile });
+    known.add(mapId);
+    changed = true;
+  }
+
+  return changed;
+}
+
+/** Turn a map id into a human display name: 'crystal_caves' → 'Crystal Caves'. */
+function defaultMapName(mapId: string): string {
+  const titled = mapId
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+  return titled || mapId;
 }
 
 /**

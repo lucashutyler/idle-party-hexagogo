@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, TileTypeDefinition, RecipeDefinition, NpcDefinition, QuestDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
+import { migrateWorldData } from '@idle-party-rpg/shared';
 
 export type VersionStatus = 'draft' | 'published';
 
@@ -186,6 +187,12 @@ export class VersionStore {
     const encountersMigrated = migrateSnapshotEncounterTables(snapshot);
     if (encountersMigrated) {
       console.log(`[VersionStore] Migrated encounter tables in version ${id}`);
+      needsSave = true;
+    }
+
+    // Normalize legacy single-map worlds (no mapId / maps) into the multi-map shape.
+    if (migrateWorldData(snapshot.world)) {
+      console.log(`[VersionStore] Migrated world to multi-map shape in version ${id}`);
       needsSave = true;
     }
 

@@ -1,8 +1,9 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { HexGrid, HexTile, offsetToCube, GAME_VERSION, DEV_SEED_MARKER_ZONE_ID } from '@idle-party-rpg/shared';
+import { GAME_VERSION, DEV_SEED_MARKER_ZONE_ID } from '@idle-party-rpg/shared';
 import { PlayerManager } from './PlayerManager.js';
+import { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
 import { TradeStore } from './social/TradeStore.js';
@@ -24,7 +25,7 @@ export class GameLoop {
   private tradeStore: TradeStore;
   private saveInterval?: ReturnType<typeof setInterval>;
   private craftTickInterval?: ReturnType<typeof setInterval>;
-  private grid!: HexGrid;
+  private grids!: WorldGrids;
 
   constructor(store: GameStateStore) {
     this.contentStore = new ContentStore();
@@ -93,14 +94,14 @@ export class GameLoop {
       }
     }
 
-    // Build hex grid from content store world data
+    // Build per-map hex grids from content store world data
     t = performance.now();
-    this.grid = this.buildGridFromContent();
-    console.log(`[Startup] HexGrid built (${this.grid.size} tiles) in ${(performance.now() - t).toFixed(1)}ms`);
+    this.grids = new WorldGrids(this.contentStore);
+    console.log(`[Startup] World grids built (${this.grids.totalSize()} tiles across ${this.grids.mapIds().length} map(s)) in ${(performance.now() - t).toFixed(1)}ms`);
 
-    // Create player manager now that grid + content are ready
+    // Create player manager now that grids + content are ready
     (this as { playerManager: PlayerManager }).playerManager = new PlayerManager(
-      this.grid,
+      this.grids,
       this.contentStore,
       this.guildStore,
       accountStore,
@@ -246,42 +247,8 @@ export class GameLoop {
    * Returns the number of parties relocated.
    */
   rebuildGridAndRelocate(): number {
-    this.rebuildGrid();
-    this.playerManager.partyBattles.refreshAllPartyTiles(this.grid);
-    return this.playerManager.relocateDisplacedParties(this.grid, this.contentStore);
-  }
-
-  /**
-   * Rebuild the HexGrid in-place from current content store data.
-   * All existing references (PlayerManager, PlayerSession, etc.) remain valid
-   * because the same grid object is reused.
-   */
-  rebuildGrid(): void {
-    this.grid.clear();
-    const world = this.contentStore.getWorld();
-    for (const tileDef of world.tiles) {
-      const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
-      const tileTypeDef = this.contentStore.getTileType(tileDef.type);
-      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id, tileDef.requiredItemId, tileTypeDef);
-      this.grid.addTile(tile);
-    }
-    console.log(`[GameLoop] Grid rebuilt: ${this.grid.size} tiles`);
-  }
-
-  /**
-   * Build a HexGrid from the content store's world data.
-   */
-  private buildGridFromContent(): HexGrid {
-    const grid = new HexGrid();
-    const world = this.contentStore.getWorld();
-
-    for (const tileDef of world.tiles) {
-      const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
-      const tileTypeDef = this.contentStore.getTileType(tileDef.type);
-      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id, tileDef.requiredItemId, tileTypeDef);
-      grid.addTile(tile);
-    }
-
-    return grid;
+    this.grids.rebuild();
+    this.playerManager.partyBattles.refreshAllPartyTiles(this.grids);
+    return this.playerManager.relocateDisplacedParties(this.grids, this.contentStore);
   }
 }

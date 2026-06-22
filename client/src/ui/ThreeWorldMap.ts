@@ -399,7 +399,10 @@ export class ThreeWorldMap {
   }
 
   applyServerState(state: ServerStateMessage, snap?: boolean): void {
-    const shouldSnap = snap || this.isFirstState;
+    // A map switch (transition) jumps the camera + party sprite — never tween
+    // across a discontinuity between two unrelated grids.
+    const mapChanged = this.worldCache.setCurrentMap(state.currentMapId);
+    const shouldSnap = snap || this.isFirstState || mapChanged;
 
     const unlockedChanged = this.worldCache.updateUnlocked(state.unlocked);
     if (unlockedChanged || shouldSnap) {
@@ -417,10 +420,11 @@ export class ThreeWorldMap {
     if (this.currentZone !== prevZone) this.staticDirty = true;
 
     this.partyMemberUsernames = (state.social?.party?.members ?? []).map(m => m.username);
-    this.lastOtherPlayers = state.otherPlayers;
+    // Only show players on the same map as us.
+    this.lastOtherPlayers = state.otherPlayers.filter(p => !p.mapId || p.mapId === state.currentMapId);
     this.serverPath = state.party.path ?? [];
 
-    if (shouldSnap || !this.hasInitializedView) {
+    if (shouldSnap || mapChanged || !this.hasInitializedView) {
       this.centerOnParty();
       this.hasInitializedView = true;
     }

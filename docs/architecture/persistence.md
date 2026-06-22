@@ -5,7 +5,7 @@
 Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added.
 
 Saved state per player (`PlayerSaveData`):
-- `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `target`, `movementQueue`
+- `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `mapId` (which map the party is on; absent on legacy saves → defaults to the world's default map on restore), `target`, `movementQueue`
 - `character` (className, level, xp, inventory, equipment, skillLoadout, skillPoints) — optional; old saves or saves with invalid/legacy classes get `character = null` on load, forcing class re-selection
 - `friends`, `outgoingFriendRequests`, `blockedUsers` — optional; default to empty
 - `guildId`, `partyId`, `partyRole`, `partyGridPosition` — party state survives server restarts for multi-player parties

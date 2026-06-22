@@ -77,11 +77,18 @@ const sharedComponents = {
       required: ['col', 'row', 'type', 'zone', 'name'],
       properties: {
         id: { type: 'string', description: 'GUID, auto-generated' },
+        mapId: { type: 'string', description: "Map this room belongs to. Defaults to 'overworld'." },
         col: { type: 'number' },
         row: { type: 'number' },
         type: { type: 'string', enum: ['plains', 'forest', 'mountain', 'water', 'town', 'dungeon', 'desert', 'swamp'] },
         zone: { type: 'string' },
         name: { type: 'string', example: 'Town Square' },
+        transitionsTo: {
+          type: 'object',
+          description: 'Optional link to a room on another map (manhole → sewers).',
+          required: ['mapId', 'tileId'],
+          properties: { mapId: { type: 'string' }, tileId: { type: 'string', description: 'Target room GUID' } },
+        },
       },
     },
   },
@@ -335,19 +342,19 @@ export const adminSwaggerSpec = {
           content: { 'application/json': { schema: {
             type: 'object',
             required: ['col', 'row'],
-            properties: { col: { type: 'number' }, row: { type: 'number' } },
+            properties: { mapId: { type: 'string', description: "Defaults to 'overworld'." }, col: { type: 'number' }, row: { type: 'number' } },
           } } },
         },
         responses: {
           200: { description: 'Tile deleted' },
-          400: { description: 'Cannot delete start tile or tile not found' },
+          400: { description: 'Cannot delete start tile, tile not found, or an inbound transition links to it' },
         },
       },
     },
     '/api/admin/world/start-tile': {
       put: {
         tags: ['World'],
-        summary: 'Set the start tile',
+        summary: "Set a map's start tile (defaults to the default/spawn map)",
         parameters: [
           { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
         ],
@@ -356,12 +363,52 @@ export const adminSwaggerSpec = {
           content: { 'application/json': { schema: {
             type: 'object',
             required: ['col', 'row'],
-            properties: { col: { type: 'number' }, row: { type: 'number' } },
+            properties: { mapId: { type: 'string', description: "Defaults to the world's default map." }, col: { type: 'number' }, row: { type: 'number' } },
           } } },
         },
         responses: {
           200: { description: 'Start tile updated' },
           400: { description: 'Tile not found or not traversable' },
+        },
+      },
+    },
+    '/api/admin/world/map': {
+      post: {
+        tags: ['World'],
+        summary: 'Create or rename a map',
+        parameters: [
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['id', 'name'],
+            properties: { id: { type: 'string' }, name: { type: 'string' }, startTile: { type: 'object', properties: { col: { type: 'number' }, row: { type: 'number' } } } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Map created/renamed, returns world data' },
+          400: { description: 'Missing id/name' },
+        },
+      },
+      delete: {
+        tags: ['World'],
+        summary: 'Delete a map (must have no rooms and no inbound transitions)',
+        parameters: [
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['id'],
+            properties: { id: { type: 'string' } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Map deleted' },
+          400: { description: 'Default map, non-empty map, or inbound transition exists' },
         },
       },
     },

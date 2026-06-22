@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { HexGrid, offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
+import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
+import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
 import { GuildSystem } from './social/GuildSystem.js';
@@ -19,7 +20,7 @@ export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
-  private grid: HexGrid;
+  private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
   private store: GameStateStore;
@@ -33,8 +34,8 @@ export class PlayerManager {
   private getAllUsernames: () => string[];
   private readonly serverVersion = Date.now().toString();
 
-  constructor(grid: HexGrid, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore) {
-    this.grid = grid;
+  constructor(grids: WorldGrids, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore) {
+    this.grids = grids;
     this.content = content;
     this.accountStore = accountStore;
     this.store = store;
@@ -46,7 +47,7 @@ export class PlayerManager {
     this.mailboxes = new MailboxSystem();
     this.getAllUsernames = () => accountStore.getAllUsernames();
     this.partyBattles = new PartyBattleManager(
-      grid,
+      grids,
       content,
       (username) => this.sessions.get(username),
       (username) => this.sendStateToPlayer(username),
@@ -54,6 +55,11 @@ export class PlayerManager {
         this.cancelInvitesOnMove(members);
       },
     );
+  }
+
+  /** The world's default (spawn) map grid. */
+  private defaultGrid(): HexGrid {
+    return this.grids.getOrThrow(this.content.getWorld().defaultMapId);
   }
 
   async login(ws: WebSocket, username: string): Promise<PlayerSession> {
@@ -80,14 +86,15 @@ export class PlayerManager {
         // Reset position to start tile and clear party state (party not in memory).
         const startPos = this.content.getStartTile();
         saveData.position = { col: startPos.col, row: startPos.row };
+        saveData.mapId = this.content.getWorld().defaultMapId;
         saveData.target = null;
         saveData.movementQueue = [];
         saveData.partyId = null;
         saveData.partyRole = undefined;
         saveData.partyGridPosition = undefined;
-        session = PlayerSession.fromSaveData(saveData, this.grid, this.content);
+        session = PlayerSession.fromSaveData(saveData, this.grids, this.content);
       } else {
-        session = new PlayerSession(username, this.grid, this.content);
+        session = new PlayerSession(username, this.grids, this.content);
       }
       this.sessions.set(username, session);
       this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
@@ -401,6 +408,11 @@ export class PlayerManager {
       if (!partyId) return null;
       return this.partyBattles.getZone(partyId);
     };
+    session.getPartyMapId = () => {
+      const partyId = session.getPartyId();
+      if (!partyId) return null;
+      return this.partyBattles.getMapId(partyId);
+    };
     session.getPartyPosition = () => {
       const partyId = session.getPartyId();
       if (!partyId) return null;
@@ -436,14 +448,14 @@ export class PlayerManager {
     );
 
     if (typeof result !== 'string') {
-      // Created a party — now create its battle entry
+      // Created a party — now create its battle entry on the default (spawn) map
       const startTile = session.getStartingTile();
-      this.partyBattles.createEntry(result.id, username, startTile);
+      this.partyBattles.createEntry(result.id, username, startTile, this.content.getWorld().defaultMapId);
     }
   }
 
-  /** Ensure a player is in a party, creating battle entry at a specific tile. */
-  ensurePartyAtTile(username: string, tile: import('@idle-party-rpg/shared').HexTile): void {
+  /** Ensure a player is in a party, creating battle entry at a specific tile on `mapId`. */
+  ensurePartyAtTile(username: string, tile: import('@idle-party-rpg/shared').HexTile, mapId: string): void {
     const session = this.sessions.get(username);
     if (!session) return;
     if (session.getPartyId()) return;
@@ -455,7 +467,7 @@ export class PlayerManager {
     );
 
     if (typeof result !== 'string') {
-      this.partyBattles.createEntry(result.id, username, tile);
+      this.partyBattles.createEntry(result.id, username, tile, mapId);
     }
   }
 
@@ -472,9 +484,10 @@ export class PlayerManager {
 
   /** Handle a player leaving/being kicked from a party. Creates new solo party at current position. */
   handlePartyLeave(username: string, oldPartyId: string): void {
-    // Capture the position BEFORE removeMember — if this was the last member, the
-    // entry will be destroyed and we'd lose the position (teleporting the player to start).
+    // Capture the position + map BEFORE removeMember — if this was the last member, the
+    // entry will be destroyed and we'd lose them (teleporting the player to start).
     const pos = this.partyBattles.getPosition(oldPartyId);
+    const mapId = this.partyBattles.getMapId(oldPartyId) ?? this.content.getWorld().defaultMapId;
 
     // Remove from party battle
     this.partyBattles.removeMember(oldPartyId, username);
@@ -482,12 +495,12 @@ export class PlayerManager {
     let tile: import('@idle-party-rpg/shared').HexTile | null = null;
     if (pos) {
       const coord = offsetToCube(pos);
-      tile = this.grid.getTile(coord) ?? null;
+      tile = this.grids.get(mapId)?.getTile(coord) ?? null;
     }
 
-    // Create new solo party at that position
+    // Create new solo party at that position on the same map
     if (tile) {
-      this.ensurePartyAtTile(username, tile);
+      this.ensurePartyAtTile(username, tile, mapId);
     } else {
       this.ensureParty(username);
     }
@@ -525,6 +538,20 @@ export class PlayerManager {
     return this.partyBattles.leaveDungeon(partyId);
   }
 
+  /**
+   * Handle a map-transition request. The whole party travels together through
+   * the transition on its current room. Returns an error string on failure, or
+   * null on success.
+   */
+  handleEnterTransition(username: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return 'No session.';
+    const partyId = session.getPartyId();
+    if (!partyId) return 'No party.';
+    const result = this.partyBattles.enterTransition(partyId);
+    return result.success ? null : result.error;
+  }
+
   /** Check if two players are on the same tile (uses party positions). */
   areSameTile(a: string, b: string): boolean {
     const sa = this.sessions.get(a);
@@ -532,7 +559,7 @@ export class PlayerManager {
     if (!sa || !sb) return false;
     const pa = sa.getPosition();
     const pb = sb.getPosition();
-    return pa.col === pb.col && pa.row === pb.row;
+    return sa.getMapId() === sb.getMapId() && pa.col === pb.col && pa.row === pb.row;
   }
 
   getOtherPlayers(excludeUsername: string): OtherPlayerState[] {
@@ -546,6 +573,7 @@ export class PlayerManager {
         username,
         col: pos.col,
         row: pos.row,
+        mapId: session.getMapId(),
         zone: session.getZone(),
         className: session.getClassName() ?? undefined,
         partyId: session.getPartyId() ?? undefined,
@@ -615,9 +643,10 @@ export class PlayerManager {
    * Players with invalid positions (e.g. after map migration) are moved to start tile.
    */
   restoreFromSaveData(saves: PlayerSaveData[]): void {
+    const defaultMapId = this.content.getWorld().defaultMapId;
     const startPos = this.content.getStartTile();
     const startCoord = offsetToCube(startPos);
-    const startTile = this.grid.getTile(startCoord);
+    const startTile = this.defaultGrid().getTile(startCoord);
     let phaseStart: number;
 
     // Phase 1: Restore all sessions
@@ -636,18 +665,20 @@ export class PlayerManager {
         continue;
       }
 
-      // Check if saved position is valid on current map
-      const coord = offsetToCube(data.position);
-      const tile = this.grid.getTile(coord);
+      // Check if the saved position is valid on its map. If the map or tile is
+      // gone (deleted content), send the player back to the default-map start.
+      const saveMapId = data.mapId ?? defaultMapId;
+      const tile = this.grids.get(saveMapId)?.getTile(offsetToCube(data.position));
       if (!tile) {
-        console.warn(`[PlayerManager] Moved "${data.username}" to start tile (old position ${data.position.col},${data.position.row} no longer exists)`);
+        console.warn(`[PlayerManager] Moved "${data.username}" to start tile (old position ${saveMapId}:${data.position.col},${data.position.row} no longer exists)`);
         data.position = { col: startPos.col, row: startPos.row };
+        data.mapId = defaultMapId;
         data.target = null;
         data.movementQueue = [];
       }
 
       try {
-        const session = PlayerSession.fromSaveData(data, this.grid, this.content);
+        const session = PlayerSession.fromSaveData(data, this.grids, this.content);
         this.sessions.set(data.username, session);
         this.friends.initPlayer(data.username, session.getFriends(), session.getOutgoingFriendRequests());
         const initialMailbox = session.consumeInitialMailbox();
@@ -689,11 +720,12 @@ export class PlayerManager {
         continue;
       }
 
-      // Use the owner's (or first member's) position/movement data for the party
+      // Use the owner's (or first member's) position/movement/map data for the party
       const ownerData = group.find(d => d.partyRole === 'owner') ?? group[0];
-      const coord = offsetToCube(ownerData.position);
-      const currentTile = this.grid.getTile(coord);
-      if (!currentTile) {
+      const partyMapId = ownerData.mapId ?? defaultMapId;
+      const partyGrid = this.grids.get(partyMapId);
+      const currentTile = partyGrid?.getTile(offsetToCube(ownerData.position));
+      if (!partyGrid || !currentTile) {
         // Fall back to solo for all members
         soloSaves.push(...group);
         continue;
@@ -701,10 +733,10 @@ export class PlayerManager {
 
       let targetTile = null;
       if (ownerData.target) {
-        targetTile = this.grid.getTile(offsetToCube(ownerData.target)) ?? null;
+        targetTile = partyGrid.getTile(offsetToCube(ownerData.target)) ?? null;
       }
       const movementQueue = ownerData.movementQueue
-        .map(p => this.grid.getTile(offsetToCube(p)))
+        .map(p => partyGrid.getTile(offsetToCube(p)))
         .filter((t): t is NonNullable<typeof t> => t !== null);
 
       // Restore the party in PartySystem
@@ -728,6 +760,7 @@ export class PlayerManager {
         currentTile,
         targetTile,
         movementQueue,
+        partyMapId,
       );
 
       for (let i = 1; i < members.length; i++) {
@@ -747,25 +780,26 @@ export class PlayerManager {
     // Phase 4: Restore solo players (no party or single-member groups)
     phaseStart = performance.now();
     for (const data of soloSaves) {
-      const coord = offsetToCube(data.position);
-      const currentTile = this.grid.getTile(coord);
-      if (!currentTile) {
+      const soloMapId = data.mapId ?? defaultMapId;
+      const soloGrid = this.grids.get(soloMapId);
+      const currentTile = soloGrid?.getTile(offsetToCube(data.position));
+      if (!soloGrid || !currentTile) {
         // Position was already corrected to start tile above, but double-check
         if (startTile) {
-          this.createSoloPartyAtTile(data.username, startTile, null, []);
+          this.createSoloPartyAtTile(data.username, startTile, null, [], defaultMapId);
         }
         continue;
       }
 
       let targetTile = null;
       if (data.target) {
-        targetTile = this.grid.getTile(offsetToCube(data.target)) ?? null;
+        targetTile = soloGrid.getTile(offsetToCube(data.target)) ?? null;
       }
       const movementQueue = data.movementQueue
-        .map(p => this.grid.getTile(offsetToCube(p)))
+        .map(p => soloGrid.getTile(offsetToCube(p)))
         .filter((t): t is NonNullable<typeof t> => t !== null);
 
-      this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue);
+      this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
 
       // Resume an in-progress dungeon run for this solo player.
       if (data.dungeonRun) {
@@ -786,6 +820,7 @@ export class PlayerManager {
     currentTile: import('@idle-party-rpg/shared').HexTile,
     targetTile: import('@idle-party-rpg/shared').HexTile | null,
     movementQueue: import('@idle-party-rpg/shared').HexTile[],
+    mapId: string,
   ): void {
     const partyResult = this.parties.createParty(
       username,
@@ -800,6 +835,7 @@ export class PlayerManager {
         currentTile,
         targetTile,
         movementQueue,
+        mapId,
       );
     }
   }
@@ -808,51 +844,57 @@ export class PlayerManager {
    * After a deploy, find all parties on unreachable tiles and relocate them.
    * Returns the number of parties relocated.
    */
-  relocateDisplacedParties(grid: HexGrid, content: ContentStore): number {
-    const startPos = content.getStartTile();
-    const startCoord = offsetToCube(startPos);
-    const reachable = grid.getReachableTiles(startCoord);
-
+  relocateDisplacedParties(grids: WorldGrids, content: ContentStore): number {
+    const world = content.getWorld();
+    const defaultMapId = world.defaultMapId;
     let relocated = 0;
 
     for (const partyId of this.partyBattles.getAllPartyIds()) {
       const tile = this.partyBattles.getTile(partyId);
       if (!tile) continue;
+      const currentMapId = this.partyBattles.getMapId(partyId) ?? defaultMapId;
+      const grid = grids.get(currentMapId);
 
-      const tileKey = cubeToKey(tile.coord);
-      if (reachable.has(tileKey)) continue;
-
-      // Find nearest reachable tile
+      let targetMapId = currentMapId;
       let bestTile: HexTile | null = null;
-      let bestDist = Infinity;
-      for (const key of reachable) {
-        const candidate = grid.getTileByKey(key);
-        if (!candidate) continue;
-        const dist = cubeDistance(tile.coord, candidate.coord);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestTile = candidate;
+
+      if (!grid) {
+        // The party's whole map was deleted — drop them at the default map's start.
+        targetMapId = defaultMapId;
+        bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
+      } else {
+        // Reachability is computed within the party's own map.
+        const meta = world.maps.find(m => m.id === currentMapId);
+        const startCoord = offsetToCube(meta?.startTile ?? world.startTile);
+        const reachable = grid.getReachableTiles(startCoord);
+        if (reachable.has(cubeToKey(tile.coord))) continue; // still reachable
+
+        let bestDist = Infinity;
+        for (const key of reachable) {
+          const candidate = grid.getTileByKey(key);
+          if (!candidate) continue;
+          const dist = cubeDistance(tile.coord, candidate.coord);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestTile = candidate;
+          }
         }
+        if (!bestTile) bestTile = grid.getTile(startCoord) ?? null;
       }
 
-      if (!bestTile) {
-        // Fallback to start tile
-        bestTile = grid.getTile(startCoord) ?? null;
-        if (!bestTile) continue;
-      }
+      if (!bestTile) continue;
+      const mapChanged = targetMapId !== currentMapId;
+      this.partyBattles.relocateParty(partyId, bestTile, targetMapId);
 
-      // Relocate the party
-      this.partyBattles.relocateParty(partyId, bestTile);
-
-      // Unlock the area for all members and log
+      // Unlock the area for all members and log.
       const members = this.partyBattles.getMembers(partyId);
       if (members) {
         for (const username of members) {
           const session = this.sessions.get(username);
-          if (session) {
-            session.forceUnlockTileArea(bestTile);
-            session.addLogEntry('World updated — relocated to a safe room.', 'move');
-          }
+          if (!session) continue;
+          if (mapChanged) session.switchMapGrid(bestTile);
+          else session.forceUnlockTileArea(bestTile);
+          session.addLogEntry('World updated — relocated to a safe room.', 'move');
         }
       }
 
@@ -870,7 +912,8 @@ export class PlayerManager {
   masterReset(): number {
     const startPos = this.content.getStartTile();
     const startCoord = offsetToCube(startPos);
-    const startTile = this.grid.getTile(startCoord);
+    const defaultMapId = this.content.getWorld().defaultMapId;
+    const startTile = this.defaultGrid().getTile(startCoord);
     if (!startTile) throw new Error('Invalid starting position for master reset');
 
     // Destroy all party battle entries
@@ -888,7 +931,7 @@ export class PlayerManager {
 
       // Create a fresh solo party at start tile (only for players with characters)
       if (session.hasCharacter()) {
-        this.createSoloPartyAtTile(session.username, startTile, null, []);
+        this.createSoloPartyAtTile(session.username, startTile, null, [], defaultMapId);
       }
       count++;
     }

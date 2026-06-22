@@ -1,5 +1,4 @@
 import {
-  HexGrid,
   HexTile,
   offsetToCube,
   cubeToOffset,
@@ -27,6 +26,7 @@ import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
 import type { PlayerSession } from './PlayerSession.js';
 import type { ContentStore } from './ContentStore.js';
+import type { WorldGrids } from './WorldGrids.js';
 
 /** Live state of a party's active dungeon run. Lives on the battle entry. */
 export interface DungeonRunState {
@@ -51,20 +51,20 @@ export type DungeonEntryResult = { success: true } | { success: false; error: st
 
 export class PartyBattleManager {
   private entries = new Map<string, PartyBattleEntry>();
-  private grid: HexGrid;
+  private grids: WorldGrids;
   private content: ContentStore;
   private getSession: (username: string) => PlayerSession | undefined;
   private broadcastToMember: (username: string) => void;
   private onMembersMoved?: (members: ReadonlySet<string>) => void;
 
   constructor(
-    grid: HexGrid,
+    grids: WorldGrids,
     content: ContentStore,
     getSession: (username: string) => PlayerSession | undefined,
     broadcastToMember: (username: string) => void,
     onMembersMoved?: (members: ReadonlySet<string>) => void,
   ) {
-    this.grid = grid;
+    this.grids = grids;
     this.content = content;
     this.getSession = getSession;
     this.broadcastToMember = broadcastToMember;
@@ -72,10 +72,10 @@ export class PartyBattleManager {
   }
 
   /** Create a party battle entry. Called when a party is created or on restore. */
-  createEntry(partyId: string, username: string, startTile: HexTile): void {
+  createEntry(partyId: string, username: string, startTile: HexTile, mapId: string): void {
     if (this.entries.has(partyId)) return;
 
-    const serverParty = new ServerParty(this.grid, startTile);
+    const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
     const members = new Set([username]);
 
     const battleTimer = new ServerBattleTimer(
@@ -159,10 +159,11 @@ export class PartyBattleManager {
     currentTile: HexTile,
     targetTile: HexTile | null,
     movementQueue: HexTile[],
+    mapId: string,
   ): void {
     if (this.entries.has(partyId)) return;
 
-    const serverParty = ServerParty.restore(this.grid, currentTile, targetTile, movementQueue);
+    const serverParty = ServerParty.restore(this.grids.getOrThrow(mapId), currentTile, targetTile, movementQueue, mapId);
     const members = new Set([username]);
 
     const battleTimer = new ServerBattleTimer(
@@ -302,7 +303,7 @@ export class PartyBattleManager {
     if (entry.dungeonRun) return { success: false };
 
     const coord = offsetToCube({ col, row });
-    const tile = this.grid.getTile(coord);
+    const tile = this.grids.getOrThrow(entry.serverParty.currentMapId).getTile(coord);
     if (!tile || !tile.isTraversable) return { success: false };
 
     const success = entry.serverParty.setDestination(tile);
@@ -318,6 +319,49 @@ export class PartyBattleManager {
     for (const m of entry.members) {
       this.broadcastToMember(m);
     }
+    return { success: true };
+  }
+
+  /**
+   * Travel through the transition on the party's current room to its linked
+   * (mapId, tileId): swap the party's grid + position, reveal the arrival area
+   * for every member, and start a fresh battle on the new map.
+   */
+  enterTransition(partyId: string): { success: true } | { success: false; error: string } {
+    const entry = this.entries.get(partyId);
+    if (!entry) return { success: false, error: 'No party.' };
+    if (entry.dungeonRun) return { success: false, error: "Can't travel from inside a dungeon." };
+
+    const fromDef = this.content.getTileById(entry.serverParty.tile.id);
+    const link = fromDef?.transitionsTo;
+    if (!link) return { success: false, error: 'Nothing to enter here.' };
+
+    const destGrid = this.grids.get(link.mapId);
+    const destDef = this.content.getTileById(link.tileId);
+    if (!destGrid || !destDef || destDef.mapId !== link.mapId) {
+      return { success: false, error: 'That passage leads nowhere right now.' };
+    }
+
+    let destTile = destGrid.getTileById(link.tileId);
+    if (!destTile) {
+      // Defensive: tile exists in content but not the grid — fall back to the map's start tile.
+      const meta = this.content.getWorld().maps.find(m => m.id === link.mapId);
+      if (meta) destTile = destGrid.getTile(offsetToCube(meta.startTile));
+      if (!destTile) return { success: false, error: 'That passage leads nowhere right now.' };
+    }
+
+    entry.serverParty.switchMap(destGrid, destTile, link.mapId);
+
+    for (const username of entry.members) {
+      const session = this.getSession(username);
+      if (!session) continue;
+      session.switchMapGrid(destTile);
+      session.addLogEntry(`Traveled to ${destDef.name}.`, 'move');
+    }
+
+    // New map → fresh encounter.
+    entry.battleTimer.restartBattle();
+    for (const m of entry.members) this.broadcastToMember(m);
     return { success: true };
   }
 
@@ -426,6 +470,7 @@ export class PartyBattleManager {
   /** Get movement save data for a party (used for PlayerSession save). */
   getMovementSaveData(partyId: string): {
     position: { col: number; row: number };
+    mapId: string;
     target: { col: number; row: number } | null;
     movementQueue: { col: number; row: number }[];
   } | null {
@@ -434,11 +479,17 @@ export class PartyBattleManager {
     const json = entry.serverParty.toJSON();
     return {
       position: { col: json.col, row: json.row },
+      mapId: entry.serverParty.currentMapId,
       target: json.targetCol !== undefined && json.targetRow !== undefined
         ? { col: json.targetCol, row: json.targetRow }
         : null,
       movementQueue: json.path,
     };
+  }
+
+  /** Get the map the party is currently on. */
+  getMapId(partyId: string): string | null {
+    return this.entries.get(partyId)?.serverParty.currentMapId ?? null;
   }
 
   /** Check if two parties are at the same tile. */
@@ -462,23 +513,31 @@ export class PartyBattleManager {
   }
 
   /** Relocate a party to a new tile, restarting its battle. */
-  relocateParty(partyId: string, newTile: HexTile): void {
+  relocateParty(partyId: string, newTile: HexTile, mapId: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
     // A forced relocation (e.g. content deploy) ends any active dungeon run —
     // otherwise the party stays movement-locked on a fresh tile fighting stale
     // dungeon-floor encounters.
     entry.dungeonRun = undefined;
-    entry.serverParty.relocateTo(newTile);
+    if (entry.serverParty.currentMapId !== mapId) {
+      // Relocation crosses to a different map (e.g. the party's map was deleted).
+      entry.serverParty.switchMap(this.grids.getOrThrow(mapId), newTile, mapId);
+    } else {
+      entry.serverParty.relocateTo(newTile);
+    }
     entry.battleTimer.restartBattle();
   }
 
   /**
-   * After a grid rebuild, re-resolve all parties' tile references.
-   * The grid object is the same but tiles inside it are new instances.
+   * After a grid rebuild, re-resolve all parties' tile references against their
+   * own map. The grid objects are the same but tiles inside them are new instances.
+   * Parties whose map vanished are left for relocateDisplacedParties to handle.
    */
-  refreshAllPartyTiles(grid: HexGrid): void {
+  refreshAllPartyTiles(grids: WorldGrids): void {
     for (const entry of this.entries.values()) {
+      const grid = grids.get(entry.serverParty.currentMapId);
+      if (!grid) continue;
       const pos = cubeToOffset(entry.serverParty.position);
       const coord = offsetToCube(pos);
       const freshTile = grid.getTile(coord);
@@ -794,7 +853,9 @@ export class PartyBattleManager {
   /** Resolve the entrance HexTile for a run, falling back to the party's current tile. */
   private resolveEntranceTile(entry: PartyBattleEntry): HexTile {
     if (entry.dungeonRun) {
-      const tile = this.grid.getTile(offsetToCube(entry.dungeonRun.entrance));
+      // The entrance is on the party's current map — a dungeon run never switches maps.
+      const grid = this.grids.get(entry.serverParty.currentMapId);
+      const tile = grid?.getTile(offsetToCube(entry.dungeonRun.entrance));
       if (tile) return tile;
     }
     return entry.serverParty.tile;
