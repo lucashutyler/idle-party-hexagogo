@@ -10,6 +10,8 @@ import {
   findSetConflicts,
   migrateLegacySet,
   mergeSetBonusesIntoEquip,
+  computeGrantedSkillIds,
+  getSetBonusText,
 } from '../src/systems/SetTypes';
 import type { SetDefinition, SetBreakpoint, SetBonuses } from '../src/systems/SetTypes';
 import { createPartyCombatState, processPartyTick } from '../src/systems/CombatEngine';
@@ -534,5 +536,73 @@ describe('getSetDisplayName', () => {
   it('returns plain name when classRestriction is an empty array', () => {
     const empty: SetDefinition = { ...knightSet, classRestriction: [] };
     expect(getSetDisplayName(empty)).toBe('Glowing Crystal Set');
+  });
+});
+
+describe('computeGrantedSkillIds', () => {
+  const items: Record<string, import('../src/systems/ItemTypes').ItemDefinition> = {
+    bash_sword: { id: 'bash_sword', name: 'Bash Sword', rarity: 'common', equipSlot: 'mainhand', grantedSkillIds: ['knight_bash'] },
+    plain_helm: { id: 'plain_helm', name: 'Plain Helm', rarity: 'common', equipSlot: 'head' },
+    echo_ring: { id: 'echo_ring', name: 'Echo Ring', rarity: 'rare', equipSlot: 'ring', grantedSkillIds: ['knight_bash', 'bard_rally'] },
+  };
+
+  const grantSet: SetDefinition = {
+    id: 'grant_set',
+    name: 'Grant Set',
+    itemIds: ['gs_a', 'gs_b', 'gs_c'],
+    classRestriction: ['Knight'],
+    breakpoints: [
+      { piecesRequired: 2, bonuses: { grantedSkillIds: ['priest_bless'] } },
+      { piecesRequired: 3, bonuses: { damagePercent: 5, grantedSkillIds: ['priest_devotion'] } },
+    ],
+  };
+
+  it('collects grants from equipped items', () => {
+    const equip = withEquipped({ mainhand: 'bash_sword', head: 'plain_helm' });
+    expect(computeGrantedSkillIds(equip, items, {}, 'Knight')).toEqual(['knight_bash']);
+  });
+
+  it('returns empty when nothing grants skills', () => {
+    const equip = withEquipped({ head: 'plain_helm' });
+    expect(computeGrantedSkillIds(equip, items, {}, 'Knight')).toEqual([]);
+  });
+
+  it('collects the active set tier grant — highest tier replaces lower tiers', () => {
+    const twoPieces = withEquipped({ head: 'gs_a', chest: 'gs_b' });
+    expect(computeGrantedSkillIds(twoPieces, items, { grant_set: grantSet }, 'Knight')).toEqual(['priest_bless']);
+
+    const threePieces = withEquipped({ head: 'gs_a', chest: 'gs_b', foot: 'gs_c' });
+    expect(computeGrantedSkillIds(threePieces, items, { grant_set: grantSet }, 'Knight')).toEqual(['priest_devotion']);
+  });
+
+  it('set classRestriction excludes non-matching classes (item grants still apply)', () => {
+    const equip = withEquipped({ head: 'gs_a', chest: 'gs_b', mainhand: 'bash_sword' });
+    const forBard = computeGrantedSkillIds(equip, items, { grant_set: grantSet }, 'Bard');
+    expect(forBard).toEqual(['knight_bash']); // set skipped, item grant kept
+    const forKnight = computeGrantedSkillIds(equip, items, { grant_set: grantSet }, 'Knight');
+    expect(forKnight).toContain('priest_bless');
+    expect(forKnight).toContain('knight_bash');
+  });
+
+  it('unions and dedupes grants across items and sets', () => {
+    const dupSet: SetDefinition = {
+      id: 'dup_set',
+      name: 'Dup Set',
+      itemIds: ['gs_a', 'gs_b'],
+      breakpoints: [{ piecesRequired: 2, bonuses: { grantedSkillIds: ['knight_bash', 'bard_rally'] } }],
+    };
+    // bash_sword grants knight_bash, echo_ring grants knight_bash + bard_rally,
+    // and the set grants knight_bash + bard_rally → each appears exactly once.
+    const equip = withEquipped({ mainhand: 'bash_sword', ring: 'echo_ring', head: 'gs_a', chest: 'gs_b' });
+    const granted = computeGrantedSkillIds(equip, items, { dup_set: dupSet }, 'Knight');
+    expect(granted.sort()).toEqual(['bard_rally', 'knight_bash']);
+  });
+
+  it('getSetBonusText renders granted skills with resolved names', () => {
+    const skills = { knight_bash: { name: 'Bash' } as SkillDefinition };
+    expect(getSetBonusText({ damagePercent: 5, grantedSkillIds: ['knight_bash'] }, skills))
+      .toBe('+5% Damage, Grants skill: Bash');
+    // Unknown skill id falls back to the raw id
+    expect(getSetBonusText({ grantedSkillIds: ['mystery'] })).toBe('Grants skill: mystery');
   });
 });

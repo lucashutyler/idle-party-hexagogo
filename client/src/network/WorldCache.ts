@@ -1,5 +1,5 @@
-import { DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
-import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
+import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, getSlotSchedule } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, SkillDefinition, SkillSlot, SkillContent, ClassName } from '@idle-party-rpg/shared';
 
 /**
  * Client-side cache for world data.
@@ -22,6 +22,14 @@ export class WorldCache {
   private maps: WorldMapMeta[] = [];
   private currentMapId: string = DEFAULT_MAP_ID;
 
+  /** Skill catalog + per-class slot schedules. Defaults to the built-in seed
+   *  catalog so skill UIs never crash before /api/skills loads (or if it fails). */
+  private skillContent: SkillContent = { skills: SEED_SKILLS, slotSchedules: SEED_SKILL_SLOT_SCHEDULES };
+
+  /** Bumped on every successful loadWorld — screens include this in their
+   *  re-render keys so content deploys refresh cached skill/world renders. */
+  private contentGen = 0;
+
   /** Offset-format keys ("col,row") for unlocked tiles on the current map. */
   private unlockedOffsetKeys = new Set<string>();
 
@@ -31,12 +39,13 @@ export class WorldCache {
   /** Previous unlock count — used to detect changes (-1 forces a recompute). */
   private lastUnlockedCount = -1;
 
-  /** Load initial world data + NPC + dungeon catalogs from the server. */
+  /** Load initial world data + NPC + dungeon + skill catalogs from the server. */
   async loadWorld(): Promise<void> {
-    const [worldRes, npcsRes, dungeonsRes] = await Promise.all([
+    const [worldRes, npcsRes, dungeonsRes, skillsRes] = await Promise.all([
       fetch('/api/world', { credentials: 'include' }),
       fetch('/api/npcs', { credentials: 'include' }),
       fetch('/api/dungeons', { credentials: 'include' }),
+      fetch('/api/skills', { credentials: 'include' }),
     ]);
     if (!worldRes.ok) throw new Error(`Failed to load world: ${worldRes.status}`);
 
@@ -85,6 +94,27 @@ export class WorldCache {
     } else {
       console.warn(`[WorldCache] Failed to load dungeons: ${dungeonsRes.status} — dungeon entrances will show no Enter button`);
     }
+
+    // Skills — tolerate failure gracefully (keep whatever catalog we already
+    // have; that's the seed catalog on first load) so skill UIs never crash.
+    if (skillsRes.ok) {
+      try {
+        const skillData = await skillsRes.json() as {
+          skills: Record<string, SkillDefinition>;
+          slotSchedules: Record<string, SkillSlot[]>;
+        };
+        this.skillContent = {
+          skills: skillData.skills ?? SEED_SKILLS,
+          slotSchedules: skillData.slotSchedules ?? SEED_SKILL_SLOT_SCHEDULES,
+        };
+      } catch (err) {
+        console.warn('[WorldCache] Failed to parse skills response — using built-in skill catalog', err);
+      }
+    } else {
+      console.warn(`[WorldCache] Failed to load skills: ${skillsRes.status} — using built-in skill catalog`);
+    }
+
+    this.contentGen++;
   }
 
   /**
@@ -183,6 +213,32 @@ export class WorldCache {
   /** Get a dungeon definition by ID. */
   getDungeon(id: string): DungeonDefinition | undefined {
     return this.dungeons.get(id);
+  }
+
+  /** Get a skill definition by ID (cross-class catalog). */
+  getSkill(id: string): SkillDefinition | undefined {
+    return this.skillContent.skills[id];
+  }
+
+  /** Get every skill definition in the catalog. */
+  getAllSkills(): SkillDefinition[] {
+    return Object.values(this.skillContent.skills);
+  }
+
+  /** Get the skill slot schedule for a class (falls back to the seed schedule). */
+  getSlotSchedule(className: string): SkillSlot[] {
+    return getSlotSchedule(className as ClassName, this.skillContent);
+  }
+
+  /** Skill catalog + slot schedules in the shape the shared helpers expect. */
+  getSkillContent(): SkillContent {
+    return this.skillContent;
+  }
+
+  /** Monotonic counter bumped on each successful loadWorld — include in
+   *  re-render keys so content deploys invalidate cached renders. */
+  get contentGeneration(): number {
+    return this.contentGen;
   }
 
   /** Check if world data has been loaded. */

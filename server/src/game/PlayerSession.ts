@@ -27,11 +27,11 @@ import {
   getZone,
   setAppliesToClass,
   createDefaultSkillLoadout,
-  SKILL_SLOTS,
+  reconcileSkillLoadout,
+  computeGrantedSkillIds,
   getUnlockedSkillsForLevel,
   equipSkillInSlot,
   unequipSkillFromSlot,
-  getSkillById,
   emptyCraftQueue,
   enqueueRecipe,
   cancelJobAt,
@@ -65,6 +65,7 @@ import type {
   ShopDefinition,
   SkillDefinition,
   SkillLoadout,
+  SkillContent,
   MailboxEntry,
   CraftQueueState,
   ClientCraftingState,
@@ -200,9 +201,10 @@ export class PlayerSession {
     const percentHp = setResult.bonuses.percentHp ?? 0;
     const maxHp = Math.max(1, Math.floor((baseMaxHp + flatHp) * (1 + percentHp / 100)));
 
-    // Resolve equipped skill definitions
+    // Resolve equipped skill definitions from live content. Grants are NOT
+    // auto-appended here — they only gate which skills can occupy a slot.
     const equippedSkills: (SkillDefinition | null)[] = this.character.skillLoadout.equippedSkills.map(
-      id => id ? getSkillById(id) ?? null : null
+      id => id ? this.content.getSkill(id) ?? null : null
     );
 
     // Get grid position from party info via social state
@@ -576,6 +578,7 @@ export class PlayerSession {
         baseDamage: calculateBaseDamage(this.character.level, this.character.className),
         damageType: CLASS_DEFINITIONS[this.character.className].damageType,
         skillLoadout: this.character.skillLoadout,
+        grantedSkillIds: this.getGrantedSkillIds(),
         inventory: { ...this.character.inventory },
         equipment: { ...this.character.equipment },
         xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
@@ -886,7 +889,7 @@ export class PlayerSession {
   /** Set class for a new character. Only works if no character exists yet. */
   setClass(className: ClassName): boolean {
     if (this.character !== null) return false;
-    this.character = createCharacter(className);
+    this.character = createCharacter(className, this.skillContent());
     return true;
   }
 
@@ -894,7 +897,7 @@ export class PlayerSession {
   forceSetClass(className: ClassName): void {
     if (!this.character) {
       // Admin creating a character for a player who hasn't chosen yet
-      this.character = createCharacter(className);
+      this.character = createCharacter(className, this.skillContent());
       this.autoUnlockSkills();
       this.addLogEntry(`Class set to ${className}!`, 'battle');
       return;
@@ -911,18 +914,48 @@ export class PlayerSession {
       }
     }
     this.character.className = className;
-    this.character.skillLoadout = createDefaultSkillLoadout(className);
+    this.character.skillLoadout = createDefaultSkillLoadout(className, this.skillContent());
     this.autoUnlockSkills();
     this.addLogEntry(`Class changed to ${className}!`, 'battle');
   }
 
   // ── Skill System ──────────────────────────────────────
 
-  /** Auto-unlock all skills the player qualifies for based on level. */
+  /** Live skill content (definitions + per-class slot schedules) from the content store. */
+  private skillContent(): SkillContent {
+    return {
+      skills: this.content.getAllSkills(),
+      slotSchedules: this.content.getAllSkillSlotSchedules(),
+    };
+  }
+
+  /** Skill IDs granted by currently equipped items/sets. Grants gate availability only. */
+  getGrantedSkillIds(): string[] {
+    if (!this.character) return [];
+    return computeGrantedSkillIds(
+      this.character.equipment,
+      this.content.getAllItems(),
+      this.content.getAllSets(),
+      this.character.className,
+    );
+  }
+
+  /**
+   * Auto-unlock all skills the player qualifies for based on level, then
+   * reconcile the equipped loadout against current content (schedule length,
+   * removed/edited skills, lost grants).
+   */
   autoUnlockSkills(): void {
     if (!this.character) return;
-    const available = getUnlockedSkillsForLevel(this.character.className, this.character.level);
-    this.character.skillLoadout.unlockedSkills = available;
+    const skillContent = this.skillContent();
+    this.character.skillLoadout.unlockedSkills = getUnlockedSkillsForLevel(this.character.className, this.character.level, skillContent);
+    this.character.skillLoadout = reconcileSkillLoadout(
+      this.character.skillLoadout,
+      this.character.className,
+      this.character.level,
+      this.getGrantedSkillIds(),
+      skillContent,
+    );
   }
 
   handleEquipSkill(skillId: string, slotIndex: number): boolean {
@@ -933,6 +966,8 @@ export class PlayerSession {
       this.character.className,
       this.character.level,
       this.character.skillLoadout,
+      this.getGrantedSkillIds(),
+      this.skillContent(),
     );
     if (!result) return false;
     this.character.skillLoadout.equippedSkills = result;
@@ -968,7 +1003,7 @@ export class PlayerSession {
    */
   resetForMasterReset(startTile: HexTile): void {
     if (this.character) {
-      this.character = createCharacter(this.character.className);
+      this.character = createCharacter(this.character.className, this.skillContent());
     }
 
     this.battleCount = 0;
@@ -1102,15 +1137,14 @@ export class PlayerSession {
     if (data.character && isValidClass) {
       const className = savedClassName as ClassName;
 
-      // Migrate skill loadout from old saves
+      // Migrate skill loadout from old saves. Content is loaded before session
+      // restore (GameLoop.init), so the store-backed skill content is available.
       const skillLoadout: SkillLoadout = data.character.skillLoadout
         ? { ...data.character.skillLoadout, equippedSkills: [...data.character.skillLoadout.equippedSkills] }
-        : createDefaultSkillLoadout(className);
-
-      // Pad equippedSkills to 5 slots (backward compat from 3-slot saves)
-      while (skillLoadout.equippedSkills.length < SKILL_SLOTS.length) {
-        skillLoadout.equippedSkills.push(null);
-      }
+        : createDefaultSkillLoadout(className, {
+            skills: content.getAllSkills(),
+            slotSchedules: content.getAllSkillSlotSchedules(),
+          });
 
       session['character'] = {
         className,
@@ -1130,7 +1164,9 @@ export class PlayerSession {
       session['character'] = null;
     }
 
-    // Auto-unlock skills for current level (only if character exists)
+    // Auto-unlock skills for current level and reconcile the equipped loadout
+    // against current content — pads/truncates to the class schedule (replaces
+    // the old pad-to-5 migration) and drops removed or no-longer-available skills.
     if (session['character']) {
       session.autoUnlockSkills();
     }
@@ -1168,7 +1204,20 @@ export class PlayerSession {
     if (!def || !def.equipSlot) return false;
 
     const result = equipItem(this.character.inventory, this.character.equipment, itemId, this.content.getAllItems(), this.character.className);
+    if (result.success) this.reconcileLoadoutAfterEquipmentChange();
     return result.success;
+  }
+
+  /** Re-validate the equipped skill loadout after an equipment change — a lost grant must null its slot. */
+  private reconcileLoadoutAfterEquipmentChange(): void {
+    if (!this.character) return;
+    this.character.skillLoadout = reconcileSkillLoadout(
+      this.character.skillLoadout,
+      this.character.className,
+      this.character.level,
+      this.getGrantedSkillIds(),
+      this.skillContent(),
+    );
   }
 
   /** Check if the player has a specific item equipped in any slot. */
@@ -1201,6 +1250,7 @@ export class PlayerSession {
     }
 
     const result = unequipItem(this.character.inventory, this.character.equipment, slot, this.content.getAllItems());
+    if (result.success) this.reconcileLoadoutAfterEquipmentChange();
     return { success: result.success };
   }
 
@@ -1257,6 +1307,7 @@ export class PlayerSession {
     const result = equipItemForceDestroy(
       this.character.inventory, this.character.equipment, itemId, this.content.getAllItems(), this.character.className
     );
+    if (result.success) this.reconcileLoadoutAfterEquipmentChange();
     return result.success;
   }
 

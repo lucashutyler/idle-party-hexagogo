@@ -212,6 +212,11 @@ export class PlayerManager {
     return this.sessions.get(username);
   }
 
+  /** All in-memory sessions — online and offline (idle sessions keep running). */
+  getAllSessions(): PlayerSession[] {
+    return Array.from(this.sessions.values());
+  }
+
   getUsernameForWs(ws: WebSocket): string | undefined {
     return this.connections.get(ws);
   }

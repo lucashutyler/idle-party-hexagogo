@@ -133,7 +133,7 @@ export class MapScreen implements Screen {
     this.map = new ThreeWorldMap(this.gameContainer, this.worldCache);
     this.map.setSendMove((col, row) => this.tryMove(col, row));
 
-    this.shopPopup = new ShopPopup(this.gameClient);
+    this.shopPopup = new ShopPopup(this.gameClient, this.worldCache);
     this.npcTalkPopup = new NpcTalkPopup(this.gameClient);
     this.dungeonEntryPopup = new DungeonEntryPopup(this.gameClient);
     this.roomView = new RoomView(

@@ -16,7 +16,7 @@ Five playable classes designed to be weak solo, strong together. `CharacterStats
 
 A player's character does not exist until they select a class — `PlayerSession.character` is `null` until class selection. Before choosing a class, the player has a WebSocket session but is invisible to the game (no party, no combat, no chat, no social presence). Old saves with invalid/legacy classes get `character = null`, forcing class re-selection.
 
-Each class has a **skill tree** (`SkillTypes.ts`) with 11 skills (6 passives, 5 actives) unlocked sequentially. 5 equip slots: passive@Lv1, active@Lv5, passive@Lv10, passive@Lv30, passive@Lv50. Players choose 4/6 passives and 1/5 actives to equip. Skill points earned every 5 levels (`LEVELS_PER_SKILL_POINT = 5`); first passive is free. By level 50, all 11 skills are unlocked. Class selection screen shows baseHp, damage, damageType, and starting skill. Players cannot change their own class — only admins can change an existing player's class via `forceSetClass`.
+Skills are **versioned content** (seeded from `SEED_SKILLS` in `SkillTypes.ts`, edited in the World Manager Skills tab, stored in `ContentStore` — see `content.md` → Skill system). Each skill belongs to a class tree, is passive or active, and is composed of one or more effect **options** from `SKILL_OPTION_CATALOG` (`SkillOptionCatalog.ts`) — the closed set of engine-supported effect kinds; any skill composable from existing kinds needs no code, new kinds still require engine work. Skills auto-unlock at their per-skill `unlockLevel` (seed: 6 passives + 5 actives per class at Lv 1/5/10…50); `unlockLevel: null` marks grant-only skills that come from items/sets. Equip slots come from a per-class **slot schedule** (content; seed: passive@Lv1, active@Lv5, passive@Lv10/30/50). Class selection screen shows baseHp, damage, damageType, and starting skill (the class's level-1 passive, if any). Players cannot change their own class — only admins can change an existing player's class via `forceSetClass`.
 
 ## Class icons
 
@@ -24,7 +24,7 @@ Each class has a **skill tree** (`SkillTypes.ts`) with 11 skills (6 passives, 5 
 
 ## Character & leveling
 
-Each player has a `CharacterState` (className, level, xp, gold, inventory, equipment, skillLoadout, skillPoints). XP is earned on victory. XP to next level = `floor(18000 * L^1.2 * 1.06^L)`. Max HP = `baseHp + (level-1) * hpPerLevel` via `calculateMaxHp(level, className)`. Base damage = `baseDamage + (level-1) * damagePerLevel` via `calculateBaseDamage(level, className)`. Skill points granted every 5 levels (at levels 5, 10, 15...).
+Each player has a `CharacterState` (className, level, xp, gold, inventory, equipment, skillLoadout). XP is earned on victory. XP to next level = `floor(18000 * L^1.2 * 1.06^L)`. Max HP = `baseHp + (level-1) * hpPerLevel` via `calculateMaxHp(level, className)`. Base damage = `baseDamage + (level-1) * damagePerLevel` via `calculateBaseDamage(level, className)`. Skills auto-unlock at each skill's content-defined `unlockLevel` (there are no skill points); `unlockedSkills` is derived state, recomputed from level + content on every level-up and restore.
 
 ## XP rate calculator
 
@@ -35,6 +35,8 @@ Client-side trip counter on the Character tab. Tracks cumulative XP earned since
 Pure functions in `CombatEngine.ts`. Party: `createPartyCombatState()`/`processPartyTick()` — turn-based, one combatant acts per tick.
 
 Player damage = `baseDamage + variance(-2..+2) + equipBonus`, min 1, multiplied by Bard Rally if present, doubled on crit (Archer Pierce). Active skills trigger every Nth attack based on cooldown. Stun causes target to skip their next turn (doesn't stack, refreshes to 1).
+
+A skill may carry several effect options: an active cast executes all of its `activeEffects` in order (the cast counts as a no-op only when every option no-ops — the no-op fallback and Arcane Surge rewind operate on the whole cast), and `passiveEffects` are honored on both passive and active skills. Summing passives sum across all equipped options; first-match passives (martyr, scorch, resurrection, stun-on-hit, intensify, focus, healing-received) use the first matching option found.
 
 At combat start: Mage Burn adds `2 * level` to baseDamage, Rally multiplier precomputed (`0.20 * partySize` per equipped Bard).
 

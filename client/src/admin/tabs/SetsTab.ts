@@ -6,7 +6,7 @@ import {
   getSetDisplayName,
   migrateLegacySet,
 } from '@idle-party-rpg/shared';
-import type { SetDefinition, SetBreakpoint, SetBonuses } from '@idle-party-rpg/shared';
+import type { SetDefinition, SetBreakpoint, SetBonuses, SkillDefinition } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
 import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
@@ -14,6 +14,8 @@ import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkS
 export class SetsTab implements Tab {
   /** Working state for the set form's breakpoints — kept across re-renders inside one modal. */
   private setFormBreakpoints: SetBreakpoint[] = [];
+  /** Skills available for per-breakpoint grants, captured when the form opens. */
+  private setFormSkills: SkillDefinition[] = [];
 
   render(container: HTMLElement, ctx: AdminContext): void {
     const content = ctx.getDisplayContent();
@@ -30,7 +32,7 @@ export class SetsTab implements Tab {
       const bps = s.breakpoints ?? [];
       const summary = bps.length === 0
         ? '(no breakpoints)'
-        : bps.map(bp => `${bp.piecesRequired}pc: ${getSetBonusText(bp.bonuses)}`).join(' · ');
+        : bps.map(bp => `${bp.piecesRequired}pc: ${getSetBonusText(bp.bonuses, content.skills)}`).join(' · ');
       const classes = s.classRestriction && s.classRestriction.length > 0
         ? s.classRestriction.join(', ')
         : 'Any';
@@ -98,6 +100,8 @@ export class SetsTab implements Tab {
       piecesRequired: bp.piecesRequired,
       bonuses: { ...bp.bonuses },
     }));
+    this.setFormSkills = Object.values(content.skills ?? {})
+      .sort((a, b) => a.className.localeCompare(b.className) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
     const items = Object.values(content.items)
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
@@ -196,6 +200,17 @@ export class SetsTab implements Tab {
     }
     container.innerHTML = this.setFormBreakpoints.map((bp, idx) => {
       const b = bp.bonuses;
+      const grantedIds = new Set(b.grantedSkillIds ?? []);
+      const skillRows = this.setFormSkills.map(skill => {
+        const haystack = `${skill.name} ${skill.className} ${skill.type} ${skill.id}`.toLowerCase();
+        return `
+          <label class="admin-checkbox sf-bp-skill-row" data-skill-search="${escapeHtml(haystack)}">
+            <input type="checkbox" class="sf-bp-skill-check" value="${escapeHtml(skill.id)}" ${grantedIds.has(skill.id) ? 'checked' : ''}>
+            ${escapeHtml(skill.name)}
+            <span class="admin-form-hint">${skill.className} · ${skill.type}</span>
+          </label>
+        `;
+      }).join('');
       return `
         <div class="sf-breakpoint-row admin-form-fieldset" data-bp-idx="${idx}">
           <div class="sf-breakpoint-header">
@@ -215,9 +230,26 @@ export class SetsTab implements Tab {
             <label>Flat HP<input type="number" class="sf-bp-flatHp" value="${b.flatHp ?? 0}" min="0"></label>
             <label>% HP<input type="number" class="sf-bp-pctHp" value="${b.percentHp ?? 0}" min="0"></label>
           </div>
+          <div class="sf-bp-grants">
+            <div class="admin-checklist-toolbar">
+              <span class="admin-form-hint">Grants skills at this tier</span>
+              <input type="search" class="sf-bp-skill-search" placeholder="Search skills…" autocomplete="off">
+            </div>
+            <div class="admin-checklist sf-bp-skill-list">${skillRows}</div>
+          </div>
         </div>
       `;
     }).join('');
+
+    container.querySelectorAll<HTMLElement>('.sf-breakpoint-row').forEach(row => {
+      const search = row.querySelector<HTMLInputElement>('.sf-bp-skill-search');
+      search?.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        row.querySelectorAll<HTMLElement>('.sf-bp-skill-row').forEach(skillRow => {
+          skillRow.style.display = !q || (skillRow.dataset.skillSearch ?? '').includes(q) ? '' : 'none';
+        });
+      });
+    });
 
     container.querySelectorAll<HTMLButtonElement>('.sf-bp-remove').forEach(btn => {
       btn.addEventListener('click', e => {
@@ -251,6 +283,11 @@ export class SetsTab implements Tab {
       if (atkMin || atkMax) { bonuses.bonusAttackMin = atkMin; bonuses.bonusAttackMax = atkMax; }
       const flatHp = num('.sf-bp-flatHp'); if (flatHp) bonuses.flatHp = flatHp;
       const pctHp = num('.sf-bp-pctHp'); if (pctHp) bonuses.percentHp = pctHp;
+      const grantedSkillIds: string[] = [];
+      row.querySelectorAll<HTMLInputElement>('.sf-bp-skill-check').forEach(cb => {
+        if (cb.checked) grantedSkillIds.push(cb.value);
+      });
+      if (grantedSkillIds.length > 0) bonuses.grantedSkillIds = grantedSkillIds;
       captured.push({ piecesRequired, bonuses });
     });
     this.setFormBreakpoints = captured;

@@ -11,6 +11,8 @@ import type {
   NpcDefinition,
   QuestDefinition,
   DungeonDefinition,
+  SkillDefinition,
+  SkillSlot,
 } from '@idle-party-rpg/shared';
 
 export interface OverviewData {
@@ -58,6 +60,8 @@ export interface ContentData {
   npcs: Record<string, NpcDefinition>;
   quests: Record<string, QuestDefinition>;
   dungeons: Record<string, DungeonDefinition>;
+  skills: Record<string, SkillDefinition>;
+  skillSlotSchedules: Record<string, SkillSlot[]>;
   world: WorldData;
 }
 
@@ -88,6 +92,7 @@ export type TabId =
   | 'maps'
   | 'map'
   | 'versions'
+  | 'skills'
   | 'xp-table';
 
 export interface TabDef {
@@ -113,6 +118,7 @@ export const TABS: TabDef[] = [
   { id: 'maps',       label: 'Maps',       icon: '▤' },
   { id: 'map',        label: 'Map Editor', icon: '⌖' },
   { id: 'versions',   label: 'Versions',   icon: '⧉' },
+  { id: 'skills',     label: 'Skills',     icon: '✥' },
   { id: 'xp-table',   label: 'XP Table',   icon: '✨' },
 ];
 

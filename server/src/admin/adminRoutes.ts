@@ -7,8 +7,8 @@ import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES, SEED_TILE_TYPES, migrateLegacySet, findSetConflicts, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
-import type { ClassName } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, findSetConflicts, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
 
 const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 } });
@@ -121,6 +121,8 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       npcs: content.getAllNpcs(),
       quests: content.getAllQuests(),
       dungeons: content.getAllDungeons(),
+      skills: content.getAllSkills(),
+      skillSlotSchedules: content.getAllSkillSlotSchedules(),
       world: content.getWorld(),
     });
   });
@@ -492,6 +494,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       res.status(400).json({ error: 'Missing required fields: id, name, rarity' });
       return;
     }
+    const grantedSkillIds: string[] = Array.isArray(item.grantedSkillIds) ? item.grantedSkillIds : [];
 
     if (versionId) {
       const versions = getVersionStore();
@@ -499,6 +502,18 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
+      // Snapshots that predate skills have no skills key — materialize live skills into
+      // the snapshot (not just for validation) so the draft ships a real catalog on deploy
+      // instead of validating against a set that never gets persisted.
+      if (snapshot.skills === undefined) {
+        snapshot.skills = Object.values(getContentStore().getAllSkills());
+      }
+      const draftSkillIds = new Set(snapshot.skills.map(s => s.id));
+      const unknownGrants = grantedSkillIds.filter(sid => !draftSkillIds.has(sid));
+      if (unknownGrants.length > 0) {
+        res.status(400).json({ error: `Unknown skill id(s) in grantedSkillIds: ${unknownGrants.join(', ')}` });
+        return;
+      }
       const idx = snapshot.items.findIndex(i => i.id === item.id);
       if (idx >= 0) {
         snapshot.items[idx] = item;
@@ -511,6 +526,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       res.json({ success: true, items: itemsRecord });
     } else {
       const content = getContentStore();
+      const unknownGrants = grantedSkillIds.filter(sid => !content.getSkill(sid));
+      if (unknownGrants.length > 0) {
+        res.status(400).json({ error: `Unknown skill id(s) in grantedSkillIds: ${unknownGrants.join(', ')}` });
+        return;
+      }
       await content.addOrUpdateItem(item);
       res.json({ success: true, items: content.getAllItems() });
     }
@@ -650,6 +670,13 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       return;
     }
     const set = migrateLegacySet(raw);
+    // Collect every skill this set's breakpoints grant (validated against the target store below)
+    const setGrantIds: string[] = [];
+    for (const bp of set.breakpoints ?? []) {
+      for (const sid of bp.bonuses.grantedSkillIds ?? []) {
+        if (!setGrantIds.includes(sid)) setGrantIds.push(sid);
+      }
+    }
 
     if (versionId) {
       const versions = getVersionStore();
@@ -658,6 +685,18 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
       const snapshot = await versions.loadSnapshot(versionId);
       if (!snapshot.sets) snapshot.sets = [];
+
+      // Snapshots that predate skills have no skills key — materialize live skills into
+      // the snapshot (not just for validation) so the draft ships a real catalog on deploy.
+      if (snapshot.skills === undefined) {
+        snapshot.skills = Object.values(getContentStore().getAllSkills());
+      }
+      const draftSkillIds = new Set(snapshot.skills.map(s => s.id));
+      const unknownGrants = setGrantIds.filter(sid => !draftSkillIds.has(sid));
+      if (unknownGrants.length > 0) {
+        res.status(400).json({ error: `Unknown skill id(s) in grantedSkillIds: ${unknownGrants.join(', ')}` });
+        return;
+      }
 
       // Validate against existing draft sets (other than the one being saved)
       const existingMigrated = snapshot.sets
@@ -678,6 +717,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       res.json({ success: true, sets: setsRecord });
     } else {
       const content = getContentStore();
+      const unknownGrants = setGrantIds.filter(sid => !content.getSkill(sid));
+      if (unknownGrants.length > 0) {
+        res.status(400).json({ error: `Unknown skill id(s) in grantedSkillIds: ${unknownGrants.join(', ')}` });
+        return;
+      }
       const result = await content.addOrUpdateSet(set);
       if (!result.success) {
         res.status(400).json({ error: result.error });
@@ -1394,6 +1438,196 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
+  // ── Skill endpoints ─────────────────────────────────────
+
+  /** List all skills. */
+  router.get('/skills', (_req, res) => {
+    const content = getContentStore();
+    res.json({ skills: content.getAllSkills() });
+  });
+
+  /** Add or update a skill. Accepts legacy-shaped bodies. Supports ?versionId= for draft editing. */
+  router.put('/skills/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const raw = req.body;
+    if (!raw || typeof raw !== 'object' || !raw.id) {
+      res.status(400).json({ error: 'Missing required field: id' });
+      return;
+    }
+    const skill = migrateLegacySkill(raw);
+    const errors = validateSkillDefinition(skill);
+    if (errors.length > 0) {
+      res.status(400).json({ error: errors.join(' ') });
+      return;
+    }
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (snapshot.skills === undefined) {
+        // Old snapshot predates skills — seed from live content
+        snapshot.skills = Object.values(getContentStore().getAllSkills());
+      }
+      const idx = snapshot.skills.findIndex(s => s.id === skill.id);
+      if (idx >= 0) {
+        snapshot.skills[idx] = skill;
+      } else {
+        snapshot.skills.push(skill);
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const skillsRecord: Record<string, SkillDefinition> = {};
+      for (const s of snapshot.skills) skillsRecord[s.id] = s;
+      res.json({ success: true, skills: skillsRecord });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateSkill(skill);
+      for (const session of getPlayerManager().getAllSessions()) session.autoUnlockSkills();
+      res.json({ success: true, skills: content.getAllSkills() });
+    }
+  });
+
+  /** Delete a skill. Blocked while any item or set breakpoint grants it. Supports ?versionId=. */
+  router.delete('/skills/:id', async (req, res) => {
+    const skillId = req.params.id;
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (snapshot.skills === undefined) {
+        // Old snapshot predates skills — seed from live content
+        snapshot.skills = Object.values(getContentStore().getAllSkills());
+      }
+      const idx = snapshot.skills.findIndex(s => s.id === skillId);
+      if (idx < 0) { res.status(400).json({ error: 'Skill not found.' }); return; }
+      // Referential guard within the snapshot: items + set breakpoints
+      const referencingItem = snapshot.items.find(i => i.grantedSkillIds?.includes(skillId));
+      if (referencingItem) {
+        res.status(400).json({ error: `Cannot delete: skill is granted by item "${referencingItem.name}".` });
+        return;
+      }
+      const referencingSet = (snapshot.sets ?? []).find(s => migrateLegacySet(s).breakpoints?.some(bp => bp.bonuses.grantedSkillIds?.includes(skillId)));
+      if (referencingSet) {
+        res.status(400).json({ error: `Cannot delete: skill is granted by set "${referencingSet.name}".` });
+        return;
+      }
+      snapshot.skills.splice(idx, 1);
+      await versions.saveSnapshot(versionId, snapshot);
+      const skillsRecord: Record<string, SkillDefinition> = {};
+      for (const s of snapshot.skills) skillsRecord[s.id] = s;
+      res.json({ success: true, skills: skillsRecord });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteSkill(skillId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      for (const session of getPlayerManager().getAllSessions()) session.autoUnlockSkills();
+      res.json({ success: true, skills: content.getAllSkills() });
+    }
+  });
+
+  /** Restore seed skills + slot schedules (overwrites seed ids, keeps custom skills). Supports ?versionId=. */
+  router.post('/skills/seed', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (snapshot.skills === undefined) {
+        snapshot.skills = Object.values(getContentStore().getAllSkills());
+      }
+      for (const seed of Object.values(SEED_SKILLS)) {
+        const idx = snapshot.skills.findIndex(s => s.id === seed.id);
+        if (idx >= 0) {
+          snapshot.skills[idx] = seed;
+        } else {
+          snapshot.skills.push(seed);
+        }
+      }
+      snapshot.skillSlotSchedules = Object.entries(SEED_SKILL_SLOT_SCHEDULES).map(([className, slots]) => ({ className, slots }));
+      await versions.saveSnapshot(versionId, snapshot);
+      const skillsRecord: Record<string, SkillDefinition> = {};
+      for (const s of snapshot.skills) skillsRecord[s.id] = s;
+      const schedulesRecord: Record<string, SkillSlot[]> = {};
+      for (const entry of snapshot.skillSlotSchedules) schedulesRecord[entry.className] = entry.slots;
+      res.json({ success: true, skills: skillsRecord, skillSlotSchedules: schedulesRecord });
+    } else {
+      const content = getContentStore();
+      for (const seed of Object.values(SEED_SKILLS)) {
+        await content.addOrUpdateSkill(seed);
+      }
+      for (const [className, slots] of Object.entries(SEED_SKILL_SLOT_SCHEDULES)) {
+        await content.setSkillSlotSchedule(className, slots);
+      }
+      for (const session of getPlayerManager().getAllSessions()) session.autoUnlockSkills();
+      res.json({ success: true, skills: content.getAllSkills(), skillSlotSchedules: content.getAllSkillSlotSchedules() });
+    }
+  });
+
+  /** Replace a class's skill slot schedule. Supports ?versionId= for draft editing. */
+  router.put('/skill-slots/:className', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const className = req.params.className;
+    if (!ALL_CLASS_NAMES.includes(className as ClassName)) {
+      res.status(400).json({ error: `Invalid class. Valid classes: ${ALL_CLASS_NAMES.join(', ')}` });
+      return;
+    }
+    const { slots } = req.body as { slots?: { type?: unknown; unlocksAtLevel?: unknown }[] };
+    if (!Array.isArray(slots) || slots.length === 0) {
+      res.status(400).json({ error: 'slots must be a non-empty array.' });
+      return;
+    }
+    for (const slot of slots) {
+      if (!slot || (slot.type !== 'passive' && slot.type !== 'active')) {
+        res.status(400).json({ error: "Each slot requires type 'passive' or 'active'." });
+        return;
+      }
+      if (typeof slot.unlocksAtLevel !== 'number' || !Number.isInteger(slot.unlocksAtLevel) || slot.unlocksAtLevel < 1 || slot.unlocksAtLevel > 100) {
+        res.status(400).json({ error: 'Each slot requires an integer unlocksAtLevel between 1 and 100.' });
+        return;
+      }
+    }
+    const schedule: SkillSlot[] = slots.map(s => ({ type: s.type as SkillSlotType, unlocksAtLevel: s.unlocksAtLevel as number }));
+
+    if (versionId) {
+      const versions = getVersionStore();
+      const version = versions.get(versionId);
+      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
+      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
+      const snapshot = await versions.loadSnapshot(versionId);
+      if (snapshot.skillSlotSchedules === undefined) {
+        // Old snapshot predates slot schedules (key absent) — seed from live content
+        snapshot.skillSlotSchedules = Object.entries(getContentStore().getAllSkillSlotSchedules()).map(([cn, sl]) => ({ className: cn, slots: sl }));
+      }
+      const idx = snapshot.skillSlotSchedules.findIndex(e => e.className === className);
+      if (idx >= 0) {
+        snapshot.skillSlotSchedules[idx] = { className, slots: schedule };
+      } else {
+        snapshot.skillSlotSchedules.push({ className, slots: schedule });
+      }
+      await versions.saveSnapshot(versionId, snapshot);
+      const schedulesRecord: Record<string, SkillSlot[]> = {};
+      for (const entry of snapshot.skillSlotSchedules) schedulesRecord[entry.className] = entry.slots;
+      res.json({ success: true, skillSlotSchedules: schedulesRecord });
+    } else {
+      const content = getContentStore();
+      await content.setSkillSlotSchedule(className, schedule);
+      for (const session of getPlayerManager().getAllSessions()) session.autoUnlockSkills();
+      res.json({ success: true, skillSlotSchedules: content.getAllSkillSlotSchedules() });
+    }
+  });
+
   // ── Version endpoints ──────────────────────────────────────
 
   /** List all versions. */
@@ -1487,7 +1721,24 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (snapshot.dungeons) {
       for (const d of snapshot.dungeons) dungeonsRecord[d.id] = d;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, recipes: recipesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, world: snapshot.world });
+    const skillsRecord: Record<string, SkillDefinition> = {};
+    if (snapshot.skills !== undefined) {
+      for (const s of snapshot.skills) skillsRecord[s.id] = s;
+    } else {
+      // Old snapshots predate skills (key absent) — seed from live content so admin shows
+      // what's in-game. A present-but-empty array means the draft genuinely has none.
+      const liveSkills = getContentStore().getAllSkills();
+      for (const [id, s] of Object.entries(liveSkills)) skillsRecord[id] = s;
+    }
+    const skillSlotSchedulesRecord: Record<string, SkillSlot[]> = {};
+    if (snapshot.skillSlotSchedules !== undefined) {
+      for (const entry of snapshot.skillSlotSchedules) skillSlotSchedulesRecord[entry.className] = entry.slots;
+    } else {
+      // Old snapshots predate slot schedules (key absent) — seed from live content.
+      const liveSchedules = getContentStore().getAllSkillSlotSchedules();
+      for (const [cn, sl] of Object.entries(liveSchedules)) skillSlotSchedulesRecord[cn] = sl;
+    }
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, recipes: recipesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, skills: skillsRecord, skillSlotSchedules: skillSlotSchedulesRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */

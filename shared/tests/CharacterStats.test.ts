@@ -13,6 +13,10 @@ import {
   CLASS_DEFINITIONS,
 } from '../src/systems/CharacterStats';
 import type { ClassName } from '../src/systems/CharacterStats';
+import { SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '../src/systems/SkillTypes';
+import type { SkillContent } from '../src/systems/SkillTypes';
+
+const SKILL_CONTENT: SkillContent = { skills: SEED_SKILLS, slotSchedules: SEED_SKILL_SLOT_SCHEDULES };
 
 describe('CharacterStats', () => {
   describe('xpForNextLevel', () => {
@@ -89,14 +93,14 @@ describe('CharacterStats', () => {
 
   describe('createCharacter', () => {
     it('creates a Knight with correct class', () => {
-      const char = createCharacter('Knight');
+      const char = createCharacter('Knight', SKILL_CONTENT);
       expect(char.className).toBe('Knight');
       expect(char.level).toBe(1);
       expect(char.xp).toBe(0);
     });
 
     it('initializes skill loadout with first passive unlocked and equipped', () => {
-      const char = createCharacter('Knight');
+      const char = createCharacter('Knight', SKILL_CONTENT);
       expect(char.skillLoadout.unlockedSkills).toEqual(['knight_guard']);
       expect(char.skillLoadout.equippedSkills).toEqual(['knight_guard', null, null, null, null]);
     });
@@ -110,7 +114,7 @@ describe('CharacterStats', () => {
         Bard: 'bard_rally',
       };
       for (const cn of ALL_CLASS_NAMES) {
-        const char = createCharacter(cn);
+        const char = createCharacter(cn, SKILL_CONTENT);
         expect(char.skillLoadout.unlockedSkills).toEqual([expectedFirstSkills[cn]]);
         expect(char.skillLoadout.equippedSkills[0]).toBe(expectedFirstSkills[cn]);
       }
@@ -119,7 +123,7 @@ describe('CharacterStats', () => {
 
   describe('addXp', () => {
     it('adds XP without leveling up', () => {
-      const char = createCharacter('Knight');
+      const char = createCharacter('Knight', SKILL_CONTENT);
       const result = addXp(char, 1000);
       expect(char.xp).toBe(1000);
       expect(char.level).toBe(1);
@@ -128,7 +132,7 @@ describe('CharacterStats', () => {
     });
 
     it('levels up at exactly xpForNextLevel(1)', () => {
-      const char = createCharacter('Knight');
+      const char = createCharacter('Knight', SKILL_CONTENT);
       const needed = xpForNextLevel(1);
       const result = addXp(char, needed);
       expect(char.level).toBe(2);
@@ -138,7 +142,7 @@ describe('CharacterStats', () => {
     });
 
     it('carries over excess XP', () => {
-      const char = createCharacter('Knight');
+      const char = createCharacter('Knight', SKILL_CONTENT);
       const needed = xpForNextLevel(1);
       addXp(char, needed + 500);
       expect(char.level).toBe(2);
@@ -146,7 +150,7 @@ describe('CharacterStats', () => {
     });
 
     it('multi-level-up from large XP gain', () => {
-      const char = createCharacter('Knight');
+      const char = createCharacter('Knight', SKILL_CONTENT);
       const needed = xpForNextLevel(1) + xpForNextLevel(2);
       const result = addXp(char, needed);
       expect(char.level).toBe(3);
@@ -201,13 +205,13 @@ describe('CharacterStats', () => {
     });
 
     it('createCharacter starts craft skill at level 1, 0 xp', () => {
-      const c = createCharacter('Mage');
+      const c = createCharacter('Mage', SKILL_CONTENT);
       expect(c.craftLevel).toBe(1);
       expect(c.craftXp).toBe(0);
     });
 
     it('addCraftXp accumulates without leveling when below threshold', () => {
-      const c = createCharacter('Mage');
+      const c = createCharacter('Mage', SKILL_CONTENT);
       const result = addCraftXp(c, 10);
       expect(result.leveledUp).toBe(false);
       expect(c.craftLevel).toBe(1);
@@ -215,7 +219,7 @@ describe('CharacterStats', () => {
     });
 
     it('addCraftXp levels up when threshold crossed', () => {
-      const c = createCharacter('Mage');
+      const c = createCharacter('Mage', SKILL_CONTENT);
       const need = xpForCraftLevel(1);
       const result = addCraftXp(c, need + 5);
       expect(result.leveledUp).toBe(true);
@@ -224,7 +228,7 @@ describe('CharacterStats', () => {
     });
 
     it('addCraftXp can level multiple times in one call', () => {
-      const c = createCharacter('Mage');
+      const c = createCharacter('Mage', SKILL_CONTENT);
       const need = xpForCraftLevel(1) + xpForCraftLevel(2) + xpForCraftLevel(3);
       const result = addCraftXp(c, need);
       expect(result.levelsGained).toBe(3);
@@ -232,7 +236,7 @@ describe('CharacterStats', () => {
     });
 
     it('addCraftXp ignores non-positive amounts', () => {
-      const c = createCharacter('Mage');
+      const c = createCharacter('Mage', SKILL_CONTENT);
       const result = addCraftXp(c, 0);
       expect(result.leveledUp).toBe(false);
       expect(c.craftLevel).toBe(1);

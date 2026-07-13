@@ -8,6 +8,7 @@ import {
   isTwoHandedEquipped,
   MAX_STACK,
   SEED_ITEMS,
+  getItemEffectText,
 } from '../src/systems/ItemTypes';
 import type { EquipSlot, ItemDefinition } from '../src/systems/ItemTypes';
 
@@ -447,5 +448,29 @@ describe('classRestriction as array', () => {
     const equip3: Record<string, string | null> = { mainhand: null, offhand: null, head: null, chest: null, foot: null };
     const result3 = equipItem(inv3, equip3, 'hybrid_weapon', testItems, 'Mage');
     expect(result3.success).toBe(false);
+  });
+});
+
+describe('getItemEffectText — granted skills', () => {
+  it('renders Grants skill lines with resolved names', () => {
+    const def: ItemDefinition = {
+      id: 'bash_sword', name: 'Bash Sword', rarity: 'common', equipSlot: 'mainhand',
+      bonusAttackMin: 1, bonusAttackMax: 3, grantedSkillIds: ['knight_bash'],
+    };
+    const skills = { knight_bash: { name: 'Bash' } } as never;
+    expect(getItemEffectText(def, skills)).toBe('+1-3 Attack, Grants skill: Bash');
+  });
+
+  it('a grant-only item is not "No bonus"; unknown ids fall back to the raw id', () => {
+    const def: ItemDefinition = {
+      id: 'relic', name: 'Relic', rarity: 'rare', equipSlot: 'relic', grantedSkillIds: ['mystery_skill'],
+    };
+    expect(getItemEffectText(def)).toBe('Grants skill: mystery_skill');
+  });
+
+  it('behavior unchanged for items without grants', () => {
+    expect(getItemEffectText(SEED_ITEMS.old_leather_boots)).toBe('No bonus');
+    expect(getItemEffectText(SEED_ITEMS.mangy_pelt)).toBe('Material');
+    expect(getItemEffectText(SEED_ITEMS.rusty_dagger)).toBe('+1-3 Attack');
   });
 });

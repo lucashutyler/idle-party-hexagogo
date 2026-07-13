@@ -5,7 +5,7 @@ import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
 import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
-import { wrapGrids, fakeWorldMeta } from './testGrids.js';
+import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import type { DungeonDefinition, WorldTileDefinition, ClassName } from '@idle-party-rpg/shared';
 import WebSocket from 'ws';
 
@@ -59,6 +59,7 @@ function createFakeContentStore(dungeon: DungeonDefinition): ContentStore {
     getQuest: () => undefined,
     getDungeon: (id: string) => (id === dungeon.id ? dungeon : undefined),
     getAllDungeons: () => ({ [dungeon.id]: dungeon }),
+    ...fakeSkillContent(),
   } as unknown as ContentStore;
 }
 

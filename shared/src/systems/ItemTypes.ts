@@ -1,3 +1,5 @@
+import type { SkillDefinition } from './SkillTypes.js';
+
 // --- Types ---
 
 export type ItemRarity = 'janky' | 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'heirloom';
@@ -23,6 +25,8 @@ export interface ItemDefinition {
   iconEmoji?: string;
   /** CSS color string used as the icon background tint (e.g., '#c0392b' for a red potion). */
   iconColor?: string;
+  /** Skill IDs this item grants while equipped (availability only — the player still equips the skill into a slot). */
+  grantedSkillIds?: string[];
 }
 
 export interface ItemDrop {
@@ -479,8 +483,12 @@ export function computeEquipmentBonuses(
   return bonuses;
 }
 
-/** Get a human-readable description of an item's effects. */
-export function getItemEffectText(def: ItemDefinition): string {
+/**
+ * Get a human-readable description of an item's effects.
+ * Pass a `skills` record to render 'Grants skill: <name>' lines for
+ * `grantedSkillIds` (falls back to the raw id when the skill is unknown).
+ */
+export function getItemEffectText(def: ItemDefinition, skills?: Record<string, SkillDefinition>): string {
   const parts: string[] = [];
   if (def.bonusAttackMin != null && def.bonusAttackMax != null && def.bonusAttackMax > 0) {
     parts.push(`+${def.bonusAttackMin}-${def.bonusAttackMax} Attack`);
@@ -491,11 +499,18 @@ export function getItemEffectText(def: ItemDefinition): string {
   if (def.magicReductionMin != null && def.magicReductionMax != null && def.magicReductionMax > 0) {
     parts.push(`Blocks ${def.magicReductionMin}-${def.magicReductionMax} magic damage`);
   }
-  if (parts.length === 0) {
+  const grantParts: string[] = [];
+  if (def.grantedSkillIds) {
+    for (const skillId of def.grantedSkillIds) {
+      grantParts.push(`Grants skill: ${skills?.[skillId]?.name ?? skillId}`);
+    }
+  }
+  if (parts.length === 0 && grantParts.length === 0) {
     return def.equipSlot ? 'No bonus' : 'Material';
   }
   let text = parts.join(', ');
-  if (def.rarity === 'heirloom') text = `${text} (x Lv)`;
+  if (def.rarity === 'heirloom' && parts.length > 0) text = `${text} (x Lv)`;
+  text = [text, ...grantParts].filter(Boolean).join(', ');
   if (def.classRestriction && def.classRestriction.length > 0) text = `${text} [${def.classRestriction.join('/')}]`;
   return text;
 }

@@ -241,6 +241,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Area/zone editor
 - [x] Quest editor (Quests tab; NPCs tab links quests to NPCs)
 - [x] Recipe editor (Recipes tab — author/edit crafting recipes without touching JSON)
+- [x] Skill tree editor (skills as versioned content — composable effect options, editable unlock levels, per-class slot schedules, item/set skill grants)
 - [x] CRM artwork upload pipeline (items / monsters / sets / shops / zones / tile types share one upload endpoint + UI)
 - [x] Game designer access only
 

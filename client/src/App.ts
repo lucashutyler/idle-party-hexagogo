@@ -283,7 +283,7 @@ export class App {
 
     // Check if player needs to select a class (no character yet)
     if (!this.gameClient.lastState?.character) {
-      const classScreen = new ClassSelectScreen('screen-class-select', this.gameClient, () => {
+      const classScreen = new ClassSelectScreen('screen-class-select', this.gameClient, this.worldCache, () => {
         this.enterGame();
       });
       this.screenManager.register('class-select', document.getElementById('screen-class-select')!, classScreen);
@@ -356,8 +356,8 @@ export class App {
   private enterGame(): void {
     const combatScreen = new CombatScreen('screen-combat', this.gameClient, this.worldCache);
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
-    const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient);
-    const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore);
+    const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient, this.worldCache);
+    const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore, this.worldCache);
     const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
     const settingsScreen = new SettingsScreen('screen-settings');
 

@@ -66,15 +66,17 @@ export type {
 
 // Skill types
 export {
-  SKILL_SLOTS,
-  SKILL_TREES,
-  LEVELS_PER_SKILL_POINT,
+  SEED_SKILLS,
+  SEED_SKILL_SLOT_SCHEDULES,
+  migrateLegacySkill,
   canEquipSkill,
   equipSkillInSlot,
   unequipSkillFromSlot,
   createDefaultSkillLoadout,
+  reconcileSkillLoadout,
   getSkillById,
-  getSkillLearnLevel,
+  getSkillsForClass,
+  getSlotSchedule,
   getUnlockedSkillsForLevel,
 } from './systems/SkillTypes.js';
 export type {
@@ -87,7 +89,21 @@ export type {
   ActiveEffect,
   SkillDefinition,
   SkillLoadout,
+  SkillContent,
 } from './systems/SkillTypes.js';
+
+// Skill option catalog (admin editor + validation)
+export {
+  SKILL_OPTION_CATALOG,
+  SKILL_CONDITION_VALUES,
+  ALL_PASSIVE_EFFECT_KINDS,
+  ALL_ACTIVE_EFFECT_KINDS,
+  validateSkillDefinition,
+} from './systems/SkillOptionCatalog.js';
+export type {
+  SkillOptionParamSpec,
+  SkillOptionDefinition,
+} from './systems/SkillOptionCatalog.js';
 
 // Item types
 export {
@@ -252,6 +268,7 @@ export {
 // Set types
 export {
   computeActiveSetBonuses,
+  computeGrantedSkillIds,
   mergeSetBonusesIntoEquip,
   getSetInfoForItem,
   getSetsForItem,

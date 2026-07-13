@@ -8,6 +8,7 @@ import type { ContentStore } from '../src/game/ContentStore.js';
 import type { WorldData } from '@idle-party-rpg/shared';
 import { HexPathfinder, offsetToCube } from '@idle-party-rpg/shared';
 import WebSocket from 'ws';
+import { fakeSkillContent } from './testGrids.js';
 
 // Two-map world: an overworld with a manhole linking to a sewers map.
 const MANHOLE_ID = 'overworld-manhole';
@@ -54,6 +55,7 @@ function createFakeContentStore(world: WorldData): ContentStore {
     getQuest: () => undefined,
     getDungeon: () => undefined,
     getAllDungeons: () => ({}),
+    ...fakeSkillContent(),
   } as unknown as ContentStore;
 }
 

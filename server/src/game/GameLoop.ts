@@ -223,6 +223,12 @@ export class GameLoop {
     // 2. Rebuild grid, refresh party tiles, relocate displaced parties
     const relocated = this.rebuildGridAndRelocate();
 
+    // 2b. Reconcile every session's skill loadout against the new content —
+    //     all sessions, not just online ones (idle sessions keep fighting).
+    for (const session of this.playerManager.getAllSessions()) {
+      session.autoUnlockSkills();
+    }
+
     // 3. Set as active version
     await this.versionStore.setActive(versionId);
 

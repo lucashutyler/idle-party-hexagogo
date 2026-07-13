@@ -120,16 +120,27 @@ export interface ActiveEffect {
   isAoe?: boolean;
 }
 
+/**
+ * A skill as editable content. Skills are composed of one or more effect
+ * "options": `passiveEffects` are allowed on both passive and active skills,
+ * `activeEffects` only on active skills (enforced by `validateSkillDefinition`).
+ */
 export interface SkillDefinition {
   id: SkillId;
   name: string;
   description: string;
+  /** Home class tree this skill belongs to. */
   className: ClassName;
+  /** Decides which slot type the skill equips into. */
   type: SkillSlotType;
-  /** Sequential position in the skill tree (0, 1, 2...). */
-  treeOrder: number;
-  passiveEffect?: PassiveEffect;
-  activeEffect?: ActiveEffect;
+  /** Level the class learns it; null = grant-only (item/set), never level-learned. */
+  unlockLevel: number | null;
+  /** Display order within the class tree. */
+  sortOrder: number;
+  /** Passive effect options — allowed on BOTH passive and active skills. */
+  passiveEffects?: PassiveEffect[];
+  /** Active effect options — allowed ONLY on active skills. */
+  activeEffects?: ActiveEffect[];
   /** Cooldown for actives: triggers every Nth attack. */
   cooldown?: number;
 }
@@ -141,9 +152,41 @@ export interface SkillLoadout {
   equippedSkills: (SkillId | null)[];
 }
 
-// --- Constants ---
+/**
+ * Runtime skill content threaded through the pure helpers below
+ * (parameterized shared functions convention). The server passes
+ * ContentStore data; tests and seeds pass the SEED_* tables.
+ */
+export interface SkillContent {
+  skills: Record<SkillId, SkillDefinition>;
+  slotSchedules: Record<string, SkillSlot[]>;
+}
 
-export const SKILL_SLOTS: SkillSlot[] = [
+// --- Legacy seed source (private) ---
+
+/**
+ * Pre-content skill shape: singular effect fields plus a `treeOrder` that
+ * implied the unlock level. Only used by the private seed table below and by
+ * `migrateLegacySkill` when loading old data.
+ */
+interface LegacySkillDefinition {
+  id: SkillId;
+  name: string;
+  description: string;
+  className: ClassName;
+  type: SkillSlotType;
+  /** Sequential position in the legacy skill tree (0, 1, 2...). */
+  treeOrder: number;
+  passiveEffect?: PassiveEffect;
+  activeEffect?: ActiveEffect;
+  cooldown?: number;
+}
+
+/** Legacy unlock cadence: treeOrder 0 → level 1, otherwise treeOrder × 5. */
+const LEGACY_LEVELS_PER_SKILL = 5;
+
+/** The historical 5-slot schedule, copied per class into SEED_SKILL_SLOT_SCHEDULES. */
+const LEGACY_SLOT_SCHEDULE: SkillSlot[] = [
   { type: 'passive', unlocksAtLevel: 1 },
   { type: 'active', unlocksAtLevel: 5 },
   { type: 'passive', unlocksAtLevel: 10 },
@@ -151,10 +194,11 @@ export const SKILL_SLOTS: SkillSlot[] = [
   { type: 'passive', unlocksAtLevel: 50 },
 ];
 
-/** Skills unlock every N levels (treeOrder N → unlocks at level N * 5, except treeOrder 0 which unlocks at level 1). */
-export const LEVELS_PER_SKILL_POINT = 5;
-
-export const SKILL_TREES: Record<string, SkillDefinition[]> = {
+/**
+ * PRIVATE legacy-shaped source table — used ONLY to build SEED_SKILLS.
+ * Skill ids are load-bearing (they live in player saves); never change them.
+ */
+const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
   // ===== KNIGHT (Tank) =====
   // Role: Absorb damage, draw aggro, protect the party.
   // Passives at treeOrder 0,2,4,6,8,10 — Actives at treeOrder 1,3,5,7,9
@@ -413,7 +457,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'priest_minor_heal',
       name: 'Minor Heal',
-      description: 'Heals the lowest percent health ally for level \u00d7 4 HP.',
+      description: 'Heals the lowest percent health ally for level × 4 HP.',
       className: 'Priest',
       type: 'active',
       treeOrder: 1,
@@ -434,7 +478,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'priest_smite',
       name: 'Smite',
-      description: 'Deal normal physical damage plus level \u00d7 3 bonus holy damage to undead.',
+      description: 'Deal normal physical damage plus level × 3 bonus holy damage to undead.',
       className: 'Priest',
       type: 'active',
       treeOrder: 3,
@@ -476,7 +520,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'priest_mending',
       name: 'Mending',
-      description: 'Apply a heal-over-time to the lowest HP ally: level \u00d7 2 HP per tick for 3 ticks.',
+      description: 'Apply a heal-over-time to the lowest HP ally: level × 2 HP per tick for 3 ticks.',
       className: 'Priest',
       type: 'active',
       treeOrder: 7,
@@ -497,7 +541,7 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
     {
       id: 'priest_sanctuary',
       name: 'Sanctuary',
-      description: 'Instead of attacking, shield the lowest-HP non-Knight ally \u2014 absorb up to level \u00d7 4 incoming damage.',
+      description: 'Instead of attacking, shield the lowest-HP non-Knight ally — absorb up to level × 4 incoming damage.',
       className: 'Priest',
       type: 'active',
       treeOrder: 9,
@@ -757,43 +801,136 @@ export const SKILL_TREES: Record<string, SkillDefinition[]> = {
   ],
 };
 
-// --- Pure functions ---
+// --- Seed content ---
 
-/** Get the level at which a skill becomes learnable (treeOrder 0 = Lv1, others = treeOrder * 5). */
-export function getSkillLearnLevel(treeOrder: number): number {
-  return treeOrder === 0 ? 1 : treeOrder * 5;
+function buildSeedSkills(): Record<SkillId, SkillDefinition> {
+  const skills: Record<SkillId, SkillDefinition> = {};
+  for (const tree of Object.values(LEGACY_SKILL_TREES)) {
+    for (const legacy of tree) {
+      skills[legacy.id] = migrateLegacySkill(legacy);
+    }
+  }
+  return skills;
 }
 
-/** Get all skill IDs that should be unlocked for a class at a given level (auto-unlock). */
-export function getUnlockedSkillsForLevel(className: ClassName, level: number): SkillId[] {
-  const tree = SKILL_TREES[className];
-  if (!tree) return [];
-  return tree
-    .filter(s => level >= getSkillLearnLevel(s.treeOrder))
-    .sort((a, b) => a.treeOrder - b.treeOrder)
+/** Seed skill catalog — the historical 55-skill table converted to the content shape. Ids preserved verbatim (saves depend on them). */
+export const SEED_SKILLS: Record<SkillId, SkillDefinition> = buildSeedSkills();
+
+/** Seed per-class slot schedules — today's 5-slot schedule copied per class. */
+export const SEED_SKILL_SLOT_SCHEDULES: Record<ClassName, SkillSlot[]> = {
+  Knight: LEGACY_SLOT_SCHEDULE.map(s => ({ ...s })),
+  Archer: LEGACY_SLOT_SCHEDULE.map(s => ({ ...s })),
+  Priest: LEGACY_SLOT_SCHEDULE.map(s => ({ ...s })),
+  Mage: LEGACY_SLOT_SCHEDULE.map(s => ({ ...s })),
+  Bard: LEGACY_SLOT_SCHEDULE.map(s => ({ ...s })),
+};
+
+// --- Pure functions ---
+
+/**
+ * Migrate a legacy skill shape (`treeOrder` + singular `passiveEffect`/`activeEffect`)
+ * to the content shape (`unlockLevel`/`sortOrder` + effect arrays). Already-migrated
+ * skills pass through as a normalized copy. Legacy unlock levels follow the historical
+ * formula: treeOrder 0 → level 1, otherwise treeOrder × 5.
+ */
+export function migrateLegacySkill(
+  skill: SkillDefinition | (Omit<SkillDefinition, 'unlockLevel' | 'sortOrder'> & {
+    treeOrder?: number;
+    unlockLevel?: number | null;
+    sortOrder?: number;
+    passiveEffect?: PassiveEffect;
+    activeEffect?: ActiveEffect;
+  }),
+): SkillDefinition {
+  const raw = skill as {
+    id: SkillId; name: string; description: string; className: ClassName; type: SkillSlotType;
+    treeOrder?: number; unlockLevel?: number | null; sortOrder?: number;
+    passiveEffect?: PassiveEffect; activeEffect?: ActiveEffect;
+    passiveEffects?: PassiveEffect[]; activeEffects?: ActiveEffect[];
+    cooldown?: number;
+  };
+
+  const unlockLevel = raw.unlockLevel !== undefined
+    ? raw.unlockLevel
+    : raw.treeOrder === undefined
+      ? 1
+      : raw.treeOrder === 0 ? 1 : raw.treeOrder * LEGACY_LEVELS_PER_SKILL;
+  const sortOrder = raw.sortOrder ?? raw.treeOrder ?? 0;
+
+  const passiveEffects = raw.passiveEffects
+    ? raw.passiveEffects.map(e => ({ ...e }))
+    : raw.passiveEffect ? [{ ...raw.passiveEffect }] : undefined;
+  const activeEffects = raw.activeEffects
+    ? raw.activeEffects.map(e => ({ ...e }))
+    : raw.activeEffect ? [{ ...raw.activeEffect }] : undefined;
+
+  const migrated: SkillDefinition = {
+    id: raw.id,
+    name: raw.name,
+    description: raw.description,
+    className: raw.className,
+    type: raw.type,
+    unlockLevel,
+    sortOrder,
+  };
+  if (passiveEffects && passiveEffects.length > 0) migrated.passiveEffects = passiveEffects;
+  if (activeEffects && activeEffects.length > 0) migrated.activeEffects = activeEffects;
+  if (raw.cooldown !== undefined) migrated.cooldown = raw.cooldown;
+  return migrated;
+}
+
+/** Look up a skill definition by ID. */
+export function getSkillById(skillId: SkillId, content: SkillContent): SkillDefinition | undefined {
+  return content.skills[skillId];
+}
+
+/** Get all skills in a class's tree, sorted by sortOrder. */
+export function getSkillsForClass(className: ClassName, content: SkillContent): SkillDefinition[] {
+  return Object.values(content.skills)
+    .filter(s => s.className === className)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+}
+
+/** Get all skill IDs that should be unlocked for a class at a given level (auto-unlock). Grant-only skills (unlockLevel null) are never included. */
+export function getUnlockedSkillsForLevel(className: ClassName, level: number, content: SkillContent): SkillId[] {
+  return getSkillsForClass(className, content)
+    .filter(s => s.unlockLevel !== null && level >= s.unlockLevel)
     .map(s => s.id);
 }
 
-/** Check if a skill can be equipped in a given slot. */
+/** Get the slot schedule for a class, falling back to the seed schedule when the class has none in content. */
+export function getSlotSchedule(className: ClassName, content: SkillContent): SkillSlot[] {
+  const schedule = content.slotSchedules[className];
+  if (schedule && schedule.length > 0) return schedule;
+  return SEED_SKILL_SLOT_SCHEDULES[className] ?? [];
+}
+
+/**
+ * Check if a skill can be equipped in a given slot.
+ * A skill is available when it belongs to the player's class AND is unlocked,
+ * OR when it is granted by equipped items/sets (`grantedSkillIds` — may be cross-class).
+ */
 export function canEquipSkill(
   skillId: SkillId,
   slotIndex: number,
   className: ClassName,
   level: number,
   unlockedSkills: SkillId[],
+  grantedSkillIds: SkillId[],
+  content: SkillContent,
 ): boolean {
-  if (slotIndex < 0 || slotIndex >= SKILL_SLOTS.length) return false;
+  const schedule = getSlotSchedule(className, content);
+  if (slotIndex < 0 || slotIndex >= schedule.length) return false;
 
-  const slot = SKILL_SLOTS[slotIndex];
+  const slot = schedule[slotIndex];
   if (level < slot.unlocksAtLevel) return false;
 
-  if (!unlockedSkills.includes(skillId)) return false;
-
-  const tree = SKILL_TREES[className];
-  if (!tree) return false;
-
-  const skill = tree.find(s => s.id === skillId);
+  const skill = content.skills[skillId];
   if (!skill) return false;
+
+  const availableFromClass = skill.className === className && unlockedSkills.includes(skillId);
+  const availableFromGrant = grantedSkillIds.includes(skillId);
+  if (!availableFromClass && !availableFromGrant) return false;
 
   return skill.type === slot.type;
 }
@@ -805,8 +942,10 @@ export function equipSkillInSlot(
   className: ClassName,
   level: number,
   loadout: SkillLoadout,
+  grantedSkillIds: SkillId[],
+  content: SkillContent,
 ): (SkillId | null)[] | null {
-  if (!canEquipSkill(skillId, slotIndex, className, level, loadout.unlockedSkills)) return null;
+  if (!canEquipSkill(skillId, slotIndex, className, level, loadout.unlockedSkills, grantedSkillIds, content)) return null;
 
   const newEquipped = [...loadout.equippedSkills];
   // Unequip from any other slot first
@@ -828,29 +967,77 @@ export function unequipSkillFromSlot(
   return newEquipped;
 }
 
-/** Create the default skill loadout for a class (first passive unlocked + equipped). */
-export function createDefaultSkillLoadout(className: ClassName): SkillLoadout {
-  const tree = SKILL_TREES[className];
-  if (!tree || tree.length === 0) {
-    return { unlockedSkills: [], equippedSkills: [null, null, null, null, null] };
+/**
+ * Create the default skill loadout for a class: its level-1 passive (tie broken
+ * by sortOrder, grant-only skills excluded) unlocked and equipped in the first
+ * passive slot. If no passive unlocks at level 1, the loadout starts fully empty
+ * (matches what `reconcileSkillLoadout` would immediately reduce it to for a
+ * level-1 character, since nothing is unlocked yet). Slot count comes from the
+ * class schedule.
+ */
+export function createDefaultSkillLoadout(className: ClassName, content: SkillContent): SkillLoadout {
+  const schedule = getSlotSchedule(className, content);
+  const emptySlots: (SkillId | null)[] = schedule.map(() => null);
+
+  const starting = getSkillsForClass(className, content)
+    .filter(s => s.type === 'passive' && s.unlockLevel !== null && s.unlockLevel <= 1)
+    .sort((a, b) => (a.unlockLevel ?? 0) - (b.unlockLevel ?? 0) || a.sortOrder - b.sortOrder)[0];
+  if (!starting) {
+    return { unlockedSkills: [], equippedSkills: emptySlots };
   }
 
-  const firstSkill = tree.find(s => s.treeOrder === 0);
-  if (!firstSkill) {
-    return { unlockedSkills: [], equippedSkills: [null, null, null, null, null] };
-  }
+  const equipped = [...emptySlots];
+  const slotIndex = schedule.findIndex(slot => slot.type === 'passive');
+  if (slotIndex >= 0) equipped[slotIndex] = starting.id;
 
   return {
-    unlockedSkills: [firstSkill.id],
-    equippedSkills: [firstSkill.id, null, null, null, null],
+    unlockedSkills: [starting.id],
+    equippedSkills: equipped,
   };
 }
 
-/** Look up a skill definition by ID. */
-export function getSkillById(skillId: SkillId): SkillDefinition | undefined {
-  for (const tree of Object.values(SKILL_TREES)) {
-    const skill = tree.find(s => s.id === skillId);
-    if (skill) return skill;
+/**
+ * Reconcile a saved loadout against current content: pads or TRUNCATES
+ * equippedSkills to the class schedule length, and nulls any entry whose skill
+ * is missing from content, type-mismatches its slot, or is no longer available
+ * (not unlocked for the class at this level and not granted by equipment).
+ * Never throws; unlockedSkills passes through untouched (it is recomputed by
+ * the server's autoUnlockSkills).
+ */
+export function reconcileSkillLoadout(
+  loadout: SkillLoadout,
+  className: ClassName,
+  level: number,
+  grantedSkillIds: SkillId[],
+  content: SkillContent,
+): SkillLoadout {
+  const schedule = getSlotSchedule(className, content);
+  const prior = loadout.equippedSkills ?? [];
+  const unlockedForLevel = new Set(getUnlockedSkillsForLevel(className, level, content));
+  const granted = new Set(grantedSkillIds);
+
+  const equipped: (SkillId | null)[] = [];
+  for (let i = 0; i < schedule.length; i++) {
+    const skillId = prior[i] ?? null;
+    if (!skillId) {
+      equipped.push(null);
+      continue;
+    }
+    const skill = content.skills[skillId];
+    if (!skill || skill.type !== schedule[i].type) {
+      equipped.push(null);
+      continue;
+    }
+    if (level < schedule[i].unlocksAtLevel) {
+      equipped.push(null);
+      continue;
+    }
+    const available = (skill.className === className && unlockedForLevel.has(skillId)) || granted.has(skillId);
+    equipped.push(available ? skillId : null);
   }
-  return undefined;
+
+  return {
+    unlockedSkills: [...(loadout.unlockedSkills ?? [])],
+    equippedSkills: equipped,
+  };
 }

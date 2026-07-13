@@ -32,6 +32,7 @@ import { DungeonsTab } from './tabs/DungeonsTab';
 import { MapTab } from './tabs/MapTab';
 import { MapsTab } from './tabs/MapsTab';
 import { VersionsTab } from './tabs/VersionsTab';
+import { SkillsTab } from './tabs/SkillsTab';
 import { XpTableTab } from './tabs/XpTableTab';
 
 export class AdminApp implements AdminContext {
@@ -63,6 +64,7 @@ export class AdminApp implements AdminContext {
     'maps':       new MapsTab(),
     'map':        new MapTab(),
     'versions':   new VersionsTab(),
+    'skills':     new SkillsTab(),
     'xp-table':   new XpTableTab(),
   };
 

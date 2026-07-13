@@ -4,7 +4,7 @@ import type { PartyCombatant } from '../src/systems/CombatEngine';
 import { createMonsterInstance } from '../src/systems/MonsterTypes';
 import type { MonsterDefinition, Resistance } from '../src/systems/MonsterTypes';
 import type { PartyGridPosition } from '../src/systems/SocialTypes';
-import { createDefaultSkillLoadout, getSkillById } from '../src/systems/SkillTypes';
+import { SEED_SKILLS } from '../src/systems/SkillTypes';
 
 function makePlayer(
   username: string,
@@ -243,7 +243,7 @@ describe('Monster Skills', () => {
 
   describe('player defenses against monster skills', () => {
     function equip(player: PartyCombatant, skillIds: string[]): PartyCombatant {
-      player.equippedSkills = skillIds.map(id => getSkillById(id) ?? null) as any;
+      player.equippedSkills = skillIds.map(id => SEED_SKILLS[id] ?? null) as any;
       return player;
     }
 

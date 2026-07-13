@@ -62,7 +62,7 @@ The client renders only the map the party is on. `ServerStateMessage.currentMapI
 
 ## Inventory screen (merged Char + Items)
 
-`CharItemsScreen` is a single scrollable column containing the old Char and Items screens together: hero card with class portrait (loaded from `/class-artwork/{class}.png`), equipped gear, skill loadout (5 slots; clicking opens a popup with all unlocked skills of the matching type — no auto-shuffle on placement), condensed stat card (ATK/DR/MR/HP with click-to-show tooltips), and inventory grid. Skill points are gone — `getUnlockedSkillsForLevel(className, level)` auto-unlocks skills at their milestone (`LEVELS_PER_SKILL_POINT = 5`); equipping the 5 slots is the only constraint.
+`CharItemsScreen` is a single scrollable column containing the old Char and Items screens together: hero card with class portrait (loaded from `/class-artwork/{class}.png`), equipped gear, skill loadout (slots per the class's content-driven slot schedule, fetched via `WorldCache.getSlotSchedule`; clicking opens a popup with all unlocked skills of the matching type plus any skills currently granted by equipped items/sets — no auto-shuffle on placement), condensed stat card (ATK/DR/MR/HP with click-to-show tooltips), and inventory grid. Skill points are gone — skills auto-unlock at each skill's content-defined `unlockLevel`; equipping the slots is the only constraint. See `docs/architecture/content.md` → Skill system for the full content model.
 
 The inventory grid groups items with visible headers when sorted by Rarity or Type (Newest stays chronological). Clicking an item opens a popup with full details and equip/unequip/drop actions.
 
