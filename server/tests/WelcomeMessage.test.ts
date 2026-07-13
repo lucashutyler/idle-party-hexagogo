@@ -7,7 +7,7 @@ import { PlayerSession } from '../src/game/PlayerSession.js';
 import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import type { WorldGrids } from '../src/game/WorldGrids.js';
-import { wrapGrids, fakeWorldMeta } from './testGrids.js';
+import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import WebSocket from 'ws';
 
 // --- Minimal fakes (matching BanSystem.test.ts patterns) ---
@@ -48,6 +48,7 @@ function createFakeContentStore(): ContentStore {
     getNpc: () => undefined,
     getAllQuests: () => ({}),
     getQuest: () => undefined,
+    ...fakeSkillContent(),
   } as unknown as ContentStore;
 }
 

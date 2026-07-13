@@ -6,7 +6,6 @@ import {
   createEncounter,
   getZone,
   rollDrops,
-  getSkillById,
   validateDungeonEntry,
   rollDungeonRewards,
   rewardAppliesToClass,
@@ -617,7 +616,8 @@ export class PartyBattleManager {
         }
       }
 
-      // Check for Bard Inspiration XP bonus (+20% per Bard with Inspiration equipped)
+      // Check for XP-bonus passives (e.g. Bard Inspiration) — sum flatValues
+      // across every passive effect of every equipped skill in the party.
       let xpMultiplier = 1;
       for (const username of members) {
         const session = this.getSession(username);
@@ -626,9 +626,12 @@ export class PartyBattleManager {
         if (loadout) {
           for (const skillId of loadout.equippedSkills) {
             if (!skillId) continue;
-            const skill = getSkillById(skillId);
-            if (skill && skill.passiveEffect?.kind === 'xp_bonus') {
-              xpMultiplier += skill.passiveEffect.flatValue ?? 0;
+            const skill = this.content.getSkill(skillId);
+            if (!skill?.passiveEffects) continue;
+            for (const effect of skill.passiveEffects) {
+              if (effect.kind === 'xp_bonus') {
+                xpMultiplier += effect.flatValue ?? 0;
+              }
             }
           }
         }

@@ -8,7 +8,7 @@ Game content (monsters, items, zones, world map, etc.) is stored in `data/*.json
 
 ## Parameterized shared functions
 
-Pure functions in shared that previously referenced module-level constants (`ITEMS`, `MONSTERS`, `ZONES`) now accept explicit data parameters. This allows the server to pass runtime-loaded content from ContentStore. E.g., `createEncounter(zoneId, monsters, zones)`, `equipItem(inv, equip, id, items)`, `computeEquipmentBonuses(equip, items)`, `getZone(zoneId, zones)`. The old constants are renamed to `SEED_*` and serve as seed data / test fixtures.
+Pure functions in shared that previously referenced module-level constants (`ITEMS`, `MONSTERS`, `ZONES`) now accept explicit data parameters. This allows the server to pass runtime-loaded content from ContentStore. E.g., `createEncounter(zoneId, monsters, zones)`, `equipItem(inv, equip, id, items)`, `computeEquipmentBonuses(equip, items)`, `getZone(zoneId, zones)`, and all skill helpers which take a `SkillContent` bundle (`getSkillById`, `getUnlockedSkillsForLevel`, `canEquipSkill`, `createDefaultSkillLoadout`, `reconcileSkillLoadout`). The old constants are renamed to `SEED_*` and serve as seed data / test fixtures.
 
 ## Zone system
 
@@ -33,7 +33,7 @@ EquipSlot =
   | 'foot' | 'ring' | 'necklace' | 'back' | 'relic';
 ```
 
-Two-handed weapons use the `twohanded` slot and block both `mainhand` and `offhand`. Items have optional `classRestriction: string[]` (array of class names that can equip) and `value?: number` (gold value for shops). Items stack up to `MAX_STACK = 99` in inventory.
+Two-handed weapons use the `twohanded` slot and block both `mainhand` and `offhand`. Items have optional `classRestriction: string[]` (array of class names that can equip) and `value?: number` (gold value for shops). Items may also carry `grantedSkillIds?: string[]` — skills the wearer can equip while the item is equipped (see Skill system below). Items stack up to `MAX_STACK = 99` in inventory.
 
 Equipment modifies combat: `bonusAttackMin/Max` adds to player damage, `damageReductionMin/Max` reduces incoming physical damage, `magicReductionMin/Max` reduces incoming magical damage. Pure functions handle inventory/equipment operations (`addItemToInventory`, `equipItem`, `unequipItem`, `computeEquipmentBonuses`, `rollDrops`) — all accept explicit `items: Record<string, ItemDefinition>` parameter. Drops are rolled per-monster on victory.
 
@@ -47,11 +47,21 @@ Read-only helpers in `shared/src/systems/InventoryView.ts` for querying a charac
 
 `SetTypes.ts` defines `SetDefinition` with `itemIds: string[]`, an optional `classRestriction?: string[]`, and a list of tiered `breakpoints: SetBreakpoint[]`. Each breakpoint declares a `piecesRequired` count and a `SetBonuses` payload — a Diablo-style tier model: bonuses do NOT stack across tiers within a single set; the highest unlocked tier replaces lower ones (use `getActiveBreakpoint`). Bonuses across DIFFERENT active sets stack additively.
 
-`SetBonuses` includes: `cooldownReduction`, `damagePercent`, `damageResistancePercent`, `damageReductionMin/Max`, `magicReductionMin/Max`, `bonusAttackMin/Max`, `flatHp`, `percentHp`.
+`SetBonuses` includes: `cooldownReduction`, `damagePercent`, `damageResistancePercent`, `damageReductionMin/Max`, `magicReductionMin/Max`, `bonusAttackMin/Max`, `flatHp`, `percentHp`, plus optional `grantedSkillIds` (skills equippable while that breakpoint tier is active — see Skill system below).
 
 **Class-restricted sets** (`classRestriction`) only activate for players of the listed classes — when displayed, their name is suffixed with the class list (e.g., "Glowing Crystal Set (Knight)"). Items can belong to MULTIPLE sets across different classes (e.g., Glowing Crystal Bracers in both a Bard set and a Knight set), but `findSetConflicts` enforces that no item is in two sets that share a class. The server filters sets by the viewer/target's class via `setAppliesToClass` so only relevant sets reach the client. Legacy `{ bonuses }` sets are migrated on load via `migrateLegacySet` to a single max-pieces breakpoint. Set definitions stored in `data/sets.json`, managed by `ContentStore` (which validates conflicts on `addOrUpdateSet`).
 
 **Combat integration**: `PlayerSession.getCombatInfo()` calls `computeActiveSetBonuses(equipment, sets, className)` to filter by class, merges flat DR/MR/attack into `equipBonuses` via `mergeSetBonusesIntoEquip`, and bakes `flatHp`/`percentHp` into `maxHp`. The remaining multiplicative components (`damagePercent`, `damageResistancePercent`, `cooldownReduction`) ride on `PartyCombatant.setBonuses` and are consumed by the engine: `damagePercent` multiplies player damage in `computePlayerDamage` (after rally/warSong); `cooldownReduction` is self-only and added in `getEffectiveCooldown`; `damageResistancePercent` applies BEFORE flat reductions in `applyMonsterDirectDamage` and the player-DoT path in `processTickEffects`.
+
+## Skill system (content)
+
+Player skills are versioned content (issue #267). `SkillDefinition` (`shared/src/systems/SkillTypes.ts`) has `className`, `type` (passive/active), an editable `unlockLevel` (`null` = grant-only, never level-learned), `sortOrder`, `cooldown` (actives), and one or more effect **options** — `passiveEffects[]` / `activeEffects[]`; passive options are honored on active skills too. The closed set of engine-supported option kinds lives in `SKILL_OPTION_CATALOG` (`shared/src/systems/SkillOptionCatalog.ts`): 27 passive + 23 active kinds, each with a param schema (percent params stored as 0–1 fractions), a targeting note, and a description with stacking caveats. The catalog drives the admin editor's searchable option picker and `validateSkillDefinition`, which gates every admin PUT (server-side; the admin client also pre-validates). Per-class **slot schedules** (`Record<ClassName, SkillSlot[]>`) are content too.
+
+Storage: `data/skills.json` + `data/skill-slots.json`, seeded from `SEED_SKILLS` / `SEED_SKILL_SLOT_SCHEDULES` on both fresh and existing installs (skill ids preserved from the original hardcoded trees so player saves stay valid — `equippedSkills` persists raw ids). Both are snapshotted in `ContentSnapshot`; `replaceAll` keeps existing skills when deploying a pre-skills snapshot (keep-when-absent, like tile types), and legacy single-effect shapes are normalized via `migrateLegacySkill` on every load path. `POST /api/admin/skills/seed` restores the defaults (destructive for seed-id skills, keeps custom ones).
+
+Runtime: shared skill helpers take a `SkillContent` bundle; `reconcileSkillLoadout` clears equipped slots whose skill vanished, changed type, or lost availability, and runs on restore, level-up, class change, equipment changes, and deploy (all sessions). `unlockedSkills` is derived state — recomputed from level + content every time; only `equippedSkills` is authoritative in saves. The game client fetches the full catalog + schedules via authed `GET /api/skills` into `WorldCache` (SEED fallback on failure; refetched on `world_update`).
+
+**Grants**: `ItemDefinition.grantedSkillIds` and per-breakpoint `SetBonuses.grantedSkillIds` make skills equippable (cross-class allowed) only while the grant is active. Grants are computed live via `computeGrantedSkillIds` and shipped to the client as `ClientCharacterState.grantedSkillIds`; they are never persisted. Players never see a granted skill before the grant is active. Monster skills remain a separate hardcoded catalog (`MONSTER_SKILL_CATALOG`).
 
 ## Dungeon system
 
@@ -119,6 +129,6 @@ Data-driven content type stored in `data/tile-types.json`, managed by ContentSto
 
 ## Content versioning
 
-Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, and relocates parties on unreachable tiles.
+Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates parties on unreachable tiles, and reconciles every session's skill loadout against the new content.
 
 **When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.**

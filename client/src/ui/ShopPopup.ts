@@ -1,4 +1,5 @@
 import type { GameClient } from '../network/GameClient';
+import type { WorldCache } from '../network/WorldCache';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import type { ShopDefinition, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
 import { getUnequippedCount, listUnequippedEntries } from '@idle-party-rpg/shared';
@@ -9,6 +10,7 @@ import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 export class ShopPopup {
   private overlay: HTMLElement;
   private gameClient: GameClient;
+  private worldCache: WorldCache;
   private mode: 'buy' | 'sell' = 'buy';
   /** View context — what's open inside the shop popup right now. */
   private view: { kind: 'grid' } | { kind: 'buy'; itemId: string; price: number; qty: number } | { kind: 'sell'; itemId: string; qty: number } = { kind: 'grid' };
@@ -20,8 +22,9 @@ export class ShopPopup {
    *  <img> elements aren't recreated and don't flicker the initials placeholder. */
   private lastRenderKey: string = '';
 
-  constructor(gameClient: GameClient) {
+  constructor(gameClient: GameClient, worldCache: WorldCache) {
     this.gameClient = gameClient;
+    this.worldCache = worldCache;
     this.overlay = document.createElement('div');
     this.overlay.className = 'shop-overlay';
     this.overlay.style.display = 'none';
@@ -257,6 +260,7 @@ export class ShopPopup {
       itemDefs,
       setDefs,
       className: state.character?.className ?? null,
+      skills: this.worldCache.getSkillContent().skills,
     });
 
     this.overlay.innerHTML = `
@@ -338,6 +342,7 @@ export class ShopPopup {
       itemDefs,
       setDefs,
       className: state.character?.className ?? null,
+      skills: this.worldCache.getSkillContent().skills,
     });
 
     this.overlay.innerHTML = `

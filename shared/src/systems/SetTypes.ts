@@ -1,4 +1,5 @@
-import type { EquipmentBonuses } from './ItemTypes.js';
+import type { EquipmentBonuses, ItemDefinition } from './ItemTypes.js';
+import type { SkillDefinition } from './SkillTypes.js';
 
 // --- Types ---
 
@@ -25,6 +26,8 @@ export interface SetBonuses {
   flatHp?: number;
   /** Percent HP bonus (applied after flat HP, stacks additively). */
   percentHp?: number;
+  /** Skill IDs this tier grants while active (availability only — the player still equips the skill into a slot). */
+  grantedSkillIds?: string[];
 }
 
 /**
@@ -176,6 +179,7 @@ export function computeActiveSetBonuses(
     bonusAttackMax: 0,
     flatHp: 0,
     percentHp: 0,
+    grantedSkillIds: [],
   };
 
   for (const set of Object.values(sets)) {
@@ -204,9 +208,43 @@ export function computeActiveSetBonuses(
     combined.bonusAttackMax += b.bonusAttackMax ?? 0;
     combined.flatHp += b.flatHp ?? 0;
     combined.percentHp += b.percentHp ?? 0;
+    if (b.grantedSkillIds) {
+      for (const skillId of b.grantedSkillIds) {
+        if (!combined.grantedSkillIds.includes(skillId)) combined.grantedSkillIds.push(skillId);
+      }
+    }
   }
 
   return { activeSetIds, bonuses: combined };
+}
+
+/**
+ * Compute the union of skill IDs granted by equipped items and by active set
+ * breakpoints (highest unlocked tier per set, class restriction respected via
+ * computeActiveSetBonuses). Grants gate skill AVAILABILITY only — they are
+ * never written into `unlockedSkills`.
+ */
+export function computeGrantedSkillIds(
+  equipment: Record<string, string | null>,
+  items: Record<string, ItemDefinition>,
+  sets: Record<string, SetDefinition>,
+  className?: string | null,
+): string[] {
+  const granted = new Set<string>();
+
+  // Item grants — a 2H weapon occupies two slots with the same id; the Set dedupes it.
+  for (const itemId of Object.values(equipment)) {
+    if (!itemId) continue;
+    const def = items[itemId];
+    if (!def?.grantedSkillIds) continue;
+    for (const skillId of def.grantedSkillIds) granted.add(skillId);
+  }
+
+  // Set grants — reuse the tier logic in computeActiveSetBonuses.
+  const { bonuses } = computeActiveSetBonuses(equipment, sets, className);
+  for (const skillId of bonuses.grantedSkillIds ?? []) granted.add(skillId);
+
+  return [...granted];
 }
 
 /**
@@ -276,8 +314,12 @@ export function getSetDisplayName(set: SetDefinition): string {
   return `${set.name} (${set.classRestriction.join(', ')})`;
 }
 
-/** Get a human-readable description of set bonuses. */
-export function getSetBonusText(bonuses: SetBonuses): string {
+/**
+ * Get a human-readable description of set bonuses.
+ * Pass a `skills` record to render 'Grants skill: <name>' parts for
+ * `grantedSkillIds` (falls back to the raw id when the skill is unknown).
+ */
+export function getSetBonusText(bonuses: SetBonuses, skills?: Record<string, SkillDefinition>): string {
   const parts: string[] = [];
   if (bonuses.cooldownReduction) parts.push(`-${bonuses.cooldownReduction} Active CD`);
   if (bonuses.damagePercent) parts.push(`+${bonuses.damagePercent}% Damage`);
@@ -293,6 +335,11 @@ export function getSetBonusText(bonuses: SetBonuses): string {
   }
   if (bonuses.flatHp) parts.push(`+${bonuses.flatHp} HP`);
   if (bonuses.percentHp) parts.push(`+${bonuses.percentHp}% HP`);
+  if (bonuses.grantedSkillIds) {
+    for (const skillId of bonuses.grantedSkillIds) {
+      parts.push(`Grants skill: ${skills?.[skillId]?.name ?? skillId}`);
+    }
+  }
   return parts.join(', ') || 'No bonus';
 }
 

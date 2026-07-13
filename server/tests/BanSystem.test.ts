@@ -6,7 +6,7 @@ import type { AccountStore, Account } from '../src/auth/AccountStore.js';
 import { HexGrid, HexTile, offsetToCube } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import type { WorldGrids } from '../src/game/WorldGrids.js';
-import { wrapGrids, fakeWorldMeta } from './testGrids.js';
+import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 
 // --- Minimal fakes ---
 
@@ -37,6 +37,8 @@ function createFakeContentStore(): ContentStore {
       auto_goblin: { id: 'auto_goblin', name: 'Goblins', type: 'random', monsterPool: [{ monsterId: 'goblin', min: 1, max: 1 }], roomMax: 9 },
     }),
     getWorld: () => ({ tiles: [], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),
+    getAllSets: () => ({}),
+    ...fakeSkillContent(),
   } as unknown as ContentStore;
 }
 

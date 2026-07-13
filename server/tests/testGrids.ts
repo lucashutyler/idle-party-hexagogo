@@ -1,5 +1,5 @@
-import { DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
-import type { HexGrid } from '@idle-party-rpg/shared';
+import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
+import type { HexGrid, SkillSlot } from '@idle-party-rpg/shared';
 import type { WorldGrids } from '../src/game/WorldGrids.js';
 
 /**
@@ -26,5 +26,15 @@ export function fakeWorldMeta(startTile = { col: 0, row: 0 }) {
   return {
     defaultMapId: DEFAULT_MAP_ID,
     maps: [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile }],
+  };
+}
+
+/** Seed-backed skill content accessors — spread into fake ContentStore objects. */
+export function fakeSkillContent() {
+  return {
+    getSkill: (id: string) => SEED_SKILLS[id],
+    getAllSkills: () => SEED_SKILLS,
+    getSkillSlotSchedule: (className: string) => (SEED_SKILL_SLOT_SCHEDULES as Record<string, SkillSlot[]>)[className],
+    getAllSkillSlotSchedules: () => SEED_SKILL_SLOT_SCHEDULES as Record<string, SkillSlot[]>,
   };
 }

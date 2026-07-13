@@ -127,6 +127,14 @@ app.get('/api/npcs', requireAuth, (_req, res) => {
   res.json({ npcs: gameLoop.contentStore.getAllNpcs() });
 });
 
+// Skill definitions + per-class slot schedules (full catalog — sent once at login)
+app.get('/api/skills', requireAuth, (_req, res) => {
+  res.json({
+    skills: gameLoop.contentStore.getAllSkills(),
+    slotSchedules: gameLoop.contentStore.getAllSkillSlotSchedules(),
+  });
+});
+
 // Dungeon definitions (full catalog — used by the room popup + entry confirm UI)
 app.get('/api/dungeons', requireAuth, (_req, res) => {
   res.json({ dungeons: gameLoop.contentStore.getAllDungeons() });

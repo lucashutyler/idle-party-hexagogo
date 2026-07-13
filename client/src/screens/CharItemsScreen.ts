@@ -13,15 +13,13 @@ import type {
 import {
   computeEquipmentBonuses,
   classIconHtml,
-  SKILL_SLOTS,
   CLASS_DEFINITIONS,
-  SKILL_TREES,
-  getSkillById,
-  getSkillLearnLevel,
+  getSkillsForClass,
   getOwnedItemIds,
   getEquippedItemIds,
 } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
+import type { WorldCache } from '../network/WorldCache';
 import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon, RARITY_COLORS } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
 import { renderAssetImg } from '../ui/assets';
@@ -603,6 +601,7 @@ function injectItemsStyles(): void {
 export class CharItemsScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
+  private worldCache: WorldCache;
   private isActive = false;
 
   // Hero section refs
@@ -662,11 +661,12 @@ export class CharItemsScreen implements Screen {
   private skillPopupOpen = false;
   private onOpenTrade?: (tradeId: string) => void;
 
-  constructor(containerId: string, gameClient: GameClient) {
+  constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
+    this.worldCache = worldCache;
 
     injectCharItemsStyles();
     injectItemsStyles();
@@ -907,8 +907,11 @@ export class CharItemsScreen implements Screen {
       this.renderInventory();
     }
 
-    // Skill loadout — re-render when skill state changes
-    const skillKey = JSON.stringify(char.skillLoadout) + char.level;
+    // Skill loadout — re-render when skill state, the content catalog, or the
+    // equipment-granted skill set changes
+    const skillKey = JSON.stringify(char.skillLoadout) + '|' + char.level
+      + '|' + this.worldCache.contentGeneration
+      + '|' + JSON.stringify(char.grantedSkillIds ?? []);
     if (!this.skillPopupOpen && skillKey !== this.lastSkillKey) {
       this.lastSkillKey = skillKey;
       this.renderSkillStrip(state);
@@ -1004,13 +1007,13 @@ export class CharItemsScreen implements Screen {
     const char = state.character;
     if (!char) return;
 
-    const slots = SKILL_SLOTS;
+    const slots = this.worldCache.getSlotSchedule(char.className);
     let html = '';
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
       const isUnlocked = char.level >= slot.unlocksAtLevel;
       const equippedId = char.skillLoadout.equippedSkills[i] ?? null;
-      const skill = equippedId ? getSkillById(equippedId) : null;
+      const skill = equippedId ? this.worldCache.getSkill(equippedId) : null;
 
       if (!isUnlocked) {
         html += `<div class="charitems-skill-slot locked">
@@ -1038,35 +1041,54 @@ export class CharItemsScreen implements Screen {
     const state = this.gameClient.lastState;
     if (!state?.character) return;
     const char = state.character;
-    const slot = SKILL_SLOTS[slotIndex];
+    const slot = this.worldCache.getSlotSchedule(char.className)[slotIndex];
     if (!slot) return;
 
     const equippedId = char.skillLoadout.equippedSkills[slotIndex] ?? null;
-    const equippedNow = equippedId ? getSkillById(equippedId) : null;
+    const equippedNow = equippedId ? this.worldCache.getSkill(equippedId) : null;
 
     const equippedIds = new Set(char.skillLoadout.equippedSkills.filter(Boolean) as string[]);
     const unlockedIds = new Set(char.skillLoadout.unlockedSkills);
-    const classTree = SKILL_TREES[char.className] ?? [];
+    const grantedIds = new Set(char.grantedSkillIds ?? []);
+    const classSkills = getSkillsForClass(char.className as ClassName, this.worldCache.getSkillContent());
 
-    // Build a single list of candidates (unlocked + future-locked) so the
+    // Build a single list of candidates (available + future-locked) so the
     // player can see what's coming. Locked rows are visually dimmed and
-    // non-clickable; unlocked rows behave as before.
-    type Candidate = { skill: SkillDefinition; locked: boolean };
+    // non-clickable; available rows behave as before. Availability comes from
+    // level unlocks OR equipment grants; grant-only skills (unlockLevel null)
+    // never appear in the future-locked list.
+    type Candidate = { skill: SkillDefinition; locked: boolean; granted: boolean };
     const candidates: Candidate[] = [];
-    for (const skill of classTree) {
+    const seen = new Set<string>();
+    for (const skill of classSkills) {
       if (skill.type !== slot.type) continue;
+      seen.add(skill.id);
       const isUnlocked = unlockedIds.has(skill.id);
-      if (isUnlocked) {
-        // Hide already-equipped-elsewhere unlocked skills (the existing rule).
+      const isGranted = grantedIds.has(skill.id);
+      if (isUnlocked || isGranted) {
+        // Hide already-equipped-elsewhere available skills (the existing rule).
         if (equippedIds.has(skill.id) && skill.id !== equippedId) continue;
-        candidates.push({ skill, locked: false });
-      } else {
-        candidates.push({ skill, locked: true });
+        candidates.push({ skill, locked: false, granted: !isUnlocked });
+      } else if (skill.unlockLevel !== null) {
+        candidates.push({ skill, locked: true, granted: false });
       }
     }
 
-    // Sort by treeOrder (level acquired)
-    candidates.sort((a, b) => a.skill.treeOrder - b.skill.treeOrder);
+    // Equipment-granted skills outside the class tree (cross-class or
+    // grant-only) — equippable rows appended after the class list.
+    const grantedExtras: SkillDefinition[] = [];
+    for (const id of grantedIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const skill = this.worldCache.getSkill(id);
+      if (!skill || skill.type !== slot.type) continue;
+      if (equippedIds.has(id) && id !== equippedId) continue;
+      grantedExtras.push(skill);
+    }
+    grantedExtras.sort((a, b) => a.sortOrder - b.sortOrder);
+    for (const skill of grantedExtras) {
+      candidates.push({ skill, locked: false, granted: true });
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'charitems-skill-popup-overlay';
@@ -1075,17 +1097,18 @@ export class CharItemsScreen implements Screen {
     if (candidates.length === 0) {
       rowsHtml = `<div class="charitems-skill-popup-empty">No other ${slot.type} skills available.</div>`;
     } else {
-      rowsHtml = candidates.map(({ skill: s, locked }) => {
+      rowsHtml = candidates.map(({ skill: s, locked, granted }) => {
         const isCurrent = s.id === equippedId;
-        const learnLevel = getSkillLearnLevel(s.treeOrder);
         const classes = ['charitems-skill-row', s.type];
         if (locked) classes.push('locked');
         const attrs = locked
           ? `data-locked="1"`
-          : `data-skill-id="${s.id}" ${isCurrent ? 'data-current="1"' : ''}`;
+          : `data-skill-id="${this.escapeHtml(s.id)}" ${isCurrent ? 'data-current="1"' : ''}`;
         const tagline = locked
-          ? `<div class="charitems-skill-row-locklabel">Unlocks at Lv ${learnLevel}</div>`
-          : '';
+          ? `<div class="charitems-skill-row-locklabel">Unlocks at Lv ${s.unlockLevel}</div>`
+          : granted
+            ? `<div class="charitems-skill-row-locklabel">Granted by equipment</div>`
+            : '';
         return `<div class="${classes.join(' ')}" ${attrs}>
           <div class="charitems-skill-row-name">${this.escapeHtml(s.name)}${isCurrent ? ' &middot; equipped' : ''}</div>
           <div class="charitems-skill-row-meta">${s.type}${s.cooldown ? ` &middot; CD ${s.cooldown}` : ''}</div>
@@ -1487,6 +1510,7 @@ export class CharItemsScreen implements Screen {
       ownedItemIds,
       equippedItemIds,
       className: this.lastClassName || null,
+      skills: this.worldCache.getSkillContent().skills,
       actionsHtml,
       extraHtml,
     });

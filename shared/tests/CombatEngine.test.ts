@@ -7,7 +7,7 @@ import { SEED_ZONES } from '../src/systems/ZoneTypes';
 import { calculateMaxHp, calculateBaseDamage, CLASS_DEFINITIONS } from '../src/systems/CharacterStats';
 import type { ClassName, DamageType } from '../src/systems/CharacterStats';
 import type { PartyGridPosition } from '../src/systems/SocialTypes';
-import { SKILL_TREES, getSkillById } from '../src/systems/SkillTypes';
+import { SEED_SKILLS } from '../src/systems/SkillTypes';
 import type { SkillDefinition } from '../src/systems/SkillTypes';
 
 function makePlayer(
@@ -154,7 +154,7 @@ describe('Party Combat', () => {
     });
 
     it('applies Mage Burn bonus damage at combat start', () => {
-      const burnSkill = getSkillById('mage_burn')!;
+      const burnSkill = SEED_SKILLS.mage_burn;
       const mage = makePlayer('Mage', 0, {
         className: 'Mage',
         level: 5,
@@ -167,7 +167,7 @@ describe('Party Combat', () => {
     });
 
     it('computes Bard Rally multiplier', () => {
-      const rallySkill = getSkillById('bard_rally')!;
+      const rallySkill = SEED_SKILLS.bard_rally;
       const bard = makePlayer('Bard', 0, {
         className: 'Bard',
         equippedSkills: [rallySkill, null, null, null, null],
@@ -218,7 +218,7 @@ describe('Party Combat', () => {
     });
 
     it('Knight Guard reduces physical damage taken', () => {
-      const guardSkill = getSkillById('knight_guard')!;
+      const guardSkill = SEED_SKILLS.knight_guard;
       const goblin = createMonsterInstance(SEED_MONSTERS.goblin, 4); // 4 physical damage
       const knight = makePlayer('Arthur', 2, {
         className: 'Knight',
@@ -238,7 +238,7 @@ describe('Party Combat', () => {
     });
 
     it('Knight Guard scales with level', () => {
-      const guardSkill = getSkillById('knight_guard')!;
+      const guardSkill = SEED_SKILLS.knight_guard;
       const goblin = createMonsterInstance(SEED_MONSTERS.goblin, 4); // 4 physical damage
       const knight = makePlayer('Arthur', 2, {
         className: 'Knight',
@@ -258,7 +258,7 @@ describe('Party Combat', () => {
     });
 
     it('Priest Bless provides party-wide magical damage reduction', () => {
-      const blessSkill = getSkillById('priest_bless')!;
+      const blessSkill = SEED_SKILLS.priest_bless;
       const wolf = createMonsterInstance(SEED_MONSTERS.wolf, 4); // magical damage, 6 dmg
       wolf.maxHp = 1000;
       wolf.currentHp = 1000; // make wolf survive player attacks
@@ -443,8 +443,8 @@ describe('Party Combat', () => {
 
   describe('cooldown-based active skills', () => {
     it('Knight Bash triggers every 2nd attack', () => {
-      const guardSkill = getSkillById('knight_guard')!;
-      const bashSkill = getSkillById('knight_bash')!;
+      const guardSkill = SEED_SKILLS.knight_guard;
+      const bashSkill = SEED_SKILLS.knight_bash;
       const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)];
       monsters[0].maxHp = 1000;
       monsters[0].currentHp = 1000;
@@ -470,8 +470,8 @@ describe('Party Combat', () => {
     });
 
     it('Knight Intercept only redirects ONE attack per cast', () => {
-      const guardSkill = getSkillById('knight_guard')!;
-      const interceptSkill = getSkillById('knight_intercept')!;
+      const guardSkill = SEED_SKILLS.knight_guard;
+      const interceptSkill = SEED_SKILLS.knight_intercept;
 
       // Two monsters at the same row as the Archer so both target the Archer naturally
       const monsters = [
@@ -523,8 +523,8 @@ describe('Party Combat', () => {
     });
 
     it('Priest Minor Heal triggers every attack (CD 1)', () => {
-      const blessSkill = getSkillById('priest_bless')!;
-      const healSkill = getSkillById('priest_minor_heal')!;
+      const blessSkill = SEED_SKILLS.priest_bless;
+      const healSkill = SEED_SKILLS.priest_minor_heal;
       const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)];
       monsters[0].maxHp = 1000;
       monsters[0].currentHp = 1000;
@@ -548,5 +548,140 @@ describe('Party Combat', () => {
       const r = processPartyTick(state);
       expect(r.logEntries[0]).toContain('Minor Heal');
     });
+  });
+});
+
+// ── Multi-option skills ───────────────────────────────────────────
+
+describe('multi-option skills', () => {
+  it('active with one no-op and one effective option acts and does NOT rewind activeSkillCount', () => {
+    // heal_lowest no-ops at full HP; damage_percent still fires → cast is effective.
+    const comboSkill: SkillDefinition = {
+      id: 'test_combo', name: 'Combo Strike', description: 'test', className: 'Priest', type: 'active',
+      unlockLevel: 5, sortOrder: 1, cooldown: 1,
+      activeEffects: [
+        { kind: 'heal_lowest', healMultiplier: 4 },
+        { kind: 'damage_percent', damagePercent: 1.0 },
+      ],
+    };
+    const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)];
+    monsters[0].maxHp = 1000;
+    monsters[0].currentHp = 1000;
+    const priest = makePlayer('Healer', 0, {
+      className: 'Priest',
+      baseDamage: 10,
+      hp: 200,
+      equippedSkills: [null, comboSkill, null, null, null],
+    });
+    const state = createPartyCombatState([priest], monsters);
+
+    const r = processPartyTick(state);
+    expect(r.logEntries.some(l => l.includes('Combo Strike'))).toBe(true);
+    expect(state.monsters[0].currentHp).toBeLessThan(1000);
+    // Effective cast — Arcane Surge cadence is consumed, not rewound.
+    expect(state.players[0].activeSkillCount).toBe(1);
+  });
+
+  it('active with ALL options no-op falls through to a normal attack AND rewinds activeSkillCount', () => {
+    // Full HP + no debuffs → both heal_lowest and cure_debuffs no-op.
+    const uselessSkill: SkillDefinition = {
+      id: 'test_useless', name: 'Wasted Words', description: 'test', className: 'Priest', type: 'active',
+      unlockLevel: 5, sortOrder: 1, cooldown: 1,
+      activeEffects: [
+        { kind: 'heal_lowest', healMultiplier: 4 },
+        { kind: 'cure_debuffs' },
+      ],
+    };
+    const monsters = [createMonsterInstance(SEED_MONSTERS.goblin, 4)];
+    monsters[0].maxHp = 1000;
+    monsters[0].currentHp = 1000;
+    const priest = makePlayer('Healer', 0, {
+      className: 'Priest',
+      baseDamage: 10,
+      hp: 200,
+      equippedSkills: [null, uselessSkill, null, null, null],
+    });
+    const state = createPartyCombatState([priest], monsters);
+
+    const r = processPartyTick(state);
+    // Fell back to a normal attack — no skill log line, but the monster got hit.
+    expect(r.logEntries.some(l => l.includes('Wasted Words'))).toBe(false);
+    expect(r.logEntries.some(l => l.includes('Healer hits'))).toBe(true);
+    expect(state.monsters[0].currentHp).toBeLessThan(1000);
+    // Whole-cast no-op — activeSkillCount rewound so Arcane Surge cadence isn't burned.
+    expect(state.players[0].activeSkillCount).toBe(0);
+  });
+
+  it('two passiveEffects of the same kind on one skill SUM at a summing site (combat-start bake)', () => {
+    const doubleBurn: SkillDefinition = {
+      id: 'test_double_burn', name: 'Double Burn', description: 'test', className: 'Mage', type: 'passive',
+      unlockLevel: 1, sortOrder: 0,
+      passiveEffects: [
+        { kind: 'bonus_damage', valuePerLevel: 2 },
+        { kind: 'bonus_damage', valuePerLevel: 3 },
+      ],
+    };
+    const mage = makePlayer('Mage', 0, {
+      className: 'Mage',
+      level: 5,
+      baseDamage: 23,
+      equippedSkills: [doubleBurn, null, null, null, null],
+    });
+    const state = createPartyCombatState([mage], [createMonsterInstance(SEED_MONSTERS.goblin, 4)]);
+    // (2 + 3) * level 5 = 25 bonus damage
+    expect(state.players[0].baseDamage).toBe(23 + 25);
+  });
+
+  it('two physical_reduction options on one skill SUM at the consumption site', () => {
+    const doubleGuard: SkillDefinition = {
+      id: 'test_double_guard', name: 'Double Guard', description: 'test', className: 'Knight', type: 'passive',
+      unlockLevel: 1, sortOrder: 0,
+      passiveEffects: [
+        { kind: 'physical_reduction', valuePerLevel: 1 },
+        { kind: 'physical_reduction', valuePerLevel: 1 },
+      ],
+    };
+    const goblin = createMonsterInstance(SEED_MONSTERS.goblin, 4); // 4 physical damage
+    const knight = makePlayer('Arthur', 2, {
+      className: 'Knight',
+      level: 1,
+      hp: 200,
+      baseDamage: 1,
+      equippedSkills: [doubleGuard, null, null, null, null],
+    });
+    const state = createPartyCombatState([knight], [goblin]);
+
+    processPartyTick(state); // Knight attacks
+    processPartyTick(state); // Goblin attacks
+
+    // Reduction = (1 + 1) * level 1 = 2 → goblin damage 4 - 2 = 2
+    expect(state.players[0].currentHp).toBe(200 - 2);
+  });
+
+  it('Sunder marks from skills with different multipliers accumulate independently instead of re-valuing prior stacks', () => {
+    const strongMark: SkillDefinition = {
+      id: 'test_strong_sunder', name: 'Strong Sunder', description: 'test', className: 'Knight', type: 'active',
+      unlockLevel: 1, sortOrder: 1, cooldown: 1,
+      activeEffects: [{ kind: 'stacking_mark', markMultiplier: 0.25 }],
+    };
+    const weakMark: SkillDefinition = {
+      id: 'test_weak_sunder', name: 'Weak Sunder', description: 'test', className: 'Knight', type: 'active',
+      unlockLevel: 1, sortOrder: 1, cooldown: 1,
+      activeEffects: [{ kind: 'stacking_mark', markMultiplier: 0.05 }],
+    };
+    const monster = createMonsterInstance(SEED_MONSTERS.goblin, 4);
+    monster.maxHp = 10000;
+    monster.currentHp = 10000;
+    // createPartyCombatState sorts players front-to-back (higher grid column first),
+    // so Arthur (col 1) acts before Lancelot (col 0).
+    const knightA = makePlayer('Arthur', 1, { className: 'Knight', hp: 500, equippedSkills: [null, strongMark, null, null, null] });
+    const knightB = makePlayer('Lancelot', 0, { className: 'Knight', hp: 500, equippedSkills: [null, weakMark, null, null, null] });
+    const state = createPartyCombatState([knightA, knightB], [monster]);
+
+    processPartyTick(state); // Arthur casts Strong Sunder: +25%
+    expect(state.monsters[0].sunderMark).toEqual({ stacks: 1, totalBonus: 0.25 });
+
+    processPartyTick(state); // Lancelot casts Weak Sunder: should ADD +5%, not overwrite to +5%
+    expect(state.monsters[0].sunderMark).toEqual({ stacks: 2, totalBonus: 0.30 });
   });
 });

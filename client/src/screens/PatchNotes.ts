@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.07.05.1',
+    notes: [
+      'Items and item sets can now grant bonus skills! While the item is equipped (or the set bonus is active), the granted skill appears in your skill picker ready to slot — even skills from another class. Unequip it and the skill leaves your loadout again.',
+      'Skills and skill slots now come from the live game world, so new and rebalanced skills can appear without waiting for a game update.',
+    ],
+  },
+  {
     version: '2026.06.21.1',
     notes: [
       'Some rooms now lead to whole new maps! Step onto a passage — like a manhole into the sewers beneath a town — and tap "Enter" to travel there with your party. A room can offer several exits, so you might choose between, say, the sewers or a watchtower.',

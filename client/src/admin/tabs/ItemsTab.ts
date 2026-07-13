@@ -1,7 +1,7 @@
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
 import { EQUIP_SLOTS, DISPLAY_EQUIP_SLOTS, ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
-import type { ItemDefinition, ItemRarity, EquipSlot } from '@idle-party-rpg/shared';
+import type { ItemDefinition, ItemRarity, EquipSlot, SkillDefinition } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
 
@@ -59,6 +59,10 @@ export class ItemsTab implements Tab {
       if (i.magicReductionMin != null && i.magicReductionMax != null && i.magicReductionMax > 0) {
         effects.push(`${i.magicReductionMin}-${i.magicReductionMax} MR`);
       }
+      if (i.grantedSkillIds && i.grantedSkillIds.length > 0) {
+        const names = i.grantedSkillIds.map(sid => content.skills?.[sid]?.name ?? sid).join(', ');
+        effects.push(`Grants: ${names}`);
+      }
       const setName = itemSetMap.get(i.id) ?? '—';
 
       const actions = readOnly
@@ -78,7 +82,7 @@ export class ItemsTab implements Tab {
           <td>${emojiSwatch}${escapeHtml(i.name)}${consumableTag}</td>
           <td><span class="rarity-${i.rarity}">${i.rarity}</span></td>
           <td>${i.equipSlot ?? (i.consumable ? 'consumable' : '—')}</td>
-          <td>${effects.length > 0 ? effects.join(', ') : (i.consumable ? 'Coming soon' : 'Material')}</td>
+          <td>${effects.length > 0 ? escapeHtml(effects.join(', ')) : (i.consumable ? 'Coming soon' : 'Material')}</td>
           <td>${i.value ?? 1}</td>
           <td>${escapeHtml(setName)}</td>
           ${actions}
@@ -144,6 +148,11 @@ export class ItemsTab implements Tab {
     const readOnly = ctx.isReadOnly();
     const i = item ?? { id: '', name: '', rarity: 'common' as const };
 
+    const skills = Object.values(ctx.getDisplayContent()?.skills ?? {})
+      .sort((a, b) => a.className.localeCompare(b.className) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+    const granted = new Set(i.grantedSkillIds ?? []);
+    const skillRows = skills.map(s => this.skillChecklistRowHtml(s, granted.has(s.id))).join('');
+
     const rarityOptions = RARITIES.map(r =>
       `<option value="${r}" ${i.rarity === r ? 'selected' : ''}>${r}</option>`
     ).join('');
@@ -197,6 +206,14 @@ export class ItemsTab implements Tab {
         <div class="admin-checkbox-row">${classCheckboxes}</div>
       </fieldset>
       <fieldset class="admin-form-fieldset">
+        <legend>Grants Skills <span id="if-skill-count" class="admin-form-hint"></span></legend>
+        <div class="admin-form-hint">Granted skills become equippable (into a matching slot) while this item is equipped.</div>
+        <div class="admin-checklist-toolbar">
+          <input type="search" id="if-skill-search" placeholder="Search skills…" autocomplete="off">
+        </div>
+        <div class="admin-checklist" id="if-skill-list">${skillRows}</div>
+      </fieldset>
+      <fieldset class="admin-form-fieldset">
         <legend>Artwork</legend>
         ${artworkPreview}
         ${readOnly ? '' : `
@@ -240,6 +257,48 @@ export class ItemsTab implements Tab {
         if (emojiInput) emojiInput.value = btn.dataset.emoji ?? '';
       });
     });
+
+    this.wireSkillFilter(root);
+  }
+
+  private skillChecklistRowHtml(skill: SkillDefinition, checked: boolean): string {
+    const haystack = `${skill.name} ${skill.className} ${skill.type} ${skill.id}`.toLowerCase();
+    return `
+      <label class="admin-checkbox if-skill-row" data-skill-search="${escapeHtml(haystack)}">
+        <input type="checkbox" class="if-skill-check" value="${escapeHtml(skill.id)}" ${checked ? 'checked' : ''}>
+        ${escapeHtml(skill.name)}
+        <span class="admin-form-hint">${skill.className} · ${skill.type}</span>
+      </label>
+    `;
+  }
+
+  private wireSkillFilter(root: HTMLElement): void {
+    const search = root.querySelector<HTMLInputElement>('#if-skill-search');
+    const list = root.querySelector<HTMLElement>('#if-skill-list');
+    const countEl = root.querySelector<HTMLElement>('#if-skill-count');
+    if (!list) return;
+
+    const apply = () => {
+      const q = (search?.value ?? '').trim().toLowerCase();
+      let shown = 0;
+      let total = 0;
+      list.querySelectorAll<HTMLElement>('.if-skill-row').forEach(row => {
+        total++;
+        const visible = !q || (row.dataset.skillSearch ?? '').includes(q);
+        row.style.display = visible ? '' : 'none';
+        if (visible) shown++;
+      });
+      const checked = list.querySelectorAll('.if-skill-check:checked').length;
+      if (countEl) {
+        countEl.textContent = shown === total
+          ? `(${checked} granted of ${total})`
+          : `(${checked} granted, ${shown} of ${total} shown)`;
+      }
+    };
+
+    search?.addEventListener('input', apply);
+    list.addEventListener('change', apply);
+    apply();
   }
 
   private async uploadArtwork(root: HTMLElement): Promise<void> {
@@ -314,6 +373,12 @@ export class ItemsTab implements Tab {
       if (cb.checked) classRestriction.push(cb.value);
     });
     if (classRestriction.length > 0) item.classRestriction = classRestriction;
+
+    const grantedSkillIds: string[] = [];
+    root.querySelectorAll<HTMLInputElement>('.if-skill-check').forEach(cb => {
+      if (cb.checked) grantedSkillIds.push(cb.value);
+    });
+    if (grantedSkillIds.length > 0) item.grantedSkillIds = grantedSkillIds;
 
     if (bonusAttackMin > 0 || bonusAttackMax > 0) { item.bonusAttackMin = bonusAttackMin; item.bonusAttackMax = bonusAttackMax; }
     if (damageReductionMin > 0 || damageReductionMax > 0) { item.damageReductionMin = damageReductionMin; item.damageReductionMax = damageReductionMax; }

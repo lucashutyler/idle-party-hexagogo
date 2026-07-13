@@ -1,8 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, TileTypeDefinition, RecipeDefinition, NpcDefinition, QuestDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
-import { migrateWorldData } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, TileTypeDefinition, RecipeDefinition, NpcDefinition, QuestDefinition, DungeonDefinition, SkillDefinition, SkillSlot } from '@idle-party-rpg/shared';
+import { migrateWorldData, migrateLegacySkill } from '@idle-party-rpg/shared';
 
 export type VersionStatus = 'draft' | 'published';
 
@@ -18,6 +18,8 @@ export interface ContentSnapshot {
   npcs?: NpcDefinition[];
   quests?: QuestDefinition[];
   dungeons?: DungeonDefinition[];
+  skills?: SkillDefinition[];
+  skillSlotSchedules?: { className: string; slots: SkillSlot[] }[];
   world: WorldData;
 }
 
@@ -183,6 +185,11 @@ export class VersionStore {
     }
     if (!snapshot.dungeons) {
       snapshot.dungeons = [];
+    }
+    // Normalize legacy-shaped skills (treeOrder / singular effects). Idempotent, no save needed —
+    // snapshots that predate skills stay undefined so replaceAll keeps live skills intact.
+    if (snapshot.skills !== undefined) {
+      snapshot.skills = snapshot.skills.map(s => migrateLegacySkill(s));
     }
     const encountersMigrated = migrateSnapshotEncounterTables(snapshot);
     if (encountersMigrated) {

@@ -1,4 +1,4 @@
-import type { ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
+import type { ItemDefinition, SetDefinition, SkillDefinition } from '@idle-party-rpg/shared';
 import { getItemEffectText, getSetsForItem, getSetBonusText, getSetDisplayName, getActiveBreakpoint } from '@idle-party-rpg/shared';
 import { RARITY_COLORS, SLOT_LABELS, SHINY_RARITIES, getItemInitials, escapeHtml } from './ItemIcon';
 
@@ -10,6 +10,8 @@ export interface ItemPopupOptions {
   ownedItemIds?: Set<string>;
   /** Set of item IDs currently equipped */
   equippedItemIds?: Set<string>;
+  /** Skill catalog — lets effect/set-bonus lines render 'Grants skill: X' by name */
+  skills?: Record<string, SkillDefinition>;
   /**
    * Class context for set filtering. When provided, only sets the class can activate
    * are shown. When omitted, every set containing the item is listed (admin / preview).
@@ -34,9 +36,9 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 
   // Build stat lines
   const statLines: string[] = [];
-  const effect = getItemEffectText(def);
+  const effect = getItemEffectText(def, options?.skills);
   if (effect && effect !== 'Material' && effect !== 'No bonus') {
-    statLines.push(`<div><span class="stat-label">Effect</span><span>${effect}</span></div>`);
+    statLines.push(`<div><span class="stat-label">Effect</span><span>${escapeHtml(effect)}</span></div>`);
   }
   if (def.equipSlot) {
     statLines.push(`<div><span class="stat-label">Slot</span><span>${SLOT_LABELS[def.equipSlot] ?? def.equipSlot}</span></div>`);
@@ -95,7 +97,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
       const isUnlocked = bp.piecesRequired <= equippedCount;
       const className = isActive ? 'active' : isUnlocked ? 'unlocked' : '';
       const prefix = isActive ? '&#9656; ' : isUnlocked ? '&#10003; ' : '&#9744; ';
-      return `<div class="item-popup-set-bp ${className}">${prefix}${bp.piecesRequired}pc: ${escapeHtml(getSetBonusText(bp.bonuses))}</div>`;
+      return `<div class="item-popup-set-bp ${className}">${prefix}${bp.piecesRequired}pc: ${escapeHtml(getSetBonusText(bp.bonuses, options?.skills))}</div>`;
     }).join('');
 
     const headerName = escapeHtml(getSetDisplayName(set));

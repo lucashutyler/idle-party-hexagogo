@@ -8,7 +8,8 @@ import type { RecipeDefinition } from '@idle-party-rpg/shared';
 import type { NpcDefinition } from '@idle-party-rpg/shared';
 import type { QuestDefinition } from '@idle-party-rpg/shared';
 import type { DungeonDefinition } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_DUNGEONS, TILE_CONFIGS, migrateLegacySet, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
+import type { SkillDefinition, SkillSlot } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_DUNGEONS, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, migrateLegacySet, migrateLegacySkill, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -24,6 +25,8 @@ const RECIPES_FILE = path.join(DATA_DIR, 'recipes.json');
 const NPCS_FILE = path.join(DATA_DIR, 'npcs.json');
 const QUESTS_FILE = path.join(DATA_DIR, 'quests.json');
 const DUNGEONS_FILE = path.join(DATA_DIR, 'dungeons.json');
+const SKILLS_FILE = path.join(DATA_DIR, 'skills.json');
+const SKILL_SLOTS_FILE = path.join(DATA_DIR, 'skill-slots.json');
 
 /**
  * Loads and manages game content from JSON files in data/.
@@ -42,6 +45,8 @@ export class ContentStore {
   private npcs = new Map<string, NpcDefinition>();
   private quests = new Map<string, QuestDefinition>();
   private dungeons = new Map<string, DungeonDefinition>();
+  private skills = new Map<string, SkillDefinition>();
+  private skillSlotSchedules = new Map<string, SkillSlot[]>();
   private world: WorldData = {
     startTile: { col: 0, row: 0 },
     maps: [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile: { col: 0, row: 0 } }],
@@ -72,6 +77,8 @@ export class ContentStore {
     await fs.writeFile(NPCS_FILE, JSON.stringify(Array.from(this.npcs.values()), null, 2));
     await fs.writeFile(QUESTS_FILE, JSON.stringify(Array.from(this.quests.values()), null, 2));
     await fs.writeFile(DUNGEONS_FILE, JSON.stringify(Array.from(this.dungeons.values()), null, 2));
+    await fs.writeFile(SKILLS_FILE, JSON.stringify(Array.from(this.skills.values()), null, 2));
+    await fs.writeFile(SKILL_SLOTS_FILE, JSON.stringify(this.skillSlotSchedulesToArray(), null, 2));
   }
 
   // --- Accessors ---
@@ -183,6 +190,26 @@ export class ContentStore {
   getAllDungeons(): Record<string, DungeonDefinition> {
     const result: Record<string, DungeonDefinition> = {};
     for (const [id, def] of this.dungeons) result[id] = def;
+    return result;
+  }
+
+  getSkill(id: string): SkillDefinition | undefined {
+    return this.skills.get(id);
+  }
+
+  getAllSkills(): Record<string, SkillDefinition> {
+    const result: Record<string, SkillDefinition> = {};
+    for (const [id, def] of this.skills) result[id] = def;
+    return result;
+  }
+
+  getSkillSlotSchedule(className: string): SkillSlot[] | undefined {
+    return this.skillSlotSchedules.get(className);
+  }
+
+  getAllSkillSlotSchedules(): Record<string, SkillSlot[]> {
+    const result: Record<string, SkillSlot[]> = {};
+    for (const [className, slots] of this.skillSlotSchedules) result[className] = slots;
     return result;
   }
 
@@ -561,10 +588,43 @@ export class ContentStore {
     return { success: true };
   }
 
+  // --- Skill CRUD ---
+
+  async addOrUpdateSkill(skill: SkillDefinition): Promise<void> {
+    this.skills.set(skill.id, skill);
+    await this.save();
+  }
+
+  async deleteSkill(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.skills.has(id)) {
+      return { success: false, error: 'Skill not found.' };
+    }
+    // Block delete if any item grants this skill
+    for (const item of this.items.values()) {
+      if (item.grantedSkillIds?.includes(id)) {
+        return { success: false, error: `Cannot delete: skill is granted by item "${item.name}".` };
+      }
+    }
+    // Block delete if any set breakpoint grants this skill
+    for (const set of this.sets.values()) {
+      if (set.breakpoints?.some(bp => bp.bonuses.grantedSkillIds?.includes(id))) {
+        return { success: false, error: `Cannot delete: skill is granted by set "${set.name}".` };
+      }
+    }
+    this.skills.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
+  async setSkillSlotSchedule(className: string, slots: SkillSlot[]): Promise<void> {
+    this.skillSlotSchedules.set(className, slots);
+    await this.save();
+  }
+
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; recipes: RecipeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; recipes: RecipeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; skills: SkillDefinition[]; skillSlotSchedules: { className: string; slots: SkillSlot[] }[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
@@ -577,12 +637,14 @@ export class ContentStore {
       npcs: Array.from(this.npcs.values()),
       quests: Array.from(this.quests.values()),
       dungeons: Array.from(this.dungeons.values()),
+      skills: Array.from(this.skills.values()),
+      skillSlotSchedules: this.skillSlotSchedulesToArray(),
       world: JSON.parse(JSON.stringify(this.world)),
     };
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; skills?: SkillDefinition[]; skillSlotSchedules?: { className: string; slots: SkillSlot[] }[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -634,6 +696,19 @@ export class ContentStore {
       for (const d of snapshot.dungeons) this.dungeons.set(d.id, d);
     }
 
+    if (snapshot.skills !== undefined) {
+      this.skills.clear();
+      for (const s of snapshot.skills) this.skills.set(s.id, migrateLegacySkill(s));
+    }
+    // Old snapshots predate skills (key absent) — keep existing skills intact; an
+    // empty array means the snapshot genuinely has none and should clear them.
+
+    if (snapshot.skillSlotSchedules !== undefined) {
+      this.skillSlotSchedules.clear();
+      for (const entry of snapshot.skillSlotSchedules) this.skillSlotSchedules.set(entry.className, entry.slots);
+    }
+    // Old snapshots predate skill slot schedules (key absent) — keep existing intact.
+
     this.world = snapshot.world;
     // Normalize legacy snapshots (no mapId / maps) into the multi-map shape.
     migrateWorldData(this.world);
@@ -656,6 +731,11 @@ export class ContentStore {
   }
 
   // --- Private ---
+
+  /** Serialize the per-class slot schedules as an array (snapshot/file shape). */
+  private skillSlotSchedulesToArray(): { className: string; slots: SkillSlot[] }[] {
+    return Array.from(this.skillSlotSchedules.entries()).map(([className, slots]) => ({ className, slots }));
+  }
 
   private async tryLoadAll(): Promise<boolean> {
     try {
@@ -749,6 +829,30 @@ export class ContentStore {
         // dungeons.json doesn't exist yet
       }
 
+      let skillsSeeded = false;
+      try {
+        const skillsRaw = await fs.readFile(SKILLS_FILE, 'utf-8');
+        const skillsArr: SkillDefinition[] = JSON.parse(skillsRaw);
+        for (const s of skillsArr) this.skills.set(s.id, migrateLegacySkill(s));
+      } catch {
+        // skills.json doesn't exist yet — seed from defaults
+        for (const s of Object.values(SEED_SKILLS)) this.skills.set(s.id, s);
+        skillsSeeded = true;
+      }
+
+      let skillSlotsSeeded = false;
+      try {
+        const slotsRaw = await fs.readFile(SKILL_SLOTS_FILE, 'utf-8');
+        const slotsArr: { className: string; slots: SkillSlot[] }[] = JSON.parse(slotsRaw);
+        for (const entry of slotsArr) this.skillSlotSchedules.set(entry.className, entry.slots);
+      } catch {
+        // skill-slots.json doesn't exist yet — seed from defaults
+        for (const [className, slots] of Object.entries(SEED_SKILL_SLOT_SCHEDULES)) {
+          this.skillSlotSchedules.set(className, slots);
+        }
+        skillSlotsSeeded = true;
+      }
+
       // Migrate: assign GUIDs to any tiles missing an id
       let migrated = 0;
       for (const tile of this.world.tiles) {
@@ -770,7 +874,7 @@ export class ContentStore {
       // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
       const itemsMigrated = this.migrateItems();
 
-      if (migrated > 0 || worldMigrated || encountersMigrated || itemsMigrated || tileTypesSeeded || recipesSeeded) {
+      if (migrated > 0 || worldMigrated || encountersMigrated || itemsMigrated || tileTypesSeeded || recipesSeeded || skillsSeeded || skillSlotsSeeded) {
         await this.save();
       }
 
@@ -934,6 +1038,14 @@ export class ContentStore {
     // Dungeons
     for (const d of Object.values(SEED_DUNGEONS)) {
       this.dungeons.set(d.id, d);
+    }
+
+    // Skills + per-class slot schedules
+    for (const s of Object.values(SEED_SKILLS)) {
+      this.skills.set(s.id, s);
+    }
+    for (const [className, slots] of Object.entries(SEED_SKILL_SLOT_SCHEDULES)) {
+      this.skillSlotSchedules.set(className, slots);
     }
 
     // World — Hatchetmill (village), Darkwood (forest), Crystal Caves (dungeon)

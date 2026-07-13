@@ -72,6 +72,30 @@ const sharedComponents = {
         },
       },
     },
+    SkillDefinition: {
+      type: 'object',
+      required: ['id', 'name', 'description', 'className', 'type', 'unlockLevel', 'sortOrder'],
+      properties: {
+        id: { type: 'string', example: 'knight_guard' },
+        name: { type: 'string', example: 'Guard' },
+        description: { type: 'string' },
+        className: { type: 'string', enum: ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'] },
+        type: { type: 'string', enum: ['passive', 'active'] },
+        unlockLevel: { type: 'number', nullable: true, description: 'Level the class learns it; null = grant-only (item/set)' },
+        sortOrder: { type: 'number', description: 'Display order within the class tree' },
+        passiveEffects: { type: 'array', items: { type: 'object' }, description: 'Effect options — allowed on both passive and active skills' },
+        activeEffects: { type: 'array', items: { type: 'object' }, description: 'Effect options — allowed only on active skills' },
+        cooldown: { type: 'number', description: 'Actives: triggers every Nth attack (>= 1)' },
+      },
+    },
+    SkillSlot: {
+      type: 'object',
+      required: ['type', 'unlocksAtLevel'],
+      properties: {
+        type: { type: 'string', enum: ['passive', 'active'] },
+        unlocksAtLevel: { type: 'number', description: 'Integer 1-100' },
+      },
+    },
     WorldTileDefinition: {
       type: 'object',
       required: ['col', 'row', 'type', 'zone', 'name'],
@@ -112,6 +136,7 @@ export const adminSwaggerSpec = {
     { name: 'Items', description: 'Item definition CRUD' },
     { name: 'Monsters', description: 'Monster definition CRUD' },
     { name: 'Zones', description: 'Zone definition CRUD' },
+    { name: 'Skills', description: 'Skill definition CRUD and per-class slot schedules' },
     { name: 'World', description: 'World map tile CRUD' },
     { name: 'Versions', description: 'Content versioning' },
     { name: 'Players', description: 'Player management' },
@@ -313,6 +338,80 @@ export const adminSwaggerSpec = {
         responses: {
           200: { description: 'Zone deleted, returns all zones' },
           400: { description: 'Zone referenced by a tile or not found' },
+        },
+      },
+    },
+
+    // ── Skills ──
+    '/api/admin/skills': {
+      get: {
+        tags: ['Skills'],
+        summary: 'List all skills',
+        responses: { 200: { description: 'All skill definitions keyed by ID' } },
+      },
+    },
+    '/api/admin/skills/seed': {
+      post: {
+        tags: ['Skills'],
+        summary: 'Restore default skills and slot schedules',
+        description: 'Overwrites seed-id skills with their defaults and resets every class slot schedule. Custom (non-seed) skills are kept.',
+        parameters: [
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' }, description: 'Target a draft version instead of live' },
+        ],
+        responses: { 200: { description: 'Seed skills restored, returns all skills and slot schedules' } },
+      },
+    },
+    '/api/admin/skills/{id}': {
+      put: {
+        tags: ['Skills'],
+        summary: 'Add or update a skill',
+        description: 'Accepts legacy-shaped bodies (treeOrder / singular effects); the server normalizes and validates against the skill option catalog.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/SkillDefinition' } } },
+        },
+        responses: {
+          200: { description: 'Skill saved, returns all skills' },
+          400: { description: 'Validation errors (joined into a single message)' },
+        },
+      },
+      delete: {
+        tags: ['Skills'],
+        summary: 'Delete a skill',
+        description: 'Fails while any item or set breakpoint grants this skill.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: { description: 'Skill deleted, returns all skills' },
+          400: { description: 'Skill granted by an item/set or not found' },
+        },
+      },
+    },
+    '/api/admin/skill-slots/{className}': {
+      put: {
+        tags: ['Skills'],
+        summary: "Replace a class's skill slot schedule",
+        parameters: [
+          { name: 'className', in: 'path', required: true, schema: { type: 'string', enum: ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'] } },
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['slots'],
+            properties: { slots: { type: 'array', items: { $ref: '#/components/schemas/SkillSlot' } } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Schedule saved, returns all slot schedules keyed by class' },
+          400: { description: 'Invalid class, empty slots, bad slot type, or unlocksAtLevel out of range' },
         },
       },
     },
@@ -646,6 +745,13 @@ export const gameSwaggerSpec = {
         summary: 'Get world data (all tiles)',
         description: 'Returns all tiles. Client handles fog of war via state.unlocked.',
         responses: { 200: { description: 'World data with tiles and start position' } },
+      },
+    },
+    '/api/skills': {
+      get: {
+        tags: ['Game'],
+        summary: 'Get skill definitions and per-class slot schedules',
+        responses: { 200: { description: 'Returns { skills, slotSchedules } keyed by skill ID / class name' } },
       },
     },
 

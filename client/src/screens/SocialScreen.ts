@@ -1,8 +1,9 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, classIconHtml, serverIconHtml, getItemEffectText, SKILL_SLOTS, getSkillById, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, classIconHtml, serverIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
+import type { WorldCache } from '../network/WorldCache';
 import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
@@ -23,6 +24,7 @@ export class SocialScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
   private chatStore: ChatLocalStore;
+  private worldCache: WorldCache;
   private isActive = false;
   private activeTab: SubTab = (() => {
     const stored = sessionStorage.getItem('socialSubTab');
@@ -91,12 +93,13 @@ export class SocialScreen implements Screen {
   private lastRenderedGuildKey = '';
   private lastRenderedPartyKey = '';
 
-  constructor(containerId: string, gameClient: GameClient, chatStore: ChatLocalStore) {
+  constructor(containerId: string, gameClient: GameClient, chatStore: ChatLocalStore, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
     this.chatStore = chatStore;
+    this.worldCache = worldCache;
     this.buildDOM();
 
     // Load chat filters from localStorage (client-only persistence)
@@ -1577,6 +1580,7 @@ export class SocialScreen implements Screen {
     const trade = this.getActiveTrade();
     const selfUsername = this.lastState?.username ?? '';
     const itemDefs = this.lastState?.itemDefinitions ?? {};
+    const skillDefs = this.worldCache.getSkillContent().skills;
     // Inventory comes from the frozen snapshot, not live state. The picker
     // and qty buttons all reference this snapshot, so the tick can't move
     // items out from under the user's selection. The server validates the
@@ -1629,7 +1633,7 @@ export class SocialScreen implements Screen {
       const rows = offerItems.map(({ itemId, quantity }) => {
         const def = itemDefs[itemId];
         const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
-        const effect = def ? getItemEffectText(def) : '';
+        const effect = def ? getItemEffectText(def, skillDefs) : '';
         return `<div class="trade-offer-row">
           <span class="trade-offer-name" style="color:${color}">${this.escapeHtml(def?.name ?? itemId)}</span>
           <span class="trade-offer-qty">×${quantity}</span>
@@ -1648,7 +1652,7 @@ export class SocialScreen implements Screen {
         const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
         const invCount = (inventory[id] as number) ?? 0;
         const selQty = this.tradeSelectedItems.get(id) ?? 0;
-        const effect = def ? getItemEffectText(def) : '';
+        const effect = def ? getItemEffectText(def, skillDefs) : '';
         return `<div class="trade-picker-row">
           <div class="trade-picker-info">
             <span class="trade-item-name" style="color:${color}">${this.escapeHtml(def?.name ?? id)}</span>
@@ -1860,6 +1864,7 @@ export class SocialScreen implements Screen {
     if (!modal) return;
 
     const itemDefs = this.lastState?.itemDefinitions ?? {};
+    const skillDefs = this.worldCache.getSkillContent().skills;
     const inventory = this.lastState?.character?.inventory ?? {};
     const target = this.giftTargetUsername ?? '';
     const giftableItems = listUnequippedEntries(inventory).map(([id]) => id);
@@ -1876,7 +1881,7 @@ export class SocialScreen implements Screen {
         const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
         const invCount = (inventory[id] as number) ?? 0;
         const selQty = this.giftSelectedItems.get(id) ?? 0;
-        const effect = def ? getItemEffectText(def) : '';
+        const effect = def ? getItemEffectText(def, skillDefs) : '';
         return `<div class="trade-picker-row">
           <div class="trade-picker-info">
             <span class="trade-item-name" style="color:${color}">${this.escapeHtml(def?.name ?? id)}</span>
@@ -2181,10 +2186,11 @@ export class SocialScreen implements Screen {
       </div>`;
 
 
-    // Skills section
-    const skillHtml = SKILL_SLOTS.map((slot, i) => {
+    // Skills section — slots come from the PROFILE player's class schedule;
+    // skills resolve via the cross-class catalog so any player renders.
+    const skillHtml = this.worldCache.getSlotSchedule(profile.className).map((slot, i) => {
       const skillId = profile.skillLoadout.equippedSkills[i];
-      const skill = skillId ? getSkillById(skillId) : null;
+      const skill = skillId ? this.worldCache.getSkill(skillId) : null;
       const isUnlocked = profile.level >= slot.unlocksAtLevel;
       if (!isUnlocked) {
         return `<div class="profile-skill-slot locked">
@@ -2273,6 +2279,7 @@ export class SocialScreen implements Screen {
       ownedItemIds: equippedItemIds,
       equippedItemIds,
       className: profileClassName,
+      skills: this.worldCache.getSkillContent().skills,
       actionsHtml: '<button class="profile-item-close-btn">Close</button>',
     });
 

@@ -1,4 +1,4 @@
-import type { SkillLoadout } from './SkillTypes.js';
+import type { SkillContent, SkillLoadout } from './SkillTypes.js';
 import { createDefaultSkillLoadout } from './SkillTypes.js';
 
 // --- Types ---
@@ -165,8 +165,12 @@ export function xpForCraftLevel(level: number): number {
   return Math.floor(100 * Math.pow(level, 1.3));
 }
 
-/** Create a fresh Level 1 character of the given class. */
-export function createCharacter(className: ClassName): CharacterState {
+/**
+ * Create a fresh Level 1 character of the given class.
+ * `skillContent` supplies the skill catalog + slot schedules used to build the
+ * default loadout (server passes ContentStore data; tests pass the SEED_* tables).
+ */
+export function createCharacter(className: ClassName, skillContent: SkillContent): CharacterState {
   return {
     className,
     level: 1,
@@ -174,7 +178,7 @@ export function createCharacter(className: ClassName): CharacterState {
     gold: 0,
     inventory: {},
     equipment: { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
-    skillLoadout: createDefaultSkillLoadout(className),
+    skillLoadout: createDefaultSkillLoadout(className, skillContent),
     craftLevel: 1,
     craftXp: 0,
   };

@@ -1,20 +1,23 @@
 import type { Screen } from './ScreenManager';
 import type { GameClient } from '../network/GameClient';
-import { ALL_CLASS_NAMES, CLASS_DEFINITIONS, SKILL_TREES, classIconHtml } from '@idle-party-rpg/shared';
+import type { WorldCache } from '../network/WorldCache';
+import { ALL_CLASS_NAMES, CLASS_DEFINITIONS, classIconHtml, getSkillsForClass } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 
 export class ClassSelectScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
+  private worldCache: WorldCache;
   private onClassChosen: () => void;
   private selectedClass: ClassName | null = null;
   private confirmBtn!: HTMLButtonElement;
 
-  constructor(containerId: string, gameClient: GameClient, onClassChosen: () => void) {
+  constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache, onClassChosen: () => void) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
+    this.worldCache = worldCache;
     this.onClassChosen = onClassChosen;
 
     this.buildDOM();
@@ -31,11 +34,16 @@ export class ClassSelectScreen implements Screen {
   }
 
   private buildDOM(): void {
+    const esc = (s: string) => s
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const skillContent = this.worldCache.getSkillContent();
     const cards = ALL_CLASS_NAMES.map(cn => {
       const def = CLASS_DEFINITIONS[cn];
-      const tree = SKILL_TREES[cn] ?? [];
-      const startingSkill = tree.find(s => s.treeOrder === 0);
-      const skillText = startingSkill ? `${startingSkill.name}: ${startingSkill.description}` : 'No starting skill';
+      // Starting-skill preview: the class's level-1 passive. getSkillsForClass
+      // returns skills sorted by sortOrder, so the first match wins ties.
+      const startingSkill = getSkillsForClass(cn, skillContent)
+        .find(s => s.type === 'passive' && s.unlockLevel === 1);
+      const skillText = startingSkill ? `${esc(startingSkill.name)}: ${esc(startingSkill.description)}` : 'No starting skill';
 
       return `
         <div class="class-card" data-class="${cn}">
