@@ -1,13 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-
-function getAdminEmails(): Set<string> {
-  const raw = process.env.ADMIN_EMAILS ?? '';
-  return new Set(
-    raw.split(',')
-      .map(e => e.trim().toLowerCase())
-      .filter(e => e.length > 0)
-  );
-}
+import { parseEmailListEnv } from '../auth/EmailListParser.js';
 
 export function adminMiddleware(req: Request, res: Response, next: NextFunction): void {
   const email = req.session?.email;
@@ -16,7 +8,7 @@ export function adminMiddleware(req: Request, res: Response, next: NextFunction)
     return;
   }
 
-  const adminEmails = getAdminEmails();
+  const adminEmails = parseEmailListEnv(process.env.ADMIN_EMAILS);
   if (!adminEmails.has(email.toLowerCase())) {
     res.status(403).json({ error: 'Not authorized' });
     return;

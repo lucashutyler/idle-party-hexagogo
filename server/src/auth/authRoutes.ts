@@ -1,17 +1,21 @@
 import { Router } from 'express';
 import type { AccountStore } from './AccountStore.js';
 import type { TokenStore } from './TokenStore.js';
+import type { InviteListStore } from './InviteListStore.js';
 import { sendMagicLinkEmail } from './EmailService.js';
+import { parseEmailListEnv } from './EmailListParser.js';
 
 const isProd = process.env.NODE_ENV === 'production';
+const isInviteOnly = process.env.INVITE_ONLY === 'true';
 
 interface AuthRouteOptions {
   accountStore: AccountStore;
   tokenStore: TokenStore;
+  inviteListStore: InviteListStore;
   onRenamePlayer?: (oldUsername: string, newUsername: string) => void;
 }
 
-export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: AuthRouteOptions): Router {
+export function createAuthRoutes({ accountStore, tokenStore, inviteListStore, onRenamePlayer }: AuthRouteOptions): Router {
   const router = Router();
 
   /**
@@ -31,6 +35,15 @@ export function createAuthRoutes({ accountStore, tokenStore, onRenamePlayer }: A
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
       res.status(400).json({ error: 'Invalid email address' });
       return;
+    }
+
+    // Beta gate: only admins and explicitly invited emails may sign in.
+    if (isInviteOnly) {
+      const adminEmails = parseEmailListEnv(process.env.ADMIN_EMAILS);
+      if (!adminEmails.has(trimmed) && !inviteListStore.has(trimmed)) {
+        res.json({ error: 'This server is invite-only right now. Ask an admin to add your email to the invite list.' });
+        return;
+      }
     }
 
     // Create account if it doesn't exist

@@ -4,6 +4,7 @@ import type {
   ContentData,
   ContentVersion,
   OverviewData,
+  TabDef,
   TabId,
   UiSize,
 } from './types';
@@ -18,6 +19,7 @@ const LIVE_VERSION_ID = '__live__';
 import type { Tab } from './tabs/Tab';
 import { OverviewTab } from './tabs/OverviewTab';
 import { AccountsTab } from './tabs/AccountsTab';
+import { InviteListTab } from './tabs/InviteListTab';
 import { MonstersTab } from './tabs/MonstersTab';
 import { ItemsTab } from './tabs/ItemsTab';
 import { SetsTab } from './tabs/SetsTab';
@@ -42,6 +44,7 @@ export class AdminApp implements AdminContext {
   // Shared state (read-only via AdminContext)
   overview: OverviewData | null = null;
   accounts: AccountData[] = [];
+  private inviteOnly = false;
   versions: ContentVersion[] = [];
   activeVersionId: string | null = null;
   selectedVersionId: string | null = null;
@@ -50,6 +53,7 @@ export class AdminApp implements AdminContext {
   private tabs: Record<TabId, Tab> = {
     'overview':   new OverviewTab(),
     'accounts':   new AccountsTab(),
+    'invite-list': new InviteListTab(),
     'monsters':   new MonstersTab(),
     'items':      new ItemsTab(),
     'sets':       new SetsTab(),
@@ -90,15 +94,17 @@ export class AdminApp implements AdminContext {
     }
 
     try {
-      const [overview, accountsData, versionsData] = await Promise.all([
+      const [overview, accountsData, versionsData, inviteListData] = await Promise.all([
         fetchAdmin<OverviewData>('/api/admin/overview'),
         fetchAdmin<{ accounts: AccountData[] }>('/api/admin/accounts'),
         fetchAdmin<{ versions: ContentVersion[]; activeVersionId: string | null }>('/api/admin/versions'),
+        fetchAdmin<{ inviteOnly: boolean }>('/api/admin/invite-list'),
       ]);
       this.overview = overview;
       this.accounts = accountsData.accounts;
       this.versions = versionsData.versions;
       this.activeVersionId = versionsData.activeVersionId ?? null;
+      this.inviteOnly = inviteListData.inviteOnly;
 
       const savedVersionId = sessionStorage.getItem('adminVersionId');
       const savedIsLive = savedVersionId === LIVE_VERSION_ID;
@@ -113,7 +119,7 @@ export class AdminApp implements AdminContext {
         this.activeTab = tabFromUrl;
       } else {
         const saved = sessionStorage.getItem('adminTab') as TabId | null;
-        if (saved && TABS.some(t => t.id === saved)) this.activeTab = saved;
+        if (saved && this.visibleTabs().some(t => t.id === saved)) this.activeTab = saved;
       }
 
       const handleNavigation = () => {
@@ -207,8 +213,13 @@ export class AdminApp implements AdminContext {
 
   // ---- Rendering ----
 
+  /** TABS filtered to what should actually be shown/reachable — hides 'invite-list' unless INVITE_ONLY is on. */
+  private visibleTabs(): TabDef[] {
+    return TABS.filter(t => t.id !== 'invite-list' || this.inviteOnly);
+  }
+
   private renderShell(): void {
-    const sidebarItems = TABS.map(t => `
+    const sidebarItems = this.visibleTabs().map(t => `
       <button class="admin-sidebar-btn${t.id === this.activeTab ? ' active' : ''}" data-tab="${t.id}">
         <span class="admin-sidebar-icon">${t.icon}</span>
         <span class="admin-sidebar-label">${t.label}</span>
@@ -451,11 +462,11 @@ export class AdminApp implements AdminContext {
     const match = path.match(/\/admin\/(\w[\w-]*)/) ?? path.match(/\/admin\.html#(\w[\w-]*)/);
     if (match) {
       const candidate = match[1] as TabId;
-      if (TABS.some(t => t.id === candidate)) return candidate;
+      if (this.visibleTabs().some(t => t.id === candidate)) return candidate;
     }
     if (window.location.hash) {
       const hashTab = window.location.hash.replace('#', '') as TabId;
-      if (TABS.some(t => t.id === hashTab)) return hashTab;
+      if (this.visibleTabs().some(t => t.id === hashTab)) return hashTab;
     }
     return null;
   }

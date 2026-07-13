@@ -27,6 +27,7 @@ Everything in `data/` is persisted behind a **swappable interface** so the stora
 - **Game state**: `GameStateStore` interface (`server/src/game/GameStateStore.ts`) → currently `JsonFileStore`
 - **Sessions**: express-session `Store` class → currently `JsonSessionStore` (`server/src/auth/JsonSessionStore.ts`)
 - **Accounts**: `AccountStore` reads/writes `data/accounts.json` directly (should be interfaced when migrating to a DB). Each account stores: `email`, `username`, `verified`, `createdAt`, `lastActiveAt`, `deactivated?`, `reactivationRequest?`, `sessionHistory?` (last 10 `SessionRecord` entries with `deviceToken`, `ip`, `userAgent`, `timestamp`)
+- **Invite list**: `InviteListStore` reads/writes `data/invite-list.json` (a JSON array of lowercase emails) — the admin-managed allow list used alongside `ADMIN_EMAILS` when `INVITE_ONLY=true` (see `docs/architecture/auth.md`)
 - **Guilds**: `GuildStore` reads/writes `data/guilds.json`
 - **Game content**: `ContentStore` reads/writes `data/monsters.json`, `data/items.json`, `data/zones.json`, `data/world.json`, `data/sets.json`, `data/shops.json`, `data/tile-types.json`, `data/npcs.json`, `data/quests.json`, `data/dungeons.json`, `data/skills.json`, `data/skill-slots.json`. Auto-seeds from `SEED_*` constants if files missing (NPCs only seed when `NODE_ENV !== 'production'`; quests are never seeded).
 - **Chat**: Stored per-player in `PlayerSaveData.chatHistory` (saved with each player's JSON file)

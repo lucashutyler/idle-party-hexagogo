@@ -19,6 +19,7 @@ import { GameLoop } from './game/GameLoop.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
+import { InviteListStore } from './auth/InviteListStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { createAdminRoutes } from './admin/adminRoutes.js';
 import swaggerUi from 'swagger-ui-express';
@@ -36,6 +37,7 @@ const store = new JsonFileStore();
 const sessionStore = new JsonSessionStore('data/sessions');
 const accountStore = new AccountStore();
 const tokenStore = new TokenStore();
+const inviteListStore = new InviteListStore();
 const gameLoop = new GameLoop(store);
 // playerManager is set during init(), use gameLoop.playerManager after init
 let playerManager: typeof gameLoop.playerManager;
@@ -97,6 +99,7 @@ app.use('/api-docs/game', (req: express.Request, res: express.Response, next: ex
 app.use('/auth', createAuthRoutes({
   accountStore,
   tokenStore,
+  inviteListStore,
   onRenamePlayer: (oldUsername, newUsername) => {
     playerManager.renamePlayer(oldUsername, newUsername);
   },
@@ -143,6 +146,7 @@ app.get('/api/dungeons', requireAuth, (_req, res) => {
 app.use('/api/admin', createAdminRoutes({
   playerManager: () => playerManager,
   accountStore,
+  inviteListStore,
   contentStore: () => gameLoop.contentStore,
   versionStore: () => gameLoop.versionStore,
   rebuildGrid: () => gameLoop.rebuildGridAndRelocate(),
@@ -1583,6 +1587,8 @@ async function start() {
   const t0 = performance.now();
   await accountStore.load();
   console.log(`[Startup] AccountStore loaded in ${(performance.now() - t0).toFixed(1)}ms`);
+
+  await inviteListStore.load();
 
   tokenStore.start();
   sessionStore.startReap();
