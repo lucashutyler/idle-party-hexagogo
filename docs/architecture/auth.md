@@ -16,6 +16,12 @@ WebSocket upgrade requests are authenticated by parsing the session cookie serve
 
 A persistent `_dt` cookie (UUID, 10-year expiry, httpOnly) is set on every request via middleware. It survives logout (only the session cookie is cleared). On every session creation (verify/login-status), a `SessionRecord` is captured: `{ deviceToken, ip, userAgent, timestamp }`. The last 10 records per account are stored in `accounts.json` via `AccountStore.addSessionRecord()`. The admin dashboard can view session history per account and detect shared device tokens across accounts via `GET /api/admin/duplicate-tokens`.
 
+## Invite-only beta gate
+
+Setting `INVITE_ONLY=true` restricts `POST /auth/login` to an allow list: emails in `ADMIN_EMAILS` (env var, shared with admin auth) are always allowed, plus any email added to the admin-managed invite list. The check runs before `AccountStore.createAccount()`, so a rejected email never gets an account record created. Rejection returns `200 { error: '...' }` (no `inviteOnly` flag — mirrors the existing generic-error path in `LoginScreen`/`App.handleEmailLogin`, no dedicated screen needed since the rejection only ever happens pre-session). When `INVITE_ONLY` is unset or `false` (the default), login is unrestricted as before.
+
+The invite list itself is persisted via `InviteListStore` (`server/src/auth/InviteListStore.ts`, `data/invite-list.json`) and managed from the admin dashboard's **Invite List** tab (only shown in the sidebar when `INVITE_ONLY=true` — see `docs/architecture/admin-dashboard.md`) via `GET/POST /api/admin/invite-list` and `DELETE /api/admin/invite-list/:email`. Comma-separated env-var email lists (`ADMIN_EMAILS`) are parsed by the shared `parseEmailListEnv()` helper (`server/src/auth/EmailListParser.ts`), used by both `adminMiddleware` and the invite-only gate.
+
 ## Account deactivation
 
 Admins can suspend accounts via `POST /api/admin/players/:username/deactivate`. Deactivation sets `account.deactivated = true`, kicks the player (closes all WS connections with code 4001), and blocks future logins. Deactivation is checked at: `POST /auth/login`, `GET /auth/verify`, `GET /auth/login-status`, `GET /auth/session`, and WS upgrade. Suspended users see a `SuspensionScreen` with a textarea to submit a reactivation appeal (`POST /auth/appeal`, no session required). Appeals are stored as `account.reactivationRequest`. Admins see appeal indicators and can reactivate via `POST /api/admin/players/:username/reactivate`.

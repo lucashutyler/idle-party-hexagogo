@@ -48,6 +48,11 @@ export interface AccountData {
 export type AccountSortColumn = 'username' | 'email' | 'status' | 'level' | 'class' | 'created' | 'lastActive';
 export type SortDirection = 'asc' | 'desc';
 
+export interface InviteListData {
+  inviteOnly: boolean;
+  emails: string[];
+}
+
 export interface ContentData {
   monsters: Record<string, MonsterDefinition>;
   items: Record<string, ItemDefinition>;
@@ -78,6 +83,7 @@ export interface ContentVersion {
 export type TabId =
   | 'overview'
   | 'accounts'
+  | 'invite-list'
   | 'monsters'
   | 'items'
   | 'sets'
@@ -104,6 +110,7 @@ export interface TabDef {
 export const TABS: TabDef[] = [
   { id: 'overview',   label: 'Overview',   icon: '≡' },
   { id: 'accounts',   label: 'Accounts',   icon: '⌂' },
+  { id: 'invite-list', label: 'Invite List', icon: '✉' },
   { id: 'monsters',   label: 'Monsters',   icon: '☠' },
   { id: 'items',      label: 'Items',      icon: '❖' },
   { id: 'sets',       label: 'Sets',       icon: '✦' },

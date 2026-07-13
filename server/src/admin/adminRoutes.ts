@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
+import type { InviteListStore } from '../auth/InviteListStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
 import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, findSetConflicts, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
@@ -16,13 +17,14 @@ const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSi
 interface AdminRouteOptions {
   playerManager: () => PlayerManager;
   accountStore: AccountStore;
+  inviteListStore: InviteListStore;
   contentStore: () => ContentStore;
   versionStore: () => VersionStore;
   rebuildGrid: () => number;
   deployVersion: (versionId: string) => Promise<{ success: boolean; error?: string; relocated?: number }>;
 }
 
-export function createAdminRoutes({ playerManager: getPlayerManager, accountStore, contentStore: getContentStore, versionStore: getVersionStore, rebuildGrid, deployVersion }: AdminRouteOptions): Router {
+export function createAdminRoutes({ playerManager: getPlayerManager, accountStore, inviteListStore, contentStore: getContentStore, versionStore: getVersionStore, rebuildGrid, deployVersion }: AdminRouteOptions): Router {
   const router = Router();
   router.use(adminMiddleware);
 
@@ -76,6 +78,35 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (emails.size > 1) duplicates[token] = Array.from(emails);
     }
     res.json({ duplicates });
+  });
+
+  /** Invite-only beta gate: INVITE_ONLY env var + admin-managed allow list (ADMIN_EMAILS is always allowed). */
+  router.get('/invite-list', (_req, res) => {
+    res.json({
+      inviteOnly: process.env.INVITE_ONLY === 'true',
+      emails: inviteListStore.getAll(),
+    });
+  });
+
+  router.post('/invite-list', async (req, res) => {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') {
+      res.status(400).json({ error: 'Email is required' });
+      return;
+    }
+    const trimmed = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      res.status(400).json({ error: 'Invalid email address' });
+      return;
+    }
+    await inviteListStore.add(trimmed);
+    res.json({ success: true, emails: inviteListStore.getAll() });
+  });
+
+  router.delete('/invite-list/:email', async (req, res) => {
+    const email = decodeURIComponent(req.params.email).trim().toLowerCase();
+    await inviteListStore.remove(email);
+    res.json({ success: true, emails: inviteListStore.getAll() });
   });
 
   /** Deactivate a player account. Fully removes them from the game world. */
