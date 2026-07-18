@@ -41,10 +41,10 @@ export class FriendsSystem {
   }
 
   /**
-   * Send a friend request. Returns true on success or an error string.
-   * If the target already sent a request to the sender, auto-accepts both.
+   * Send a friend request. Returns 'created' or 'auto_accepted' on success, or an error string.
+   * If the target already sent a request to the sender, both are auto-accepted as friends.
    */
-  sendRequest(fromUsername: string, toUsername: string): true | string {
+  sendRequest(fromUsername: string, toUsername: string): 'created' | 'auto_accepted' | string {
     if (fromUsername === toUsername) return 'Cannot send a friend request to yourself';
 
     const friends = this.friendLists.get(fromUsername);
@@ -59,7 +59,7 @@ export class FriendsSystem {
       // Auto-accept: add both as friends, clear the existing request
       this.addFriendBothWays(fromUsername, toUsername);
       this.removeRequest(toUsername, fromUsername);
-      return true;
+      return 'auto_accepted';
     }
 
     // Create the request
@@ -85,7 +85,7 @@ export class FriendsSystem {
     }
     targetIn.set(fromUsername, request);
 
-    return true;
+    return 'created';
   }
 
   /** Accept an incoming friend request. */

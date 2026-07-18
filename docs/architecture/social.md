@@ -12,7 +12,7 @@ Pending invite flow: owner/leader invites → target sees pending invite with ac
 
 3x3 grid positioning for combat formation. Combat is shared — all members fight the same monsters together with grid-based targeting. Movement is party-level (owner/leader moves all members). On victory, each member gets XP/gold/loot independently. Leaving/kicked auto-creates new solo party at current position (captured before the old party entry can be torn down). If owner leaves, first leader becomes owner; if no leaders, first member becomes owner.
 
-Party events (join, kick, promotion, demotion, ownership change) post personalized chat announcements — the subject sees "You were ..." while others see "<name> was ..." — via `PlayerManager.broadcastPartyEvent` (party channel for in-party recipients, server channel for kicked players who are no longer in the party).
+Party events (join, kick, promotion, demotion, ownership change) post personalized chat announcements — the subject sees "You were ..." while others see "<name> was ..." — via `PlayerManager.broadcastPartyEvent` (party channel for in-party recipients, server channel for kicked players who are no longer in the party). The same events also fire through the notification framework (invite received, kicked, promoted, demoted, ownership transferred, member joined/left) — see [`notifications.md`](notifications.md).
 
 ### Guild
 
@@ -26,7 +26,9 @@ All registered players sorted by level descending by default (proxy for XP). Sor
 
 Documented in [`client.md`](client.md) under "ChatPopout (global overlay)" — covers the desktop floating-window mode, mobile full/sheet layouts, docking behavior, clickable senders + channel tags, and the body data-attributes that drive the layout. Protocol-level chat behavior:
 
-WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM). 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). Toggle filter pills to show/hide each channel. Channel selector dropdown for sending (Party/Guild disabled when unavailable; `server` is server-emit-only). Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel. Blocking (`dm` or `all` levels) filters messages server-side.
+WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM), plus a day-separator row ("Today"/"Yesterday"/short date) inserted wherever consecutive messages cross a calendar-day boundary. 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). Toggle filter pills to show/hide each channel. Channel selector dropdown for sending (Party/Guild disabled when unavailable; `server` is server-emit-only). Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel. Blocking (`dm` or `all` levels) filters messages server-side.
+
+A DM also fires a `dm_received` notification, suppressed when the recipient has the popout open with that thread selected — see [`notifications.md`](notifications.md) → "Chat focus".
 
 ## User popup menu
 
@@ -58,4 +60,6 @@ Badge dot (red) on the Social bottom-nav tab when there are pending friend reque
 
 ## Social state
 
-`ClientSocialState` is included in every `ServerStateMessage.social`. Contains friends, incoming/outgoing friend requests, guild info, guild members, party info, pending party invites, outgoing party invites (sent by this player), online players list, all registered players list (as `PlayerListEntry[]` with className and level), blocked users, and chat preferences (send channel + DM target). `PlayerManager` builds this via `getSocialState()` callback on each `PlayerSession`.
+`ClientSocialState` is included in every `ServerStateMessage.social`. Contains friends, incoming/outgoing friend requests, guild info, guild members, party info, pending party invites, outgoing party invites (sent by this player), online players list, all registered players list (as `PlayerListEntry[]` with className and level), blocked users, chat preferences (send channel + DM target), and the player's notification inbox + preferences (see [`notifications.md`](notifications.md)). `PlayerManager` builds this via `getSocialState()` callback on each `PlayerSession`.
+
+Incoming friend requests also fire a `friend_request_received` notification, and an accepted outgoing request fires `friend_request_accepted` for the original sender (including the auto-accept case when both sides happen to request each other).

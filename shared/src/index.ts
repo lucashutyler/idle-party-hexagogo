@@ -426,3 +426,29 @@ export type {
   ServerTradeCompletedMessage,
   MailboxEntry,
 } from './systems/SocialTypes.js';
+
+// Notification framework
+export {
+  ALL_NOTIFICATION_CHANNELS,
+  NOTIFICATION_CATEGORY_META,
+  NOTIFICATION_EVENT_REGISTRY,
+  getNotificationEventDefinition,
+  emptyNotificationPreferences,
+} from './systems/NotificationTypes.js';
+export type {
+  NotificationCategory,
+  NotificationChannel,
+  NotificationCategoryMeta,
+  NotificationEventDefinition,
+  NotificationPreferences,
+  NotificationEntry,
+  WebPushSubscription,
+  ClientMarkNotificationReadMessage,
+  ClientMarkAllNotificationsReadMessage,
+  ClientSetNotificationPreferencesMessage,
+  ClientRegisterPushSubscriptionMessage,
+  ClientUnregisterPushSubscriptionMessage,
+  ClientSetChatFocusMessage,
+  ClientNotificationMessage,
+  ServerNotificationMessage,
+} from './systems/NotificationTypes.js';

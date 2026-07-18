@@ -169,6 +169,18 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Class icons next to usernames everywhere
 - [x] XP rate calculator (trip counter on Character tab)
 
+### Notifications
+- [x] Pluggable notification framework (category registry, per-user channel preferences, capped persisted inbox, save/restore)
+- [x] Channel drivers: in-app (live toast + inbox), browser push (Web Push/VAPID), email (via SES)
+- [x] Party notifications (invite received, kicked, promoted, demoted, ownership transferred, member joined/left)
+- [x] DM notifications (suppressed while actively viewing that conversation)
+- [x] Friend-request notifications (received + accepted)
+- [x] Notification preferences UI (category × channel grid, per-channel kill switch, enable/disable all)
+- [x] In-app notification bell (dropdown inbox, unread badge, live toasts)
+- [x] PWA scaffolding (installable manifest, service worker, offline app-shell caching)
+- [ ] Guild event notifications (blocked on the guild system existing)
+- [ ] SMS / Discord channel drivers
+
 ### Towns & Economy
 - [ ] Town interactions (shops, inns, etc.)
 - [ ] Currency system

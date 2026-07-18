@@ -1,6 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatMessage, ChatChannelType, ServerStateMessage } from '@idle-party-rpg/shared';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { chatFocusTracker } from '../network/ChatFocusTracker';
 
 const STORAGE_KEY_GEOMETRY = 'chatPopoutGeometry';
 const STORAGE_KEY_FILTERS = 'chatPopoutFilters';
@@ -154,6 +155,7 @@ export class ChatPopout {
       // the timeline, so the user can't read the messages they just opened.
       if (!this.isMobile()) this.inputEl.focus();
     });
+    this.reportChatFocus();
   }
 
   /** Open the popout and pre-fill the composer for a DM to `username`. */
@@ -162,6 +164,7 @@ export class ChatPopout {
     this.channelSelect.value = 'dm';
     this.dmInput.value = username;
     this.dmInput.style.display = '';
+    this.reportChatFocus();
   }
 
   close(): void {
@@ -173,6 +176,21 @@ export class ChatPopout {
     delete document.body.dataset.chatLayout;
     this.persistOpenState();
     this.onClose?.();
+    this.reportChatFocus();
+  }
+
+  /**
+   * The popout shows a unified timeline, not per-thread views — so "focused
+   * on a DM thread" means the popout is open with that thread selected in
+   * the composer. Suppresses DM notifications for whoever that is.
+   */
+  private reportChatFocus(): void {
+    const target = this.dmInput.value.trim();
+    if (this.isOpen && this.channelSelect.value === 'dm' && target) {
+      chatFocusTracker.setActiveThread('dm', target);
+    } else {
+      chatFocusTracker.clearActiveThread();
+    }
   }
 
   /** True if chat was open last session — caller may call open() during boot. */
@@ -318,7 +336,9 @@ export class ChatPopout {
     this.channelSelect.addEventListener('change', () => {
       const showDm = this.channelSelect.value === 'dm';
       this.dmInput.style.display = showDm ? '' : 'none';
+      this.reportChatFocus();
     });
+    this.dmInput.addEventListener('input', () => this.reportChatFocus());
   }
 
   private wireDrag(): void {
@@ -505,7 +525,15 @@ export class ChatPopout {
 
   private renderTimeline(): void {
     const visible = this.messages.filter(m => this.filters[m.channelType] !== false);
-    const html = visible.map(m => this.formatMessage(m)).join('');
+    let html = '';
+    let lastTimestamp: number | null = null;
+    for (const m of visible) {
+      if (lastTimestamp === null || !this.isSameCalendarDay(lastTimestamp, m.timestamp)) {
+        html += `<div class="chat-day-separator"><span>${this.formatDayLabel(m.timestamp)}</span></div>`;
+      }
+      html += this.formatMessage(m);
+      lastTimestamp = m.timestamp;
+    }
     this.timelineEl.innerHTML = html;
     requestAnimationFrame(() => {
       this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
@@ -580,6 +608,23 @@ export class ChatPopout {
     const h = d.getHours().toString().padStart(2, '0');
     const m = d.getMinutes().toString().padStart(2, '0');
     return `${h}:${m}`;
+  }
+
+  private isSameCalendarDay(a: number, b: number): boolean {
+    const da = new Date(a);
+    const db = new Date(b);
+    return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+  }
+
+  /** "Today" / "Yesterday" / a short date — used for the day-separator between messages. */
+  private formatDayLabel(ts: number): string {
+    const now = Date.now();
+    if (this.isSameCalendarDay(ts, now)) return 'Today';
+    if (this.isSameCalendarDay(ts, now - 24 * 60 * 60 * 1000)) return 'Yesterday';
+    const d = new Date(ts);
+    const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+    if (d.getFullYear() !== new Date(now).getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString(undefined, opts);
   }
 
   private escapeHtml(s: string): string {

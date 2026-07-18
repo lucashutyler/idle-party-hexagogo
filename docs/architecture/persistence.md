@@ -13,6 +13,7 @@ Saved state per player (`PlayerSaveData`):
 - `mailbox` (pending gift entries)
 - `activeQuests`, `completedQuests`, `weeklyCompletions` — quest state (see `docs/architecture/content.md` Quest system)
 - `dungeonRun` (`{ dungeonId, currentFloorIndex, entrance }`) — active dungeon run, so an in-progress dive continues offline and across restarts; `clearedDungeons` (string[]) — dungeons this player has cleared at least once, gating one-time first-clear rewards (see `docs/architecture/content.md` Dungeon system). `dungeonRun` is sourced from the `PartyBattleManager` entry at save time and re-applied via `restoreDungeonRun` after the party's battle entry is rebuilt on restore.
+- `notifications` (capped notification inbox, last 50 entries), `notificationPreferences` (per-category/channel opt-ins), `pushSubscriptions` (registered Web Push endpoints) — see `docs/architecture/notifications.md`
 
 The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment.
 
@@ -32,6 +33,7 @@ Everything in `data/` is persisted behind a **swappable interface** so the stora
 - **Game content**: `ContentStore` reads/writes `data/monsters.json`, `data/items.json`, `data/zones.json`, `data/world.json`, `data/sets.json`, `data/shops.json`, `data/tile-types.json`, `data/npcs.json`, `data/quests.json`, `data/dungeons.json`, `data/skills.json`, `data/skill-slots.json`. Auto-seeds from `SEED_*` constants if files missing (NPCs only seed when `NODE_ENV !== 'production'`; quests are never seeded).
 - **Chat**: Stored per-player in `PlayerSaveData.chatHistory` (saved with each player's JSON file)
 - **Mailbox**: Stored per-player in `PlayerSaveData.mailbox` (gift entries persist with each player's JSON file). Live state lives in `MailboxSystem` at runtime; `PlayerSession.consumeInitialMailbox()` ferries the saved entries into `MailboxSystem` on load, and `PlayerSession.toSaveData` snapshots the live mailbox back via the `getMailbox` callback.
+- **Notifications**: Stored per-player in `PlayerSaveData.notifications` (same pattern as mailbox — live state in `NotificationSystem`, restored via `consumeInitialNotifications`/`setInbox`, snapshotted back via a `getNotifications` callback). `notificationPreferences` and `pushSubscriptions` are plain fields on `PlayerSession` (like `blockedUsers`) since only the owning player ever mutates them. See `docs/architecture/notifications.md`.
 - **Trades**: `TradeStore` reads/writes `data/trades.json` (only active `pending`/`countered` trades). Restored at startup via `TradeSystem.restoreFromSaveData`.
 - **Versions**: `VersionStore` reads/writes `data/versions/manifest.json` + `data/versions/{id}.json`
 

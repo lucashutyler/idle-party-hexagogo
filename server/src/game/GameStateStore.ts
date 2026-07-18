@@ -1,4 +1,4 @@
-import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -56,6 +56,12 @@ export interface PlayerSaveData {
   };
   /** Dungeon IDs this player has cleared at least once (gates first-clear rewards). */
   clearedDungeons?: string[];
+  /** Capped notification inbox (most recent last). */
+  notifications?: NotificationEntry[];
+  /** Per-category/channel notification opt-ins. Absent → registry defaults apply. */
+  notificationPreferences?: NotificationPreferences;
+  /** Registered browser push endpoints for this player. */
+  pushSubscriptions?: WebPushSubscription[];
 }
 
 /**

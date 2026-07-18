@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.07.17.1',
+    notes: [
+      'New notifications! You\'ll be notified about party invites, getting kicked or promoted, new friend requests, and direct messages you haven\'t already seen — in-app and, if you enable it, as a browser push notification.',
+      'A new bell icon shows your recent notifications — tap it to see what you missed and mark them as read.',
+      'Head to Settings → Notifications to choose exactly what you want to be notified about, and how.',
+      'Idle Party RPG can now be installed as an app on your phone or desktop home screen for quicker access.',
+      'Chat now shows a "Today" / "Yesterday" / date divider between messages from different days, so it\'s easy to tell when older messages were sent.',
+    ],
+  },
+  {
     version: '2026.07.05.1',
     notes: [
       'Items and item sets can now grant bonus skills! While the item is equipped (or the set bonus is active), the granted skill appears in your skill picker ready to slot — even skills from another class. Unequip it and the skill leaves your loadout again.',
