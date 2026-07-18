@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, NotificationEntry } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -12,6 +12,11 @@ import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem } from './social/PartySystem.js';
 import { TradeSystem } from './social/TradeSystem.js';
 import { MailboxSystem } from './social/MailboxSystem.js';
+import { NotificationSystem } from './social/NotificationSystem.js';
+import { NotificationService } from './social/NotificationService.js';
+import { InAppNotificationDriver } from './social/InAppNotificationDriver.js';
+import { BrowserPushNotificationDriver } from './social/BrowserPushNotificationDriver.js';
+import { EmailNotificationDriver } from './social/EmailNotificationDriver.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
@@ -30,6 +35,8 @@ export class PlayerManager {
   readonly parties: PartySystem;
   readonly trades: TradeSystem;
   readonly mailboxes: MailboxSystem;
+  readonly notifications: NotificationSystem;
+  readonly notify: NotificationService;
   readonly partyBattles: PartyBattleManager;
   private getAllUsernames: () => string[];
   private readonly serverVersion = Date.now().toString();
@@ -45,6 +52,18 @@ export class PlayerManager {
     this.parties = new PartySystem();
     this.trades = new TradeSystem();
     this.mailboxes = new MailboxSystem();
+    this.notifications = new NotificationSystem();
+    this.notify = new NotificationService(
+      (username) => this.sessions.get(username)?.getNotificationPreferences(),
+      [
+        new InAppNotificationDriver(this.notifications, (username, ctx) => this.sendNotificationToPlayer(username, ctx.entry)),
+        new BrowserPushNotificationDriver(
+          (username) => this.sessions.get(username)?.getPushSubscriptions() ?? [],
+          (username, endpoint) => this.sessions.get(username)?.removePushSubscription(endpoint),
+        ),
+        new EmailNotificationDriver((username) => accountStore.findByUsername(username)?.email ?? null),
+      ],
+    );
     this.getAllUsernames = () => accountStore.getAllUsernames();
     this.partyBattles = new PartyBattleManager(
       grids,
@@ -100,6 +119,8 @@ export class PlayerManager {
       this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
       const initialMailbox = session.consumeInitialMailbox();
       if (initialMailbox.length > 0) this.mailboxes.setMailbox(username, initialMailbox);
+      const initialNotifications = session.consumeInitialNotifications();
+      if (initialNotifications.length > 0) this.notifications.setInbox(username, initialNotifications);
       this.wireCallbacks(session);
       if (session.hasCharacter()) {
         this.ensureParty(username);
@@ -262,6 +283,16 @@ export class PlayerManager {
     }
   }
 
+  /** Push a live notification toast over any open WebSocket connections (in_app channel). */
+  sendNotificationToPlayer(username: string, notification: NotificationEntry): void {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet || wsSet.size === 0) return;
+    const payload = JSON.stringify({ type: 'notification', notification });
+    for (const ws of wsSet) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
+  }
+
   /** Broadcast a global welcome message when a new player picks their class. */
   broadcastWelcome(username: string, className: ClassName): void {
     const text = `Welcome our new ${className}, ${username}, to the world!`;
@@ -391,6 +422,8 @@ export class PlayerManager {
       },
       proposedTrades: this.trades.getPlayerTrades(username),
       mailbox: this.mailboxes.getMailbox(username),
+      notifications: this.notifications.getInbox(username),
+      notificationPreferences: session?.getNotificationPreferences(),
     };
   }
 
@@ -398,6 +431,7 @@ export class PlayerManager {
   private wireCallbacks(session: PlayerSession): void {
     session.getSocialState = () => this.getSocialState(session.username);
     session.getMailbox = () => this.mailboxes.getMailbox(session.username);
+    session.getNotifications = () => this.notifications.getInbox(session.username);
     session.getBattleState = () => {
       const partyId = session.getPartyId();
       if (!partyId) return null;
@@ -688,6 +722,8 @@ export class PlayerManager {
         this.friends.initPlayer(data.username, session.getFriends(), session.getOutgoingFriendRequests());
         const initialMailbox = session.consumeInitialMailbox();
         if (initialMailbox.length > 0) this.mailboxes.setMailbox(data.username, initialMailbox);
+        const initialNotifications = session.consumeInitialNotifications();
+        if (initialNotifications.length > 0) this.notifications.setInbox(data.username, initialNotifications);
         this.wireCallbacks(session);
         validSaves.push(data);
         console.log(`[PlayerManager] Restored session for "${data.username}"`);

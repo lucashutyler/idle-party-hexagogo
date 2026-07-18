@@ -7180,3 +7180,296 @@ body, button, input, select, textarea {
 .profile-equip-col > .items-equip-slot-square:nth-child(6) {
   margin-top: 8px;
 }
+
+/* ── Notification Center (bell + dropdown + toast) ──────────
+   Bell sits fixed at top-right — the top of the viewport is free chrome
+   (the persistent XP bar and bottom nav are both bottom-pinned). Bell is
+   just above bottom-nav's tier (1000); the dropdown panel is promoted via
+   ModalStack like every other overlay. */
+
+.notif-bell-btn {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 1001;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-panel);
+  border: 2px solid var(--border-pixel);
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  padding: 0;
+}
+.notif-bell-btn:hover {
+  border-color: var(--accent-gold);
+}
+.notif-bell-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.notif-bell-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--accent-red);
+  color: #fff;
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.notif-bell-badge.visible {
+  display: flex;
+}
+
+.notif-dropdown {
+  position: fixed;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: 60vh;
+  background: var(--bg-panel);
+  border: 2px solid var(--border-pixel);
+  border-radius: 4px;
+  box-shadow:
+    inset -2px -2px 0 rgba(0, 0, 0, 0.3),
+    inset 2px 2px 0 rgba(255, 255, 255, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+  font-family: var(--pixel-font);
+}
+.notif-dropdown.notif-dropdown-shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+.notif-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-panel-light);
+  border-bottom: 2px solid var(--border-pixel);
+}
+.notif-dropdown-title {
+  font-family: var(--display-font);
+  font-size: 13px;
+  color: var(--accent-gold);
+  letter-spacing: 0.5px;
+  text-shadow: 1px 1px 0 #000;
+}
+.notif-mark-all-btn {
+  background: transparent;
+  border: 1px solid var(--border-pixel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 9px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-family: var(--pixel-font);
+}
+.notif-mark-all-btn:hover {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+}
+.notif-dropdown-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.notif-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.notif-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(83, 52, 131, 0.4);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--pixel-font);
+}
+.notif-row:last-child {
+  border-bottom: none;
+}
+.notif-row:hover {
+  background: rgba(245, 200, 66, 0.08);
+}
+.notif-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.notif-row-unread .notif-row-dot {
+  background: var(--accent-gold);
+}
+.notif-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.notif-row-title {
+  font-size: 10px;
+  color: var(--text-primary);
+}
+.notif-row-unread .notif-row-title {
+  color: var(--accent-gold);
+}
+.notif-row-text {
+  font-size: 9px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.notif-row-time {
+  font-size: 8px;
+  color: var(--text-dim);
+}
+
+.notif-toast-stack {
+  position: fixed;
+  top: 52px;
+  right: 8px;
+  z-index: 1002;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  pointer-events: none;
+}
+.notif-toast {
+  pointer-events: auto;
+  background: var(--bg-panel);
+  border: 2px solid var(--accent-gold);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  font-family: var(--pixel-font);
+  opacity: 0;
+  transform: translateX(20px);
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+}
+.notif-toast.notif-toast-shown {
+  opacity: 1;
+  transform: translateX(0);
+}
+.notif-toast.notif-toast-leaving {
+  opacity: 0;
+  transform: translateX(20px);
+}
+.notif-toast-title {
+  font-size: 10px;
+  color: var(--accent-gold);
+}
+.notif-toast-text {
+  font-size: 9px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── Notification Preferences grid (Settings → Notifications) ── */
+
+.notif-prefs-modal {
+  max-width: 480px;
+}
+.notif-prefs-body {
+  padding: 12px;
+  overflow-x: auto;
+}
+.notif-prefs-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.notif-prefs-bulk-btn {
+  background: var(--bg-panel-light);
+  border: 1px solid var(--border-pixel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 9px;
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-family: var(--pixel-font);
+}
+.notif-prefs-bulk-btn:hover {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+}
+.notif-prefs-status {
+  font-size: 9px;
+  color: var(--accent-red);
+  margin-bottom: 8px;
+}
+.notif-prefs-grid {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--pixel-font);
+}
+.notif-prefs-grid th,
+.notif-prefs-grid td {
+  padding: 6px 8px;
+  text-align: center;
+  border-bottom: 1px solid rgba(83, 52, 131, 0.4);
+}
+.notif-prefs-grid th {
+  font-size: 9px;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-pixel);
+}
+.notif-prefs-col-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.notif-prefs-master input,
+.notif-prefs-grid td input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent-gold);
+  cursor: pointer;
+}
+.notif-prefs-cat-row td {
+  text-align: left;
+  font-size: 9px;
+  color: var(--accent-gold);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: var(--bg-panel-light);
+  border-bottom: 1px solid var(--border-pixel);
+  padding-top: 8px;
+  padding-bottom: 4px;
+}
+.notif-prefs-event-label {
+  text-align: left !important;
+  font-size: 9px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}

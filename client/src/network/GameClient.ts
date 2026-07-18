@@ -1,4 +1,4 @@
-import type { ServerStateMessage, ServerEquipBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerEquipBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
@@ -12,6 +12,7 @@ type SuspensionListener = () => void;
 type ResumeListener = () => void;
 type MoveBlockedListener = (msg: { itemName: string; itemId: string; missingPlayers: string[] }) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
+type NotificationListener = (notification: NotificationEntry) => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -30,6 +31,7 @@ export class GameClient {
   private suspensionListeners = new Set<SuspensionListener>();
   private resumeListeners = new Set<ResumeListener>();
   private playerProfileListeners = new Set<PlayerProfileListener>();
+  private notificationListeners = new Set<NotificationListener>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -207,6 +209,14 @@ export class GameClient {
             listener(msg);
           } catch (err) {
             console.error('[GameClient] error in player_profile listener:', err);
+          }
+        }
+      } else if (msg.type === 'notification') {
+        for (const listener of this.notificationListeners) {
+          try {
+            listener(msg.notification);
+          } catch (err) {
+            console.error('[GameClient] error in notification listener:', err);
           }
         }
       } else if (msg.type === 'error') {
@@ -399,6 +409,39 @@ export class GameClient {
     this.sendRaw({ type: 'unblock_user', username });
   }
 
+  // --- Notifications ---
+
+  sendMarkNotificationRead(id: string): void {
+    this.sendRaw({ type: 'mark_notification_read', id });
+  }
+
+  sendMarkAllNotificationsRead(): void {
+    this.sendRaw({ type: 'mark_all_notifications_read' });
+  }
+
+  sendSetNotificationPreferences(preferences: NotificationPreferences): void {
+    this.sendRaw({ type: 'set_notification_preferences', preferences });
+  }
+
+  sendRegisterPushSubscription(subscription: WebPushSubscription): void {
+    this.sendRaw({ type: 'register_push_subscription', subscription });
+  }
+
+  sendUnregisterPushSubscription(endpoint: string): void {
+    this.sendRaw({ type: 'unregister_push_subscription', endpoint });
+  }
+
+  /** Reports which chat thread (if any) the player is actively looking at, so the server can suppress DM notifications for it. */
+  sendSetChatFocus(channelType: ChatChannelType | null, channelId: string | null): void {
+    this.sendRaw({ type: 'set_chat_focus', channelType, channelId });
+  }
+
+  /** Subscribe to live notification toasts. Returns an unsubscribe function. */
+  onNotification(listener: NotificationListener): () => void {
+    this.notificationListeners.add(listener);
+    return () => { this.notificationListeners.delete(listener); };
+  }
+
   // --- Guild ---
 
   sendCreateGuild(name: string): void {
@@ -538,5 +581,6 @@ export class GameClient {
     this.syncChatListeners.clear();
     this.worldUpdateListeners.clear();
     this.resumeListeners.clear();
+    this.notificationListeners.clear();
   }
 }

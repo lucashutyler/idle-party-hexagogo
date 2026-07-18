@@ -19,6 +19,8 @@ import { BottomNav } from './ui/BottomNav';
 import { ChatLocalStore } from './network/ChatLocalStore';
 import { ChatPopout } from './ui/ChatPopout';
 import { PersistentXpBar } from './ui/PersistentXpBar';
+import { NotificationCenter } from './ui/NotificationCenter';
+import { chatFocusTracker } from './network/ChatFocusTracker';
 
 const CONNECTION_ERROR = 'Could not connect to server';
 
@@ -253,6 +255,7 @@ export class App {
 
   private async connectAndEnterGame(): Promise<void> {
     this.gameClient = new GameClient();
+    chatFocusTracker.init(this.gameClient);
 
     // Listen for account suspension (admin kicked while playing)
     this.gameClient.onSuspension(() => {
@@ -359,7 +362,7 @@ export class App {
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient, this.worldCache);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore, this.worldCache);
     const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
-    const settingsScreen = new SettingsScreen('screen-settings');
+    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient);
 
     // Wire map username click to social screen popup
     mapScreen.setOnUserClick((username, anchor, tileCol, tileRow) => {
@@ -396,6 +399,9 @@ export class App {
 
     // Persistent XP bar above nav — visible on every screen
     new PersistentXpBar(this.gameClient);
+
+    // Notification bell — global overlay, visible on every screen
+    new NotificationCenter(this.gameClient);
 
     // Chat popout — global overlay, toggled from the Chat nav tab
     this.chatPopout = new ChatPopout(this.gameClient);

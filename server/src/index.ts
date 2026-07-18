@@ -28,6 +28,7 @@ import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
+import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 
 const app = express();
 const server = createServer(app);
@@ -141,6 +142,11 @@ app.get('/api/skills', requireAuth, (_req, res) => {
 // Dungeon definitions (full catalog — used by the room popup + entry confirm UI)
 app.get('/api/dungeons', requireAuth, (_req, res) => {
   res.json({ dungeons: gameLoop.contentStore.getAllDungeons() });
+});
+
+// Public VAPID key for browser push subscription — null if push isn't configured server-side
+app.get('/api/notifications/vapid-public-key', requireAuth, (_req, res) => {
+  res.json({ publicKey: getVapidPublicKey() });
 });
 
 app.use('/api/admin', createAdminRoutes({
@@ -809,11 +815,25 @@ wss.on('connection', (ws) => {
           return;
         }
         const result = playerManager.friends.sendRequest(username, target);
-        if (typeof result === 'string') {
+        if (result !== 'created' && result !== 'auto_accepted') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
         syncFriendState(username, target);
+        if (result === 'created') {
+          playerManager.notify.notify(target, 'friend_request_received', {
+            title: 'Friend request',
+            body: `${username} sent you a friend request.`,
+            payload: { fromUsername: username },
+          });
+        } else {
+          // Mutual request — target's earlier outgoing request just got auto-accepted.
+          playerManager.notify.notify(target, 'friend_request_accepted', {
+            title: 'Friend request accepted',
+            body: `You and ${username} are now friends!`,
+            payload: { username },
+          });
+        }
         return;
       }
 
@@ -826,6 +846,11 @@ wss.on('connection', (ws) => {
           return;
         }
         syncFriendState(username, msg.username);
+        playerManager.notify.notify(msg.username, 'friend_request_accepted', {
+          title: 'Friend request accepted',
+          body: `${username} accepted your friend request.`,
+          payload: { username },
+        });
         return;
       }
 
@@ -891,6 +916,57 @@ wss.on('connection', (ws) => {
         if (session) {
           session.setChatSendChannel(msg.sendChannel);
           session.setChatDmTarget(msg.dmTarget ?? '');
+        }
+        return;
+      }
+
+      // --- Notification messages ---
+
+      if (msg.type === 'set_chat_focus') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+        if (typeof msg.channelType === 'string' && typeof msg.channelId === 'string') {
+          session.setChatFocus({ channelType: msg.channelType, channelId: msg.channelId });
+        } else {
+          session.setChatFocus(null);
+        }
+        return;
+      }
+
+      if (msg.type === 'mark_notification_read' && typeof msg.id === 'string') {
+        if (playerManager.notifications.markRead(username, msg.id)) {
+          playerManager.sendStateToPlayer(username);
+        }
+        return;
+      }
+
+      if (msg.type === 'mark_all_notifications_read') {
+        playerManager.notifications.markAllRead(username);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'set_notification_preferences' && msg.preferences && typeof msg.preferences === 'object') {
+        const session = playerManager.getSessionByUsername(username);
+        if (session) {
+          session.setNotificationPreferences(msg.preferences);
+          playerManager.sendStateToPlayer(username);
+        }
+        return;
+      }
+
+      if (msg.type === 'register_push_subscription' && msg.subscription && typeof msg.subscription === 'object') {
+        const session = playerManager.getSessionByUsername(username);
+        if (session) {
+          session.addPushSubscription(msg.subscription);
+        }
+        return;
+      }
+
+      if (msg.type === 'unregister_push_subscription' && typeof msg.endpoint === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (session) {
+          session.removePushSubscription(msg.endpoint);
         }
         return;
       }
@@ -1036,6 +1112,18 @@ wss.on('connection', (ws) => {
         if (chatMsg) {
           playerManager.sendChatToPlayer(username, chatMsg);
         }
+
+        if (chatMsg && channelType === 'dm') {
+          const recipientFocus = playerManager.getSessionByUsername(channelId)?.getChatFocus();
+          const recipientIsLooking = recipientFocus?.channelType === 'dm' && recipientFocus.channelId === username;
+          if (!recipientIsLooking) {
+            playerManager.notify.notify(channelId, 'dm_received', {
+              title: `Message from ${username}`,
+              body: msg.text.length > 140 ? `${msg.text.slice(0, 140)}…` : msg.text,
+              payload: { fromUsername: username },
+            });
+          }
+        }
         return;
       }
 
@@ -1090,6 +1178,11 @@ wss.on('connection', (ws) => {
         playerManager.sendStateToPlayer(msg.username);
         // Also update the inviter so outgoingPartyInvites reflects the sent invite
         playerManager.sendStateToPlayer(username);
+        playerManager.notify.notify(msg.username, 'party_invite_received', {
+          title: 'Party invite',
+          body: `${username} invited you to their party.`,
+          payload: { inviterUsername: username },
+        });
         return;
       }
 
@@ -1127,6 +1220,13 @@ wss.on('connection', (ws) => {
         // Notify all members of the joined party
         for (const m of result.joined.members) {
           playerManager.sendStateToPlayer(m.username);
+          if (m.username !== username) {
+            playerManager.notify.notify(m.username, 'party_member_joined', {
+              title: 'Party',
+              body: `${username} joined your party.`,
+              payload: { joinedUsername: username },
+            });
+          }
         }
         return;
       }
@@ -1166,6 +1266,11 @@ wss.on('connection', (ws) => {
               'You became the new party owner.',
               `${newOwner.username} became the new party owner.`,
             );
+            playerManager.notify.notify(newOwner.username, 'party_ownership_transferred', {
+              title: 'Party ownership',
+              body: 'You became the new party owner.',
+              payload: {},
+            });
           }
         }
         // Handle party battle leave (removes from shared combat, creates solo party)
@@ -1177,6 +1282,11 @@ wss.on('connection', (ws) => {
         playerManager.sendStateToPlayer(username);
         for (const m of otherMembers) {
           playerManager.sendStateToPlayer(m.username);
+          playerManager.notify.notify(m.username, 'party_member_left', {
+            title: 'Party',
+            body: `${username} left your party.`,
+            payload: { leftUsername: username },
+          });
         }
         return;
       }
@@ -1213,6 +1323,11 @@ wss.on('connection', (ws) => {
         }
         playerManager.sendStateToPlayer(username);
         playerManager.sendStateToPlayer(msg.username);
+        playerManager.notify.notify(msg.username, 'party_kicked', {
+          title: 'Party',
+          body: 'You were removed from your party.',
+          payload: {},
+        });
         return;
       }
 
@@ -1258,6 +1373,11 @@ wss.on('connection', (ws) => {
             'You were promoted to party leader.',
             `${msg.username} was promoted to party leader.`,
           );
+          playerManager.notify.notify(msg.username, 'party_promoted', {
+            title: 'Party',
+            body: 'You were promoted to party leader.',
+            payload: {},
+          });
           const party = playerManager.parties.getParty(partyId);
           if (party) {
             for (const m of party.members) {
@@ -1287,6 +1407,11 @@ wss.on('connection', (ws) => {
             'You were demoted from party leader.',
             `${msg.username} was demoted from party leader.`,
           );
+          playerManager.notify.notify(msg.username, 'party_demoted', {
+            title: 'Party',
+            body: 'You were demoted from party leader.',
+            payload: {},
+          });
           const party = playerManager.parties.getParty(partyId);
           if (party) {
             for (const m of party.members) {
@@ -1316,6 +1441,11 @@ wss.on('connection', (ws) => {
             'You became the new party owner.',
             `${msg.username} became the new party owner.`,
           );
+          playerManager.notify.notify(msg.username, 'party_ownership_transferred', {
+            title: 'Party ownership',
+            body: 'You became the new party owner.',
+            payload: {},
+          });
           const party = playerManager.parties.getParty(partyId);
           if (party) {
             for (const m of party.members) {

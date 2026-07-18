@@ -76,6 +76,14 @@ Mobile sheet mode also sets `body.dataset.chatLayout = 'sheet'` so the screen co
 
 Filters per channel (color-coded), unified timeline with timestamps. Sender names and channel tags are clickable: sender opens the user popup via `setOnUserClick`, tag switches the composer send channel (DMs auto-fill the target with the "other party"). Server-channel messages render as plain spans (no popup, no channel switch).
 
+Whenever the popout is open with `dm` selected as the send channel, it reports that thread to `ChatFocusTracker` (`client/src/network/ChatFocusTracker.ts`) so the server suppresses DM notifications for it — see [`notifications.md`](notifications.md).
+
+## NotificationCenter (global overlay)
+
+`client/src/ui/NotificationCenter.ts` is mounted into `#notification-center-root` (another fixed root outside `#app`, alongside `#chat-popout-root`), so — like `ChatPopout` — it survives every screen switch. A bell button fixed at top-right shows an unread-count badge; clicking it opens a dropdown (via `ModalStack`) listing the inbox newest-first, click-to-mark-read. Live pushes (`GameClient.onNotification`) also spawn an auto-dismissing toast in a separate fixed stack, independent of whether the dropdown is open. Full details in [`notifications.md`](notifications.md).
+
+Notification channel/category preferences are a modal opened from a new "Notifications" button on `SettingsScreen` (`client/src/ui/NotificationPreferences.ts`) — a category × channel checkbox grid following the same visual language as the existing Player Options popup.
+
 ## Combat cards
 
 `CombatScreen` renders each combatant as a small card on a 3×3 grid — portrait image (top), name, HP bar with numeric overlay. Player portraits load from `/class-artwork/{class}.png` with a class-icon fallback; monster art loads from `/monster-artwork/{slug}.png` with a placehold.co fallback. Player cards highlight the current user in gold; dead combatants dim; stunned combatants show a "💫" badge. Cards arrange on the grid via CSS-grid mapping their `gridPosition`. Clicking a player opens the user popup; clicking a monster opens the monster popup (name + image + optional flavor description from `MonsterDefinition.description`).
@@ -86,7 +94,11 @@ Per-turn animations (`updateCombatAnimations`) toggle `.attacking` / `.hit` / `.
 
 ## ModalStack
 
-`client/src/ui/ModalStack.ts` manages click-order z-index across overlays. `bringToFront(el)` is called when a modal opens (and on `mousedown` so click-to-focus works like native windows); `release(el)` on close. `wireFocusOnInteract(el)` attaches the focus-on-click handler in one call. Every overlay in the app (RoomView, ChatPopout, PlayerOptions, player popup, monster popup, etc.) routes through it.
+`client/src/ui/ModalStack.ts` manages click-order z-index across overlays. `bringToFront(el)` is called when a modal opens (and on `mousedown` so click-to-focus works like native windows); `release(el)` on close. `wireFocusOnInteract(el)` attaches the focus-on-click handler in one call. Every overlay in the app (RoomView, ChatPopout, PlayerOptions, player popup, monster popup, the notification dropdown, etc.) routes through it.
+
+## PWA (installability + service worker)
+
+`client/index.html` links `manifest.webmanifest` and sets the theme-color/apple-mobile-web-app meta tags; `client/public/sw.js` (plain, hand-written — not Vite-processed, just copied as-is to the build root) handles app-shell caching and the `push`/`notificationclick` events for the browser-push notification channel. `main.ts` registers it via `registerServiceWorker()` (`client/src/network/PushNotifications.ts`), which no-ops in dev (`import.meta.env.DEV`) so a stale service worker never shadows local changes. `admin.html` deliberately has none of this — only the player-facing client is installable. Full details in [`notifications.md`](notifications.md).
 
 ## Image-everywhere convention
 

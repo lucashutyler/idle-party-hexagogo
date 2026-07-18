@@ -13,7 +13,7 @@ describe('FriendsSystem', () => {
 
   describe('sendRequest', () => {
     it('creates a pending request', () => {
-      expect(system.sendRequest('alice', 'bob')).toBe(true);
+      expect(system.sendRequest('alice', 'bob')).toBe('created');
       expect(system.getOutgoingRequests('alice')).toHaveLength(1);
       expect(system.getOutgoingRequests('alice')[0].toUsername).toBe('bob');
       expect(system.getIncomingRequests('bob')).toHaveLength(1);
@@ -37,7 +37,7 @@ describe('FriendsSystem', () => {
 
     it('auto-accepts cross-requests', () => {
       system.sendRequest('alice', 'bob');
-      expect(system.sendRequest('bob', 'alice')).toBe(true);
+      expect(system.sendRequest('bob', 'alice')).toBe('auto_accepted');
       // Both should be friends now
       expect(system.areMutualFriends('alice', 'bob')).toBe(true);
       // No pending requests remain

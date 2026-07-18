@@ -42,6 +42,7 @@ import {
   addCraftXp,
   xpForCraftLevel,
   getCraftSkillName,
+  emptyNotificationPreferences,
 } from '@idle-party-rpg/shared';
 import type {
   ServerStateMessage,
@@ -70,6 +71,9 @@ import type {
   CraftQueueState,
   ClientCraftingState,
   EnqueueError,
+  NotificationEntry,
+  NotificationPreferences,
+  WebPushSubscription,
 } from '@idle-party-rpg/shared';
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
@@ -106,6 +110,14 @@ export class PlayerSession {
   private initialMailbox: MailboxEntry[] = [];
   /** Callback to fetch the player's live mailbox from MailboxSystem. */
   getMailbox?: () => MailboxEntry[];
+  /** Initial notification inbox snapshot from save data; live state lives in NotificationSystem. */
+  private initialNotifications: NotificationEntry[] = [];
+  /** Callback to fetch the player's live notification inbox from NotificationSystem. */
+  getNotifications?: () => NotificationEntry[];
+  private notificationPreferences: NotificationPreferences = emptyNotificationPreferences();
+  private pushSubscriptions: WebPushSubscription[] = [];
+  /** Which chat thread the player is actively looking at right now, if any — ephemeral, not persisted. */
+  private chatFocus: { channelType: string; channelId: string } | null = null;
   /** Per-player quest tracking. */
   quests: QuestSystem;
 
@@ -757,6 +769,28 @@ export class PlayerSession {
     return m;
   }
 
+  /** Notification inbox snapshot from save data — used once at startup to populate NotificationSystem. */
+  consumeInitialNotifications(): NotificationEntry[] {
+    const n = this.initialNotifications;
+    this.initialNotifications = [];
+    return n;
+  }
+
+  getNotificationPreferences(): NotificationPreferences { return this.notificationPreferences; }
+  setNotificationPreferences(prefs: NotificationPreferences): void { this.notificationPreferences = prefs; }
+
+  getPushSubscriptions(): WebPushSubscription[] { return this.pushSubscriptions; }
+  addPushSubscription(sub: WebPushSubscription): void {
+    if (this.pushSubscriptions.some(s => s.endpoint === sub.endpoint)) return;
+    this.pushSubscriptions.push(sub);
+  }
+  removePushSubscription(endpoint: string): void {
+    this.pushSubscriptions = this.pushSubscriptions.filter(s => s.endpoint !== endpoint);
+  }
+
+  getChatFocus(): { channelType: string; channelId: string } | null { return this.chatFocus; }
+  setChatFocus(focus: { channelType: string; channelId: string } | null): void { this.chatFocus = focus; }
+
   /** Store a chat message in this player's personal history. */
   addChatMessage(message: ChatMessage): void {
     this.chatHistory.push(message);
@@ -1081,6 +1115,9 @@ export class PlayerSession {
       weeklyCompletions: this.quests.toSaveData().weeklyCompletions,
       dungeonRun: dungeonRun ?? undefined,
       clearedDungeons: [...this.clearedDungeons],
+      notifications: this.getNotifications ? this.getNotifications() : this.initialNotifications,
+      notificationPreferences: this.notificationPreferences,
+      pushSubscriptions: [...this.pushSubscriptions],
     };
   }
 
@@ -1182,6 +1219,10 @@ export class PlayerSession {
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
     session['initialMailbox'] = data.mailbox ? [...data.mailbox] : [];
+    session['initialNotifications'] = data.notifications ? [...data.notifications] : [];
+    session['notificationPreferences'] = data.notificationPreferences ?? emptyNotificationPreferences();
+    session['pushSubscriptions'] = data.pushSubscriptions ? [...data.pushSubscriptions] : [];
+    session['chatFocus'] = null;
 
     // Restore craft queue (lazy completion happens on next tick)
     session['craftQueue'] = data.craftQueue

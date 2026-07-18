@@ -1,5 +1,7 @@
 // ── Social System Types ─────────────────────────────────────
 
+import type { NotificationEntry, NotificationPreferences } from './NotificationTypes.js';
+
 // --- Friend System ---
 export interface FriendRequest {
   fromUsername: string;
@@ -136,6 +138,9 @@ export interface ClientSocialState {
   proposedTrades?: TradeState[];
   /** Pending gift entries in this player's mailbox. */
   mailbox?: MailboxEntry[];
+  /** This player's notification inbox (capped, most recent last). */
+  notifications?: NotificationEntry[];
+  notificationPreferences?: NotificationPreferences;
 }
 
 export interface ChatPreferences {

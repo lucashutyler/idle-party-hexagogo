@@ -1,7 +1,9 @@
 import './styles/pixel-theme.css';
 import { App } from './App';
+import { registerServiceWorker } from './network/PushNotifications';
 
 new App();
+registerServiceWorker();
 
 // Resize #app when the mobile virtual keyboard opens/closes.
 // visualViewport shrinks when the keyboard appears; we match #app to it
