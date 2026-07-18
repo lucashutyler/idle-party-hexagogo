@@ -6,6 +6,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'A new bell icon shows your recent notifications — tap it to see what you missed and mark them as read.',
       'Head to Settings → Notifications to choose exactly what you want to be notified about, and how.',
       'Idle Party RPG can now be installed as an app on your phone or desktop home screen for quicker access.',
+      'Chat now shows a "Today" / "Yesterday" / date divider between messages from different days, so it\'s easy to tell when older messages were sent.',
     ],
   },
   {

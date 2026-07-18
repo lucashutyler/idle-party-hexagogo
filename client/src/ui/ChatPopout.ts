@@ -525,7 +525,15 @@ export class ChatPopout {
 
   private renderTimeline(): void {
     const visible = this.messages.filter(m => this.filters[m.channelType] !== false);
-    const html = visible.map(m => this.formatMessage(m)).join('');
+    let html = '';
+    let lastTimestamp: number | null = null;
+    for (const m of visible) {
+      if (lastTimestamp === null || !this.isSameCalendarDay(lastTimestamp, m.timestamp)) {
+        html += `<div class="chat-day-separator"><span>${this.formatDayLabel(m.timestamp)}</span></div>`;
+      }
+      html += this.formatMessage(m);
+      lastTimestamp = m.timestamp;
+    }
     this.timelineEl.innerHTML = html;
     requestAnimationFrame(() => {
       this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
@@ -600,6 +608,23 @@ export class ChatPopout {
     const h = d.getHours().toString().padStart(2, '0');
     const m = d.getMinutes().toString().padStart(2, '0');
     return `${h}:${m}`;
+  }
+
+  private isSameCalendarDay(a: number, b: number): boolean {
+    const da = new Date(a);
+    const db = new Date(b);
+    return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+  }
+
+  /** "Today" / "Yesterday" / a short date — used for the day-separator between messages. */
+  private formatDayLabel(ts: number): string {
+    const now = Date.now();
+    if (this.isSameCalendarDay(ts, now)) return 'Today';
+    if (this.isSameCalendarDay(ts, now - 24 * 60 * 60 * 1000)) return 'Yesterday';
+    const d = new Date(ts);
+    const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+    if (d.getFullYear() !== new Date(now).getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString(undefined, opts);
   }
 
   private escapeHtml(s: string): string {

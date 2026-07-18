@@ -5840,6 +5840,23 @@ html, body {
 .chat-msg-sender-btn:hover {
   text-decoration: underline;
 }
+.chat-day-separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  color: var(--text-dim);
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.chat-day-separator::before,
+.chat-day-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-pixel);
+}
 .chat-popout-composer {
   display: flex;
   gap: 4px;
