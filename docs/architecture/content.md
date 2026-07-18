@@ -129,6 +129,10 @@ Data-driven content type stored in `data/tile-types.json`, managed by ContentSto
 
 ## Content versioning
 
-Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates parties on unreachable tiles, and reconciles every session's skill loadout against the new content.
+Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates parties on unreachable tiles, and reconciles every session's skill loadout against the new content.
 
 **When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.**
+
+## Design notes
+
+`DesignNote` (`shared/src/systems/DesignNoteTypes.ts`) is a markdown note — `{id, title, body, tags?, author, createdAt, updatedAt}` — that rides inside a content version snapshot to record the agreed-upon design context for a draft. Stored via `ContentStore` (`data/design-notes.json`, no seed) and included in `ContentSnapshot`/`toSnapshot()`/`replaceAll()` with keep-when-absent semantics on deploy, same as skills. Notes are authored only through MCP tools and are never sent to players. See `docs/architecture/mcp.md` for the full picture (the MCP server, tool catalog, and the read-only Design Notes panel on the admin Versions tab).

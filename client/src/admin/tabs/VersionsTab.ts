@@ -63,6 +63,7 @@ export class VersionsTab implements Tab {
             <tbody>${rows || '<tr><td colspan="4" style="text-align:center;opacity:0.5">No versions yet</td></tr>'}</tbody>
           </table>
         </div>
+        ${this.renderDesignNotes(ctx)}
       </div>
     `;
 
@@ -93,6 +94,33 @@ export class VersionsTab implements Tab {
         }
       });
     });
+  }
+
+  private renderDesignNotes(ctx: AdminContext): string {
+    if (!ctx.selectedVersionId || !ctx.versionContent) return '';
+    const notes = Object.values(ctx.versionContent.designNotes ?? {});
+    if (notes.length === 0) return '';
+
+    const cards = notes.map(note => {
+      const date = new Date(note.updatedAt).toLocaleDateString();
+      const tags = (note.tags ?? []).map(t => `<span class="design-note-tag">${escapeHtml(t)}</span>`).join('');
+      return `
+        <div class="admin-card design-note-card">
+          <div class="admin-card-title">${escapeHtml(note.title)}</div>
+          <div class="design-note-meta admin-muted">${escapeHtml(note.author)} &middot; ${date}</div>
+          <div class="design-note-body">${escapeHtml(note.body)}</div>
+          ${tags ? `<div class="design-note-tags">${tags}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="design-note-section">
+        <h3>Design Notes</h3>
+        <p class="admin-form-hint">Design context recorded alongside this draft (read-only here; authored via the MCP tools).</p>
+        <div class="admin-analytics-grid">${cards}</div>
+      </div>
+    `;
   }
 
   private async createDraftFrom(ctx: AdminContext, fromId: string | null): Promise<void> {

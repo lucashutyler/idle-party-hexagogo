@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import crypto from 'crypto';
 import multer from 'multer';
 import fs from 'fs/promises';
 import path from 'path';
@@ -8,9 +7,10 @@ import type { AccountStore } from '../auth/AccountStore.js';
 import type { InviteListStore } from '../auth/InviteListStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, findSetConflicts, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
+import { DraftEditor, toRecord } from '../game/DraftEditor.js';
 
 const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 } });
 
@@ -27,6 +27,7 @@ interface AdminRouteOptions {
 export function createAdminRoutes({ playerManager: getPlayerManager, accountStore, inviteListStore, contentStore: getContentStore, versionStore: getVersionStore, rebuildGrid, deployVersion }: AdminRouteOptions): Router {
   const router = Router();
   router.use(adminMiddleware);
+  const draftEditor = new DraftEditor(getVersionStore(), getContentStore);
 
   router.get('/overview', (_req, res) => {
     const pm = getPlayerManager();
@@ -154,6 +155,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       dungeons: content.getAllDungeons(),
       skills: content.getAllSkills(),
       skillSlotSchedules: content.getAllSkillSlotSchedules(),
+      designNotes: content.getAllDesignNotes(),
       world: content.getWorld(),
     });
   });
@@ -189,26 +191,15 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const tileEncounterTable = Array.isArray(encounterTable) && encounterTable.length > 0 ? encounterTable : undefined;
     // Which map this tile belongs to. Clients that predate multi-map omit it → default map.
     const tileMapId = (req.body.mapId as string) || DEFAULT_MAP_ID;
+    const tileInput = { mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef };
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.world.tiles.findIndex(t => t.mapId === tileMapId && t.col === col && t.row === row);
-      if (idx >= 0) {
-        // Preserve existing GUID on update
-        snapshot.world.tiles[idx] = { id: snapshot.world.tiles[idx].id, mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef };
-      } else {
-        // New tile — generate a GUID
-        snapshot.world.tiles.push({ id: crypto.randomUUID(), mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef });
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      res.json({ success: true, world: snapshot.world });
+      const result = await draftEditor.upsertTile(versionId, tileInput);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, world: result.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ id: '', mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef });
+      await content.addOrUpdateTile({ id: '', ...tileInput });
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }
@@ -225,23 +216,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const { startTile } = snapshot.world;
-      if (tileMapId === snapshot.world.defaultMapId && startTile.col === col && startTile.row === row) {
-        res.status(400).json({ error: 'Cannot delete the start tile.' });
-        return;
-      }
-      const idx = snapshot.world.tiles.findIndex(t => t.mapId === tileMapId && t.col === col && t.row === row);
-      if (idx < 0) { res.status(400).json({ error: 'Tile not found.' }); return; }
-      const inbound = snapshot.world.tiles.find(t => t.transitions?.some(tr => tr.tileId === snapshot.world.tiles[idx].id));
-      if (inbound) { res.status(400).json({ error: `A transition in "${inbound.name}" links to this room. Remove it first.` }); return; }
-      snapshot.world.tiles.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      res.json({ success: true, world: snapshot.world });
+      const result = await draftEditor.deleteTile(versionId, tileMapId, col, row);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, world: result.world });
     } else {
       const content = getContentStore();
       const result = await content.deleteTile(tileMapId, col, row);
@@ -267,19 +244,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const mapId = (req.body.mapId as string) || snapshot.world.defaultMapId;
-      const tile = snapshot.world.tiles.find(t => t.mapId === mapId && t.col === col && t.row === row);
-      if (!tile) { res.status(400).json({ error: 'Tile not found.' }); return; }
-      const meta = snapshot.world.maps.find(m => m.id === mapId);
-      if (meta) meta.startTile = { col, row };
-      if (mapId === snapshot.world.defaultMapId) snapshot.world.startTile = { col, row };
-      await versions.saveSnapshot(versionId, snapshot);
-      res.json({ success: true, world: snapshot.world });
+      const result = await draftEditor.setStartTile(versionId, req.body.mapId as string | undefined, col, row);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, world: result.world });
     } else {
       const content = getContentStore();
       const mapId = (req.body.mapId as string) || content.getWorld().defaultMapId;
@@ -303,16 +270,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const meta = { id: id as string, name: name as string, startTile: startTile ?? { col: 0, row: 0 } };
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.world.maps.findIndex(m => m.id === meta.id);
-      if (idx >= 0) snapshot.world.maps[idx] = { ...snapshot.world.maps[idx], name: meta.name };
-      else snapshot.world.maps.push(meta);
-      await versions.saveSnapshot(versionId, snapshot);
-      res.json({ success: true, world: snapshot.world });
+      const result = await draftEditor.upsertMap(versionId, meta);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, world: result.world });
     } else {
       const content = getContentStore();
       const result = await content.addOrUpdateMap(meta);
@@ -329,18 +289,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (!id) { res.status(400).json({ error: 'Missing required field: id' }); return; }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (id === snapshot.world.defaultMapId) { res.status(400).json({ error: 'Cannot delete the default map.' }); return; }
-      if (snapshot.world.tiles.some(t => t.mapId === id)) { res.status(400).json({ error: "Delete or move this map's rooms first." }); return; }
-      const inbound = snapshot.world.tiles.find(t => t.transitions?.some(tr => tr.mapId === id));
-      if (inbound) { res.status(400).json({ error: `A transition in "${inbound.name}" still leads to this map. Remove it first.` }); return; }
-      snapshot.world.maps = snapshot.world.maps.filter(m => m.id !== id);
-      await versions.saveSnapshot(versionId, snapshot);
-      res.json({ success: true, world: snapshot.world });
+      const result = await draftEditor.deleteMap(versionId, id as string);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, world: result.world });
     } else {
       const content = getContentStore();
       const result = await content.deleteMap(id as string);
@@ -370,21 +321,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.monsters.findIndex(m => m.id === monster.id);
-      if (idx >= 0) {
-        snapshot.monsters[idx] = monster;
-      } else {
-        snapshot.monsters.push(monster);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const monstersRecord: Record<string, typeof monster> = {};
-      for (const m of snapshot.monsters) monstersRecord[m.id] = m;
-      res.json({ success: true, monsters: monstersRecord });
+      const result = await draftEditor.upsertMonster(versionId, monster);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, monsters: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateMonster(monster);
@@ -398,18 +337,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.monsters.findIndex(m => m.id === monsterId);
-      if (idx < 0) { res.status(400).json({ error: 'Monster not found.' }); return; }
-      snapshot.monsters.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const monstersRecord: Record<string, typeof snapshot.monsters[0]> = {};
-      for (const m of snapshot.monsters) monstersRecord[m.id] = m;
-      res.json({ success: true, monsters: monstersRecord });
+      const result = await draftEditor.deleteMonster(versionId, monsterId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, monsters: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteMonster(monsterId);
@@ -444,19 +374,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      for (const m of monsters) {
-        const idx = snapshot.monsters.findIndex(existing => existing.id === m.id);
-        if (idx >= 0) { snapshot.monsters[idx] = m; } else { snapshot.monsters.push(m); }
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const monstersRecord: Record<string, typeof monsters[0]> = {};
-      for (const m of snapshot.monsters) monstersRecord[m.id] = m;
-      res.json({ success: true, imported: monsters.length, monsters: monstersRecord });
+      const result = await draftEditor.upsertContentBulk('monsters', versionId, monsters);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, imported: monsters.length, monsters: toRecord(result.entries as typeof monsters) });
     } else {
       const content = getContentStore();
       for (const m of monsters) {
@@ -495,19 +415,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      for (const item of items) {
-        const idx = snapshot.items.findIndex(i => i.id === item.id);
-        if (idx >= 0) { snapshot.items[idx] = item; } else { snapshot.items.push(item); }
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const itemsRecord: Record<string, typeof items[0]> = {};
-      for (const i of snapshot.items) itemsRecord[i.id] = i;
-      res.json({ success: true, imported: items.length, items: itemsRecord });
+      const result = await draftEditor.upsertContentBulk('items', versionId, items);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, imported: items.length, items: toRecord(result.entries as typeof items) });
     } else {
       const content = getContentStore();
       for (const item of items) {
@@ -528,33 +438,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const grantedSkillIds: string[] = Array.isArray(item.grantedSkillIds) ? item.grantedSkillIds : [];
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      // Snapshots that predate skills have no skills key — materialize live skills into
-      // the snapshot (not just for validation) so the draft ships a real catalog on deploy
-      // instead of validating against a set that never gets persisted.
-      if (snapshot.skills === undefined) {
-        snapshot.skills = Object.values(getContentStore().getAllSkills());
-      }
-      const draftSkillIds = new Set(snapshot.skills.map(s => s.id));
-      const unknownGrants = grantedSkillIds.filter(sid => !draftSkillIds.has(sid));
-      if (unknownGrants.length > 0) {
-        res.status(400).json({ error: `Unknown skill id(s) in grantedSkillIds: ${unknownGrants.join(', ')}` });
-        return;
-      }
-      const idx = snapshot.items.findIndex(i => i.id === item.id);
-      if (idx >= 0) {
-        snapshot.items[idx] = item;
-      } else {
-        snapshot.items.push(item);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const itemsRecord: Record<string, typeof item> = {};
-      for (const i of snapshot.items) itemsRecord[i.id] = i;
-      res.json({ success: true, items: itemsRecord });
+      const result = await draftEditor.upsertItem(versionId, item);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, items: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const unknownGrants = grantedSkillIds.filter(sid => !content.getSkill(sid));
@@ -573,24 +459,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.items.findIndex(i => i.id === itemId);
-      if (idx < 0) { res.status(400).json({ error: 'Item not found.' }); return; }
-      // Check if any monster references this item in its drops
-      const referencingMonster = snapshot.monsters.find(m => m.drops?.some(d => d.itemId === itemId));
-      if (referencingMonster) {
-        res.status(400).json({ error: `Cannot delete: item is referenced in ${referencingMonster.name}'s drop table.` });
-        return;
-      }
-      snapshot.items.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const itemsRecord: Record<string, typeof snapshot.items[0]> = {};
-      for (const i of snapshot.items) itemsRecord[i.id] = i;
-      res.json({ success: true, items: itemsRecord });
+      const result = await draftEditor.deleteItem(versionId, itemId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, items: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteItem(itemId);
@@ -710,42 +581,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.sets) snapshot.sets = [];
-
-      // Snapshots that predate skills have no skills key — materialize live skills into
-      // the snapshot (not just for validation) so the draft ships a real catalog on deploy.
-      if (snapshot.skills === undefined) {
-        snapshot.skills = Object.values(getContentStore().getAllSkills());
-      }
-      const draftSkillIds = new Set(snapshot.skills.map(s => s.id));
-      const unknownGrants = setGrantIds.filter(sid => !draftSkillIds.has(sid));
-      if (unknownGrants.length > 0) {
-        res.status(400).json({ error: `Unknown skill id(s) in grantedSkillIds: ${unknownGrants.join(', ')}` });
-        return;
-      }
-
-      // Validate against existing draft sets (other than the one being saved)
-      const existingMigrated = snapshot.sets
-        .filter(s => s.id !== set.id)
-        .map(s => migrateLegacySet(s));
-      const errors = findSetConflicts(set, existingMigrated);
-      if (errors.length > 0) { res.status(400).json({ error: errors.join(' ') }); return; }
-
-      const idx = snapshot.sets.findIndex(s => s.id === set.id);
-      if (idx >= 0) {
-        snapshot.sets[idx] = set;
-      } else {
-        snapshot.sets.push(set);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const setsRecord: Record<string, typeof set> = {};
-      for (const s of snapshot.sets) setsRecord[s.id] = s;
-      res.json({ success: true, sets: setsRecord });
+      const result = await draftEditor.upsertSet(versionId, set);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, sets: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const unknownGrants = setGrantIds.filter(sid => !content.getSkill(sid));
@@ -768,19 +606,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.sets) snapshot.sets = [];
-      const idx = snapshot.sets.findIndex(s => s.id === setId);
-      if (idx < 0) { res.status(400).json({ error: 'Set not found.' }); return; }
-      snapshot.sets.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const setsRecord: Record<string, typeof snapshot.sets[0]> = {};
-      for (const s of snapshot.sets) setsRecord[s.id] = s;
-      res.json({ success: true, sets: setsRecord });
+      const result = await draftEditor.deleteSet(versionId, setId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, sets: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteSet(setId);
@@ -810,22 +638,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.shops) snapshot.shops = [];
-      const idx = snapshot.shops.findIndex(s => s.id === shop.id);
-      if (idx >= 0) {
-        snapshot.shops[idx] = shop;
-      } else {
-        snapshot.shops.push(shop);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const shopsRecord: Record<string, typeof shop> = {};
-      for (const s of snapshot.shops) shopsRecord[s.id] = s;
-      res.json({ success: true, shops: shopsRecord });
+      const result = await draftEditor.upsertShop(versionId, shop);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, shops: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateShop(shop);
@@ -839,19 +654,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.shops) snapshot.shops = [];
-      const idx = snapshot.shops.findIndex(s => s.id === shopId);
-      if (idx < 0) { res.status(400).json({ error: 'Shop not found.' }); return; }
-      snapshot.shops.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const shopsRecord: Record<string, typeof snapshot.shops[0]> = {};
-      for (const s of snapshot.shops) shopsRecord[s.id] = s;
-      res.json({ success: true, shops: shopsRecord });
+      const result = await draftEditor.deleteShop(versionId, shopId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, shops: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteShop(shopId);
@@ -900,19 +705,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.recipes) snapshot.recipes = [];
-      const idx = snapshot.recipes.findIndex(r => r.id === recipe.id);
-      if (idx >= 0) snapshot.recipes[idx] = recipe;
-      else snapshot.recipes.push(recipe);
-      await versions.saveSnapshot(versionId, snapshot);
-      const recipesRecord: Record<string, typeof recipe> = {};
-      for (const r of snapshot.recipes) recipesRecord[r.id] = r;
-      res.json({ success: true, recipes: recipesRecord });
+      const result = await draftEditor.upsertRecipe(versionId, recipe);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, recipes: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateRecipe(recipe);
@@ -926,19 +721,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.recipes) snapshot.recipes = [];
-      const idx = snapshot.recipes.findIndex(r => r.id === recipeId);
-      if (idx < 0) { res.status(400).json({ error: 'Recipe not found.' }); return; }
-      snapshot.recipes.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const recipesRecord: Record<string, typeof snapshot.recipes[0]> = {};
-      for (const r of snapshot.recipes) recipesRecord[r.id] = r;
-      res.json({ success: true, recipes: recipesRecord });
+      const result = await draftEditor.deleteRecipe(versionId, recipeId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, recipes: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteRecipe(recipeId);
@@ -968,22 +753,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.npcs) snapshot.npcs = [];
-      const idx = snapshot.npcs.findIndex(n => n.id === npc.id);
-      if (idx >= 0) {
-        snapshot.npcs[idx] = npc;
-      } else {
-        snapshot.npcs.push(npc);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const npcsRecord: Record<string, typeof npc> = {};
-      for (const n of snapshot.npcs) npcsRecord[n.id] = n;
-      res.json({ success: true, npcs: npcsRecord });
+      const result = await draftEditor.upsertNpc(versionId, npc);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, npcs: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateNpc(npc);
@@ -997,25 +769,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.npcs) snapshot.npcs = [];
-      const idx = snapshot.npcs.findIndex(n => n.id === npcId);
-      if (idx < 0) { res.status(400).json({ error: 'NPC not found.' }); return; }
-      // Block delete if any tile in the snapshot references the NPC
-      const referencingTile = snapshot.world.tiles.find(t => t.npcId === npcId);
-      if (referencingTile) {
-        res.status(400).json({ error: `Cannot delete: NPC is placed in room "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` });
-        return;
-      }
-      snapshot.npcs.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const npcsRecord: Record<string, typeof snapshot.npcs[0]> = {};
-      for (const n of snapshot.npcs) npcsRecord[n.id] = n;
-      res.json({ success: true, npcs: npcsRecord });
+      const result = await draftEditor.deleteNpc(versionId, npcId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, npcs: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteNpc(npcId);
@@ -1045,22 +801,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.quests) snapshot.quests = [];
-      const idx = snapshot.quests.findIndex(q => q.id === quest.id);
-      if (idx >= 0) {
-        snapshot.quests[idx] = quest;
-      } else {
-        snapshot.quests.push(quest);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const questsRecord: Record<string, typeof quest> = {};
-      for (const q of snapshot.quests) questsRecord[q.id] = q;
-      res.json({ success: true, quests: questsRecord });
+      const result = await draftEditor.upsertQuest(versionId, quest);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, quests: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateQuest(quest);
@@ -1074,24 +817,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.quests) snapshot.quests = [];
-      const idx = snapshot.quests.findIndex(q => q.id === questId);
-      if (idx < 0) { res.status(400).json({ error: 'Quest not found.' }); return; }
-      // Block delete if NPC offers it or another quest depends on it
-      const npc = (snapshot.npcs ?? []).find(n => n.questIds?.includes(questId));
-      if (npc) { res.status(400).json({ error: `Cannot delete: quest is offered by NPC "${npc.name}".` }); return; }
-      const dependent = snapshot.quests.find(q => q.prerequisiteQuestIds?.includes(questId));
-      if (dependent) { res.status(400).json({ error: `Cannot delete: quest is a prerequisite of "${dependent.name}".` }); return; }
-      snapshot.quests.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const questsRecord: Record<string, typeof snapshot.quests[0]> = {};
-      for (const q of snapshot.quests) questsRecord[q.id] = q;
-      res.json({ success: true, quests: questsRecord });
+      const result = await draftEditor.deleteQuest(versionId, questId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, quests: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteQuest(questId);
@@ -1133,22 +861,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.dungeons) snapshot.dungeons = [];
-      const idx = snapshot.dungeons.findIndex(d => d.id === dungeon.id);
-      if (idx >= 0) {
-        snapshot.dungeons[idx] = dungeon;
-      } else {
-        snapshot.dungeons.push(dungeon);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const dungeonsRecord: Record<string, typeof dungeon> = {};
-      for (const d of snapshot.dungeons) dungeonsRecord[d.id] = d;
-      res.json({ success: true, dungeons: dungeonsRecord });
+      const result = await draftEditor.upsertDungeon(versionId, dungeon);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, dungeons: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateDungeon(dungeon);
@@ -1162,19 +877,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.dungeons) snapshot.dungeons = [];
-      const idx = snapshot.dungeons.findIndex(d => d.id === dungeonId);
-      if (idx < 0) { res.status(400).json({ error: 'Dungeon not found.' }); return; }
-      snapshot.dungeons.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const dungeonsRecord: Record<string, typeof snapshot.dungeons[0]> = {};
-      for (const d of snapshot.dungeons) dungeonsRecord[d.id] = d;
-      res.json({ success: true, dungeons: dungeonsRecord });
+      const result = await draftEditor.deleteDungeon(versionId, dungeonId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, dungeons: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteDungeon(dungeonId);
@@ -1204,21 +909,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.zones.findIndex(z => z.id === zone.id);
-      if (idx >= 0) {
-        snapshot.zones[idx] = zone;
-      } else {
-        snapshot.zones.push(zone);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const zonesRecord: Record<string, typeof zone> = {};
-      for (const z of snapshot.zones) zonesRecord[z.id] = z;
-      res.json({ success: true, zones: zonesRecord });
+      const result = await draftEditor.upsertZone(versionId, zone);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, zones: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateZone(zone);
@@ -1232,24 +925,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      const idx = snapshot.zones.findIndex(z => z.id === zoneId);
-      if (idx < 0) { res.status(400).json({ error: 'Zone not found.' }); return; }
-      // Check if any world tile references this zone
-      const referencingTile = snapshot.world.tiles.find(t => t.zone === zoneId);
-      if (referencingTile) {
-        res.status(400).json({ error: `Cannot delete: zone is used by tile "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` });
-        return;
-      }
-      snapshot.zones.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const zonesRecord: Record<string, typeof snapshot.zones[0]> = {};
-      for (const z of snapshot.zones) zonesRecord[z.id] = z;
-      res.json({ success: true, zones: zonesRecord });
+      const result = await draftEditor.deleteZone(versionId, zoneId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, zones: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteZone(zoneId);
@@ -1279,22 +957,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.encounters) snapshot.encounters = [];
-      const idx = snapshot.encounters.findIndex(e => e.id === encounter.id);
-      if (idx >= 0) {
-        snapshot.encounters[idx] = encounter;
-      } else {
-        snapshot.encounters.push(encounter);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const encountersRecord: Record<string, typeof encounter> = {};
-      for (const e of snapshot.encounters) encountersRecord[e.id] = e;
-      res.json({ success: true, encounters: encountersRecord });
+      const result = await draftEditor.upsertEncounter(versionId, encounter);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, encounters: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateEncounter(encounter);
@@ -1308,30 +973,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const encounterId = req.params.id;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.encounters) snapshot.encounters = [];
-      // Check referential integrity within the snapshot
-      for (const zone of snapshot.zones) {
-        if (zone.encounterTable.some(e => e.encounterId === encounterId)) {
-          res.status(400).json({ error: `Cannot delete: encounter is referenced by zone "${zone.displayName}".` });
-          return;
-        }
-      }
-      for (const tile of snapshot.world.tiles) {
-        if (tile.encounterTable?.some(e => e.encounterId === encounterId)) {
-          res.status(400).json({ error: `Cannot delete: encounter is referenced by tile "${tile.name}".` });
-          return;
-        }
-      }
-      snapshot.encounters = snapshot.encounters.filter(e => e.id !== encounterId);
-      await versions.saveSnapshot(versionId, snapshot);
-      const encountersRecord: Record<string, (typeof snapshot.encounters)[0]> = {};
-      for (const e of snapshot.encounters) encountersRecord[e.id] = e;
-      res.json({ success: true, encounters: encountersRecord });
+      const result = await draftEditor.deleteEncounter(versionId, encounterId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, encounters: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteEncounter(encounterId);
@@ -1380,22 +1024,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     };
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.tileTypes || snapshot.tileTypes.length === 0) {
-        // Old snapshot predates tile types — seed from live content
-        snapshot.tileTypes = Object.values(getContentStore().getAllTileTypes());
-      }
-      const idx = snapshot.tileTypes.findIndex(t => t.id === tileTypeId);
-      if (idx >= 0) snapshot.tileTypes[idx] = def;
-      else snapshot.tileTypes.push(def);
-      await versions.saveSnapshot(versionId, snapshot);
-      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
-      for (const t of snapshot.tileTypes) record[t.id] = t;
-      res.json({ success: true, tileTypes: record });
+      const result = await draftEditor.upsertTileType(versionId, def);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, tileTypes: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateTileType(def);
@@ -1408,26 +1039,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const tileTypeId = req.params.id;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.tileTypes || snapshot.tileTypes.length === 0) {
-        snapshot.tileTypes = Object.values(getContentStore().getAllTileTypes());
-      }
-      // Check referential integrity
-      for (const tile of snapshot.world.tiles) {
-        if (tile.type === tileTypeId) {
-          res.status(400).json({ error: `Cannot delete: tile type is used by room "${tile.name}".` });
-          return;
-        }
-      }
-      snapshot.tileTypes = snapshot.tileTypes.filter(t => t.id !== tileTypeId);
-      await versions.saveSnapshot(versionId, snapshot);
-      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
-      for (const t of snapshot.tileTypes) record[t.id] = t;
-      res.json({ success: true, tileTypes: record });
+      const result = await draftEditor.deleteTileType(versionId, tileTypeId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, tileTypes: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteTileType(tileTypeId);
@@ -1444,20 +1058,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (!snapshot.tileTypes) snapshot.tileTypes = [];
-      const existingIds = new Set(snapshot.tileTypes.map(t => t.id));
-      for (const seed of SEED_TILE_TYPES) {
-        if (!existingIds.has(seed.id)) snapshot.tileTypes.push(seed);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const record: Record<string, import('@idle-party-rpg/shared').TileTypeDefinition> = {};
-      for (const t of snapshot.tileTypes) record[t.id] = t;
-      res.json({ success: true, tileTypes: record });
+      const result = await draftEditor.seedTileTypes(versionId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, tileTypes: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       for (const seed of SEED_TILE_TYPES) {
@@ -1493,25 +1096,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (snapshot.skills === undefined) {
-        // Old snapshot predates skills — seed from live content
-        snapshot.skills = Object.values(getContentStore().getAllSkills());
-      }
-      const idx = snapshot.skills.findIndex(s => s.id === skill.id);
-      if (idx >= 0) {
-        snapshot.skills[idx] = skill;
-      } else {
-        snapshot.skills.push(skill);
-      }
-      await versions.saveSnapshot(versionId, snapshot);
-      const skillsRecord: Record<string, SkillDefinition> = {};
-      for (const s of snapshot.skills) skillsRecord[s.id] = s;
-      res.json({ success: true, skills: skillsRecord });
+      const result = await draftEditor.upsertSkill(versionId, skill);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, skills: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       await content.addOrUpdateSkill(skill);
@@ -1526,33 +1113,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (snapshot.skills === undefined) {
-        // Old snapshot predates skills — seed from live content
-        snapshot.skills = Object.values(getContentStore().getAllSkills());
-      }
-      const idx = snapshot.skills.findIndex(s => s.id === skillId);
-      if (idx < 0) { res.status(400).json({ error: 'Skill not found.' }); return; }
-      // Referential guard within the snapshot: items + set breakpoints
-      const referencingItem = snapshot.items.find(i => i.grantedSkillIds?.includes(skillId));
-      if (referencingItem) {
-        res.status(400).json({ error: `Cannot delete: skill is granted by item "${referencingItem.name}".` });
-        return;
-      }
-      const referencingSet = (snapshot.sets ?? []).find(s => migrateLegacySet(s).breakpoints?.some(bp => bp.bonuses.grantedSkillIds?.includes(skillId)));
-      if (referencingSet) {
-        res.status(400).json({ error: `Cannot delete: skill is granted by set "${referencingSet.name}".` });
-        return;
-      }
-      snapshot.skills.splice(idx, 1);
-      await versions.saveSnapshot(versionId, snapshot);
-      const skillsRecord: Record<string, SkillDefinition> = {};
-      for (const s of snapshot.skills) skillsRecord[s.id] = s;
-      res.json({ success: true, skills: skillsRecord });
+      const result = await draftEditor.deleteSkill(versionId, skillId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, skills: toRecord(result.entries) });
     } else {
       const content = getContentStore();
       const result = await content.deleteSkill(skillId);
@@ -1570,29 +1133,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const versionId = req.query.versionId as string | undefined;
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (snapshot.skills === undefined) {
-        snapshot.skills = Object.values(getContentStore().getAllSkills());
-      }
-      for (const seed of Object.values(SEED_SKILLS)) {
-        const idx = snapshot.skills.findIndex(s => s.id === seed.id);
-        if (idx >= 0) {
-          snapshot.skills[idx] = seed;
-        } else {
-          snapshot.skills.push(seed);
-        }
-      }
-      snapshot.skillSlotSchedules = Object.entries(SEED_SKILL_SLOT_SCHEDULES).map(([className, slots]) => ({ className, slots }));
-      await versions.saveSnapshot(versionId, snapshot);
-      const skillsRecord: Record<string, SkillDefinition> = {};
-      for (const s of snapshot.skills) skillsRecord[s.id] = s;
+      const result = await draftEditor.seedSkills(versionId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
       const schedulesRecord: Record<string, SkillSlot[]> = {};
-      for (const entry of snapshot.skillSlotSchedules) schedulesRecord[entry.className] = entry.slots;
-      res.json({ success: true, skills: skillsRecord, skillSlotSchedules: schedulesRecord });
+      for (const entry of result.skillSlotSchedules) schedulesRecord[entry.className] = entry.slots;
+      res.json({ success: true, skills: toRecord(result.skills), skillSlotSchedules: schedulesRecord });
     } else {
       const content = getContentStore();
       for (const seed of Object.values(SEED_SKILLS)) {
@@ -1632,24 +1177,10 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const schedule: SkillSlot[] = slots.map(s => ({ type: s.type as SkillSlotType, unlocksAtLevel: s.unlocksAtLevel as number }));
 
     if (versionId) {
-      const versions = getVersionStore();
-      const version = versions.get(versionId);
-      if (!version) { res.status(404).json({ error: 'Version not found.' }); return; }
-      if (version.status !== 'draft') { res.status(400).json({ error: 'Only drafts can be edited.' }); return; }
-      const snapshot = await versions.loadSnapshot(versionId);
-      if (snapshot.skillSlotSchedules === undefined) {
-        // Old snapshot predates slot schedules (key absent) — seed from live content
-        snapshot.skillSlotSchedules = Object.entries(getContentStore().getAllSkillSlotSchedules()).map(([cn, sl]) => ({ className: cn, slots: sl }));
-      }
-      const idx = snapshot.skillSlotSchedules.findIndex(e => e.className === className);
-      if (idx >= 0) {
-        snapshot.skillSlotSchedules[idx] = { className, slots: schedule };
-      } else {
-        snapshot.skillSlotSchedules.push({ className, slots: schedule });
-      }
-      await versions.saveSnapshot(versionId, snapshot);
+      const result = await draftEditor.setSkillSlotSchedule(versionId, className, schedule);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
       const schedulesRecord: Record<string, SkillSlot[]> = {};
-      for (const entry of snapshot.skillSlotSchedules) schedulesRecord[entry.className] = entry.slots;
+      for (const entry of result.skillSlotSchedules) schedulesRecord[entry.className] = entry.slots;
       res.json({ success: true, skillSlotSchedules: schedulesRecord });
     } else {
       const content = getContentStore();
@@ -1706,61 +1237,29 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
     const snapshot = await versions.loadSnapshot(req.params.id);
     // Convert arrays to records keyed by ID (client expects Record<string, T>)
-    const monstersRecord: Record<string, (typeof snapshot.monsters)[0]> = {};
-    for (const m of snapshot.monsters) monstersRecord[m.id] = m;
-    const itemsRecord: Record<string, (typeof snapshot.items)[0]> = {};
-    for (const i of snapshot.items) itemsRecord[i.id] = i;
-    const zonesRecord: Record<string, (typeof snapshot.zones)[0]> = {};
-    for (const z of snapshot.zones) zonesRecord[z.id] = z;
-    const encountersRecord: Record<string, NonNullable<(typeof snapshot.encounters)>[0]> = {};
-    if (snapshot.encounters) {
-      for (const e of snapshot.encounters) encountersRecord[e.id] = e;
-    }
-    const setsRecord: Record<string, NonNullable<(typeof snapshot.sets)>[0]> = {};
-    if (snapshot.sets) {
-      for (const s of snapshot.sets) setsRecord[s.id] = s;
-    }
-    const shopsRecord: Record<string, NonNullable<(typeof snapshot.shops)>[0]> = {};
-    if (snapshot.shops) {
-      for (const s of snapshot.shops) shopsRecord[s.id] = s;
-    }
-    const tileTypesRecord: Record<string, NonNullable<(typeof snapshot.tileTypes)>[0]> = {};
-    if (snapshot.tileTypes && snapshot.tileTypes.length > 0) {
-      for (const t of snapshot.tileTypes) tileTypesRecord[t.id] = t;
-    } else {
-      // Old snapshots predate tile types — seed from live content
-      const liveTileTypes = getContentStore().getAllTileTypes();
-      for (const [id, t] of Object.entries(liveTileTypes)) tileTypesRecord[id] = t;
-    }
-    const recipesRecord: Record<string, NonNullable<(typeof snapshot.recipes)>[0]> = {};
-    if (snapshot.recipes && snapshot.recipes.length > 0) {
-      for (const r of snapshot.recipes) recipesRecord[r.id] = r;
-    } else {
-      // Old snapshots predate recipes — seed from live content so admin shows what's in-game.
-      const liveRecipes = getContentStore().getAllRecipes();
-      for (const [id, r] of Object.entries(liveRecipes)) recipesRecord[id] = r;
-    }
-    const npcsRecord: Record<string, NonNullable<(typeof snapshot.npcs)>[0]> = {};
-    if (snapshot.npcs) {
-      for (const n of snapshot.npcs) npcsRecord[n.id] = n;
-    }
-    const questsRecord: Record<string, NonNullable<(typeof snapshot.quests)>[0]> = {};
-    if (snapshot.quests) {
-      for (const q of snapshot.quests) questsRecord[q.id] = q;
-    }
-    const dungeonsRecord: Record<string, NonNullable<(typeof snapshot.dungeons)>[0]> = {};
-    if (snapshot.dungeons) {
-      for (const d of snapshot.dungeons) dungeonsRecord[d.id] = d;
-    }
-    const skillsRecord: Record<string, SkillDefinition> = {};
-    if (snapshot.skills !== undefined) {
-      for (const s of snapshot.skills) skillsRecord[s.id] = s;
-    } else {
-      // Old snapshots predate skills (key absent) — seed from live content so admin shows
-      // what's in-game. A present-but-empty array means the draft genuinely has none.
-      const liveSkills = getContentStore().getAllSkills();
-      for (const [id, s] of Object.entries(liveSkills)) skillsRecord[id] = s;
-    }
+    const monstersRecord = toRecord(snapshot.monsters);
+    const itemsRecord = toRecord(snapshot.items);
+    const zonesRecord = toRecord(snapshot.zones);
+    const encountersRecord = toRecord(snapshot.encounters ?? []);
+    const setsRecord = toRecord(snapshot.sets ?? []);
+    const shopsRecord = toRecord(snapshot.shops ?? []);
+    // Old snapshots predate tile types/recipes/skills/design notes — seed from live content so
+    // admin shows what's actually in-game. A present-but-empty array means the draft genuinely has none.
+    const tileTypesRecord = snapshot.tileTypes && snapshot.tileTypes.length > 0
+      ? toRecord(snapshot.tileTypes)
+      : getContentStore().getAllTileTypes();
+    const recipesRecord = snapshot.recipes && snapshot.recipes.length > 0
+      ? toRecord(snapshot.recipes)
+      : getContentStore().getAllRecipes();
+    const npcsRecord = toRecord(snapshot.npcs ?? []);
+    const questsRecord = toRecord(snapshot.quests ?? []);
+    const dungeonsRecord = toRecord(snapshot.dungeons ?? []);
+    const skillsRecord: Record<string, SkillDefinition> = snapshot.skills !== undefined
+      ? toRecord(snapshot.skills)
+      : getContentStore().getAllSkills();
+    const designNotesRecord = snapshot.designNotes !== undefined
+      ? toRecord(snapshot.designNotes)
+      : getContentStore().getAllDesignNotes();
     const skillSlotSchedulesRecord: Record<string, SkillSlot[]> = {};
     if (snapshot.skillSlotSchedules !== undefined) {
       for (const entry of snapshot.skillSlotSchedules) skillSlotSchedulesRecord[entry.className] = entry.slots;
@@ -1769,7 +1268,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const liveSchedules = getContentStore().getAllSkillSlotSchedules();
       for (const [cn, sl] of Object.entries(liveSchedules)) skillSlotSchedulesRecord[cn] = sl;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, recipes: recipesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, skills: skillsRecord, skillSlotSchedules: skillSlotSchedulesRecord, world: snapshot.world });
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, recipes: recipesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, skills: skillsRecord, skillSlotSchedules: skillSlotSchedulesRecord, designNotes: designNotesRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */

@@ -886,6 +886,20 @@ body.admin-modal-open { overflow: hidden; }
 .version-badge-none       { background: var(--admin-bg-2); color: var(--admin-text-muted); border: 1px solid var(--admin-border); }
 .version-actions-cell { display: flex; gap: 4px; flex-wrap: wrap; }
 
+/* ---- Design notes (Versions tab) ---- */
+.design-note-section { margin-top: var(--admin-gap-loose); }
+.design-note-meta { font-size: 0.85em; }
+.design-note-body { font-size: 0.9em; white-space: pre-wrap; }
+.design-note-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.design-note-tag {
+  font-size: 0.78em;
+  color: var(--admin-text-muted);
+  background: var(--admin-bg-2);
+  border: 1px solid var(--admin-border);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
 /* ---- Tile types card grid ---- */
 .tile-type-grid {
   display: grid;

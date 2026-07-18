@@ -22,6 +22,7 @@ import { TokenStore } from './auth/TokenStore.js';
 import { InviteListStore } from './auth/InviteListStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { createAdminRoutes } from './admin/adminRoutes.js';
+import { createMcpRouter } from './mcp/McpEndpoint.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
@@ -158,6 +159,8 @@ app.use('/api/admin', createAdminRoutes({
   rebuildGrid: () => gameLoop.rebuildGridAndRelocate(),
   deployVersion: (versionId) => gameLoop.deployVersion(versionId),
 }));
+
+app.use('/mcp', createMcpRouter({ contentStore: () => gameLoop.contentStore, versionStore: () => gameLoop.versionStore }));
 
 app.get('/health', (_req, res) => {
   res.json({

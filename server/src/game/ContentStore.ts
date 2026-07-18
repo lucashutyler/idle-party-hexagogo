@@ -9,6 +9,7 @@ import type { NpcDefinition } from '@idle-party-rpg/shared';
 import type { QuestDefinition } from '@idle-party-rpg/shared';
 import type { DungeonDefinition } from '@idle-party-rpg/shared';
 import type { SkillDefinition, SkillSlot } from '@idle-party-rpg/shared';
+import type { DesignNote } from '@idle-party-rpg/shared';
 import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_DUNGEONS, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, migrateLegacySet, migrateLegacySkill, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
@@ -27,6 +28,7 @@ const QUESTS_FILE = path.join(DATA_DIR, 'quests.json');
 const DUNGEONS_FILE = path.join(DATA_DIR, 'dungeons.json');
 const SKILLS_FILE = path.join(DATA_DIR, 'skills.json');
 const SKILL_SLOTS_FILE = path.join(DATA_DIR, 'skill-slots.json');
+const DESIGN_NOTES_FILE = path.join(DATA_DIR, 'design-notes.json');
 
 /**
  * Loads and manages game content from JSON files in data/.
@@ -47,6 +49,7 @@ export class ContentStore {
   private dungeons = new Map<string, DungeonDefinition>();
   private skills = new Map<string, SkillDefinition>();
   private skillSlotSchedules = new Map<string, SkillSlot[]>();
+  private designNotes = new Map<string, DesignNote>();
   private world: WorldData = {
     startTile: { col: 0, row: 0 },
     maps: [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile: { col: 0, row: 0 } }],
@@ -79,6 +82,7 @@ export class ContentStore {
     await fs.writeFile(DUNGEONS_FILE, JSON.stringify(Array.from(this.dungeons.values()), null, 2));
     await fs.writeFile(SKILLS_FILE, JSON.stringify(Array.from(this.skills.values()), null, 2));
     await fs.writeFile(SKILL_SLOTS_FILE, JSON.stringify(this.skillSlotSchedulesToArray(), null, 2));
+    await fs.writeFile(DESIGN_NOTES_FILE, JSON.stringify(Array.from(this.designNotes.values()), null, 2));
   }
 
   // --- Accessors ---
@@ -180,6 +184,16 @@ export class ContentStore {
   getAllQuests(): Record<string, QuestDefinition> {
     const result: Record<string, QuestDefinition> = {};
     for (const [id, def] of this.quests) result[id] = def;
+    return result;
+  }
+
+  getDesignNote(id: string): DesignNote | undefined {
+    return this.designNotes.get(id);
+  }
+
+  getAllDesignNotes(): Record<string, DesignNote> {
+    const result: Record<string, DesignNote> = {};
+    for (const [id, def] of this.designNotes) result[id] = def;
     return result;
   }
 
@@ -535,6 +549,22 @@ export class ContentStore {
     return { success: true };
   }
 
+  // --- Design Note CRUD ---
+
+  async addOrUpdateDesignNote(note: DesignNote): Promise<void> {
+    this.designNotes.set(note.id, note);
+    await this.save();
+  }
+
+  async deleteDesignNote(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.designNotes.has(id)) {
+      return { success: false, error: 'Design note not found.' };
+    }
+    this.designNotes.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
   // --- Tile Type CRUD ---
 
   async addOrUpdateTileType(def: TileTypeDefinition): Promise<void> {
@@ -624,7 +654,7 @@ export class ContentStore {
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; recipes: RecipeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; skills: SkillDefinition[]; skillSlotSchedules: { className: string; slots: SkillSlot[] }[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; recipes: RecipeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; skills: SkillDefinition[]; skillSlotSchedules: { className: string; slots: SkillSlot[] }[]; designNotes: DesignNote[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
@@ -639,12 +669,13 @@ export class ContentStore {
       dungeons: Array.from(this.dungeons.values()),
       skills: Array.from(this.skills.values()),
       skillSlotSchedules: this.skillSlotSchedulesToArray(),
+      designNotes: Array.from(this.designNotes.values()),
       world: JSON.parse(JSON.stringify(this.world)),
     };
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; skills?: SkillDefinition[]; skillSlotSchedules?: { className: string; slots: SkillSlot[] }[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; skills?: SkillDefinition[]; skillSlotSchedules?: { className: string; slots: SkillSlot[] }[]; designNotes?: DesignNote[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -708,6 +739,12 @@ export class ContentStore {
       for (const entry of snapshot.skillSlotSchedules) this.skillSlotSchedules.set(entry.className, entry.slots);
     }
     // Old snapshots predate skill slot schedules (key absent) — keep existing intact.
+
+    if (snapshot.designNotes) {
+      this.designNotes.clear();
+      for (const n of snapshot.designNotes) this.designNotes.set(n.id, n);
+    }
+    // Old snapshots predate design notes — keep existing intact.
 
     this.world = snapshot.world;
     // Normalize legacy snapshots (no mapId / maps) into the multi-map shape.
@@ -827,6 +864,14 @@ export class ContentStore {
         for (const d of dungeonsArr) this.dungeons.set(d.id, d);
       } catch {
         // dungeons.json doesn't exist yet
+      }
+
+      try {
+        const designNotesRaw = await fs.readFile(DESIGN_NOTES_FILE, 'utf-8');
+        const designNotesArr: DesignNote[] = JSON.parse(designNotesRaw);
+        for (const n of designNotesArr) this.designNotes.set(n.id, n);
+      } catch {
+        // design-notes.json doesn't exist yet — start empty (no seed; every note is authored)
       }
 
       let skillsSeeded = false;

@@ -13,6 +13,7 @@ import type {
   DungeonDefinition,
   SkillDefinition,
   SkillSlot,
+  DesignNote,
 } from '@idle-party-rpg/shared';
 
 export interface OverviewData {
@@ -67,6 +68,7 @@ export interface ContentData {
   dungeons: Record<string, DungeonDefinition>;
   skills: Record<string, SkillDefinition>;
   skillSlotSchedules: Record<string, SkillSlot[]>;
+  designNotes: Record<string, DesignNote>;
   world: WorldData;
 }
 

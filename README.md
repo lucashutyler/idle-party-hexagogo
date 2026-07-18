@@ -62,6 +62,7 @@ The script will:
 | `AWS_SECRET_ACCESS_KEY` | AWS credentials for SES | Yes |
 | `AWS_REGION` | AWS region (default: us-east-1) | No |
 | `SES_FROM_EMAIL` | Email sender address | Yes |
+| `MCP_TOKENS` | Comma-separated bearer tokens for the MCP content-authoring endpoint (`label:token` or plain `token`; unset = endpoint disabled) | No |
 
 ### After Setup
 
@@ -256,6 +257,12 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Skill tree editor (skills as versioned content — composable effect options, editable unlock levels, per-class slot schedules, item/set skill grants)
 - [x] CRM artwork upload pipeline (items / monsters / sets / shops / zones / tile types share one upload endpoint + UI)
 - [x] Game designer access only
+
+### AI-Assisted Content (MCP)
+- [x] MCP server scaffold — read-only content tools over a bearer-token-authed endpoint (#297)
+- [x] MCP write tools, draft-version-scoped only (#298)
+- [x] Design notes — versioned markdown design context alongside AI-authored draft content
+- [x] validate_draft — referential-integrity sweep before publish
 
 ### Infrastructure
 - [x] Monorepo structure (client/, server/)
