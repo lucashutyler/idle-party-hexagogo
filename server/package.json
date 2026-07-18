@@ -12,6 +12,7 @@
   "dependencies": {
     "@aws-sdk/client-ses": "^3.997.0",
     "@idle-party-rpg/shared": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^4.21.0",
@@ -19,7 +20,8 @@
     "multer": "^2.1.1",
     "swagger-ui-express": "^5.0.1",
     "web-push": "^3.6.7",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

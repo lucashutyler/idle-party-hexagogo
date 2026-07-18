@@ -320,6 +320,9 @@ export type {
 export { SEED_NPCS } from './systems/NpcTypes.js';
 export type { NpcDefinition } from './systems/NpcTypes.js';
 
+// Design note types (MCP-authored content design context)
+export type { DesignNote } from './systems/DesignNoteTypes.js';
+
 // Quest types
 export {
   getObjectiveTarget,

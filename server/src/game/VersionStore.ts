@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, TileTypeDefinition, RecipeDefinition, NpcDefinition, QuestDefinition, DungeonDefinition, SkillDefinition, SkillSlot } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, TileTypeDefinition, RecipeDefinition, NpcDefinition, QuestDefinition, DungeonDefinition, SkillDefinition, SkillSlot, DesignNote } from '@idle-party-rpg/shared';
 import { migrateWorldData, migrateLegacySkill } from '@idle-party-rpg/shared';
 
 export type VersionStatus = 'draft' | 'published';
@@ -20,6 +20,7 @@ export interface ContentSnapshot {
   dungeons?: DungeonDefinition[];
   skills?: SkillDefinition[];
   skillSlotSchedules?: { className: string; slots: SkillSlot[] }[];
+  designNotes?: DesignNote[];
   world: WorldData;
 }
 
