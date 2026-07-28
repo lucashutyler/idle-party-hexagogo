@@ -21,6 +21,27 @@ export function getPushPermission(): NotificationPermission | 'unsupported' {
   return Notification.permission;
 }
 
+// Cached for the page's lifetime — the server only picks up VAPID env var changes on restart,
+// so there's no need to re-fetch this on every check.
+let cachedVapidPublicKey: string | null | undefined;
+
+async function fetchVapidPublicKey(): Promise<string | null> {
+  if (cachedVapidPublicKey !== undefined) return cachedVapidPublicKey;
+  try {
+    const res = await fetch('/api/notifications/vapid-public-key', { credentials: 'include' });
+    const { publicKey } = await res.json() as { publicKey: string | null };
+    cachedVapidPublicKey = publicKey;
+  } catch {
+    cachedVapidPublicKey = null;
+  }
+  return cachedVapidPublicKey;
+}
+
+/** Whether the server has VAPID keys configured — independent of browser support or notification permission. */
+export async function isPushConfiguredOnServer(): Promise<boolean> {
+  return (await fetchVapidPublicKey()) !== null;
+}
+
 function urlBase64ToUint8Array(base64: string): Uint8Array {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
   const base64Safe = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -35,8 +56,7 @@ export async function subscribeToPush(gameClient: GameClient): Promise<{ success
   const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
   if (permission !== 'granted') return { success: false, error: 'Notification permission was not granted' };
 
-  const keyRes = await fetch('/api/notifications/vapid-public-key', { credentials: 'include' });
-  const { publicKey } = await keyRes.json() as { publicKey: string | null };
+  const publicKey = await fetchVapidPublicKey();
   if (!publicKey) return { success: false, error: 'Push is not configured on this server' };
 
   const registration = await navigator.serviceWorker.ready;

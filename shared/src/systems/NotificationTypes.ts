@@ -106,6 +106,15 @@ export interface ClientMarkAllNotificationsReadMessage {
   type: 'mark_all_notifications_read';
 }
 
+export interface ClientDismissNotificationMessage {
+  type: 'dismiss_notification';
+  id: string;
+}
+
+export interface ClientClearAllNotificationsMessage {
+  type: 'clear_all_notifications';
+}
+
 export interface ClientSetNotificationPreferencesMessage {
   type: 'set_notification_preferences';
   preferences: NotificationPreferences;
@@ -131,6 +140,8 @@ export interface ClientSetChatFocusMessage {
 export type ClientNotificationMessage =
   | ClientMarkNotificationReadMessage
   | ClientMarkAllNotificationsReadMessage
+  | ClientDismissNotificationMessage
+  | ClientClearAllNotificationsMessage
   | ClientSetNotificationPreferencesMessage
   | ClientRegisterPushSubscriptionMessage
   | ClientUnregisterPushSubscriptionMessage
@@ -142,4 +153,36 @@ export type ClientNotificationMessage =
 export interface ServerNotificationMessage {
   type: 'notification';
   notification: NotificationEntry;
+}
+
+// --- Click navigation ---
+
+/** Where clicking a notification should take the player, resolved per eventKey/category. */
+export type NotificationNavigationTarget =
+  | { kind: 'party' }
+  | { kind: 'friend_requests' }
+  | { kind: 'dm_reply'; username: string }
+  | { kind: 'none' };
+
+/**
+ * Resolves a notification's click destination from its category/eventKey/payload.
+ * Any 'party' category notification (invite, kick, promotion, membership churn, ...) routes to the
+ * Party tab — add a case here for other event types only once there's an equally obvious destination;
+ * everything else falls through to 'none' (clicking still just marks the notification read).
+ */
+export function resolveNotificationNavigation(
+  entry: Pick<NotificationEntry, 'category' | 'eventKey' | 'payload'>,
+): NotificationNavigationTarget {
+  if (entry.category === 'party') return { kind: 'party' };
+
+  switch (entry.eventKey) {
+    case 'friend_request_received':
+      return { kind: 'friend_requests' };
+    case 'dm_received': {
+      const from = entry.payload?.fromUsername;
+      return typeof from === 'string' ? { kind: 'dm_reply', username: from } : { kind: 'none' };
+    }
+    default:
+      return { kind: 'none' };
+  }
 }

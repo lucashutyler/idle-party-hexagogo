@@ -400,9 +400,6 @@ export class App {
     // Persistent XP bar above nav — visible on every screen
     new PersistentXpBar(this.gameClient);
 
-    // Notification bell — global overlay, visible on every screen
-    new NotificationCenter(this.gameClient);
-
     // Chat popout — global overlay, toggled from the Chat nav tab
     this.chatPopout = new ChatPopout(this.gameClient);
     this.chatPopout.setOnUserClick((username, anchor) => {
@@ -490,6 +487,30 @@ export class App {
     socialScreen.setOnDmRequest((username) => {
       this.chatPopout?.openDm(username);
       nav.setOverlayActive('chat', true);
+    });
+
+    // Notification bell — global overlay, visible on every screen. Constructed here (after nav +
+    // socialScreen exist) since clicking a notification can navigate to either of them.
+    new NotificationCenter(this.gameClient, (target) => {
+      switch (target.kind) {
+        case 'party':
+          socialScreen.setSubTab('party');
+          this.screenManager.switchTo('social');
+          nav.setActive('social');
+          sessionStorage.setItem('activeScreen', 'social');
+          break;
+        case 'friend_requests':
+          socialScreen.setSubTab('users');
+          this.screenManager.switchTo('social');
+          nav.setActive('social');
+          sessionStorage.setItem('activeScreen', 'social');
+          break;
+        case 'dm_reply':
+          socialScreen.startDm(target.username);
+          break;
+        case 'none':
+          break;
+      }
     });
 
     // Restore chat open/closed from the previous session on this browser.

@@ -1,5 +1,6 @@
 import type { GameClient } from '../network/GameClient';
-import type { NotificationEntry } from '@idle-party-rpg/shared';
+import type { NotificationEntry, NotificationNavigationTarget } from '@idle-party-rpg/shared';
+import { resolveNotificationNavigation } from '@idle-party-rpg/shared';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 
 const TOAST_LIFETIME_MS = 6000;
@@ -31,7 +32,10 @@ export class NotificationCenter {
   private dropdown: HTMLElement | null = null;
   private notifications: NotificationEntry[] = [];
 
-  constructor(private gameClient: GameClient) {
+  constructor(
+    private gameClient: GameClient,
+    private onNavigate: (target: NotificationNavigationTarget) => void,
+  ) {
     this.root = document.getElementById('notification-center-root')!;
 
     this.bellButton = document.createElement('button');
@@ -92,13 +96,22 @@ export class NotificationCenter {
     panel.innerHTML = `
       <div class="notif-dropdown-header">
         <span class="notif-dropdown-title">Notifications</span>
-        <button class="notif-mark-all-btn">Mark all read</button>
+        <div class="notif-dropdown-actions">
+          <button class="notif-mark-all-btn">Mark all read</button>
+          <button class="notif-clear-all-btn">Clear all</button>
+        </div>
       </div>
       <div class="notif-dropdown-list"></div>
     `;
 
     panel.querySelector('.notif-mark-all-btn')!.addEventListener('click', () => {
       this.gameClient.sendMarkAllNotificationsRead();
+    });
+
+    panel.querySelector('.notif-clear-all-btn')!.addEventListener('click', () => {
+      if (this.notifications.length === 0) return;
+      if (!window.confirm("Clear all notifications? This can't be undone.")) return;
+      this.gameClient.sendClearAllNotifications();
     });
 
     document.body.appendChild(panel);
@@ -138,22 +151,43 @@ export class NotificationCenter {
 
     const sorted = [...this.notifications].sort((a, b) => b.createdAt - a.createdAt);
     list.innerHTML = sorted.map(n => `
-      <button class="notif-row${n.readAt === null ? ' notif-row-unread' : ''}" data-id="${n.id}">
-        <span class="notif-row-dot"></span>
-        <span class="notif-row-body">
-          <span class="notif-row-title">${escapeHtml(n.title)}</span>
-          <span class="notif-row-text">${escapeHtml(n.body)}</span>
-          <span class="notif-row-time">${relativeTime(n.createdAt)}</span>
-        </span>
-      </button>
+      <div class="notif-row${n.readAt === null ? ' notif-row-unread' : ''}">
+        <button class="notif-row-main" data-id="${n.id}">
+          <span class="notif-row-dot"></span>
+          <span class="notif-row-body">
+            <span class="notif-row-title">${escapeHtml(n.title)}</span>
+            <span class="notif-row-text">${escapeHtml(n.body)}</span>
+            <span class="notif-row-time">${relativeTime(n.createdAt)}</span>
+          </span>
+        </button>
+        <button class="notif-row-dismiss" data-id="${n.id}" aria-label="Dismiss notification">×</button>
+      </div>
     `).join('');
 
-    list.querySelectorAll<HTMLButtonElement>('.notif-row').forEach((row) => {
+    list.querySelectorAll<HTMLButtonElement>('.notif-row-main').forEach((row) => {
       row.addEventListener('click', () => {
         const id = row.dataset.id!;
         this.gameClient.sendMarkNotificationRead(id);
+        this.navigateFor(id);
       });
     });
+
+    list.querySelectorAll<HTMLButtonElement>('.notif-row-dismiss').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.gameClient.sendDismissNotification(btn.dataset.id!);
+      });
+    });
+  }
+
+  /** Resolves and applies the click-to-navigate target for a notification, closing the dropdown if it navigates. */
+  private navigateFor(id: string): void {
+    const entry = this.notifications.find(n => n.id === id);
+    if (!entry) return;
+    const target = resolveNotificationNavigation(entry);
+    if (target.kind === 'none') return;
+    this.onNavigate(target);
+    this.closeDropdown();
   }
 
   private showToast(notification: NotificationEntry): void {
@@ -165,6 +199,8 @@ export class NotificationCenter {
     `;
     toast.addEventListener('click', () => {
       this.gameClient.sendMarkNotificationRead(notification.id);
+      const target = resolveNotificationNavigation(notification);
+      if (target.kind !== 'none') this.onNavigate(target);
       dismiss();
     });
 

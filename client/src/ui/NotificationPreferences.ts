@@ -5,7 +5,7 @@ import {
 } from '@idle-party-rpg/shared';
 import type { NotificationChannel, NotificationPreferences } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
-import { subscribeToPush, unsubscribeFromPush, getPushPermission } from '../network/PushNotifications';
+import { subscribeToPush, unsubscribeFromPush, getPushPermission, isPushSupported, isPushConfiguredOnServer } from '../network/PushNotifications';
 
 const CHANNEL_LABELS: Record<NotificationChannel, string> = {
   in_app: 'In-App',
@@ -28,9 +28,64 @@ function resolvePreferences(saved: NotificationPreferences | undefined): Notific
   return { events, channelDisabled: { ...(saved?.channelDisabled ?? {}) } };
 }
 
-export function renderNotificationPreferences(container: HTMLElement, gameClient: GameClient): void {
-  let prefs = resolvePreferences(gameClient.lastState?.social?.notificationPreferences);
+/**
+ * `channelDisabled[channel]` drives the master checkbox's checked state, so keep it a pure derived
+ * value — true only when nothing uses this channel — rather than an independently-toggled flag. That
+ * way the master checkbox always reads "checked" whenever at least one event still uses the channel,
+ * regardless of whether it changed via the master, a bulk button, or a single per-event checkbox.
+ */
+function syncChannelDisabled(prefs: NotificationPreferences, channel: NotificationChannel): void {
+  prefs.channelDisabled[channel] = !NOTIFICATION_EVENT_REGISTRY.some(def => prefs.events[def.eventKey].includes(channel));
+}
 
+// Cached for the page's lifetime, mirroring isPushConfiguredOnServer's caching rationale.
+let cachedEmailConfigured: boolean | undefined;
+async function isEmailConfiguredOnServer(): Promise<boolean> {
+  if (cachedEmailConfigured !== undefined) return cachedEmailConfigured;
+  try {
+    const res = await fetch('/api/notifications/email-configured', { credentials: 'include' });
+    const { configured } = await res.json() as { configured: boolean };
+    cachedEmailConfigured = configured;
+  } catch {
+    cachedEmailConfigured = false;
+  }
+  return cachedEmailConfigured;
+}
+
+/** Why a channel can't be used right now, keyed by channel. Absent = usable. Mutated in place as async checks resolve. */
+type DisabledReasons = Partial<Record<NotificationChannel, string>>;
+
+export function renderNotificationPreferences(container: HTMLElement, gameClient: GameClient): void {
+  const prefs = resolvePreferences(gameClient.lastState?.social?.notificationPreferences);
+  for (const ch of ALL_NOTIFICATION_CHANNELS) syncChannelDisabled(prefs, ch);
+
+  const disabledReasons: DisabledReasons = {};
+  if (!isPushSupported()) disabledReasons.browser_push = 'Not supported in this browser';
+  renderGrid(container, gameClient, prefs, disabledReasons);
+
+  const pushCheck = disabledReasons.browser_push
+    ? Promise.resolve()
+    : isPushConfiguredOnServer().then((configured) => {
+      if (!configured) disabledReasons.browser_push = 'Not set up on this server';
+    });
+  const emailCheck = isEmailConfiguredOnServer().then((configured) => {
+    if (!configured) disabledReasons.email = 'Not set up on this server';
+  });
+
+  Promise.all([pushCheck, emailCheck]).then(() => {
+    if (!container.isConnected) return;
+    if (disabledReasons.browser_push || disabledReasons.email) {
+      renderGrid(container, gameClient, prefs, disabledReasons);
+    }
+  });
+}
+
+/**
+ * Renders the grid from a given `prefs` object and wires its handlers to re-render from that same
+ * object on mutation — never by re-deriving from `gameClient.lastState`, which only updates once the
+ * server's WS response arrives on a later event-loop tick and would otherwise clobber the just-made change.
+ */
+function renderGrid(container: HTMLElement, gameClient: GameClient, prefs: NotificationPreferences, disabledReasons: DisabledReasons): void {
   const send = () => gameClient.sendSetNotificationPreferences(prefs);
 
   const categories = activeCategories();
@@ -49,8 +104,10 @@ export function renderNotificationPreferences(container: HTMLElement, gameClient
             <th>
               <div class="notif-prefs-col-head">
                 <span>${CHANNEL_LABELS[ch]}</span>
+                ${disabledReasons[ch] ? `<span class="notif-prefs-col-note">${disabledReasons[ch]}</span>` : ''}
                 <label class="notif-prefs-master">
-                  <input type="checkbox" data-master-channel="${ch}" ${prefs.channelDisabled[ch] ? '' : 'checked'} />
+                  <input type="checkbox" data-master-channel="${ch}" ${!disabledReasons[ch] && !prefs.channelDisabled[ch] ? 'checked' : ''}
+                    ${disabledReasons[ch] ? 'disabled' : ''} />
                 </label>
               </div>
             </th>
@@ -66,7 +123,8 @@ export function renderNotificationPreferences(container: HTMLElement, gameClient
               ${ALL_NOTIFICATION_CHANNELS.map(ch => `
                 <td>
                   <input type="checkbox" data-event="${evt.eventKey}" data-channel="${ch}"
-                    ${prefs.events[evt.eventKey].includes(ch) ? 'checked' : ''} />
+                    ${!disabledReasons[ch] && prefs.events[evt.eventKey].includes(ch) ? 'checked' : ''}
+                    ${disabledReasons[ch] ? 'disabled' : ''} />
                 </td>
               `).join('')}
             </tr>
@@ -102,14 +160,27 @@ export function renderNotificationPreferences(container: HTMLElement, gameClient
       const list = new Set(prefs.events[eventKey]);
       if (box.checked) list.add(channel); else list.delete(channel);
       prefs.events[eventKey] = Array.from(list);
+      syncChannelDisabled(prefs, channel);
       send();
+
+      // Keep that channel's master checkbox in sync without a full re-render.
+      const masterBox = container.querySelector<HTMLInputElement>(`input[data-master-channel="${channel}"]`);
+      if (masterBox) masterBox.checked = !prefs.channelDisabled[channel];
     });
   });
 
-  // Per-channel master kill switch
+  // Per-channel "select all" checkbox — checked whenever any event still uses this channel.
   container.querySelectorAll<HTMLInputElement>('input[data-master-channel]').forEach((box) => {
     box.addEventListener('change', async () => {
       const channel = box.dataset.masterChannel as NotificationChannel;
+
+      if (!box.checked) {
+        // Unchecking clears the channel from every event — confirm before doing something that broad.
+        if (!window.confirm(`Turn off ${CHANNEL_LABELS[channel]} for every notification type?`)) {
+          box.checked = true;
+          return;
+        }
+      }
 
       if (channel === 'browser_push' && box.checked && getPushPermission() !== 'granted') {
         box.disabled = true;
@@ -125,8 +196,14 @@ export function renderNotificationPreferences(container: HTMLElement, gameClient
         await unsubscribeFromPush(gameClient);
       }
 
-      prefs.channelDisabled[channel] = !box.checked;
+      for (const def of NOTIFICATION_EVENT_REGISTRY) {
+        const list = new Set(prefs.events[def.eventKey]);
+        if (box.checked) list.add(channel); else list.delete(channel);
+        prefs.events[def.eventKey] = Array.from(list);
+      }
+      syncChannelDisabled(prefs, channel);
       send();
+      renderGrid(container, gameClient, prefs, disabledReasons);
     });
   });
 
@@ -134,11 +211,14 @@ export function renderNotificationPreferences(container: HTMLElement, gameClient
   container.querySelectorAll<HTMLButtonElement>('.notif-prefs-bulk-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const enable = btn.dataset.bulk === 'enable';
+      // Enabling never turns on a channel the player can't actually use.
+      const enableChannels = ALL_NOTIFICATION_CHANNELS.filter(ch => !disabledReasons[ch]);
       for (const def of NOTIFICATION_EVENT_REGISTRY) {
-        prefs.events[def.eventKey] = enable ? [...ALL_NOTIFICATION_CHANNELS] : [];
+        prefs.events[def.eventKey] = enable ? [...enableChannels] : [];
       }
+      for (const ch of ALL_NOTIFICATION_CHANNELS) syncChannelDisabled(prefs, ch);
       send();
-      renderNotificationPreferences(container, gameClient);
+      renderGrid(container, gameClient, prefs, disabledReasons);
     });
   });
 }

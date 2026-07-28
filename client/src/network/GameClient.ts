@@ -419,6 +419,14 @@ export class GameClient {
     this.sendRaw({ type: 'mark_all_notifications_read' });
   }
 
+  sendDismissNotification(id: string): void {
+    this.sendRaw({ type: 'dismiss_notification', id });
+  }
+
+  sendClearAllNotifications(): void {
+    this.sendRaw({ type: 'clear_all_notifications' });
+  }
+
   sendSetNotificationPreferences(preferences: NotificationPreferences): void {
     this.sendRaw({ type: 'set_notification_preferences', preferences });
   }

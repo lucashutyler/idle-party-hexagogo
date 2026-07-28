@@ -88,4 +88,41 @@ describe('NotificationSystem', () => {
     expect(system.getInbox('bob')).toHaveLength(1);
     expect(system.getAllUsernames().sort()).toEqual(['alice', 'bob']);
   });
+
+  it('removeEntry removes the matching entry and returns true', () => {
+    system.addEntry('alice', makeEntry('n1'));
+    system.addEntry('alice', makeEntry('n2'));
+    expect(system.removeEntry('alice', 'n1')).toBe(true);
+    const inbox = system.getInbox('alice');
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0].id).toBe('n2');
+  });
+
+  it('removeEntry deletes the map key entirely once the inbox empties', () => {
+    system.addEntry('alice', makeEntry('n1'));
+    system.removeEntry('alice', 'n1');
+    expect(system.getInbox('alice')).toEqual([]);
+    expect(system.getAllUsernames()).not.toContain('alice');
+  });
+
+  it('removeEntry returns false for an unknown id or unknown user', () => {
+    system.addEntry('alice', makeEntry('n1'));
+    expect(system.removeEntry('alice', 'nope')).toBe(false);
+    expect(system.removeEntry('nobody', 'n1')).toBe(false);
+  });
+
+  it('clearAll empties the inbox and resets unread count', () => {
+    system.addEntry('alice', makeEntry('n1'));
+    system.addEntry('alice', makeEntry('n2'));
+    system.clearAll('alice');
+    expect(system.getInbox('alice')).toEqual([]);
+    expect(system.unreadCount('alice')).toBe(0);
+    expect(system.getAllUsernames()).not.toContain('alice');
+  });
+
+  it('clearAll on an unknown user is a no-op', () => {
+    system.addEntry('alice', makeEntry('n1'));
+    system.clearAll('nobody');
+    expect(system.getInbox('alice')).toHaveLength(1);
+  });
 });

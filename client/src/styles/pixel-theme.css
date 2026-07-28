@@ -7286,7 +7286,12 @@ body, button, input, select, textarea {
   letter-spacing: 0.5px;
   text-shadow: 1px 1px 0 #000;
 }
-.notif-mark-all-btn {
+.notif-dropdown-actions {
+  display: flex;
+  gap: 6px;
+}
+.notif-mark-all-btn,
+.notif-clear-all-btn {
   background: transparent;
   border: 1px solid var(--border-pixel);
   color: var(--text-secondary);
@@ -7299,6 +7304,10 @@ body, button, input, select, textarea {
 .notif-mark-all-btn:hover {
   border-color: var(--accent-gold);
   color: var(--accent-gold);
+}
+.notif-clear-all-btn:hover {
+  border-color: var(--accent-red);
+  color: var(--accent-red);
 }
 .notif-dropdown-list {
   overflow-y: auto;
@@ -7313,22 +7322,42 @@ body, button, input, select, textarea {
 }
 .notif-row {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: stretch;
   width: 100%;
-  padding: 10px 12px;
-  background: transparent;
-  border: none;
   border-bottom: 1px solid rgba(83, 52, 131, 0.4);
-  text-align: left;
-  cursor: pointer;
-  font-family: var(--pixel-font);
 }
 .notif-row:last-child {
   border-bottom: none;
 }
-.notif-row:hover {
+.notif-row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--pixel-font);
+}
+.notif-row-main:hover {
   background: rgba(245, 200, 66, 0.08);
+}
+.notif-row-dismiss {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 12px;
+  font-family: var(--pixel-font);
+}
+.notif-row-dismiss:hover {
+  color: var(--accent-red);
 }
 .notif-row-dot {
   width: 8px;
@@ -7466,12 +7495,25 @@ body, button, input, select, textarea {
   align-items: center;
   gap: 3px;
 }
+.notif-prefs-col-note {
+  font-size: 7px;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: normal;
+  max-width: 70px;
+  line-height: 1.3;
+}
 .notif-prefs-master input,
 .notif-prefs-grid td input {
   width: 15px;
   height: 15px;
   accent-color: var(--accent-gold);
   cursor: pointer;
+}
+.notif-prefs-master input:disabled,
+.notif-prefs-grid td input:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 .notif-prefs-cat-row td {
   text-align: left;
