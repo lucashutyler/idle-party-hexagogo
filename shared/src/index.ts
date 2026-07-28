@@ -437,6 +437,7 @@ export {
   NOTIFICATION_EVENT_REGISTRY,
   getNotificationEventDefinition,
   emptyNotificationPreferences,
+  resolveNotificationNavigation,
 } from './systems/NotificationTypes.js';
 export type {
   NotificationCategory,
@@ -448,10 +449,13 @@ export type {
   WebPushSubscription,
   ClientMarkNotificationReadMessage,
   ClientMarkAllNotificationsReadMessage,
+  ClientDismissNotificationMessage,
+  ClientClearAllNotificationsMessage,
   ClientSetNotificationPreferencesMessage,
   ClientRegisterPushSubscriptionMessage,
   ClientUnregisterPushSubscriptionMessage,
   ClientSetChatFocusMessage,
   ClientNotificationMessage,
   ServerNotificationMessage,
+  NotificationNavigationTarget,
 } from './systems/NotificationTypes.js';

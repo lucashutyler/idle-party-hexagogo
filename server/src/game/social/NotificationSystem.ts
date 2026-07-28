@@ -59,6 +59,22 @@ export class NotificationSystem {
     }
   }
 
+  /** Remove a single entry. Returns true if it existed and was removed. */
+  removeEntry(username: string, id: string): boolean {
+    const list = this.inboxes.get(username);
+    if (!list) return false;
+    const idx = list.findIndex(n => n.id === id);
+    if (idx < 0) return false;
+    list.splice(idx, 1);
+    if (list.length === 0) this.inboxes.delete(username);
+    return true;
+  }
+
+  /** Remove every entry for a user (bulk clear). */
+  clearAll(username: string): void {
+    this.inboxes.delete(username);
+  }
+
   /** All current usernames with inbox entries. */
   getAllUsernames(): string[] {
     return Array.from(this.inboxes.keys());

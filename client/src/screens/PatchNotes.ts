@@ -1,5 +1,14 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.07.18.1',
+    notes: [
+      'You can now dismiss individual notifications or clear your whole notification list — cleared notifications are gone for good, not just marked as read.',
+      'Tapping a notification now takes you straight to what it\'s about: anything party-related (invites, promotions, being kicked, and so on) jumps to your Party tab, a new friend request jumps to the Leaderboard tab, and a direct message opens a reply to that person.',
+      'If push or email notifications aren\'t available yet, that column in Settings → Notifications now shows why, appears unchecked, and can\'t be toggled — instead of looking like it\'s on when it can\'t actually deliver anything.',
+      'The "select all" checkbox at the top of each notification channel now reflects whether anything in that column is turned on, actually turns the whole column on or off when you toggle it, and asks you to confirm before turning a whole column off.',
+    ],
+  },
+  {
     version: '2026.07.17.1',
     notes: [
       'New notifications! You\'ll be notified about party invites, getting kicked or promoted, new friend requests, and direct messages you haven\'t already seen — in-app and, if you enable it, as a browser push notification.',

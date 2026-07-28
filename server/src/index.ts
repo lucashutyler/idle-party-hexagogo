@@ -30,6 +30,7 @@ import type { ClassName, ItemDefinition } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
+import { isEmailConfigured } from './auth/EmailService.js';
 
 const app = express();
 const server = createServer(app);
@@ -148,6 +149,11 @@ app.get('/api/dungeons', requireAuth, (_req, res) => {
 // Public VAPID key for browser push subscription — null if push isn't configured server-side
 app.get('/api/notifications/vapid-public-key', requireAuth, (_req, res) => {
   res.json({ publicKey: getVapidPublicKey() });
+});
+
+// Whether email notifications can actually be delivered — false only in production without SES configured
+app.get('/api/notifications/email-configured', requireAuth, (_req, res) => {
+  res.json({ configured: isEmailConfigured() });
 });
 
 app.use('/api/admin', createAdminRoutes({
@@ -945,6 +951,19 @@ wss.on('connection', (ws) => {
 
       if (msg.type === 'mark_all_notifications_read') {
         playerManager.notifications.markAllRead(username);
+        playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'dismiss_notification' && typeof msg.id === 'string') {
+        if (playerManager.notifications.removeEntry(username, msg.id)) {
+          playerManager.sendStateToPlayer(username);
+        }
+        return;
+      }
+
+      if (msg.type === 'clear_all_notifications') {
+        playerManager.notifications.clearAll(username);
         playerManager.sendStateToPlayer(username);
         return;
       }

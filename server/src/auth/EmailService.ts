@@ -17,6 +17,12 @@ function getSesClient(): SESClient {
   return sesClient;
 }
 
+/** Whether email can actually be delivered right now. Dev mode always "sends" (console log), so this only bites in production. */
+export function isEmailConfigured(): boolean {
+  if (!isProd) return true;
+  return Boolean(process.env.SES_FROM_EMAIL && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+}
+
 /** Shared SES send — dev mode logs instead of sending. */
 async function sendSesEmail(to: string, subject: string, html: string, text: string, devLogLabel: string): Promise<void> {
   if (!isProd) {
