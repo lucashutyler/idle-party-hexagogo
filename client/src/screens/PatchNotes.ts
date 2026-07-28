@@ -1,6 +1,6 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.07.18.1',
+    version: '2026.07.28.1',
     notes: [
       'You can now dismiss individual notifications or clear your whole notification list — cleared notifications are gone for good, not just marked as read.',
       'Tapping a notification now takes you straight to what it\'s about: anything party-related (invites, promotions, being kicked, and so on) jumps to your Party tab, a new friend request jumps to the Leaderboard tab, and a direct message opens a reply to that person.',
