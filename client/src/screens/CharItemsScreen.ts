@@ -22,7 +22,7 @@ import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
 import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon, RARITY_COLORS } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
-import { renderAssetImg } from '../ui/assets';
+import { renderAssetImg, artworkUrl } from '../ui/assets';
 import { bringToFront, release } from '../ui/ModalStack';
 
 /** Left column slots (top to bottom). Mainhand sits at the bottom of the
@@ -131,6 +131,36 @@ function injectCharItemsStyles(): void {
     }
     .charitems-skill-slot.filled.passive { border-color: #5c8a5c; }
     .charitems-skill-slot.filled.active { border-color: #c89b3c; }
+    /*
+     * Skill art is optional. The img starts hidden and only reveals on a
+     * successful load, so a skill with no artwork collapses to the existing
+     * name+meta layout rather than leaving a gap or a broken-image glyph.
+     * No placehold.co fallback here — 55 skills would mean 55 third-party
+     * requests on one screen.
+     */
+    .charitems-skill-icon {
+      width: 34px;
+      height: 34px;
+      align-self: center;
+      border-radius: 3px;
+      opacity: 0;
+      transition: opacity 120ms;
+    }
+    /*
+     * Floated rather than a flex/grid child: the row is a flex column, and a
+     * float lets the name/meta/desc wrap alongside the icon without
+     * restructuring the row markup. It also means the removed-on-404 case
+     * needs no fallback rule — the layout is simply what it was before.
+     */
+    .charitems-skill-row-icon {
+      float: left;
+      width: 32px;
+      height: 32px;
+      margin: 0 8px 2px 0;
+      border-radius: 3px;
+      opacity: 0;
+      transition: opacity 120ms;
+    }
     .charitems-skill-slot-name {
       font-size: 11px;
       color: var(--text-primary);
@@ -1022,6 +1052,7 @@ export class CharItemsScreen implements Screen {
         </div>`;
       } else if (skill) {
         html += `<div class="charitems-skill-slot filled ${skill.type}" data-slot-index="${i}">
+          ${this.skillIconHtml(skill, 'charitems-skill-icon')}
           <span class="charitems-skill-slot-name">${this.escapeHtml(skill.name)}</span>
           <span class="charitems-skill-slot-meta">${skill.type}${skill.cooldown ? ` &middot; CD${skill.cooldown}` : ''}</span>
         </div>`;
@@ -1110,6 +1141,7 @@ export class CharItemsScreen implements Screen {
             ? `<div class="charitems-skill-row-locklabel">Granted by equipment</div>`
             : '';
         return `<div class="${classes.join(' ')}" ${attrs}>
+          ${this.skillIconHtml(s, 'charitems-skill-row-icon')}
           <div class="charitems-skill-row-name">${this.escapeHtml(s.name)}${isCurrent ? ' &middot; equipped' : ''}</div>
           <div class="charitems-skill-row-meta">${s.type}${s.cooldown ? ` &middot; CD ${s.cooldown}` : ''}</div>
           ${tagline}
@@ -1791,6 +1823,22 @@ export class CharItemsScreen implements Screen {
     // user clicks Equip multiple times in a row.
     void row.offsetWidth;
     row.classList.add('class-restriction-pulse');
+  }
+
+  /**
+   * Optional skill art, following the `/<kind>-artwork/{id}.png` convention
+   * keyed on the skill id — same as items, so no schema field is needed.
+   *
+   * Unlike renderAssetImg there is no placehold.co fallback: the picker can
+   * show a dozen skills at once and a missing-art placeholder for each would
+   * be both noisy and a pile of third-party requests. Instead the img is
+   * hidden until it loads and removed outright if it 404s, so skills without
+   * art fall back cleanly to the text-only layout.
+   */
+  private skillIconHtml(skill: SkillDefinition, className: string): string {
+    const src = artworkUrl('skill', skill.id);
+    return `<img class="${className}" src="${src}" alt=""`
+      + ` onload="this.style.opacity='1'" onerror="this.remove()" decoding="async" />`;
   }
 
   private escapeHtml(s: string): string {
