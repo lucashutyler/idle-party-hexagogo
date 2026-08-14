@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.08.14.2',
+    notes: [
+      'Skills now have artwork. Your equipped skills show their icon, and the skill picker shows one for every skill you can slot, so you can pick at a glance instead of reading every name.',
+    ],
+  },
+  {
     version: '2026.07.28.1',
     notes: [
       'You can now dismiss individual notifications or clear your whole notification list — cleared notifications are gone for good, not just marked as read.',
