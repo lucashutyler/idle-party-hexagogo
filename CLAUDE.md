@@ -90,6 +90,8 @@ Also bump `GAME_VERSION` in `shared/src/systems/BattleTypes.ts` to match. The se
 
 Everything in `data/` must be persisted behind a swappable store interface — never read/write files directly from game logic. Add new persistent data by extending an existing store or defining a new interface. See `docs/architecture/persistence.md` for the full list of stores.
 
+`data/` is gitignored — it is runtime state plus operator-uploaded artwork, and it is also where third-party licensed art lives, which may not be redistributed via this public repo. **Artwork the project owns outright** goes in `assets/<kind>/` instead, which is committed and mounted after the matching `data/` mount so operator uploads still win. Never commit a licensed asset.
+
 ### Content versioning
 
 When adding a new content type to the game, include it in `ContentSnapshot` (`server/src/game/VersionStore.ts`) and in `ContentStore.toSnapshot()` / `replaceAll()` so it ships in draft/publish/deploy snapshots.

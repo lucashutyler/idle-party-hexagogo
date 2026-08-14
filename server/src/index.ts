@@ -193,6 +193,23 @@ app.use('/shop-artwork', express.static(path.resolve('data/shop-artwork')));
 app.use('/set-artwork', express.static(path.resolve('data/set-artwork')));
 app.use('/zone-artwork', express.static(path.resolve('data/zone-artwork')));
 
+/*
+ * Shipped default UI art, committed to the repo under assets/.
+ *
+ * These are mounted AFTER the data/ mounts above, and express.static chains —
+ * the first mount that finds the file wins. So an operator who drops a PNG
+ * into data/nav-icons/ still overrides the shipped default, and the game
+ * ships looking finished out of the box instead of falling through to
+ * placehold.co on a fresh clone.
+ *
+ * Only art we own outright goes here. data/ stays gitignored: it holds game
+ * state saves, and it is also where third-party licensed art lives, which
+ * may not be redistributed via a public repo.
+ */
+app.use('/nav-icons', express.static(path.resolve('assets/nav-icons')));
+app.use('/slot-icons', express.static(path.resolve('assets/slot-icons')));
+app.use('/class-artwork', express.static(path.resolve('assets/class-artwork')));
+
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
