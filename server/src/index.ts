@@ -178,6 +178,7 @@ app.get('/health', (_req, res) => {
 
 // --- Static files (drop PNGs into the matching data/<dir>/ to serve real art) ---
 app.use('/item-artwork', express.static(path.resolve('data/item-artwork')));
+app.use('/skill-artwork', express.static(path.resolve('data/skill-artwork')));
 app.use('/class-icons', express.static(path.resolve('data/class-icons')));
 app.use('/slot-icons', express.static(path.resolve('data/slot-icons')));
 app.use('/nav-icons', express.static(path.resolve('data/nav-icons')));

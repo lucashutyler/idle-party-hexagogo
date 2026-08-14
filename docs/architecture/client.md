@@ -102,14 +102,16 @@ Per-turn animations (`updateCombatAnimations`) toggle `.attacking` / `.hit` / `.
 
 ## Image-everywhere convention
 
-`client/src/ui/assets.ts` exposes `artworkUrl(kind, id)`, `placeholderUrl(name, opts?)`, and `renderAssetImg(kind, id, opts)`. Convention: `/<kind>-artwork/{id}.png`, falling through to `placehold.co` (and finally to the surrounding background color via CSS) so layouts always have shape. Active kinds: `item`, `monster`, `class`, `tile`, `tile-type`, `zone`, `set`, `shop`, `logo`, `parchment`, `combat-bg`, `room-bg`.
+`client/src/ui/assets.ts` exposes `artworkUrl(kind, id)`, `placeholderUrl(name, opts?)`, and `renderAssetImg(kind, id, opts)`. Convention: `/<kind>-artwork/{id}.png`, falling through to `placehold.co` (and finally to the surrounding background color via CSS) so layouts always have shape. Active kinds: `item`, `skill`, `monster`, `class`, `tile`, `tile-type`, `zone`, `set`, `shop`, `logo`, `parchment`, `combat-bg`, `room-bg`. Each kind requires an Express static mount in `server/src/index.ts` AND a matching `/X-artwork` entry in the vite dev proxy (`client/vite.config.ts`) — missing proxy entries silently fall through to the SPA index in dev.
 
 **Shipped defaults vs operator art.** Two sources serve the same URLs, and `express.static` chains so the first mount holding the file wins:
 
 1. `data/<kind>/` — operator-supplied, uploaded through the admin dashboard. Mounted **first**, so it always overrides.
 2. `assets/<kind>/` — defaults committed to the repo. Mounted **second**.
 
-`assets/` ships `nav-icons`, `slot-icons`, `class-artwork`, `item-artwork`, and `skill-artwork`, so a fresh clone looks finished instead of falling through to `placehold.co`. `data/` stays gitignored — it holds game-state saves, which are runtime data and never belong in the repo. Before adding third-party art to `assets/`, confirm its licence permits redistribution: a public repo redistributes everything in it. Each kind requires an Express static mount in `server/src/index.ts` AND a matching `/X-artwork` entry in the vite dev proxy (`client/vite.config.ts`) — missing proxy entries silently fall through to the SPA index in dev.
+`assets/` ships `nav-icons`, `slot-icons`, `class-artwork`, `item-artwork`, and `skill-artwork`, so a fresh clone looks finished instead of falling through to `placehold.co`. `data/` stays gitignored — it holds game-state saves, which are runtime data and never belong in the repo. Before adding third-party art to `assets/`, confirm its licence permits redistribution: a public repo redistributes everything in it.
+
+**Skill icons** follow the same convention keyed on the skill id (`/skill-artwork/{skillId}.png`), so no field was added to `SkillDefinition`. They render in the equipped-skill slots and the skill-picker rows on `CharItemsScreen`. Unlike `renderAssetImg` there is deliberately **no `placehold.co` fallback** — the picker can list a dozen skills at once, and a placeholder per row would be both visually noisy and a pile of third-party requests. The `<img>` starts at `opacity: 0`, reveals on load, and removes itself on error, so skills without art fall back cleanly to the text-only layout.
 
 **Fade-in on fallback**: every fallback-capable `<img>` (renderAssetImg, item-square art, slot dogear, item popup, nav icon) renders with inline `opacity:0` and an `onload` handler that flips it to `1`. The browser never paints its broken-image glyph during the swap from a 404 real source to the placehold.co fallback — the surrounding slot's background / initials stand in until either the real or placeholder load resolves. A 120 ms `transition: opacity` is set on the affected image classes so the reveal feels smooth rather than snapping.
 
