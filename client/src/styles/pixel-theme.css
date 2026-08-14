@@ -938,25 +938,22 @@ html, body {
   border-color: var(--color-danger, #c0392b);
 }
 
-.patch-notes-panel {
-  width: 100%;
-  max-width: 500px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.patch-notes-back {
-  align-self: flex-start;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-family: var(--pixel-font);
-}
-
+/*
+ * Patch notes is its own pushed screen — the back affordance comes from
+ * ScreenManager's shared header, so the old `.patch-notes-panel` wrapper
+ * and `.patch-notes-back` button are gone.
+ *
+ * The list is the screen's single scroll region (`.screen-scroll`); the
+ * screen itself does not scroll.
+ */
 .patch-notes-list {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
+  max-width: 500px;
+  margin-inline: auto;
+  padding: 16px;
 }
 
 .patch-note-entry {
