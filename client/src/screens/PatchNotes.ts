@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.08.14.1',
+    notes: [
+      'The game now opens straight into play — the loading screen is gone.',
+      'Text throughout the game has a new look. The old pixel lettering has been replaced with a fantasy typeface for headings and a cleaner one for everything else, so smaller text is much easier to read.',
+      'The sign-in screen has been redesigned to match, with a larger title and a bigger, easier-to-tap email field.',
+    ],
+  },
+  {
     version: '2026.07.28.1',
     notes: [
       'You can now dismiss individual notifications or clear your whole notification list — cleared notifications are gone for good, not just marked as read.',
