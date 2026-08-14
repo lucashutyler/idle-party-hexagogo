@@ -41,6 +41,7 @@ export default defineConfig({
       // and returns the SPA index.html. Keep this list in sync with the
       // static mounts in server/src/index.ts.
       '/item-artwork': { target: 'http://localhost:3001', changeOrigin: true },
+      '/skill-artwork': { target: 'http://localhost:3001', changeOrigin: true },
       '/monster-artwork': { target: 'http://localhost:3001', changeOrigin: true },
       '/class-artwork': { target: 'http://localhost:3001', changeOrigin: true },
       '/tile-artwork': { target: 'http://localhost:3001', changeOrigin: true },

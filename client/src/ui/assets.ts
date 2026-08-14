@@ -10,6 +10,7 @@
 
 export type AssetKind =
   | 'item'
+  | 'skill'
   | 'monster'
   | 'zone'
   | 'tile'
