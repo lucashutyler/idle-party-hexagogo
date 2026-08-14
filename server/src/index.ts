@@ -202,13 +202,13 @@ app.use('/zone-artwork', express.static(path.resolve('data/zone-artwork')));
  * ships looking finished out of the box instead of falling through to
  * placehold.co on a fresh clone.
  *
- * Only art we own outright goes here. data/ stays gitignored: it holds game
- * state saves, and it is also where third-party licensed art lives, which
- * may not be redistributed via a public repo.
+ * data/ stays gitignored regardless — it holds game state saves, which are
+ * runtime data and never belong in the repo.
  */
 app.use('/nav-icons', express.static(path.resolve('assets/nav-icons')));
 app.use('/slot-icons', express.static(path.resolve('assets/slot-icons')));
 app.use('/class-artwork', express.static(path.resolve('assets/class-artwork')));
+app.use('/item-artwork', express.static(path.resolve('assets/item-artwork')));
 
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.resolve(__dirname, '../../client/dist');
