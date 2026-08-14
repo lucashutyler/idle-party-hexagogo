@@ -4,6 +4,25 @@
 
 DOM-based screen switching. `ScreenManager` handles show/hide with `onActivate`/`onDeactivate` lifecycle. Combat is the default screen; Map lazy-creates the three.js world map on first visit. A persistent XP bar sits directly above the bottom nav, visible on every game screen.
 
+### Navigation stack (roots + pushes)
+
+`ScreenManager` models two separate axes, matching the standard mobile tab-bar-plus-stack pattern:
+
+- **Roots** — the top-level destinations owned by the bottom nav. `switchTo(id)` discards any drill-down and starts a fresh stack of depth 1. Re-selecting the current root while deep pops back to it.
+- **Pushes** — drill-downs on top of the current root. `push(id, params)` stacks a screen, `pop()` removes it. `params` reaches the screen via `onActivate(params?)`; screens that take none can keep declaring `onActivate(): void`.
+
+`getRootScreenId()` is what the bottom nav should highlight; `getActiveScreenId()` is what's visible. `onStackChange(cb)` fires on every depth change.
+
+**Browser/hardware back is wired in.** Each `push` calls `history.pushState({ ipDepth })`; a `popstate` carrying a shallower depth pops the stack. That makes the browser back button, Android's hardware key, and the in-app back arrow the same gesture. Entries not created by `ScreenManager` are ignored via the `ipDepth` marker.
+
+**One shared header, not one per screen.** `ScreenManager` mounts a single `#screen-header` above `#screen-container` with a back button and title, shown only at depth > 1 — roots are already identified by the nav tab, so a title bar there would just cost vertical space. Titles come from the optional 4th argument to `register(id, el, screen, title)` and are set via `textContent`, never `innerHTML`. The back button carries `aria-label="Go back"` and a 44px minimum target.
+
+`body.dataset.navDepth` mirrors the current depth so global CSS can react (e.g. hiding the nav in a drill-down).
+
+### Limited scrolling
+
+The app is built to read as a mobile app rather than a set of long pages: **screens do not scroll, designated regions inside them do.** `.screen` is `overflow: hidden`, and content that genuinely needs to scroll opts in by wrapping in `.screen-scroll` (a `flex: 1; min-height: 0; overflow-y: auto` region with `overscroll-behavior: contain`). Content that would otherwise stack into one tall screen becomes a `push` instead.
+
 ## Bottom nav structure
 
 Six tabs, three behavioral modes:
