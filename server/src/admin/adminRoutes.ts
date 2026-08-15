@@ -1,18 +1,20 @@
 import { Router } from 'express';
+import type { Request, Response } from 'express';
 import multer from 'multer';
-import fs from 'fs/promises';
-import path from 'path';
 import type { PlayerManager } from '../game/PlayerManager.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { InviteListStore } from '../auth/InviteListStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID, isManagedAssetKind, isDeferredAssetKind } from '@idle-party-rpg/shared';
 import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType } from '@idle-party-rpg/shared';
 import { adminMiddleware } from './adminMiddleware.js';
 import { DraftEditor, toRecord } from '../game/DraftEditor.js';
+import { AssetValidationError, MAX_ASSET_BYTES } from '../game/AssetStore.js';
+import type { AssetStore } from '../game/AssetStore.js';
+import { registerAssetRoutes, assetUploadErrorHandler } from './assetRoutes.js';
 
-const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 } });
+const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ASSET_BYTES } });
 
 interface AdminRouteOptions {
   playerManager: () => PlayerManager;
@@ -20,14 +22,34 @@ interface AdminRouteOptions {
   inviteListStore: InviteListStore;
   contentStore: () => ContentStore;
   versionStore: () => VersionStore;
+  assetStore: AssetStore;
   rebuildGrid: () => number;
   deployVersion: (versionId: string) => Promise<{ success: boolean; error?: string; relocated?: number }>;
 }
 
-export function createAdminRoutes({ playerManager: getPlayerManager, accountStore, inviteListStore, contentStore: getContentStore, versionStore: getVersionStore, rebuildGrid, deployVersion }: AdminRouteOptions): Router {
+export function createAdminRoutes({ playerManager: getPlayerManager, accountStore, inviteListStore, contentStore: getContentStore, versionStore: getVersionStore, assetStore, rebuildGrid, deployVersion }: AdminRouteOptions): Router {
   const router = Router();
   router.use(adminMiddleware);
   const draftEditor = new DraftEditor(getVersionStore(), getContentStore);
+
+  /** Shared body of the deprecated artwork upload aliases — validation lives in the store. */
+  async function writeAssetFromRequest(req: Request, res: Response, kind: string, id: string): Promise<void> {
+    if (!isManagedAssetKind(kind)) {
+      const reason = isDeferredAssetKind(kind)
+        ? `The "${kind}" artwork kind is not managed through this API yet.`
+        : `Unknown artwork kind: ${kind}`;
+      res.status(400).json({ error: reason });
+      return;
+    }
+    if (!req.file) { res.status(400).json({ error: 'No file uploaded.' }); return; }
+    try {
+      await assetStore.write(kind, id, req.file.buffer);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(err instanceof AssetValidationError ? 400 : 500)
+        .json({ error: err instanceof Error ? err.message : 'Failed to save artwork.' });
+    }
+  }
 
   router.get('/overview', (_req, res) => {
     const pm = getPlayerManager();
@@ -473,81 +495,50 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
-  /** Upload artwork for an item. PNG only, square dimensions. */
+  /** Deprecated item-specific artwork upload. Superseded by `/assets/item/:id`. */
   router.post('/items/:id/artwork', artworkUpload.single('artwork'), async (req, res) => {
-    if (!req.file) { res.status(400).json({ error: 'No file uploaded.' }); return; }
-    if (req.file.mimetype !== 'image/png') { res.status(400).json({ error: 'Only PNG files are accepted.' }); return; }
-
-    // Validate PNG is square by reading IHDR chunk
-    // PNG structure: 8-byte signature, then IHDR chunk: 4 bytes length + 4 bytes 'IHDR' + 4 bytes width + 4 bytes height
-    // So width is at offset 16 and height is at offset 20
-    const buf = req.file.buffer;
-    if (buf.length < 24) { res.status(400).json({ error: 'Invalid PNG file.' }); return; }
-    const pngWidth = buf.readUInt32BE(16);
-    const pngHeight = buf.readUInt32BE(20);
-    if (pngWidth !== pngHeight) { res.status(400).json({ error: `Image must be square. Got ${pngWidth}x${pngHeight}.` }); return; }
-
-    const artworkDir = path.resolve('data/item-artwork');
-    await fs.mkdir(artworkDir, { recursive: true });
-    await fs.writeFile(path.join(artworkDir, `${req.params.id}.png`), buf);
-    res.json({ success: true });
+    await writeAssetFromRequest(req, res, 'item', req.params.id);
   });
 
-  /** Delete artwork for an item. */
+  /** Deprecated item-specific artwork delete. Superseded by `/assets/item/:id`. */
   router.delete('/items/:id/artwork', async (req, res) => {
-    const artworkPath = path.resolve('data/item-artwork', `${req.params.id}.png`);
     try {
-      await fs.unlink(artworkPath);
+      await assetStore.remove('item', req.params.id);
       res.json({ success: true });
     } catch {
-      res.json({ success: true }); // Already doesn't exist, that's fine
+      res.json({ success: true }); // A malformed id can't name a real file either.
     }
   });
 
-  // ── Generic CRM artwork upload/delete ──────────────────────
-  // Single endpoint handles every content kind so new content types don't
-  // need their own bespoke routes. The admin client posts to
-  // `/api/admin/artwork/:kind/:id` with a PNG file.
-  /** Map of allowed kinds → on-disk folder. New kinds just add a row here. */
-  const ARTWORK_KINDS: Record<string, string> = {
-    item: 'data/item-artwork',
-    monster: 'data/monster-artwork',
-    set: 'data/set-artwork',
-    shop: 'data/shop-artwork',
-    zone: 'data/zone-artwork',
-    'tile-type': 'data/tile-type-artwork',
-    parchment: 'data/parchment-artwork',
-  };
+  // ── Assets (imagery) ───────────────────────────────────────
+  // Every kind of artwork the game serves lives under `/api/admin/assets`,
+  // described by the shared ASSET_KIND_INFO registry. See assetRoutes.ts.
+  registerAssetRoutes(router, { contentStore: getContentStore, assetStore });
 
-  /** Validate + write a square PNG into the appropriate kind folder. */
+  /**
+   * Deprecated aliases for the pre-registry artwork endpoints. The admin UI
+   * has moved to `/api/admin/assets/:kind/:id`; these stay so an older client
+   * build (or a bookmarked script) doesn't break mid-deploy.
+   */
   router.post('/artwork/:kind/:id', artworkUpload.single('artwork'), async (req, res) => {
-    const dir = ARTWORK_KINDS[req.params.kind];
-    if (!dir) { res.status(400).json({ error: `Unknown artwork kind: ${req.params.kind}` }); return; }
-    if (!req.file) { res.status(400).json({ error: 'No file uploaded.' }); return; }
-    if (req.file.mimetype !== 'image/png') { res.status(400).json({ error: 'Only PNG files are accepted.' }); return; }
-
-    // Validate PNG is square via the IHDR chunk (offset 16 width, 20 height).
-    const buf = req.file.buffer;
-    if (buf.length < 24) { res.status(400).json({ error: 'Invalid PNG file.' }); return; }
-    const w = buf.readUInt32BE(16);
-    const h = buf.readUInt32BE(20);
-    if (w !== h) { res.status(400).json({ error: `Image must be square. Got ${w}x${h}.` }); return; }
-
-    const artworkDir = path.resolve(dir);
-    await fs.mkdir(artworkDir, { recursive: true });
-    await fs.writeFile(path.join(artworkDir, `${req.params.id}.png`), buf);
-    res.json({ success: true });
+    await writeAssetFromRequest(req, res, req.params.kind, req.params.id);
   });
 
   router.delete('/artwork/:kind/:id', async (req, res) => {
-    const dir = ARTWORK_KINDS[req.params.kind];
-    if (!dir) { res.status(400).json({ error: `Unknown artwork kind: ${req.params.kind}` }); return; }
-    const artworkPath = path.resolve(dir, `${req.params.id}.png`);
+    if (!isManagedAssetKind(req.params.kind)) {
+      const reason = isDeferredAssetKind(req.params.kind)
+        ? `The "${req.params.kind}" artwork kind is not managed through this API yet.`
+        : `Unknown artwork kind: ${req.params.kind}`;
+      res.status(400).json({ error: reason });
+      return;
+    }
     try {
-      await fs.unlink(artworkPath);
+      await assetStore.remove(req.params.kind, req.params.id);
       res.json({ success: true });
-    } catch {
-      res.json({ success: true }); // Already doesn't exist, that's fine
+    } catch (err) {
+      // A bad id is the only failure mode here, and it means the file can't exist.
+      res.status(err instanceof AssetValidationError ? 400 : 500)
+        .json({ error: err instanceof Error ? err.message : 'Failed to remove artwork.' });
     }
   });
 
@@ -1361,6 +1352,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
     res.json({ success: true, relocated: result.relocated });
   });
+
+  // Last, so it sees errors thrown by every upload route above — including the
+  // deprecated artwork aliases, which would otherwise return an HTML error page
+  // for an oversized PNG instead of the `{ error }` envelope.
+  router.use(['/assets', '/artwork', '/items'], assetUploadErrorHandler);
 
   return router;
 }

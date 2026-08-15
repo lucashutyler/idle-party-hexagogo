@@ -459,3 +459,27 @@ export type {
   ServerNotificationMessage,
   NotificationNavigationTarget,
 } from './systems/NotificationTypes.js';
+
+// Imagery / assets registry
+export {
+  ASSET_KINDS,
+  ASSET_KIND_INFO,
+  MANAGED_ASSET_KINDS,
+  DEFERRED_ASSET_KINDS,
+  ASSET_ID_PATTERN,
+  isAssetKind,
+  isManagedAssetKind,
+  isDeferredAssetKind,
+  isValidAssetId,
+  assetPublicPath,
+  canonicalAssetId,
+} from './assets/AssetKinds.js';
+export type {
+  AssetKind,
+  ManagedAssetKind,
+  DeferredAssetKind,
+  AssetKindInfo,
+  AssetIdSource,
+  AssetOverrideSource,
+  AssetFallback,
+} from './assets/AssetKinds.js';

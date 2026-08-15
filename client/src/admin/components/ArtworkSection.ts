@@ -1,7 +1,7 @@
 /**
  * Reusable "Artwork" section for any CRM admin edit modal — PNG upload +
  * delete + live preview, all driven by the generic
- * `/api/admin/artwork/:kind/:id` server endpoint.
+ * `/api/admin/assets/:kind/:id` server endpoint.
  *
  * Caller workflow:
  *   1. Inject the HTML returned by `renderArtworkSection({ kind, id })` into
@@ -9,14 +9,22 @@
  *   2. After the modal is mounted, call `wireArtworkSection(root, opts)` once
  *      to attach the upload/remove click handlers.
  *
- * `kind` must match one of the entries in the server's ARTWORK_KINDS map
- * (item, monster, set, shop, zone, tile-type, …) and the matching
- * `/{kind}-artwork` static mount on the server.
+ * `kind` is any of the shared registry's `MANAGED_ASSET_KINDS`, which also
+ * drive the server's static mounts and the `/api/admin/assets` endpoints.
+ * Kinds listed in `DEFERRED_ASSET_KINDS` have no working endpoint yet and are
+ * excluded by the type.
  */
 
+import { assetPublicPath } from '@idle-party-rpg/shared';
+import type { ManagedAssetKind } from '@idle-party-rpg/shared';
+
 export interface ArtworkSectionOpts {
-  /** Server kind id — picks the folder. */
-  kind: 'item' | 'monster' | 'set' | 'shop' | 'zone' | 'tile-type' | 'parchment';
+  /**
+   * Server kind id — picks the folder. Restricted to the kinds the assets API
+   * manages, so wiring an uploader to a deferred kind is a compile error rather
+   * than a modal that 400s when the admin clicks Upload.
+   */
+  kind: ManagedAssetKind;
   /** The entity id whose artwork is being edited. Empty for unsaved entities. */
   id: string;
   /** DOM id prefix so multiple sections can coexist; defaults to `if-art-${kind}`. */
@@ -27,9 +35,8 @@ function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
-function publicArtworkUrl(kind: ArtworkSectionOpts['kind'], id: string): string {
-  // Server static mounts follow the convention `/<kind>-artwork/{id}.png`.
-  return `/${kind}-artwork/${encodeURIComponent(id)}.png`;
+function publicArtworkUrl(kind: ManagedAssetKind, id: string): string {
+  return assetPublicPath(kind, id);
 }
 
 /** HTML for the artwork upload section. Caller wraps in a fieldset/legend. */
@@ -67,7 +74,7 @@ async function uploadArtwork(root: HTMLElement, opts: ArtworkSectionOpts): Promi
   const formData = new FormData();
   formData.append('artwork', fileInput.files[0]);
   try {
-    const res = await fetch(`/api/admin/artwork/${opts.kind}/${encodeURIComponent(id)}`, {
+    const res = await fetch(`/api/admin/assets/${opts.kind}/${encodeURIComponent(id)}`, {
       method: 'POST', credentials: 'include', body: formData,
     });
     if (!res.ok) {
@@ -76,11 +83,12 @@ async function uploadArtwork(root: HTMLElement, opts: ArtworkSectionOpts): Promi
       return;
     }
     alert('Artwork uploaded successfully.');
-    // Bust the cached preview by re-pointing the same URL with a query string.
+    // The response carries the stored file's URL already stamped with its
+    // write time, so the preview refreshes without a cache-busting guess.
+    const data = await res.json().catch(() => ({}));
     const preview = root.querySelector('[data-artwork-preview]') as HTMLImageElement | null;
     if (preview) {
-      const base = publicArtworkUrl(opts.kind, id);
-      preview.src = `${base}?t=${Date.now()}`;
+      preview.src = data?.asset?.url ?? `${publicArtworkUrl(opts.kind, id)}?t=${Date.now()}`;
       preview.style.display = '';
     }
   } catch {
@@ -93,7 +101,7 @@ async function removeArtwork(root: HTMLElement, opts: ArtworkSectionOpts): Promi
   if (!id) return;
   if (!confirm(`Remove artwork for this ${opts.kind}?`)) return;
   try {
-    const res = await fetch(`/api/admin/artwork/${opts.kind}/${encodeURIComponent(id)}`, {
+    const res = await fetch(`/api/admin/assets/${opts.kind}/${encodeURIComponent(id)}`, {
       method: 'DELETE', credentials: 'include',
     });
     if (!res.ok) {

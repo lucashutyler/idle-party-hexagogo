@@ -236,7 +236,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Mobile-first responsive design
 - [x] Pixel/retro RPG visual style (Silkscreen + Pixelify Sans)
 - [x] Combat cards with portrait + name + HP bar; per-zone backgrounds; lunge/hit/dodge animations
-- [x] Image-everywhere convention (`/<kind>-artwork/{id}.png` with placeholder fallback) for items, monsters, classes, tiles, sets, shops, zones, rooms
+- [x] Image-everywhere convention (`<mount>/{id}.png` with placeholder fallback) across all 16 asset kinds — items, monsters, classes, rooms, room types, sets, shops, zones, NPCs, map parchment, combat/room backdrops, the splash logo, and the class/slot/nav icon sets — all declared once in a shared registry
 - [x] Nav bar battle status indicators (pulse/flash on combat events)
 - [x] Server unavailable / offline screen with retry
 - [x] Desktop font scaling (larger fonts on desktop via media query)
@@ -255,7 +255,9 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Quest editor (Quests tab; NPCs tab links quests to NPCs)
 - [x] Recipe editor (Recipes tab — author/edit crafting recipes without touching JSON)
 - [x] Skill tree editor (skills as versioned content — composable effect options, editable unlock levels, per-class slot schedules, item/set skill grants)
-- [x] CRM artwork upload pipeline (items / monsters / sets / shops / zones / tile types share one upload endpoint + UI)
+- [x] CRM artwork upload pipeline (14 of the 16 asset kinds share one upload API; items / monsters / zones / tile types / map parchment also have an in-modal uploader)
+- [ ] Set and shop artwork management (deferred — set art has no render site, and shop art is fetched by zone id rather than shop id)
+- [x] Asset coverage report (which content is still missing artwork, accounting for fallback chains, plus orphaned files)
 - [x] Game designer access only
 
 ### AI-Assisted Content (MCP)
@@ -263,6 +265,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] MCP write tools, draft-version-scoped only (#298)
 - [x] Design notes — versioned markdown design context alongside AI-authored draft content
 - [x] validate_draft — referential-integrity sweep before publish
+- [x] Imagery tools — list asset kinds, upload/delete PNGs, and a coverage report showing which content is still missing art (artwork is live and unversioned, so these write directly rather than into a draft)
 
 ### Infrastructure
 - [x] Monorepo structure (client/, server/)

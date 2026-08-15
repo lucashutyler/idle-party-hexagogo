@@ -127,6 +127,54 @@ Data-driven content type stored in `data/tile-types.json`, managed by ContentSto
 
 `WorldCache` (`client/src/network/WorldCache.ts`) is the client-side cache for world data. Loaded once from `GET /api/world` on login (in parallel with WS connect). Stores all tiles (keyed `mapId:col:row`, since two maps may share a `col,row`), the `maps` registry + `defaultMapId`, start position, tile-type defs, and NPC catalog. It tracks a `currentMapId` (driven by `ServerStateMessage.currentMapId` via `setCurrentMap`) and exposes only the current map: `getTiles()`/`getTile(col,row)` are map-scoped, while `getTileByGuid(id)` resolves across maps (used to name a transition's destination). `updateUnlocked(tileIds)` computes unlock state from `state.unlocked` tile GUIDs each tick, scoped to the current map; switching maps invalidates the change-detection short-circuit so fog recomputes. `ThreeWorldMap` builds its `HexGrid` from the current map's tiles and rebuilds + recenters when `currentMapId` changes.
 
+## Artwork & imagery
+
+Every kind of image the game serves is declared once in `ASSET_KIND_INFO` (`shared/src/assets/AssetKinds.ts`) — the single source of truth for the server's Express static mounts, the admin upload API, the MCP asset tools, the client's `artworkUrl()`, and the vite dev proxy. The kind set used to be written down in five places that had drifted apart (the game served 15 kinds while only 7 could be uploaded); adding a kind is now one row in the registry. Each row carries a `label`, `description`, `dir` (folder under the process working directory), `mount` (public URL prefix), `idSource` (drives the coverage report), `idFormat`, `shape`, and optional `fallbacks`/`overrideIdSource`/`fixedIds`/`lowercaseIds`.
+
+**URL convention**: `<mount>/{id}.png`, served statically from `data/<dir>/`. Most kinds follow `/{kind}-artwork/{id}.png`; the three icon sets predate that convention and keep their own mounts, which is why `dir`/`mount` are spelled out per row rather than derived from the kind name. `assetPublicPath(kind, id)` builds the URL — never hand-concatenate one.
+
+| Kind | Art for | Id | Shape |
+| --- | --- | --- | --- |
+| `item` | Inventory / loot / shop icons | `ItemDefinition.id` | square |
+| `monster` | Combat-screen portraits | `MonsterDefinition.id` | square |
+| `set` ⏸ | Equipment-set browser | `SetDefinition.id` | square |
+| `shop` ⏸ | Room-view shop action button | `ShopDefinition.id` | square |
+| `zone` | Zone art, and the last-resort combat backdrop | `ZoneDefinition.id` (the zone tag, not `displayName`) | square |
+| `tile` | Per-room map art overriding the room-type art | `WorldTileDefinition.id` (room GUID) | square |
+| `tile-type` | Baseline map art for every room of a type | `TileTypeDefinition.id` | square |
+| `parchment` | Tiling backdrop behind the world map | `WorldMapMeta.id` | square |
+| `class` | Character portraits (combat / character / profile) | Class name, folded to lowercase (`Knight` → `knight.png`) | square |
+| `npc` | Talk-popup portraits | `NpcDefinition.id` — but see the NPC note below | square |
+| `logo` | Splash-screen logo | fixed single id `idle-party` | any |
+| `combat-bg` | Backdrop behind the combat stage | zone id, or `{zoneId}-{col}-{row}` per room | any |
+| `room-bg` | Backdrop behind the room view | zone id, or `{zoneId}-{col}-{row}` per room | any |
+| `class-icon` | Inline class glyphs (party lists, chat, leaderboard) | Class name as spelled, plus `Unknown`/`Server` (case-sensitive — `CLASS_ICONS` requests `Knight.png`) | square |
+| `slot-icon` | Equipment-slot dogear glyphs | `EquipSlot` id | square |
+| `nav-icon` | Bottom-nav button glyphs | Nav destination id | square |
+
+`shape: 'square'` rejects non-square uploads; `'any'` accepts any aspect ratio (the wide backdrops and the logo). NPCs may skip the folder entirely by pointing `NpcDefinition.artworkUrl` at any URL.
+
+**⏸ Deferred kinds.** `set` and `shop` are in the registry — still mounted, still served, still type-checked — but listed in `DEFERRED_ASSET_KINDS` rather than `MANAGED_ASSET_KINDS`, so the assets API, the MCP tools, and the coverage report all skip them and the routes reject them with a 400 explaining why. Each is blocked on a client-side problem that would make managing its art misleading:
+
+- `set`: nothing in the client renders set art at all, so coverage would pressure authors to draw art that never appears.
+- `shop`: the uploader writes `/shop-artwork/{ShopDefinition.id}.png`, but `RoomView.renderCurrentRoom` fetches `/shop-artwork/{zoneId}.png` — the room's zone tag, not the shop id. Uploaded shop art therefore doesn't render unless a shop's id happens to equal its zone's.
+
+Existing files in `data/set-artwork/` and `data/shop-artwork/` are untouched and keep serving. Un-deferring a kind is a one-line move between the two lists (plus whatever client fix unblocked it); `shared/tests/AssetKinds.test.ts` asserts the two lists partition `ASSET_KINDS`, so a kind can't be added without landing in one of them.
+
+**Fallback chains** — several kinds resolve through a chain rather than a single file, and the registry's `fallbacks` mirror what the render sites actually do:
+
+- **Rooms**: the world map draws per-room `/tile-artwork/{tileId}.png` first, then per-type `/tile-type-artwork/{type}.png`, then the tile-type emoji glyph (no `placehold.co` at the bake layer). Room-type art already covers every room, so a room with no override of its own isn't missing anything — `tile` has `idSource: 'none'`.
+- **Combat backdrop** (`CombatScreen.updateCombatBackground`): per-room `/combat-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/combat-bg-artwork/{zoneId}.png` → `/zone-artwork/{zoneId}.png` → placeholder. The key is the current room's raw `zone` tag, **not** a slug of the zone's display name.
+- **Room backdrop** (`RoomView.renderCurrentRoom`): per-room `/room-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/room-bg-artwork/{zoneId}.png`, layered as two CSS background images so the room-specific one wins when present.
+- **Monsters**: art is keyed by `MonsterDefinition.id` (what the admin upload writes). `CombatScreen.monsterArtSrc` falls back to a slug of the monster's name when a combat payload carries no id, so older art dropped in by name still renders — and the coverage report counts a name-slug file as covering the monster rather than reporting it missing.
+- **NPCs**: `NpcTalkPopup` renders `NpcDefinition.artworkUrl` verbatim (falling back to the NPC's emoji) rather than fetching `/npc-artwork/{id}.png`. An uploaded NPC PNG only renders once `artworkUrl` points at it. The coverage report accounts for this: an NPC carrying an `artworkUrl` resolves as `external` rather than being counted as a gap.
+
+**Artwork is deliberately NOT versioned.** It is not a field on any content type and is not part of `ContentSnapshot`: half the kinds have no owning entity at all (parchment keys on a map id, backdrops on a zone, the logo is a singleton, the icon sets aren't content), and binary blobs would balloon every version snapshot. So artwork is live and global — an upload is visible immediately regardless of draft mode, and publish/rollback never moves a PNG. The trade-off is that rolling a content version back does not roll its art back.
+
+**Storage & API**: `AssetStore` (`server/src/game/AssetStore.ts`) is the swappable store behind `data/<kind>-artwork/` — see [`persistence.md`](persistence.md). It validates every write (PNG signature + `IHDR` chunk, per-kind shape, 512 KB cap) and refuses any id that could escape its folder. Admins reach it through `/api/admin/assets/*` ([`admin-dashboard.md`](admin-dashboard.md)) and AI authoring reaches it through the MCP asset tools ([`mcp.md`](mcp.md)).
+
+**Coverage report**: `computeAssetCoverage` (`server/src/game/AssetCoverage.ts`) answers "what imagery is missing?" by joining every asset folder against the content that's supposed to have art in it — per kind it reports `required` / `present` / `missing` / `coveredByFallback` (missing its own art but still rendering real art through a fallback) / `overrides` (legitimate per-room files) / `orphans` (files matching no required id and no override shape, usually art left behind by deleted content), plus optional per-id `entries` whose `resolvedVia` says `own`, `fallback:{kind}`, `external` (the entity points at its own artwork URL), or `placeholder`. Accounting for the fallback chains is the whole point: a naive does-the-file-exist check reports thousands of false positives. Served at `GET /api/admin/assets/coverage` and as the `get_asset_coverage` MCP tool.
+
 ## Content versioning
 
 Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates parties on unreachable tiles, and reconciles every session's skill loadout against the new content.

@@ -1,10 +1,10 @@
 # MCP content-authoring server
 
-An in-process [Model Context Protocol](https://modelcontextprotocol.io) endpoint that lets an AI assistant read the game's content catalog and author content inside a **draft** content version — never live. A human admin still has to publish and deploy the draft via the existing World Manager (`docs/architecture/admin-dashboard.md`); nothing here can do that. This is admin/content-authoring tooling — it never reaches players.
+An in-process [Model Context Protocol](https://modelcontextprotocol.io) endpoint that lets an AI assistant read the game's content catalog and author content inside a **draft** content version — never live. A human admin still has to publish and deploy the draft via the existing World Manager (`docs/architecture/admin-dashboard.md`); nothing here can do that. The one exception is imagery: artwork lives outside the version system entirely, so the asset tools write live PNGs directly — see Guardrails. This is admin/content-authoring tooling — it never reaches players.
 
 ## Transport (`server/src/mcp/McpEndpoint.ts`)
 
-Mounted at `POST /mcp` (`app.use('/mcp', createMcpRouter({ contentStore, versionStore }))` in `server/src/index.ts`). Stateless per the `@modelcontextprotocol/sdk` "stateless streamable HTTP" pattern: every request builds a fresh `McpServer`, a fresh `DraftEditor`, and a fresh `StreamableHTTPServerTransport({ sessionIdGenerator: undefined })`, registers all four tool groups on that server instance, then hands the request off to the transport. `res.on('close', ...)` tears the transport and server back down. No session state is kept between requests — every tool call is fully self-contained (callers pass `versionId` on every write/read-from-draft call, there's no "current draft" concept server-side).
+Mounted at `POST /mcp` (`app.use('/mcp', createMcpRouter({ contentStore, versionStore, assetStore }))` in `server/src/index.ts`, preceded by a dedicated `app.use('/mcp', express.json({ limit: '2mb' }))` so base64 PNG uploads clear body-parser's 100 KB default — it must come *before* the global `express.json()`, since body-parser marks the request read and the generic parser then no-ops for `/mcp`). Stateless per the `@modelcontextprotocol/sdk` "stateless streamable HTTP" pattern: every request builds a fresh `McpServer`, a fresh `DraftEditor`, and a fresh `StreamableHTTPServerTransport({ sessionIdGenerator: undefined })`, registers all five tool groups on that server instance, then hands the request off to the transport. `res.on('close', ...)` tears the transport and server back down. No session state is kept between requests — every tool call is fully self-contained (callers pass `versionId` on every write/read-from-draft call, there's no "current draft" concept server-side).
 
 `GET`/`DELETE /mcp` both 405 — there's no server-initiated stream or session to resume/end in stateless mode.
 
@@ -30,7 +30,7 @@ Referential-integrity guards mirror `ContentStore`'s live-delete guards (item re
 
 ## Tool catalog
 
-19 tools across four files, each registered via `server.registerTool(name, { description, inputSchema }, handler)`. Every tool's core logic is also exported as a plain async function (e.g. `getOverview(deps)`) so it's unit-testable without going through the MCP protocol layer — the registered handler is a thin wrapper that JSON-stringifies the result into `{ content: [{ type: 'text', text }] }`.
+24 tools across five files, each registered via `server.registerTool(name, { description, inputSchema }, handler)`. Every tool's core logic is also exported as a plain async function (e.g. `getOverview(deps)`) so it's unit-testable without going through the MCP protocol layer — the registered handler is a thin wrapper that JSON-stringifies the result into `{ content: [{ type: 'text', text }] }`.
 
 **Read** (`tools/readTools.ts`) — read-only, work against either live content or a draft snapshot (`versionId` optional on each):
 - `get_overview` — content-catalog counts per type from live content, plus the version list and active version id.
@@ -52,6 +52,13 @@ Referential-integrity guards mirror `ContentStore`'s live-delete guards (item re
 - `set_start_tile` — set a map's start room (`mapId` defaults to the draft's default map).
 - `set_skill_slots` — set a class's full skill-slot unlock schedule.
 
+**Assets / imagery** (`tools/assetTools.ts`) — the MCP half of the `/api/admin/assets` surface, and the one group that writes to **live** data rather than a draft (see Guardrails). Kinds come from `MANAGED_ASSET_KINDS` in the shared registry (`shared/src/assets/AssetKinds.ts`) — 14 of the 16 registered kinds; `set` and `shop` are deliberately deferred and rejected by every tool here. See `docs/architecture/content.md` → "Artwork & imagery" for the full kind table and the deferral rationale:
+- `list_asset_kinds` — the registry itself: every managed kind with its label, description, URL template (`<mount>/{id}.png`), id format, square-or-any shape rule, and fallback chain, plus the 512 KB `maxBytes` ceiling. Also returns `deferred` — kinds the game has but these tools don't manage yet (`set`, `shop`), each with the reason — so a caller can tell "not supported yet" apart from "doesn't exist". Lets a client discover kinds instead of hard-coding them.
+- `get_asset_coverage` — which content is missing art, per kind: required ids, how many have art of their own, how many still render real art through a fallback, override files, and orphans left by deleted content. `includeEntries`/`missingOnly`/`limit` add per-id detail. This is the "what should I draw next?" tool.
+- `list_assets` — the artwork actually stored for one kind, each with its public URL (cache-busted by mtime), byte size, and pixel dimensions.
+- `upsert_asset` — upload or replace one PNG from base64. Validates the PNG signature + IHDR, enforces the per-kind shape rule and the 512 KB cap, and takes no `versionId`.
+- `delete_asset` — remove stored art for one id; idempotent, with `removed` reporting whether a file was actually there.
+
 **Validate** (`tools/validateTools.ts`):
 - `validate_draft` — sweeps a draft snapshot for dangling cross-references and returns every problem found (no early return): zone/tile encounter-table references, tile zone/type/shop/npc/dungeon/requiredItemId/mapId/transition references, encounter monster-pool/placement references, monster drop references, shop inventory references, recipe ingredient/result references, quest objective/reward references, NPC questIds references, quest prerequisite references plus prerequisite-cycle detection (DFS, dedupes cycles found from multiple starting quests), set itemIds/grantedSkillIds references, item grantedSkillIds references, and both the world default start tile and every map's start tile resolving to an actual room. Meant to run before a human ever reviews the draft in the World Manager.
 
@@ -67,6 +74,7 @@ See `docs/architecture/content.md` → "Design notes" for the content-system-lev
 
 ## Guardrails
 
-- Every write tool requires a draft `versionId` — `DraftEditor.loadDraft` rejects with `status: 404` if the version doesn't exist, or `status: 400` if it exists but isn't `status: 'draft'`. There is no way to write to live content through MCP.
+- Every **content** write tool requires a draft `versionId` — `DraftEditor.loadDraft` rejects with `status: 404` if the version doesn't exist, or `status: 400` if it exists but isn't `status: 'draft'`. There is no way to write live *content* through MCP — artwork is the one live-write surface, and it isn't content (next bullet but one).
 - No `publish`, `deploy`, `delete_version`, or player/account-admin tools are exposed. Publishing and deploying stay a human action in the World Manager.
-- No artwork upload tool in v1 — content authored via MCP ships without custom art until an admin uploads it manually afterward.
+- **`upsert_asset`/`delete_asset` write to LIVE artwork and deliberately bypass the draft rule.** Artwork isn't part of `ContentSnapshot` — binary blobs would balloon every version snapshot, and publish/rollback has never moved a PNG — so there is no draft to stage an upload into and no `versionId` to pass. The practical consequences: an uploaded PNG is visible to players as soon as the next page load fetches it, deleting art the game still expects immediately drops that entity to its fallback or placeholder, and rolling a content version back does **not** roll artwork back. `get_asset_coverage` is the companion that makes this safe to drive — check what's actually missing before uploading anything.
+- Asset writes are still gated by the same bearer token as everything else, and by `AssetStore`'s own validation: ids must match `ASSET_ID_PATTERN` and resolve inside their kind's folder (path traversal is rejected twice over), bytes must carry a real PNG signature + `IHDR` chunk (the client-declared mime type is never trusted), and square-shaped kinds reject non-square images. Max 512 KB decoded.

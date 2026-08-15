@@ -12,12 +12,14 @@ type ContentStoreInstance = InstanceType<ContentStoreCtor>;
 type VersionStoreCtor = typeof import('../src/game/VersionStore.js').VersionStore;
 type VersionStoreInstance = InstanceType<VersionStoreCtor>;
 type DraftEditorCtor = typeof import('../src/game/DraftEditor.js').DraftEditor;
+type AssetStoreCtor = typeof import('../src/game/AssetStore.js').AssetStore;
 type McpToolDeps = import('../src/mcp/tools/McpToolDeps.js').McpToolDeps;
 type DraftContentType = import('../src/game/DraftEditor.js').DraftContentType;
 
 let ContentStore: ContentStoreCtor;
 let VersionStore: VersionStoreCtor;
 let DraftEditor: DraftEditorCtor;
+let AssetStore: AssetStoreCtor;
 let validateDraft: typeof import('../src/mcp/tools/validateTools.js').validateDraft;
 let getOverview: typeof import('../src/mcp/tools/readTools.js').getOverview;
 let getContentSchema: typeof import('../src/mcp/tools/readTools.js').getContentSchema;
@@ -40,6 +42,7 @@ beforeAll(async () => {
   ({ ContentStore } = await import('../src/game/ContentStore.js'));
   ({ VersionStore } = await import('../src/game/VersionStore.js'));
   ({ DraftEditor } = await import('../src/game/DraftEditor.js'));
+  ({ AssetStore } = await import('../src/game/AssetStore.js'));
   ({ validateDraft } = await import('../src/mcp/tools/validateTools.js'));
   ({ getOverview, getContentSchema } = await import('../src/mcp/tools/readTools.js'));
   ({ createDraft, saveNote } = await import('../src/mcp/tools/notesTools.js'));
@@ -64,6 +67,7 @@ async function setupDeps(): Promise<{ deps: McpToolDeps; contentStore: ContentSt
     contentStore: () => contentStore,
     versionStore: () => versionStore,
     draftEditor,
+    assetStore: new AssetStore(),
     tokenLabel: 'test-label',
   };
   return { deps, contentStore, versionStore };
