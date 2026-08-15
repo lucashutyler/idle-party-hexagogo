@@ -1,4 +1,4 @@
-import type { AccountData, ContentData, ContentVersion, OverviewData } from './types';
+import type { AccountData, AdminMe, ContentData, ContentVersion, OverviewData } from './types';
 
 /**
  * Shared state and actions exposed to tabs. The AdminApp owns the data;
@@ -6,6 +6,8 @@ import type { AccountData, ContentData, ContentVersion, OverviewData } from './t
  */
 export interface AdminContext {
   // ---- Read state ----
+  /** The signed-in admin. Tabs gate super-admin-only controls on `me.isSuperAdmin`. */
+  readonly me: AdminMe | null;
   readonly overview: OverviewData | null;
   readonly accounts: AccountData[];
   readonly versions: ContentVersion[];

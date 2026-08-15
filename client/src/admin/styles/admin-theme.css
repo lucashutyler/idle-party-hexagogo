@@ -1320,6 +1320,30 @@ body.admin-modal-open { overflow: hidden; }
   .admin-status-bar { font-size: 0.9em; }
 }
 
+/* ---- API Tokens page ---- */
+.token-secret-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--admin-gap-tight);
+  margin-bottom: var(--admin-gap-loose);
+}
+.token-secret-input {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.token-config-block {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--admin-pad-cell-y) var(--admin-pad-cell-x);
+  background: var(--admin-bg-2);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+  font-size: 0.85em;
+  white-space: pre;
+}
+.admin-table code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
 @media (max-width: 600px) {
   .admin-status-bar select { max-width: 140px; }
   .admin-stats { grid-template-columns: repeat(2, 1fr); }

@@ -6,6 +6,11 @@ const sharedComponents = {
       name: 'connect.sid',
       description: 'Express session cookie',
     },
+    apiToken: {
+      type: 'http',
+      scheme: 'bearer',
+      description: 'An API token generated from the World Manager\'s API Tokens tab. Sent as `Authorization: Bearer ipr_...`. Resolved to its owner on every request, so it stops working the moment that account loses its admin role. Token- and role-management routes deliberately reject it and require a browser session.',
+    },
   },
   schemas: {
     ItemDefinition: {
@@ -145,6 +150,32 @@ const sharedComponents = {
         },
       },
     },
+    AdminMe: {
+      type: 'object',
+      description: 'The admin behind the current request, however they authenticated.',
+      required: ['email', 'role', 'isSuperAdmin', 'via'],
+      properties: {
+        email: { type: 'string', example: 'owner@example.com' },
+        username: { type: 'string', nullable: true, example: 'Lucas' },
+        role: { type: 'string', enum: ['admin', 'superadmin'] },
+        isSuperAdmin: { type: 'boolean', description: 'Super admins may additionally grant roles' },
+        via: { type: 'string', enum: ['session', 'token'], description: 'How this request authenticated' },
+      },
+    },
+    ApiToken: {
+      type: 'object',
+      description: 'A stored API token, minus its secret — only the sha256 hash is kept server-side.',
+      required: ['id', 'label', 'prefix', 'createdAt', 'expiresAt', 'lastUsedAt', 'expired'],
+      properties: {
+        id: { type: 'string', example: '6c84fb90-12c4-11e1-840d-7b25c5ee775a' },
+        label: { type: 'string', example: 'laptop MCP' },
+        prefix: { type: 'string', description: 'Leading characters of the secret, for identifying a row', example: 'ipr_1a2b3c4d' },
+        createdAt: { type: 'string', description: 'ISO timestamp' },
+        expiresAt: { type: 'string', nullable: true, description: 'ISO timestamp, or null for a token that never expires' },
+        lastUsedAt: { type: 'string', nullable: true, description: 'ISO timestamp of the last authenticated request, flushed to disk about once a minute' },
+        expired: { type: 'boolean' },
+      },
+    },
     AssetInfo: {
       type: 'object',
       description: 'A stored PNG on disk. Dimensions are read from the file\'s own IHDR header, not from the upload metadata.',
@@ -222,12 +253,13 @@ export const adminSwaggerSpec = {
   info: {
     title: 'Idle Party RPG — Admin API',
     version: '0.1.0',
-    description: 'Admin endpoints for content management, versioning, and player administration. Requires admin session cookie.',
+    description: 'Admin endpoints for content management, versioning, and player administration. Authenticate with either an admin session cookie or an API token generated in the World Manager (`Authorization: Bearer ipr_...`). Routes that manage roles or API tokens require a session and reject bearer tokens — those carry a narrower per-route `security` block.',
   },
   servers: [{ url: '/' }],
   components: sharedComponents,
-  security: [{ sessionCookie: [] }],
+  security: [{ sessionCookie: [] }, { apiToken: [] }],
   tags: [
+    { name: 'Access', description: 'Admin roles and API tokens. Roles come from ADMIN_EMAILS (always super admin) or a super admin\'s grant; API tokens are per-user bearer credentials for this API and the MCP server.' },
     { name: 'Overview', description: 'Server stats and content' },
     { name: 'Items', description: 'Item definition CRUD' },
     { name: 'Monsters', description: 'Monster definition CRUD' },
@@ -261,10 +293,114 @@ export const adminSwaggerSpec = {
         },
       },
     },
+    // ── Access ──
+    '/api/admin/me': {
+      get: {
+        tags: ['Access'],
+        summary: 'The calling admin\'s identity and role',
+        description: 'Used by the World Manager to decide which super-admin-only controls to render.',
+        responses: {
+          200: {
+            description: 'The caller',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminMe' } } },
+          },
+        },
+      },
+    },
+    '/api/admin/accounts/{email}/role': {
+      put: {
+        tags: ['Access'],
+        summary: 'Grant or clear an account\'s admin role',
+        description: 'Super admins only, and session-only — an API token cannot escalate its owner\'s privileges. Accounts listed in ADMIN_EMAILS are super admins by configuration and are rejected here, as is changing your own role.',
+        security: [{ sessionCookie: [] }],
+        parameters: [
+          { name: 'email', in: 'path', required: true, schema: { type: 'string' }, description: 'URL-encoded account email' },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['role'],
+            properties: { role: { type: 'string', nullable: true, enum: ['admin', 'superadmin', null], description: 'null removes admin access' } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Role updated' },
+          400: { description: 'Invalid role, an ADMIN_EMAILS account, or your own account' },
+          403: { description: 'Not a super admin, or authenticated with an API token' },
+          404: { description: 'No such account' },
+        },
+      },
+    },
+    '/api/admin/api-tokens': {
+      get: {
+        tags: ['Access'],
+        summary: 'Your own API tokens',
+        description: 'Scoped to the caller — there is no way to list anyone else\'s tokens. Secrets are never returned.',
+        security: [{ sessionCookie: [] }],
+        responses: {
+          200: {
+            description: 'Your tokens',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: { tokens: { type: 'array', items: { $ref: '#/components/schemas/ApiToken' } } },
+            } } },
+          },
+          403: { description: 'Authenticated with an API token rather than a session' },
+        },
+      },
+      post: {
+        tags: ['Access'],
+        summary: 'Generate an API token for yourself',
+        description: 'The plaintext secret is returned exactly once, in this response, and is stored only as a sha256 hash afterwards.',
+        security: [{ sessionCookie: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['label'],
+            properties: {
+              label: { type: 'string', example: 'laptop MCP', description: 'Truncated to 60 characters' },
+              expiresAt: { type: 'string', nullable: true, example: '2026-12-01', description: 'YYYY-MM-DD (through the end of that day) or a full ISO timestamp. Omit or null for a token that never expires.' },
+            },
+          } } },
+        },
+        responses: {
+          200: {
+            description: 'Token created — copy the secret now',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                token: { type: 'string', description: 'The plaintext secret. Shown once and unrecoverable.', example: 'ipr_1a2b3c...' },
+                created: { $ref: '#/components/schemas/ApiToken' },
+                tokens: { type: 'array', items: { $ref: '#/components/schemas/ApiToken' } },
+              },
+            } } },
+          },
+          400: { description: 'Missing label, or an invalid/past expiry' },
+          403: { description: 'Authenticated with an API token rather than a session' },
+        },
+      },
+    },
+    '/api/admin/api-tokens/{id}': {
+      delete: {
+        tags: ['Access'],
+        summary: 'Revoke one of your own API tokens',
+        description: 'Deletes the token outright; anything using it stops working immediately. Scoped to the caller, so another admin\'s token id resolves as not found.',
+        security: [{ sessionCookie: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'Revoked, returns your remaining tokens' },
+          403: { description: 'Authenticated with an API token rather than a session' },
+          404: { description: 'No such token owned by you' },
+        },
+      },
+    },
     '/api/admin/accounts': {
       get: {
         tags: ['Overview'],
         summary: 'All accounts with online status',
+        description: 'Each account carries its granted `role` (null for non-admins) and `roleLocked` (true when the role comes from ADMIN_EMAILS).',
         responses: { 200: { description: 'Account list' } },
       },
     },

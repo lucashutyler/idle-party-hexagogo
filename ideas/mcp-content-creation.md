@@ -51,6 +51,8 @@ The code lives in `server/src/mcp/` (`McpEndpoint.ts`, `tools/`), mirroring the 
 
 ### Auth: bearer token, separate from session auth
 
+> **Superseded.** `MCP_TOKENS` shipped as described below but was replaced by per-admin API tokens generated in the World Manager (`data/api-tokens.json`). See `docs/architecture/auth.md` → "API tokens" and `docs/architecture/mcp.md` → "Auth" for what actually runs today.
+
 - New env var `MCP_TOKENS` — comma-separated list of accepted bearer tokens, each optionally labeled: `MCP_TOKENS=lucas:abc123,claude-desktop:def456` (plain unlabeled tokens also accepted; label defaults to `mcp`). The label becomes the `author` on notes and any future audit log, and one token can be revoked without rotating everyone.
 - `mcpAuthMiddleware` checks `Authorization: Bearer <token>` with a constant-time compare. No session cookies on `/mcp` — the MCP surface is token-only, and tokens grant **content-tool access only** (nothing player-facing, no account admin, no publish/deploy).
 - If `MCP_TOKENS` is unset, `/mcp` returns 404 — the feature is opt-in per deployment.

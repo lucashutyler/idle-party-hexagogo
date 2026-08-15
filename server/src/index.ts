@@ -20,6 +20,7 @@ import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { InviteListStore } from './auth/InviteListStore.js';
+import { ApiTokenStore } from './auth/ApiTokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { createAdminRoutes } from './admin/adminRoutes.js';
 import { createMcpRouter } from './mcp/McpEndpoint.js';
@@ -42,6 +43,7 @@ const sessionStore = new JsonSessionStore('data/sessions');
 const accountStore = new AccountStore();
 const tokenStore = new TokenStore();
 const inviteListStore = new InviteListStore();
+const apiTokenStore = new ApiTokenStore();
 const assetStore = new AssetStore();
 const gameLoop = new GameLoop(store);
 // playerManager is set during init(), use gameLoop.playerManager after init
@@ -96,9 +98,12 @@ app.use((req, res, next) => {
 
 app.use(sessionMiddleware);
 
+// --- Admin auth (session cookie or API token, both resolved to an admin role) ---
+import { createAdminAuth } from './admin/adminMiddleware.js';
+const adminAuth = createAdminAuth({ accountStore, apiTokenStore });
+
 // --- Swagger ---
-import { adminMiddleware } from './admin/adminMiddleware.js';
-app.use('/api-docs/admin', adminMiddleware, swaggerUi.serveFiles(adminSwaggerSpec), swaggerUi.setup(adminSwaggerSpec));
+app.use('/api-docs/admin', adminAuth.requireAdmin, swaggerUi.serveFiles(adminSwaggerSpec), swaggerUi.setup(adminSwaggerSpec));
 app.use('/api-docs/game', (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (!req.session?.username) { res.status(401).json({ error: 'Not authenticated' }); return; }
   next();
@@ -166,6 +171,8 @@ app.use('/api/admin', createAdminRoutes({
   playerManager: () => playerManager,
   accountStore,
   inviteListStore,
+  apiTokenStore,
+  adminAuth,
   contentStore: () => gameLoop.contentStore,
   versionStore: () => gameLoop.versionStore,
   assetStore,
@@ -177,6 +184,7 @@ app.use('/mcp', createMcpRouter({
   contentStore: () => gameLoop.contentStore,
   versionStore: () => gameLoop.versionStore,
   assetStore,
+  adminAuth,
 }));
 
 app.get('/health', (_req, res) => {
@@ -1743,8 +1751,10 @@ async function start() {
   console.log(`[Startup] AccountStore loaded in ${(performance.now() - t0).toFixed(1)}ms`);
 
   await inviteListStore.load();
+  await apiTokenStore.load();
 
   tokenStore.start();
+  apiTokenStore.startFlush();
   sessionStore.startReap();
 
   const t1 = performance.now();
@@ -1761,6 +1771,7 @@ async function start() {
 async function shutdown(signal: string) {
   console.log(`\n${signal} received — shutting down...`);
   tokenStore.stop();
+  await apiTokenStore.stopFlush();
   sessionStore.stopReap();
   await gameLoop.shutdown();
   process.exit(0);

@@ -3,7 +3,7 @@ import type { AccountStore } from './AccountStore.js';
 import type { TokenStore } from './TokenStore.js';
 import type { InviteListStore } from './InviteListStore.js';
 import { sendMagicLinkEmail } from './EmailService.js';
-import { parseEmailListEnv } from './EmailListParser.js';
+import { grantedAdminRole } from './AdminRoles.js';
 
 const isProd = process.env.NODE_ENV === 'production';
 const isInviteOnly = process.env.INVITE_ONLY === 'true';
@@ -37,10 +37,11 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore, on
       return;
     }
 
-    // Beta gate: only admins and explicitly invited emails may sign in.
+    // Beta gate: only admins (env super admins or granted roles) and invited emails may sign in.
+    // Uses the granted role, not the effective one — a suspended admin should fall through to the
+    // deactivated branch below and get the appeal flow, not a generic "invite-only" rejection.
     if (isInviteOnly) {
-      const adminEmails = parseEmailListEnv(process.env.ADMIN_EMAILS);
-      if (!adminEmails.has(trimmed) && !inviteListStore.has(trimmed)) {
+      if (!grantedAdminRole(trimmed, accountStore) && !inviteListStore.has(trimmed)) {
         res.json({ error: 'This server is invite-only right now. Ask an admin to add your email to the invite list.' });
         return;
       }

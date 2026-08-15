@@ -68,7 +68,7 @@ async function setupDeps(): Promise<{ deps: McpToolDeps; contentStore: ContentSt
     versionStore: () => versionStore,
     draftEditor,
     assetStore: new AssetStore(),
-    tokenLabel: 'test-label',
+    callerLabel: 'test-label',
   };
   return { deps, contentStore, versionStore };
 }

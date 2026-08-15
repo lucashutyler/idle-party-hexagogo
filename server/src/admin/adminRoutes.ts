@@ -8,7 +8,10 @@ import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
 import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID, isManagedAssetKind, isDeferredAssetKind } from '@idle-party-rpg/shared';
 import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType } from '@idle-party-rpg/shared';
-import { adminMiddleware } from './adminMiddleware.js';
+import type { AdminAuth } from './adminMiddleware.js';
+import type { ApiTokenStore, ApiTokenRecord } from '../auth/ApiTokenStore.js';
+import { isApiTokenExpired } from '../auth/ApiTokenStore.js';
+import { grantedAdminRole, isAdminRole, isEnvSuperAdmin } from '../auth/AdminRoles.js';
 import { DraftEditor, toRecord } from '../game/DraftEditor.js';
 import { AssetValidationError, MAX_ASSET_BYTES } from '../game/AssetStore.js';
 import type { AssetStore } from '../game/AssetStore.js';
@@ -20,6 +23,8 @@ interface AdminRouteOptions {
   playerManager: () => PlayerManager;
   accountStore: AccountStore;
   inviteListStore: InviteListStore;
+  apiTokenStore: ApiTokenStore;
+  adminAuth: AdminAuth;
   contentStore: () => ContentStore;
   versionStore: () => VersionStore;
   assetStore: AssetStore;
@@ -27,9 +32,38 @@ interface AdminRouteOptions {
   deployVersion: (versionId: string) => Promise<{ success: boolean; error?: string; relocated?: number }>;
 }
 
-export function createAdminRoutes({ playerManager: getPlayerManager, accountStore, inviteListStore, contentStore: getContentStore, versionStore: getVersionStore, assetStore, rebuildGrid, deployVersion }: AdminRouteOptions): Router {
+/** An API token as the dashboard sees it — everything except the secret, which only exists once. */
+function toPublicToken(record: ApiTokenRecord) {
+  return {
+    id: record.id,
+    label: record.label,
+    prefix: record.prefix,
+    createdAt: record.createdAt,
+    expiresAt: record.expiresAt,
+    lastUsedAt: record.lastUsedAt,
+    expired: isApiTokenExpired(record),
+  };
+}
+
+/**
+ * Normalizes an expiry from the dashboard's date picker (`YYYY-MM-DD`, taken to mean "through the
+ * end of that day") or a full ISO timestamp. Returns an error message for anything unusable.
+ */
+function parseExpiry(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'Expiry must be a date string' };
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, value: null };
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(trimmed);
+  const parsed = Date.parse(dateOnly ? `${trimmed}T23:59:59.999Z` : trimmed);
+  if (Number.isNaN(parsed)) return { ok: false, error: 'Invalid expiry date' };
+  if (parsed <= Date.now()) return { ok: false, error: 'Expiry must be in the future' };
+  return { ok: true, value: new Date(parsed).toISOString() };
+}
+
+export function createAdminRoutes({ playerManager: getPlayerManager, accountStore, inviteListStore, apiTokenStore, adminAuth, contentStore: getContentStore, versionStore: getVersionStore, assetStore, rebuildGrid, deployVersion }: AdminRouteOptions): Router {
   const router = Router();
-  router.use(adminMiddleware);
+  router.use(adminAuth.requireAdmin);
   const draftEditor = new DraftEditor(getVersionStore(), getContentStore);
 
   /** Shared body of the deprecated artwork upload aliases — validation lives in the store. */
@@ -50,6 +84,86 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         .json({ error: err instanceof Error ? err.message : 'Failed to save artwork.' });
     }
   }
+
+  /** Who the dashboard is talking to, and what it's allowed to show them. */
+  router.get('/me', (req, res) => {
+    const principal = req.adminPrincipal!;
+    res.json({
+      email: principal.email,
+      username: accountStore.findByEmail(principal.email)?.username ?? null,
+      role: principal.role,
+      isSuperAdmin: principal.role === 'superadmin',
+      via: principal.via,
+    });
+  });
+
+  /**
+   * Grant or clear an account's admin role. Super admins only, and only from a browser session —
+   * an API token must never be able to escalate its own owner's privileges.
+   */
+  router.put('/accounts/:email/role', adminAuth.requireSuperAdmin, adminAuth.requireSession, async (req, res) => {
+    // req.params is already percent-decoded by Express — decoding again throws URIError on an
+    // email containing a literal '%', which an async handler turns into a process-killing rejection.
+    const email = req.params.email.trim().toLowerCase();
+    const { role } = req.body ?? {};
+    if (role !== null && !isAdminRole(role)) {
+      res.status(400).json({ error: 'Role must be "admin", "superadmin", or null' });
+      return;
+    }
+    const account = accountStore.findByEmail(email);
+    if (!account) {
+      res.status(404).json({ error: `Account for "${email}" not found` });
+      return;
+    }
+    if (isEnvSuperAdmin(email)) {
+      res.status(400).json({ error: 'This account is a super admin via ADMIN_EMAILS and can only be changed in the server environment.' });
+      return;
+    }
+    if (email === req.adminPrincipal!.email) {
+      res.status(400).json({ error: "You can't change your own role." });
+      return;
+    }
+    await accountStore.setRole(email, role);
+    console.log(`[Admin] ${req.adminPrincipal!.label} set role "${role ?? 'none'}" for "${email}"`);
+    res.json({ success: true, email, role });
+  });
+
+  /**
+   * API tokens — bearer credentials for the MCP server and the REST admin API. Always scoped to
+   * the caller: an admin can only ever see, create, or revoke their own. Session-only for the same
+   * reason as role changes — a leaked token can't mint itself a longer-lived replacement.
+   */
+  router.get('/api-tokens', adminAuth.requireSession, (req, res) => {
+    res.json({ tokens: apiTokenStore.listForEmail(req.adminPrincipal!.email).map(toPublicToken) });
+  });
+
+  router.post('/api-tokens', adminAuth.requireSession, async (req, res) => {
+    const email = req.adminPrincipal!.email;
+    const { label } = req.body ?? {};
+    if (!label || typeof label !== 'string' || !label.trim()) {
+      res.status(400).json({ error: 'A label is required' });
+      return;
+    }
+    const trimmedLabel = label.trim().slice(0, 60);
+    const expiry = parseExpiry(req.body?.expiresAt);
+    if (!expiry.ok) {
+      res.status(400).json({ error: expiry.error });
+      return;
+    }
+    const { record, token } = await apiTokenStore.create(email, trimmedLabel, expiry.value);
+    // The plaintext secret is returned exactly once — it is not recoverable afterwards.
+    res.json({ success: true, token, created: toPublicToken(record), tokens: apiTokenStore.listForEmail(email).map(toPublicToken) });
+  });
+
+  router.delete('/api-tokens/:id', adminAuth.requireSession, async (req, res) => {
+    const email = req.adminPrincipal!.email;
+    const revoked = await apiTokenStore.revoke(req.params.id, email);
+    if (!revoked) {
+      res.status(404).json({ error: 'Token not found' });
+      return;
+    }
+    res.json({ success: true, tokens: apiTokenStore.listForEmail(email).map(toPublicToken) });
+  });
 
   router.get('/overview', (_req, res) => {
     const pm = getPlayerManager();
@@ -81,6 +195,10 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         hasReactivationRequest: !!a.reactivationRequest,
         reactivationRequest: a.reactivationRequest ?? null,
         sessionHistory: a.sessionHistory ?? [],
+        // The granted role, not the effective one — a suspended admin still shows as an admin
+        // here, since reactivating them restores it. Authorization uses resolveAdminRole().
+        role: grantedAdminRole(a.email, accountStore),
+        roleLocked: isEnvSuperAdmin(a.email),
       };
     });
     res.json({ accounts });
@@ -103,7 +221,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     res.json({ duplicates });
   });
 
-  /** Invite-only beta gate: INVITE_ONLY env var + admin-managed allow list (ADMIN_EMAILS is always allowed). */
+  /** Invite-only beta gate: INVITE_ONLY env var + admin-managed allow list (admins are always allowed). */
   router.get('/invite-list', (_req, res) => {
     res.json({
       inviteOnly: process.env.INVITE_ONLY === 'true',
@@ -127,7 +245,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   });
 
   router.delete('/invite-list/:email', async (req, res) => {
-    const email = decodeURIComponent(req.params.email).trim().toLowerCase();
+    const email = req.params.email.trim().toLowerCase();
     await inviteListStore.remove(email);
     res.json({ success: true, emails: inviteListStore.getAll() });
   });
