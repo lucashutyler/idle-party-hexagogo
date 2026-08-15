@@ -118,6 +118,102 @@ const sharedComponents = {
         },
       },
     },
+    AssetKindInfo: {
+      type: 'object',
+      description: 'One row of the shared ASSET_KIND_INFO registry — what a kind is, where it lives, and how it is keyed.',
+      required: ['kind', 'label', 'description', 'mount', 'dir', 'idFormat', 'shape', 'urlTemplate', 'fallbacks'],
+      properties: {
+        kind: { type: 'string', example: 'monster' },
+        label: { type: 'string', example: 'Monster' },
+        description: { type: 'string', example: 'Monster portraits shown on the combat screen.' },
+        mount: { type: 'string', description: 'Public URL prefix the client fetches from', example: '/monster-artwork' },
+        dir: { type: 'string', description: 'Folder under the process working directory that holds the PNGs', example: 'data/monster-artwork' },
+        idFormat: { type: 'string', description: 'Human description of the id format', example: 'MonsterDefinition.id' },
+        shape: { type: 'string', enum: ['square', 'any'], description: "'square' rejects non-square uploads" },
+        urlTemplate: { type: 'string', example: '/monster-artwork/{id}.png' },
+        fallbacks: {
+          type: 'array',
+          description: 'Ordered chain the client walks when an id has no art of its own. Empty for most kinds.',
+          items: {
+            type: 'object',
+            required: ['kind', 'idFrom'],
+            properties: {
+              kind: { type: 'string', description: 'Folder searched for the fallback' },
+              idFrom: { type: 'string', enum: ['zoneId', 'tileType', 'nameSlug'], description: 'Which id is looked up there' },
+            },
+          },
+        },
+      },
+    },
+    AssetInfo: {
+      type: 'object',
+      description: 'A stored PNG on disk. Dimensions are read from the file\'s own IHDR header, not from the upload metadata.',
+      required: ['id', 'kind', 'url', 'bytes', 'width', 'height', 'updatedAt'],
+      properties: {
+        id: { type: 'string', example: 'crystal_golem' },
+        kind: { type: 'string', example: 'monster' },
+        url: { type: 'string', description: 'Public URL including a cache-busting version stamp', example: '/monster-artwork/crystal_golem.png?v=1754000000000' },
+        bytes: { type: 'number', example: 48211 },
+        width: { type: 'number', example: 512 },
+        height: { type: 'number', example: 512 },
+        updatedAt: { type: 'string', description: "ISO timestamp of the file's last write" },
+      },
+    },
+    AssetCoverageEntry: {
+      type: 'object',
+      required: ['id', 'label', 'hasOwnAsset', 'resolvedVia'],
+      properties: {
+        id: { type: 'string', example: 'crystal_golem' },
+        label: { type: 'string', description: 'Display name of the entity that wants this art', example: 'Crystal Golem' },
+        hasOwnAsset: { type: 'boolean', description: 'Whether a PNG exists under this exact id' },
+        resolvedVia: { type: 'string', description: "What the player actually sees: 'own', 'placeholder', 'external' (the entity carries its own artwork URL), or 'fallback:{kind}'", example: 'fallback:zone' },
+      },
+    },
+    AssetKindCoverage: {
+      type: 'object',
+      required: ['kind', 'label', 'description', 'dir', 'mount', 'idFormat', 'required', 'present', 'missing', 'coveredByFallback', 'overrides', 'orphans'],
+      properties: {
+        kind: { type: 'string', example: 'monster' },
+        label: { type: 'string', example: 'Monster' },
+        description: { type: 'string' },
+        dir: { type: 'string', example: 'data/monster-artwork' },
+        mount: { type: 'string', example: '/monster-artwork' },
+        idFormat: { type: 'string' },
+        required: { type: 'number', description: 'How many ids of this kind are expected to have art' },
+        present: { type: 'number', description: 'Required ids that have art of their own' },
+        missing: { type: 'number', description: 'Required ids with no art of their own' },
+        coveredByFallback: { type: 'number', description: 'Of the missing, how many still render real art through a fallback' },
+        overrides: { type: 'number', description: 'Optional per-entity override files present (per-room art and the like)' },
+        orphans: { type: 'array', items: { type: 'string' }, description: 'Files matching no required id and no recognized override shape' },
+        entries: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/AssetCoverageEntry' },
+          description: 'Per-id detail. Omitted unless includeEntries=true — some kinds have thousands.',
+        },
+      },
+    },
+    AssetCoverageReport: {
+      type: 'object',
+      required: ['generatedAt', 'summary', 'kinds'],
+      properties: {
+        generatedAt: { type: 'string', description: 'ISO timestamp' },
+        summary: {
+          type: 'object',
+          description: 'Totals across every kind in the report.',
+          required: ['kinds', 'required', 'present', 'missing', 'coveredByFallback', 'overrides', 'orphans'],
+          properties: {
+            kinds: { type: 'number' },
+            required: { type: 'number' },
+            present: { type: 'number' },
+            missing: { type: 'number' },
+            coveredByFallback: { type: 'number' },
+            overrides: { type: 'number' },
+            orphans: { type: 'number', description: 'Orphan count, where each kind reports the filenames' },
+          },
+        },
+        kinds: { type: 'array', items: { $ref: '#/components/schemas/AssetKindCoverage' } },
+      },
+    },
   },
 };
 
@@ -138,6 +234,7 @@ export const adminSwaggerSpec = {
     { name: 'Zones', description: 'Zone definition CRUD' },
     { name: 'Skills', description: 'Skill definition CRUD and per-class slot schedules' },
     { name: 'World', description: 'World map tile CRUD' },
+    { name: 'Assets', description: 'Game imagery — kind registry, coverage audit, and PNG upload/delete. The `set` and `shop` kinds exist in the game but are not managed here yet; GET /api/admin/assets lists them under `deferred` with the reason. Assets are live and unversioned: they are not part of ContentSnapshot, so uploads bypass the draft/publish/deploy flow and take effect immediately.' },
     { name: 'Versions', description: 'Content versioning' },
     { name: 'Players', description: 'Player management' },
   ],
@@ -511,6 +608,244 @@ export const adminSwaggerSpec = {
         responses: {
           200: { description: 'Map deleted' },
           400: { description: 'Default map, non-empty map, or inbound transition exists' },
+        },
+      },
+    },
+
+    // ── Assets ──
+    '/api/admin/assets': {
+      get: {
+        tags: ['Assets'],
+        summary: 'Describe every asset kind',
+        description: 'The shared ASSET_KIND_INFO registry — what kinds exist, where they are served from, how they are keyed, and the upload size ceiling. Clients should read kinds from here rather than hard-coding them. Kinds the game has but this API does not manage yet come back under `deferred` instead of `kinds`.',
+        responses: {
+          200: {
+            description: 'Kind registry',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              required: ['kinds', 'deferred', 'maxBytes'],
+              properties: {
+                kinds: {
+                  type: 'object',
+                  description: 'Managed kinds, keyed by asset kind. Only these are valid on the routes below.',
+                  additionalProperties: { $ref: '#/components/schemas/AssetKindInfo' },
+                },
+                deferred: {
+                  type: 'array',
+                  description: 'Kinds that exist in the game and are still served statically, but are not managed through this API yet. Sending one to any /assets route returns 400.',
+                  items: {
+                    type: 'object',
+                    required: ['kind', 'label', 'reason'],
+                    properties: {
+                      kind: { type: 'string', example: 'shop' },
+                      label: { type: 'string', example: 'Shop' },
+                      reason: { type: 'string', description: 'Why the kind is held back' },
+                    },
+                  },
+                },
+                maxBytes: { type: 'number', description: 'Maximum upload size in bytes', example: 524288 },
+              },
+            } } },
+          },
+        },
+      },
+    },
+    '/api/admin/assets/coverage': {
+      get: {
+        tags: ['Assets'],
+        summary: 'Audit which content is missing artwork',
+        description: 'Joins every asset folder against the content expected to have art in it. Accounts for the fallback chains the client actually walks, so an id with no art of its own can still report that it renders real art via another kind.',
+        parameters: [
+          { name: 'kind', in: 'query', required: false, schema: { type: 'string', enum: ['item', 'monster', 'zone', 'tile', 'tile-type', 'parchment', 'class', 'npc', 'logo', 'combat-bg', 'room-bg', 'class-icon', 'slot-icon', 'nav-icon'] }, description: 'Restrict the report to one kind. Omit for all kinds.' },
+          { name: 'includeEntries', in: 'query', required: false, schema: { type: 'string', enum: ['true'] }, description: "Set to 'true' to include the per-id entries array on each kind" },
+          { name: 'missingOnly', in: 'query', required: false, schema: { type: 'string', enum: ['true'] }, description: "With includeEntries, set to 'true' to list only ids that have no art of their own" },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'number' }, description: 'Cap on entries per kind. Defaults to 500.' },
+        ],
+        responses: {
+          200: {
+            description: 'Coverage report',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AssetCoverageReport' } } },
+          },
+          400: { description: 'Unknown kind — the message lists the valid kinds' },
+          500: { description: 'Failed to compute coverage' },
+        },
+      },
+    },
+    '/api/admin/assets/{kind}': {
+      get: {
+        tags: ['Assets'],
+        summary: 'List every stored asset of one kind',
+        description: 'Reads the kind\'s folder and returns full metadata per file, sorted by id. A kind with no folder yet simply returns an empty list.',
+        parameters: [
+          { name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['item', 'monster', 'zone', 'tile', 'tile-type', 'parchment', 'class', 'npc', 'logo', 'combat-bg', 'room-bg', 'class-icon', 'slot-icon', 'nav-icon'] } },
+        ],
+        responses: {
+          200: {
+            description: 'Assets for the kind',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              required: ['kind', 'count', 'assets'],
+              properties: {
+                kind: { type: 'string', example: 'monster' },
+                count: { type: 'number' },
+                assets: { type: 'array', items: { $ref: '#/components/schemas/AssetInfo' } },
+              },
+            } } },
+          },
+          400: { description: 'Unknown kind — the message lists the valid kinds' },
+          500: { description: 'Failed to read the kind\'s folder' },
+        },
+      },
+    },
+    '/api/admin/assets/{kind}/{id}': {
+      get: {
+        tags: ['Assets'],
+        summary: 'Metadata for one asset',
+        parameters: [
+          { name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['item', 'monster', 'zone', 'tile', 'tile-type', 'parchment', 'class', 'npc', 'logo', 'combat-bg', 'room-bg', 'class-icon', 'slot-icon', 'nav-icon'] } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Format varies by kind — see idFormat on GET /api/admin/assets' },
+        ],
+        responses: {
+          200: {
+            description: 'Asset metadata',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              required: ['asset'],
+              properties: { asset: { $ref: '#/components/schemas/AssetInfo' } },
+            } } },
+          },
+          400: { description: 'Unknown kind' },
+          404: { description: 'No artwork stored for this id (also returned for an unreadable id)' },
+          500: { description: 'Failed to stat the asset' },
+        },
+      },
+      post: {
+        tags: ['Assets'],
+        summary: 'Upload or replace a PNG',
+        description: 'Multipart upload under the field name `artwork`. The bytes must be a real PNG — the signature and IHDR chunk are verified and the dimensions read from the file itself, never from the client-declared mime type. Kinds with shape `square` reject non-square images. Writes take effect on the live game immediately; artwork is not versioned content.',
+        parameters: [
+          { name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['item', 'monster', 'zone', 'tile', 'tile-type', 'parchment', 'class', 'npc', 'logo', 'combat-bg', 'room-bg', 'class-icon', 'slot-icon', 'nav-icon'] } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Letters, numbers, spaces, dots, dashes, and underscores only; no `..` runs' },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'multipart/form-data': { schema: {
+            type: 'object',
+            required: ['artwork'],
+            properties: { artwork: { type: 'string', format: 'binary', description: 'PNG file, 512 KB max' } },
+          } } },
+        },
+        responses: {
+          200: {
+            description: 'Asset written, returns its metadata',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              required: ['success', 'asset'],
+              properties: { success: { type: 'boolean', example: true }, asset: { $ref: '#/components/schemas/AssetInfo' } },
+            } } },
+          },
+          400: { description: 'Unknown kind, no file uploaded, invalid asset id, non-PNG bytes, non-square image for a square kind, or over the 512 KB limit' },
+          500: { description: 'Failed to write the file' },
+        },
+      },
+      delete: {
+        tags: ['Assets'],
+        summary: 'Delete an asset',
+        description: 'Idempotent — deleting art that is not there still succeeds, with `removed: false`.',
+        parameters: [
+          { name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['item', 'monster', 'zone', 'tile', 'tile-type', 'parchment', 'class', 'npc', 'logo', 'combat-bg', 'room-bg', 'class-icon', 'slot-icon', 'nav-icon'] } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: {
+            description: 'Delete completed',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              required: ['success', 'removed'],
+              properties: {
+                success: { type: 'boolean', example: true },
+                removed: { type: 'boolean', description: 'Whether a file was actually removed' },
+              },
+            } } },
+          },
+          400: { description: 'Unknown kind or invalid asset id' },
+          500: { description: 'Failed to remove the file' },
+        },
+      },
+    },
+    '/api/admin/artwork/{kind}/{id}': {
+      post: {
+        tags: ['Assets'],
+        deprecated: true,
+        summary: 'Upload artwork (deprecated)',
+        description: 'Deprecated alias kept so an older client build does not break mid-deploy. Use POST /api/admin/assets/{kind}/{id}, which returns the stored asset metadata and reports oversized uploads as a JSON 400.',
+        parameters: [
+          { name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['item', 'monster', 'zone', 'tile', 'tile-type', 'parchment', 'class', 'npc', 'logo', 'combat-bg', 'room-bg', 'class-icon', 'slot-icon', 'nav-icon'] } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'multipart/form-data': { schema: {
+            type: 'object',
+            required: ['artwork'],
+            properties: { artwork: { type: 'string', format: 'binary', description: 'PNG file, 512 KB max' } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Artwork saved, returns { success: true } only' },
+          400: { description: 'Unknown kind, no file uploaded, invalid asset id, non-PNG bytes, or non-square image for a square kind' },
+          500: { description: 'Failed to save artwork' },
+        },
+      },
+      delete: {
+        tags: ['Assets'],
+        deprecated: true,
+        summary: 'Delete artwork (deprecated)',
+        description: 'Deprecated alias. Use DELETE /api/admin/assets/{kind}/{id}, which also reports whether a file was actually removed.',
+        parameters: [
+          { name: 'kind', in: 'path', required: true, schema: { type: 'string', enum: ['item', 'monster', 'zone', 'tile', 'tile-type', 'parchment', 'class', 'npc', 'logo', 'combat-bg', 'room-bg', 'class-icon', 'slot-icon', 'nav-icon'] } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: { description: 'Returns { success: true } whether or not a file existed' },
+          400: { description: 'Unknown kind or invalid asset id' },
+          500: { description: 'Failed to remove artwork' },
+        },
+      },
+    },
+    '/api/admin/items/{id}/artwork': {
+      post: {
+        tags: ['Assets'],
+        deprecated: true,
+        summary: 'Upload item artwork (deprecated)',
+        description: "Deprecated item-specific alias, equivalent to the 'item' kind. Use POST /api/admin/assets/item/{id}.",
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'ItemDefinition.id' },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'multipart/form-data': { schema: {
+            type: 'object',
+            required: ['artwork'],
+            properties: { artwork: { type: 'string', format: 'binary', description: 'PNG file, 512 KB max, must be square' } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Artwork saved, returns { success: true } only' },
+          400: { description: 'No file uploaded, invalid asset id, non-PNG bytes, or non-square image' },
+          500: { description: 'Failed to save artwork' },
+        },
+      },
+      delete: {
+        tags: ['Assets'],
+        deprecated: true,
+        summary: 'Delete item artwork (deprecated)',
+        description: 'Deprecated item-specific alias. Use DELETE /api/admin/assets/item/{id}.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'ItemDefinition.id' },
+        ],
+        responses: {
+          200: { description: 'Always returns { success: true } — a malformed id cannot name a real file either' },
         },
       },
     },

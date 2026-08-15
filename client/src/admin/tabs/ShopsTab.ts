@@ -3,7 +3,6 @@ import type { AdminContext } from '../AdminContext';
 import type { ShopDefinition, ShopItem } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
-import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
 export class ShopsTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -101,10 +100,6 @@ export class ShopsTab implements Tab {
         </div>
         <div class="admin-checklist admin-checklist-tall" id="shf-item-list">${itemRows}</div>
       </fieldset>
-      <fieldset class="admin-form-fieldset">
-        <legend>Artwork</legend>
-        ${renderArtworkSection({ kind: 'shop', id: s.id })}
-      </fieldset>
     `;
     const actionsHtml = readOnly
       ? `<div class="admin-modal-actions admin-modal-actions-readonly">
@@ -130,7 +125,6 @@ export class ShopsTab implements Tab {
 
     root.querySelector('#shf-cancel')?.addEventListener('click', modal.close);
     root.querySelector('#shf-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal.close));
-    wireArtworkSection(root, { kind: 'shop', id: s.id });
   }
 
   private wireItemFilter(root: HTMLElement): void {

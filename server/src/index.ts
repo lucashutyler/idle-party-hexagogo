@@ -23,11 +23,12 @@ import { InviteListStore } from './auth/InviteListStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { createAdminRoutes } from './admin/adminRoutes.js';
 import { createMcpRouter } from './mcp/McpEndpoint.js';
+import { AssetStore } from './game/AssetStore.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 import { isEmailConfigured } from './auth/EmailService.js';
@@ -41,6 +42,7 @@ const sessionStore = new JsonSessionStore('data/sessions');
 const accountStore = new AccountStore();
 const tokenStore = new TokenStore();
 const inviteListStore = new InviteListStore();
+const assetStore = new AssetStore();
 const gameLoop = new GameLoop(store);
 // playerManager is set during init(), use gameLoop.playerManager after init
 let playerManager: typeof gameLoop.playerManager;
@@ -68,6 +70,10 @@ app.use(cors({
   origin: process.env.APP_URL ?? 'http://localhost:3000',
   credentials: true,
 }));
+// MCP carries base64 PNG uploads, which blow past the 100 KB default. This must
+// precede the global parser — body-parser marks the request as read, so the
+// generic parser below then no-ops for /mcp instead of re-reading it.
+app.use('/mcp', express.json({ limit: '2mb' }));
 app.use(express.json());
 
 // Device token: persistent cookie that survives logout for duplicate detection
@@ -162,11 +168,16 @@ app.use('/api/admin', createAdminRoutes({
   inviteListStore,
   contentStore: () => gameLoop.contentStore,
   versionStore: () => gameLoop.versionStore,
+  assetStore,
   rebuildGrid: () => gameLoop.rebuildGridAndRelocate(),
   deployVersion: (versionId) => gameLoop.deployVersion(versionId),
 }));
 
-app.use('/mcp', createMcpRouter({ contentStore: () => gameLoop.contentStore, versionStore: () => gameLoop.versionStore }));
+app.use('/mcp', createMcpRouter({
+  contentStore: () => gameLoop.contentStore,
+  versionStore: () => gameLoop.versionStore,
+  assetStore,
+}));
 
 app.get('/health', (_req, res) => {
   res.json({
@@ -177,21 +188,12 @@ app.get('/health', (_req, res) => {
 });
 
 // --- Static files (drop PNGs into the matching data/<dir>/ to serve real art) ---
-app.use('/item-artwork', express.static(path.resolve('data/item-artwork')));
-app.use('/class-icons', express.static(path.resolve('data/class-icons')));
-app.use('/slot-icons', express.static(path.resolve('data/slot-icons')));
-app.use('/nav-icons', express.static(path.resolve('data/nav-icons')));
-app.use('/logo-artwork', express.static(path.resolve('data/logo-artwork')));
-app.use('/monster-artwork', express.static(path.resolve('data/monster-artwork')));
-app.use('/class-artwork', express.static(path.resolve('data/class-artwork')));
-app.use('/tile-artwork', express.static(path.resolve('data/tile-artwork')));
-app.use('/tile-type-artwork', express.static(path.resolve('data/tile-type-artwork')));
-app.use('/parchment-artwork', express.static(path.resolve('data/parchment-artwork')));
-app.use('/combat-bg-artwork', express.static(path.resolve('data/combat-bg-artwork')));
-app.use('/room-bg-artwork', express.static(path.resolve('data/room-bg-artwork')));
-app.use('/shop-artwork', express.static(path.resolve('data/shop-artwork')));
-app.use('/set-artwork', express.static(path.resolve('data/set-artwork')));
-app.use('/zone-artwork', express.static(path.resolve('data/zone-artwork')));
+// Mounts are derived from the shared asset registry so the served kinds can't
+// drift from the uploadable ones — adding a kind is one row in ASSET_KIND_INFO.
+for (const kind of ASSET_KINDS) {
+  const info = ASSET_KIND_INFO[kind];
+  app.use(info.mount, express.static(path.resolve(info.dir)));
+}
 
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.resolve(__dirname, '../../client/dist');

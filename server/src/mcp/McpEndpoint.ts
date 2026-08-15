@@ -4,16 +4,19 @@ import { Router } from 'express';
 import { DraftEditor } from '../game/DraftEditor.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
+import type { AssetStore } from '../game/AssetStore.js';
 import { mcpAuthMiddleware } from './mcpAuthMiddleware.js';
 import type { McpToolDeps } from './tools/McpToolDeps.js';
 import { registerReadTools } from './tools/readTools.js';
 import { registerNotesTools } from './tools/notesTools.js';
 import { registerWriteTools } from './tools/writeTools.js';
 import { registerValidateTools } from './tools/validateTools.js';
+import { registerAssetTools } from './tools/assetTools.js';
 
 export interface McpEndpointOptions {
   contentStore: () => ContentStore;
   versionStore: () => VersionStore;
+  assetStore: AssetStore;
 }
 
 /** Stateless MCP transport: a fresh McpServer + DraftEditor + StreamableHTTPServerTransport per request. */
@@ -29,6 +32,7 @@ export function createMcpRouter(opts: McpEndpointOptions): Router {
         contentStore: opts.contentStore,
         versionStore: opts.versionStore,
         draftEditor,
+        assetStore: opts.assetStore,
         tokenLabel: req.mcpTokenLabel ?? 'mcp',
       };
 
@@ -36,6 +40,7 @@ export function createMcpRouter(opts: McpEndpointOptions): Router {
       registerNotesTools(server, deps);
       registerWriteTools(server, deps);
       registerValidateTools(server, deps);
+      registerAssetTools(server, deps);
 
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       await server.connect(transport);

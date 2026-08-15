@@ -1,5 +1,20 @@
 import { defineConfig } from 'vite';
 import path from 'path';
+// Imported by source path rather than through the `@idle-party-rpg/shared`
+// alias below: the alias is applied to app code, not to the config itself,
+// which vite loads before any of it takes effect. AssetKinds is pure data with
+// no imports of its own, so pulling the single file in is safe here.
+import { ASSET_KINDS, ASSET_KIND_INFO } from '../shared/src/assets/AssetKinds';
+
+/** One dev proxy entry per asset mount, so artwork requests reach the server. */
+function assetProxyEntries(): Record<string, { target: string; changeOrigin: boolean }> {
+  return Object.fromEntries(
+    ASSET_KINDS.map(kind => [
+      ASSET_KIND_INFO[kind].mount,
+      { target: 'http://localhost:3001', changeOrigin: true },
+    ])
+  );
+}
 
 export default defineConfig({
   base: '/',
@@ -36,25 +51,11 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
-      // Every artwork kind served by the server's express static mounts
-      // needs a matching proxy entry — otherwise vite swallows the request
-      // and returns the SPA index.html. Keep this list in sync with the
-      // static mounts in server/src/index.ts.
-      '/item-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/monster-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/class-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/tile-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/tile-type-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/set-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/shop-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/zone-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/logo-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/parchment-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/combat-bg-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/room-bg-artwork': { target: 'http://localhost:3001', changeOrigin: true },
-      '/nav-icons': { target: 'http://localhost:3001', changeOrigin: true },
-      '/class-icons': { target: 'http://localhost:3001', changeOrigin: true },
-      '/slot-icons': { target: 'http://localhost:3001', changeOrigin: true },
+      // Every asset mount the server serves statically needs a matching proxy
+      // entry — otherwise vite swallows the request and returns the SPA
+      // index.html. Derived from the shared registry so this can't drift from
+      // the server's mounts the way the hand-written list used to.
+      ...assetProxyEntries(),
     },
   },
   resolve: {

@@ -2,29 +2,27 @@
  * Asset helpers for the "image-everywhere" convention.
  *
  * Convention: every entity kind serves art at `/<kind>-artwork/{id}.png`,
- * mirroring the existing `/item-artwork/{id}.png` pipeline. When art is
+ * mirroring the existing `/item-artwork/{id}.png` pipeline. The kinds
+ * themselves live in `shared/src/assets/AssetKinds.ts`, which the server's
+ * static mounts and the admin upload API derive from as well. When art is
  * missing, the image falls back to a placehold.co URL so the layout still
  * looks like art is there. Background-color-only fallback is reserved for
  * places where we deliberately want a tinted swatch instead of a placeholder.
  */
 
-export type AssetKind =
-  | 'item'
-  | 'monster'
-  | 'zone'
-  | 'tile'
-  | 'tile-type'
-  | 'class'
-  | 'set'
-  | 'shop'
-  | 'logo'
-  | 'parchment'
-  | 'combat-bg'
-  | 'room-bg';
+import { assetPublicPath } from '@idle-party-rpg/shared';
+import type { AssetKind } from '@idle-party-rpg/shared';
 
-/** Real artwork URL — same convention as the existing item-artwork path. */
+export type { AssetKind };
+
+/**
+ * Real artwork URL. The mount per kind comes from the shared `ASSET_KIND_INFO`
+ * registry rather than being spelled `/${kind}-artwork/` here, because the
+ * icon sets (`class-icon`, `slot-icon`, `nav-icon`) predate that convention
+ * and serve from their own paths.
+ */
 export function artworkUrl(kind: AssetKind, id: string): string {
-  return `/${kind}-artwork/${encodeURIComponent(id)}.png`;
+  return assetPublicPath(kind, id);
 }
 
 /** placehold.co fallback. Keeps text short to stay readable in small slots. */
