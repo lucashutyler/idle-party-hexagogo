@@ -14,6 +14,10 @@ export interface McpToolDeps {
   draftEditor: DraftEditor;
   /** Imagery store. Stateless like the others — artwork lives outside content versions. */
   assetStore: AssetStore;
-  /** The authenticated caller's token label (from MCP_TOKENS), used e.g. as DesignNote.author. */
-  tokenLabel: string;
+  /**
+   * Who is calling: the API token owner's username (falling back to their email), resolved by
+   * mcpAuthMiddleware. Used as DesignNote.author and asset upload attribution — never taken from
+   * tool input.
+   */
+  callerLabel: string;
 }

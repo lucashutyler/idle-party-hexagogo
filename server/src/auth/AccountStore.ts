@@ -1,6 +1,7 @@
 import { readFile, writeFile, rename, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import type { AdminRole } from './AdminRoles.js';
 
 export interface SessionRecord {
   deviceToken: string;
@@ -18,6 +19,11 @@ export interface Account {
   deactivated?: boolean;
   reactivationRequest?: string;
   sessionHistory?: SessionRecord[];
+  /**
+   * Admin role granted from the dashboard by a super admin. Absent = no admin access.
+   * Emails in ADMIN_EMAILS are super admins regardless of this field — see AdminRoles.ts.
+   */
+  role?: AdminRole;
 }
 
 interface AccountsData {
@@ -145,6 +151,16 @@ export class AccountStore {
       delete account.reactivationRequest;
     }
     await this.save();
+  }
+
+  /** Grant or clear an account's admin role. Passing null removes admin access entirely. */
+  async setRole(email: string, role: AdminRole | null): Promise<void> {
+    const account = this.accounts[email.toLowerCase()];
+    if (!account) return;
+    if (role) account.role = role;
+    else delete account.role;
+    await this.save();
+    console.log(`[AccountStore] Set role "${role ?? 'none'}" for "${account.email}"`);
   }
 
   async setReactivationRequest(email: string, text: string): Promise<void> {

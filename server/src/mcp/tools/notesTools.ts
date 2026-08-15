@@ -63,7 +63,7 @@ export async function saveNote(
       title: input.note.title,
       body: input.note.body,
       tags: input.note.tags,
-      author: deps.tokenLabel,
+      author: deps.callerLabel,
       createdAt,
       updatedAt: now,
     };

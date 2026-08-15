@@ -1,10 +1,12 @@
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
-import type { AccountData, AccountSortColumn, SortDirection } from '../types';
-import { escapeHtml, fetchAdmin, formatRelativeTime, postAdmin } from '../api';
+import type { AccountData, AdminRole, AccountSortColumn, SortDirection } from '../types';
+import { escapeHtml, fetchAdmin, formatRelativeTime, postAdmin, putAdmin } from '../api';
 import { openModal } from '../components/Modal';
 
 const CLASSES = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'];
+
+const ROLE_LABELS: Record<AdminRole, string> = { admin: 'Admin', superadmin: 'Super Admin' };
 
 export class AccountsTab implements Tab {
   // Filters & sort persist across tab switches.
@@ -41,6 +43,9 @@ export class AccountsTab implements Tab {
           ? ' <span class="status-appeal" title="Has reactivation request">!</span>'
           : '';
         statusBadges.push(`<span class="status-banned" title="Suspended">BAN${appealIcon}</span>`);
+      }
+      if (a.role) {
+        statusBadges.push(`<span class="admin-pill" title="${a.roleLocked ? 'Super admin via ADMIN_EMAILS' : 'Granted in the World Manager'}">${ROLE_LABELS[a.role]}</span>`);
       }
 
       return `
@@ -290,6 +295,8 @@ export class AccountsTab implements Tab {
         </div>`
       : '';
 
+    const roleControl = this.renderRoleControl(account, ctx);
+
     const actionBtn = account.deactivated
       ? `<button class="admin-btn" id="account-reactivate-btn">Reactivate Account</button>`
       : account.username
@@ -303,6 +310,7 @@ export class AccountsTab implements Tab {
         <div><dt>Last Active</dt><dd>${account.lastActiveAt ? new Date(account.lastActiveAt).toLocaleString() : '—'}</dd></div>
         <div><dt>Status</dt><dd>${account.isOnline ? '<span class="status-online">Online</span>' : '<span class="status-offline">Offline</span>'}${account.deactivated ? ' <span class="status-banned">SUSPENDED</span>' : ''}</dd></div>
         <div><dt>Class / Level</dt><dd>${account.className ?? '—'} Lv${account.level ?? '—'}</dd></div>
+        <div><dt>Admin Role</dt><dd>${roleControl}</dd></div>
       </dl>
       <div class="admin-modal-actions">${actionBtn}</div>
       ${reactivationSection}
@@ -324,6 +332,8 @@ export class AccountsTab implements Tab {
       width: '720px',
     });
 
+    this.wireRoleControl(modal.body, account, ctx);
+
     modal.body.querySelector('#account-deactivate-btn')?.addEventListener('click', async () => {
       if (!confirm(`Suspend account "${account.username}"? This will kick them and prevent login.`)) return;
       try {
@@ -343,6 +353,51 @@ export class AccountsTab implements Tab {
         await ctx.refresh();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to reactivate');
+      }
+    });
+  }
+
+  /**
+   * Editable only for super admins, and never for an account whose role comes from ADMIN_EMAILS
+   * or for the signed-in admin themselves — both are rejected server-side too.
+   */
+  private renderRoleControl(account: AccountData, ctx: AdminContext): string {
+    const current = account.role ? ROLE_LABELS[account.role] : 'None';
+    if (account.roleLocked) {
+      return `${current} <span class="admin-muted">(from ADMIN_EMAILS)</span>`;
+    }
+    if (!ctx.me?.isSuperAdmin) {
+      return current;
+    }
+    if (account.email === ctx.me.email) {
+      return `${current} <span class="admin-muted">(you — change this from another super admin's account)</span>`;
+    }
+    const option = (value: string, label: string) =>
+      `<option value="${value}"${(account.role ?? '') === value ? ' selected' : ''}>${label}</option>`;
+    return `<select id="account-role-select">
+        ${option('', 'None')}
+        ${option('admin', ROLE_LABELS.admin)}
+        ${option('superadmin', ROLE_LABELS.superadmin)}
+      </select>`;
+  }
+
+  private wireRoleControl(root: HTMLElement, account: AccountData, ctx: AdminContext): void {
+    const select = root.querySelector<HTMLSelectElement>('#account-role-select');
+    select?.addEventListener('change', async () => {
+      const previous = account.role ?? '';
+      const role = select.value === '' ? null : (select.value as AdminRole);
+      const description = role ? ROLE_LABELS[role] : 'no admin access';
+      if (!confirm(`Set ${account.username ?? account.email} to ${description}?`)) {
+        select.value = previous;
+        return;
+      }
+      try {
+        await putAdmin(`/api/admin/accounts/${encodeURIComponent(account.email)}/role`, { role });
+        account.role = role;
+        await ctx.refresh();
+      } catch (err) {
+        select.value = previous;
+        alert(err instanceof Error ? err.message : 'Failed to change role');
       }
     });
   }

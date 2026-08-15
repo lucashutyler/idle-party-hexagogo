@@ -18,9 +18,52 @@ A persistent `_dt` cookie (UUID, 10-year expiry, httpOnly) is set on every reque
 
 ## Invite-only beta gate
 
-Setting `INVITE_ONLY=true` restricts `POST /auth/login` to an allow list: emails in `ADMIN_EMAILS` (env var, shared with admin auth) are always allowed, plus any email added to the admin-managed invite list. The check runs before `AccountStore.createAccount()`, so a rejected email never gets an account record created. Rejection returns `200 { error: '...' }` (no `inviteOnly` flag — mirrors the existing generic-error path in `LoginScreen`/`App.handleEmailLogin`, no dedicated screen needed since the rejection only ever happens pre-session). When `INVITE_ONLY` is unset or `false` (the default), login is unrestricted as before.
+Setting `INVITE_ONLY=true` restricts `POST /auth/login` to an allow list: anyone with an admin role (see below) is always allowed, plus any email added to the admin-managed invite list. The check runs before `AccountStore.createAccount()`, so a rejected email never gets an account record created. Rejection returns `200 { error: '...' }` (no `inviteOnly` flag — mirrors the existing generic-error path in `LoginScreen`/`App.handleEmailLogin`, no dedicated screen needed since the rejection only ever happens pre-session). When `INVITE_ONLY` is unset or `false` (the default), login is unrestricted as before.
 
-The invite list itself is persisted via `InviteListStore` (`server/src/auth/InviteListStore.ts`, `data/invite-list.json`) and managed from the admin dashboard's **Invite List** tab (only shown in the sidebar when `INVITE_ONLY=true` — see `docs/architecture/admin-dashboard.md`) via `GET/POST /api/admin/invite-list` and `DELETE /api/admin/invite-list/:email`. Comma-separated env-var email lists (`ADMIN_EMAILS`) are parsed by the shared `parseEmailListEnv()` helper (`server/src/auth/EmailListParser.ts`), used by both `adminMiddleware` and the invite-only gate.
+The invite list itself is persisted via `InviteListStore` (`server/src/auth/InviteListStore.ts`, `data/invite-list.json`) and managed from the admin dashboard's **Invite List** tab (only shown in the sidebar when `INVITE_ONLY=true` — see `docs/architecture/admin-dashboard.md`) via `GET/POST /api/admin/invite-list` and `DELETE /api/admin/invite-list/:email`. The gate calls `grantedAdminRole()`, so promoting someone in the dashboard also lets them sign in. It deliberately uses the *granted* role rather than the effective one, so a suspended admin falls through to the deactivated branch below and gets the appeal flow instead of a generic "invite-only" rejection.
+
+## Admin roles
+
+Two levels, defined in `server/src/auth/AdminRoles.ts`:
+
+| Role | Can do |
+|------|--------|
+| `admin` | Every admin action — the whole World Manager, `/api/admin/*`, and the MCP content tools |
+| `superadmin` | All of the above, **plus** granting and clearing other accounts' roles |
+
+Where a role comes from:
+
+- **`ADMIN_EMAILS`** (comma-separated env var) — every listed email is automatically a **super admin**, whether or not an account record exists yet. This is the bootstrap set: it can't be edited from the dashboard, so there is always a way back in. Parsed per request by the shared `parseEmailListEnv()` helper (`server/src/auth/EmailListParser.ts`), so editing the env var takes effect without a code change.
+- **Granted in the dashboard** — a super admin sets any other account to Admin or Super Admin from the Accounts tab's detail modal (`PUT /api/admin/accounts/:email/role`). The grant is persisted as `Account.role` in `data/accounts.json`.
+
+Two resolvers, and the distinction matters:
+
+- `resolveAdminRole(email, accountStore)` — the role you may **act with right now**. Used by every *authorization* gate (`createAdminAuth`, and through it the MCP endpoint). A suspended account resolves to `null`, so deactivating an admin immediately strips their privileges (an `ADMIN_EMAILS` super admin is exempt).
+- `grantedAdminRole(email, accountStore)` — the role **on record**, ignoring suspension. Used where suspension is handled separately or shouldn't apply: rendering the dashboard's role editor (so a suspended admin still displays as an admin, and reactivating restores it) and the invite-only login gate above.
+
+Guards on `PUT /api/admin/accounts/:email/role`: super admin only, browser session only (never an API token), and it rejects both `ADMIN_EMAILS` accounts (`400` — change the env var instead) and changing your own role (`400`, so you can't accidentally lock yourself out).
+
+## API tokens
+
+Bearer credentials an admin generates for themselves, used by the MCP content-authoring server (`docs/architecture/mcp.md`) and by `/api/admin/*` for scripting. They replaced the old `MCP_TOKENS` env var entirely.
+
+`ApiTokenStore` (`server/src/auth/ApiTokenStore.ts`, `data/api-tokens.json`) holds one record per token: `{ id, email, label, tokenHash, prefix, createdAt, expiresAt, lastUsedAt }`.
+
+- The secret is `ipr_` + 32 random bytes as hex. It is **returned exactly once**, in the creation response, and stored only as a sha256 hash — `prefix` keeps the first 8 characters in the clear purely so a row is identifiable in the UI.
+- **Scoped to the owner.** `GET`/`POST /api/admin/api-tokens` and `DELETE /api/admin/api-tokens/:id` always operate on the caller's own tokens; revoke is filtered by owner email, so another admin's token id resolves as `404` rather than deleting anything.
+- **Session-only management.** All three routes sit behind `requireSession`, so a leaked token can't mint itself a longer-lived replacement or promote its owner.
+- **Tokens carry no permissions.** Authorization is re-derived from the owner's role on every single request, so a token belonging to someone who was demoted or suspended is inert — there is deliberately no cleanup pass on role removal, and nothing to forget to run.
+- Optional expiry (`YYYY-MM-DD` from the dashboard's date picker means "through the end of that day"; a full ISO timestamp also works). An unparseable `expiresAt` counts as expired, so a corrupt record fails closed.
+- `lastUsedAt` is stamped in memory on each authenticated request and flushed to disk on a 60-second timer rather than writing the file per request. `startFlush()`/`stopFlush()` are wired in `server/src/index.ts` next to `TokenStore`; `stopFlush()` is awaited on shutdown and persists whatever the last tick missed.
+
+## Unified admin auth
+
+`createAdminAuth({ accountStore, apiTokenStore })` (`server/src/admin/adminMiddleware.ts`) resolves either credential into one `AdminPrincipal` — `{ email, role, via: 'session' | 'token', label, tokenId? }` — attached to `req.adminPrincipal`. A bearer token, when present, always wins over a session cookie. It exports four things:
+
+- `requireAdmin` — applied router-wide to `/api/admin/*` and to the `/api-docs/admin` Swagger UI. 401 unauthenticated / invalid or expired token, 403 authenticated-but-not-an-admin.
+- `requireSuperAdmin` — the extra check on role granting.
+- `requireSession` — rejects API-token callers on token and role management.
+- `resolvePrincipal` — the raw resolver, reused by the MCP endpoint so it can apply its own bearer-token-only rule first.
 
 ## Account deactivation
 

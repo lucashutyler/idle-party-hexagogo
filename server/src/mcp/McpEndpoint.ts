@@ -5,7 +5,8 @@ import { DraftEditor } from '../game/DraftEditor.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
 import type { AssetStore } from '../game/AssetStore.js';
-import { mcpAuthMiddleware } from './mcpAuthMiddleware.js';
+import type { AdminAuth } from '../admin/adminMiddleware.js';
+import { createMcpAuthMiddleware } from './mcpAuthMiddleware.js';
 import type { McpToolDeps } from './tools/McpToolDeps.js';
 import { registerReadTools } from './tools/readTools.js';
 import { registerNotesTools } from './tools/notesTools.js';
@@ -17,11 +18,14 @@ export interface McpEndpointOptions {
   contentStore: () => ContentStore;
   versionStore: () => VersionStore;
   assetStore: AssetStore;
+  /** Shared with the REST admin API — MCP tokens are ordinary admin API tokens. */
+  adminAuth: AdminAuth;
 }
 
 /** Stateless MCP transport: a fresh McpServer + DraftEditor + StreamableHTTPServerTransport per request. */
 export function createMcpRouter(opts: McpEndpointOptions): Router {
   const router = Router();
+  const mcpAuthMiddleware = createMcpAuthMiddleware(opts.adminAuth);
 
   router.post('/', mcpAuthMiddleware, async (req, res) => {
     const server = new McpServer({ name: 'idle-party-rpg', version: '1.0.0' });
@@ -33,7 +37,7 @@ export function createMcpRouter(opts: McpEndpointOptions): Router {
         versionStore: opts.versionStore,
         draftEditor,
         assetStore: opts.assetStore,
-        tokenLabel: req.mcpTokenLabel ?? 'mcp',
+        callerLabel: req.mcpCallerLabel ?? 'mcp',
       };
 
       registerReadTools(server, deps);

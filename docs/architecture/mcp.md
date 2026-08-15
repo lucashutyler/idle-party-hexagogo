@@ -4,17 +4,20 @@ An in-process [Model Context Protocol](https://modelcontextprotocol.io) endpoint
 
 ## Transport (`server/src/mcp/McpEndpoint.ts`)
 
-Mounted at `POST /mcp` (`app.use('/mcp', createMcpRouter({ contentStore, versionStore, assetStore }))` in `server/src/index.ts`, preceded by a dedicated `app.use('/mcp', express.json({ limit: '2mb' }))` so base64 PNG uploads clear body-parser's 100 KB default — it must come *before* the global `express.json()`, since body-parser marks the request read and the generic parser then no-ops for `/mcp`). Stateless per the `@modelcontextprotocol/sdk` "stateless streamable HTTP" pattern: every request builds a fresh `McpServer`, a fresh `DraftEditor`, and a fresh `StreamableHTTPServerTransport({ sessionIdGenerator: undefined })`, registers all five tool groups on that server instance, then hands the request off to the transport. `res.on('close', ...)` tears the transport and server back down. No session state is kept between requests — every tool call is fully self-contained (callers pass `versionId` on every write/read-from-draft call, there's no "current draft" concept server-side).
+Mounted at `POST /mcp` (`app.use('/mcp', createMcpRouter({ contentStore, versionStore, assetStore, adminAuth }))` in `server/src/index.ts`, preceded by a dedicated `app.use('/mcp', express.json({ limit: '2mb' }))` so base64 PNG uploads clear body-parser's 100 KB default — it must come *before* the global `express.json()`, since body-parser marks the request read and the generic parser then no-ops for `/mcp`). Stateless per the `@modelcontextprotocol/sdk` "stateless streamable HTTP" pattern: every request builds a fresh `McpServer`, a fresh `DraftEditor`, and a fresh `StreamableHTTPServerTransport({ sessionIdGenerator: undefined })`, registers all five tool groups on that server instance, then hands the request off to the transport. `res.on('close', ...)` tears the transport and server back down. No session state is kept between requests — every tool call is fully self-contained (callers pass `versionId` on every write/read-from-draft call, there's no "current draft" concept server-side).
 
 `GET`/`DELETE /mcp` both 405 — there's no server-initiated stream or session to resume/end in stateless mode.
 
 ## Auth (`server/src/mcp/mcpAuthMiddleware.ts`)
 
-Bearer-token auth via the `MCP_TOKENS` env var: comma-separated entries, each either `label:token` or a plain `token` (defaults to label `"mcp"`). `parseMcpTokens()` mirrors `parseEmailListEnv`'s style (`server/src/auth/EmailListParser.ts`) — trim, split, filter empty.
+Bearer-token auth against the **same API tokens as the REST admin API** — an admin generates one for themselves in the World Manager's API Tokens tab and pastes it into their MCP client. There is no MCP-specific credential and no env var; `createMcpAuthMiddleware(adminAuth)` delegates to `AdminAuth.resolvePrincipal` (`server/src/admin/adminMiddleware.ts`) and only adds one rule of its own. See `docs/architecture/auth.md` → "Admin roles" and "API tokens" for the token lifecycle.
 
-- `MCP_TOKENS` unset or empty → **404** on every method, before the token is even inspected. The endpoint's existence is opt-in per deployment; an unconfigured server hides it entirely rather than exposing an auth wall.
-- Token present but doesn't match any configured entry → **401**.
-- Token matches → the resolved label is attached to `req.mcpTokenLabel` (ambient `Express.Request` augmentation in the same file) and used downstream as `DesignNote.author` — never accepted from tool input.
+- **No bearer token → 401, always.** Unlike `/api/admin/*`, a browser session is *never* sufficient here: otherwise any signed-in admin's cookie would reach the content-authoring tools from a cross-site request. The check runs before principal resolution, so a session-only request never falls through to the cookie path.
+- Token not found, or expired → **401**.
+- Token resolves, but its owner has no admin role (never had one, was demoted, or is suspended) → **403**. Roles are read fresh on every request, so revoking someone's admin instantly disables every token they hold — the tokens themselves are left alone rather than cleaned up.
+- Valid → the owner's username (falling back to their email) is attached to `req.mcpCallerLabel` (ambient `Express.Request` augmentation in the same file) and flows into `McpToolDeps.callerLabel`, used downstream as `DesignNote.author` and asset-upload attribution — never accepted from tool input.
+
+`GET`/`DELETE /mcp` run the same middleware before their 405, so an unauthenticated probe can't distinguish them from `POST`.
 
 ## `DraftEditor` (`server/src/game/DraftEditor.ts`)
 
@@ -42,7 +45,7 @@ Referential-integrity guards mirror `ContentStore`'s live-delete guards (item re
 
 **Notes** (`tools/notesTools.ts`) — design-note authoring plus draft creation:
 - `create_draft` — creates a new draft version, cloned from an existing version's snapshot (`fromVersionId`) or seeded from live content. Returns the `ContentVersion`; its `id` is the `versionId` every other write/notes call needs.
-- `save_note` — create-or-update a `DesignNote` in a draft. Omit `note.id` to create; pass an existing id to update in place (`createdAt` preserved). `author` always comes from `deps.tokenLabel`, never from tool input.
+- `save_note` — create-or-update a `DesignNote` in a draft. Omit `note.id` to create; pass an existing id to update in place (`createdAt` preserved). `author` always comes from `deps.callerLabel` (the token owner's username), never from tool input.
 - `delete_note` — delete a design note from a draft by id.
 
 **Write** (`tools/writeTools.ts`) — draft-scoped only, thin wrappers over `DraftEditor`:
@@ -77,4 +80,4 @@ See `docs/architecture/content.md` → "Design notes" for the content-system-lev
 - Every **content** write tool requires a draft `versionId` — `DraftEditor.loadDraft` rejects with `status: 404` if the version doesn't exist, or `status: 400` if it exists but isn't `status: 'draft'`. There is no way to write live *content* through MCP — artwork is the one live-write surface, and it isn't content (next bullet but one).
 - No `publish`, `deploy`, `delete_version`, or player/account-admin tools are exposed. Publishing and deploying stay a human action in the World Manager.
 - **`upsert_asset`/`delete_asset` write to LIVE artwork and deliberately bypass the draft rule.** Artwork isn't part of `ContentSnapshot` — binary blobs would balloon every version snapshot, and publish/rollback has never moved a PNG — so there is no draft to stage an upload into and no `versionId` to pass. The practical consequences: an uploaded PNG is visible to players as soon as the next page load fetches it, deleting art the game still expects immediately drops that entity to its fallback or placeholder, and rolling a content version back does **not** roll artwork back. `get_asset_coverage` is the companion that makes this safe to drive — check what's actually missing before uploading anything.
-- Asset writes are still gated by the same bearer token as everything else, and by `AssetStore`'s own validation: ids must match `ASSET_ID_PATTERN` and resolve inside their kind's folder (path traversal is rejected twice over), bytes must carry a real PNG signature + `IHDR` chunk (the client-declared mime type is never trusted), and square-shaped kinds reject non-square images. Max 512 KB decoded.
+- Asset writes are still gated by the same API token as everything else — and therefore by the owner's current admin role — and by `AssetStore`'s own validation: ids must match `ASSET_ID_PATTERN` and resolve inside their kind's folder (path traversal is rejected twice over), bytes must carry a real PNG signature + `IHDR` chunk (the client-declared mime type is never trusted), and square-shaped kinds reject non-square images. Max 512 KB decoded.

@@ -69,7 +69,7 @@ export async function upsertAsset(deps: McpToolDeps, args: { kind: ManagedAssetK
     const png = Buffer.from(args.pngBase64, 'base64');
     if (png.length === 0) return { error: 'pngBase64 decoded to zero bytes — check the encoding.' };
     const asset = await deps.assetStore.write(args.kind, args.id, png);
-    return { success: true, asset, uploadedBy: deps.tokenLabel };
+    return { success: true, asset, uploadedBy: deps.callerLabel };
   } catch (err) {
     return { error: errorMessage(err) };
   }

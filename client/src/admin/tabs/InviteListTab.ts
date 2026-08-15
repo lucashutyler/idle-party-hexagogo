@@ -21,7 +21,7 @@ export class InviteListTab implements Tab {
           <h2>Invite List <span class="admin-count-badge">${this.emails.length}</span></h2>
         </div>
         <p class="admin-page-subtitle">
-          This server is invite-only (INVITE_ONLY=true). Emails in ADMIN_EMAILS always have access —
+          This server is invite-only (INVITE_ONLY=true). Admins always have access —
           add other allowed emails here to let them sign in during the beta.
         </p>
         <div class="admin-filter-bar">

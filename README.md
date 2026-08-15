@@ -62,7 +62,8 @@ The script will:
 | `AWS_SECRET_ACCESS_KEY` | AWS credentials for SES | Yes |
 | `AWS_REGION` | AWS region (default: us-east-1) | No |
 | `SES_FROM_EMAIL` | Email sender address | Yes |
-| `MCP_TOKENS` | Comma-separated bearer tokens for the MCP content-authoring endpoint (`label:token` or plain `token`; unset = endpoint disabled) | No |
+| `ADMIN_EMAILS` | Comma-separated emails that are automatically **super admins** — the bootstrap set for the World Manager. Super admins grant `admin`/`superadmin` to everyone else from the dashboard. | Yes |
+| `INVITE_ONLY` | `true` restricts sign-in to admins plus the admin-managed invite list | No |
 
 ### After Setup
 
