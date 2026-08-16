@@ -107,14 +107,29 @@ async function api(pathname, { method = 'GET', body, headers = {} } = {}) {
   return payload;
 }
 
-/** The server describes its own kinds, so shapes are never hard-coded here. */
+/**
+ * The server describes its own kinds, so shapes are never hard-coded here.
+ *
+ * `/assets` returns `{ kinds: { item: {...}, monster: {...} } }` — an object
+ * keyed by kind. An array is accepted too, so the CLI keeps working if that
+ * ever changes.
+ */
 async function loadKinds() {
   const payload = await api('/assets');
-  const list = Array.isArray(payload) ? payload : payload.kinds ?? payload.assetKinds ?? [];
+  const raw = payload.kinds ?? payload.assetKinds ?? payload;
+  const list = Array.isArray(raw) ? raw : Object.values(raw ?? {});
   const byKind = new Map();
   for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
     const kind = entry.kind ?? entry.id ?? entry.name;
-    if (kind) byKind.set(kind, { kind, shape: entry.shape ?? 'any', label: entry.label ?? kind });
+    if (kind) {
+      byKind.set(kind, {
+        kind,
+        shape: entry.shape ?? 'any',
+        label: entry.label ?? kind,
+        mount: entry.mount,
+      });
+    }
   }
   if (byKind.size === 0) throw new Error('server returned no asset kinds');
   return byKind;
@@ -180,25 +195,41 @@ async function cmdKinds() {
 }
 
 async function cmdCoverage(flags) {
-  const params = new URLSearchParams({ includeEntries: 'true' });
+  const params = new URLSearchParams();
   if (flags.kind) params.set('kind', flags.kind);
-  if (flags.missing) params.set('missingOnly', 'true');
-  const report = await api(`/assets/coverage?${params}`);
+  // Entry detail is only worth pulling when it will be shown — it is the bulk
+  // of the payload and useless without --missing or a single --kind.
+  if (flags.missing || flags.kind) {
+    params.set('includeEntries', 'true');
+    if (flags.missing) params.set('missingOnly', 'true');
+  }
+  const report = await api(`/assets/coverage${params.size ? `?${params}` : ''}`);
 
-  const kinds = report.kinds ?? report.coverage ?? [];
+  const kinds = report.kinds ?? [];
   if (!Array.isArray(kinds) || kinds.length === 0) {
     console.log(JSON.stringify(report, null, 2));
     return;
   }
-  console.log(c.bold('kind            have/total  missing'));
+
+  console.log(c.bold('kind            present  missing  required'));
   for (const k of kinds) {
-    const total = k.total ?? k.expected ?? 0;
-    const have = k.present ?? k.covered ?? 0;
-    const missing = k.missing ?? Math.max(total - have, 0);
-    const line = `  ${String(k.kind).padEnd(14)} ${String(`${have}/${total}`).padEnd(11)} ${missing}`;
-    console.log(missing > 0 ? c.yellow(line) : c.green(line));
-    const ids = (k.entries ?? []).filter((e) => e.missing || e.hasAsset === false).map((e) => e.id);
-    if (ids.length) console.log(c.dim(`      ${ids.slice(0, 12).join(', ')}${ids.length > 12 ? ` … +${ids.length - 12}` : ''}`));
+    const line = `  ${String(k.kind).padEnd(14)} ${String(k.present ?? 0).padStart(7)}  ${String(k.missing ?? 0).padStart(7)}  ${String(k.required ?? 0).padStart(8)}`;
+    console.log((k.missing ?? 0) > 0 ? c.yellow(line) : c.green(line));
+    // `hasOwnAsset` false means nothing is stored for that id — it is resolving
+    // via a fallback kind or the placeholder, which is what "missing" means here.
+    const ids = (k.entries ?? []).filter((e) => e.hasOwnAsset === false).map((e) => e.id);
+    if (ids.length) {
+      console.log(c.dim(`      ${ids.slice(0, 12).join(', ')}${ids.length > 12 ? ` … +${ids.length - 12} more` : ''}`));
+    }
+    // An orphan is stored art with no content pointing at it — usually a
+    // renamed or deleted entity, so worth surfacing rather than hiding.
+    if (k.orphans?.length) console.log(c.dim(`      orphaned: ${k.orphans.join(', ')}`));
+  }
+
+  const s = report.summary;
+  if (s) {
+    console.log(`\n${c.bold('total')}  ${c.green(`${s.present} present`)}, ${c.yellow(`${s.missing} missing`)} of ${s.required} required`
+      + (s.orphans ? `, ${s.orphans} orphaned` : ''));
   }
 }
 
