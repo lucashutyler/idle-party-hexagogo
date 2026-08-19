@@ -1,5 +1,6 @@
 import { TileType } from './HexTile.js';
 import type { EncounterTableEntry } from '../systems/ZoneTypes.js';
+import type { RoomEntryRequirements } from '../systems/RoomRequirements.js';
 
 /**
  * Schema for defining a map.
@@ -41,14 +42,37 @@ export interface WorldTileDefinition {
   npcId?: string;
   /** Optional dungeon entry assigned to this room. Admin link only — entry runtime not yet wired. */
   dungeonId?: string;
-  /** Item ID required to traverse. Overrides the tile type default if set. */
+  /**
+   * Item ID required to traverse.
+   * @deprecated Author new gates via `entryRequirements`. Still honoured — it is
+   * folded into the resolved gate at read time, so existing content and the
+   * existing admin/MCP fields keep working.
+   */
   requiredItemId?: string;
+  /**
+   * Entry gate for this room. Overrides the tile type's gate field by field —
+   * an unset field falls through to the type's value.
+   */
+  entryRequirements?: RoomEntryRequirements;
   /**
    * Rooms this room can travel to (e.g. a manhole into the sewers, plus stairs to
    * a tower). Each target is identified by stable GUID so it survives col/row
    * edits; a room may have several exits.
    */
-  transitions?: { mapId: string; tileId: string }[];
+  transitions?: MapTransitionLink[];
+}
+
+/**
+ * A one-way exit from a room to a room on another (or the same) map.
+ * Optionally gated: the gate on the link is enforced *in addition to* the
+ * destination room's own gate — a door and the room behind it can lock
+ * independently.
+ */
+export interface MapTransitionLink {
+  mapId: string;
+  tileId: string;
+  /** Gate on taking this exit. */
+  entryRequirements?: RoomEntryRequirements;
 }
 
 /**
@@ -100,7 +124,7 @@ export function migrateWorldData(world: WorldData): boolean {
       tile.mapId = DEFAULT_MAP_ID;
       changed = true;
     }
-    const legacy = (tile as { transitionsTo?: { mapId: string; tileId: string } }).transitionsTo;
+    const legacy = (tile as { transitionsTo?: MapTransitionLink }).transitionsTo;
     if (legacy) {
       if (!tile.transitions) tile.transitions = [];
       if (!tile.transitions.some(t => t.tileId === legacy.tileId && t.mapId === legacy.mapId)) {

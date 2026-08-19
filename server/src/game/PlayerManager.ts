@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, NotificationEntry } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, NotificationEntry, RoomEntryFailure } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -579,16 +579,19 @@ export class PlayerManager {
 
   /**
    * Handle a map-transition request. The whole party travels together through
-   * the transition on its current room. Returns an error string on failure, or
-   * null on success.
+   * the transition on its current room. On failure the result carries an error
+   * string, plus `blocked` when the refusal was an unmet entry requirement
+   * rather than a structural problem.
    */
-  handleEnterTransition(username: string, targetTileId: string): string | null {
+  handleEnterTransition(
+    username: string,
+    targetTileId: string,
+  ): { success: true } | { success: false; error: string; blocked?: RoomEntryFailure } {
     const session = this.sessions.get(username);
-    if (!session) return 'No session.';
+    if (!session) return { success: false, error: 'No session.' };
     const partyId = session.getPartyId();
-    if (!partyId) return 'No party.';
-    const result = this.partyBattles.enterTransition(partyId, targetTileId);
-    return result.success ? null : result.error;
+    if (!partyId) return { success: false, error: 'No party.' };
+    return this.partyBattles.enterTransition(partyId, targetTileId);
   }
 
   /** Check if two players are on the same tile (uses party positions). */

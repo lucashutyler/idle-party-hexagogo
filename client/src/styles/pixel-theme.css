@@ -2033,7 +2033,10 @@ html, body {
   color: var(--accent-gold);
   font-family: var(--pixel-font);
   font-size: 13px;
-  white-space: nowrap;
+  /* Gate rejections are full sentences — wrap rather than run off the map. */
+  white-space: normal;
+  max-width: min(90%, 30rem);
+  text-align: center;
   z-index: 200;
   pointer-events: none;
   animation: toast-fade 2s ease-out forwards;

@@ -494,7 +494,7 @@ export class ThreeWorldMap {
     for (const tileDef of this.worldCache.getTiles()) {
       const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
       const tileTypeDef = this.worldCache.getTileTypeDef(tileDef.type);
-      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id, tileDef.requiredItemId, tileTypeDef);
+      const tile = new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id, tileDef.requiredItemId, tileTypeDef, tileDef.entryRequirements);
       grid.addTile(tile);
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }

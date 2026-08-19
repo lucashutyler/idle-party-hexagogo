@@ -29,11 +29,26 @@ export { HexPathfinder } from './hex/HexPathfinder.js';
 
 // Map
 export { WORLD_MAP, DEFAULT_MAP_ID, migrateWorldData } from './hex/MapSchema.js';
-export type { MapSchema, TileDefinition, WorldTileDefinition, WorldData, WorldMapMeta } from './hex/MapSchema.js';
+export type { MapSchema, TileDefinition, WorldTileDefinition, WorldData, WorldMapMeta, MapTransitionLink } from './hex/MapSchema.js';
 export { generateWorldMap, getStartingPosition } from './hex/MapData.js';
 
 // Systems
 export { UnlockSystem } from './systems/UnlockSystem.js';
+
+// Room entry requirements
+export {
+  isRoomGateEmpty,
+  toRoomRequirements,
+  mergeRoomRequirements,
+  validateRoomEntry,
+} from './systems/RoomRequirements.js';
+export type {
+  RoomEntryRequirements,
+  RoomEntryMemberInfo,
+  RoomEntryLabels,
+  RoomEntryFailureKind,
+  RoomEntryFailure,
+} from './systems/RoomRequirements.js';
 
 // Character stats
 export {
@@ -242,6 +257,7 @@ export type {
   ClientDestroyItemsMessage,
   ClientEquipItemForceDestroyMessage,
   ServerEquipBlockedMessage,
+  ServerMoveBlockedMessage,
   ClientSetClassMessage,
   ClientResetXpRateMessage,
   ClientEquipSkillMessage,

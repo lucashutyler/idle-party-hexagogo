@@ -7,7 +7,7 @@ import type { InviteListStore } from '../auth/InviteListStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
 import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID, isManagedAssetKind, isDeferredAssetKind } from '@idle-party-rpg/shared';
-import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType } from '@idle-party-rpg/shared';
+import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType, RoomEntryRequirements } from '@idle-party-rpg/shared';
 import type { AdminAuth } from './adminMiddleware.js';
 import type { ApiTokenStore, ApiTokenRecord } from '../auth/ApiTokenStore.js';
 import { isApiTokenExpired } from '../auth/ApiTokenStore.js';
@@ -16,6 +16,25 @@ import { DraftEditor, toRecord } from '../game/DraftEditor.js';
 import { AssetValidationError, MAX_ASSET_BYTES } from '../game/AssetStore.js';
 import type { AssetStore } from '../game/AssetStore.js';
 import { registerAssetRoutes, assetUploadErrorHandler } from './assetRoutes.js';
+
+/**
+ * Coerce an untrusted room/transition entry gate from a request body, dropping
+ * anything malformed. Returns undefined when nothing survives, so an empty
+ * gate is never persisted.
+ */
+function normalizeRoomRequirements(raw: unknown): RoomEntryRequirements | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as { minLevel?: unknown; requiredItemId?: unknown; requiredQuestIds?: unknown };
+  const out: RoomEntryRequirements = {};
+  const minLevel = Number(r.minLevel);
+  if (Number.isFinite(minLevel) && minLevel >= 1) out.minLevel = Math.floor(minLevel);
+  if (typeof r.requiredItemId === 'string' && r.requiredItemId) out.requiredItemId = r.requiredItemId;
+  const questIds = Array.isArray(r.requiredQuestIds)
+    ? r.requiredQuestIds.filter((q): q is string => typeof q === 'string' && !!q)
+    : [];
+  if (questIds.length > 0) out.requiredQuestIds = questIds;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ASSET_BYTES } });
 
@@ -303,7 +322,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Add or update a world tile. Supports ?versionId= for draft editing. */
   router.put('/world/tile', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
-    const { col, row, type, zone, name, encounterTable, shopId, npcId, dungeonId, requiredItemId, transitions } = req.body;
+    const { col, row, type, zone, name, encounterTable, shopId, npcId, dungeonId, requiredItemId, entryRequirements, transitions } = req.body;
     if (col == null || row == null || !type || !zone || !name) {
       res.status(400).json({ error: 'Missing required fields: col, row, type, zone, name' });
       return;
@@ -313,7 +332,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const tileTransitions = Array.isArray(transitions)
       ? transitions
           .filter((t: { mapId?: unknown; tileId?: unknown }) => t && t.mapId && t.tileId)
-          .map((t: { mapId: string; tileId: string }) => ({ mapId: t.mapId, tileId: t.tileId }))
+          .map((t: { mapId: string; tileId: string; entryRequirements?: unknown }) => ({
+            mapId: t.mapId,
+            tileId: t.tileId,
+            entryRequirements: normalizeRoomRequirements(t.entryRequirements),
+          }))
       : undefined;
     const tileTransitionsOrUndef = tileTransitions && tileTransitions.length > 0 ? tileTransitions : undefined;
 
@@ -331,7 +354,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const tileEncounterTable = Array.isArray(encounterTable) && encounterTable.length > 0 ? encounterTable : undefined;
     // Which map this tile belongs to. Clients that predate multi-map omit it → default map.
     const tileMapId = (req.body.mapId as string) || DEFAULT_MAP_ID;
-    const tileInput = { mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, transitions: tileTransitionsOrUndef };
+    const tileInput = { mapId: tileMapId, col, row, type, zone, name, encounterTable: tileEncounterTable, shopId: shopId || undefined, npcId: npcId || undefined, dungeonId: dungeonId || undefined, requiredItemId: requiredItemId || undefined, entryRequirements: normalizeRoomRequirements(entryRequirements), transitions: tileTransitionsOrUndef };
 
     if (versionId) {
       const result = await draftEditor.upsertTile(versionId, tileInput);
@@ -1106,8 +1129,8 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   router.put('/tile-types/:id', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
     const tileTypeId = req.params.id;
-    const { name, icon, color, traversable, requiredItemId } = req.body as {
-      name?: string; icon?: string; color?: string; traversable?: boolean; requiredItemId?: string;
+    const { name, icon, color, traversable, requiredItemId, entryRequirements } = req.body as {
+      name?: string; icon?: string; color?: string; traversable?: boolean; requiredItemId?: string; entryRequirements?: unknown;
     };
 
     if (!name || typeof name !== 'string') {
@@ -1130,6 +1153,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       color,
       traversable,
       requiredItemId: requiredItemId || undefined,
+      entryRequirements: normalizeRoomRequirements(entryRequirements),
     };
 
     if (versionId) {

@@ -112,14 +112,58 @@ const sharedComponents = {
         type: { type: 'string', enum: ['plains', 'forest', 'mountain', 'water', 'town', 'dungeon', 'desert', 'swamp'] },
         zone: { type: 'string' },
         name: { type: 'string', example: 'Town Square' },
+        requiredItemId: {
+          type: 'string',
+          description: 'Legacy item gate. Prefer entryRequirements.requiredItemId — both are honoured.',
+        },
+        entryRequirements: {
+          $ref: '#/components/schemas/RoomEntryRequirements',
+          description: 'Gate on entering this room. Overrides the tile type gate field by field.',
+        },
         transitions: {
           type: 'array',
           description: 'Links to rooms on other maps (e.g. manhole → sewers). A room may have several exits.',
           items: {
             type: 'object',
             required: ['mapId', 'tileId'],
-            properties: { mapId: { type: 'string' }, tileId: { type: 'string', description: 'Target room GUID' } },
+            properties: {
+              mapId: { type: 'string' },
+              tileId: { type: 'string', description: 'Target room GUID' },
+              entryRequirements: {
+                $ref: '#/components/schemas/RoomEntryRequirements',
+                description: 'Gate on taking this exit, applied on top of the destination room gate.',
+              },
+            },
           },
+        },
+      },
+    },
+    RoomEntryRequirements: {
+      type: 'object',
+      description: 'Entry gate for a room or transition. Every party member must satisfy every field set here.',
+      properties: {
+        minLevel: { type: 'number', description: 'Minimum character level every member must have.' },
+        requiredItemId: { type: 'string', description: 'Item every member must have equipped.' },
+        requiredQuestIds: {
+          type: 'array',
+          description: 'Quests every member must have completed (turned in).',
+          items: { type: 'string' },
+        },
+      },
+    },
+    TileTypeDefinition: {
+      type: 'object',
+      required: ['id', 'name', 'icon', 'color', 'traversable'],
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        icon: { type: 'string', description: 'Emoji' },
+        color: { type: 'string', example: '#7ec850' },
+        traversable: { type: 'boolean' },
+        requiredItemId: { type: 'string', description: 'Legacy item gate. Prefer entryRequirements.' },
+        entryRequirements: {
+          $ref: '#/components/schemas/RoomEntryRequirements',
+          description: 'Default gate for every room of this type. Rooms override it field by field.',
         },
       },
     },

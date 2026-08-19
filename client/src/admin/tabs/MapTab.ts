@@ -11,6 +11,7 @@ import {
   TILE_CONFIGS,
   HEX_SIZE,
   DEFAULT_MAP_ID,
+  toRoomRequirements,
 } from '@idle-party-rpg/shared';
 import type {
   CubeCoord,
@@ -18,11 +19,14 @@ import type {
   WorldData,
   WorldTileDefinition,
   EncounterDefinition,
+  MapTransitionLink,
+  RoomEntryRequirements,
 } from '@idle-party-rpg/shared';
 
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
+import { entryRequirementsHtml, readEntryRequirements, summarizeEntryRequirements } from '../components/EntryRequirements';
 
 // Maps CUBE_DIRECTIONS index → hex corner indices for the shared edge.
 const DIR_TO_EDGE: [number, number][] = [
@@ -747,10 +751,16 @@ export class MapTab implements Tab {
 
     // Map transitions — a room may link to several rooms on other maps.
     const links = tile.transitions ?? [];
-    const linkRow = (link: { mapId: string; tileId: string }, idx: number): string => {
+    const itemName = (id: string): string => content?.items?.[id]?.name ?? id;
+    const questName = (id: string): string => content?.quests?.[id]?.name ?? id;
+    const linkRow = (link: MapTransitionLink, idx: number): string => {
       const destTile = content?.world.tiles.find(t => t.id === link.tileId);
       const destMap = content?.world.maps?.find(m => m.id === link.mapId);
-      const label = `→ ${escapeHtml(destMap?.name ?? link.mapId)}: ${escapeHtml(destTile?.name ?? '(missing room)')}`;
+      // Per-transition gates are authored via MCP; surface them here so an
+      // admin can at least see one exists.
+      const gate = summarizeEntryRequirements(link.entryRequirements, itemName, questName);
+      const gateLabel = gate ? ` <span class="admin-form-hint" title="Gate on this exit">🔒 ${escapeHtml(gate)}</span>` : '';
+      const label = `→ ${escapeHtml(destMap?.name ?? link.mapId)}: ${escapeHtml(destTile?.name ?? '(missing room)')}${gateLabel}`;
       return readOnly
         ? `<div class="admin-form-hint">${label}</div>`
         : `<div class="admin-map-transition-row"><span class="admin-form-hint">${label}</span><button class="admin-btn admin-btn-sm" data-remove-transition="${idx}" type="button">Remove</button></div>`;
@@ -791,14 +801,16 @@ export class MapTab implements Tab {
         <label>NPC<select id="sidebar-npc"${disabled}>${npcOptions}</select></label>
         <label>Dungeon<select id="sidebar-dungeon"${disabled}>${dungeonOptions}</select></label>
         ${transitionSectionHtml}
-        <label>Required Item (override)
-          <select id="sidebar-required-item"${disabled}>
-            <option value="">(use type default)</option>
-            ${Object.values(content?.items ?? {}).map(i =>
-              `<option value="${escapeHtml(i.id)}"${i.id === (tile.requiredItemId ?? '') ? ' selected' : ''}>${escapeHtml(i.name)}</option>`
-            ).join('')}
-          </select>
-        </label>
+        ${entryRequirementsHtml({
+          idPrefix: 'sidebar-req',
+          current: this.tileGate(tile),
+          items: Object.values(content?.items ?? {}),
+          quests: Object.values(content?.quests ?? {}),
+          readOnly,
+          itemLabel: 'Required Item (override)',
+          itemNoneLabel: '(use type default)',
+          hint: 'Every party member must satisfy every requirement to enter this room. Unset fields fall back to the tile type.',
+        })}
         <div class="admin-form-coords">Coordinates (${tile.col}, ${tile.row})</div>
         <label class="admin-form-checkbox">
           <input type="checkbox" id="sidebar-custom-encounters" ${tile.encounterTable?.length ? 'checked' : ''}${disabled}>
@@ -848,13 +860,21 @@ export class MapTab implements Tab {
       else delete this.selectedTile.dungeonId;
       this.scheduleSave(ctx);
     });
-    const requiredItemSelect = document.getElementById('sidebar-required-item') as HTMLSelectElement;
-    requiredItemSelect?.addEventListener('change', () => {
+    const applyEntryRequirements = (): void => {
       if (!this.selectedTile) return;
-      if (requiredItemSelect.value) this.selectedTile.requiredItemId = requiredItemSelect.value;
-      else delete this.selectedTile.requiredItemId;
+      const reqs = readEntryRequirements('sidebar-req');
+      if (reqs) this.selectedTile.entryRequirements = reqs;
+      else delete this.selectedTile.entryRequirements;
+      // The legacy scalar is folded into the gate at read time — clear it so a
+      // room never carries two competing item requirements.
+      delete this.selectedTile.requiredItemId;
       this.scheduleSave(ctx);
-    });
+    };
+    document.getElementById('sidebar-req-item')?.addEventListener('change', applyEntryRequirements);
+    document.getElementById('sidebar-req-min-level')?.addEventListener('change', applyEntryRequirements);
+    for (const el of document.querySelectorAll('[data-sidebar-req-quest]')) {
+      el.addEventListener('change', applyEntryRequirements);
+    }
     const customEncCheck = document.getElementById('sidebar-custom-encounters') as HTMLInputElement;
     customEncCheck?.addEventListener('change', () => {
       const section = document.getElementById('sidebar-encounters-section');
@@ -894,6 +914,14 @@ export class MapTab implements Tab {
         this.renderSidebar(ctx);
       });
     }
+  }
+
+  /**
+   * The room's own gate for editing, with any legacy top-level
+   * `requiredItemId` folded in so the form shows one value, not two.
+   */
+  private tileGate(tile: WorldTileDefinition): RoomEntryRequirements | undefined {
+    return toRoomRequirements(tile.entryRequirements, tile.requiredItemId);
   }
 
   private encounterRowsHtml(tile: WorldTileDefinition, encounters: EncounterDefinition[], readOnly: boolean): string {

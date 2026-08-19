@@ -77,7 +77,7 @@ export class WorldGrids {
       for (const tileDef of tiles) {
         const coord = offsetToCube({ col: tileDef.col, row: tileDef.row });
         const tileTypeDef = this.content.getTileType(tileDef.type);
-        grid.addTile(new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id, tileDef.requiredItemId, tileTypeDef));
+        grid.addTile(new HexTile(coord, tileDef.type, tileDef.zone, tileDef.id, tileDef.requiredItemId, tileTypeDef, tileDef.entryRequirements));
       }
     }
 

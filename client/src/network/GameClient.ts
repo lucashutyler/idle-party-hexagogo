@@ -1,4 +1,5 @@
-import type { ServerStateMessage, ServerEquipBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerEquipBlockedMessage,
+  ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode } from '@idle-party-rpg/shared';
 
 const RECONNECT_DELAY = 2000;
 
@@ -10,7 +11,7 @@ type WorldUpdateListener = () => void;
 type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
 type SuspensionListener = () => void;
 type ResumeListener = () => void;
-type MoveBlockedListener = (msg: { itemName: string; itemId: string; missingPlayers: string[] }) => void;
+type MoveBlockedListener = (msg: ServerMoveBlockedMessage) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 type NotificationListener = (notification: NotificationEntry) => void;
 type ServerErrorListener = (message: string, code?: ServerErrorCode) => void;

@@ -16,6 +16,7 @@ import type {
 import type { SkillLoadout } from './SkillTypes.js';
 import type { DungeonRunInfo } from './DungeonTypes.js';
 import type { ClientNotificationMessage, ServerNotificationMessage } from './NotificationTypes.js';
+import type { RoomEntryFailureKind } from './RoomRequirements.js';
 
 
 export type BattleTimerState = 'battle' | 'result';
@@ -25,7 +26,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.08.18.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.08.18.2'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -245,6 +246,31 @@ export interface ServerEquipBlockedMessage {
   blockedBySlot: EquipSlot;
 }
 
+/**
+ * A move or a map transition was refused because the party doesn't meet a
+ * room's entry requirements. `requirement`/`reason` describe the gate; the
+ * kind-specific fields carry the details for clients that want to format
+ * their own message. The item fields predate the generalized gate and stay
+ * populated for item gates.
+ */
+export interface ServerMoveBlockedMessage {
+  type: 'move_blocked';
+  /** Which kind of requirement was unmet. */
+  requirement: RoomEntryFailureKind;
+  /** Player-facing sentence naming the unmet requirement. */
+  reason: string;
+  /** Party members who don't satisfy it. */
+  missingPlayers: string[];
+  /** Item gates only. */
+  itemId?: string;
+  itemName?: string;
+  /** Quest gates only. */
+  questId?: string;
+  questName?: string;
+  /** Level gates only. */
+  minLevel?: number;
+}
+
 export interface ClientEquipSkillMessage {
   type: 'equip_skill';
   skillId: string;
@@ -268,6 +294,7 @@ export type ServerMessage =
   | ServerChatMessageMessage
   | ServerSyncChatMessage
   | ServerEquipBlockedMessage
+  | ServerMoveBlockedMessage
   | ServerTradeProposedMessage
   | ServerTradeCancelledMessage
   | ServerTradeCompletedMessage

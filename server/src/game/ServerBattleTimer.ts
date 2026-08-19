@@ -14,7 +14,14 @@ export interface ServerBattleCallbacks {
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
   onMove?: () => void;
-  canMoveToNextTile?: () => boolean;
+  /**
+   * Whether the party may step onto its next room this cycle.
+   * `ignoreFog` is set after a victory: winning unlocks adjacent rooms, so fog
+   * of war must not hold the party back — but hard entry gates still must.
+   */
+  canMoveToNextTile?: (opts: { ignoreFog: boolean }) => boolean;
+  /** The party wanted to move but couldn't. Fired once per blocked cycle. */
+  onMoveBlocked?: () => void;
   onCombatTick?: (state: PartyCombatState, logEntries: string[]) => void;
 }
 
@@ -36,7 +43,8 @@ export class ServerBattleTimer {
   onBattleEnd?: (result: BattleResult) => void;
   onStateChange?: (state: BattleTimerState) => void;
   onMove?: () => void;
-  canMoveToNextTile?: () => boolean;
+  canMoveToNextTile?: (opts: { ignoreFog: boolean }) => boolean;
+  onMoveBlocked?: () => void;
   onCombatTick?: (state: PartyCombatState, logEntries: string[]) => void;
 
   constructor(party: ServerParty, createCombat: () => PartyCombatState, callbacks?: ServerBattleCallbacks) {
@@ -49,6 +57,7 @@ export class ServerBattleTimer {
       this.onStateChange = callbacks.onStateChange;
       this.onMove = callbacks.onMove;
       this.canMoveToNextTile = callbacks.canMoveToNextTile;
+      this.onMoveBlocked = callbacks.onMoveBlocked;
       this.onCombatTick = callbacks.onCombatTick;
     }
 
@@ -100,10 +109,11 @@ export class ServerBattleTimer {
     // so newly unlocked tiles are available for movement this cycle.
     this.onBattleEnd?.(result);
 
-    const canMove = this.party.hasDestination && (
-      result === 'victory' ||
-      (this.canMoveToNextTile?.() ?? false)
-    );
+    // Victory waives fog of war (it just unlocked the adjacent rooms) but never
+    // an entry gate, so the check runs either way.
+    const canMove = this.party.hasDestination
+      && (this.canMoveToNextTile?.({ ignoreFog: result === 'victory' }) ?? false);
+    if (this.party.hasDestination && !canMove) this.onMoveBlocked?.();
 
     this.setState('result');
 
@@ -176,7 +186,8 @@ export class ServerBattleTimer {
     this.party.exitBattle();
 
     // Movement follows defeat rules: only move to already-unlocked tiles
-    const canMove = this.party.hasDestination && (this.canMoveToNextTile?.() ?? false);
+    const canMove = this.party.hasDestination && (this.canMoveToNextTile?.({ ignoreFog: false }) ?? false);
+    if (this.party.hasDestination && !canMove) this.onMoveBlocked?.();
 
     if (canMove) {
       this.setState('result');

@@ -1,13 +1,26 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { ALL_CLASS_NAMES, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
-import type { ClassName, SkillSlot, SkillSlotType, WorldTileDefinition } from '@idle-party-rpg/shared';
+import type { ClassName, SkillSlot, SkillSlotType, WorldTileDefinition, MapTransitionLink, RoomEntryRequirements } from '@idle-party-rpg/shared';
 import type { McpToolDeps } from './McpToolDeps.js';
 import { DRAFT_CONTENT_TYPES } from '../../game/DraftEditor.js';
 import type { DraftContentType } from '../../game/DraftEditor.js';
 import { toolResult, errorMessage } from './mcpResult.js';
 
 const DRAFT_CONTENT_TYPE_ENUM = z.enum(DRAFT_CONTENT_TYPES);
+
+/**
+ * A room / transition entry gate. Every party member must satisfy every field
+ * set here; unset fields fall back to the tile type's gate.
+ */
+const ROOM_REQUIREMENTS_SCHEMA = z.object({
+  minLevel: z.number().int().min(1).optional()
+    .describe('Minimum character level every party member must have.'),
+  requiredItemId: z.string().optional()
+    .describe('Item every party member must have equipped.'),
+  requiredQuestIds: z.array(z.string()).optional()
+    .describe('Quests every party member must have completed (turned in).'),
+});
 
 const TILE_INPUT_SHAPE = {
   mapId: z.string().optional(),
@@ -20,8 +33,16 @@ const TILE_INPUT_SHAPE = {
   shopId: z.string().optional(),
   npcId: z.string().optional(),
   dungeonId: z.string().optional(),
-  requiredItemId: z.string().optional(),
-  transitions: z.array(z.object({ mapId: z.string(), tileId: z.string() })).optional(),
+  requiredItemId: z.string().optional()
+    .describe('Legacy item gate. Prefer entryRequirements.requiredItemId — both are honoured.'),
+  entryRequirements: ROOM_REQUIREMENTS_SCHEMA.optional()
+    .describe('Gate on entering this room. Overrides the tile type gate field by field.'),
+  transitions: z.array(z.object({
+    mapId: z.string(),
+    tileId: z.string(),
+    entryRequirements: ROOM_REQUIREMENTS_SCHEMA.optional()
+      .describe('Gate on taking this exit, applied on top of the destination room gate.'),
+  })).optional(),
 };
 
 function trimResult(result: { success: true; entries: unknown[] } | { success: false; error: string }): unknown {
@@ -68,7 +89,8 @@ interface UpsertTileInput {
   npcId?: string;
   dungeonId?: string;
   requiredItemId?: string;
-  transitions?: { mapId: string; tileId: string }[];
+  entryRequirements?: RoomEntryRequirements;
+  transitions?: MapTransitionLink[];
 }
 
 export async function upsertTiles(deps: McpToolDeps, versionId: string, tiles: UpsertTileInput[]) {
@@ -202,7 +224,7 @@ export function registerWriteTools(server: McpServer, deps: McpToolDeps): void {
   server.registerTool(
     'upsert_tiles',
     {
-      description: 'Create or update one or more world rooms (tiles) in a draft version, in order. mapId defaults to the overworld map when omitted.',
+      description: 'Create or update one or more world rooms (tiles) in a draft version, in order. mapId defaults to the overworld map when omitted. Rooms and individual transitions can carry entryRequirements — every party member must satisfy every requirement to enter.',
       inputSchema: {
         versionId: z.string(),
         tiles: z.array(z.object(TILE_INPUT_SHAPE)),

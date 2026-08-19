@@ -36,7 +36,7 @@ export class MapScreen implements Screen {
 
     this.gameClient.onMoveBlocked((msg) => {
       const names = msg.missingPlayers.join(', ');
-      this.showMoveToast(`${msg.itemName} required! Missing: ${names}`);
+      this.showMoveToast(names ? `${msg.reason} Missing: ${names}` : msg.reason);
     });
   }
 
