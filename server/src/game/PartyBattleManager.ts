@@ -187,7 +187,6 @@ export class PartyBattleManager {
     this.registerEntry(partyId, serverParty, new Set([username]));
   }
 
-
   /** Add a member to an existing party battle. They join the next combat cycle. */
   addMember(partyId: string, username: string): void {
     const entry = this.entries.get(partyId);

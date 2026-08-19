@@ -32,6 +32,8 @@ import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition, RoomEntryFailure, ServerMoveBlockedMessage } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
+import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
+import { isEmailConfigured } from './auth/EmailService.js';
 
 /**
  * Render an unmet room entry requirement as the wire message. Item gates keep
@@ -49,8 +51,6 @@ function toMoveBlockedMessage(failure: RoomEntryFailure): ServerMoveBlockedMessa
     ...(failure.minLevel !== undefined ? { minLevel: failure.minLevel } : {}),
   };
 }
-import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
-import { isEmailConfigured } from './auth/EmailService.js';
 
 const app = express();
 const server = createServer(app);
