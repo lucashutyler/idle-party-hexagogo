@@ -75,6 +75,22 @@ export class SocialScreen implements Screen {
    * while the user is choosing items.
    */
   private lastTradeRenderKey = '';
+  /**
+   * Offer version the Confirm button is currently armed against. Compared against
+   * the incoming one on each paint: if it moved while Confirm was on screen, the
+   * button is withheld (see `tradeAwaitingReview`) rather than silently re-armed,
+   * which is what would let a partner swap items in during the read-then-click
+   * window. The server rejects any confirm that does not carry the live nonce.
+   */
+  private tradeConfirmNonce: string | null = null;
+  /** One-off warning shown in the trade modal, e.g. after a stale-nonce rejection. */
+  private tradeNotice: string | null = null;
+  /** True when the last paint actually put a live Confirm button on screen. */
+  private tradeConfirmArmed = false;
+  /** Set when the offer moved while Confirm was armed — blocks confirm until acknowledged. */
+  private tradeAwaitingReview = false;
+  /** State subscription that lives as long as the trade modal, not the screen. */
+  private unsubTradeModal?: () => void;
 
   // Gift modal
   private giftModalEl: HTMLElement | null = null;
@@ -117,6 +133,14 @@ export class SocialScreen implements Screen {
     // On tab resume, trigger incremental sync (no clearing)
     this.gameClient.onResume(() => {
       this.gameClient.sendSyncChat(this.chatStore.getLatestId());
+    });
+
+    // A confirm rejected on a stale nonce means the partner's offer moved. The
+    // re-synced state repaints the new offer; this explains why nothing happened.
+    this.gameClient.onServerError((_message, code) => {
+      if (code !== 'trade_nonce_mismatch' || !this.tradeModalEl) return;
+      this.tradeNotice = 'That offer changed before your confirmation went through. Review the updated offer below, then confirm again.';
+      this.updateTradeModal();
     });
   }
 
@@ -1443,6 +1467,7 @@ export class SocialScreen implements Screen {
    * resume it; otherwise start composing a new proposal.
    */
   openTradeModal(targetUsername: string): void {
+    this.refreshStateForTrade();
     const selfUsername = this.lastState?.username ?? '';
     const existing = (this.lastSocial?.proposedTrades ?? []).find(t => {
       const a = t.initiator.username;
@@ -1462,6 +1487,7 @@ export class SocialScreen implements Screen {
 
   /** Open the trade modal for an existing trade, identified by trade ID. */
   openExistingTrade(tradeId: string): void {
+    this.refreshStateForTrade();
     this.tradeActiveId = tradeId;
     this.tradeTargetUsername = null;
     this.tradeSelectedItems = new Map();
@@ -1469,7 +1495,23 @@ export class SocialScreen implements Screen {
     this.renderTradeModal();
   }
 
+  /**
+   * Pull the latest state before opening the modal. Both entry points can fire
+   * while this screen is deactivated — the Items screen's "Proposed Trades" rows
+   * call `openExistingTrade` without a screen switch — and `lastSocial` is frozen
+   * at the last activation in that case. Same idiom as `showUserPopup`.
+   */
+  private refreshStateForTrade(): void {
+    const freshState = this.gameClient.lastState;
+    if (!freshState) return;
+    this.lastState = freshState;
+    this.lastSocial = freshState.social ?? null;
+  }
+
   private snapshotInventoryForTrade(): void {
+    this.tradeNotice = null;
+    this.tradeAwaitingReview = false;
+    this.tradeConfirmArmed = false;
     const inv = this.lastState?.character?.inventory ?? {};
     this.tradeInventorySnapshot = { ...inv };
     this.lastTradeRenderKey = '';
@@ -1486,6 +1528,20 @@ export class SocialScreen implements Screen {
       this.tradeModalEl.remove();
       this.tradeModalEl = null;
     }
+    this.unsubTradeModal?.();
+
+    // The modal outlives this screen's own subscription: it is opened from the
+    // Items screen while SocialScreen is deactivated, and the whole nonce
+    // recovery path depends on the modal seeing the server's re-synced state.
+    // Subscribing per-modal (rather than per-screen) keeps it live either way;
+    // updateTradeModal is render-key gated, so the overlap when the screen is
+    // also active costs nothing.
+    this.unsubTradeModal = this.gameClient.subscribe((state) => {
+      if (!this.tradeModalEl) return;
+      this.lastState = state;
+      this.lastSocial = state.social ?? null;
+      this.updateTradeModal();
+    });
 
     const overlay = document.createElement('div');
     overlay.className = 'trade-modal-overlay';
@@ -1516,9 +1572,19 @@ export class SocialScreen implements Screen {
         return;
       }
 
+      if (btn.matches('.trade-modal-review-btn')) {
+        // The player has now seen the new offer — arm Confirm against it.
+        this.tradeAwaitingReview = false;
+        this.tradeNotice = null;
+        this.updateTradeModal();
+        return;
+      }
+
       if (btn.matches('.trade-modal-confirm-btn')) {
         const trade = this.getActiveTrade();
-        if (trade) this.gameClient.sendConfirmTrade(trade.id);
+        if (!trade) return;
+        this.tradeNotice = null;
+        this.gameClient.sendConfirmTrade(trade.id, this.tradeConfirmNonce ?? trade.nonce);
         return;
       }
 
@@ -1558,7 +1624,13 @@ export class SocialScreen implements Screen {
         } else if (this.tradeTargetUsername) {
           this.gameClient.sendProposeTrade(this.tradeTargetUsername, items);
         }
-        // Clear local selection — server response will repaint with the new state
+        // Clear local selection — server response will repaint with the new state.
+        // The review gate is deliberately NOT cleared here: a counter can be
+        // rejected (the picker renders from a frozen snapshot, so the server may
+        // reject it) or dropped on a closed socket, and neither case repaints.
+        // Clearing it optimistically would leave a stale "Review Updated Offer"
+        // button that the next routine tick silently turns into a live Confirm.
+        // It clears in updateTradeModal once Confirm is genuinely off screen.
         this.tradeSelectedItems = new Map();
         return;
       }
@@ -1579,6 +1651,27 @@ export class SocialScreen implements Screen {
 
     const trade = this.getActiveTrade();
     const selfUsername = this.lastState?.username ?? '';
+
+    // The read-then-click window. If a live Confirm button was already on screen
+    // for one offer and the partner has since changed it, re-arming the button
+    // with the new nonce would let them swap items in while the player is
+    // reaching for Confirm — the server would see a matching nonce and swap.
+    // Instead, hold Confirm back until the player acknowledges the new offer.
+    const confirmOnScreen = !!trade && trade.status === 'countered' && trade.lastUpdatedBy !== selfUsername;
+    if (!confirmOnScreen) {
+      // Nothing to gate while Confirm is off screen — e.g. this player's own
+      // counter landed. Reset so the partner's next counter starts clean.
+      this.tradeAwaitingReview = false;
+      this.tradeNotice = null;
+    } else if (trade && this.tradeConfirmArmed
+      && this.tradeConfirmNonce !== null && trade.nonce !== this.tradeConfirmNonce) {
+      this.tradeAwaitingReview = true;
+      this.tradeNotice = 'Their offer changed while you were looking at it. Check the new offer, then confirm.';
+    }
+    this.tradeConfirmArmed = confirmOnScreen && !this.tradeAwaitingReview;
+    // Bind confirm to the offer version on screen right now.
+    this.tradeConfirmNonce = trade?.nonce ?? null;
+
     const itemDefs = this.lastState?.itemDefinitions ?? {};
     const skillDefs = this.worldCache.getSkillContent().skills;
     // Inventory comes from the frozen snapshot, not live state. The picker
@@ -1674,6 +1767,9 @@ export class SocialScreen implements Screen {
     const hasSelection = selItems.length > 0;
 
     let html = `<div class="trade-modal-header">Trade with ${this.escapeHtml(targetUsername)}</div>`;
+    if (this.tradeNotice) {
+      html += `<div class="trade-notice">${this.escapeHtml(this.tradeNotice)}</div>`;
+    }
 
     if (!trade) {
       // Composing a new proposal
@@ -1697,7 +1793,9 @@ export class SocialScreen implements Screen {
         <div class="trade-picker-label">Counter with:</div>
         ${renderPicker()}
         <div class="trade-actions">
-          <button class="social-action-btn add-friend trade-modal-confirm-btn">Confirm Trade</button>
+          ${this.tradeAwaitingReview
+            ? '<button class="social-action-btn trade-modal-review-btn">Review Updated Offer</button>'
+            : '<button class="social-action-btn add-friend trade-modal-confirm-btn">Confirm Trade</button>'}
           <button class="social-action-btn add-friend trade-send-btn"${hasSelection ? '' : ' disabled'}>Counter</button>
           <button class="social-action-btn remove-friend trade-modal-cancel-btn">Cancel Trade</button>
           <button class="social-action-btn trade-modal-close-btn">Close</button>
@@ -1761,8 +1859,9 @@ export class SocialScreen implements Screen {
       .map(([id, qty]) => `${id}:${qty}`)
       .sort()
       .join(',');
+    const noticeStr = `${this.tradeNotice ?? ''}|${this.tradeAwaitingReview ? 'review' : ''}`;
     if (!trade) {
-      return `new|${this.tradeTargetUsername ?? ''}|${selStr}`;
+      return `new|${this.tradeTargetUsername ?? ''}|${selStr}|${noticeStr}`;
     }
     const offerStr = (items: TradeOfferItem[]): string =>
       items.map(i => `${i.itemId}:${i.quantity}`).sort().join(',');
@@ -1770,13 +1869,18 @@ export class SocialScreen implements Screen {
       trade.id,
       trade.status,
       trade.lastUpdatedBy,
+      // Rotates on every offer change, so a stale paint can never be skipped.
+      trade.nonce,
       offerStr(trade.initiator.items),
       offerStr(trade.target?.items ?? []),
       selStr,
+      noticeStr,
     ].join('|');
   }
 
   dismissTradeModal(): void {
+    this.unsubTradeModal?.();
+    this.unsubTradeModal = undefined;
     if (this.tradeModalEl) {
       release(this.tradeModalEl);
       this.tradeModalEl.remove();
@@ -1787,6 +1891,10 @@ export class SocialScreen implements Screen {
     this.tradeTargetUsername = null;
     this.tradeInventorySnapshot = null;
     this.lastTradeRenderKey = '';
+    this.tradeConfirmNonce = null;
+    this.tradeNotice = null;
+    this.tradeAwaitingReview = false;
+    this.tradeConfirmArmed = false;
   }
 
   // ── Gift Modal ────────────────────────────────────────────────

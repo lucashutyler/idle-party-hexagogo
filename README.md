@@ -187,7 +187,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [ ] Town interactions (shops, inns, etc.)
 - [ ] Currency system
 - [x] Item/equipment system (4 items, 4 equip slots, inventory with stacking)
-- [x] Trading between players (asynchronous multi-item trades, no same-room requirement, persists across server restarts)
+- [x] Trading between players (asynchronous multi-item trades, no same-room requirement, persists across server restarts, per-trade confirm nonce)
 - [x] Item gifting (mailbox-based, accept/deny, declined gifts return to sender)
 
 ### Crafting

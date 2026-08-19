@@ -25,7 +25,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.07.28.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.08.18.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -256,6 +256,12 @@ export interface ClientUnequipSkillMessage {
   slotIndex: number;
 }
 
+/**
+ * Machine-readable tag on an `error` message, for the cases a screen needs to react
+ * to rather than just log. Most errors carry no code.
+ */
+export type ServerErrorCode = 'trade_nonce_mismatch';
+
 export type ServerMessage =
   | ServerStateMessage
   | ServerSocialStateMessage
@@ -267,7 +273,7 @@ export type ServerMessage =
   | ServerTradeCompletedMessage
   | ServerNotificationMessage
   | PlayerProfileMessage
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; code?: ServerErrorCode };
 
 export interface ClientViewPlayerMessage {
   type: 'view_player';

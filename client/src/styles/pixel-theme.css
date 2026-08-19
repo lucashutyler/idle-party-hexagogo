@@ -4503,6 +4503,16 @@ html, body {
   text-align: center;
 }
 
+/* Shown when a confirm was rejected because the offer moved under it. */
+.trade-notice {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--accent-red);
+  border: 1px solid var(--accent-red);
+  padding: 6px 8px;
+  text-align: center;
+}
+
 .trade-actions {
   display: flex;
   gap: 8px;

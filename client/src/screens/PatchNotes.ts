@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.08.18.1',
+    notes: [
+      'Confirming a trade now always trades exactly the offer you were shown. If your trading partner changes their items while you\'re looking at the trade, the Confirm button is held back and replaced with "Review Updated Offer" — so a last-second swap can\'t go through on items you never agreed to.',
+      'Trades opened from the Items screen now stay up to date while the window is open, instead of showing whatever the offer was the last time you visited the Social screen.',
+    ],
+  },
+  {
     version: '2026.07.28.1',
     notes: [
       'You can now dismiss individual notifications or clear your whole notification list — cleared notifications are gone for good, not just marked as read.',

@@ -78,6 +78,13 @@ export interface TradeState {
   timestamp: number;
   /** Username of the player who last took action on this trade (proposed/countered). */
   lastUpdatedBy: string;
+  /**
+   * Confirmation token, rotated on every offer change. A `confirm_trade` must echo
+   * the nonce of the exact offer the player saw, so a captured confirm frame
+   * cannot be replayed and an offer cannot be swapped out from under a
+   * confirmation already in flight.
+   */
+  nonce: string;
   cancelReason?: string;
 }
 
@@ -285,6 +292,8 @@ export interface ClientCounterTradeMessage {
 export interface ClientConfirmTradeMessage {
   type: 'confirm_trade';
   tradeId: string;
+  /** Must match the current `TradeState.nonce` — see TradeState.nonce. */
+  nonce: string;
 }
 
 export interface ClientCancelTradeMessage {
