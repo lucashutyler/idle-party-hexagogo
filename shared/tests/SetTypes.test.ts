@@ -422,37 +422,36 @@ describe('Combat integration — set bonuses are applied', () => {
   // Some cases below pin Math.random to make damage rolls deterministic.
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it('damageResistancePercent reduces incoming monster damage', () => {
-    // Monster always hits for 100. Player has 50% damage resistance from a set.
-    // Without set: takes 100 damage. With set: takes 50.
-    const playerWithSet = makePlayer('hero', 0, {
-      hp: 200,
-      className: 'Knight',
-      setBonuses: { damageResistancePercent: 50 },
-    });
-    const playerNoSet = makePlayer('control', 0, {
-      hp: 200,
-      className: 'Knight',
-    });
-    const monsterDef = makeStaticMonster(100);
-    const monster = createMonsterInstance(monsterDef);
+  /**
+   * Run one player against a monster that always hits for 100, and report the
+   * HP lost. Give the player enough HP to survive the whole run: a player who
+   * dies mid-loop ends the battle, and `processPartyTick` then no-ops, so a
+   * dead arm silently stops accruing damage and the two arms stop being
+   * comparable. Combat alternates player, monster, player, ... so `ticks`
+   * ticks land `ticks / 2` monster attacks.
+   */
+  function hpLostAgainstStaticMonster(
+    ticks: number,
+    setBonuses?: SetBonuses,
+    equipBonuses?: PartyCombatant['equipBonuses'],
+  ): number {
+    const player = makePlayer('hero', 0, { hp: 1000, className: 'Knight', setBonuses });
+    player.equipBonuses = equipBonuses;
+    const monster = createMonsterInstance(makeStaticMonster(100));
     monster.gridPosition = 0;
 
-    const stateA = createPartyCombatState([playerWithSet], [monster]);
-    const stateB = createPartyCombatState([playerNoSet], [createMonsterInstance(monsterDef)]);
+    const state = createPartyCombatState([player], [monster]);
+    for (let i = 0; i < ticks; i++) processPartyTick(state);
+    return state.players[0].maxHp - state.players[0].currentHp;
+  }
 
-    // Tick: player attacks first (prelude), then monster attacks. Run a few ticks.
-    for (let i = 0; i < 4; i++) processPartyTick(stateA);
-    for (let i = 0; i < 4; i++) processPartyTick(stateB);
+  it('damageResistancePercent halves incoming monster damage', () => {
+    // Three monster attacks of 100: 300 unprotected, 150 behind a 50% resist.
+    const plain = hpLostAgainstStaticMonster(6);
+    const resisted = hpLostAgainstStaticMonster(6, { damageResistancePercent: 50 });
 
-    const hpLossA = stateA.players[0].maxHp - stateA.players[0].currentHp;
-    const hpLossB = stateB.players[0].maxHp - stateB.players[0].currentHp;
-
-    // The set-protected player should lose strictly less HP.
-    expect(hpLossA).toBeLessThan(hpLossB);
-    // And the loss should be roughly halved (allow some tolerance because both could
-    // include other reductions, but with no other defenses, A should be ~50% of B).
-    expect(hpLossA).toBeLessThanOrEqual(Math.ceil(hpLossB / 2) + 1);
+    expect(plain).toBe(300);
+    expect(resisted).toBe(150);
   });
 
   it('damagePercent scales player attack damage at every damage roll', () => {
@@ -495,34 +494,18 @@ describe('Combat integration — set bonuses are applied', () => {
   });
 
   it('damage resistance is applied BEFORE flat reductions', () => {
-    // Raw damage 100, 50% set resist → 50, then equip DR of 10 → final 40.
-    // Without the "before flat" rule, you'd see (100-10)*0.5 = 45.
-    // We can't observe the math directly without exposing internals, but we CAN
-    // check the order via behavior at the boundary — large flat reduction with small
-    // raw damage shouldn't underflow, etc. For now sanity: combined defenses don't
-    // subtract more than rawDamage and produce non-negative results.
-    const player = makePlayer('hero', 0, {
-      hp: 500,
-      className: 'Knight',
-      setBonuses: { damageResistancePercent: 50 },
-    });
-    player.equipBonuses = {
+    // Percent-then-flat: floor(100 * 0.5) - 10 = 40 per hit.
+    // Flat-then-percent would be (100 - 10) * 0.5 = 45 per hit.
+    // Over three monster attacks that is 120 vs 135 — so an exact assertion is
+    // what actually pins the ordering. The old bounds check (0 < lost < 400)
+    // was satisfied by both.
+    const lost = hpLostAgainstStaticMonster(6, { damageResistancePercent: 50 }, {
       bonusAttackMin: 0, bonusAttackMax: 0,
       damageReductionMin: 10, damageReductionMax: 10,
       magicReductionMin: 0, magicReductionMax: 0,
-    };
-    const monsterDef = makeStaticMonster(100);
-    const monster = createMonsterInstance(monsterDef);
-    monster.gridPosition = 0;
+    });
 
-    const state = createPartyCombatState([player], [monster]);
-    const startHp = state.players[0].currentHp;
-    for (let i = 0; i < 4; i++) processPartyTick(state);
-    const lost = startHp - state.players[0].currentHp;
-
-    // Some damage was dealt (resistance didn't drop it to 0) and we didn't take a full hit.
-    expect(lost).toBeGreaterThan(0);
-    expect(lost).toBeLessThan(100 * 4); // would be 400+ with no defenses
+    expect(lost).toBe(3 * 40);
   });
 });
 
