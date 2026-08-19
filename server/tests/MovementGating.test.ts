@@ -168,10 +168,14 @@ async function setup(usernames: string[] = ['alice']): Promise<{
   sessions: Record<string, PlayerSession>;
   session: PlayerSession;
   partyId: string;
+  world: WorldData;
+  content: ContentStore;
+  grids: WorldGrids;
 }> {
   const world = makeWorld();
   const content = createFakeContentStore(world);
-  const pm = new PlayerManager(new WorldGrids(content), content, new GuildStore(), createFakeAccountStore(usernames), createFakeStore());
+  const grids = new WorldGrids(content);
+  const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(usernames), createFakeStore());
 
   const sessions: Record<string, PlayerSession> = {};
   for (const username of usernames) {
@@ -182,7 +186,7 @@ async function setup(usernames: string[] = ['alice']): Promise<{
   }
 
   const leader = sessions[usernames[0]];
-  return { pm, sessions, session: leader, partyId: leader.getPartyId()! };
+  return { pm, sessions, session: leader, partyId: leader.getPartyId()!, world, content, grids };
 }
 
 /** Merge `joiner` into `leader`'s party the way the invite/accept flow does. */
@@ -367,46 +371,63 @@ describe('Movement gating (PartyBattleManager via PlayerManager)', () => {
     expect(pathIds(pm, partyId)).toEqual([ROAD_1_ID]);
   });
 
-  // ── Gates outlive a victory ─────────────────────────────────
+  // ── Gates are checked when the move is requested ────────────
 
   /**
-   * A party can only end up walking into a gate it fails if the party changed
-   * after the path was queued: alice (carrying the key) sets a course through
-   * the vault, then keyless bob joins. Victory waives fog of war, so this is
-   * the case that proves it does not waive the entry gate too.
+   * The path is validated up front, so a party can only be *inside* a room it
+   * fails once the world changes underneath it — which the relocation sweep
+   * handles (see "relocates a party out of a room that became gated"). While
+   * merely walking, winning a battle never re-opens the question.
    */
-  async function setupPartyWalkingIntoGate(): Promise<{ pm: PlayerManager; sessions: Record<string, PlayerSession>; partyId: string }> {
-    const { pm, sessions, partyId } = await setup(['alice', 'bob']);
+  it('does not re-check the gate every battle cycle once the path is approved', async () => {
+    const { pm, sessions, partyId } = await setup();
     equip(sessions.alice, 'silver_key');
     expect(moveTo(pm, partyId, ROAD_2_ID)).toEqual({ success: true });
-    joinParty(pm, 'alice', 'bob');
-    return { pm, sessions, partyId };
-  }
-
-  it('stops at the gate after a victory instead of stepping onto the gated room', async () => {
-    const { pm, partyId } = await setupPartyWalkingIntoGate();
 
     // Several full battle → victory → move cycles.
     vi.advanceTimersByTime(20000);
 
-    // The cycles really did end in victory — the branch that waives fog of war.
-    expect(pm.partyBattles.getBattleState(partyId)!.result).toBe('victory');
-    // The party walked the ungated first step, then refused the vault and stopped.
-    expect(pm.partyBattles.getTile(partyId)!.id).toBe(ROAD_1_ID);
-    expect(pm.partyBattles.getPosition(partyId)).toEqual(POS[ROAD_1_ID]);
+    // The approved path ran to completion straight through the gated room.
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(ROAD_2_ID);
+    expect(pathIds(pm, partyId)).toEqual([]);
   });
 
-  it('clears the destination and tells every member why the party stopped', async () => {
-    const { pm, sessions, partyId } = await setupPartyWalkingIntoGate();
+  // ── Recovery when the world changes underneath a party ──────
 
+  it('relocates a party out of a room that became gated, and says why', async () => {
+    const { pm, session, partyId, world, content, grids } = await setup();
+
+    // Walk to an ungated room and settle there.
+    expect(moveTo(pm, partyId, ROAD_1_ID)).toEqual({ success: true });
+    vi.advanceTimersByTime(20000);
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(ROAD_1_ID);
+
+    // Content changes: the room the party is standing in is now gated.
+    world.tiles.find(t => t.id === ROAD_1_ID)!.entryRequirements = { minLevel: 25 };
+    grids.rebuild();
+    pm.partyBattles.refreshAllPartyTiles(grids);
+    const relocated = pm.relocateDisplacedParties(grids, content);
+
+    expect(relocated).toBe(1);
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(START_ID);
+    const moved = logTexts(session).filter(t => t.includes('starting room'));
+    expect(moved.length).toBeGreaterThan(0);
+    expect(moved[moved.length - 1]).toContain('Level 25');
+  });
+
+  it('leaves a party alone when the room it is standing in is still allowed', async () => {
+    const { pm, partyId, world, content, grids } = await setup();
+
+    expect(moveTo(pm, partyId, ROAD_1_ID)).toEqual({ success: true });
     vi.advanceTimersByTime(20000);
 
-    expect(pathIds(pm, partyId)).toEqual([]);
-    for (const username of ['alice', 'bob']) {
-      const stopped = logTexts(sessions[username]).filter(t => t.includes('Your party stopped'));
-      expect(stopped.length).toBeGreaterThan(0);
-      expect(stopped[stopped.length - 1]).toContain('Silver Key');
-    }
+    // A gate the party already satisfies must not uproot them.
+    world.tiles.find(t => t.id === ROAD_1_ID)!.entryRequirements = { minLevel: 1 };
+    grids.rebuild();
+    pm.partyBattles.refreshAllPartyTiles(grids);
+
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(0);
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(ROAD_1_ID);
   });
 
   // ── Equipment locking ───────────────────────────────────────

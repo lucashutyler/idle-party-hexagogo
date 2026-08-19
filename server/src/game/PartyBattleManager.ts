@@ -131,32 +131,17 @@ export class PartyBattleManager {
           }
           this.onMembersMoved?.(members);
         },
-        canMoveToNextTile: ({ ignoreFog }) => {
+        canMoveToNextTile: () => {
           const nextTile = serverParty.nextTile;
           if (!nextTile) return false;
-          // Entry gate — ALL members must satisfy it. Enforced even after a
-          // victory, unlike fog of war.
-          if (this.checkRoomEntry(members, nextTile.entryRequirements)) return false;
-          if (ignoreFog) return true;
-          // Fog of war — at least one member must have the next room unlocked.
+          // Fog of war only. Entry requirements are checked when the move is
+          // requested (handleMove validates every room in the path), so there
+          // is nothing to re-decide per step.
           for (const m of members) {
             const s = this.getSession(m);
             if (s && s.isTileUnlocked(nextTile)) return true;
           }
           return false;
-        },
-        onMoveBlocked: () => {
-          const nextTile = serverParty.nextTile;
-          if (!nextTile) return;
-          const failure = this.checkRoomEntry(members, nextTile.entryRequirements);
-          // Stalled on fog, not a gate — the party is waiting to win a battle
-          // and reveal the room, so keep the destination queued.
-          if (!failure) return;
-          serverParty.clearDestination();
-          for (const m of members) {
-            this.getSession(m)?.addLogEntry(`Your party stopped — ${failure.reason}`, 'move');
-            this.broadcastToMember(m);
-          }
         },
       },
     );
@@ -350,6 +335,16 @@ export class PartyBattleManager {
       itemName: id => this.content.getItem(id)?.name,
       questName: id => this.content.getQuest(id)?.name,
     };
+  }
+
+  /**
+   * Whether this party satisfies a room's entry requirements. Used after a
+   * content change to find parties standing in a room that just became gated.
+   */
+  checkPartyRoomEntry(partyId: string, tile: HexTile): RoomEntryFailure | null {
+    const entry = this.entries.get(partyId);
+    if (!entry) return null;
+    return this.checkRoomEntry(entry.members, tile.entryRequirements);
   }
 
   /** Evaluate one gate against a party. Returns the unmet requirement, or null. */

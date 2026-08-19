@@ -132,18 +132,23 @@ interface RoomEntryRequirements {
 **Where gates attach.**
 - `TileTypeDefinition.entryRequirements` — the default for every room of that type.
 - `WorldTileDefinition.entryRequirements` — a per-room override, merged with the type's gate **field by field** (`mergeRoomRequirements`). Setting a level requirement on one room therefore does not silently drop the item requirement it inherits. The trade-off: a room cannot *clear* a requirement its type sets.
-- `MapTransitionLink.entryRequirements` — a gate on one exit, enforced *in addition to* the destination room's own gate. A door and the room behind it lock independently.
+- `MapTransitionLink.entryRequirements` — requirements on *taking that exit*, which is a room action rather than room entry (the same shape as `DungeonEntryRequirements`). Enforced *in addition to* the destination room's own gate: a door and the room behind it lock independently.
 
 `HexTile.entryRequirements` resolves the merged gate; `HexTile.requiredItemId` is now derived from it.
 
 **Legacy `requiredItemId`.** The original scalar field still exists on both `WorldTileDefinition` and `TileTypeDefinition` and is still honoured — `toRoomRequirements()` folds it into the gate at read time, with an explicit `entryRequirements.requiredItemId` winning. No data migration was needed. The admin forms write the new field and clear the legacy one on save.
 
-**Enforcement** (all server-authoritative, in `PartyBattleManager`):
-1. `handleMove` scans every room in the queued path up front; a rejected move restores the party's previous path rather than stranding it.
-2. The per-tick `canMoveToNextTile` check re-validates the next room each cycle, so a party whose eligibility changes mid-path (a member joins, unequips, or the content changes) stops. Winning a battle waives **fog of war** for that step but never a gate.
-3. `enterTransition` validates the link's gate, then the destination room's gate.
+**Enforcement** (server-authoritative, in `PartyBattleManager`). A requirement is checked **when the party asks to enter**, and nowhere else:
+- `handleMove` scans every room in the requested path up front. A rejected move restores the party's previous path rather than stranding it.
+- `enterTransition` checks the transition's own requirements, then the destination room's.
 
-A blocked party halts at the last legal room, clears its destination, and logs why (`onMoveBlocked`). Rejections reach the client as a `move_blocked` message (`ServerMoveBlockedMessage`) carrying `requirement`, `reason`, `missingPlayers`, plus kind-specific fields; blocked transitions reuse the same message. The client renders it as a map toast — there is no client-side preview of gates, because party members' levels, equipment, and quest history are not in the client's state (see `docs/architecture/client.md`).
+There is deliberately **no per-step re-check** during movement. Once a path is approved it runs; `canMoveToNextTile` stays a pure fog-of-war check. The only thing that can invalidate an approved path is the world changing underneath it, and that is handled by relocation rather than by re-validating every room on every combat tick for every party.
+
+**When the world changes.** A content deploy clears every party's movement queue (`refreshAllPartyTiles` → `ServerParty.relocateTo`), so a queued path is never stale. A party left *standing in* a room whose new requirements it doesn't meet is picked up by `relocateDisplacedParties`, which sends it to the world start tile — the one room guaranteed to be ungated — logs the reason, and raises a `world_room_gated` notification so the move isn't a silent surprise on next login. There is no attempt to find a "nearest room they still qualify for": the neighbours of a gated room are usually gated the same way.
+
+Rejections reach the client as a `move_blocked` message (`ServerMoveBlockedMessage`) carrying `requirement`, `reason`, `missingPlayers`, plus kind-specific fields; blocked transitions reuse the same message. The client renders it as a map toast — there is no client-side preview of gates, because party members' levels, equipment, and quest history are not in the client's state (see `docs/architecture/client.md`).
+
+**Known gap.** A member who joins a party mid-path inherits an approved path they may not qualify for, and gets carried through. Given "weak solo, strong together", being ferried by a friend is arguably fine; if it ever needs closing, the place to do it is `handlePartyJoin`, not the movement tick.
 
 **Equipment lock.** Items required by the current room or any room in the remaining path stay locked — they cannot be unequipped (`PlayerSession.getLockedItemIds`). This reads through the resolved gate, so items authored either way are covered. Level and quest requirements need no equivalent (they can't be un-met). Trades and destroy cannot affect equipped items, so the unequip lock is sufficient.
 

@@ -885,7 +885,8 @@ export class PlayerManager {
   }
 
   /**
-   * After a deploy, find all parties on unreachable tiles and relocate them.
+   * After a deploy, find all parties on unreachable tiles — or standing in a
+   * room whose entry requirements they no longer meet — and relocate them.
    * Returns the number of parties relocated.
    */
   relocateDisplacedParties(grids: WorldGrids, content: ContentStore): number {
@@ -901,6 +902,23 @@ export class PlayerManager {
 
       let targetMapId = currentMapId;
       let bestTile: HexTile | null = null;
+
+      // A content change can gate the room a party is already standing in.
+      // There is no "nearest room they qualify for" worth computing — the
+      // neighbours are usually gated the same way — so send them to the world
+      // start tile, the one room guaranteed to be ungated.
+      const gateFailure = this.partyBattles.checkPartyRoomEntry(partyId, tile);
+      if (gateFailure) {
+        targetMapId = defaultMapId;
+        bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
+        if (bestTile) {
+          this.relocatePartyTo(partyId, bestTile, targetMapId, currentMapId,
+            `The world changed — ${gateFailure.reason} Your party was moved to the starting room.`,
+            'world_room_gated');
+          relocated++;
+          continue;
+        }
+      }
 
       if (!grid) {
         // The party's whole map was deleted — drop them at the default map's start.
@@ -927,25 +945,47 @@ export class PlayerManager {
       }
 
       if (!bestTile) continue;
-      const mapChanged = targetMapId !== currentMapId;
-      this.partyBattles.relocateParty(partyId, bestTile, targetMapId);
-
-      // Unlock the area for all members and log.
-      const members = this.partyBattles.getMembers(partyId);
-      if (members) {
-        for (const username of members) {
-          const session = this.sessions.get(username);
-          if (!session) continue;
-          if (mapChanged) session.switchMapGrid(bestTile);
-          else session.forceUnlockTileArea(bestTile);
-          session.addLogEntry('World updated — relocated to a safe room.', 'move');
-        }
-      }
+      this.relocatePartyTo(partyId, bestTile, targetMapId, currentMapId,
+        'World updated — relocated to a safe room.');
 
       relocated++;
     }
 
     return relocated;
+  }
+
+  /**
+   * Move a party to `tile`, re-seat every member's fog of war, and tell them
+   * why. Passing `eventKey` also raises a notification — used when the move is
+   * something a player would be surprised by on next login, like being sent
+   * back to the start because a room they were standing in became gated.
+   */
+  private relocatePartyTo(
+    partyId: string,
+    tile: HexTile,
+    targetMapId: string,
+    currentMapId: string,
+    logMessage: string,
+    eventKey?: string,
+  ): void {
+    const mapChanged = targetMapId !== currentMapId;
+    this.partyBattles.relocateParty(partyId, tile, targetMapId);
+
+    const members = this.partyBattles.getMembers(partyId);
+    if (!members) return;
+    for (const username of members) {
+      const session = this.sessions.get(username);
+      if (!session) continue;
+      if (mapChanged) session.switchMapGrid(tile);
+      else session.forceUnlockTileArea(tile);
+      session.addLogEntry(logMessage, 'move');
+      if (eventKey) {
+        this.notify.notify(username, eventKey, {
+          title: 'Your party was moved',
+          body: logMessage,
+        });
+      }
+    }
   }
 
   /**

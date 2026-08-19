@@ -5,9 +5,8 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'Some rooms can now ask more of your party than the right gear. A room may require everyone to have reached a certain level, or to have finished certain quests, before the party can set foot in it.',
       'Passages between maps can be locked the same way. Taking one now checks your whole party first, instead of letting anyone straight through.',
       'When a move is turned down, the message names exactly what is missing and which party members are short of it.',
-      'Winning a fight no longer walks your party into a room it does not qualify to enter.',
-      'A party that can no longer reach where it was heading now stops at the last room it can reach and tells you why, instead of quietly getting stuck.',
       'Asking to travel somewhere your party cannot go no longer cancels the trip you were already on.',
+      'If a game update ever leaves your party standing somewhere it no longer qualifies to be, you will be moved to the starting room and told why, instead of being stuck there.',
     ],
   },
   {
