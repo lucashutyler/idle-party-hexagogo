@@ -1,20 +1,20 @@
 [Unit]
-Description=Idle Party RPG Game Server
+Description=Idle Party RPG Game Server ({{INSTANCE_LABEL}})
 After=network.target
 
 [Service]
 Type=simple
-User=idlerpg
-Group=idlerpg
-WorkingDirectory=/opt/idle-party-rpg
+User={{SERVICE_USER}}
+Group={{SERVICE_USER}}
+WorkingDirectory={{INSTALL_DIR}}
 ExecStart=/usr/bin/node server/dist/index.js
-EnvironmentFile=/opt/idle-party-rpg/.env
+EnvironmentFile={{INSTALL_DIR}}/.env
 Environment=NODE_ENV=production
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=idle-party-rpg
+SyslogIdentifier={{SERVICE_NAME}}
 
 [Install]
 WantedBy=multi-user.target

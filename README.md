@@ -46,10 +46,42 @@ sudo bash setup-prod.sh
 
 The script will:
 1. Validate that node (22+), npm, nginx, and git are installed
-2. Prompt for domain, session secret, AWS SES credentials, and other config
+2. Prompt for instance name, domain, session secret, AWS SES credentials, and other config
 3. Clone the repo to `/opt/idle-party-rpg` and build
 4. Install and start a systemd service (`idle-party-rpg`)
 5. Configure nginx as a reverse proxy with WebSocket support
+6. Optionally issue a Let's Encrypt certificate with certbot — skip it if TLS
+   terminates upstream (e.g. behind the Cloudflare proxy). Use `--certbot` /
+   `--no-certbot` to answer that up front.
+
+### Running Multiple Instances
+
+Several independent games can share one server, each on its own domain. Pass
+`--instance NAME` to install a sibling alongside the primary:
+
+```bash
+sudo bash setup-prod.sh --instance game2
+```
+
+Every instance gets its own install directory, `.env`, `data/` folder, systemd
+unit, and nginx site — so players, accounts, and CMS content are fully separate:
+
+| | Primary | `--instance game2` |
+|---|---|---|
+| Install dir | `/opt/idle-party-rpg` | `/opt/idle-party-rpg-game2` |
+| Service | `idle-party-rpg` | `idle-party-rpg-game2` |
+| nginx site | `ipr-site.conf` | `ipr-site-game2.conf` |
+| Game data | `/opt/idle-party-rpg/data/` | `/opt/idle-party-rpg-game2/data/` |
+
+The install directory name is the source of truth — `deploy/sync-nginx.sh` and the
+deploy workflow both derive the service and nginx site names from it, so nothing
+else needs configuring.
+
+Each instance needs its own `PORT` (the script scans sibling installs, suggests
+the next free one, and refuses a collision) and its own `APP_URL`, which drives
+both magic-link redirects and the CORS origin. `SESSION_SECRET` should be distinct
+per instance. The SES credentials can be shared. Note that magic-link emails are
+branded "Idle Party RPG" regardless of instance — only the link URL differs.
 
 ### Environment Variables
 
@@ -70,12 +102,19 @@ The script will:
 ```bash
 sudo systemctl status idle-party-rpg   # check service
 journalctl -u idle-party-rpg -f        # follow logs
-sudo certbot --nginx -d yourdomain.com # add HTTPS
 ```
+
+For a named instance, append the instance name to the unit
+(`systemctl status idle-party-rpg-game2`).
+
+If you skipped certbot, point the domain at the server and terminate TLS upstream.
+With Cloudflare: an A record for the domain with the proxy enabled, SSL/TLS mode
+**Full**, and **WebSockets** enabled under Network (the game runs over a WS
+connection). nginx serves plain HTTP on `:80` behind the proxy.
 
 ## Auto-Deploy
 
-Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into the server, pulls the latest code, builds, and restarts the service.
+Pushes to `main` automatically deploy via GitHub Actions. The workflow SSHs into the server, then for **every** instance it finds under `/opt/idle-party-rpg*` it pulls the latest code, builds, syncs nginx, and restarts that instance's service. A new instance is picked up automatically — no workflow change needed. If one instance fails, the rest still deploy and the job reports the failure at the end.
 
 **Required GitHub Secrets** (Settings → Secrets and variables → Actions):
 
