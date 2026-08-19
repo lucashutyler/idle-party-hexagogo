@@ -256,6 +256,7 @@ export type {
   ClientTurnInQuestMessage,
   PlayerProfileMessage,
   ServerMessage,
+  ServerErrorCode,
   ClientMessage,
 } from './systems/BattleTypes.js';
 export {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TradeSystem } from '../src/game/social/TradeSystem.js';
+import { TradeSystem, TRADE_NONCE_MISMATCH } from '../src/game/social/TradeSystem.js';
 import type { TradeOfferItem, TradeState } from '@idle-party-rpg/shared';
 
 /**
@@ -233,7 +233,7 @@ describe('TradeSystem (async)', () => {
     it('confirms when the partner just acted', () => {
       const trade = setupCounteredTrade(system, state);
       // alice can confirm because bob was the last to update (the counter)
-      const result = system.confirmTrade(trade.id, 'alice',
+      const result = system.confirmTrade(trade.id, 'alice', trade.nonce,
         state.hasItemInInventory, state.getInventoryCount);
       expect(typeof result).not.toBe('string');
       if (typeof result === 'string') return;
@@ -247,7 +247,7 @@ describe('TradeSystem (async)', () => {
     it('rejects when player tries to confirm their own latest action', () => {
       const trade = setupCounteredTrade(system, state);
       // bob counter-ed last; bob can't confirm
-      const result = system.confirmTrade(trade.id, 'bob',
+      const result = system.confirmTrade(trade.id, 'bob', trade.nonce,
         state.hasItemInInventory, state.getInventoryCount);
       expect(result).toBe('Waiting for the other player to confirm');
     });
@@ -258,14 +258,14 @@ describe('TradeSystem (async)', () => {
         state.hasItemInInventory, state.isBlocked);
       if (typeof proposed === 'string') throw new Error(proposed);
 
-      const result = system.confirmTrade(proposed.id, 'alice',
+      const result = system.confirmTrade(proposed.id, 'alice', proposed.nonce,
         state.hasItemInInventory, state.getInventoryCount);
       expect(result).toBe('Both players must offer items before confirming');
     });
 
     it('rejects when actor is not a participant', () => {
       const trade = setupCounteredTrade(system, state);
-      const result = system.confirmTrade(trade.id, 'charlie',
+      const result = system.confirmTrade(trade.id, 'charlie', trade.nonce,
         state.hasItemInInventory, state.getInventoryCount);
       expect(result).toBe('Not your trade');
     });
@@ -273,7 +273,7 @@ describe('TradeSystem (async)', () => {
     it('rejects when offered item is gone at confirm time', () => {
       const trade = setupCounteredTrade(system, state);
       state.takeItem('alice', 'sword');
-      const result = system.confirmTrade(trade.id, 'alice',
+      const result = system.confirmTrade(trade.id, 'alice', trade.nonce,
         state.hasItemInInventory, state.getInventoryCount);
       expect(result).toBe('An offered item is no longer in inventory');
     });
@@ -282,7 +282,7 @@ describe('TradeSystem (async)', () => {
       const trade = setupCounteredTrade(system, state);
       // Alice already has 99 shields → can't accept 1 more
       state.setItemCount('alice', 'shield', 99);
-      const result = system.confirmTrade(trade.id, 'alice',
+      const result = system.confirmTrade(trade.id, 'alice', trade.nonce,
         state.hasItemInInventory, state.getInventoryCount);
       expect(typeof result).not.toBe('string');
       if (typeof result === 'string') return;
@@ -297,12 +297,149 @@ describe('TradeSystem (async)', () => {
 
     it('cleans up trade indexes after confirmation', () => {
       const trade = setupCounteredTrade(system, state);
-      system.confirmTrade(trade.id, 'alice',
+      system.confirmTrade(trade.id, 'alice', trade.nonce,
         state.hasItemInInventory, state.getInventoryCount);
 
       expect(system.getTrade(trade.id)).toBeNull();
       expect(system.getPlayerTrades('alice')).toHaveLength(0);
       expect(system.getPlayerTrades('bob')).toHaveLength(0);
+    });
+  });
+
+  describe('confirm nonce (replay / offer-swap protection)', () => {
+    it('mints a nonce on propose', () => {
+      setupReadyPair(state);
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
+      expect(typeof proposed.nonce).toBe('string');
+      expect(proposed.nonce.length).toBeGreaterThan(0);
+    });
+
+    it('rotates the nonce on every counter', () => {
+      setupReadyPair(state);
+      state.giveItem('bob', 'pebble');
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'),
+        state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
+      const n0 = `${proposed.nonce}`;
+
+      const c1 = system.counterTrade(proposed.id, 'bob', offer('shield'), state.hasItemInInventory);
+      if (typeof c1 === 'string') throw new Error(c1);
+      // counterTrade returns the live trade object — snapshot the string, don't alias it.
+      const n1 = c1.nonce;
+      expect(n1).not.toBe(n0);
+
+      const c2 = system.counterTrade(proposed.id, 'bob', offer('pebble'), state.hasItemInInventory);
+      if (typeof c2 === 'string') throw new Error(c2);
+      expect(c2.nonce).not.toBe(n1);
+    });
+
+    it('rejects a confirm for an offer that was swapped after the player saw it', () => {
+      // The exploit the nonce closes: bob baits alice with a good offer, then
+      // swaps in a worthless one while her confirm is in flight. `lastUpdatedBy`
+      // is still 'bob' after the swap, so that check alone would let it through.
+      const trade = setupCounteredTrade(system, state);
+      const seenNonce = trade.nonce;
+
+      state.giveItem('bob', 'pebble');
+      const swapped = system.counterTrade(trade.id, 'bob', offer('pebble'), state.hasItemInInventory);
+      if (typeof swapped === 'string') throw new Error(swapped);
+      expect(swapped.lastUpdatedBy).toBe('bob'); // the old guard still passes
+
+      const result = system.confirmTrade(trade.id, 'alice', seenNonce,
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(result).toBe(TRADE_NONCE_MISMATCH);
+
+      // Nothing was swapped and the trade stays open so alice can re-read it.
+      expect(system.getTrade(trade.id)?.status).toBe('countered');
+      expect(system.getTrade(trade.id)?.target?.items).toEqual([{ itemId: 'pebble', quantity: 1 }]);
+    });
+
+    it('accepts the confirm once the player re-reads the swapped offer', () => {
+      const trade = setupCounteredTrade(system, state);
+      state.giveItem('bob', 'pebble');
+      const swapped = system.counterTrade(trade.id, 'bob', offer('pebble'), state.hasItemInInventory);
+      if (typeof swapped === 'string') throw new Error(swapped);
+
+      const result = system.confirmTrade(trade.id, 'alice', swapped.nonce,
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(typeof result).not.toBe('string');
+    });
+
+    // Note: it is the post-confirm cleanup, not the nonce, that catches this one —
+    // the trade is gone. The nonce is what catches a replay against a trade that
+    // still exists (next test). Both are asserted so neither guard can regress
+    // silently.
+    it('rejects a replayed confirm frame after the trade completed', () => {
+      const trade = setupCounteredTrade(system, state);
+      const capturedId = trade.id;
+      const capturedNonce = trade.nonce;
+
+      const first = system.confirmTrade(capturedId, 'alice', capturedNonce,
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(typeof first).not.toBe('string');
+
+      // Same frame, sent twice — the trade is gone, so there is nothing to re-run.
+      const replay = system.confirmTrade(capturedId, 'alice', capturedNonce,
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(replay).toBe('Trade not found');
+    });
+
+    it('rejects a replayed confirm against a fresh trade with the same partner', () => {
+      const trade = setupCounteredTrade(system, state);
+      const capturedNonce = trade.nonce;
+      system.cancelTrade(trade.id, 'alice');
+
+      // New trade, same pair, same items — the captured nonce must not carry over.
+      const next = setupCounteredTrade(system, state);
+      const result = system.confirmTrade(next.id, 'alice', capturedNonce,
+        state.hasItemInInventory, state.getInventoryCount);
+      expect(result).toBe(TRADE_NONCE_MISMATCH);
+    });
+
+    it('rejects a confirm with a missing or garbage nonce', () => {
+      const trade = setupCounteredTrade(system, state);
+      expect(system.confirmTrade(trade.id, 'alice', '',
+        state.hasItemInInventory, state.getInventoryCount)).toBe(TRADE_NONCE_MISMATCH);
+      expect(system.confirmTrade(trade.id, 'alice', 'not-a-real-nonce',
+        state.hasItemInInventory, state.getInventoryCount)).toBe(TRADE_NONCE_MISMATCH);
+      expect(system.getTrade(trade.id)?.status).toBe('countered');
+    });
+
+    it('does not let a non-participant probe nonces', () => {
+      const trade = setupCounteredTrade(system, state);
+      // Same error whether the outsider guesses right or wrong.
+      expect(system.confirmTrade(trade.id, 'charlie', trade.nonce,
+        state.hasItemInInventory, state.getInventoryCount)).toBe('Not your trade');
+      expect(system.confirmTrade(trade.id, 'charlie', 'wrong',
+        state.hasItemInInventory, state.getInventoryCount)).toBe('Not your trade');
+    });
+
+    it('backfills a nonce for trades persisted before nonces existed', () => {
+      const trade = setupCounteredTrade(system, state);
+      const legacy = JSON.parse(JSON.stringify(trade)) as TradeState & { nonce?: string };
+      delete legacy.nonce;
+
+      const restored = new TradeSystem();
+      restored.restoreFromSaveData([legacy as TradeState]);
+
+      const live = restored.getTrade(trade.id);
+      expect(typeof live?.nonce).toBe('string');
+      expect(live?.nonce.length).toBeGreaterThan(0);
+
+      // The backfilled nonce is the one that works.
+      expect(restored.confirmTrade(trade.id, 'alice', '',
+        state.hasItemInInventory, state.getInventoryCount)).toBe(TRADE_NONCE_MISMATCH);
+      expect(typeof restored.confirmTrade(trade.id, 'alice', live!.nonce,
+        state.hasItemInInventory, state.getInventoryCount)).not.toBe('string');
+    });
+
+    it('preserves the nonce across a normal save/restore round trip', () => {
+      const trade = setupCounteredTrade(system, state);
+      const restored = new TradeSystem();
+      restored.restoreFromSaveData(JSON.parse(JSON.stringify(system.getAllTrades())));
+      expect(restored.getTrade(trade.id)?.nonce).toBe(trade.nonce);
     });
   });
 

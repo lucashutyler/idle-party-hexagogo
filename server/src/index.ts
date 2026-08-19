@@ -24,6 +24,7 @@ import { ApiTokenStore } from './auth/ApiTokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { createAdminRoutes } from './admin/adminRoutes.js';
 import { createMcpRouter } from './mcp/McpEndpoint.js';
+import { TRADE_NONCE_MISMATCH } from './game/social/TradeSystem.js';
 import { AssetStore } from './game/AssetStore.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
@@ -1542,15 +1543,28 @@ wss.on('connection', (ws) => {
       if (msg.type === 'confirm_trade' && typeof msg.tradeId === 'string') {
         console.log(`[Trade] ${username} confirming trade ${msg.tradeId}`);
         const partner = playerManager.trades.getTradePartner(msg.tradeId, username);
+        // A missing nonce is treated as a stale one — an old or hand-rolled client
+        // gets the same "review the updated offer" rejection as a replayed frame.
+        const nonce = typeof msg.nonce === 'string' ? msg.nonce : '';
         const result = playerManager.trades.confirmTrade(
           msg.tradeId,
           username,
+          nonce,
           (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
           (u, itemId) => playerManager.getSessionByUsername(u)?.getInventoryCount(itemId) ?? 0,
         );
 
         if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: result,
+            // Tagged so the trade modal can explain the rejection rather than
+            // looking like a dead button.
+            ...(result === TRADE_NONCE_MISMATCH ? { code: 'trade_nonce_mismatch' } : {}),
+          }));
+          // Re-sync so a client that rejected on a stale nonce repaints with the
+          // current offer (and its current nonce) instead of retrying the old one.
+          playerManager.sendStateToPlayer(username);
           return;
         }
 

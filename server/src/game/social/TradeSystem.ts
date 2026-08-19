@@ -21,11 +21,23 @@ import { MAX_STACK } from '@idle-party-rpg/shared';
  * `lastUpdatedBy` tracks who took the most recent action — the OTHER player
  * needs to act next. Used by clients to surface "needs my attention" state.
  *
+ * Every trade carries a `nonce` that is regenerated on propose and on every
+ * counter. `confirmTrade` requires the caller to echo the current nonce, which
+ * makes a confirmation bind to the exact offer the player saw: a captured
+ * `confirm_trade` frame cannot be replayed, and a partner cannot swap their
+ * offer out from under a confirmation that is already in flight.
+ *
  * This class is pure stateful logic — no WebSocket sends, no file I/O.
  * PlayerManager wires everything together; TradeStore handles persistence.
  */
 
 export type ConfirmTradeFailure = { success: false; reason: string; affectedPlayer: 'initiator' | 'target' };
+
+/**
+ * Returned by `confirmTrade` when the supplied nonce is missing or stale — the
+ * offer changed (or the frame is a replay) since the player last saw the trade.
+ */
+export const TRADE_NONCE_MISMATCH = 'This trade changed — review the updated offer before confirming';
 
 export class TradeSystem {
   /** All active trades by trade ID. */
@@ -41,6 +53,9 @@ export class TradeSystem {
     for (const trade of saved) {
       // Only restore unfinished trades
       if (trade.status === 'cancelled' || trade.status === 'confirmed') continue;
+      // Trades persisted before nonces existed have none — mint one so they stay
+      // confirmable. Clients pick it up from the next state push.
+      if (!trade.nonce) trade.nonce = TradeSystem.generateNonce();
       this.trades.set(trade.id, trade);
       this.indexParticipants(trade);
     }
@@ -154,6 +169,7 @@ export class TradeSystem {
       target: { username: targetUsername, items: [] },
       timestamp: Date.now(),
       lastUpdatedBy: initiatorUsername,
+      nonce: TradeSystem.generateNonce(),
     };
 
     this.trades.set(id, trade);
@@ -201,6 +217,9 @@ export class TradeSystem {
     trade.status = (initOk && targetOk) ? 'countered' : 'pending';
     trade.lastUpdatedBy = actingUsername;
     trade.timestamp = Date.now();
+    // Rotate the nonce: any confirm the partner already sent for the previous
+    // offer is now stale and will be rejected.
+    trade.nonce = TradeSystem.generateNonce();
 
     return trade;
   }
@@ -208,6 +227,12 @@ export class TradeSystem {
   /**
    * Confirm a trade. Either player can confirm — but only if the OTHER player
    * was the last to update. Re-validates inventory + stack capacity.
+   *
+   * `nonce` must equal the trade's current nonce, which rotates on every offer
+   * change. That binds the confirmation to the exact offer the confirming player
+   * was looking at: a replayed `confirm_trade` frame carries a spent nonce, and a
+   * partner who counters while a confirm is in flight invalidates it rather than
+   * having the stale confirm accept their new offer.
    *
    * Returns:
    *   - `{ trade, initiatorOffer, targetOffer }` on success — caller executes the atomic swap.
@@ -219,6 +244,7 @@ export class TradeSystem {
   confirmTrade(
     tradeId: string,
     actingUsername: string,
+    nonce: string,
     hasItemInInventory: (u: string, itemId: string, quantity: number) => boolean,
     getInventoryCount: (u: string, itemId: string) => number,
   ): { trade: TradeState; initiatorOffer: TradeOffer; targetOffer: TradeOffer } | ConfirmTradeFailure | string {
@@ -230,6 +256,11 @@ export class TradeSystem {
     const isInitiator = trade.initiator.username === actingUsername;
     const isTarget = trade.target.username === actingUsername;
     if (!isInitiator && !isTarget) return 'Not your trade';
+
+    // Checked after participation so a non-participant can't probe nonces.
+    if (typeof nonce !== 'string' || nonce !== trade.nonce) {
+      return TRADE_NONCE_MISMATCH;
+    }
 
     if (trade.lastUpdatedBy === actingUsername) {
       return 'Waiting for the other player to confirm';
@@ -321,6 +352,11 @@ export class TradeSystem {
     if (trade.initiator.username === username) return trade.target?.username ?? null;
     if (trade.target?.username === username) return trade.initiator.username;
     return null;
+  }
+
+  /** Fresh confirmation token. Rotated on every change to a trade's offers. */
+  private static generateNonce(): string {
+    return randomUUID();
   }
 
   private cleanupTrade(tradeId: string): void {
