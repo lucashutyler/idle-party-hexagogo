@@ -95,6 +95,12 @@ Everything in `data/` must be persisted behind a swappable store interface — n
 
 When adding a new content type to the game, include it in `ContentSnapshot` (`server/src/game/VersionStore.ts`) and in `ContentStore.toSnapshot()` / `replaceAll()` so it ships in draft/publish/deploy snapshots.
 
+### Seed data is not live content
+
+The game is content-managed: `ContentStore.load()` seeds defaults **only** when no data files exist at all. After first boot, each server's content is whatever lives in its own `data/`, authored through the World Manager and MCP and shipped via draft → publish → deploy. Different live servers can hold entirely different content.
+
+So never infer what the game contains from the source tree. Grepping the repo tells you what a *fresh* world starts with and what this checkout happens to hold — it does not tell you what any running server has. Claims like "nothing references X, so no live content is affected" are unsupportable; say "the seed defaults don't reference X" and treat the real blast radius as unknown. This matters most when writing issues, PR descriptions, or anything where a severity or priority depends on what operators actually authored.
+
 ### UI terminology
 
 In all user-facing text (UI labels, error messages, combat log), refer to hex tiles as **"rooms"**. Code internals (variable names, class names, comments) may still use "tile" — the rename is UI-only.
