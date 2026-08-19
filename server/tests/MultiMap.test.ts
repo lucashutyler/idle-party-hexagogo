@@ -310,3 +310,63 @@ describe('Cross-map transition gating', () => {
     expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 0, row: 0 });
   });
 });
+
+/**
+ * `relocateDisplacedParties` walks each grid from a start tile to decide what
+ * is reachable. That premise only holds on the map players spawn and walk on —
+ * anywhere else a room is reached through a transition, so a legitimately
+ * occupied room can be unreachable by any walk from that map's start tile.
+ */
+describe('Displaced-party sweep and multi-map reachability', () => {
+  const ISLAND_ID = 'sewer-island';
+  const ORPHAN_ID = 'overworld-orphan';
+
+  /** The two-map world plus one isolated room on each map. */
+  function makeIslandWorld(): WorldData {
+    const world = makeWorld();
+    // Reachable only via a transition — no walking route from (0,0).
+    world.tiles.push(
+      { id: ISLAND_ID, mapId: 'sewers', col: 5, row: 5, type: 'plains', zone: 'sewer', name: 'Flooded Island' },
+      { id: ORPHAN_ID, mapId: 'overworld', col: 7, row: 7, type: 'plains', zone: 'town', name: 'Marooned Clearing' },
+    );
+    world.tiles.find(t => t.id === MANHOLE_ID)!.transitions!.push({ mapId: 'sewers', tileId: ISLAND_ID });
+    return world;
+  }
+
+  async function setup() {
+    const world = makeIslandWorld();
+    const content = createFakeContentStore(world);
+    const grids = new WorldGrids(content);
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    const session = await pm.login(createFakeWs(), 'alice');
+    session.setClass('Knight');
+    pm.ensureParty('alice');
+    return { pm, session, grids, content, partyId: session.getPartyId()! };
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('leaves a party on a non-default map alone even when its room is unwalkable from that map start', async () => {
+    const { pm, grids, content, partyId } = await setup();
+
+    expect(pm.handleEnterTransition('alice', ISLAND_ID).success).toBe(true);
+    expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
+
+    // The island is nowhere near the sewers' own start tile, but the party got
+    // there legitimately — the sweep must not uproot them.
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(0);
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(ISLAND_ID);
+    expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
+  });
+
+  it('still relocates a party stranded on the map that holds the world start tile', async () => {
+    const { pm, grids, content, partyId } = await setup();
+
+    const orphan = grids.getOrThrow('overworld').getTileById(ORPHAN_ID)!;
+    pm.partyBattles.relocateParty(partyId, orphan, 'overworld');
+
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(1);
+    expect(pm.partyBattles.getTile(partyId)!.id).not.toBe(ORPHAN_ID);
+  });
+});

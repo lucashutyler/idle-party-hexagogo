@@ -888,6 +888,14 @@ export class PlayerManager {
    * After a deploy, find all parties on unreachable tiles — or standing in a
    * room whose entry requirements they no longer meet — and relocate them.
    * Returns the number of parties relocated.
+   *
+   * The reachability sweep only runs on the map that holds the world start
+   * tile. It walks the grid from that start, which is only a meaningful notion
+   * of "reachable" where players actually spawn and walk; on any other map a
+   * room is reached through a transition, possibly one-way, so a party can sit
+   * somewhere perfectly legitimate that no walk from that map's own start tile
+   * would ever find. Uprooting them would be worse than leaving them be.
+   * Revisiting this properly is issue #374.
    */
   relocateDisplacedParties(grids: WorldGrids, content: ContentStore): number {
     const world = content.getWorld();
@@ -924,6 +932,10 @@ export class PlayerManager {
         // The party's whole map was deleted — drop them at the default map's start.
         targetMapId = defaultMapId;
         bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
+      } else if (currentMapId !== defaultMapId) {
+        // Off the start tile's map, reachability isn't decidable from one grid
+        // alone — see the note on this method. Leave the party alone.
+        continue;
       } else {
         // Reachability is computed within the party's own map.
         const meta = world.maps.find(m => m.id === currentMapId);
