@@ -65,7 +65,7 @@ Runtime: shared skill helpers take a `SkillContent` bundle; `reconcileSkillLoado
 
 ## Dungeon system
 
-**Definitions.** `DungeonTypes.ts` defines `DungeonDefinition` with `id`, `name`, optional `description`, `floors: DungeonFloor[]`, optional `entryRequirements: DungeonEntryRequirements`, optional `firstClearRewards: DungeonReward[]`, and optional flat `firstClearXp`/`firstClearGold` bonuses. Each `DungeonFloor` has `floorNumber` (1-indexed), `gridShape: { cols, rows }`, `encounterTable: EncounterTableEntry[]` (reuses zone-style weighted picks), optional `isBoss`, and optional `rewards`. `DungeonEntryRequirements` covers `minLevel`/`maxLevel`, `requiredItemId` + `consumeRequiredItem`, `requiredClasses: ClassName[]`, and `minPartySize`/`maxPartySize`. Stored in `data/dungeons.json` via `ContentStore` and snapshotted in `ContentSnapshot.dungeons`. Admin CRUD lives in the Dungeons tab. A room is linked to a dungeon via `dungeonId?` on its `WorldTileDefinition` (set in the Map tab room editor, mirrors the `shopId`/`npcId` pattern).
+**Definitions.** `DungeonTypes.ts` defines `DungeonDefinition` with `id`, `name`, optional `description`, `floors: DungeonFloor[]`, optional `entryRequirements: DungeonEntryRequirements`, optional `firstClearRewards: DungeonReward[]`, and optional flat `firstClearXp`/`firstClearGold` bonuses. Each `DungeonFloor` has `floorNumber` (1-indexed), `gridShape: { cols, rows }`, `encounterTable: EncounterTableEntry[]` (reuses zone-style weighted picks), optional `isBoss`, and optional `rewards`. `DungeonEntryRequirements` covers `minLevel`/`maxLevel`, `requiredItemId` + `consumeRequiredItem`, `requiredClasses: ClassName[]`, and `minPartySize`/`maxPartySize`. It is the sibling of `RoomEntryRequirements` ([Room entry requirements](#room-entry-requirements)) — same "all members must satisfy it" rule, evaluated by its own pure validator. Stored in `data/dungeons.json` via `ContentStore` and snapshotted in `ContentSnapshot.dungeons`. Admin CRUD lives in the Dungeons tab. A room is linked to a dungeon via `dungeonId?` on its `WorldTileDefinition` (set in the Map tab room editor, mirrors the `shopId`/`npcId` pattern).
 
 **Pure helpers** (shared, unit-tested in `DungeonTypes.test.ts`): `validateDungeonEntry(dungeon, members, requiredItemName?)` returns a human-readable rejection reason or `null` (checks floors-exist, party size, per-member level/class/required-item); `rollDungeonRewards(rewards, rng?)` rolls a `DungeonReward[]` table into concrete `{ itemId, quantity }[]` grants; `rewardAppliesToClass(reward, className)` gates a reward by its optional `classRestriction`. Each `DungeonReward` may carry a `classRestriction: ClassName[]` — only members of a listed class roll for it, so a dungeon can hand different loot to different classes (a blade for Knights, a lute for Bards). The server filters floor and first-clear rewards per member by class before rolling.
 
@@ -103,7 +103,7 @@ A world is a collection of independent hex **maps**, not one grid. `WorldData` c
 
 The server builds **one `HexGrid` per map** via `WorldGrids` (`server/src/game/WorldGrids.ts`), a stable registry (`Map<mapId, HexGrid>`). Both the registry object and each per-map grid keep their object identity across rebuilds (cleared + repopulated in place), preserving the by-reference invariant relied on by `PartyBattleManager`/`PlayerSession`/`ServerParty`. A `ServerParty` knows its `mapId` and owns the pathfinder for that map; `ServerParty.switchMap(grid, tile, mapId)` swaps both. Because each map's `HexPathfinder` is bound to its own disjoint grid, A* never crosses maps.
 
-**Transitions**: a tile may set `transitions: { mapId, tileId }[]` — a room can have several exits (a manhole and a staircase). Each target is identified by GUID (robust to col/row edits). Standing on such a room, a party travels via the `enter_transition` client message (which carries the chosen target `tileId`) → `PartyBattleManager.enterTransition(partyId, tileId)`: it verifies the current room actually offers that transition, switches the party's grid + position, reveals the arrival area for every member (`PlayerSession.switchMapGrid` re-seats `UnlockSystem` on the new grid from the same GUID set — unlocks span maps for free), and restarts combat for a fresh encounter. Blocked inside a dungeon; falls back to the destination map's `startTile` if the exact tile is gone, else rejects. The state message carries top-level `currentMapId`; `OtherPlayerState.mapId` lets clients hide players on other maps. `migrateWorldData` also upgrades any legacy single `transitionsTo` field into the `transitions` array. Out of scope (separate issues): a zoomed-out overworld/map-select for players (#168), teleport items (#170–#172).
+**Transitions**: a tile may set `transitions: MapTransitionLink[]` (`{ mapId, tileId, entryRequirements? }`) — a room can have several exits (a manhole and a staircase), each optionally gated (see [Room entry requirements](#room-entry-requirements)). Each target is identified by GUID (robust to col/row edits). Standing on such a room, a party travels via the `enter_transition` client message (which carries the chosen target `tileId`) → `PartyBattleManager.enterTransition(partyId, tileId)`: it verifies the current room actually offers that transition, checks the link's gate and then the destination room's gate, switches the party's grid + position, reveals the arrival area for every member (`PlayerSession.switchMapGrid` re-seats `UnlockSystem` on the new grid from the same GUID set — unlocks span maps for free), and restarts combat for a fresh encounter. Blocked inside a dungeon; falls back to the destination map's `startTile` if the exact tile is gone, else rejects. The state message carries top-level `currentMapId`; `OtherPlayerState.mapId` lets clients hide players on other maps. `migrateWorldData` also upgrades any legacy single `transitionsTo` field into the `transitions` array. Out of scope (separate issues): a zoomed-out overworld/map-select for players (#168), teleport items (#170–#172).
 
 ## Fog of war (unlock-based)
 
@@ -115,13 +115,50 @@ Every tile renders in three layers regardless of unlock state — tile-type colo
 
 **Non-traversable tiles** (mountains, water, hedges, volcanoes) always render in a fixed dimmed style with their terrain icon — they are unaffected by fog of war or unlock state. Zone names are always visible on all tiles. Players can click and attempt to travel to any visible tile regardless of fog state. Zone unlock is computed client-side by `WorldCache.updateUnlocked()` from the unlock keys.
 
-## Item-gated tiles
+## Room entry requirements
 
-Some traversable tile types require a specific equipped item for entry. `TileConfig.requiredItemId` specifies the item ID (e.g., Desert requires `waterskin` relic, Lava Field requires `magma_boots` foot slot). When a party tries to move and the path crosses a gated tile, ALL party members must have the required item equipped — otherwise the move is rejected with a `move_blocked` WS message listing the item name and missing players. Once movement starts, required items are **locked**: they cannot be unequipped while the party is on the gated tile or has gated tiles in their remaining path. The lock covers both current tile and all tiles in the movement queue. Trades and destroy cannot affect equipped items, so the unequip lock is sufficient.
+Rooms and map transitions can be gated behind requirements the whole party must meet. The model lives in `shared/src/systems/RoomRequirements.ts`:
+
+```ts
+interface RoomEntryRequirements {
+  minLevel?: number;          // every member at or above this level
+  requiredItemId?: string;    // every member has it equipped
+  requiredQuestIds?: string[]; // every member has completed (turned in) each
+}
+```
+
+**Party semantics.** ALL members must satisfy EVERY set requirement — the same rule the original item-only gate used. A member with no live session satisfies nothing. `validateRoomEntry(reqs, members, labels)` is a pure shared function (sibling of `validateDungeonEntry`) returning a `RoomEntryFailure` — the unmet requirement kind, player-facing `reason`, and the `missingPlayers` who don't meet it — or `null` when entry is allowed. Checks run item → level → quest, so a purely item-gated room produces the same rejection it always did.
+
+**Where gates attach.**
+- `TileTypeDefinition.entryRequirements` — the default for every room of that type.
+- `WorldTileDefinition.entryRequirements` — a per-room override, merged with the type's gate **field by field** (`mergeRoomRequirements`). Setting a level requirement on one room therefore does not silently drop the item requirement it inherits. The trade-off: a room cannot *clear* a requirement its type sets.
+- `MapTransitionLink.entryRequirements` — requirements on *taking that exit*, which is a room action rather than room entry (the same shape as `DungeonEntryRequirements`). Enforced *in addition to* the destination room's own gate: a door and the room behind it lock independently.
+
+`HexTile.entryRequirements` resolves the merged gate; `HexTile.requiredItemId` is now derived from it.
+
+**Legacy `requiredItemId`.** The original scalar field still exists on both `WorldTileDefinition` and `TileTypeDefinition` and is still honoured — `toRoomRequirements()` folds it into the gate at read time, with an explicit `entryRequirements.requiredItemId` winning. No data migration was needed. The admin forms write the new field and clear the legacy one on save.
+
+**Enforcement** (server-authoritative, in `PartyBattleManager`). A requirement is checked **when the party asks to enter**, and nowhere else:
+- `handleMove` scans every room in the requested path up front. A rejected move restores the party's previous path rather than stranding it.
+- `enterTransition` checks the transition's own requirements, then the destination room's.
+
+There is deliberately **no per-step re-check** during movement. Once a path is approved it runs; `canMoveToNextTile` stays a pure fog-of-war check. The only thing that can invalidate an approved path is the world changing underneath it, and that is handled by relocation rather than by re-validating every room on every combat tick for every party.
+
+**When the world changes.** A content deploy clears every party's movement queue (`refreshAllPartyTiles` → `ServerParty.relocateTo`), so a queued path is never stale. A party left *standing in* a room whose new requirements it doesn't meet is picked up by `relocateDisplacedParties`, which sends it to the world start tile — the one room guaranteed to be ungated — logs the reason, and raises a `world_room_gated` notification so the move isn't a silent surprise on next login. There is no attempt to find a "nearest room they still qualify for": the neighbours of a gated room are usually gated the same way. This check runs on every map.
+
+Note that the *other* half of that sweep — the pre-existing "is this room still reachable?" flood fill — is scoped to the map holding the world start tile only. Walking one grid from one start tile isn't a meaningful test of reachability on a map whose rooms are entered through (possibly one-way) transitions, and a false "stranded" verdict teleports a party that was somewhere perfectly legitimate. Issue #374 tracks doing this properly across the world graph.
+
+Rejections reach the client as a `move_blocked` message (`ServerMoveBlockedMessage`) carrying `requirement`, `reason`, `missingPlayers`, plus kind-specific fields; blocked transitions reuse the same message. The client renders it as a map toast — there is no client-side preview of gates, because party members' levels, equipment, and quest history are not in the client's state (see `docs/architecture/client.md`).
+
+**Known gap.** A member who joins a party mid-path inherits an approved path they may not qualify for, and gets carried through. Given "weak solo, strong together", being ferried by a friend is arguably fine; if it ever needs closing, the place to do it is `handlePartyJoin`, not the movement tick.
+
+**Equipment lock.** Items required by the current room or any room in the remaining path stay locked — they cannot be unequipped (`PlayerSession.getLockedItemIds`). This reads through the resolved gate, so items authored either way are covered. Level and quest requirements need no equivalent (they can't be un-met). Trades and destroy cannot affect equipped items, so the unequip lock is sufficient.
+
+**Authoring.** Admin: the Map tab's room sidebar and the Tile Types form both render the shared `EntryRequirements` editor (`client/src/admin/components/EntryRequirements.ts`). Per-transition gates are authored via MCP; the Map tab shows a 🔒 summary on a gated exit but does not yet edit it. MCP: `upsert_tiles` accepts `entryRequirements` on a room and on each transition, and `validate_draft` reports gates that reference unknown items or quests.
 
 ## Tile types
 
-Data-driven content type stored in `data/tile-types.json`, managed by ContentStore, editable via admin dashboard. `TileTypeDefinition` has `id`, `name`, `icon`, `color` (hex string), `traversable`, and optional `requiredItemId` (default item required for all tiles of this type). Seed types: Plains, Forest, Mountain (non-trav), Water (non-trav), Town, Dungeon, Void (non-trav), Desert, Lava Field, Beach, Hedge (non-trav), Volcano (non-trav). Per-tile `requiredItemId` on `WorldTileDefinition` overrides the type-level default. Admin can create, edit, and delete tile types (delete blocked if tiles reference the type). Client receives tile type definitions via `GET /api/world` response and uses them for data-driven map rendering (icons, colors, traversability).
+Data-driven content type stored in `data/tile-types.json`, managed by ContentStore, editable via admin dashboard. `TileTypeDefinition` has `id`, `name`, `icon`, `color` (hex string), `traversable`, and optional `entryRequirements` (the default entry gate for all tiles of this type) plus the legacy `requiredItemId` it supersedes. Seed types: Plains, Forest, Mountain (non-trav), Water (non-trav), Town, Dungeon, Void (non-trav), Desert, Lava Field, Beach, Hedge (non-trav), Volcano (non-trav). Per-tile `entryRequirements` on `WorldTileDefinition` overrides the type-level gate field by field — see [Room entry requirements](#room-entry-requirements). Admin can create, edit, and delete tile types (delete blocked if tiles reference the type). Client receives tile type definitions via `GET /api/world` response and uses them for data-driven map rendering (icons, colors, traversability).
 
 ## WorldCache (client)
 
@@ -177,7 +214,7 @@ Existing files in `data/set-artwork/` and `data/shop-artwork/` are untouched and
 
 ## Content versioning
 
-Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates parties on unreachable tiles, and reconciles every session's skill loadout against the new content.
+Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates displaced parties (unreachable rooms — start tile's map only, see #374 — and rooms whose entry requirements the party no longer meets), and reconciles every session's skill loadout against the new content.
 
 **When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.**
 

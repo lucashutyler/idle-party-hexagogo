@@ -1,9 +1,11 @@
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
 import type { TileTypeDefinition } from '@idle-party-rpg/shared';
+import { toRoomRequirements } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin, postAdmin } from '../api';
 import { openModal } from '../components/Modal';
 import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
+import { entryRequirementsHtml, readEntryRequirements, summarizeEntryRequirements } from '../components/EntryRequirements';
 
 export class TileTypesTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -16,11 +18,16 @@ export class TileTypesTab implements Tab {
     const items = content.items;
     const readOnly = ctx.isReadOnly();
 
+    const quests = content.quests ?? {};
     const cards = tileTypes.map(t => {
-      const itemName = t.requiredItemId ? (items[t.requiredItemId]?.name ?? t.requiredItemId) : '';
+      const gate = summarizeEntryRequirements(
+        toRoomRequirements(t.entryRequirements, t.requiredItemId),
+        id => items[id]?.name ?? id,
+        id => quests[id]?.name ?? id,
+      );
       const blockedClass = t.traversable ? '' : ' is-blocked';
-      const requiredItemTag = itemName
-        ? `<div class="tile-type-card-tag">Requires: ${escapeHtml(itemName)}</div>`
+      const requiredItemTag = gate
+        ? `<div class="tile-type-card-tag">Requires: ${escapeHtml(gate)}</div>`
         : '';
       const editBtn = readOnly
         ? `<button class="admin-btn admin-btn-sm tile-type-view-btn" data-id="${escapeHtml(t.id)}">View</button>`
@@ -72,9 +79,7 @@ export class TileTypesTab implements Tab {
     const existing = editId ? content.tileTypes?.[editId] ?? null : null;
     const readOnly = ctx.isReadOnly();
     const items = Object.values(content.items);
-    const itemOptions = items.map(i =>
-      `<option value="${escapeHtml(i.id)}"${existing?.requiredItemId === i.id ? ' selected' : ''}>${escapeHtml(i.name)}</option>`
-    ).join('');
+    const gate = toRoomRequirements(existing?.entryRequirements, existing?.requiredItemId);
 
     const initColor = existing?.color ?? '#888888';
     const initBlocked = existing ? existing.traversable === false : false;
@@ -101,10 +106,17 @@ export class TileTypesTab implements Tab {
             <input id="ttf-traversable" type="checkbox" ${existing?.traversable !== false ? 'checked' : ''}>
             Traversable
           </label>
-          <label>Required Item
-            <select id="ttf-required-item"><option value="">(none)</option>${itemOptions}</select>
-          </label>
         </div>
+        ${entryRequirementsHtml({
+          idPrefix: 'ttf-req',
+          current: gate,
+          items,
+          quests: Object.values(content.quests ?? {}),
+          readOnly,
+          itemLabel: 'Required Item',
+          itemNoneLabel: '(none)',
+          hint: 'Default gate for every room of this type. Individual rooms override it field by field.',
+        })}
       </div>
       <fieldset class="admin-form-fieldset">
         <legend>Artwork</legend>
@@ -158,13 +170,15 @@ export class TileTypesTab implements Tab {
       const icon = (root.querySelector('#ttf-icon') as HTMLInputElement).value.trim();
       const color = (root.querySelector('#ttf-color') as HTMLInputElement).value;
       const traversable = (root.querySelector('#ttf-traversable') as HTMLInputElement).checked;
-      const requiredItemId = (root.querySelector('#ttf-required-item') as HTMLSelectElement).value || undefined;
+      const entryRequirements = readEntryRequirements('ttf-req', root);
       if (!id) { alert('ID is required.'); return; }
       if (!name) { alert('Name is required.'); return; }
       try {
         const data = await putAdmin<{ tileTypes: Record<string, TileTypeDefinition> }>(
           `/api/admin/tile-types/${encodeURIComponent(id)}${ctx.versionQueryParam()}`,
-          { name, icon, color, traversable, requiredItemId });
+          // The legacy scalar is folded into entryRequirements above, so it is
+          // deliberately not sent back — the gate is the single source now.
+          { name, icon, color, traversable, entryRequirements });
         ctx.patchVersionContent({ tileTypes: data.tileTypes });
         modal.close();
         ctx.rerenderTab();

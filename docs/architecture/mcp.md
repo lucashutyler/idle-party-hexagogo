@@ -50,7 +50,7 @@ Referential-integrity guards mirror `ContentStore`'s live-delete guards (item re
 
 **Write** (`tools/writeTools.ts`) — draft-scoped only, thin wrappers over `DraftEditor`:
 - `upsert_content` / `upsert_content_bulk` / `delete_content` — generic create/update/delete against the 13-type dispatch surface.
-- `upsert_tiles` / `delete_tiles` — batched room upserts/deletes by `mapId`/`col`/`row` (`mapId` defaults to `DEFAULT_MAP_ID`), backed by `DraftEditor.upsertTilesBulk`/`deleteTilesBulk` — one load, one save, all-or-nothing on failure.
+- `upsert_tiles` / `delete_tiles` — batched room upserts/deletes by `mapId`/`col`/`row` (`mapId` defaults to `DEFAULT_MAP_ID`), backed by `DraftEditor.upsertTilesBulk`/`deleteTilesBulk` — one load, one save, all-or-nothing on failure. A room and each of its `transitions` may carry `entryRequirements` (`{minLevel?, requiredItemId?, requiredQuestIds?}`); this is the only surface that authors per-transition gates today. See `docs/architecture/content.md` → Room entry requirements.
 - `create_map` / `delete_map` — world map CRUD (delete fails on the default map or a map with rooms/inbound transitions, mirroring `DraftEditor.deleteMap`).
 - `set_start_tile` — set a map's start room (`mapId` defaults to the draft's default map).
 - `set_skill_slots` — set a class's full skill-slot unlock schedule.
@@ -63,7 +63,7 @@ Referential-integrity guards mirror `ContentStore`'s live-delete guards (item re
 - `delete_asset` — remove stored art for one id; idempotent, with `removed` reporting whether a file was actually there.
 
 **Validate** (`tools/validateTools.ts`):
-- `validate_draft` — sweeps a draft snapshot for dangling cross-references and returns every problem found (no early return): zone/tile encounter-table references, tile zone/type/shop/npc/dungeon/requiredItemId/mapId/transition references, encounter monster-pool/placement references, monster drop references, shop inventory references, recipe ingredient/result references, quest objective/reward references, NPC questIds references, quest prerequisite references plus prerequisite-cycle detection (DFS, dedupes cycles found from multiple starting quests), set itemIds/grantedSkillIds references, item grantedSkillIds references, and both the world default start tile and every map's start tile resolving to an actual room. Meant to run before a human ever reviews the draft in the World Manager.
+- `validate_draft` — sweeps a draft snapshot for dangling cross-references and returns every problem found (no early return): zone/tile encounter-table references, tile zone/type/shop/npc/dungeon/requiredItemId/mapId/transition references, entry-gate item and quest references on rooms, transitions, and tile types (plus `minLevel` range), encounter monster-pool/placement references, monster drop references, shop inventory references, recipe ingredient/result references, quest objective/reward references, NPC questIds references, quest prerequisite references plus prerequisite-cycle detection (DFS, dedupes cycles found from multiple starting quests), set itemIds/grantedSkillIds references, item grantedSkillIds references, and both the world default start tile and every map's start tile resolving to an actual room. Meant to run before a human ever reviews the draft in the World Manager.
 
 ## Design notes
 

@@ -23,6 +23,7 @@ import {
   EQUIP_SLOTS,
   isTwoHandedEquipped,
   getOwnedItemIds,
+  getEquippedItemIds,
   hasItemEquipped as inventoryHasItemEquipped,
   getZone,
   setAppliesToClass,
@@ -1265,6 +1266,12 @@ export class PlayerSession {
   hasItemEquipped(itemId: string): boolean {
     if (!this.character) return false;
     return inventoryHasItemEquipped(itemId, this.character.equipment);
+  }
+
+  /** Every item ID currently equipped — used to evaluate room entry gates. */
+  getEquippedItemIds(): Set<string> {
+    if (!this.character) return new Set();
+    return getEquippedItemIds(this.character.equipment);
   }
 
   /** Get item IDs locked by the current tile and remaining path (required for traversal). */

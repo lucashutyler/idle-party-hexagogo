@@ -5,7 +5,8 @@ import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
 import type { ContentStore } from '../src/game/ContentStore.js';
-import type { WorldData } from '@idle-party-rpg/shared';
+import type { PlayerSession } from '../src/game/PlayerSession.js';
+import type { QuestDefinition, WorldData } from '@idle-party-rpg/shared';
 import { HexPathfinder, offsetToCube } from '@idle-party-rpg/shared';
 import WebSocket from 'ws';
 import { fakeSkillContent } from './testGrids.js';
@@ -31,7 +32,38 @@ function makeWorld(): WorldData {
   };
 }
 
-function createFakeContentStore(world: WorldData): ContentStore {
+// Gated content used only by the transition-gating cases. The manhole gains two
+// more exits: a quest-gated link into the vault, and an ungated link into a
+// level-gated room (the destination's own gate must still be enforced).
+const SEWER_VAULT_ID = 'sewer-vault';
+const SEWER_DEPTHS_ID = 'sewer-depths';
+const PERMIT_QUEST_ID = 'sewer_permit';
+
+const SEWER_PERMIT: QuestDefinition = {
+  id: PERMIT_QUEST_ID,
+  name: 'Sewer Permit',
+  description: 'Get clearance for the vault.',
+  scope: 'party_shared',
+  objectives: [{ kind: 'visit', tileId: SEWER_ENTRANCE_ID }],
+  rewards: [],
+};
+
+function makeGatedWorld(): WorldData {
+  const world = makeWorld();
+  world.tiles.push(
+    { id: SEWER_VAULT_ID, mapId: 'sewers', col: 2, row: 0, type: 'plains', zone: 'sewer', name: 'Sewer Vault' },
+    { id: SEWER_DEPTHS_ID, mapId: 'sewers', col: 3, row: 0, type: 'plains', zone: 'sewer', name: 'Sewer Depths', entryRequirements: { minLevel: 5 } },
+  );
+  const manhole = world.tiles.find(t => t.id === MANHOLE_ID)!;
+  manhole.transitions = [
+    ...manhole.transitions!,
+    { mapId: 'sewers', tileId: SEWER_VAULT_ID, entryRequirements: { requiredQuestIds: [PERMIT_QUEST_ID] } },
+    { mapId: 'sewers', tileId: SEWER_DEPTHS_ID },
+  ];
+  return world;
+}
+
+function createFakeContentStore(world: WorldData, quests: Record<string, QuestDefinition> = {}): ContentStore {
   return {
     getStartTile: () => world.startTile,
     getWorld: () => world,
@@ -51,8 +83,8 @@ function createFakeContentStore(world: WorldData): ContentStore {
     getRecipe: () => undefined,
     getAllNpcs: () => ({}),
     getNpc: () => undefined,
-    getAllQuests: () => ({}),
-    getQuest: () => undefined,
+    getAllQuests: () => quests,
+    getQuest: (id: string) => quests[id],
     getDungeon: () => undefined,
     getAllDungeons: () => ({}),
     ...fakeSkillContent(),
@@ -141,8 +173,8 @@ describe('Cross-map transitions', () => {
     const { pm, session, partyId } = await setup();
     expect(session.getMapId()).toBe('overworld');
 
-    const error = pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
-    expect(error).toBeNull();
+    const result = pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
+    expect(result.success).toBe(true);
 
     expect(session.getMapId()).toBe('sewers');
     expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
@@ -162,8 +194,8 @@ describe('Cross-map transitions', () => {
   it('honors the chosen exit when a room has multiple transitions', async () => {
     const { pm, session, partyId } = await setup();
     // The manhole links to both the sewer entrance and the sewer tunnel — pick the tunnel.
-    const error = pm.handleEnterTransition('alice', 'sewer-tunnel');
-    expect(error).toBeNull();
+    const result = pm.handleEnterTransition('alice', 'sewer-tunnel');
+    expect(result.success).toBe(true);
     expect(session.getMapId()).toBe('sewers');
     expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 1, row: 0 }); // sewer-tunnel
   });
@@ -173,7 +205,168 @@ describe('Cross-map transitions', () => {
     // Place the party on the plain road room (no transition), then try to travel.
     const road = grids.getOrThrow('overworld').getTileById('overworld-road')!;
     pm.partyBattles.relocateParty(partyId, road, 'overworld');
-    const error = pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
-    expect(error).toMatch(/nothing to enter/i);
+    const result = pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
+    expect(result.success).toBe(false);
+    expect(result.success === false && result.error).toMatch(/nothing to enter/i);
+  });
+});
+
+describe('Cross-map transition gating', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** Tests-only level override — the party spawns at level 1. */
+  function setLevel(session: PlayerSession, level: number): void {
+    (session as unknown as { character: { level: number } }).character.level = level;
+  }
+
+  /** Tests-only quest completion — the gate only reads completed quest IDs. */
+  function completeQuest(session: PlayerSession, questId: string): void {
+    session.quests.loadFromSaveData({
+      active: [],
+      completed: [{ questId, completedAt: new Date().toISOString() }],
+      weeklyCompletions: {},
+    });
+  }
+
+  async function setup() {
+    const world = makeGatedWorld();
+    const content = createFakeContentStore(world, { [PERMIT_QUEST_ID]: SEWER_PERMIT });
+    const grids = new WorldGrids(content);
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    const session = await pm.login(createFakeWs(), 'alice');
+    session.setClass('Knight');
+    pm.ensureParty('alice'); // spawns on the manhole
+    return { pm, session, grids, partyId: session.getPartyId()! };
+  }
+
+  it('blocks travel when the transition link is gated', async () => {
+    const { pm, session, partyId } = await setup();
+    const result = pm.handleEnterTransition('alice', SEWER_VAULT_ID);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.blocked?.kind).toBe('quest');
+      expect(result.blocked?.questId).toBe(PERMIT_QUEST_ID);
+      expect(result.blocked?.missingPlayers).toEqual(['alice']);
+      // The rejection is the gate's own player-facing prose, using the quest's display name.
+      expect(result.error).toBe(result.blocked!.reason);
+      expect(result.error).toMatch(/sewer permit/i);
+    }
+
+    // The party never left the overworld manhole.
+    expect(session.getMapId()).toBe('overworld');
+    expect(pm.partyBattles.getMapId(partyId)).toBe('overworld');
+    expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 0, row: 0 });
+  });
+
+  it('blocks travel when the destination room is gated but the link is not', async () => {
+    const { pm, session, partyId } = await setup();
+    const result = pm.handleEnterTransition('alice', SEWER_DEPTHS_ID);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.blocked?.kind).toBe('level');
+      expect(result.blocked?.minLevel).toBe(5);
+      expect(result.blocked?.missingPlayers).toEqual(['alice']);
+      expect(result.error).toMatch(/level 5/i);
+    }
+
+    expect(session.getMapId()).toBe('overworld');
+    expect(pm.partyBattles.getMapId(partyId)).toBe('overworld');
+    expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 0, row: 0 });
+  });
+
+  it('travels through a gated link once the quest is completed', async () => {
+    const { pm, session, partyId } = await setup();
+    completeQuest(session, PERMIT_QUEST_ID);
+
+    const result = pm.handleEnterTransition('alice', SEWER_VAULT_ID);
+    expect(result.success).toBe(true);
+
+    expect(session.getMapId()).toBe('sewers');
+    expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
+    expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 2, row: 0 }); // sewer-vault
+    expect(session.getUnlockedKeys()).toContain(SEWER_VAULT_ID);
+  });
+
+  it('travels into a gated destination room once the level requirement is met', async () => {
+    const { pm, session, partyId } = await setup();
+    setLevel(session, 5);
+
+    const result = pm.handleEnterTransition('alice', SEWER_DEPTHS_ID);
+    expect(result.success).toBe(true);
+
+    expect(session.getMapId()).toBe('sewers');
+    expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
+    expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 3, row: 0 }); // sewer-depths
+  });
+
+  it('leaves ungated exits alone', async () => {
+    const { pm, session, partyId } = await setup();
+    const result = pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID);
+    expect(result.success).toBe(true);
+    expect(session.getMapId()).toBe('sewers');
+    expect(pm.partyBattles.getPosition(partyId)).toEqual({ col: 0, row: 0 });
+  });
+});
+
+/**
+ * `relocateDisplacedParties` walks each grid from a start tile to decide what
+ * is reachable. That premise only holds on the map players spawn and walk on —
+ * anywhere else a room is reached through a transition, so a legitimately
+ * occupied room can be unreachable by any walk from that map's start tile.
+ */
+describe('Displaced-party sweep and multi-map reachability', () => {
+  const ISLAND_ID = 'sewer-island';
+  const ORPHAN_ID = 'overworld-orphan';
+
+  /** The two-map world plus one isolated room on each map. */
+  function makeIslandWorld(): WorldData {
+    const world = makeWorld();
+    // Reachable only via a transition — no walking route from (0,0).
+    world.tiles.push(
+      { id: ISLAND_ID, mapId: 'sewers', col: 5, row: 5, type: 'plains', zone: 'sewer', name: 'Flooded Island' },
+      { id: ORPHAN_ID, mapId: 'overworld', col: 7, row: 7, type: 'plains', zone: 'town', name: 'Marooned Clearing' },
+    );
+    world.tiles.find(t => t.id === MANHOLE_ID)!.transitions!.push({ mapId: 'sewers', tileId: ISLAND_ID });
+    return world;
+  }
+
+  async function setup() {
+    const world = makeIslandWorld();
+    const content = createFakeContentStore(world);
+    const grids = new WorldGrids(content);
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    const session = await pm.login(createFakeWs(), 'alice');
+    session.setClass('Knight');
+    pm.ensureParty('alice');
+    return { pm, session, grids, content, partyId: session.getPartyId()! };
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('leaves a party on a non-default map alone even when its room is unwalkable from that map start', async () => {
+    const { pm, grids, content, partyId } = await setup();
+
+    expect(pm.handleEnterTransition('alice', ISLAND_ID).success).toBe(true);
+    expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
+
+    // The island is nowhere near the sewers' own start tile, but the party got
+    // there legitimately — the sweep must not uproot them.
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(0);
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(ISLAND_ID);
+    expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
+  });
+
+  it('still relocates a party stranded on the map that holds the world start tile', async () => {
+    const { pm, grids, content, partyId } = await setup();
+
+    const orphan = grids.getOrThrow('overworld').getTileById(ORPHAN_ID)!;
+    pm.partyBattles.relocateParty(partyId, orphan, 'overworld');
+
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(1);
+    expect(pm.partyBattles.getTile(partyId)!.id).not.toBe(ORPHAN_ID);
   });
 });

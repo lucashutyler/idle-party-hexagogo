@@ -52,6 +52,7 @@ export const NOTIFICATION_EVENT_REGISTRY: NotificationEventDefinition[] = [
   { eventKey: 'party_ownership_transferred', category: 'party', label: 'Became party owner', defaultChannels: ['in_app'] },
   { eventKey: 'party_member_joined', category: 'party', label: 'Member joined your party', defaultChannels: [] },
   { eventKey: 'party_member_left', category: 'party', label: 'Member left your party', defaultChannels: [] },
+  { eventKey: 'world_room_gated', category: 'world_event', label: 'Moved out of a room your party no longer qualifies for', defaultChannels: ['in_app'] },
   { eventKey: 'dm_received', category: 'dm', label: 'New direct message', defaultChannels: ['in_app'] },
   { eventKey: 'friend_request_received', category: 'friend', label: 'New friend request', defaultChannels: ['in_app'] },
   { eventKey: 'friend_request_accepted', category: 'friend', label: 'Friend request accepted', defaultChannels: ['in_app'] },

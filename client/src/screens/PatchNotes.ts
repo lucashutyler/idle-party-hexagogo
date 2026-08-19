@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.08.18.2',
+    notes: [
+      'Some rooms can now ask more of your party than the right gear. A room may require everyone to have reached a certain level, or to have finished certain quests, before the party can set foot in it.',
+      'Passages between maps can be locked the same way. Taking one now checks your whole party first, instead of letting anyone straight through.',
+      'When a move is turned down, the message names exactly what is missing and which party members are short of it.',
+      'Asking to travel somewhere your party cannot go no longer cancels the trip you were already on.',
+      'If a game update ever leaves your party standing somewhere it no longer qualifies to be, you will be moved to the starting room and told why, instead of being stuck there.',
+    ],
+  },
+  {
     version: '2026.08.18.1',
     notes: [
       'Confirming a trade now always trades exactly the offer you were shown. If your trading partner changes their items while you\'re looking at the trade, the Confirm button is held back and replaced with "Review Updated Offer" — so a last-second swap can\'t go through on items you never agreed to.',

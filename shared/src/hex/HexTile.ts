@@ -1,4 +1,6 @@
 import { CubeCoord, cubeToPixel, cubeToKey } from './HexUtils.js';
+import { mergeRoomRequirements, toRoomRequirements } from '../systems/RoomRequirements.js';
+import type { RoomEntryRequirements } from '../systems/RoomRequirements.js';
 
 export enum TileType {
   Plains = 'plains',
@@ -28,7 +30,13 @@ export interface TileTypeDefinition {
   icon: string;
   color: string;
   traversable: boolean;
+  /**
+   * @deprecated Author new gates via `entryRequirements`. Still honoured — it is
+   * folded into the resolved gate at read time.
+   */
   requiredItemId?: string;
+  /** Default entry gate for every room of this type. Rooms override it field by field. */
+  entryRequirements?: RoomEntryRequirements;
 }
 
 export const TILE_CONFIGS: Record<TileType, TileConfig> = {
@@ -117,19 +125,31 @@ export class HexTile {
   readonly zone: string;
   /** Stable GUID from WorldTileDefinition — used as unlock key. */
   readonly id: string;
-  /** Per-tile override for required item. Takes precedence over tile type default. */
+  /** Per-tile override for required item (legacy scalar gate). */
   private readonly _requiredItemId?: string;
+
+  /** Per-tile entry gate. Overrides the tile type's gate field by field. */
+  private readonly _entryRequirements?: RoomEntryRequirements;
 
   /** Data-driven tile type definition from ContentStore. */
   private readonly _tileTypeDef?: TileTypeDefinition;
 
-  constructor(coord: CubeCoord, type: string, zone: string = 'friendly_forest', id?: string, requiredItemId?: string, tileTypeDef?: TileTypeDefinition) {
+  constructor(
+    coord: CubeCoord,
+    type: string,
+    zone: string = 'friendly_forest',
+    id?: string,
+    requiredItemId?: string,
+    tileTypeDef?: TileTypeDefinition,
+    entryRequirements?: RoomEntryRequirements,
+  ) {
     this.coord = coord;
     this.type = type;
     this.key = cubeToKey(coord);
     this.zone = zone;
     this.id = id ?? this.key; // Fallback to cube key for legacy/test usage
     this._requiredItemId = requiredItemId;
+    this._entryRequirements = entryRequirements;
     this._tileTypeDef = tileTypeDef;
   }
 
@@ -140,8 +160,21 @@ export class HexTile {
     return config?.traversable ?? true;
   }
 
+  /**
+   * The gate a party must satisfy to enter this room: the tile type's gate,
+   * overridden field by field by this room's own. Legacy `requiredItemId` is
+   * folded in at both levels. Undefined when the room is ungated.
+   */
+  get entryRequirements(): RoomEntryRequirements | undefined {
+    return mergeRoomRequirements(
+      toRoomRequirements(this._tileTypeDef?.entryRequirements, this._tileTypeDef?.requiredItemId),
+      toRoomRequirements(this._entryRequirements, this._requiredItemId),
+    );
+  }
+
+  /** Item that must be equipped to traverse, resolved through the full gate. */
   get requiredItemId(): string | undefined {
-    return this._requiredItemId ?? this._tileTypeDef?.requiredItemId;
+    return this.entryRequirements?.requiredItemId;
   }
 
   get color(): number {

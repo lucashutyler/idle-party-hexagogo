@@ -90,6 +90,15 @@ export class ServerParty {
   }
 
   /**
+   * Restore a previously snapshotted movement queue. Used to roll back a
+   * destination that turned out to be blocked, so a refused move leaves the
+   * party's in-flight path intact instead of stranding it.
+   */
+  restoreMovementQueue(queue: HexTile[]): void {
+    this.movementQueue = [...queue];
+  }
+
+  /**
    * Move to the next tile instantly (server-side, no tweens).
    * Returns true if movement occurred.
    */

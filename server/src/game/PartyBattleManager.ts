@@ -9,6 +9,7 @@ import {
   validateDungeonEntry,
   rollDungeonRewards,
   rewardAppliesToClass,
+  validateRoomEntry,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -20,6 +21,10 @@ import type {
   DungeonRunInfo,
   DungeonEntryMemberInfo,
   DungeonReward,
+  RoomEntryMemberInfo,
+  RoomEntryLabels,
+  RoomEntryFailure,
+  RoomEntryRequirements,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
@@ -70,13 +75,12 @@ export class PartyBattleManager {
     this.onMembersMoved = onMembersMoved;
   }
 
-  /** Create a party battle entry. Called when a party is created or on restore. */
-  createEntry(partyId: string, username: string, startTile: HexTile, mapId: string): void {
-    if (this.entries.has(partyId)) return;
-
-    const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
-    const members = new Set([username]);
-
+  /**
+   * Build the battle timer for a party and register the entry. Shared by
+   * {@link createEntry} and {@link createEntryFromSave} so movement gating and
+   * battle callbacks can never drift between fresh and restored parties.
+   */
+  private registerEntry(partyId: string, serverParty: ServerParty, members: Set<string>): void {
     const battleTimer = new ServerBattleTimer(
       serverParty,
       () => this.createCombatForParty(partyId),
@@ -130,15 +134,9 @@ export class PartyBattleManager {
         canMoveToNextTile: () => {
           const nextTile = serverParty.nextTile;
           if (!nextTile) return false;
-          // Check item requirements — ALL members must have the required item
-          const requiredItemId = nextTile.requiredItemId;
-          if (requiredItemId) {
-            for (const m of members) {
-              const s = this.getSession(m);
-              if (!s || !s.hasItemEquipped(requiredItemId)) return false;
-            }
-          }
-          // Check if at least one member has the next tile unlocked
+          // Fog of war only. Entry requirements are checked when the move is
+          // requested (handleMove validates every room in the path), so there
+          // is nothing to re-decide per step.
           for (const m of members) {
             const s = this.getSession(m);
             if (s && s.isTileUnlocked(nextTile)) return true;
@@ -149,6 +147,14 @@ export class PartyBattleManager {
     );
 
     this.entries.set(partyId, { partyId, serverParty, battleTimer, members });
+  }
+
+  /** Create a party battle entry. Called when a party is created or on restore. */
+  createEntry(partyId: string, username: string, startTile: HexTile, mapId: string): void {
+    if (this.entries.has(partyId)) return;
+
+    const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
+    this.registerEntry(partyId, serverParty, new Set([username]));
   }
 
   /** Create a party battle entry from saved movement state (for restoring). */
@@ -163,80 +169,7 @@ export class PartyBattleManager {
     if (this.entries.has(partyId)) return;
 
     const serverParty = ServerParty.restore(this.grids.getOrThrow(mapId), currentTile, targetTile, movementQueue, mapId);
-    const members = new Set([username]);
-
-    const battleTimer = new ServerBattleTimer(
-      serverParty,
-      () => this.createCombatForParty(partyId),
-      {
-        onBattleStart: () => {
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (!s) continue;
-            s.incrementBattleCount();
-            s.addLogEntry('Battle begins!', 'battle');
-          }
-        },
-        onStateChange: () => {
-          for (const m of members) {
-            this.broadcastToMember(m);
-          }
-        },
-        onCombatTick: (_state: PartyCombatState, logEntries: string[]) => {
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (s) {
-              for (const entry of logEntries) {
-                s.addLogEntry(entry, 'damage');
-              }
-            }
-          }
-          for (const m of members) {
-            this.broadcastToMember(m);
-          }
-        },
-        onBattleEnd: (result: BattleResult) => {
-          this.handleBattleEnd(partyId, result);
-        },
-        onMove: () => {
-          const allQuests = this.content.getAllQuests();
-          const tileId = serverParty.tile.id;
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (s) {
-              const allZones = this.content.getAllZones();
-              const zone = getZone(serverParty.tile.zone, allZones);
-              const zName = zone ? zone.displayName : serverParty.tile.zone;
-              const tileDef = this.content.getTileById(serverParty.tile.id);
-              const rName = tileDef?.name ?? '';
-              s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
-              s.quests.applyVisit(tileId, allQuests);
-            }
-          }
-          this.onMembersMoved?.(members);
-        },
-        canMoveToNextTile: () => {
-          const nextTile = serverParty.nextTile;
-          if (!nextTile) return false;
-          // Check item requirements — ALL members must have the required item
-          const requiredItemId = nextTile.requiredItemId;
-          if (requiredItemId) {
-            for (const m of members) {
-              const s = this.getSession(m);
-              if (!s || !s.hasItemEquipped(requiredItemId)) return false;
-            }
-          }
-          // Check if at least one member has the next tile unlocked
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (s && s.isTileUnlocked(nextTile)) return true;
-          }
-          return false;
-        },
-      },
-    );
-
-    this.entries.set(partyId, { partyId, serverParty, battleTimer, members });
+    this.registerEntry(partyId, serverParty, new Set([username]));
   }
 
   /** Add a member to an existing party battle. They join the next combat cycle. */
@@ -293,8 +226,8 @@ export class PartyBattleManager {
     this.entries.delete(partyId);
   }
 
-  /** Handle move request. Returns a result with missing-item info if the path is blocked. */
-  handleMove(partyId: string, col: number, row: number): { success: true } | { success: false; missingItemId?: string; missingPlayers?: string[] } {
+  /** Handle move request. Returns the unmet requirement if the path is gated. */
+  handleMove(partyId: string, col: number, row: number): { success: true } | { success: false; blocked?: RoomEntryFailure } {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false };
 
@@ -305,14 +238,16 @@ export class PartyBattleManager {
     const tile = this.grids.getOrThrow(entry.serverParty.currentMapId).getTile(coord);
     if (!tile || !tile.isTraversable) return { success: false };
 
+    // Snapshot first: setDestination overwrites the queue, so a refused move
+    // must put the party's previous path back rather than strand it.
+    const previousPath = entry.serverParty.remainingPath;
     const success = entry.serverParty.setDestination(tile);
     if (!success) return { success: false };
 
-    // Validate item requirements for every tile in the path
-    const pathCheck = this.validatePathItemRequirements(entry);
-    if (!pathCheck.valid) {
-      entry.serverParty.clearDestination();
-      return { success: false, missingItemId: pathCheck.missingItemId, missingPlayers: pathCheck.missingPlayers };
+    const blocked = this.validatePathRequirements(entry);
+    if (blocked) {
+      entry.serverParty.restoreMovementQueue(previousPath);
+      return { success: false, blocked };
     }
 
     for (const m of entry.members) {
@@ -326,7 +261,7 @@ export class PartyBattleManager {
    * (mapId, tileId): swap the party's grid + position, reveal the arrival area
    * for every member, and start a fresh battle on the new map.
    */
-  enterTransition(partyId: string, targetTileId: string): { success: true } | { success: false; error: string } {
+  enterTransition(partyId: string, targetTileId: string): { success: true } | { success: false; error: string; blocked?: RoomEntryFailure } {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
     if (entry.dungeonRun) return { success: false, error: "Can't travel from inside a dungeon." };
@@ -350,6 +285,12 @@ export class PartyBattleManager {
       if (!destTile) return { success: false, error: 'That passage leads nowhere right now.' };
     }
 
+    // A transition is a door into a room: the link's own gate and the
+    // destination room's gate both apply.
+    const blocked = this.checkRoomEntry(entry.members, link.entryRequirements)
+      ?? this.checkRoomEntry(entry.members, destTile.entryRequirements);
+    if (blocked) return { success: false, error: blocked.reason, blocked };
+
     entry.serverParty.switchMap(destGrid, destTile, link.mapId);
 
     for (const username of entry.members) {
@@ -365,24 +306,69 @@ export class PartyBattleManager {
     return { success: true };
   }
 
-  /** Check every tile in the path for required items. All party members must have each required item equipped. */
-  private validatePathItemRequirements(entry: PartyBattleEntry): { valid: true } | { valid: false; missingItemId: string; missingPlayers: string[] } {
-    for (const tile of entry.serverParty.remainingPath) {
-      const requiredItemId = tile.requiredItemId;
-      if (!requiredItemId) continue;
-
-      const missingPlayers: string[] = [];
-      for (const username of entry.members) {
-        const session = this.getSession(username);
-        if (!session || !session.hasItemEquipped(requiredItemId)) {
-          missingPlayers.push(username);
-        }
+  /**
+   * Per-member facts for the shared room-entry validator. A member with no live
+   * session satisfies nothing — the same conservative rule the item gate has
+   * always applied.
+   */
+  private buildMemberInfos(members: ReadonlySet<string>): RoomEntryMemberInfo[] {
+    const infos: RoomEntryMemberInfo[] = [];
+    for (const username of members) {
+      const session = this.getSession(username);
+      if (!session) {
+        infos.push({ username, level: 0, equippedItemIds: new Set(), completedQuestIds: new Set() });
+        continue;
       }
-      if (missingPlayers.length > 0) {
-        return { valid: false, missingItemId: requiredItemId, missingPlayers };
-      }
+      infos.push({
+        username,
+        level: session.getLevel(),
+        equippedItemIds: session.getEquippedItemIds(),
+        completedQuestIds: session.quests.getCompletedQuestIds(),
+      });
     }
-    return { valid: true };
+    return infos;
+  }
+
+  /** Content-backed display names so gate rejections read as player-facing prose. */
+  private roomLabels(): RoomEntryLabels {
+    return {
+      itemName: id => this.content.getItem(id)?.name,
+      questName: id => this.content.getQuest(id)?.name,
+    };
+  }
+
+  /**
+   * Whether this party satisfies a room's entry requirements. Used after a
+   * content change to find parties standing in a room that just became gated.
+   */
+  checkPartyRoomEntry(partyId: string, tile: HexTile): RoomEntryFailure | null {
+    const entry = this.entries.get(partyId);
+    if (!entry) return null;
+    return this.checkRoomEntry(entry.members, tile.entryRequirements);
+  }
+
+  /** Evaluate one gate against a party. Returns the unmet requirement, or null. */
+  private checkRoomEntry(members: ReadonlySet<string>, reqs: RoomEntryRequirements | undefined): RoomEntryFailure | null {
+    if (!reqs) return null;
+    return validateRoomEntry(reqs, this.buildMemberInfos(members), this.roomLabels());
+  }
+
+  /**
+   * Check every room in the party's queued path against its entry
+   * requirements. All members must satisfy every gate. Member info is built
+   * once and reused across the path.
+   */
+  private validatePathRequirements(entry: PartyBattleEntry): RoomEntryFailure | null {
+    const path = entry.serverParty.remainingPath;
+    if (!path.some(tile => tile.entryRequirements)) return null;
+
+    const infos = this.buildMemberInfos(entry.members);
+    const labels = this.roomLabels();
+    for (const tile of path) {
+      const failure = validateRoomEntry(tile.entryRequirements, infos, labels);
+      if (failure) return failure;
+    }
+    return null;
   }
 
   /** Get the party's current position. */

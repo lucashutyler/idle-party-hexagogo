@@ -29,11 +29,28 @@ import { AssetStore } from './game/AssetStore.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
-import type { ClassName, ItemDefinition } from '@idle-party-rpg/shared';
+import type { ClassName, ItemDefinition, RoomEntryFailure, ServerMoveBlockedMessage } from '@idle-party-rpg/shared';
 import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 import { isEmailConfigured } from './auth/EmailService.js';
+
+/**
+ * Render an unmet room entry requirement as the wire message. Item gates keep
+ * carrying `itemId`/`itemName` so the payload stays shaped the way it was
+ * before gates generalized beyond equipped items.
+ */
+function toMoveBlockedMessage(failure: RoomEntryFailure): ServerMoveBlockedMessage {
+  return {
+    type: 'move_blocked',
+    requirement: failure.kind,
+    reason: failure.reason,
+    missingPlayers: failure.missingPlayers,
+    ...(failure.itemId !== undefined ? { itemId: failure.itemId, itemName: failure.itemName } : {}),
+    ...(failure.questId !== undefined ? { questId: failure.questId, questName: failure.questName } : {}),
+    ...(failure.minLevel !== undefined ? { minLevel: failure.minLevel } : {}),
+  };
+}
 
 const app = express();
 const server = createServer(app);
@@ -327,14 +344,8 @@ wss.on('connection', (ws) => {
 
         const moveResult = playerManager.partyBattles.handleMove(partyId, msg.col, msg.row);
         if (!moveResult.success) {
-          if (moveResult.missingItemId) {
-            const itemDef = gameLoop.contentStore.getItem(moveResult.missingItemId);
-            ws.send(JSON.stringify({
-              type: 'move_blocked',
-              itemName: itemDef?.name ?? moveResult.missingItemId,
-              itemId: moveResult.missingItemId,
-              missingPlayers: moveResult.missingPlayers,
-            }));
+          if (moveResult.blocked) {
+            ws.send(JSON.stringify(toMoveBlockedMessage(moveResult.blocked)));
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
           }
@@ -423,9 +434,15 @@ wss.on('connection', (ws) => {
           }
         }
 
-        const error = playerManager.handleEnterTransition(username, msg.tileId);
-        if (error) {
-          ws.send(JSON.stringify({ type: 'error', message: error }));
+        const transitionResult = playerManager.handleEnterTransition(username, msg.tileId);
+        if (!transitionResult.success) {
+          // An unmet gate reuses move_blocked so it surfaces in the same toast
+          // as a blocked move; structural failures stay on the error channel.
+          if (transitionResult.blocked) {
+            ws.send(JSON.stringify(toMoveBlockedMessage(transitionResult.blocked)));
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: transitionResult.error }));
+          }
         }
         return;
       }
