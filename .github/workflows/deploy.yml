@@ -14,11 +14,28 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          # Deploys every instance installed on the host. The primary lives at
+          # /opt/idle-party-rpg; setup-prod.sh --instance NAME adds siblings at
+          # /opt/idle-party-rpg-NAME, and the directory name is also the unit name.
+          # One instance failing doesn't block the others — the job fails at the end.
           script: |
-            set -e
-            cd /opt/idle-party-rpg
-            git pull
-            npm install
-            npm run build
-            bash deploy/sync-nginx.sh
-            sudo systemctl restart idle-party-rpg
+            FAILED=""
+            for DIR in /opt/idle-party-rpg /opt/idle-party-rpg-*; do
+              [ -d "$DIR/.git" ] || continue
+              NAME=$(basename "$DIR")
+              echo "=== Deploying $NAME ($DIR) ==="
+              (
+                set -e
+                cd "$DIR"
+                git pull
+                npm install
+                npm run build
+                bash deploy/sync-nginx.sh
+                sudo systemctl restart "$NAME"
+              ) || FAILED="$FAILED $NAME"
+            done
+            if [ -n "$FAILED" ]; then
+              echo "Deploy failed for:$FAILED"
+              exit 1
+            fi
+            echo "All instances deployed."
