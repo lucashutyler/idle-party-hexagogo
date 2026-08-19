@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   computeActiveSetBonuses,
   getSetInfoForItem,
@@ -419,6 +419,9 @@ describe('mergeSetBonusesIntoEquip', () => {
 });
 
 describe('Combat integration — set bonuses are applied', () => {
+  // Some cases below pin Math.random to make damage rolls deterministic.
+  afterEach(() => { vi.restoreAllMocks(); });
+
   it('damageResistancePercent reduces incoming monster damage', () => {
     // Monster always hits for 100. Player has 50% damage resistance from a set.
     // Without set: takes 100 damage. With set: takes 50.
@@ -452,39 +455,43 @@ describe('Combat integration — set bonuses are applied', () => {
     expect(hpLossA).toBeLessThanOrEqual(Math.ceil(hpLossB / 2) + 1);
   });
 
-  it('damagePercent boosts player attack damage', () => {
-    // Two identical players, one with +100% damage from a set bonus, both attacking
-    // a wall (passive monster with high HP that doesn't fight back). Compare HP loss.
-    const playerWithSet = makePlayer('hero', 8, {
-      className: 'Archer', level: 1, baseDamage: 10,
-      setBonuses: { damagePercent: 100 },
-    });
-    const playerNoSet = makePlayer('control', 8, {
-      className: 'Archer', level: 1, baseDamage: 10,
-    });
-
+  it('damagePercent scales player attack damage at every damage roll', () => {
+    // A player attacks a wall — a passive monster that never fights back.
+    //
+    // Note the player lands exactly ONE attack no matter how many ticks are
+    // run: `processPartyTick` ends the battle when every
+    // non-passive monster is dead, and with only passive monsters present that
+    // test is vacuously true, so the party wins on the first tick and every
+    // later tick is a no-op. Ticking in a loop here would measure nothing extra.
     const wallDef: MonsterDefinition = {
       id: 'wall', name: 'Wall', hp: 10000, damage: 0,
       damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0, passive: true,
     };
-    const wallA = createMonsterInstance(wallDef);
-    wallA.gridPosition = 0;
-    const wallB = createMonsterInstance(wallDef);
-    wallB.gridPosition = 0;
 
-    const stateA = createPartyCombatState([playerWithSet], [wallA]);
-    const stateB = createPartyCombatState([playerNoSet], [wallB]);
+    const damageDealt = (setBonuses?: SetBonuses): number => {
+      const wall = createMonsterInstance(wallDef);
+      wall.gridPosition = 0;
+      const player = makePlayer('hero', 8, {
+        className: 'Archer', level: 1, baseDamage: 10, setBonuses,
+      });
+      const state = createPartyCombatState([player], [wall]);
+      processPartyTick(state);
+      return state.monsters[0].maxHp - state.monsters[0].currentHp;
+    };
 
-    for (let i = 0; i < 10; i++) processPartyTick(stateA);
-    for (let i = 0; i < 10; i++) processPartyTick(stateB);
+    // Attack damage carries a `floor(random() * 5) - 2` variance, so comparing
+    // one unpinned roll against another is a coin flip — that made this test
+    // fail ~1 run in 25. Pin the roll instead and check every value it takes.
+    const rolls: [number, number][] = [[0, -2], [0.2, -1], [0.4, 0], [0.6, 1], [0.8, 2]];
+    for (const [roll, variance] of rolls) {
+      vi.spyOn(Math, 'random').mockReturnValue(roll);
 
-    const dmgA = stateA.monsters[0].maxHp - stateA.monsters[0].currentHp;
-    const dmgB = stateB.monsters[0].maxHp - stateB.monsters[0].currentHp;
+      const plain = damageDealt();
+      const boosted = damageDealt({ damagePercent: 100 });
 
-    // Player with damagePercent=100 should deal noticeably more damage.
-    expect(dmgA).toBeGreaterThan(dmgB);
-    // Roughly 2x (allow generous tolerance for damage variance).
-    expect(dmgA).toBeGreaterThanOrEqual(Math.floor(dmgB * 1.5));
+      expect(plain).toBe(10 + variance);
+      expect(boosted).toBe(plain * 2);
+    }
   });
 
   it('damage resistance is applied BEFORE flat reductions', () => {
