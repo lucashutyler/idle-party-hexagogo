@@ -2,7 +2,13 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import type { QuestDefinition } from '@idle-party-rpg/shared';
+import { TileType, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import type {
+  ItemDefinition,
+  MapTransitionLink,
+  QuestDefinition,
+  RoomEntryRequirements,
+} from '@idle-party-rpg/shared';
 
 // ContentStore/VersionStore (and, transitively, the MCP tool modules that import
 // DraftEditor) resolve their data dirs from process.cwd() at module load, so the
@@ -85,6 +91,41 @@ function makeQuest(id: string, overrides: Partial<QuestDefinition> = {}): QuestD
   };
 }
 
+function makeItem(id: string, overrides: Partial<ItemDefinition> = {}): ItemDefinition {
+  return {
+    id,
+    name: `Item ${id}`,
+    rarity: 'common',
+    value: 1,
+    ...overrides,
+  };
+}
+
+/** Create-or-update a room on the seeded overworld and return its stable GUID. */
+async function upsertRoom(
+  deps: McpToolDeps,
+  versionId: string,
+  input: {
+    col: number;
+    row: number;
+    name: string;
+    entryRequirements?: RoomEntryRequirements;
+    transitions?: MapTransitionLink[];
+  },
+): Promise<string> {
+  const result = await deps.draftEditor.upsertTile(versionId, {
+    mapId: DEFAULT_MAP_ID,
+    type: TileType.Plains,
+    zone: 'hatchetmill',
+    ...input,
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) throw new Error('unreachable');
+  const tile = result.world.tiles.find(t => t.mapId === DEFAULT_MAP_ID && t.col === input.col && t.row === input.row);
+  expect(tile).toBeDefined();
+  return tile!.id;
+}
+
 describe('validateDraft', () => {
   it('reports zero problems on a clean draft fresh from ContentStore.toSnapshot()', async () => {
     const { deps, contentStore, versionStore } = await setupDeps();
@@ -157,6 +198,139 @@ describe('validateDraft', () => {
     expect(result.problems).toContain(
       "Tile type 'gated_type' requiredItemId references unknown item 'nonexistent_item'.",
     );
+  });
+
+  it('reports a room whose entryRequirements.requiredItemId references an unknown item', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('bad room item gate draft', null, contentStore.toSnapshot());
+
+    const roomId = await upsertRoom(deps, version.id, {
+      col: 42,
+      row: 42,
+      name: 'Locked Room',
+      entryRequirements: { requiredItemId: 'nonexistent_item' },
+    });
+
+    const result = await validateDraft(deps, version.id);
+    expect(result.problems).toContain(
+      `Room 'Locked Room' (${roomId}) entryRequirements.requiredItemId references unknown item 'nonexistent_item'.`,
+    );
+  });
+
+  it('reports a room entryRequirements quest reference by index, leaving the known quest alone', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('bad room quest gate draft', null, contentStore.toSnapshot());
+
+    const questResult = await deps.draftEditor.upsertQuest(version.id, makeQuest('known_gate_quest'));
+    expect(questResult.success).toBe(true);
+
+    const roomId = await upsertRoom(deps, version.id, {
+      col: 42,
+      row: 42,
+      name: 'Quest Room',
+      entryRequirements: { requiredQuestIds: ['known_gate_quest', 'nonexistent_quest'] },
+    });
+
+    const result = await validateDraft(deps, version.id);
+    expect(result.problems).toContain(
+      `Room 'Quest Room' (${roomId}) entryRequirements.requiredQuestIds references unknown quest 'nonexistent_quest' (index 1).`,
+    );
+    expect(result.problems).not.toContain(
+      `Room 'Quest Room' (${roomId}) entryRequirements.requiredQuestIds references unknown quest 'known_gate_quest' (index 0).`,
+    );
+  });
+
+  it("reports a transition's entryRequirements quest reference under the transition label", async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('bad transition gate draft', null, contentStore.toSnapshot());
+
+    const landingId = await upsertRoom(deps, version.id, { col: 43, row: 42, name: 'Sewer Landing' });
+    const doorId = await upsertRoom(deps, version.id, {
+      col: 42,
+      row: 42,
+      name: 'Manhole',
+      transitions: [{
+        mapId: DEFAULT_MAP_ID,
+        tileId: landingId,
+        entryRequirements: { requiredQuestIds: ['nonexistent_quest'] },
+      }],
+    });
+
+    const result = await validateDraft(deps, version.id);
+    expect(result.problems).toContain(
+      `Room 'Manhole' (${doorId}) transition 0 entryRequirements.requiredQuestIds references unknown quest 'nonexistent_quest' (index 0).`,
+    );
+    // The link itself resolves — only the gate is broken.
+    expect(result.problems).not.toContain(
+      `Room 'Manhole' (${doorId}) transition 0 targets unknown room '${landingId}' on map '${DEFAULT_MAP_ID}'.`,
+    );
+  });
+
+  it('reports a tile type whose entryRequirements references an unknown item', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('bad tile type gate draft', null, contentStore.toSnapshot());
+
+    const upsertResult = await deps.draftEditor.upsertTileType(version.id, {
+      id: 'gated_type',
+      name: 'Gated',
+      icon: '?',
+      color: '#000000',
+      traversable: true,
+      entryRequirements: { requiredItemId: 'nonexistent_item' },
+    });
+    expect(upsertResult.success).toBe(true);
+
+    const result = await validateDraft(deps, version.id);
+    expect(result.problems).toContain(
+      "Tile type 'gated_type' entryRequirements.requiredItemId references unknown item 'nonexistent_item'.",
+    );
+  });
+
+  it('reports an entryRequirements.minLevel below 1', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('bad min level draft', null, contentStore.toSnapshot());
+
+    const roomId = await upsertRoom(deps, version.id, {
+      col: 42,
+      row: 42,
+      name: 'Level Zero Room',
+      entryRequirements: { minLevel: 0 },
+    });
+
+    const result = await validateDraft(deps, version.id);
+    expect(result.problems).toContain(
+      `Room 'Level Zero Room' (${roomId}) entryRequirements.minLevel must be at least 1.`,
+    );
+  });
+
+  it('reports no problems for gates whose item, quest and minLevel all resolve', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('valid gate draft', null, contentStore.toSnapshot());
+
+    const itemResult = await deps.draftEditor.upsertItem(version.id, makeItem('gate_key'));
+    expect(itemResult.success).toBe(true);
+    const questResult = await deps.draftEditor.upsertQuest(version.id, makeQuest('gate_quest'));
+    expect(questResult.success).toBe(true);
+    const tileTypeResult = await deps.draftEditor.upsertTileType(version.id, {
+      id: 'vault_type',
+      name: 'Vault',
+      icon: '?',
+      color: '#000000',
+      traversable: true,
+      entryRequirements: { minLevel: 1, requiredItemId: 'gate_key', requiredQuestIds: ['gate_quest'] },
+    });
+    expect(tileTypeResult.success).toBe(true);
+
+    await upsertRoom(deps, version.id, {
+      col: 42,
+      row: 42,
+      name: 'Vault',
+      entryRequirements: { minLevel: 5, requiredItemId: 'gate_key', requiredQuestIds: ['gate_quest'] },
+    });
+
+    const result = await validateDraft(deps, version.id);
+    expect(result.error).toBeUndefined();
+    expect(result.problems).toEqual([]);
   });
 
   it('reports an error (not problems) for a non-existent version id', async () => {
