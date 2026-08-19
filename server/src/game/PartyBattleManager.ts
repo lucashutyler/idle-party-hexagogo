@@ -70,13 +70,12 @@ export class PartyBattleManager {
     this.onMembersMoved = onMembersMoved;
   }
 
-  /** Create a party battle entry. Called when a party is created or on restore. */
-  createEntry(partyId: string, username: string, startTile: HexTile, mapId: string): void {
-    if (this.entries.has(partyId)) return;
-
-    const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
-    const members = new Set([username]);
-
+  /**
+   * Build the battle timer for a party and register the entry. Shared by
+   * {@link createEntry} and {@link createEntryFromSave} so movement gating and
+   * battle callbacks can never drift between fresh and restored parties.
+   */
+  private registerEntry(partyId: string, serverParty: ServerParty, members: Set<string>): void {
     const battleTimer = new ServerBattleTimer(
       serverParty,
       () => this.createCombatForParty(partyId),
@@ -149,6 +148,14 @@ export class PartyBattleManager {
     );
 
     this.entries.set(partyId, { partyId, serverParty, battleTimer, members });
+  }
+
+  /** Create a party battle entry. Called when a party is created or on restore. */
+  createEntry(partyId: string, username: string, startTile: HexTile, mapId: string): void {
+    if (this.entries.has(partyId)) return;
+
+    const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
+    this.registerEntry(partyId, serverParty, new Set([username]));
   }
 
   /** Create a party battle entry from saved movement state (for restoring). */
@@ -163,81 +170,9 @@ export class PartyBattleManager {
     if (this.entries.has(partyId)) return;
 
     const serverParty = ServerParty.restore(this.grids.getOrThrow(mapId), currentTile, targetTile, movementQueue, mapId);
-    const members = new Set([username]);
-
-    const battleTimer = new ServerBattleTimer(
-      serverParty,
-      () => this.createCombatForParty(partyId),
-      {
-        onBattleStart: () => {
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (!s) continue;
-            s.incrementBattleCount();
-            s.addLogEntry('Battle begins!', 'battle');
-          }
-        },
-        onStateChange: () => {
-          for (const m of members) {
-            this.broadcastToMember(m);
-          }
-        },
-        onCombatTick: (_state: PartyCombatState, logEntries: string[]) => {
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (s) {
-              for (const entry of logEntries) {
-                s.addLogEntry(entry, 'damage');
-              }
-            }
-          }
-          for (const m of members) {
-            this.broadcastToMember(m);
-          }
-        },
-        onBattleEnd: (result: BattleResult) => {
-          this.handleBattleEnd(partyId, result);
-        },
-        onMove: () => {
-          const allQuests = this.content.getAllQuests();
-          const tileId = serverParty.tile.id;
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (s) {
-              const allZones = this.content.getAllZones();
-              const zone = getZone(serverParty.tile.zone, allZones);
-              const zName = zone ? zone.displayName : serverParty.tile.zone;
-              const tileDef = this.content.getTileById(serverParty.tile.id);
-              const rName = tileDef?.name ?? '';
-              s.addLogEntry(`Moved to ${zName}${rName ? `, ${rName}` : ''}`, 'move');
-              s.quests.applyVisit(tileId, allQuests);
-            }
-          }
-          this.onMembersMoved?.(members);
-        },
-        canMoveToNextTile: () => {
-          const nextTile = serverParty.nextTile;
-          if (!nextTile) return false;
-          // Check item requirements — ALL members must have the required item
-          const requiredItemId = nextTile.requiredItemId;
-          if (requiredItemId) {
-            for (const m of members) {
-              const s = this.getSession(m);
-              if (!s || !s.hasItemEquipped(requiredItemId)) return false;
-            }
-          }
-          // Check if at least one member has the next tile unlocked
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (s && s.isTileUnlocked(nextTile)) return true;
-          }
-          return false;
-        },
-      },
-    );
-
-    this.entries.set(partyId, { partyId, serverParty, battleTimer, members });
+    this.registerEntry(partyId, serverParty, new Set([username]));
   }
+
 
   /** Add a member to an existing party battle. They join the next combat cycle. */
   addMember(partyId: string, username: string): void {
