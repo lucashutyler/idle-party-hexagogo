@@ -1,6 +1,6 @@
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
-import type { ShopDefinition, ShopItem } from '@idle-party-rpg/shared';
+import type { HenchmanDefinition, ShopDefinition, ShopItem } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
 
@@ -59,7 +59,7 @@ export class ShopsTab implements Tab {
     if (!content) return;
     const isNew = !shop;
     const readOnly = ctx.isReadOnly();
-    const s = shop ?? { id: '', name: '', inventory: [] };
+    const s: ShopDefinition = shop ?? { id: '', name: '', inventory: [] };
     // Alphabetize items by name (case-insensitive) so the inventory list is easy to scan.
     const items = Object.values(content.items)
       .slice()
@@ -68,6 +68,15 @@ export class ShopsTab implements Tab {
     const priceMap = new Map<string, number>();
     const inShop = new Set<string>();
     for (const si of s.inventory) { priceMap.set(si.itemId, si.price); inShop.add(si.itemId); }
+
+    // Alphabetize henchmen the same way, so the two checklists read alike.
+    const henchmen = Object.values(content.henchmen ?? {})
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const forHire = new Set(s.henchmanIds ?? []);
+    const henchmanRows = henchmen.length > 0
+      ? henchmen.map(h => this.henchmanChecklistRowHtml(h, forHire.has(h.id))).join('')
+      : '<div class="admin-form-hint">No henchmen defined yet. Create some on the Henchmen tab.</div>';
 
     const itemRows = items.map(item => {
       const checked = inShop.has(item.id);
@@ -100,6 +109,14 @@ export class ShopsTab implements Tab {
         </div>
         <div class="admin-checklist admin-checklist-tall" id="shf-item-list">${itemRows}</div>
       </fieldset>
+      <fieldset class="admin-form-fieldset">
+        <legend>Henchmen for hire <span id="shf-hench-count" class="admin-form-hint"></span></legend>
+        <div class="admin-form-hint">Players hire these from this shop's room; the hire lasts until the party leaves the map.</div>
+        <div class="admin-checklist-toolbar">
+          <input type="search" id="shf-hench-search" placeholder="Search henchmen…" autocomplete="off">
+        </div>
+        <div class="admin-checklist" id="shf-hench-list">${henchmanRows}</div>
+      </fieldset>
     `;
     const actionsHtml = readOnly
       ? `<div class="admin-modal-actions admin-modal-actions-readonly">
@@ -122,6 +139,7 @@ export class ShopsTab implements Tab {
     const root = modal.body;
 
     this.wireItemFilter(root);
+    this.wireHenchmanFilter(root);
 
     root.querySelector('#shf-cancel')?.addEventListener('click', modal.close);
     root.querySelector('#shf-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal.close));
@@ -163,6 +181,46 @@ export class ShopsTab implements Tab {
     apply();
   }
 
+  private henchmanChecklistRowHtml(henchman: HenchmanDefinition, checked: boolean): string {
+    const haystack = `${henchman.name} ${henchman.className} ${henchman.id}`.toLowerCase();
+    return `
+      <label class="admin-checkbox shf-hench-row" data-henchman-search="${escapeHtml(haystack)}">
+        <input type="checkbox" class="shf-hench-check" value="${escapeHtml(henchman.id)}" ${checked ? 'checked' : ''}>
+        ${escapeHtml(henchman.emoji)} ${escapeHtml(henchman.name)}
+        <span class="admin-form-hint">Lv ${henchman.level} · ${henchman.maxHp} HP</span>
+      </label>
+    `;
+  }
+
+  private wireHenchmanFilter(root: HTMLElement): void {
+    const search = root.querySelector<HTMLInputElement>('#shf-hench-search');
+    const list = root.querySelector<HTMLElement>('#shf-hench-list');
+    const countEl = root.querySelector<HTMLElement>('#shf-hench-count');
+    if (!list) return;
+
+    const apply = () => {
+      const q = (search?.value ?? '').trim().toLowerCase();
+      let shown = 0;
+      let total = 0;
+      list.querySelectorAll<HTMLElement>('.shf-hench-row').forEach(row => {
+        total++;
+        const visible = !q || (row.dataset.henchmanSearch ?? '').includes(q);
+        row.style.display = visible ? '' : 'none';
+        if (visible) shown++;
+      });
+      const checked = list.querySelectorAll('.shf-hench-check:checked').length;
+      if (countEl) {
+        countEl.textContent = shown === total
+          ? `(${checked} offered of ${total})`
+          : `(${checked} offered, ${shown} of ${total} shown)`;
+      }
+    };
+
+    search?.addEventListener('input', apply);
+    list.addEventListener('change', apply);
+    apply();
+  }
+
   private async saveForm(root: HTMLElement, ctx: AdminContext, close: () => void): Promise<void> {
     const existingId = (root.querySelector('#shf-id') as HTMLInputElement).value.trim();
     const name = (root.querySelector('#shf-name') as HTMLInputElement).value.trim();
@@ -179,7 +237,15 @@ export class ShopsTab implements Tab {
       }
     });
 
-    const shopDef: ShopDefinition = { id, name, inventory };
+    const henchmanIds: string[] = [];
+    root.querySelectorAll<HTMLInputElement>('.shf-hench-check').forEach(cb => {
+      if (cb.checked) henchmanIds.push(cb.value);
+    });
+
+    const shopDef: ShopDefinition = {
+      id, name, inventory,
+      henchmanIds: henchmanIds.length > 0 ? henchmanIds : undefined,
+    };
     try {
       const data = await putAdmin<{ shops: Record<string, ShopDefinition> }>(
         `/api/admin/shops/${encodeURIComponent(id)}${ctx.versionQueryParam()}`, shopDef);

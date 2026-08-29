@@ -25,6 +25,7 @@ export const ASSET_KINDS = [
   'parchment',
   'class',
   'npc',
+  'henchman',
   'logo',
   'combat-bg',
   'room-bg',
@@ -48,6 +49,7 @@ export type AssetIdSource =
   | 'zones'
   | 'tileTypes'
   | 'npcs'
+  | 'henchmen'
   | 'maps'
   | 'classes'
   | 'equipSlots'
@@ -208,6 +210,15 @@ export const ASSET_KIND_INFO: Record<AssetKind, AssetKindInfo> = {
     idFormat: 'NpcDefinition.id',
     shape: 'square',
   },
+  henchman: {
+    label: 'Henchman',
+    description: 'Henchman photos in the hire list and the party grid. Henchmen may instead point at any URL via HenchmanDefinition.artworkUrl.',
+    dir: 'data/henchman-artwork',
+    mount: '/henchman-artwork',
+    idSource: 'henchmen',
+    idFormat: 'HenchmanDefinition.id',
+    shape: 'square',
+  },
   logo: {
     label: 'Logo',
     description: 'Splash-screen logo shown while the game loads.',
@@ -289,6 +300,7 @@ export const MANAGED_ASSET_KINDS = [
   'parchment',
   'class',
   'npc',
+  'henchman',
   'logo',
   'combat-bg',
   'room-bg',

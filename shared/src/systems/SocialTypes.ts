@@ -1,6 +1,9 @@
 // ── Social System Types ─────────────────────────────────────
 
 import type { NotificationEntry, NotificationPreferences } from './NotificationTypes.js';
+// Type-only, so the HenchmanTypes -> SocialTypes cycle (it needs PartyGridPosition)
+// is erased at compile time.
+import type { HiredHenchman } from './HenchmanTypes.js';
 
 // --- Friend System ---
 export interface FriendRequest {
@@ -42,6 +45,19 @@ export interface GamePartyMember {
 export interface GamePartyInfo {
   id: string;
   members: GamePartyMember[];
+  /**
+   * Hired henchmen, kept deliberately SEPARATE from `members`.
+   *
+   * `members` means "accounts" — roughly seventy server call sites resolve a
+   * member to a PlayerSession, transfer ownership to one, count one toward a
+   * reward divisor or notify one. A henchman in that array makes each of those
+   * wrong silently rather than at compile time, so henchmen get their own
+   * roster and every existing member loop stays correct by construction.
+   *
+   * Grid slots are still shared: `PartySystem` allocates positions across both
+   * arrays so two occupants can never land on one square.
+   */
+  henchmen?: HiredHenchman[];
 }
 
 export interface PartyInvite {

@@ -19,6 +19,7 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
   const zoneIds = new Set(snapshot.zones.map(z => z.id));
   const encounterIds = new Set((snapshot.encounters ?? []).map(e => e.id));
   const shopIds = new Set((snapshot.shops ?? []).map(s => s.id));
+  const henchmanIds = new Set((snapshot.henchmen ?? []).map(h => h.id));
   const npcIds = new Set((snapshot.npcs ?? []).map(n => n.id));
   const questIds = new Set((snapshot.quests ?? []).map(q => q.id));
   const dungeonIds = new Set((snapshot.dungeons ?? []).map(d => d.id));
@@ -152,6 +153,27 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
         problems.push(`Shop '${shop.id}' inventory references unknown item '${entry.itemId}' (index ${index}).`);
       }
     });
+    // Henchmen are keep-when-absent: a draft branched before the type existed
+    // has no `henchmen` key and still deploys against live henchmen, so an
+    // absent key means "unknown", not "empty".
+    if (snapshot.henchmen !== undefined) {
+      (shop.henchmanIds ?? []).forEach((hid, index) => {
+        if (!henchmanIds.has(hid)) {
+          problems.push(`Shop '${shop.id}' henchmanIds references unknown henchman '${hid}' (index ${index}).`);
+        }
+      });
+    }
+  }
+
+  // --- Henchmen ---
+  if (snapshot.skills !== undefined) {
+    for (const henchman of snapshot.henchmen ?? []) {
+      henchman.skillIds.forEach((skillId, index) => {
+        if (!skillIds.has(skillId)) {
+          problems.push(`Henchman '${henchman.id}' skillIds references unknown skill '${skillId}' (index ${index}).`);
+        }
+      });
+    }
   }
 
   // --- Recipes ---

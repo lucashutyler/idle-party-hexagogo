@@ -83,7 +83,19 @@ Runtime: shared skill helpers take a `SkillContent` bundle; `reconcileSkillLoado
 
 ## Shop system
 
-`ShopTypes.ts` defines `ShopDefinition` with `id`, `name`, and `inventory: ShopItem[]` (item ID + stock + price). Shops are linked to tiles via `shopId?: string` on `WorldTileDefinition`. Shop definitions stored in `data/shops.json`, managed by `ContentStore`. The client shows a shop button in the room info popup when the current tile has a shop. `ShopPopup` (`client/src/ui/ShopPopup.ts`) provides buy/sell UI — buy mode shows shop inventory with prices, sell mode shows unequipped inventory items only with quantity controls (-/+/All) and sell prices.
+`ShopTypes.ts` defines `ShopDefinition` with `id`, `name`, `inventory: ShopItem[]` (item ID + stock + price), and `henchmanIds?: string[]` — the henchmen this shop offers for hire (see Henchman system). A shop may vend items, henchmen, or both. Shops are linked to tiles via `shopId?: string` on `WorldTileDefinition`. Shop definitions stored in `data/shops.json`, managed by `ContentStore`. The client shows a shop button in the room info popup when the current tile has a shop. `ShopPopup` (`client/src/ui/ShopPopup.ts`) provides buy/sell UI — buy mode shows shop inventory with prices, sell mode shows unequipped inventory items only with quantity controls (-/+/All) and sell prices.
+
+## Henchman system
+
+`HenchmanTypes.ts` defines `HenchmanDefinition` with `id`, `name`, optional `description`, `className`, `level`, `maxHp`, `baseDamage`, optional `damageType`, `skillIds`, `emoji` (required), and optional `artworkUrl`. Definitions live in `data/henchmen.json`, managed by `ContentStore`. **Dev-only seed**: `SEED_HENCHMEN` is only seeded when `NODE_ENV !== 'production'`.
+
+Henchmen are **vended through shops**, not through a content type of their own — a shop lists them in `henchmanIds`, and the shop is linked to a room by the existing `shopId?: string` on `WorldTileDefinition`. There is no henchmen-specific tile field.
+
+Stats are **fixed**: no levelling, no equipment, no inventory, so the definition is the whole of a henchman's power. `level` is cosmetic — `maxHp` and `baseDamage` are authoritative and are not derived from it. `className` is a **hidden combat archetype**, not a player-facing label: the combat engine keys five behaviours off it (Sanctuary's non-Knight target pick, War Cry's `targetClass` match, Martyr's Knight-damage trigger, and monster `all_class` skill filters), so every henchman must carry a real `ClassName`, but the hire UI never shows it.
+
+**Referential guards** (written twice, once per surface — `ContentStore` for live edits, `DraftEditor` for draft edits): deleting a henchman is blocked while any shop offers it, and deleting a skill is blocked while any henchman's fixed loadout uses it. Unlike a player's loadout, a henchman's cannot be re-picked, so a dangling skill id would silently cost it an ability.
+
+**Snapshot semantics**: `henchmen` is **keep-when-absent** in `ContentStore.replaceAll` (the `skills` form, not the `shops` form), and `VersionStore.loadSnapshot` deliberately does **not** back-fill it to `[]`. Every snapshot published before the type existed lacks the key, so a clear-then-fill would wipe the live catalogue on the first deploy or rollback. `DraftEditor`'s henchman cores hydrate an absent key from live content before mutating, so editing one henchman in a pre-henchmen draft cannot collapse the set to a single entry.
 
 ## NPC system
 
@@ -182,6 +194,7 @@ Every kind of image the game serves is declared once in `ASSET_KIND_INFO` (`shar
 | `parchment` | Tiling backdrop behind the world map | `WorldMapMeta.id` | square |
 | `class` | Character portraits (combat / character / profile) | Class name, folded to lowercase (`Knight` → `knight.png`) | square |
 | `npc` | Talk-popup portraits | `NpcDefinition.id` — but see the NPC note below | square |
+| `henchman` | Hire-list and party-grid photos | `HenchmanDefinition.id` — but see the note below | square |
 | `logo` | Splash-screen logo | fixed single id `idle-party` | any |
 | `combat-bg` | Backdrop behind the combat stage | zone id, or `{zoneId}-{col}-{row}` per room | any |
 | `room-bg` | Backdrop behind the room view | zone id, or `{zoneId}-{col}-{row}` per room | any |
@@ -189,7 +202,7 @@ Every kind of image the game serves is declared once in `ASSET_KIND_INFO` (`shar
 | `slot-icon` | Equipment-slot dogear glyphs | `EquipSlot` id | square |
 | `nav-icon` | Bottom-nav button glyphs | Nav destination id | square |
 
-`shape: 'square'` rejects non-square uploads; `'any'` accepts any aspect ratio (the wide backdrops and the logo). NPCs may skip the folder entirely by pointing `NpcDefinition.artworkUrl` at any URL.
+`shape: 'square'` rejects non-square uploads; `'any'` accepts any aspect ratio (the wide backdrops and the logo). NPCs and henchmen may skip the folder entirely by pointing `NpcDefinition.artworkUrl` / `HenchmanDefinition.artworkUrl` at any URL.
 
 **⏸ Deferred kinds.** `set` and `shop` are in the registry — still mounted, still served, still type-checked — but listed in `DEFERRED_ASSET_KINDS` rather than `MANAGED_ASSET_KINDS`, so the assets API, the MCP tools, and the coverage report all skip them and the routes reject them with a 400 explaining why. Each is blocked on a client-side problem that would make managing its art misleading:
 
@@ -214,7 +227,7 @@ Existing files in `data/set-artwork/` and `data/shop-artwork/` are untouched and
 
 ## Content versioning
 
-Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates displaced parties (unreachable rooms — start tile's map only, see #374 — and rooms whose entry requirements the party no longer meets), and reconciles every session's skill loadout against the new content.
+Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, henchmen, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates displaced parties (unreachable rooms — start tile's map only, see #374 — and rooms whose entry requirements the party no longer meets), and reconciles every session's skill loadout against the new content.
 
 **When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.**
 

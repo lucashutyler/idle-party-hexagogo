@@ -111,7 +111,7 @@ interface RequiredId {
   nameSlug?: string;
   /**
    * Art this entity points at directly rather than through the asset folders —
-   * today only `NpcDefinition.artworkUrl`. Such an entity isn't missing art
+   * today `NpcDefinition.artworkUrl` and `HenchmanDefinition.artworkUrl`. Such an entity isn't missing art
    * even with nothing on disk under its id.
    */
   externalUrl?: string;
@@ -153,6 +153,15 @@ function requiredIdsFor(kind: AssetKind, info: AssetKindInfo, content: ContentSt
         label: npc.name,
         nameSlug: slugify(npc.name),
         externalUrl: npc.artworkUrl,
+      }));
+    case 'henchmen':
+      // A henchman pointing at its own artwork URL already has a photo, whether
+      // or not anything sits in the henchman-artwork folder.
+      return Object.values(content.getAllHenchmen()).map(h => ({
+        id: h.id,
+        label: h.name,
+        nameSlug: slugify(h.name),
+        externalUrl: h.artworkUrl,
       }));
     case 'zones':
       // Backdrop kinds key off the zone too, and their fallback chain needs to

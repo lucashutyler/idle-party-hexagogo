@@ -25,6 +25,7 @@ import { MonstersTab } from './tabs/MonstersTab';
 import { ItemsTab } from './tabs/ItemsTab';
 import { SetsTab } from './tabs/SetsTab';
 import { ShopsTab } from './tabs/ShopsTab';
+import { HenchmenTab } from './tabs/HenchmenTab';
 import { RecipesTab } from './tabs/RecipesTab';
 import { NpcsTab } from './tabs/NpcsTab';
 import { QuestsTab } from './tabs/QuestsTab';
@@ -61,6 +62,7 @@ export class AdminApp implements AdminContext {
     'items':      new ItemsTab(),
     'sets':       new SetsTab(),
     'shops':      new ShopsTab(),
+    'henchmen':   new HenchmenTab(),
     'recipes':    new RecipesTab(),
     'npcs':       new NpcsTab(),
     'quests':     new QuestsTab(),

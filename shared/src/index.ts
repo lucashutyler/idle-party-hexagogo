@@ -309,6 +309,18 @@ export type {
   ShopDefinition,
 } from './systems/ShopTypes.js';
 
+export type {
+  HenchmanDefinition,
+  HiredHenchman,
+  HenchmanOffer,
+} from './systems/HenchmanTypes.js';
+export {
+  SEED_HENCHMEN,
+  henchmanHandle,
+  isHenchmanHandle,
+  buildHenchmanCombatant,
+} from './systems/HenchmanTypes.js';
+
 // Crafting types
 export {
   CRAFTING_UNLOCK_LEVEL,

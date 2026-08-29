@@ -307,6 +307,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       encounters: content.getAllEncounters(),
       sets: content.getAllSets(),
       shops: content.getAllShops(),
+      henchmen: content.getAllHenchmen(),
       tileTypes: content.getAllTileTypes(),
       recipes: content.getAllRecipes(),
       npcs: content.getAllNpcs(),
@@ -797,6 +798,61 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         return;
       }
       res.json({ success: true, shops: content.getAllShops() });
+    }
+  });
+
+  // ── Henchman endpoints ──────────────────────────────────
+
+  /** List all henchmen. */
+  router.get('/henchmen', (_req, res) => {
+    const content = getContentStore();
+    res.json({ henchmen: content.getAllHenchmen() });
+  });
+
+  /** Add or update a henchman. Supports ?versionId= for draft editing. */
+  router.put('/henchmen/:id', async (req, res) => {
+    const versionId = req.query.versionId as string | undefined;
+    const henchman = req.body;
+    if (!henchman.id || !henchman.name || !henchman.className || !henchman.emoji
+        || typeof henchman.level !== 'number' || typeof henchman.maxHp !== 'number'
+        || typeof henchman.baseDamage !== 'number') {
+      res.status(400).json({ error: 'Missing required fields: id, name, className, level, maxHp, baseDamage, emoji' });
+      return;
+    }
+    if (!ALL_CLASS_NAMES.includes(henchman.className as ClassName)) {
+      res.status(400).json({ error: `Invalid class. Valid classes: ${ALL_CLASS_NAMES.join(', ')}` });
+      return;
+    }
+    if (!Array.isArray(henchman.skillIds)) henchman.skillIds = [];
+
+    if (versionId) {
+      const result = await draftEditor.upsertHenchman(versionId, henchman);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, henchmen: toRecord(result.entries) });
+    } else {
+      const content = getContentStore();
+      await content.addOrUpdateHenchman(henchman);
+      res.json({ success: true, henchmen: content.getAllHenchmen() });
+    }
+  });
+
+  /** Delete a henchman. Supports ?versionId= for draft editing. */
+  router.delete('/henchmen/:id', async (req, res) => {
+    const henchmanId = req.params.id;
+    const versionId = req.query.versionId as string | undefined;
+
+    if (versionId) {
+      const result = await draftEditor.deleteHenchman(versionId, henchmanId);
+      if (!result.success) { res.status(result.status).json({ error: result.error }); return; }
+      res.json({ success: true, henchmen: toRecord(result.entries) });
+    } else {
+      const content = getContentStore();
+      const result = await content.deleteHenchman(henchmanId);
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({ success: true, henchmen: content.getAllHenchmen() });
     }
   });
 
@@ -1376,7 +1432,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const encountersRecord = toRecord(snapshot.encounters ?? []);
     const setsRecord = toRecord(snapshot.sets ?? []);
     const shopsRecord = toRecord(snapshot.shops ?? []);
-    // Old snapshots predate tile types/recipes/skills/design notes — seed from live content so
+    // Old snapshots predate tile types/recipes/skills/design notes/henchmen — seed from live content so
     // admin shows what's actually in-game. A present-but-empty array means the draft genuinely has none.
     const tileTypesRecord = snapshot.tileTypes && snapshot.tileTypes.length > 0
       ? toRecord(snapshot.tileTypes)
@@ -1393,6 +1449,9 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const designNotesRecord = snapshot.designNotes !== undefined
       ? toRecord(snapshot.designNotes)
       : getContentStore().getAllDesignNotes();
+    const henchmenRecord = snapshot.henchmen !== undefined
+      ? toRecord(snapshot.henchmen)
+      : getContentStore().getAllHenchmen();
     const skillSlotSchedulesRecord: Record<string, SkillSlot[]> = {};
     if (snapshot.skillSlotSchedules !== undefined) {
       for (const entry of snapshot.skillSlotSchedules) skillSlotSchedulesRecord[entry.className] = entry.slots;
@@ -1401,7 +1460,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       const liveSchedules = getContentStore().getAllSkillSlotSchedules();
       for (const [cn, sl] of Object.entries(liveSchedules)) skillSlotSchedulesRecord[cn] = sl;
     }
-    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, tileTypes: tileTypesRecord, recipes: recipesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, skills: skillsRecord, skillSlotSchedules: skillSlotSchedulesRecord, designNotes: designNotesRecord, world: snapshot.world });
+    res.json({ monsters: monstersRecord, items: itemsRecord, zones: zonesRecord, encounters: encountersRecord, sets: setsRecord, shops: shopsRecord, henchmen: henchmenRecord, tileTypes: tileTypesRecord, recipes: recipesRecord, npcs: npcsRecord, quests: questsRecord, dungeons: dungeonsRecord, skills: skillsRecord, skillSlotSchedules: skillSlotSchedulesRecord, designNotes: designNotesRecord, world: snapshot.world });
   });
 
   /** Rename a draft version. */
