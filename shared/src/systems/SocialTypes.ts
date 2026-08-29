@@ -237,6 +237,25 @@ export interface ClientKickPartyMemberMessage {
 export interface ClientSetPartyGridPositionMessage {
   type: 'set_party_grid_position';
   position: PartyGridPosition;
+  /**
+   * Move this henchman instead of the sender.
+   *
+   * The subject is otherwise inferred from the socket — a member may only ever
+   * move themselves. Henchmen have no socket of their own, so moving one is
+   * always somebody else acting on it, and the server authorizes that on the
+   * caller's party role rather than on identity.
+   */
+  henchmanInstanceId?: string;
+}
+
+export interface ClientHireHenchmanMessage {
+  type: 'hire_henchman';
+  henchmanId: string;
+}
+
+export interface ClientDismissHenchmanMessage {
+  type: 'dismiss_henchman';
+  instanceId: string;
 }
 
 export interface ClientPromotePartyLeaderMessage {
@@ -349,6 +368,8 @@ export type ClientSocialMessage =
   | ClientLeavePartyMessage
   | ClientKickPartyMemberMessage
   | ClientSetPartyGridPositionMessage
+  | ClientHireHenchmanMessage
+  | ClientDismissHenchmanMessage
   | ClientPromotePartyLeaderMessage
   | ClientDemotePartyMemberMessage
   | ClientTransferPartyOwnershipMessage

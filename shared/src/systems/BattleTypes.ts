@@ -1,6 +1,7 @@
 import type { EquipSlot, ItemDefinition } from './ItemTypes.js';
 import type { SetDefinition } from './SetTypes.js';
 import type { ShopDefinition } from './ShopTypes.js';
+import type { HenchmanOffer } from './HenchmanTypes.js';
 import type { RecipeDefinition, CraftQueueState, ActiveJobProgress } from './CraftingTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type {
@@ -170,6 +171,8 @@ export interface ServerStateMessage {
   setDefinitions?: Record<string, SetDefinition>;
   /** Shop definition for the player's current room (if any). */
   shopDefinition?: ShopDefinition;
+  /** Henchmen the current room's shop offers for hire. Empty when there are none. */
+  henchmanOffers?: HenchmanOffer[];
   /** Crafting state: visible recipes, queue, and progress on the active job. */
   crafting?: ClientCraftingState;
   /** Active quests the player has accepted (with live progress / status). */

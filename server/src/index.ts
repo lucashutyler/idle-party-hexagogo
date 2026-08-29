@@ -1382,11 +1382,12 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'set_party_grid_position' && typeof msg.position === 'number') {
-        const result = playerManager.parties.setGridPosition(
-          username,
-          msg.position,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-        );
+        const getPartyId = (u: string) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null;
+        // A henchman has no socket, so the subject cannot be inferred from the
+        // connection the way it is for a member moving themselves.
+        const result = msg.henchmanInstanceId
+          ? playerManager.parties.setHenchmanGridPosition(username, msg.henchmanInstanceId, msg.position, getPartyId)
+          : playerManager.parties.setGridPosition(username, msg.position, getPartyId);
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
@@ -1399,6 +1400,74 @@ wss.on('connection', (ws) => {
             for (const m of party.members) {
               playerManager.sendStateToPlayer(m.username);
             }
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'hire_henchman' && typeof msg.henchmanId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        // Validate at the point of action: the henchman must be offered by the
+        // shop in the room the party is standing in right now.
+        const shop = session.getCurrentShop();
+        if (!shop?.henchmanIds?.includes(msg.henchmanId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'That henchman is not for hire here.' }));
+          return;
+        }
+        const def = gameLoop.contentStore.getHenchman(msg.henchmanId);
+        if (!def) {
+          ws.send(JSON.stringify({ type: 'error', message: 'That henchman is no longer available.' }));
+          return;
+        }
+
+        const result = playerManager.parties.hireHenchman(
+          username,
+          msg.henchmanId,
+          session.getMapId(),
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+
+        const partyId = session.getPartyId();
+        if (partyId) {
+          playerManager.partyBattles.restartBattle(partyId);
+          const party = playerManager.parties.getParty(partyId);
+          for (const m of party?.members ?? []) {
+            playerManager.getSessionByUsername(m.username)?.addLogEntry(`${def.name} joins the party.`, 'move');
+            playerManager.sendStateToPlayer(m.username);
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'dismiss_henchman' && typeof msg.instanceId === 'string') {
+        const result = playerManager.parties.dismissHenchman(
+          username,
+          msg.instanceId,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+
+        // Deliberately no handlePartyLeave and no notify here: both assume an
+        // account, and notify would allocate a permanent inbox for a handle
+        // that nothing ever reads.
+        const name = gameLoop.contentStore.getHenchman(result.henchmanId)?.name ?? 'Your henchman';
+        const session = playerManager.getSessionByUsername(username);
+        const partyId = session?.getPartyId();
+        if (partyId) {
+          playerManager.partyBattles.restartBattle(partyId);
+          const party = playerManager.parties.getParty(partyId);
+          for (const m of party?.members ?? []) {
+            playerManager.getSessionByUsername(m.username)?.addLogEntry(`${name} leaves the party.`, 'move');
+            playerManager.sendStateToPlayer(m.username);
           }
         }
         return;

@@ -10,6 +10,7 @@ import {
   rollDungeonRewards,
   rewardAppliesToClass,
   validateRoomEntry,
+  buildHenchmanCombatant,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -25,6 +26,7 @@ import type {
   RoomEntryLabels,
   RoomEntryFailure,
   RoomEntryRequirements,
+  HiredHenchman,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
@@ -60,6 +62,14 @@ export class PartyBattleManager {
   private getSession: (username: string) => PlayerSession | undefined;
   private broadcastToMember: (username: string) => void;
   private onMembersMoved?: (members: ReadonlySet<string>) => void;
+  /**
+   * Hired henchmen for a party. Injected rather than held here because
+   * `PartySystem` owns the 3x3 grid, and slot allocation has to see members and
+   * henchmen together or two occupants land on one square.
+   */
+  private getPartyHenchmen: (partyId: string) => HiredHenchman[] = () => [];
+  /** Dismiss henchmen whose hire map is no longer the party's map. */
+  private dismissHenchmenOffMap: (partyId: string, mapId: string) => HiredHenchman[] = () => [];
 
   constructor(
     grids: WorldGrids,
@@ -73,6 +83,15 @@ export class PartyBattleManager {
     this.getSession = getSession;
     this.broadcastToMember = broadcastToMember;
     this.onMembersMoved = onMembersMoved;
+  }
+
+  /** Wire the henchmen roster callbacks. Called once by PlayerManager at boot. */
+  setHenchmenCallbacks(
+    getPartyHenchmen: (partyId: string) => HiredHenchman[],
+    dismissHenchmenOffMap: (partyId: string, mapId: string) => HiredHenchman[],
+  ): void {
+    this.getPartyHenchmen = getPartyHenchmen;
+    this.dismissHenchmenOffMap = dismissHenchmenOffMap;
   }
 
   /**
@@ -292,6 +311,7 @@ export class PartyBattleManager {
     if (blocked) return { success: false, error: blocked.reason, blocked };
 
     entry.serverParty.switchMap(destGrid, destTile, link.mapId);
+    this.announceHenchmenLeft(entry, this.dismissHenchmenOffMap(partyId, link.mapId));
 
     for (const username of entry.members) {
       const session = this.getSession(username);
@@ -304,6 +324,22 @@ export class PartyBattleManager {
     entry.battleTimer.restartBattle();
     for (const m of entry.members) this.broadcastToMember(m);
     return { success: true };
+  }
+
+  /**
+   * Tell the party which henchmen a map change just cost them.
+   *
+   * A hire is scoped to the map it was made on, so a body silently vanishing
+   * from the formation would read as a bug rather than as the rule.
+   */
+  private announceHenchmenLeft(entry: PartyBattleEntry, dismissed: HiredHenchman[]): void {
+    if (dismissed.length === 0) return;
+    for (const hired of dismissed) {
+      const name = this.content.getHenchman(hired.henchmanId)?.name ?? 'Your henchman';
+      for (const username of entry.members) {
+        this.getSession(username)?.addLogEntry(`${name} parts ways with the party.`, 'move');
+      }
+    }
   }
 
   /**
@@ -510,6 +546,7 @@ export class PartyBattleManager {
     if (entry.serverParty.currentMapId !== mapId) {
       // Relocation crosses to a different map (e.g. the party's map was deleted).
       entry.serverParty.switchMap(this.grids.getOrThrow(mapId), newTile, mapId);
+      this.announceHenchmenLeft(entry, this.dismissHenchmenOffMap(partyId, mapId));
     } else {
       entry.serverParty.relocateTo(newTile);
     }
@@ -554,6 +591,15 @@ export class PartyBattleManager {
       if (!session) continue;
       const info = session.getCombatInfo();
       players.push(info);
+    }
+
+    // Hired henchmen fight alongside the party. A definition deleted by a
+    // content deploy is skipped rather than thrown on — this runs inside the
+    // battle timer's interval callback, which has no try/catch above it.
+    for (const hired of this.getPartyHenchmen(partyId)) {
+      const def = this.content.getHenchman(hired.henchmanId);
+      if (!def) continue;
+      players.push(buildHenchmanCombatant(def, hired, id => this.content.getSkill(id)));
     }
 
     const zone = entry.serverParty.tile.zone;
@@ -709,6 +755,10 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
     if (entry.dungeonRun) return { success: false, error: 'Already in a dungeon.' };
+    // Refuse rather than auto-dismiss, so the player understands why.
+    if (this.getPartyHenchmen(partyId).length > 0) {
+      return { success: false, error: 'Dismiss your henchmen before entering.' };
+    }
 
     const dungeon = this.content.getDungeon(dungeonId);
     if (!dungeon) return { success: false, error: 'Dungeon not found.' };

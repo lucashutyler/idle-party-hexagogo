@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, NotificationEntry, RoomEntryFailure } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -73,6 +73,12 @@ export class PlayerManager {
       (members) => {
         this.cancelInvitesOnMove(members);
       },
+    );
+    // PartySystem owns the party grid, so it owns the henchmen roster too —
+    // members and henchmen share the nine squares.
+    this.partyBattles.setHenchmenCallbacks(
+      (partyId) => this.parties.getHenchmen(partyId),
+      (partyId, mapId) => this.parties.dismissHenchmenOffMap(partyId, mapId),
     );
   }
 
@@ -195,7 +201,8 @@ export class PlayerManager {
           if (member) partyInfo = { role: member.role, gridPosition: member.gridPosition };
         }
       }
-      const saveData = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData);
+      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
+      const saveData = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen);
       await saveStore.saveAll([saveData]);
     }
 
@@ -385,6 +392,34 @@ export class PlayerManager {
   }
 
   /** Build ClientSocialState for a player. */
+  /**
+   * Drop saved hires that no longer make sense: a definition deleted by a
+   * content deploy, or a hire scoped to a map the party is no longer on.
+   * Mirrors the vanished-dungeon guard in `restoreDungeonRun`.
+   */
+  private validHenchmen(saved: HiredHenchman[], partyMapId: string): HiredHenchman[] {
+    return saved.filter(h => h.mapId === partyMapId && this.content.getHenchman(h.henchmanId));
+  }
+
+  /**
+   * Attach display fields for the client. The roster stores ids only, so names
+   * are resolved at send time and a renamed henchman never goes stale inside a
+   * party that already hired it.
+   */
+  private resolveHenchmen(henchmen: HiredHenchman[] | undefined): HiredHenchman[] {
+    if (!henchmen?.length) return [];
+    return henchmen.map(h => {
+      const def = this.content.getHenchman(h.henchmanId);
+      return {
+        ...h,
+        name: def?.name ?? 'Unknown henchman',
+        emoji: def?.emoji ?? '❓',
+        artworkUrl: def?.artworkUrl,
+        level: def?.level,
+      };
+    });
+  }
+
   getSocialState(username: string): ClientSocialState {
     const session = this.sessions.get(username);
     const guildData = this.guilds.getPlayerGuild(username);
@@ -398,7 +433,7 @@ export class PlayerManager {
       outgoingFriendRequests: this.friends.getOutgoingRequests(username),
       guild: guildData?.info ?? null,
       guildMembers: guildData?.members ?? [],
-      party: partyData,
+      party: partyData && { ...partyData, henchmen: this.resolveHenchmen(partyData.henchmen) },
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: this.getOnlinePlayers(),
@@ -674,7 +709,8 @@ export class PlayerManager {
         }
       }
 
-      data.push(session.toSaveData(movementData ?? undefined, partyInfo, dungeonData));
+      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
+      data.push(session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen));
     }
     return data;
   }
@@ -816,6 +852,12 @@ export class PlayerManager {
         this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
       }
 
+      // Restore hired henchmen from the owner's save. Mirrored on every member,
+      // so taking only the owner's copy is what stops a split party duplicating them.
+      if (ownerData.partyHenchmen?.length) {
+        this.parties.restoreHenchmen(party.id, this.validHenchmen(ownerData.partyHenchmen, partyMapId));
+      }
+
       console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
     }
 
@@ -849,6 +891,14 @@ export class PlayerManager {
       if (data.dungeonRun) {
         const partyId = this.sessions.get(data.username)?.getPartyId();
         if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
+      }
+
+      // Restore hired henchmen. A solo party is minted with a FRESH id on
+      // restore, so the saved partyId is useless here — read the new one back
+      // off the session, exactly as the dungeon run above does.
+      if (data.partyHenchmen?.length) {
+        const partyId = this.sessions.get(data.username)?.getPartyId();
+        if (partyId) this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
       }
     }
 

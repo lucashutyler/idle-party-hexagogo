@@ -46,6 +46,8 @@ import {
   emptyNotificationPreferences,
 } from '@idle-party-rpg/shared';
 import type {
+  HiredHenchman,
+  HenchmanOffer,
   ServerStateMessage,
   ServerBattleState,
   ServerPartyState,
@@ -418,6 +420,43 @@ export class PlayerSession {
     return this.content.getShop(tile.shopId);
   }
 
+  /**
+   * Shop for the room the party is standing in, resolved by the room's GUID.
+   *
+   * `world.tiles` is flat across every map, so a col/row lookup can resolve a
+   * different map's room at the same coordinates. Anything gating an action on
+   * "the shop here" must go through this, not through coordinates.
+   */
+  getCurrentShop(): ShopDefinition | undefined {
+    const tileId = this.getCurrentTile?.()?.id;
+    if (!tileId) return undefined;
+    const tileDef = this.content.getTileById(tileId);
+    if (!tileDef?.shopId) return undefined;
+    return this.content.getShop(tileDef.shopId);
+  }
+
+  /** Henchmen the room's shop currently offers, resolved for the hire list. */
+  getHenchmanOffers(): HenchmanOffer[] {
+    const shop = this.getCurrentShop();
+    if (!shop?.henchmanIds?.length) return [];
+    const offers: HenchmanOffer[] = [];
+    for (const id of shop.henchmanIds) {
+      const def = this.content.getHenchman(id);
+      if (!def) continue;
+      offers.push({
+        henchmanId: def.id,
+        name: def.name,
+        description: def.description,
+        emoji: def.emoji,
+        artworkUrl: def.artworkUrl,
+        level: def.level,
+        maxHp: def.maxHp,
+        baseDamage: def.baseDamage,
+      });
+    }
+    return offers;
+  }
+
   /** Get the NPC definition for the player's current tile, if any. */
   private getCurrentNpc(): import('@idle-party-rpg/shared').NpcDefinition | undefined {
     const pos = this.getPosition();
@@ -623,6 +662,7 @@ export class PlayerSession {
       itemDefinitions: this.getOwnedItemDefinitions(setDefs),
       setDefinitions: setDefs,
       shopDefinition: this.getCurrentShopDefinition(),
+      henchmanOffers: this.getHenchmanOffers(),
       crafting: this.getCraftingState(),
       activeQuests: questBlock.activeQuests,
       completedQuests: questBlock.completedQuests,
@@ -1076,7 +1116,7 @@ export class PlayerSession {
     dungeonId: string;
     currentFloorIndex: number;
     entrance: { col: number; row: number };
-  } | null): PlayerSaveData {
+  } | null, partyHenchmen?: HiredHenchman[]): PlayerSaveData {
     const pos = movementData?.position ?? this.getPosition();
 
     return {
@@ -1115,6 +1155,7 @@ export class PlayerSession {
       completedQuests: this.quests.toSaveData().completed,
       weeklyCompletions: this.quests.toSaveData().weeklyCompletions,
       dungeonRun: dungeonRun ?? undefined,
+      partyHenchmen: partyHenchmen?.length ? partyHenchmen : undefined,
       clearedDungeons: [...this.clearedDungeons],
       notifications: this.getNotifications ? this.getNotifications() : this.initialNotifications,
       notificationPreferences: this.notificationPreferences,

@@ -426,6 +426,8 @@ export type {
   ClientLeavePartyMessage,
   ClientKickPartyMemberMessage,
   ClientSetPartyGridPositionMessage,
+  ClientHireHenchmanMessage,
+  ClientDismissHenchmanMessage,
   ClientPromotePartyLeaderMessage,
   ClientDemotePartyMemberMessage,
   ClientTransferPartyOwnershipMessage,

@@ -1,4 +1,4 @@
-import type { CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription } from '@idle-party-rpg/shared';
+import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -56,6 +56,12 @@ export interface PlayerSaveData {
   };
   /** Dungeon IDs this player has cleared at least once (gates first-clear rewards). */
   clearedDungeons?: string[];
+  /**
+   * Henchmen the player's party currently holds, mirrored onto every member's
+   * save the way `dungeonRun` is. Restored owner-authoritatively, so a party
+   * that splits across a restart cannot duplicate its hires.
+   */
+  partyHenchmen?: HiredHenchman[];
   /** Capped notification inbox (most recent last). */
   notifications?: NotificationEntry[];
   /** Per-category/channel notification opt-ins. Absent → registry defaults apply. */
