@@ -617,8 +617,6 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // Resolve the shop from the room's GUID: `world.tiles` is flat across
-        // every map, so matching on col/row can hand back a different map's shop.
         const shop = session.getCurrentShop();
         if (!shop) {
           ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
@@ -1134,9 +1132,7 @@ wss.on('connection', (ws) => {
             }
           }
         } else if (channelType === 'tile') {
-          // All players in the same room — of the same MAP. Coordinates repeat
-          // across maps, so a position-only match would deliver room chat to
-          // players standing at the same spot in a different map entirely.
+          // All players in the same room on the same map
           const pos = session.getPosition();
           const mapId = session.getMapId();
           for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
@@ -1380,8 +1376,6 @@ wss.on('connection', (ws) => {
 
       if (msg.type === 'set_party_grid_position' && typeof msg.position === 'number') {
         const getPartyId = (u: string) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null;
-        // A henchman has no socket, so the subject cannot be inferred from the
-        // connection the way it is for a member moving themselves.
         const result = msg.henchmanInstanceId
           ? playerManager.parties.setHenchmanGridPosition(username, msg.henchmanInstanceId, msg.position, getPartyId)
           : playerManager.parties.setGridPosition(username, msg.position, getPartyId);
@@ -1406,8 +1400,6 @@ wss.on('connection', (ws) => {
         const session = playerManager.getSessionByUsername(username);
         if (!session) return;
 
-        // Validate at the point of action: the henchman must be offered by the
-        // shop in the room the party is standing in right now.
         const shop = session.getCurrentShop();
         if (!shop?.henchmanIds?.includes(msg.henchmanId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'That henchman is not for hire here.' }));
@@ -1453,9 +1445,7 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // Deliberately no handlePartyLeave and no notify here: both assume an
-        // account, and notify would allocate a permanent inbox for a handle
-        // that nothing ever reads.
+        // No handlePartyLeave/notify here — both assume a real account.
         const name = gameLoop.contentStore.getHenchman(result.henchmanId)?.name ?? 'Your henchman';
         const session = playerManager.getSessionByUsername(username);
         const partyId = session?.getPartyId();

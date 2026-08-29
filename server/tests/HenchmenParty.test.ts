@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { PartySystem } from '../src/game/social/PartySystem.js';
 import { MAX_PARTY_SIZE } from '@idle-party-rpg/shared';
 
-// Mirrors the helper in PartySystem.test.ts.
 function createPlayerState() {
   const partyIds = new Map<string, string | null>();
   const positions = new Map<string, { col: number; row: number }>();
@@ -45,9 +44,7 @@ describe('PartySystem henchmen', () => {
   }
 
   it('keeps henchmen out of party.members entirely', () => {
-    // This is the invariant the whole design rests on: ~70 server call sites
-    // resolve a member to an account. A henchman appearing there is silently
-    // catastrophic rather than a compile error.
+    // Server call sites resolve every party.members entry to a real account.
     const party = soloParty('alice');
     hire('alice', 'hench_a');
 
@@ -196,8 +193,6 @@ describe('PartySystem henchmen', () => {
 
     system.leaveParty('alice', state.getPartyId, state.setPartyId);
 
-    // Ownership transfer scans party.members, which holds only accounts — so a
-    // henchman can never be crowned owner and brick the survivor's movement.
     expect(party.members).toHaveLength(1);
     expect(party.members[0].username).toBe('bob');
     expect(party.members[0].role).toBe('owner');

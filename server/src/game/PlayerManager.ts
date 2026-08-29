@@ -74,8 +74,6 @@ export class PlayerManager {
         this.cancelInvitesOnMove(members);
       },
     );
-    // PartySystem owns the party grid, so it owns the henchmen roster too —
-    // members and henchmen share the nine squares.
     this.partyBattles.setHenchmenCallbacks(
       (partyId) => this.parties.getHenchmen(partyId),
       (partyId, mapId) => this.parties.dismissHenchmenOffMap(partyId, mapId),
@@ -391,21 +389,10 @@ export class PlayerManager {
     return Array.from(this.playerConnections.keys());
   }
 
-  /** Build ClientSocialState for a player. */
-  /**
-   * Drop saved hires that no longer make sense: a definition deleted by a
-   * content deploy, or a hire scoped to a map the party is no longer on.
-   * Mirrors the vanished-dungeon guard in `restoreDungeonRun`.
-   */
   private validHenchmen(saved: HiredHenchman[], partyMapId: string): HiredHenchman[] {
     return saved.filter(h => h.mapId === partyMapId && this.content.getHenchman(h.henchmanId));
   }
 
-  /**
-   * Attach display fields for the client. The roster stores ids only, so names
-   * are resolved at send time and a renamed henchman never goes stale inside a
-   * party that already hired it.
-   */
   private resolveHenchmen(henchmen: HiredHenchman[] | undefined): HiredHenchman[] {
     if (!henchmen?.length) return [];
     return henchmen.map(h => {
@@ -420,6 +407,7 @@ export class PlayerManager {
     });
   }
 
+  /** Build ClientSocialState for a player. */
   getSocialState(username: string): ClientSocialState {
     const session = this.sessions.get(username);
     const guildData = this.guilds.getPlayerGuild(username);
@@ -555,10 +543,6 @@ export class PlayerManager {
     // Add to new party's battle
     this.partyBattles.addMember(partyId, username);
 
-    // Joining is a third way a player's map can change (the others being a
-    // transition and a forced relocation, both of which already do this). The
-    // session's fog-of-war grid is bound to one map, so without re-seating it
-    // the joiner keeps unlocking rooms against the map they came from.
     const joiner = this.sessions.get(username);
     const tile = this.partyBattles.getTile(partyId);
     if (joiner && tile) joiner.switchMapGrid(tile);
@@ -757,10 +741,7 @@ export class PlayerManager {
       const tile = this.grids.get(saveMapId)?.getTile(offsetToCube(data.position));
       if (!tile) {
         console.warn(`[PlayerManager] Moved "${data.username}" to start tile (old position ${saveMapId}:${data.position.col},${data.position.row} no longer exists)`);
-        // The run's entrance is a bare (col,row) resolved against the party's
-        // CURRENT map, and we are about to move them to a different one — so the
-        // run cannot survive this. Same rule `relocateParty` already applies to a
-        // forced relocation.
+        // dungeonRun.entrance is a bare (col,row) against the old map — it cannot survive.
         data.dungeonRun = undefined;
         data.position = { col: startPos.col, row: startPos.row };
         data.mapId = defaultMapId;
@@ -865,8 +846,7 @@ export class PlayerManager {
         this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
       }
 
-      // Restore hired henchmen from the owner's save. Mirrored on every member,
-      // so taking only the owner's copy is what stops a split party duplicating them.
+      // Every member's save mirrors the roster — read only the owner's or they duplicate.
       if (ownerData.partyHenchmen?.length) {
         this.parties.restoreHenchmen(party.id, this.validHenchmen(ownerData.partyHenchmen, partyMapId));
       }
@@ -906,9 +886,6 @@ export class PlayerManager {
         if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
       }
 
-      // Restore hired henchmen. A solo party is minted with a FRESH id on
-      // restore, so the saved partyId is useless here — read the new one back
-      // off the session, exactly as the dungeon run above does.
       if (data.partyHenchmen?.length) {
         const partyId = this.sessions.get(data.username)?.getPartyId();
         if (partyId) this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
@@ -996,17 +973,12 @@ export class PlayerManager {
         targetMapId = defaultMapId;
         bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
       } else if (currentMapId !== defaultMapId) {
-        // Off the start tile's map, REACHABILITY isn't decidable from one grid
-        // alone — see the note on this method. EXISTENCE is, though, and it has
-        // to be checked: `refreshAllPartyTiles` deliberately leaves a party's
-        // stale HexTile in place when its room vanished from the rebuilt grid,
-        // so skipping this branch outright strands the party on a room that no
-        // longer exists.
-        if (grid.getTile(tile.coord)) continue; // room survived — leave them be
+        // Off the start tile's map, reachability isn't decidable from one grid
+        // alone — see the note on this method. Existence still is.
+        if (grid.getTile(tile.coord)) continue;
         const meta = world.maps.find(m => m.id === currentMapId);
         bestTile = grid.getTile(offsetToCube(meta?.startTile ?? world.startTile)) ?? null;
         if (!bestTile) {
-          // That map has no usable start room either — fall back to the default map.
           targetMapId = defaultMapId;
           bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
         }

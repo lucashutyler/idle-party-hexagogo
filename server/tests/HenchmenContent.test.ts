@@ -5,9 +5,7 @@ import path from 'path';
 import type { HenchmanDefinition, ShopDefinition, SkillDefinition } from '@idle-party-rpg/shared';
 import { findZonesSpanningMaps } from '@idle-party-rpg/shared';
 
-// ContentStore resolves its data dir from process.cwd() at module load, so the
-// tmp-dir chdir must happen BEFORE the module is imported (dynamic import below).
-// Mirrors DesignNotes.test.ts.
+// ContentStore reads its data dir from cwd at module load — chdir before the dynamic import.
 type ContentStoreCtor = typeof import('../src/game/ContentStore.js').ContentStore;
 type ContentStoreInstance = InstanceType<ContentStoreCtor>;
 
@@ -84,8 +82,6 @@ describe('ContentStore henchmen', () => {
     const result = await store.deleteHenchman('hench_offered');
     expect(result.success).toBe(false);
     expect(result.error).toContain('Shop shop_a');
-    // The henchman must still be there — a refused delete that half-applied
-    // would leave shops pointing at nothing.
     expect(store.getHenchman('hench_offered')).toBeDefined();
   });
 
@@ -130,9 +126,7 @@ describe('ContentStore henchmen snapshot semantics', () => {
   });
 
   it('KEEPS live henchmen when a snapshot omits the key entirely (pre-henchmen snapshot)', async () => {
-    // The blocker this guards: every snapshot published before henchmen existed
-    // lacks the key. Clear-then-fill semantics would wipe the live catalogue on
-    // the first deploy or rollback, orphaning every party that hired one.
+    // keep-when-absent: an absent key means keep, not clear.
     const store = await loadFreshStore();
     await store.addOrUpdateHenchman(makeHenchman('hench_live'));
 
@@ -173,8 +167,6 @@ describe('ContentStore zone/map constraint', () => {
   }
 
   it('the seeded default world satisfies the constraint', async () => {
-    // A guard on our own content: the constraint is worthless if a fresh install
-    // violates it out of the box.
     const store = await loadFreshStore();
     expect(findZonesSpanningMaps(store.getWorld().tiles)).toEqual([]);
   });
@@ -193,14 +185,12 @@ describe('ContentStore zone/map constraint', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('cannot span maps');
-    // And the refused room must not have been written.
     expect(store.getWorld().tiles.some(t => t.mapId === 'sewers' && t.zone === 'shared_zone')).toBe(false);
   });
 
   it('still allows editing a room in a zone that already spans maps', async () => {
     const store = await loadFreshStore();
-    // Force a pre-constraint violation directly into the world, the way legacy
-    // content would already look.
+    // Pushed directly: addOrUpdateTile would refuse to create this violation.
     const world = store.getWorld();
     world.tiles.push(
       { ...worldTile('overworld', 42, 42, 'legacy_zone'), id: 'legacy-a' },

@@ -50,10 +50,7 @@ export interface ClientPlayerCombatant {
   className: string;
   /** Remaining stun turns (0 or undefined = not stunned). */
   stunTurns?: number;
-  /**
-   * Set for hired henchmen. The client renders them as party members but must
-   * not offer player-only actions on them (View Player, DM, trade, friend).
-   */
+  /** Set for hired henchmen — the client must not offer player-only actions on them. */
   henchman?: boolean;
 }
 
@@ -176,7 +173,7 @@ export interface ServerStateMessage {
   setDefinitions?: Record<string, SetDefinition>;
   /** Shop definition for the player's current room (if any). */
   shopDefinition?: ShopDefinition;
-  /** Henchmen the current room's shop offers for hire. Empty when there are none. */
+  /** Henchmen the current room's shop offers for hire. */
   henchmanOffers?: HenchmanOffer[];
   /** Crafting state: visible recipes, queue, and progress on the active job. */
   crafting?: ClientCraftingState;

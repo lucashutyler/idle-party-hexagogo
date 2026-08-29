@@ -753,8 +753,6 @@ export class DraftEditor {
     const draft = await this.loadDraft(versionId);
     if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
     const { snapshot } = draft;
-    // All-or-nothing, mirroring deleteTilesBulk: abort without persisting on the
-    // first room that can't be written, so a partial batch never lands.
     for (const input of inputs) {
       const err = this.upsertTileCore(snapshot, input);
       if (err) return { success: false, status: 400, error: err };

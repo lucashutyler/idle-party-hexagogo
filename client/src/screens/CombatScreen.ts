@@ -62,9 +62,6 @@ export class CombatScreen implements Screen {
   private selfUsername = '';
   private partyUsernames = new Set<string>();
   private monsterNamesSeen = new Set<string>();
-  // Hired henchmen keyed by their combat display name. They arrive in the
-  // combat players array with no portrait of their own, so their emoji/photo
-  // is looked up here rather than derived from `className` (a hidden archetype).
   private henchmenByCombatName = new Map<string, HiredHenchman>();
   private renderedPlayerKey = '';
   private renderedEnemyKey = '';
@@ -241,10 +238,7 @@ export class CombatScreen implements Screen {
       partyMembers.map(m => m.username).filter(u => u !== this.selfUsername),
     );
 
-    // Henchmen are a sibling of `members`, never inside it. Their combat name
-    // is derived from the roster the same way the server derives it (roster
-    // order, ` #2` on a repeat), so it lines the two lists up. They fight as
-    // party members, so their names colour like one in the log too.
+    // Derive combat names exactly as the server does (roster order) so the two lists line up.
     const henchmen = state.social?.party?.henchmen ?? [];
     const henchmanNames = henchmanDisplayNames(henchmen.map(h => h.name ?? ''));
     this.henchmenByCombatName.clear();
@@ -296,9 +290,7 @@ export class CombatScreen implements Screen {
         if (card) {
           card.classList.toggle('dead', p.currentHp <= 0);
           card.classList.toggle('stunned', !!(p.stunTurns && p.stunTurns > 0));
-          // A henchman's `className` is a hidden combat archetype — it must
-          // never drive a class icon or class artwork. Its portrait is the
-          // authored photo with the emoji showing through behind it.
+          // A henchman's `className` is a hidden archetype — never drive an icon or artwork from it.
           const henchman = p.henchman ? this.henchmenByCombatName.get(p.username) : undefined;
           const icon = card.querySelector('.combat-card-icon') as HTMLElement | null;
           if (icon) {
@@ -309,7 +301,6 @@ export class CombatScreen implements Screen {
           const img = card.querySelector('.combat-card-img') as HTMLImageElement | null;
           if (img) {
             if (p.henchman) {
-              // No photo authored (or a 404) leaves the emoji as the portrait.
               const real = henchman?.artworkUrl ?? '';
               if (img.dataset.src !== real) {
                 img.dataset.src = real;
@@ -468,9 +459,6 @@ export class CombatScreen implements Screen {
     // Layered background, first found wins:
     //   per-room combat bg (GUID) → per-room combat bg (legacy zone+coords)
     //   → zone combat bg → zone artwork (admin upload) → placeholder.
-    // The room GUID is map-unique and survives col/row edits; the legacy
-    // zone-and-coordinates id collides across maps but is kept so art already
-    // uploaded under it keeps rendering.
     const layers: string[] = [];
     if (tile) layers.push(`/combat-bg-artwork/${enc(tile.id)}.png`);
     if (state.party && zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}-${state.party.col}-${state.party.row}.png`);
@@ -488,9 +476,6 @@ export class CombatScreen implements Screen {
   private updateLocationLabel(state: ServerStateMessage): void {
     if (!this.runLocationLabel) return;
     const zone = state.zoneName ?? '';
-    // Resolve against the server's map, not the renderer's — `zone` here comes
-    // from the server, so a render-cursor lookup can pair a room name from one
-    // map with a zone name from another.
     const tile = state.party
       ? this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row)
       : null;
@@ -549,9 +534,6 @@ export class CombatScreen implements Screen {
       const isSelf = p.username === selfUsername;
       card.classList.toggle('self', isSelf);
       if (p.henchman) {
-        // No account sits behind a henchman, and every action in the user
-        // popup (View Player, DM, trade, gift, friend, party role) resolves a
-        // real username — so its card is deliberately inert.
         card.removeAttribute('data-player-username');
         card.onclick = null;
       } else {

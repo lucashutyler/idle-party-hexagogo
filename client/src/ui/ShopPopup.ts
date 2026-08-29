@@ -42,8 +42,6 @@ export class ShopPopup {
   show(state: ServerStateMessage): void {
     const shop = state.shopDefinition;
     if (!shop) return;
-    // A shop may vend items, henchmen, or both. Open on the hire list when the
-    // shop stocks nothing else, so a henchmen-only shop isn't an empty grid.
     const hasOffers = (state.henchmanOffers?.length ?? 0) > 0;
     this.mode = shop.inventory.length === 0 && hasOffers ? 'hire' : 'buy';
     this.view = { kind: 'grid' };
@@ -57,20 +55,12 @@ export class ShopPopup {
     this.unsubscribeState = this.gameClient.subscribe(s => {
       if (this.overlay.style.display === 'none') return;
       if (!s.shopDefinition) { this.hide(); return; }
-      // A state tick means the hire went through; anything failing arrives as an
-      // error before this.
+      // A state tick means the hire landed — a refusal arrives as an error first.
       this.pendingHireId = null;
       this.renderCurrentView(s);
     });
 
-    // Hiring is server-authoritative — a refusal (party full, not owner/leader)
-    // comes back as an `error` message rather than a state change, so surface it
-    // in the same notice strip a buy/sell confirmation uses.
-    //
-    // Only while a hire is actually outstanding: this popup's strip otherwise
-    // reads as the answer to whatever the player just clicked, and an unrelated
-    // error (a refused room entry, a quest, a trade) arriving mid-shop would
-    // masquerade as one.
+    // A hire refusal arrives as an `error`, not a state change; only claim one while a hire is outstanding.
     this.unsubscribeError?.();
     this.unsubscribeError = this.gameClient.onServerError((message) => {
       if (this.overlay.style.display === 'none') return;
@@ -104,8 +94,6 @@ export class ShopPopup {
     const shop = state.shopDefinition;
     if (!shop) return;
 
-    // The hire tab only exists while the shop has someone to hire — a content
-    // deploy (or walking into a different shop) can empty it under the player.
     const offers = state.henchmanOffers ?? [];
     if (this.mode === 'hire' && offers.length === 0) this.mode = 'buy';
 
@@ -172,15 +160,12 @@ export class ShopPopup {
     const sellActive = this.mode === 'sell' ? ' active' : '';
     const hireActive = this.mode === 'hire' ? ' active' : '';
 
-    // Hire has no item grid — henchmen are listed as rows, since a row has to
-    // carry a name, a flavour line and three stats rather than one icon.
     const listHtml = this.mode === 'hire'
       ? `<div class="shop-hire-list" style="max-height:45vh;overflow-y:auto;">${this.renderHireList(offers)}</div>`
       : `<div class="shop-items-grid">${this.mode === 'buy'
           ? this.renderBuyItems(shop, itemDefs, setDefs)
           : this.renderSellItems(char.inventory, char.equipment, itemDefs, setDefs)}</div>`;
 
-    // Only shown when this shop vends henchmen at all.
     const hireToggle = offers.length > 0
       ? `<button class="shop-toggle-btn${hireActive}" data-mode="hire">Hire</button>`
       : '';
@@ -215,8 +200,7 @@ export class ShopPopup {
       });
     }
 
-    // Wire hire buttons. Hiring is free, so there's no detail/quantity step —
-    // the row's button is the whole flow.
+    // Wire hire buttons
     for (const btn of this.overlay.querySelectorAll('.shop-hire-btn')) {
       btn.addEventListener('click', () => {
         const henchmanId = (btn as HTMLElement).dataset.henchmanId;
@@ -299,11 +283,7 @@ export class ShopPopup {
     }).join('');
   }
 
-  /**
-   * Render the hire list. Henchmen are free, so a row carries what the hire
-   * brings (level, HP, damage) where a shop item would carry its price. The
-   * combat archetype behind a henchman is deliberately not shown.
-   */
+  /** Render the hire list. The combat archetype (className) is deliberately not shown. */
   private renderHireList(offers: HenchmanOffer[]): string {
     if (offers.length === 0) {
       return '<div style="color:#888;text-align:center;padding:16px;">Nobody here is looking for work</div>';
@@ -330,12 +310,7 @@ export class ShopPopup {
     }).join('');
   }
 
-  /**
-   * Photo with emoji fallback. The emoji sits behind the image and the image
-   * hides itself on error, so a henchman with no photo — or a 404 — still
-   * renders a portrait. Same shape as `renderAssetImg`'s fade-in, except the
-   * fallback is the authored emoji rather than a placehold.co URL.
-   */
+  /** Photo layered over an emoji fallback, so a missing or broken image still renders a portrait. */
   private static henchmanPortrait(offer: HenchmanOffer): string {
     const emoji = `<span class="shop-hire-emoji" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:24px;">${escapeHtml(offer.emoji)}</span>`;
     if (!offer.artworkUrl) return emoji;

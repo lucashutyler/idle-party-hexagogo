@@ -5,7 +5,6 @@ import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
 
-// Curated palette for henchman portraits (sellswords, casters, beasts, oddities).
 const EMOJI_PALETTE = [
   '🗡️', '⚔️', '🛡️', '🏹', '🪓', '🔨', '🔱', '🪄', '🔮', '📜',
   '🧙', '🧝', '🧛', '🧚', '🧞', '🧟', '🧜', '🦸', '🦹', '🥷',
@@ -182,7 +181,6 @@ export class HenchmenTab implements Tab {
     root.querySelector('#hf-cancel')?.addEventListener('click', modal.close);
     root.querySelector('#hf-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal.close));
 
-    // Emoji palette: clicking a swatch sets the emoji input.
     const emojiInput = root.querySelector<HTMLInputElement>('#hf-emoji');
     root.querySelectorAll<HTMLButtonElement>('.hf-emoji-pick').forEach(btn => {
       btn.addEventListener('click', () => {

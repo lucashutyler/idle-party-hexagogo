@@ -32,12 +32,7 @@ export class RoomView {
   dungeon: DungeonDefinition | null = null;
   /** Map transitions on the player's current tile. Set externally before showing. */
   transitions: { tileId: string; name: string }[] = [];
-  /**
-   * GUID of the room being shown, used as the per-room artwork override id.
-   * Set externally before showing; null falls back to the legacy zone+coords
-   * id. The GUID is map-unique (two maps can hold a room at the same col/row)
-   * and survives col/row edits, which the legacy id does not.
-   */
+  /** GUID of the room being shown — the per-room artwork override id. Set externally before showing. */
   roomId: string | null = null;
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
@@ -117,11 +112,7 @@ export class RoomView {
     this.modal.className = 'room-view room-view-current';
 
     const enc = encodeURIComponent;
-    // We layer the background images so the most specific one that exists wins;
-    // the ones above it simply don't paint. Order: per-room art keyed by the
-    // room GUID (map-unique, survives col/row edits) → the legacy zone+coords
-    // id, kept so art already uploaded under it keeps rendering → the zone
-    // default.
+    // Layered background, first found wins: room GUID → legacy zone+coords → zone default.
     const layers: string[] = [];
     if (this.roomId) layers.push(`/room-bg-artwork/${enc(this.roomId)}.png`);
     layers.push(`/room-bg-artwork/${enc(info.zoneId)}-${info.col}-${info.row}.png`);

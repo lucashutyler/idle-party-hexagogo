@@ -56,11 +56,7 @@ export interface PlayerSaveData {
   };
   /** Dungeon IDs this player has cleared at least once (gates first-clear rewards). */
   clearedDungeons?: string[];
-  /**
-   * Henchmen the player's party currently holds, mirrored onto every member's
-   * save the way `dungeonRun` is. Restored owner-authoritatively, so a party
-   * that splits across a restart cannot duplicate its hires.
-   */
+  /** Henchmen the party holds, mirrored onto every member's save like `dungeonRun`. */
   partyHenchmen?: HiredHenchman[];
   /** Capped notification inbox (most recent last). */
   notifications?: NotificationEntry[];

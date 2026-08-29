@@ -28,13 +28,7 @@ function generateHenchmanInstanceId(): string {
   return `h${Date.now()}_${++henchmanInstanceCounter}`;
 }
 
-/**
- * Every occupied grid square, across BOTH rosters.
- *
- * Members and henchmen share the 3x3 grid, so slot allocation has to see both
- * or two occupants land on one square. This is the single place that knows it —
- * every allocator and every move validates through here.
- */
+// Members and henchmen share the nine squares — a slot check must span both rosters.
 function occupiedPositions(party: GamePartyInfo, ignore?: string): Set<PartyGridPosition> {
   const taken = new Set<PartyGridPosition>();
   for (const m of party.members) {
@@ -48,7 +42,6 @@ function occupiedPositions(party: GamePartyInfo, ignore?: string): Set<PartyGrid
   return taken;
 }
 
-/** First free grid square, or null when all nine are taken. */
 function firstFreePosition(party: GamePartyInfo): PartyGridPosition | null {
   const taken = occupiedPositions(party);
   for (let i = 0; i < 9; i++) {
@@ -57,12 +50,6 @@ function firstFreePosition(party: GamePartyInfo): PartyGridPosition | null {
   return null;
 }
 
-/**
- * Bodies in the party, henchmen included.
- *
- * A henchman fully occupies a party slot, so a party holding one has room for
- * one fewer real player — dismiss it to make space.
- */
 function partyBodyCount(party: GamePartyInfo): number {
   return party.members.length + (party.henchmen?.length ?? 0);
 }
@@ -188,7 +175,6 @@ export class PartySystem {
       this.leaveParty(username, getPlayerPartyId, setPlayerPartyId);
     }
 
-    // Join the new party. Henchmen hold squares too, so allocate across both.
     const pos = firstFreePosition(party) ?? 0;
 
     party.members.push({
@@ -287,13 +273,6 @@ export class PartySystem {
 
     party.members = party.members.filter(m => m.username !== username);
     setPlayerPartyId(username, null);
-    // Drop invites this player sent for this party, and any addressed to them.
-    // An invite outlives its sender otherwise, and `acceptInvite` validates the
-    // accepter against the INVITER's room — so a departed inviter's stale invite
-    // would admit someone from wherever that inviter now stands, up to and
-    // including a different map. Invites for a party that MOVES are already
-    // cancelled via `cancelInvitesInvolving` on the move path; this closes the
-    // matching hole on the leave path.
     this.cancelInvitesInvolving(new Set([username]));
 
     if (party.members.length === 0) {
@@ -339,8 +318,6 @@ export class PartySystem {
 
     party.members = party.members.filter(m => m.username !== targetUsername);
     setPlayerPartyId(targetUsername, null);
-    // Same reasoning as leaveParty: a kicked member's outstanding invites must
-    // not outlive their membership.
     this.cancelInvitesInvolving(new Set([targetUsername]));
     return true;
   }
@@ -359,7 +336,6 @@ export class PartySystem {
     const party = this.parties.get(partyId);
     if (!party) return 'Party not found';
 
-    // Check if position is taken — by another member OR by a henchman.
     if (occupiedPositions(party, username).has(position)) return 'Position is taken';
 
     const member = party.members.find(m => m.username === username);
@@ -369,16 +345,7 @@ export class PartySystem {
     return true;
   }
 
-
-  // --- Henchmen ---
-
-  /**
-   * Hire a henchman into the caller's party.
-   *
-   * Gated on the invite role: a henchman is functionally an invite that always
-   * accepts, so whoever may bring a player into the party may bring a hire.
-   * Content validity is the caller's problem — this only owns roster rules.
-   */
+  /** Hire a henchman into the caller's party. Returns the hire or error string. */
   hireHenchman(
     callerUsername: string,
     henchmanId: string,
@@ -413,7 +380,7 @@ export class PartySystem {
     return hired;
   }
 
-  /** Dismiss a hired henchman. Gated on the kick role, since that is what it is. */
+  /** Dismiss a hired henchman. Returns the dismissed hire or error string. */
   dismissHenchman(
     callerUsername: string,
     instanceId: string,
@@ -466,13 +433,7 @@ export class PartySystem {
     return true;
   }
 
-  /**
-   * Dismiss every henchman not hired on `mapId`, returning those removed.
-   *
-   * A hire is scoped to the map it was made on. Called after the party's map
-   * changes for any reason — a transition the party chose, or a forced
-   * relocation from a content deploy.
-   */
+  /** Dismiss every henchman not hired on `mapId`, returning those removed. */
   dismissHenchmenOffMap(partyId: string, mapId: string): HiredHenchman[] {
     const party = this.parties.get(partyId);
     if (!party || !party.henchmen?.length) return [];
@@ -484,7 +445,7 @@ export class PartySystem {
     return leaving;
   }
 
-  /** Hired henchmen for a party. Empty when the party has none or does not exist. */
+  /** Hired henchmen for a party. */
   getHenchmen(partyId: string): HiredHenchman[] {
     return this.parties.get(partyId)?.henchmen ?? [];
   }
@@ -493,9 +454,7 @@ export class PartySystem {
   restoreHenchmen(partyId: string, henchmen: HiredHenchman[]): void {
     const party = this.parties.get(partyId);
     if (!party) return;
-    // Re-validate slots against the restored member roster: members are placed
-    // first, and a saved henchman square may now be held by a player. Assign
-    // the array up front so each iteration sees the squares already re-taken.
+    // party.henchmen aliases `kept` mid-loop so each re-placement counts as taken.
     const kept: HiredHenchman[] = [];
     party.henchmen = kept;
     for (const h of henchmen) {

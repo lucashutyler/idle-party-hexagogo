@@ -64,13 +64,7 @@ export class PartyBattleManager {
   private getSession: (username: string) => PlayerSession | undefined;
   private broadcastToMember: (username: string) => void;
   private onMembersMoved?: (members: ReadonlySet<string>) => void;
-  /**
-   * Hired henchmen for a party. Injected rather than held here because
-   * `PartySystem` owns the 3x3 grid, and slot allocation has to see members and
-   * henchmen together or two occupants land on one square.
-   */
   private getPartyHenchmen: (partyId: string) => HiredHenchman[] = () => [];
-  /** Dismiss henchmen whose hire map is no longer the party's map. */
   private dismissHenchmenOffMap: (partyId: string, mapId: string) => HiredHenchman[] = () => [];
 
   constructor(
@@ -328,12 +322,6 @@ export class PartyBattleManager {
     return { success: true };
   }
 
-  /**
-   * Tell the party which henchmen a map change just cost them.
-   *
-   * A hire is scoped to the map it was made on, so a body silently vanishing
-   * from the formation would read as a bug rather than as the rule.
-   */
   private announceHenchmenLeft(entry: PartyBattleEntry, dismissed: HiredHenchman[]): void {
     if (dismissed.length === 0) return;
     for (const hired of dismissed) {
@@ -596,14 +584,9 @@ export class PartyBattleManager {
       players.push(info);
     }
 
-    // Hired henchmen fight alongside the party. A definition deleted by a
-    // content deploy is skipped rather than thrown on — this runs inside the
-    // battle timer's interval callback, which has no try/catch above it.
     const hires = this.getPartyHenchmen(partyId)
       .map(hired => ({ hired, def: this.content.getHenchman(hired.henchmanId) }))
       .filter((h): h is { hired: HiredHenchman; def: HenchmanDefinition } => !!h.def);
-    // Reserve the party's real usernames: a henchman named the same as a
-    // member would otherwise share its combat identity.
     const names = henchmanDisplayNames(hires.map(h => h.def.name), players.map(p => p.username));
     hires.forEach(({ hired, def }, i) => {
       players.push(buildHenchmanCombatant(def, hired, id => this.content.getSkill(id), names[i]));
@@ -762,7 +745,6 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
     if (entry.dungeonRun) return { success: false, error: 'Already in a dungeon.' };
-    // Refuse rather than auto-dismiss, so the player understands why.
     if (this.getPartyHenchmen(partyId).length > 0) {
       return { success: false, error: 'Dismiss your henchmen before entering.' };
     }

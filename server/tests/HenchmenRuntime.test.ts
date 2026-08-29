@@ -9,7 +9,6 @@ import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import type { HenchmanDefinition, WorldTileDefinition, DungeonDefinition, PartyCombatant } from '@idle-party-rpg/shared';
 import WebSocket from 'ws';
 
-// Mirrors the harness in DungeonRuntime.test.ts.
 const SHOP_TILE_ID = 'tile-start';
 const DUNGEON_ID = 'test_dungeon';
 const HENCH_ID = 'hench_sellsword';
@@ -118,7 +117,6 @@ function createFakeGuildStore(): GuildStore {
   return new GuildStore();
 }
 
-/** The combat player array the engine is actually fighting with. */
 function combatPlayers(pm: PlayerManager, partyId: string): PartyCombatant[] {
   const combat = (pm.partyBattles as unknown as {
     createCombatForParty: (id: string) => { players: PartyCombatant[] };
@@ -148,8 +146,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     hire(pm);
 
     const players = combatPlayers(pm, partyId);
-    // The engine sorts combatants by grid position for targeting, so compare as
-    // a set rather than pinning an order that is not this test's subject.
+    // The engine orders combatants by grid position, so compare sorted.
     expect(players.map(p => p.username).sort()).toEqual(['Grim the Sellsword', 'alice']);
     const henchman = players.find(p => p.isHenchman)!;
     expect(henchman.isHenchman).toBe(true);
@@ -176,8 +173,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
   });
 
   it('drops a henchman whose definition a content deploy removed, without throwing', async () => {
-    // createCombatForParty runs inside the battle timer's interval callback,
-    // which has no try/catch above it — a throw here is a server crash.
+    // createCombatForParty runs in the battle timer's interval callback — no try/catch above it.
     const henchmen: Record<string, HenchmanDefinition> = { [HENCH_ID]: makeHenchman() };
     const { pm, partyId } = await setup(henchmen);
     hire(pm);
@@ -198,8 +194,6 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     const result = fresh.pm.partyBattles.enterDungeon(fresh.partyId, DUNGEON_ID);
 
     expect(result.success).toBe(false);
-    // Assert on the text, not just the boolean — the whole point is that the
-    // player is told to dismiss rather than blamed for something else.
     if (!result.success) expect(result.error).toMatch(/dismiss your henchmen/i);
   });
 
@@ -214,8 +208,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
   });
 
   it('a henchman does not block movement into a level-gated room', async () => {
-    // buildMemberInfos treats a session-less member as level 0, which would fail
-    // every gate. Henchmen live outside `members`, so this must still succeed.
+    // buildMemberInfos scores a session-less member as level 0, failing every gate.
     const { pm, partyId } = await setup();
     hire(pm);
 
@@ -265,8 +258,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     expect(saved[0].partyHenchmen![0].instanceId).toBe(hired.instanceId);
     expect(saved[0].partyHenchmen![0].mapId).toBe(DEFAULT_MAP_ID);
 
-    // The roster stores ids only — display fields must not be persisted, or a
-    // renamed henchman would go stale on disk.
+    // Ids only: a persisted display name would go stale when the definition is renamed.
     expect(saved[0].partyHenchmen![0].name).toBeUndefined();
     expect(pm.parties.getHenchmen(partyId)).toHaveLength(1);
   });

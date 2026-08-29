@@ -111,8 +111,8 @@ interface RequiredId {
   nameSlug?: string;
   /**
    * Art this entity points at directly rather than through the asset folders —
-   * today `NpcDefinition.artworkUrl` and `HenchmanDefinition.artworkUrl`. Such an entity isn't missing art
-   * even with nothing on disk under its id.
+   * today `NpcDefinition.artworkUrl` and `HenchmanDefinition.artworkUrl`. Such an
+   * entity isn't missing art even with nothing on disk under its id.
    */
   externalUrl?: string;
 }
@@ -155,8 +155,6 @@ function requiredIdsFor(kind: AssetKind, info: AssetKindInfo, content: ContentSt
         externalUrl: npc.artworkUrl,
       }));
     case 'henchmen':
-      // A henchman pointing at its own artwork URL already has a photo, whether
-      // or not anything sits in the henchman-artwork folder.
       return Object.values(content.getAllHenchmen()).map(h => ({
         id: h.id,
         label: h.name,
@@ -188,16 +186,8 @@ function requiredIdsFor(kind: AssetKind, info: AssetKindInfo, content: ContentSt
 /**
  * Ids that may legitimately sit in a kind's folder on top of its required set —
  * per-room overrides. Anything outside both sets is an orphan, usually art left
- * behind by a deleted entity.
- *
- * The `'rooms'` source yields **two** keys per room. The room GUID is the
- * canonical one: `world.tiles` is flat across every map, so two maps can each
- * hold a room at the same `{zone, col, row}` and the legacy composite key
- * addresses both at once — one upload silently repainting a room on another
- * map. Backdrops uploaded before the GUID scheme are still on disk and still
- * render, though, so the composite stays in the override set: dropping it would
- * report live art as an orphan and invite an admin (or an MCP client acting on
- * the report) to delete it.
+ * behind by a deleted entity. Legacy `zone-col-row` keys stay in the set beside
+ * the room GUIDs — art filed under them still renders, so it isn't an orphan.
  */
 function overrideIdsFor(info: AssetKindInfo, content: ContentStore): Set<string> {
   if (!info.overrideIdSource) return new Set();

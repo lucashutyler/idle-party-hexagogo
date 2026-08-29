@@ -1,8 +1,7 @@
 // ── Social System Types ─────────────────────────────────────
 
 import type { NotificationEntry, NotificationPreferences } from './NotificationTypes.js';
-// Type-only, so the HenchmanTypes -> SocialTypes cycle (it needs PartyGridPosition)
-// is erased at compile time.
+// Must stay `import type`: erases the HenchmanTypes <-> SocialTypes cycle at compile time.
 import type { HiredHenchman } from './HenchmanTypes.js';
 
 // --- Friend System ---
@@ -45,18 +44,7 @@ export interface GamePartyMember {
 export interface GamePartyInfo {
   id: string;
   members: GamePartyMember[];
-  /**
-   * Hired henchmen, kept deliberately SEPARATE from `members`.
-   *
-   * `members` means "accounts" — roughly seventy server call sites resolve a
-   * member to a PlayerSession, transfer ownership to one, count one toward a
-   * reward divisor or notify one. A henchman in that array makes each of those
-   * wrong silently rather than at compile time, so henchmen get their own
-   * roster and every existing member loop stays correct by construction.
-   *
-   * Grid slots are still shared: `PartySystem` allocates positions across both
-   * arrays so two occupants can never land on one square.
-   */
+  /** Never merge into `members` — member call sites all resolve an account. Grid slots are shared. */
   henchmen?: HiredHenchman[];
 }
 
@@ -237,14 +225,7 @@ export interface ClientKickPartyMemberMessage {
 export interface ClientSetPartyGridPositionMessage {
   type: 'set_party_grid_position';
   position: PartyGridPosition;
-  /**
-   * Move this henchman instead of the sender.
-   *
-   * The subject is otherwise inferred from the socket — a member may only ever
-   * move themselves. Henchmen have no socket of their own, so moving one is
-   * always somebody else acting on it, and the server authorizes that on the
-   * caller's party role rather than on identity.
-   */
+  /** Move this henchman rather than the sender; authorized on party role, not identity. */
   henchmanInstanceId?: string;
 }
 

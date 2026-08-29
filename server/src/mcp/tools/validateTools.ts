@@ -153,9 +153,7 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
         problems.push(`Shop '${shop.id}' inventory references unknown item '${entry.itemId}' (index ${index}).`);
       }
     });
-    // Henchmen are keep-when-absent: a draft branched before the type existed
-    // has no `henchmen` key and still deploys against live henchmen, so an
-    // absent key means "unknown", not "empty".
+    // keep-when-absent: an absent `henchmen` key means unknown, not empty.
     if (snapshot.henchmen !== undefined) {
       (shop.henchmanIds ?? []).forEach((hid, index) => {
         if (!henchmanIds.has(hid)) {
@@ -166,9 +164,6 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
   }
 
   // --- Zones ---
-  // A zone belongs to exactly one map. The tile write guard stops new
-  // violations, but content authored before the constraint may already span —
-  // and nothing else surfaces it, so report it here.
   for (const { zone, mapIds } of findZonesSpanningMaps(snapshot.world.tiles)) {
     problems.push(`Zone '${zone}' spans ${mapIds.length} maps (${mapIds.join(', ')}). A zone must belong to exactly one map — split it so each map has its own zone.`);
   }

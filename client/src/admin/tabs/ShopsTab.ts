@@ -69,7 +69,6 @@ export class ShopsTab implements Tab {
     const inShop = new Set<string>();
     for (const si of s.inventory) { priceMap.set(si.itemId, si.price); inShop.add(si.itemId); }
 
-    // Alphabetize henchmen the same way, so the two checklists read alike.
     const henchmen = Object.values(content.henchmen ?? {})
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));

@@ -9,14 +9,7 @@ import type { ShopDefinition, NpcDefinition, QuestDefinition, WorldData } from '
 import WebSocket from 'ws';
 import { fakeSkillContent } from './testGrids.js';
 
-/**
- * Two maps, each with a room at (0,0) — the collision that makes a col/row room
- * lookup wrong. `world.tiles` is flat across every map, so matching on
- * coordinates alone can hand back the other map's shop or NPC.
- *
- * Overworld (0,0) has the general store and the blacksmith.
- * Sewers   (0,0) has the black market and the fence.
- */
+// `world.tiles` is flat across maps: a col/row room lookup can return the other map's room.
 const OVERWORLD_HUB = 'overworld-hub';
 const SEWER_HUB = 'sewer-hub';
 
@@ -35,8 +28,7 @@ const SEWER_NPC: NpcDefinition = {
   id: 'npc_fence', name: 'Fence', emoji: '🕶️', greeting: 'Keep it quiet.', questIds: ['q_fence'],
 };
 
-// The NPC does not ride the state message directly — the client resolves it from
-// the room. `offeredQuestIds` is the observable output of getCurrentNpc().
+// The state message carries no NPC; `offeredQuestIds` is how getCurrentNpc() is observable.
 const QUESTS: Record<string, QuestDefinition> = {
   q_smith: { id: 'q_smith', name: 'Smith Errand', description: '', scope: 'party_shared', objectives: [], rewards: [] },
   q_fence: { id: 'q_fence', name: 'Fence Errand', description: '', scope: 'party_shared', objectives: [], rewards: [] },
@@ -147,17 +139,14 @@ describe('Cross-map room lookup', () => {
   it('resolves the shop of the map the party is actually on, not a same-coordinate room elsewhere', async () => {
     const { pm, session, partyId } = await setup();
 
-    // Standing on overworld (0,0).
     expect(session.getMapId()).toBe('overworld');
     expect(session.getCurrentShop()?.id).toBe(OVERWORLD_SHOP.id);
 
-    // Cross into the sewers, landing on sewers (0,0) — same coordinates.
     const moved = pm.partyBattles.enterTransition(partyId, SEWER_HUB);
     expect(moved.success).toBe(true);
     expect(session.getMapId()).toBe('sewers');
     expect(session.getPosition()).toEqual({ col: 0, row: 0 });
 
-    // A col/row lookup would still find the overworld's General Store here.
     expect(session.getCurrentShop()?.id).toBe(SEWER_SHOP.id);
     expect(session.getCurrentShop()?.name).toBe('Black Market');
   });
@@ -184,7 +173,6 @@ describe('Cross-map room lookup', () => {
     const { pm, session, partyId } = await setup();
     pm.partyBattles.enterTransition(partyId, SEWER_HUB);
 
-    // The Blacksmith is on overworld (0,0); the party is on sewers (0,0).
     const result = session.handleAcceptQuest('q_smith', 1);
     expect(result.success).toBe(false);
     expect(session.handleAcceptQuest('q_fence', 1).success).toBe(true);

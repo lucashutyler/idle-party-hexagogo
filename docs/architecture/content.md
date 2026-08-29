@@ -101,6 +101,8 @@ Henchmen are **vended through shops**, not through a content type of their own �
 
 Stats are **fixed**: no levelling, no equipment, no inventory, so the definition is the whole of a henchman's power. `level` is cosmetic — `maxHp` and `baseDamage` are authoritative and are not derived from it. `className` is a **hidden combat archetype**, not a player-facing label: the combat engine keys five behaviours off it (Sanctuary's non-Knight target pick, War Cry's `targetClass` match, Martyr's Knight-damage trigger, and monster `all_class` skill filters), so every henchman must carry a real `ClassName`, but the hire UI never shows it.
 
+`buildHenchmanCombatant` must never throw: it runs inside the battle timer's `setInterval` callback, which has no `try/catch` above it, so a throw would take down the process rather than one party. A definition deleted by a deploy is skipped and an unresolvable skill id becomes an empty slot.
+
 **Referential guards** (written twice, once per surface — `ContentStore` for live edits, `DraftEditor` for draft edits): deleting a henchman is blocked while any shop offers it, and deleting a skill is blocked while any henchman's fixed loadout uses it. Unlike a player's loadout, a henchman's cannot be re-picked, so a dangling skill id would silently cost it an ability.
 
 **Runtime & UI**: hired henchmen live in `GamePartyInfo.henchmen`, a sibling of `members` — see `docs/architecture/social.md`. `ShopPopup` gains a Hire list driven by `ServerStateMessage.henchmanOffers`; a shop with no `henchmanIds` shows no hire list at all.
@@ -242,6 +244,10 @@ Existing files in `data/set-artwork/` and `data/shop-artwork/` are untouched and
 Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, henchmen, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates displaced parties (unreachable rooms — start tile's map only, see #374 — and rooms whose entry requirements the party no longer meets), and reconciles every session's skill loadout against the new content.
 
 **When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.**
+
+**Room GUIDs across a deploy.** Player unlock data, quest `visit` objectives and every room-scoped lookup key off `WorldTileDefinition.id`, so a deploy must carry live GUIDs onto the incoming snapshot rather than minting new ones. `preserveTileGuids` (`GameLoop.ts`) does that, matching rooms per **(mapId, col, row)** — never per (col, row) alone. `world.tiles` is flat across every map and two maps may hold a room at the same coordinates, so a position-only key hands one GUID to two rooms; nothing downstream detects a duplicate GUID, so the result is silent, persistent corruption of room identity and of every player's saved unlocks. The function also refuses to issue any GUID twice, so a malformed snapshot cannot introduce a duplicate either.
+
+**Resolve a room by GUID, not by coordinates.** The same reasoning applies everywhere, not just at deploy: `content.getTileById(tile.id)` is correct, `world.tiles.find(t => t.col === … && t.row === …)` is not.
 
 ## Design notes
 

@@ -32,9 +32,6 @@ describe('zoneMapConflict', () => {
   });
 
   it('keeps a pre-existing cross-map zone editable', () => {
-    // The constraint is not retroactive. Content authored before it may already
-    // span maps, and refusing these writes would make those rooms uneditable —
-    // `findZonesSpanningMaps` reports them instead so an author can split them.
     const tiles = [tile('overworld', 0, 0, 'town'), tile('sewers', 0, 0, 'town')];
 
     expect(zoneMapConflict(tiles, { mapId: 'overworld', zone: 'town' })).toBeNull();

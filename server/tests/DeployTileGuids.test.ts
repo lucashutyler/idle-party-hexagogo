@@ -23,9 +23,7 @@ describe('preserveTileGuids', () => {
   });
 
   it('does NOT let one map\'s room claim another map\'s GUID at the same coordinates', () => {
-    // The bug: a (col,row)-only key collapses both maps onto one entry, so
-    // whichever room came last in the flat array won — and then BOTH snapshot
-    // rooms were assigned that single GUID.
+    // The bug: a (col,row)-only key collapsed both maps onto one entry, one shared GUID.
     const live = [
       tile({ id: 'guid-overworld', mapId: 'overworld', col: 3, row: 4 }),
       tile({ id: 'guid-crypt', mapId: 'crypt', col: 3, row: 4 }),
@@ -81,8 +79,7 @@ describe('preserveTileGuids', () => {
   });
 
   it('breaks a tie when a malformed snapshot already contains duplicate ids', () => {
-    // Defence in depth: nothing downstream detects a duplicate GUID, so a bad
-    // snapshot must not be able to write one into the live world.
+    // Nothing downstream detects a duplicate GUID.
     const live: WorldTileDefinition[] = [];
     const snap = [
       tile({ id: 'dupe', mapId: 'overworld', col: 0, row: 0 }),

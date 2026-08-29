@@ -361,23 +361,18 @@ describe('Displaced-party sweep and multi-map reachability', () => {
   });
 
   it('relocates a party on a non-default map when its room is DELETED', async () => {
-    // The reachability exemption above must not swallow this case: existence IS
-    // decidable on any map, and refreshAllPartyTiles deliberately leaves the
-    // stale HexTile in place when a room vanishes — so skipping the branch
-    // outright strands the party on a room that no longer exists.
+    // refreshAllPartyTiles leaves the stale HexTile in place when a room vanishes.
     const { pm, grids, content, partyId } = await setup();
 
     expect(pm.handleEnterTransition('alice', ISLAND_ID).success).toBe(true);
     expect(pm.partyBattles.getTile(partyId)!.id).toBe(ISLAND_ID);
 
-    // Delete the island room and rebuild, exactly as a content deploy does.
     const world = content.getWorld();
     world.tiles = world.tiles.filter(t => t.id !== ISLAND_ID);
     grids.rebuild();
     pm.partyBattles.refreshAllPartyTiles(grids);
 
     expect(pm.relocateDisplacedParties(grids, content)).toBe(1);
-    // Relocated within their own map, not yanked back to the overworld.
     expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
     expect(pm.partyBattles.getTile(partyId)!.id).not.toBe(ISLAND_ID);
     expect(grids.getOrThrow('sewers').getTileById(pm.partyBattles.getTile(partyId)!.id)).toBeTruthy();

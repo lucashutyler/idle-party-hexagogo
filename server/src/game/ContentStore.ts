@@ -421,8 +421,6 @@ export class ContentStore {
    */
   async mergeSeedContent(zones: ZoneDefinition[], tiles: WorldTileDefinition[]): Promise<void> {
     for (const z of zones) this.zones.set(z.id, z);
-    // Keyed per map: rooms are unique per (mapId, col, row), so a room on some
-    // other map must not block the seed from placing one here.
     const occupied = new Set(this.world.tiles.map(t => `${t.mapId}:${t.col},${t.row}`));
     for (const t of tiles) {
       const key = `${t.mapId}:${t.col},${t.row}`;
@@ -533,7 +531,6 @@ export class ContentStore {
     if (!this.henchmen.has(id)) {
       return { success: false, error: 'Henchman not found.' };
     }
-    // Check if any shop offers this henchman for hire
     for (const shop of this.shops.values()) {
       if (shop.henchmanIds?.includes(id)) {
         return { success: false, error: `Cannot delete: henchman is offered by shop "${shop.name}".` };
@@ -684,9 +681,7 @@ export class ContentStore {
         return { success: false, error: `Cannot delete: skill is granted by set "${set.name}".` };
       }
     }
-    // Block delete if any henchman's fixed loadout uses this skill. Unlike a
-    // player's, a henchman's loadout cannot be re-picked, so a dangling id would
-    // silently cost it an ability rather than surfacing anywhere.
+    // Block delete if any henchman's fixed loadout uses this skill
     for (const henchman of this.henchmen.values()) {
       if (henchman.skillIds.includes(id)) {
         return { success: false, error: `Cannot delete: skill is used by henchman "${henchman.name}".` };
@@ -790,8 +785,7 @@ export class ContentStore {
       this.henchmen.clear();
       for (const h of snapshot.henchmen) this.henchmen.set(h.id, h);
     }
-    // Old snapshots predate henchmen (key absent) — keep existing henchmen intact; an
-    // empty array means the snapshot genuinely has none and should clear them.
+    // keep-when-absent: an absent `henchmen` key keeps live henchmen; `[]` clears them.
 
     if (snapshot.skillSlotSchedules !== undefined) {
       this.skillSlotSchedules.clear();
@@ -884,8 +878,7 @@ export class ContentStore {
         const henchmenArr: HenchmanDefinition[] = JSON.parse(henchmenRaw);
         for (const h of henchmenArr) this.henchmen.set(h.id, h);
       } catch {
-        // henchmen.json doesn't exist yet — dev only. Production installs stay
-        // empty; admins create their own.
+        // henchmen.json doesn't exist yet
         if (process.env.NODE_ENV !== 'production') {
           for (const h of Object.values(SEED_HENCHMEN)) this.henchmen.set(h.id, h);
           henchmenSeeded = true;

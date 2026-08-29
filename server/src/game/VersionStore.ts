@@ -188,8 +188,7 @@ export class VersionStore {
     if (!snapshot.dungeons) {
       snapshot.dungeons = [];
     }
-    // Henchmen are deliberately not defaulted here — snapshots that predate henchmen stay
-    // undefined so replaceAll keeps live henchmen intact.
+    // keep-when-absent: leave `henchmen` undefined so replaceAll keeps live henchmen.
     // Normalize legacy-shaped skills (treeOrder / singular effects). Idempotent, no save needed —
     // snapshots that predate skills stay undefined so replaceAll keeps live skills intact.
     if (snapshot.skills !== undefined) {

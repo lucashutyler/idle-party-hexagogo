@@ -183,33 +183,10 @@ function t(col: number, row: number, type: TileType): TileDefinition {
 }
 
 /**
- * The main world map schema.
- * Features:
- * - Central starting area
- * - Mountain range running north-south (with a pass)
- * - River running east-west (with bridge crossings)
- * - Multiple towns and dungeons
- */
-/**
- * A zone belongs to exactly one map.
- *
- * Zones are referenced by id from `WorldTileDefinition.zone`, and
- * `ZoneDefinition` carries no map of its own — so nothing structural stopped one
- * zone id from appearing on two maps. That ambiguity is load-bearing in several
- * places that treat a zone as a place rather than a label: zone chat delivers to
- * everyone in the zone, the social "Zone" filter lists them, and encounter
- * tables are resolved per zone. With this constraint each of those is
- * unambiguous, because a zone cannot straddle two maps.
- *
- * Enforced at every tile write. It is NOT retroactive: content authored before
- * the constraint may already violate it, and refusing to save such a room would
- * make it uneditable. So a write is refused only when it would ADD a map to a
- * zone that is not already on it — existing violations stay editable, and
- * `validate_draft` reports them via {@link findZonesSpanningMaps} so an author
- * can split the zone deliberately.
+ * Guards the rule that a zone belongs to exactly one map. See docs/architecture/content.md.
+ * Non-retroactive: only a write ADDING a map to a zone is refused, so pre-existing cross-map zones stay editable.
  *
  * @param tiles every world tile, in their state BEFORE the write
- * @param incoming the tile about to be written
  * @returns a player-facing error, or null when the write is allowed
  */
 export function zoneMapConflict(
@@ -220,22 +197,13 @@ export function zoneMapConflict(
   for (const t of tiles) {
     if (t.zone === incoming.zone) mapsUsingZone.add(t.mapId);
   }
-  // Empty: a brand-new zone. Already contains this map: either an edit in place,
-  // or a room joining a zone that lives here — both fine, and this is also what
-  // keeps a pre-existing cross-map zone editable.
   if (mapsUsingZone.size === 0 || mapsUsingZone.has(incoming.mapId)) return null;
 
   const other = Array.from(mapsUsingZone).sort().join(', ');
   return `Zone "${incoming.zone}" already belongs to map "${other}". A zone cannot span maps — use a different zone for rooms on map "${incoming.mapId}".`;
 }
 
-/**
- * Every zone that currently sits on more than one map, worst first.
- *
- * Reports violations that predate the {@link zoneMapConflict} write guard so an
- * author can see and fix them, rather than discovering the ambiguity through
- * misrouted zone chat.
- */
+/** Every zone that currently sits on more than one map, most maps first. */
 export function findZonesSpanningMaps(
   tiles: readonly WorldTileDefinition[],
 ): { zone: string; mapIds: string[] }[] {
@@ -253,6 +221,14 @@ export function findZonesSpanningMaps(
   return spanning.sort((a, b) => b.mapIds.length - a.mapIds.length || a.zone.localeCompare(b.zone));
 }
 
+/**
+ * The main world map schema.
+ * Features:
+ * - Central starting area
+ * - Mountain range running north-south (with a pass)
+ * - River running east-west (with bridge crossings)
+ * - Multiple towns and dungeons
+ */
 export const WORLD_MAP: MapSchema = {
   name: 'Overworld',
   startPosition: { col: 4, row: 6 },

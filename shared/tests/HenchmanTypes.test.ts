@@ -35,8 +35,6 @@ describe('henchmanDisplayNames', () => {
   });
 
   it('disambiguates repeats so one battle cannot hold two identical names', () => {
-    // Names key DoT sourceUsername and heal-target prose, and a party may hold
-    // two hires of the same definition.
     expect(henchmanDisplayNames(['Grim', 'Grim', 'Grim'])).toEqual(['Grim', 'Grim #2', 'Grim #3']);
   });
 
@@ -45,9 +43,7 @@ describe('henchmanDisplayNames', () => {
   });
 
   it('renames a henchman that collides with a real party member', () => {
-    // The dangerous case: the FIRST hire, unsuffixed, sharing a name with an
-    // account. Two combatants with one username break DoT attribution, heal
-    // targeting, and the client's "You" substitution.
+    // Two combatants under one username break DoT attribution and heal targeting.
     expect(henchmanDisplayNames(['Grim'], ['Grim'])).toEqual(['Grim #2']);
   });
 
@@ -105,9 +101,7 @@ describe('buildHenchmanCombatant', () => {
   });
 
   it('turns an unresolvable skill id into an empty slot rather than throwing', () => {
-    // This runs inside the battle timer's interval callback, which has no
-    // try/catch above it — a throw here would take down the process, not one
-    // party. A live server may simply not hold the skill.
+    // Runs inside the battle timer's interval callback — no try/catch above it.
     expect(() =>
       buildHenchmanCombatant(makeDef({ skillIds: ['missing'] }), makeHire(), noSkills, 'Grim'),
     ).not.toThrow();

@@ -61,13 +61,7 @@ export type AssetIdSource =
 export type AssetOverrideSource =
   /** Per-room art keyed by the room's GUID. */
   | 'tiles'
-  /**
-   * Per-room art keyed by the room's GUID, plus the legacy
-   * `{zoneId}-{col}-{row}` composite. The composite predates multi-map worlds
-   * and can't tell two maps apart (a zone carries no `mapId`), so the GUID is
-   * the id these kinds are written under now — but files already uploaded
-   * under the composite still resolve, so both shapes count as overrides.
-   */
+  /** Per-room art keyed by the room's GUID; the legacy `{zoneId}-{col}-{row}` composite still resolves too. */
   | 'rooms';
 
 /**

@@ -565,10 +565,7 @@ describe('PartySystem invite lifetime', () => {
   });
 
   it('cancels invites a member sent for a party they then leave', () => {
-    // An invite must not outlive its sender's membership: acceptInvite validates
-    // the accepter against the INVITER's room, so a departed inviter's stale
-    // invite would admit someone from wherever that inviter now stands — which
-    // after a map change is a different map entirely.
+    // acceptInvite validates the accepter against the inviter's CURRENT room.
     const party = system.createParty('alice', state.getPartyId, state.setPartyId);
     if (typeof party === 'string') throw new Error(party);
     system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
@@ -587,8 +584,7 @@ describe('PartySystem invite lifetime', () => {
     system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
     system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.areSameTile);
 
-    // Only owners and leaders may invite, so promote Bob first. He invites
-    // Carol; then Alice kicks him.
+    // Only owners and leaders may invite, hence the promote.
     system.promoteLeader('alice', 'bob', state.getPartyId);
     system.inviteToParty('bob', 'carol', state.getPartyId, state.areSameTile);
     expect(system.getPendingInvites('carol')).toHaveLength(1);
@@ -615,7 +611,6 @@ describe('PartySystem invite lifetime', () => {
   });
 
   it('still lets a normal invite be accepted', () => {
-    // Guard against the cancellation being over-eager and breaking the happy path.
     const party = system.createParty('alice', state.getPartyId, state.setPartyId);
     if (typeof party === 'string') throw new Error(party);
     system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);

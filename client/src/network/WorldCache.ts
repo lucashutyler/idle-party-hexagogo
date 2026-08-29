@@ -191,15 +191,8 @@ export class WorldCache {
   }
 
   /**
-   * Get a specific tile on an explicitly named map by offset coordinates.
-   *
-   * Prefer this over `getTile` anywhere outside the map renderer:
-   * `currentMapId` tracks what the renderer is *showing*, not where the player
-   * *is* — it only advances when ThreeWorldMap calls `setCurrentMap`, which
-   * only happens while the Map screen is active. A player who crosses to
-   * another map without opening the map would otherwise resolve their room
-   * against the stale map. Pass the server-authoritative
-   * `ServerStateMessage.currentMapId` instead.
+   * Get a tile on an explicitly named map. Prefer this over `getTile` outside the map renderer:
+   * `currentMapId` only advances when ThreeWorldMap calls `setCurrentMap`, so it can lag the party's real map.
    */
   getTileOn(mapId: string, col: number, row: number): WorldTileDefinition | undefined {
     return this.tiles.get(`${mapId}:${col},${row}`);

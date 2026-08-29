@@ -411,13 +411,7 @@ export class PlayerSession {
     return result;
   }
 
-  /**
-   * Shop for the room the party is standing in, resolved by the room's GUID.
-   *
-   * `world.tiles` is flat across every map, so a col/row lookup can resolve a
-   * different map's room at the same coordinates. Anything gating an action on
-   * "the shop here" must go through this, not through coordinates.
-   */
+  /** Shop for the player's current room. Resolve rooms by GUID — col/row repeat across maps. */
   getCurrentShop(): ShopDefinition | undefined {
     const tileId = this.getCurrentTile?.()?.id;
     if (!tileId) return undefined;
@@ -426,7 +420,6 @@ export class PlayerSession {
     return this.content.getShop(tileDef.shopId);
   }
 
-  /** Henchmen the room's shop currently offers, resolved for the hire list. */
   getHenchmanOffers(): HenchmanOffer[] {
     const shop = this.getCurrentShop();
     if (!shop?.henchmanIds?.length) return [];
@@ -448,11 +441,7 @@ export class PlayerSession {
     return offers;
   }
 
-  /**
-   * NPC for the room the party is standing in, resolved by the room's GUID.
-   *
-   * Coordinates are not unique across maps — see {@link getCurrentShop}.
-   */
+  /** NPC definition for the player's current room, if any. */
   private getCurrentNpc(): import('@idle-party-rpg/shared').NpcDefinition | undefined {
     const tileId = this.getCurrentTile?.()?.id;
     if (!tileId) return undefined;

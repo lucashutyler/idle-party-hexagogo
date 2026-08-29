@@ -18,20 +18,9 @@ const CRAFT_TICK_MS = 1000;       // Check craft completions every 1s
 const VERSION_FILE = path.resolve('data', 'game-version.txt');
 
 /**
- * Carry live room GUIDs onto a snapshot about to be deployed, so player unlock
- * data (which is keyed by GUID) stays valid across a deploy.
- *
- * Matching is per **(map, col, row)**, not per (col, row): `world.tiles` is flat
- * across every map and two maps may legitimately hold a room at the same
- * coordinates — the same uniqueness rule `ContentStore.addOrUpdateTile`
- * enforces. Keying on position alone lets one map's room claim another's GUID,
- * which hands the *same* id to two different rooms. Nothing downstream detects
- * a duplicate GUID, so the result is silent, persistent corruption: room
- * lookups resolve to whichever room comes first in the flat array, and every
- * player's saved unlock for the displaced GUID goes dangling.
- *
- * Exported for testing — this ran inside `deployVersion` and was untestable,
- * which is why the position-only key survived the multi-map migration.
+ * Carry live room GUIDs onto a snapshot about to be deployed, keyed on
+ * (mapId, col, row) — a position-only key hands one GUID to two rooms.
+ * See docs/architecture/content.md.
  */
 export function preserveTileGuids(
   liveTiles: readonly WorldTileDefinition[],
@@ -48,11 +37,8 @@ export function preserveTileGuids(
   for (const tile of snapshotTiles) {
     const liveGuid = liveGuidByPos.get(key(tile));
     if (liveGuid && !assignedIds.has(liveGuid)) {
-      tile.id = liveGuid; // Preserve live GUID so player unlocks stay valid
+      tile.id = liveGuid;
     } else if (!tile.id || assignedIds.has(tile.id)) {
-      // No live match, or the id is already spoken for by an earlier tile in
-      // this deploy. Mint a fresh one rather than let two rooms share an
-      // identity — a malformed snapshot must not be able to corrupt the world.
       tile.id = crypto.randomUUID();
     }
     assignedIds.add(tile.id);

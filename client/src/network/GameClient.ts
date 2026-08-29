@@ -496,8 +496,7 @@ export class GameClient {
     this.sendRaw({ type: 'kick_party_member', username });
   }
 
-  /** Moves the sender, or the named henchman when `henchmanInstanceId` is given —
-   *  a henchman has no socket of its own, so the server can't infer the subject. */
+  /** Moves the sender, or the named henchman when `henchmanInstanceId` is given. */
   sendSetPartyGridPosition(position: number, henchmanInstanceId?: string): void {
     this.sendRaw({
       type: 'set_party_grid_position',
@@ -528,14 +527,11 @@ export class GameClient {
 
   // --- Henchmen ---
 
-  /** Hire a henchman offered by the current room's shop. The server validates the
-   *  offer and party rules, and answers a violation with an `error` message. */
+  /** Hire a henchman from the current room's shop; a refusal comes back as an `error` message. */
   sendHireHenchman(henchmanId: string): void {
     this.sendRaw({ type: 'hire_henchman', henchmanId });
   }
 
-  /** Dismiss one hired henchman by its instance id — henchmen have no account, so
-   *  they are never addressed by username the way party members are. */
   sendDismissHenchman(instanceId: string): void {
     this.sendRaw({ type: 'dismiss_henchman', instanceId });
   }
