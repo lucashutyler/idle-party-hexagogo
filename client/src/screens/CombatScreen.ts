@@ -462,12 +462,17 @@ export class CombatScreen implements Screen {
     // The zone id is the current room's `zone` tag — admin art is keyed by it
     // (matching `/zone-artwork/{id}` and `/combat-bg-artwork/{id}` uploads),
     // not by a slugified display name.
-    const tile = state.party ? this.worldCache.getTile(state.party.col, state.party.row) : null;
+    const tile = state.party ? this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row) : null;
     const zoneId = tile?.zone ?? '';
     const enc = encodeURIComponent;
     // Layered background, first found wins:
-    //   per-room combat bg → zone combat bg → zone artwork (admin upload) → placeholder.
+    //   per-room combat bg (GUID) → per-room combat bg (legacy zone+coords)
+    //   → zone combat bg → zone artwork (admin upload) → placeholder.
+    // The room GUID is map-unique and survives col/row edits; the legacy
+    // zone-and-coordinates id collides across maps but is kept so art already
+    // uploaded under it keeps rendering.
     const layers: string[] = [];
+    if (tile) layers.push(`/combat-bg-artwork/${enc(tile.id)}.png`);
     if (state.party && zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}-${state.party.col}-${state.party.row}.png`);
     if (zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}.png`);
     if (zoneId) layers.push(`/zone-artwork/${enc(zoneId)}.png`);
@@ -483,8 +488,11 @@ export class CombatScreen implements Screen {
   private updateLocationLabel(state: ServerStateMessage): void {
     if (!this.runLocationLabel) return;
     const zone = state.zoneName ?? '';
+    // Resolve against the server's map, not the renderer's — `zone` here comes
+    // from the server, so a render-cursor lookup can pair a room name from one
+    // map with a zone name from another.
     const tile = state.party
-      ? this.worldCache.getTile(state.party.col, state.party.row)
+      ? this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row)
       : null;
     const room = tile?.name ?? '';
     const text = zone && room ? `${zone}: ${room}` : (zone || room);

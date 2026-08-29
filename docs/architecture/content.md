@@ -198,13 +198,15 @@ Every kind of image the game serves is declared once in `ASSET_KIND_INFO` (`shar
 | `npc` | Talk-popup portraits | `NpcDefinition.id` — but see the NPC note below | square |
 | `henchman` | Hire-list and party-grid photos | `HenchmanDefinition.id` — but see the note below | square |
 | `logo` | Splash-screen logo | fixed single id `idle-party` | any |
-| `combat-bg` | Backdrop behind the combat stage | zone id, or `{zoneId}-{col}-{row}` per room | any |
-| `room-bg` | Backdrop behind the room view | zone id, or `{zoneId}-{col}-{row}` per room | any |
+| `combat-bg` | Backdrop behind the combat stage | zone id, or `WorldTileDefinition.id` (room GUID) per room — see the room-override note below | any |
+| `room-bg` | Backdrop behind the room view | zone id, or `WorldTileDefinition.id` (room GUID) per room — see the room-override note below | any |
 | `class-icon` | Inline class glyphs (party lists, chat, leaderboard) | Class name as spelled, plus `Unknown`/`Server` (case-sensitive — `CLASS_ICONS` requests `Knight.png`) | square |
 | `slot-icon` | Equipment-slot dogear glyphs | `EquipSlot` id | square |
 | `nav-icon` | Bottom-nav button glyphs | Nav destination id | square |
 
 `shape: 'square'` rejects non-square uploads; `'any'` accepts any aspect ratio (the wide backdrops and the logo). NPCs and henchmen may skip the folder entirely by pointing `NpcDefinition.artworkUrl` / `HenchmanDefinition.artworkUrl` at any URL.
+
+**Per-room backdrop overrides are keyed by the room GUID.** `combat-bg` and `room-bg` used to address a room as `{zoneId}-{col}-{row}`, which multi-map worlds broke: `getWorld().tiles` is flat across every map and a zone carries no `mapId`, so two maps that each hold a room at the same coordinates in the same zone collapsed onto one filename — uploading a backdrop for one silently repainted the other. The GUID is map-unique and survives col/row edits, so it is what new overrides are filed under. **The legacy composite key is still served**: art already uploaded under it keeps rendering (the client tries the GUID first, then the composite, then the zone default), and `AssetCoverage.overrideIdsFor` counts both shapes as overrides so live uploads are never reported as orphans.
 
 **⏸ Deferred kinds.** `set` and `shop` are in the registry — still mounted, still served, still type-checked — but listed in `DEFERRED_ASSET_KINDS` rather than `MANAGED_ASSET_KINDS`, so the assets API, the MCP tools, and the coverage report all skip them and the routes reject them with a 400 explaining why. Each is blocked on a client-side problem that would make managing its art misleading:
 
@@ -216,8 +218,8 @@ Existing files in `data/set-artwork/` and `data/shop-artwork/` are untouched and
 **Fallback chains** — several kinds resolve through a chain rather than a single file, and the registry's `fallbacks` mirror what the render sites actually do:
 
 - **Rooms**: the world map draws per-room `/tile-artwork/{tileId}.png` first, then per-type `/tile-type-artwork/{type}.png`, then the tile-type emoji glyph (no `placehold.co` at the bake layer). Room-type art already covers every room, so a room with no override of its own isn't missing anything — `tile` has `idSource: 'none'`.
-- **Combat backdrop** (`CombatScreen.updateCombatBackground`): per-room `/combat-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/combat-bg-artwork/{zoneId}.png` → `/zone-artwork/{zoneId}.png` → placeholder. The key is the current room's raw `zone` tag, **not** a slug of the zone's display name.
-- **Room backdrop** (`RoomView.renderCurrentRoom`): per-room `/room-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/room-bg-artwork/{zoneId}.png`, layered as two CSS background images so the room-specific one wins when present.
+- **Combat backdrop** (`CombatScreen.updateCombatBackground`): per-room `/combat-bg-artwork/{tileId}.png` → legacy per-room `/combat-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/combat-bg-artwork/{zoneId}.png` → `/zone-artwork/{zoneId}.png` → placeholder. The zone key is the current room's raw `zone` tag, **not** a slug of the zone's display name.
+- **Room backdrop** (`RoomView.renderCurrentRoom`): per-room `/room-bg-artwork/{tileId}.png` → legacy per-room `/room-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/room-bg-artwork/{zoneId}.png`, layered as CSS background images so the room-specific one wins when present.
 - **Monsters**: art is keyed by `MonsterDefinition.id` (what the admin upload writes). `CombatScreen.monsterArtSrc` falls back to a slug of the monster's name when a combat payload carries no id, so older art dropped in by name still renders — and the coverage report counts a name-slug file as covering the monster rather than reporting it missing.
 - **NPCs**: `NpcTalkPopup` renders `NpcDefinition.artworkUrl` verbatim (falling back to the NPC's emoji) rather than fetching `/npc-artwork/{id}.png`. An uploaded NPC PNG only renders once `artworkUrl` points at it. The coverage report accounts for this: an NPC carrying an `artworkUrl` resolves as `external` rather than being counted as a gap.
 

@@ -10,11 +10,54 @@ import { TradeStore } from './social/TradeStore.js';
 import { ContentStore } from './ContentStore.js';
 import { VersionStore } from './VersionStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
+import type { WorldTileDefinition } from '@idle-party-rpg/shared';
 import { seedDevContent, seedDevPlayers } from './DevSeed.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
 const CRAFT_TICK_MS = 1000;       // Check craft completions every 1s
 const VERSION_FILE = path.resolve('data', 'game-version.txt');
+
+/**
+ * Carry live room GUIDs onto a snapshot about to be deployed, so player unlock
+ * data (which is keyed by GUID) stays valid across a deploy.
+ *
+ * Matching is per **(map, col, row)**, not per (col, row): `world.tiles` is flat
+ * across every map and two maps may legitimately hold a room at the same
+ * coordinates — the same uniqueness rule `ContentStore.addOrUpdateTile`
+ * enforces. Keying on position alone lets one map's room claim another's GUID,
+ * which hands the *same* id to two different rooms. Nothing downstream detects
+ * a duplicate GUID, so the result is silent, persistent corruption: room
+ * lookups resolve to whichever room comes first in the flat array, and every
+ * player's saved unlock for the displaced GUID goes dangling.
+ *
+ * Exported for testing — this ran inside `deployVersion` and was untestable,
+ * which is why the position-only key survived the multi-map migration.
+ */
+export function preserveTileGuids(
+  liveTiles: readonly WorldTileDefinition[],
+  snapshotTiles: WorldTileDefinition[],
+): void {
+  const key = (t: WorldTileDefinition) => `${t.mapId}:${t.col},${t.row}`;
+
+  const liveGuidByPos = new Map<string, string>();
+  for (const t of liveTiles) {
+    if (t.id) liveGuidByPos.set(key(t), t.id);
+  }
+
+  const assignedIds = new Set<string>();
+  for (const tile of snapshotTiles) {
+    const liveGuid = liveGuidByPos.get(key(tile));
+    if (liveGuid && !assignedIds.has(liveGuid)) {
+      tile.id = liveGuid; // Preserve live GUID so player unlocks stay valid
+    } else if (!tile.id || assignedIds.has(tile.id)) {
+      // No live match, or the id is already spoken for by an earlier tile in
+      // this deploy. Mint a fresh one rather than let two rooms share an
+      // identity — a malformed snapshot must not be able to corrupt the world.
+      tile.id = crypto.randomUUID();
+    }
+    assignedIds.add(tile.id);
+  }
+}
 
 export class GameLoop {
   readonly playerManager!: PlayerManager;
@@ -202,22 +245,11 @@ export class GameLoop {
     if (!version) return { success: false, error: 'Version not found.' };
     if (version.status !== 'published') return { success: false, error: 'Only published versions can be deployed.' };
 
-    // 1. Load snapshot and preserve live GUIDs where tiles match by (col,row).
+    // 1. Load snapshot and preserve live GUIDs where tiles match by (map, col, row).
     //    This keeps player unlock data valid after deploying an old snapshot.
     const snapshot = await this.versionStore.loadSnapshot(versionId);
     const liveWorld = this.contentStore.getWorld();
-    const liveGuidByPos = new Map<string, string>();
-    for (const t of liveWorld.tiles) {
-      if (t.id) liveGuidByPos.set(`${t.col},${t.row}`, t.id);
-    }
-    for (const tile of snapshot.world.tiles) {
-      const liveGuid = liveGuidByPos.get(`${tile.col},${tile.row}`);
-      if (liveGuid) {
-        tile.id = liveGuid; // Preserve live GUID so player unlocks stay valid
-      } else if (!tile.id) {
-        tile.id = crypto.randomUUID(); // New tile — fresh GUID
-      }
-    }
+    preserveTileGuids(liveWorld.tiles, snapshot.world.tiles);
     await this.contentStore.replaceAll(snapshot);
 
     // 2. Rebuild grid, refresh party tiles, relocate displaced parties

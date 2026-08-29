@@ -287,6 +287,14 @@ export class PartySystem {
 
     party.members = party.members.filter(m => m.username !== username);
     setPlayerPartyId(username, null);
+    // Drop invites this player sent for this party, and any addressed to them.
+    // An invite outlives its sender otherwise, and `acceptInvite` validates the
+    // accepter against the INVITER's room — so a departed inviter's stale invite
+    // would admit someone from wherever that inviter now stands, up to and
+    // including a different map. Invites for a party that MOVES are already
+    // cancelled via `cancelInvitesInvolving` on the move path; this closes the
+    // matching hole on the leave path.
+    this.cancelInvitesInvolving(new Set([username]));
 
     if (party.members.length === 0) {
       this.parties.delete(partyId);
@@ -331,6 +339,9 @@ export class PartySystem {
 
     party.members = party.members.filter(m => m.username !== targetUsername);
     setPlayerPartyId(targetUsername, null);
+    // Same reasoning as leaveParty: a kicked member's outstanding invites must
+    // not outlive their membership.
+    this.cancelInvitesInvolving(new Set([targetUsername]));
     return true;
   }
 

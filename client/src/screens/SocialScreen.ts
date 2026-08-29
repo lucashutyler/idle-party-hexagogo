@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState } from '@idle-party-rpg/shared';
 import { MAX_PARTY_SIZE, classIconHtml, serverIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
@@ -603,7 +603,7 @@ export class SocialScreen implements Screen {
     const pendingInvites = social.pendingInvites ?? [];
     const outgoing = social.outgoingPartyInvites ?? [];
     const sameTile = (this.lastState?.otherPlayers ?? [])
-      .filter(p => p.col === this.lastState?.party.col && p.row === this.lastState?.party.row)
+      .filter(p => this.isInMyRoom(p))
       .map(p => p.username).sort();
     const key = JSON.stringify({
       partyId: party?.id ?? null,
@@ -617,6 +617,24 @@ export class SocialScreen implements Screen {
       this.lastRenderedPartyKey = key;
       this.renderPartyPanel();
     }
+  }
+
+  // ── Same-room helper ─────────────────────────────────────────
+
+  /**
+   * True when `p` stands in the same room as our party. The map term is
+   * load-bearing: room coordinates only identify a room within one map, and
+   * two maps can each have a room at the same (col, row) — without it, a
+   * player on another map reads as co-located and we offer actions (party
+   * invites) the server then refuses. `mapId` is optional on the wire, so a
+   * missing one is treated as "our map" to keep older payloads working.
+   */
+  private isInMyRoom(p: OtherPlayerState): boolean {
+    const state = this.lastState;
+    if (!state) return false;
+    return p.col === state.party.col
+      && p.row === state.party.row
+      && (!p.mapId || p.mapId === state.currentMapId);
   }
 
   // ── Class icon helper ────────────────────────────────────────
@@ -659,7 +677,7 @@ export class SocialScreen implements Screen {
     // If opened from tile modal, use tile coords for a reliable same-room check
     const sameRoom = tileCol !== undefined && tileRow !== undefined
       ? (myCol === tileCol && myRow === tileRow)
-      : otherPlayers.some(p => p.username === username && p.col === myCol && p.row === myRow);
+      : otherPlayers.some(p => p.username === username && this.isInMyRoom(p));
 
     // Build header with relationship labels
     const isFriend = friends.has(username);
@@ -916,10 +934,8 @@ export class SocialScreen implements Screen {
     // Build filter sets
     const guildMembers = new Set((social.guildMembers ?? []).map(m => m.username));
     const otherPlayers = this.lastState?.otherPlayers ?? [];
-    const myCol = this.lastState?.party.col;
-    const myRow = this.lastState?.party.row;
     const myZone = this.lastState?.zoneName ?? '';
-    const roomPlayers = new Set(otherPlayers.filter(p => p.col === myCol && p.row === myRow).map(p => p.username));
+    const roomPlayers = new Set(otherPlayers.filter(p => this.isInMyRoom(p)).map(p => p.username));
     const zonePlayers = new Set(otherPlayers.filter(p => p.zone === myZone).map(p => p.username));
 
     // Filter
@@ -1262,7 +1278,7 @@ export class SocialScreen implements Screen {
 
     // Same-tile players (not already in our party)
     const sameTilePlayers = (this.lastState?.otherPlayers ?? [])
-      .filter(p => p.col === this.lastState?.party.col && p.row === this.lastState?.party.row)
+      .filter(p => this.isInMyRoom(p))
       .filter(p => !partyMembers.has(p.username))
       .map(p => p.username)
       .sort();

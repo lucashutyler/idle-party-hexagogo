@@ -554,6 +554,14 @@ export class PlayerManager {
 
     // Add to new party's battle
     this.partyBattles.addMember(partyId, username);
+
+    // Joining is a third way a player's map can change (the others being a
+    // transition and a forced relocation, both of which already do this). The
+    // session's fog-of-war grid is bound to one map, so without re-seating it
+    // the joiner keeps unlocking rooms against the map they came from.
+    const joiner = this.sessions.get(username);
+    const tile = this.partyBattles.getTile(partyId);
+    if (joiner && tile) joiner.switchMapGrid(tile);
   }
 
   /** Handle a player leaving/being kicked from a party. Creates new solo party at current position. */
@@ -749,6 +757,11 @@ export class PlayerManager {
       const tile = this.grids.get(saveMapId)?.getTile(offsetToCube(data.position));
       if (!tile) {
         console.warn(`[PlayerManager] Moved "${data.username}" to start tile (old position ${saveMapId}:${data.position.col},${data.position.row} no longer exists)`);
+        // The run's entrance is a bare (col,row) resolved against the party's
+        // CURRENT map, and we are about to move them to a different one — so the
+        // run cannot survive this. Same rule `relocateParty` already applies to a
+        // forced relocation.
+        data.dungeonRun = undefined;
         data.position = { col: startPos.col, row: startPos.row };
         data.mapId = defaultMapId;
         data.target = null;
@@ -983,9 +996,20 @@ export class PlayerManager {
         targetMapId = defaultMapId;
         bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
       } else if (currentMapId !== defaultMapId) {
-        // Off the start tile's map, reachability isn't decidable from one grid
-        // alone — see the note on this method. Leave the party alone.
-        continue;
+        // Off the start tile's map, REACHABILITY isn't decidable from one grid
+        // alone — see the note on this method. EXISTENCE is, though, and it has
+        // to be checked: `refreshAllPartyTiles` deliberately leaves a party's
+        // stale HexTile in place when its room vanished from the rebuilt grid,
+        // so skipping this branch outright strands the party on a room that no
+        // longer exists.
+        if (grid.getTile(tile.coord)) continue; // room survived — leave them be
+        const meta = world.maps.find(m => m.id === currentMapId);
+        bestTile = grid.getTile(offsetToCube(meta?.startTile ?? world.startTile)) ?? null;
+        if (!bestTile) {
+          // That map has no usable start room either — fall back to the default map.
+          targetMapId = defaultMapId;
+          bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
+        }
       } else {
         // Reachability is computed within the party's own map.
         const meta = world.maps.find(m => m.id === currentMapId);

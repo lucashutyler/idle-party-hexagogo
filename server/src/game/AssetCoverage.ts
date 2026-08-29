@@ -189,12 +189,23 @@ function requiredIdsFor(kind: AssetKind, info: AssetKindInfo, content: ContentSt
  * Ids that may legitimately sit in a kind's folder on top of its required set —
  * per-room overrides. Anything outside both sets is an orphan, usually art left
  * behind by a deleted entity.
+ *
+ * The `'rooms'` source yields **two** keys per room. The room GUID is the
+ * canonical one: `world.tiles` is flat across every map, so two maps can each
+ * hold a room at the same `{zone, col, row}` and the legacy composite key
+ * addresses both at once — one upload silently repainting a room on another
+ * map. Backdrops uploaded before the GUID scheme are still on disk and still
+ * render, though, so the composite stays in the override set: dropping it would
+ * report live art as an orphan and invite an admin (or an MCP client acting on
+ * the report) to delete it.
  */
 function overrideIdsFor(info: AssetKindInfo, content: ContentStore): Set<string> {
   if (!info.overrideIdSource) return new Set();
   const tiles = content.getWorld().tiles;
-  if (info.overrideIdSource === 'tiles') return new Set(tiles.map(tile => tile.id));
-  return new Set(tiles.map(tile => `${tile.zone}-${tile.col}-${tile.row}`));
+  const ids = new Set(tiles.map(tile => tile.id));
+  if (info.overrideIdSource === 'tiles') return ids;
+  for (const tile of tiles) ids.add(`${tile.zone}-${tile.col}-${tile.row}`);
+  return ids;
 }
 
 /**

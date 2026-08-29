@@ -1134,12 +1134,15 @@ wss.on('connection', (ws) => {
             }
           }
         } else if (channelType === 'tile') {
-          // All players on the same tile
+          // All players in the same room — of the same MAP. Coordinates repeat
+          // across maps, so a position-only match would deliver room chat to
+          // players standing at the same spot in a different map entirely.
           const pos = session.getPosition();
+          const mapId = session.getMapId();
           for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
             if (u === username) continue;
             const otherPos = s.getPosition();
-            if (otherPos.col === pos.col && otherPos.row === pos.row) {
+            if (s.getMapId() === mapId && otherPos.col === pos.col && otherPos.row === pos.row) {
               recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
             }
           }
