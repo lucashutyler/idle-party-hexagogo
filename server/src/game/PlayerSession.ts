@@ -367,7 +367,7 @@ export class PlayerSession {
     }
 
     // Shop items (so client has defs for buyable items)
-    const shop = this.getCurrentShopDefinition();
+    const shop = this.getCurrentShop();
     if (shop) {
       for (const si of shop.inventory) {
         if (!defs[si.itemId]) {
@@ -411,15 +411,6 @@ export class PlayerSession {
     return result;
   }
 
-  /** Get the shop definition for the player's current tile, if any. */
-  private getCurrentShopDefinition(): ShopDefinition | undefined {
-    const pos = this.getPosition();
-    const world = this.content.getWorld();
-    const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
-    if (!tile?.shopId) return undefined;
-    return this.content.getShop(tile.shopId);
-  }
-
   /**
    * Shop for the room the party is standing in, resolved by the room's GUID.
    *
@@ -457,13 +448,17 @@ export class PlayerSession {
     return offers;
   }
 
-  /** Get the NPC definition for the player's current tile, if any. */
+  /**
+   * NPC for the room the party is standing in, resolved by the room's GUID.
+   *
+   * Coordinates are not unique across maps — see {@link getCurrentShop}.
+   */
   private getCurrentNpc(): import('@idle-party-rpg/shared').NpcDefinition | undefined {
-    const pos = this.getPosition();
-    const world = this.content.getWorld();
-    const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
-    if (!tile?.npcId) return undefined;
-    return this.content.getNpc(tile.npcId);
+    const tileId = this.getCurrentTile?.()?.id;
+    if (!tileId) return undefined;
+    const tileDef = this.content.getTileById(tileId);
+    if (!tileDef?.npcId) return undefined;
+    return this.content.getNpc(tileDef.npcId);
   }
 
   /** Quest data block for the state message: active progress, completed history, defs, offered IDs. */
@@ -661,7 +656,7 @@ export class PlayerSession {
       social: this.getSocialState?.(),
       itemDefinitions: this.getOwnedItemDefinitions(setDefs),
       setDefinitions: setDefs,
-      shopDefinition: this.getCurrentShopDefinition(),
+      shopDefinition: this.getCurrentShop(),
       henchmanOffers: this.getHenchmanOffers(),
       crafting: this.getCraftingState(),
       activeQuests: questBlock.activeQuests,

@@ -617,17 +617,11 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // Find the tile the player is on and check for a shop
-        const pos = session.getPosition();
-        const world = gameLoop.contentStore.getWorld();
-        const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
-        if (!tile?.shopId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
-          return;
-        }
-        const shop = gameLoop.contentStore.getShop(tile.shopId);
+        // Resolve the shop from the room's GUID: `world.tiles` is flat across
+        // every map, so matching on col/row can hand back a different map's shop.
+        const shop = session.getCurrentShop();
         if (!shop) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Shop not found' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
           return;
         }
 
