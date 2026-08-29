@@ -32,6 +32,8 @@ export class RoomView {
   dungeon: DungeonDefinition | null = null;
   /** Map transitions on the player's current tile. Set externally before showing. */
   transitions: { tileId: string; name: string }[] = [];
+  /** GUID of the room being shown — the per-room artwork override id. Set externally before showing. */
+  roomId: string | null = null;
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
 
@@ -109,12 +111,14 @@ export class RoomView {
   private renderCurrentRoom(info: TileClickInfo): void {
     this.modal.className = 'room-view room-view-current';
 
-    const tileBgUrl = `/room-bg-artwork/${info.zoneId}-${info.col}-${info.row}.png`;
-    const zoneBgUrl = `/room-bg-artwork/${info.zoneId}.png`;
-    // We layer two background images so the tile-specific one wins if present;
-    // otherwise the zone default fills in. CSS `background` short-hand falls
-    // through gracefully via the second URL.
-    const bgStyle = `background-image: url('${tileBgUrl}'), url('${zoneBgUrl}'); background-size: cover; background-position: center;`;
+    const enc = encodeURIComponent;
+    // Layered background, first found wins: room GUID → legacy zone+coords → zone default.
+    const layers: string[] = [];
+    if (this.roomId) layers.push(`/room-bg-artwork/${enc(this.roomId)}.png`);
+    layers.push(`/room-bg-artwork/${enc(info.zoneId)}-${info.col}-${info.row}.png`);
+    layers.push(`/room-bg-artwork/${enc(info.zoneId)}.png`);
+    const bgLayers = layers.map(u => `url('${u}')`).join(', ');
+    const bgStyle = `background-image: ${bgLayers}; background-size: cover; background-position: center;`;
 
     const grouped = this.groupPlayersByParty(info.playersHere, info.partyMemberUsernames);
 

@@ -10,6 +10,8 @@ import {
   rollDungeonRewards,
   rewardAppliesToClass,
   validateRoomEntry,
+  buildHenchmanCombatant,
+  henchmanDisplayNames,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -25,6 +27,8 @@ import type {
   RoomEntryLabels,
   RoomEntryFailure,
   RoomEntryRequirements,
+  HiredHenchman,
+  HenchmanDefinition,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
@@ -60,6 +64,8 @@ export class PartyBattleManager {
   private getSession: (username: string) => PlayerSession | undefined;
   private broadcastToMember: (username: string) => void;
   private onMembersMoved?: (members: ReadonlySet<string>) => void;
+  private getPartyHenchmen: (partyId: string) => HiredHenchman[] = () => [];
+  private dismissHenchmenOffMap: (partyId: string, mapId: string) => HiredHenchman[] = () => [];
 
   constructor(
     grids: WorldGrids,
@@ -73,6 +79,15 @@ export class PartyBattleManager {
     this.getSession = getSession;
     this.broadcastToMember = broadcastToMember;
     this.onMembersMoved = onMembersMoved;
+  }
+
+  /** Wire the henchmen roster callbacks. Called once by PlayerManager at boot. */
+  setHenchmenCallbacks(
+    getPartyHenchmen: (partyId: string) => HiredHenchman[],
+    dismissHenchmenOffMap: (partyId: string, mapId: string) => HiredHenchman[],
+  ): void {
+    this.getPartyHenchmen = getPartyHenchmen;
+    this.dismissHenchmenOffMap = dismissHenchmenOffMap;
   }
 
   /**
@@ -292,6 +307,7 @@ export class PartyBattleManager {
     if (blocked) return { success: false, error: blocked.reason, blocked };
 
     entry.serverParty.switchMap(destGrid, destTile, link.mapId);
+    this.announceHenchmenLeft(entry, this.dismissHenchmenOffMap(partyId, link.mapId));
 
     for (const username of entry.members) {
       const session = this.getSession(username);
@@ -304,6 +320,16 @@ export class PartyBattleManager {
     entry.battleTimer.restartBattle();
     for (const m of entry.members) this.broadcastToMember(m);
     return { success: true };
+  }
+
+  private announceHenchmenLeft(entry: PartyBattleEntry, dismissed: HiredHenchman[]): void {
+    if (dismissed.length === 0) return;
+    for (const hired of dismissed) {
+      const name = this.content.getHenchman(hired.henchmanId)?.name ?? 'Your henchman';
+      for (const username of entry.members) {
+        this.getSession(username)?.addLogEntry(`${name} parts ways with the party.`, 'move');
+      }
+    }
   }
 
   /**
@@ -420,6 +446,7 @@ export class PartyBattleManager {
         gridPosition: p.gridPosition,
         className: p.className,
         stunTurns: p.stunTurns > 0 ? p.stunTurns : undefined,
+        henchman: p.isHenchman || undefined,
       })),
       monsters: combat.monsters.map(m => ({
         id: m.id,
@@ -510,6 +537,7 @@ export class PartyBattleManager {
     if (entry.serverParty.currentMapId !== mapId) {
       // Relocation crosses to a different map (e.g. the party's map was deleted).
       entry.serverParty.switchMap(this.grids.getOrThrow(mapId), newTile, mapId);
+      this.announceHenchmenLeft(entry, this.dismissHenchmenOffMap(partyId, mapId));
     } else {
       entry.serverParty.relocateTo(newTile);
     }
@@ -555,6 +583,14 @@ export class PartyBattleManager {
       const info = session.getCombatInfo();
       players.push(info);
     }
+
+    const hires = this.getPartyHenchmen(partyId)
+      .map(hired => ({ hired, def: this.content.getHenchman(hired.henchmanId) }))
+      .filter((h): h is { hired: HiredHenchman; def: HenchmanDefinition } => !!h.def);
+    const names = henchmanDisplayNames(hires.map(h => h.def.name), players.map(p => p.username));
+    hires.forEach(({ hired, def }, i) => {
+      players.push(buildHenchmanCombatant(def, hired, id => this.content.getSkill(id), names[i]));
+    });
 
     const zone = entry.serverParty.tile.zone;
 
@@ -709,6 +745,9 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
     if (entry.dungeonRun) return { success: false, error: 'Already in a dungeon.' };
+    if (this.getPartyHenchmen(partyId).length > 0) {
+      return { success: false, error: 'Dismiss your henchmen before entering.' };
+    }
 
     const dungeon = this.content.getDungeon(dungeonId);
     if (!dungeon) return { success: false, error: 'Dungeon not found.' };

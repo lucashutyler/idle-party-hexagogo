@@ -36,7 +36,7 @@ let tmpDir: string;
 let originalCwd: string;
 
 const CONTENT_TYPES: DraftContentType[] = [
-  'monsters', 'items', 'sets', 'shops', 'recipes', 'npcs',
+  'monsters', 'items', 'sets', 'shops', 'henchmen', 'recipes', 'npcs',
   'quests', 'dungeons', 'zones', 'encounters', 'tileTypes',
   'skills', 'designNotes',
 ];
@@ -368,7 +368,7 @@ describe('getOverview', () => {
 });
 
 describe('getContentSchema', () => {
-  it('returns a non-empty description string for all 13 content types', async () => {
+  it('returns a non-empty description string for all 14 content types', async () => {
     for (const type of CONTENT_TYPES) {
       const result = await getContentSchema({ type });
       expect('error' in result).toBe(false);

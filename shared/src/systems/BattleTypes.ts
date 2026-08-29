@@ -1,6 +1,7 @@
 import type { EquipSlot, ItemDefinition } from './ItemTypes.js';
 import type { SetDefinition } from './SetTypes.js';
 import type { ShopDefinition } from './ShopTypes.js';
+import type { HenchmanOffer } from './HenchmanTypes.js';
 import type { RecipeDefinition, CraftQueueState, ActiveJobProgress } from './CraftingTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type {
@@ -26,7 +27,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.08.18.2'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.08.28.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -49,6 +50,8 @@ export interface ClientPlayerCombatant {
   className: string;
   /** Remaining stun turns (0 or undefined = not stunned). */
   stunTurns?: number;
+  /** Set for hired henchmen — the client must not offer player-only actions on them. */
+  henchman?: boolean;
 }
 
 export interface ClientMonsterState {
@@ -170,6 +173,8 @@ export interface ServerStateMessage {
   setDefinitions?: Record<string, SetDefinition>;
   /** Shop definition for the player's current room (if any). */
   shopDefinition?: ShopDefinition;
+  /** Henchmen the current room's shop offers for hire. */
+  henchmanOffers?: HenchmanOffer[];
   /** Crafting state: visible recipes, queue, and progress on the active job. */
   crafting?: ClientCraftingState;
   /** Active quests the player has accepted (with live progress / status). */

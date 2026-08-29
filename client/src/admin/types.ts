@@ -6,6 +6,7 @@ import type {
   WorldData,
   SetDefinition,
   ShopDefinition,
+  HenchmanDefinition,
   TileTypeDefinition,
   RecipeDefinition,
   NpcDefinition,
@@ -88,6 +89,7 @@ export interface ContentData {
   encounters: Record<string, EncounterDefinition>;
   sets: Record<string, SetDefinition>;
   shops: Record<string, ShopDefinition>;
+  henchmen: Record<string, HenchmanDefinition>;
   tileTypes: Record<string, TileTypeDefinition>;
   recipes: Record<string, RecipeDefinition>;
   npcs: Record<string, NpcDefinition>;
@@ -117,6 +119,7 @@ export type TabId =
   | 'items'
   | 'sets'
   | 'shops'
+  | 'henchmen'
   | 'recipes'
   | 'npcs'
   | 'quests'
@@ -147,6 +150,7 @@ export const TABS: TabDef[] = [
   { id: 'items',      label: 'Items',      icon: '❖' },
   { id: 'sets',       label: 'Sets',       icon: '✦' },
   { id: 'shops',      label: 'Shops',      icon: '¤' },
+  { id: 'henchmen',   label: 'Henchmen',   icon: '♟' },
   { id: 'recipes',    label: 'Recipes',    icon: '⚒' },
   { id: 'npcs',       label: 'NPCs',       icon: '☺' },
   { id: 'quests',     label: 'Quests',     icon: '!' },

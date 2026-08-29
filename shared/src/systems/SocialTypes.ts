@@ -1,6 +1,8 @@
 // ── Social System Types ─────────────────────────────────────
 
 import type { NotificationEntry, NotificationPreferences } from './NotificationTypes.js';
+// Must stay `import type`: erases the HenchmanTypes <-> SocialTypes cycle at compile time.
+import type { HiredHenchman } from './HenchmanTypes.js';
 
 // --- Friend System ---
 export interface FriendRequest {
@@ -42,6 +44,8 @@ export interface GamePartyMember {
 export interface GamePartyInfo {
   id: string;
   members: GamePartyMember[];
+  /** Never merge into `members` — member call sites all resolve an account. Grid slots are shared. */
+  henchmen?: HiredHenchman[];
 }
 
 export interface PartyInvite {
@@ -221,6 +225,18 @@ export interface ClientKickPartyMemberMessage {
 export interface ClientSetPartyGridPositionMessage {
   type: 'set_party_grid_position';
   position: PartyGridPosition;
+  /** Move this henchman rather than the sender; authorized on party role, not identity. */
+  henchmanInstanceId?: string;
+}
+
+export interface ClientHireHenchmanMessage {
+  type: 'hire_henchman';
+  henchmanId: string;
+}
+
+export interface ClientDismissHenchmanMessage {
+  type: 'dismiss_henchman';
+  instanceId: string;
 }
 
 export interface ClientPromotePartyLeaderMessage {
@@ -333,6 +349,8 @@ export type ClientSocialMessage =
   | ClientLeavePartyMessage
   | ClientKickPartyMemberMessage
   | ClientSetPartyGridPositionMessage
+  | ClientHireHenchmanMessage
+  | ClientDismissHenchmanMessage
   | ClientPromotePartyLeaderMessage
   | ClientDemotePartyMemberMessage
   | ClientTransferPartyOwnershipMessage

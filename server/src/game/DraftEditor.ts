@@ -13,17 +13,18 @@ import type {
   NpcDefinition,
   QuestDefinition,
   DungeonDefinition,
+  HenchmanDefinition,
   SkillDefinition,
   SkillSlot,
   DesignNote,
   WorldTileDefinition,
   WorldMapMeta,
 } from '@idle-party-rpg/shared';
-import { migrateLegacySet, migrateLegacySkill, findSetConflicts, validateSkillDefinition, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
+import { migrateLegacySet, migrateLegacySkill, findSetConflicts, zoneMapConflict, validateSkillDefinition, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
 
 /** Content types editable through the generic (MCP) draft-write surface. Single source of truth — derive z.enum(...) lists from this array, don't hand-copy the literals. */
 export const DRAFT_CONTENT_TYPES = [
-  'monsters', 'items', 'sets', 'shops', 'recipes', 'npcs',
+  'monsters', 'items', 'sets', 'shops', 'henchmen', 'recipes', 'npcs',
   'quests', 'dungeons', 'zones', 'encounters', 'tileTypes',
   'skills', 'designNotes',
 ] as const;
@@ -272,6 +273,49 @@ export class DraftEditor {
     if (err) return { success: false, status: 400, error: err };
     await this.persist(versionId, snapshot);
     return { success: true, snapshot, entries: snapshot.shops ?? [] };
+  }
+
+  // --- Henchman CRUD ---
+
+  private upsertHenchmanCore(snapshot: ContentSnapshot, henchman: HenchmanDefinition): string | null {
+    if (snapshot.henchmen === undefined) {
+      snapshot.henchmen = Object.values(this.liveContent().getAllHenchmen());
+    }
+    const idx = snapshot.henchmen.findIndex(h => h.id === henchman.id);
+    if (idx >= 0) snapshot.henchmen[idx] = henchman; else snapshot.henchmen.push(henchman);
+    return null;
+  }
+
+  async upsertHenchman(versionId: string, henchman: HenchmanDefinition): Promise<DraftResult<HenchmanDefinition>> {
+    const draft = await this.loadDraft(versionId);
+    if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
+    const { snapshot } = draft;
+    this.upsertHenchmanCore(snapshot, henchman);
+    await this.persist(versionId, snapshot);
+    return { success: true, snapshot, entries: snapshot.henchmen ?? [] };
+  }
+
+  private deleteHenchmanCore(snapshot: ContentSnapshot, id: string): string | null {
+    if (snapshot.henchmen === undefined) {
+      snapshot.henchmen = Object.values(this.liveContent().getAllHenchmen());
+    }
+    const idx = snapshot.henchmen.findIndex(h => h.id === id);
+    if (idx < 0) return 'Henchman not found.';
+    // Mirrors ContentStore.deleteHenchman's shop-reference guard.
+    const offeringShop = (snapshot.shops ?? []).find(s => s.henchmanIds?.includes(id));
+    if (offeringShop) return `Cannot delete: henchman is offered by shop "${offeringShop.name}".`;
+    snapshot.henchmen.splice(idx, 1);
+    return null;
+  }
+
+  async deleteHenchman(versionId: string, id: string): Promise<DraftResult<HenchmanDefinition>> {
+    const draft = await this.loadDraft(versionId);
+    if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
+    const { snapshot } = draft;
+    const err = this.deleteHenchmanCore(snapshot, id);
+    if (err) return { success: false, status: 400, error: err };
+    await this.persist(versionId, snapshot);
+    return { success: true, snapshot, entries: snapshot.henchmen ?? [] };
   }
 
   // --- Recipe CRUD ---
@@ -595,6 +639,8 @@ export class DraftEditor {
     if (referencingItem) return `Cannot delete: skill is granted by item "${referencingItem.name}".`;
     const referencingSet = (snapshot.sets ?? []).find(s => migrateLegacySet(s).breakpoints?.some(bp => bp.bonuses.grantedSkillIds?.includes(id)));
     if (referencingSet) return `Cannot delete: skill is granted by set "${referencingSet.name}".`;
+    const referencingHenchman = (snapshot.henchmen ?? []).find(h => h.skillIds.includes(id));
+    if (referencingHenchman) return `Cannot delete: skill is used by henchman "${referencingHenchman.name}".`;
     snapshot.skills.splice(idx, 1);
     return null;
   }
@@ -678,7 +724,10 @@ export class DraftEditor {
 
   // --- World: tiles ---
 
-  private upsertTileCore(snapshot: ContentSnapshot, input: Omit<WorldTileDefinition, 'id'> & { id?: string }): void {
+  private upsertTileCore(snapshot: ContentSnapshot, input: Omit<WorldTileDefinition, 'id'> & { id?: string }): string | null {
+    const zoneConflict = zoneMapConflict(snapshot.world.tiles, input);
+    if (zoneConflict) return zoneConflict;
+
     const idx = snapshot.world.tiles.findIndex(t => t.mapId === input.mapId && t.col === input.col && t.row === input.row);
     if (idx >= 0) {
       // Preserve the existing GUID on update.
@@ -686,13 +735,15 @@ export class DraftEditor {
     } else {
       snapshot.world.tiles.push({ ...input, id: crypto.randomUUID() });
     }
+    return null;
   }
 
   async upsertTile(versionId: string, input: Omit<WorldTileDefinition, 'id'> & { id?: string }): Promise<DraftWorldResult> {
     const draft = await this.loadDraft(versionId);
     if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
     const { snapshot } = draft;
-    this.upsertTileCore(snapshot, input);
+    const err = this.upsertTileCore(snapshot, input);
+    if (err) return { success: false, status: 400, error: err };
     await this.persist(versionId, snapshot);
     return { success: true, world: snapshot.world };
   }
@@ -702,7 +753,10 @@ export class DraftEditor {
     const draft = await this.loadDraft(versionId);
     if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
     const { snapshot } = draft;
-    for (const input of inputs) this.upsertTileCore(snapshot, input);
+    for (const input of inputs) {
+      const err = this.upsertTileCore(snapshot, input);
+      if (err) return { success: false, status: 400, error: err };
+    }
     await this.persist(versionId, snapshot);
     return { success: true, world: snapshot.world };
   }
@@ -797,6 +851,7 @@ export class DraftEditor {
       case 'zones': return snapshot.zones;
       case 'sets': return snapshot.sets ?? [];
       case 'shops': return snapshot.shops ?? [];
+      case 'henchmen': return snapshot.henchmen ?? [];
       case 'recipes': return snapshot.recipes ?? [];
       case 'npcs': return snapshot.npcs ?? [];
       case 'quests': return snapshot.quests ?? [];
@@ -819,6 +874,7 @@ export class DraftEditor {
       case 'items': return this.upsertItemCore(snapshot, entry as ItemDefinition);
       case 'sets': return this.upsertSetCore(snapshot, entry as SetDefinition);
       case 'shops': return this.upsertShopCore(snapshot, entry as ShopDefinition);
+      case 'henchmen': return this.upsertHenchmanCore(snapshot, entry as HenchmanDefinition);
       case 'recipes': return this.upsertRecipeCore(snapshot, entry as RecipeDefinition);
       case 'npcs': return this.upsertNpcCore(snapshot, entry as NpcDefinition);
       case 'quests': return this.upsertQuestCore(snapshot, entry as QuestDefinition);
@@ -867,6 +923,7 @@ export class DraftEditor {
       case 'items': return this.deleteItem(versionId, id);
       case 'sets': return this.deleteSet(versionId, id);
       case 'shops': return this.deleteShop(versionId, id);
+      case 'henchmen': return this.deleteHenchman(versionId, id);
       case 'recipes': return this.deleteRecipe(versionId, id);
       case 'npcs': return this.deleteNpc(versionId, id);
       case 'quests': return this.deleteQuest(versionId, id);

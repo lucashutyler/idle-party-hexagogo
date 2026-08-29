@@ -183,6 +183,45 @@ function t(col: number, row: number, type: TileType): TileDefinition {
 }
 
 /**
+ * Guards the rule that a zone belongs to exactly one map. See docs/architecture/content.md.
+ * Non-retroactive: only a write ADDING a map to a zone is refused, so pre-existing cross-map zones stay editable.
+ *
+ * @param tiles every world tile, in their state BEFORE the write
+ * @returns a player-facing error, or null when the write is allowed
+ */
+export function zoneMapConflict(
+  tiles: readonly WorldTileDefinition[],
+  incoming: { mapId: string; zone: string },
+): string | null {
+  const mapsUsingZone = new Set<string>();
+  for (const t of tiles) {
+    if (t.zone === incoming.zone) mapsUsingZone.add(t.mapId);
+  }
+  if (mapsUsingZone.size === 0 || mapsUsingZone.has(incoming.mapId)) return null;
+
+  const other = Array.from(mapsUsingZone).sort().join(', ');
+  return `Zone "${incoming.zone}" already belongs to map "${other}". A zone cannot span maps — use a different zone for rooms on map "${incoming.mapId}".`;
+}
+
+/** Every zone that currently sits on more than one map, most maps first. */
+export function findZonesSpanningMaps(
+  tiles: readonly WorldTileDefinition[],
+): { zone: string; mapIds: string[] }[] {
+  const byZone = new Map<string, Set<string>>();
+  for (const t of tiles) {
+    let maps = byZone.get(t.zone);
+    if (!maps) { maps = new Set(); byZone.set(t.zone, maps); }
+    maps.add(t.mapId);
+  }
+
+  const spanning: { zone: string; mapIds: string[] }[] = [];
+  for (const [zone, maps] of byZone) {
+    if (maps.size > 1) spanning.push({ zone, mapIds: Array.from(maps).sort() });
+  }
+  return spanning.sort((a, b) => b.mapIds.length - a.mapIds.length || a.zone.localeCompare(b.zone));
+}
+
+/**
  * The main world map schema.
  * Features:
  * - Central starting area

@@ -182,6 +182,10 @@ Only items with **Feedback** appear here. Untagged items still need a read-throu
 **Feedback**:
 - Yes. This is still a need. Don't even worry about equipment, just have them have some fixed hp/damage/skills. MVP doesn't require a cost to hire. But the henchmen should be lower than the lowest party member. You'd have to kick the henchmen to invite someone lower level and go find another henchman from another town if you felt you still needed that gap to fill. They should be a "last resort" feature. Not allowed in dungeons. Just used on occassion ideally.
 
+**Superseded 2026-08-28 (implemented).** The power rule above was dropped: henchmen are **typically worse than a party mate, not strictly worse**. There is no enforced ceiling tying a henchman's stats to the party's lowest level — stats are fixed content, and balance is a job for whoever authors them and chooses which shop and map they appear on. Henchmen do count toward party-size-scaled effects (Bard Rally, Nimble Dodge, Unnerve, party-wide cooldown reduction) exactly as a player does, so a hire is a real contribution rather than a pure handicap.
+
+The rest held: no equipment, no hire cost, fixed hp/damage/skills, not allowed in dungeons. The delivery shape changed — henchmen are vended by shops rather than a bespoke town NPC UI, are authored as content (photo + fixed stats) rather than hardcoded, carry no player-facing class, are scoped to the map they were hired on, and occupy a party seat so a party holding one has room for one fewer player.
+
 ### [engine] [priority-low] [large] Pet slot
 **Summary**: A single pet that adds passive bonuses and an occasional attack, without occupying a grid position.
 **Deliverables**:

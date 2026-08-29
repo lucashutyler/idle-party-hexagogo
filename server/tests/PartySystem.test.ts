@@ -553,3 +553,71 @@ describe('PartySystem', () => {
     });
   });
 });
+
+describe('PartySystem invite lifetime', () => {
+  let system: PartySystem;
+  let state: ReturnType<typeof createPlayerState>;
+
+  beforeEach(() => {
+    system = new PartySystem();
+    state = createPlayerState();
+    for (const u of ['alice', 'bob', 'carol']) state.setPosition(u, 0, 0);
+  });
+
+  it('cancels invites a member sent for a party they then leave', () => {
+    // acceptInvite validates the accepter against the inviter's CURRENT room.
+    const party = system.createParty('alice', state.getPartyId, state.setPartyId);
+    if (typeof party === 'string') throw new Error(party);
+    system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+    system.inviteToParty('alice', 'carol', state.getPartyId, state.areSameTile);
+    expect(system.getPendingInvites('bob')).toHaveLength(1);
+
+    system.leaveParty('alice', state.getPartyId, state.setPartyId);
+
+    expect(system.getPendingInvites('bob')).toHaveLength(0);
+    expect(system.getPendingInvites('carol')).toHaveLength(0);
+  });
+
+  it('cancels invites a member sent for a party they are kicked from', () => {
+    const party = system.createParty('alice', state.getPartyId, state.setPartyId);
+    if (typeof party === 'string') throw new Error(party);
+    system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.areSameTile);
+
+    // Only owners and leaders may invite, hence the promote.
+    system.promoteLeader('alice', 'bob', state.getPartyId);
+    system.inviteToParty('bob', 'carol', state.getPartyId, state.areSameTile);
+    expect(system.getPendingInvites('carol')).toHaveLength(1);
+
+    system.kickMember('alice', 'bob', state.getPartyId, state.setPartyId);
+
+    expect(system.getPendingInvites('carol')).toHaveLength(0);
+  });
+
+  it('cancels invites addressed to a player who leaves', () => {
+    const party = system.createParty('alice', state.getPartyId, state.setPartyId);
+    if (typeof party === 'string') throw new Error(party);
+    system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.areSameTile);
+
+    const solo = system.createParty('carol', state.getPartyId, state.setPartyId);
+    if (typeof solo === 'string') throw new Error(solo);
+    system.inviteToParty('carol', 'bob', state.getPartyId, state.areSameTile);
+    expect(system.getPendingInvites('bob')).toHaveLength(1);
+
+    system.leaveParty('bob', state.getPartyId, state.setPartyId);
+
+    expect(system.getPendingInvites('bob')).toHaveLength(0);
+  });
+
+  it('still lets a normal invite be accepted', () => {
+    const party = system.createParty('alice', state.getPartyId, state.setPartyId);
+    if (typeof party === 'string') throw new Error(party);
+    system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
+
+    const result = system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.areSameTile);
+
+    expect(typeof result).not.toBe('string');
+    expect(party.members.map(m => m.username).sort()).toEqual(['alice', 'bob']);
+  });
+});

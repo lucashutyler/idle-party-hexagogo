@@ -83,7 +83,31 @@ Runtime: shared skill helpers take a `SkillContent` bundle; `reconcileSkillLoado
 
 ## Shop system
 
-`ShopTypes.ts` defines `ShopDefinition` with `id`, `name`, and `inventory: ShopItem[]` (item ID + stock + price). Shops are linked to tiles via `shopId?: string` on `WorldTileDefinition`. Shop definitions stored in `data/shops.json`, managed by `ContentStore`. The client shows a shop button in the room info popup when the current tile has a shop. `ShopPopup` (`client/src/ui/ShopPopup.ts`) provides buy/sell UI — buy mode shows shop inventory with prices, sell mode shows unequipped inventory items only with quantity controls (-/+/All) and sell prices.
+`ShopTypes.ts` defines `ShopDefinition` with `id`, `name`, `inventory: ShopItem[]` (item ID + stock + price), and `henchmanIds?: string[]` — the henchmen this shop offers for hire (see Henchman system). A shop may vend items, henchmen, or both. Shops are linked to tiles via `shopId?: string` on `WorldTileDefinition`. Shop definitions stored in `data/shops.json`, managed by `ContentStore`. The client shows a shop button in the room info popup when the current tile has a shop. `ShopPopup` (`client/src/ui/ShopPopup.ts`) provides buy/sell UI — buy mode shows shop inventory with prices, sell mode shows unequipped inventory items only with quantity controls (-/+/All) and sell prices.
+
+## Zone / map constraint
+
+**A zone belongs to exactly one map.** Zones are referenced by id from `WorldTileDefinition.zone`, and `ZoneDefinition` carries no map of its own, so nothing structural stopped one zone id from appearing on two maps. That ambiguity is load-bearing wherever a zone is treated as a *place* rather than a label: zone chat delivers to everyone in the zone, the Social screen's "Zone" filter lists them, and encounter tables resolve per zone. With the constraint each of those is unambiguous.
+
+Enforced by `zoneMapConflict` (`shared/src/hex/MapSchema.ts`) at **every** tile write — `ContentStore.addOrUpdateTile` for live edits and `DraftEditor.upsertTileCore` for draft edits, which also backs the MCP `upsert_tiles` tool. Bulk upserts are all-or-nothing: the first offending room aborts the batch without persisting, mirroring `deleteTilesBulk`.
+
+It is deliberately **not retroactive**. Content authored before the constraint may already span maps, and refusing those writes would make the rooms uneditable — so a write is refused only when it would *add* a map to a zone that is not already on it. Existing violations stay editable and are reported by `findZonesSpanningMaps`, surfaced through `validate_draft`, so an author can split the zone deliberately rather than discovering the ambiguity through misrouted zone chat.
+
+## Henchman system
+
+`HenchmanTypes.ts` defines `HenchmanDefinition` with `id`, `name`, optional `description`, `className`, `level`, `maxHp`, `baseDamage`, optional `damageType`, `skillIds`, `emoji` (required), and optional `artworkUrl`. Definitions live in `data/henchmen.json`, managed by `ContentStore`. **Dev-only seed**: `SEED_HENCHMEN` is only seeded when `NODE_ENV !== 'production'`.
+
+Henchmen are **vended through shops**, not through a content type of their own — a shop lists them in `henchmanIds`, and the shop is linked to a room by the existing `shopId?: string` on `WorldTileDefinition`. There is no henchmen-specific tile field.
+
+Stats are **fixed**: no levelling, no equipment, no inventory, so the definition is the whole of a henchman's power. `level` is cosmetic — `maxHp` and `baseDamage` are authoritative and are not derived from it. `className` is a **hidden combat archetype**, not a player-facing label: the combat engine keys five behaviours off it (Sanctuary's non-Knight target pick, War Cry's `targetClass` match, Martyr's Knight-damage trigger, and monster `all_class` skill filters), so every henchman must carry a real `ClassName`, but the hire UI never shows it.
+
+`buildHenchmanCombatant` must never throw: it runs inside the battle timer's `setInterval` callback, which has no `try/catch` above it, so a throw would take down the process rather than one party. A definition deleted by a deploy is skipped and an unresolvable skill id becomes an empty slot.
+
+**Referential guards** (written twice, once per surface — `ContentStore` for live edits, `DraftEditor` for draft edits): deleting a henchman is blocked while any shop offers it, and deleting a skill is blocked while any henchman's fixed loadout uses it. Unlike a player's loadout, a henchman's cannot be re-picked, so a dangling skill id would silently cost it an ability.
+
+**Runtime & UI**: hired henchmen live in `GamePartyInfo.henchmen`, a sibling of `members` — see `docs/architecture/social.md`. `ShopPopup` gains a Hire list driven by `ServerStateMessage.henchmanOffers`; a shop with no `henchmanIds` shows no hire list at all.
+
+**Snapshot semantics**: `henchmen` is **keep-when-absent** in `ContentStore.replaceAll` (the `skills` form, not the `shops` form), and `VersionStore.loadSnapshot` deliberately does **not** back-fill it to `[]`. Every snapshot published before the type existed lacks the key, so a clear-then-fill would wipe the live catalogue on the first deploy or rollback. `DraftEditor`'s henchman cores hydrate an absent key from live content before mutating, so editing one henchman in a pre-henchmen draft cannot collapse the set to a single entry.
 
 ## NPC system
 
@@ -182,14 +206,17 @@ Every kind of image the game serves is declared once in `ASSET_KIND_INFO` (`shar
 | `parchment` | Tiling backdrop behind the world map | `WorldMapMeta.id` | square |
 | `class` | Character portraits (combat / character / profile) | Class name, folded to lowercase (`Knight` → `knight.png`) | square |
 | `npc` | Talk-popup portraits | `NpcDefinition.id` — but see the NPC note below | square |
+| `henchman` | Hire-list and party-grid photos | `HenchmanDefinition.id` — but see the note below | square |
 | `logo` | Splash-screen logo | fixed single id `idle-party` | any |
-| `combat-bg` | Backdrop behind the combat stage | zone id, or `{zoneId}-{col}-{row}` per room | any |
-| `room-bg` | Backdrop behind the room view | zone id, or `{zoneId}-{col}-{row}` per room | any |
+| `combat-bg` | Backdrop behind the combat stage | zone id, or `WorldTileDefinition.id` (room GUID) per room — see the room-override note below | any |
+| `room-bg` | Backdrop behind the room view | zone id, or `WorldTileDefinition.id` (room GUID) per room — see the room-override note below | any |
 | `class-icon` | Inline class glyphs (party lists, chat, leaderboard) | Class name as spelled, plus `Unknown`/`Server` (case-sensitive — `CLASS_ICONS` requests `Knight.png`) | square |
 | `slot-icon` | Equipment-slot dogear glyphs | `EquipSlot` id | square |
 | `nav-icon` | Bottom-nav button glyphs | Nav destination id | square |
 
-`shape: 'square'` rejects non-square uploads; `'any'` accepts any aspect ratio (the wide backdrops and the logo). NPCs may skip the folder entirely by pointing `NpcDefinition.artworkUrl` at any URL.
+`shape: 'square'` rejects non-square uploads; `'any'` accepts any aspect ratio (the wide backdrops and the logo). NPCs and henchmen may skip the folder entirely by pointing `NpcDefinition.artworkUrl` / `HenchmanDefinition.artworkUrl` at any URL.
+
+**Per-room backdrop overrides are keyed by the room GUID.** `combat-bg` and `room-bg` used to address a room as `{zoneId}-{col}-{row}`, which multi-map worlds broke: `getWorld().tiles` is flat across every map and a zone carries no `mapId`, so two maps that each hold a room at the same coordinates in the same zone collapsed onto one filename — uploading a backdrop for one silently repainted the other. The GUID is map-unique and survives col/row edits, so it is what new overrides are filed under. **The legacy composite key is still served**: art already uploaded under it keeps rendering (the client tries the GUID first, then the composite, then the zone default), and `AssetCoverage.overrideIdsFor` counts both shapes as overrides so live uploads are never reported as orphans.
 
 **⏸ Deferred kinds.** `set` and `shop` are in the registry — still mounted, still served, still type-checked — but listed in `DEFERRED_ASSET_KINDS` rather than `MANAGED_ASSET_KINDS`, so the assets API, the MCP tools, and the coverage report all skip them and the routes reject them with a 400 explaining why. Each is blocked on a client-side problem that would make managing its art misleading:
 
@@ -201,8 +228,8 @@ Existing files in `data/set-artwork/` and `data/shop-artwork/` are untouched and
 **Fallback chains** — several kinds resolve through a chain rather than a single file, and the registry's `fallbacks` mirror what the render sites actually do:
 
 - **Rooms**: the world map draws per-room `/tile-artwork/{tileId}.png` first, then per-type `/tile-type-artwork/{type}.png`, then the tile-type emoji glyph (no `placehold.co` at the bake layer). Room-type art already covers every room, so a room with no override of its own isn't missing anything — `tile` has `idSource: 'none'`.
-- **Combat backdrop** (`CombatScreen.updateCombatBackground`): per-room `/combat-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/combat-bg-artwork/{zoneId}.png` → `/zone-artwork/{zoneId}.png` → placeholder. The key is the current room's raw `zone` tag, **not** a slug of the zone's display name.
-- **Room backdrop** (`RoomView.renderCurrentRoom`): per-room `/room-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/room-bg-artwork/{zoneId}.png`, layered as two CSS background images so the room-specific one wins when present.
+- **Combat backdrop** (`CombatScreen.updateCombatBackground`): per-room `/combat-bg-artwork/{tileId}.png` → legacy per-room `/combat-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/combat-bg-artwork/{zoneId}.png` → `/zone-artwork/{zoneId}.png` → placeholder. The zone key is the current room's raw `zone` tag, **not** a slug of the zone's display name.
+- **Room backdrop** (`RoomView.renderCurrentRoom`): per-room `/room-bg-artwork/{tileId}.png` → legacy per-room `/room-bg-artwork/{zoneId}-{col}-{row}.png` → zone default `/room-bg-artwork/{zoneId}.png`, layered as CSS background images so the room-specific one wins when present.
 - **Monsters**: art is keyed by `MonsterDefinition.id` (what the admin upload writes). `CombatScreen.monsterArtSrc` falls back to a slug of the monster's name when a combat payload carries no id, so older art dropped in by name still renders — and the coverage report counts a name-slug file as covering the monster rather than reporting it missing.
 - **NPCs**: `NpcTalkPopup` renders `NpcDefinition.artworkUrl` verbatim (falling back to the NPC's emoji) rather than fetching `/npc-artwork/{id}.png`. An uploaded NPC PNG only renders once `artworkUrl` points at it. The coverage report accounts for this: an NPC carrying an `artworkUrl` resolves as `external` rather than being counted as a gap.
 
@@ -214,9 +241,13 @@ Existing files in `data/set-artwork/` and `data/shop-artwork/` are untouched and
 
 ## Content versioning
 
-Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates displaced parties (unreachable rooms — start tile's map only, see #374 — and rooms whose entry requirements the party no longer meets), and reconciles every session's skill loadout against the new content.
+Admin content edits go through a draft→publish→deploy pipeline. `VersionStore` manages version metadata (`data/versions/manifest.json`) and snapshots (`data/versions/{id}.json`). Each snapshot freezes all game content (monsters, items, zones, world, sets, shops, henchmen, npcs, quests, dungeons, tile types, skills, skill slot schedules, design notes). On deploy, `GameLoop.deployVersion()` replaces live content, rebuilds the hex grid, relocates displaced parties (unreachable rooms — start tile's map only, see #374 — and rooms whose entry requirements the party no longer meets), and reconciles every session's skill loadout against the new content.
 
 **When adding new content types to the game, they must be included in `ContentSnapshot` (`VersionStore.ts`) and `ContentStore.toSnapshot()`/`replaceAll()`.**
+
+**Room GUIDs across a deploy.** Player unlock data, quest `visit` objectives and every room-scoped lookup key off `WorldTileDefinition.id`, so a deploy must carry live GUIDs onto the incoming snapshot rather than minting new ones. `preserveTileGuids` (`GameLoop.ts`) does that, matching rooms per **(mapId, col, row)** — never per (col, row) alone. `world.tiles` is flat across every map and two maps may hold a room at the same coordinates, so a position-only key hands one GUID to two rooms; nothing downstream detects a duplicate GUID, so the result is silent, persistent corruption of room identity and of every player's saved unlocks. The function also refuses to issue any GUID twice, so a malformed snapshot cannot introduce a duplicate either.
+
+**Resolve a room by GUID, not by coordinates.** The same reasoning applies everywhere, not just at deploy: `content.getTileById(tile.id)` is correct, `world.tiles.find(t => t.col === … && t.row === …)` is not.
 
 ## Design notes
 

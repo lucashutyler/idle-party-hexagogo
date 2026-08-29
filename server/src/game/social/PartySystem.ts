@@ -1,4 +1,4 @@
-import type { GamePartyInfo, PartyGridPosition, PartyInvite, PartyRole } from '@idle-party-rpg/shared';
+import type { GamePartyInfo, HiredHenchman, PartyGridPosition, PartyInvite, PartyRole } from '@idle-party-rpg/shared';
 import { MAX_PARTY_SIZE } from '@idle-party-rpg/shared';
 
 let partyIdCounter = 0;
@@ -20,6 +20,38 @@ export function canMove(role: PartyRole): boolean {
 /** Check if a role can invite. Owners and leaders can invite. */
 function canInvite(role: PartyRole): boolean {
   return role === 'owner' || role === 'leader';
+}
+
+let henchmanInstanceCounter = 0;
+
+function generateHenchmanInstanceId(): string {
+  return `h${Date.now()}_${++henchmanInstanceCounter}`;
+}
+
+// Members and henchmen share the nine squares — a slot check must span both rosters.
+function occupiedPositions(party: GamePartyInfo, ignore?: string): Set<PartyGridPosition> {
+  const taken = new Set<PartyGridPosition>();
+  for (const m of party.members) {
+    if (m.username === ignore) continue;
+    taken.add(m.gridPosition);
+  }
+  for (const h of party.henchmen ?? []) {
+    if (h.instanceId === ignore) continue;
+    taken.add(h.gridPosition);
+  }
+  return taken;
+}
+
+function firstFreePosition(party: GamePartyInfo): PartyGridPosition | null {
+  const taken = occupiedPositions(party);
+  for (let i = 0; i < 9; i++) {
+    if (!taken.has(i as PartyGridPosition)) return i as PartyGridPosition;
+  }
+  return null;
+}
+
+function partyBodyCount(party: GamePartyInfo): number {
+  return party.members.length + (party.henchmen?.length ?? 0);
 }
 
 /**
@@ -86,7 +118,7 @@ export class PartySystem {
       return 'Must be in the same room to invite';
     }
 
-    if (party.members.length >= MAX_PARTY_SIZE) {
+    if (partyBodyCount(party) >= MAX_PARTY_SIZE) {
       return `Party is full (max ${MAX_PARTY_SIZE})`;
     }
 
@@ -128,7 +160,7 @@ export class PartySystem {
     const party = this.parties.get(partyId);
     if (!party) return 'Party no longer exists';
 
-    if (party.members.length >= MAX_PARTY_SIZE) return 'Party is full';
+    if (partyBodyCount(party) >= MAX_PARTY_SIZE) return 'Party is full';
 
     // Verify inviter is still on the same tile
     if (!areSameTile(invite.inviterUsername, username)) {
@@ -143,15 +175,7 @@ export class PartySystem {
       this.leaveParty(username, getPlayerPartyId, setPlayerPartyId);
     }
 
-    // Join the new party
-    const taken = new Set(party.members.map(m => m.gridPosition));
-    let pos: PartyGridPosition = 0;
-    for (let i = 0; i < 9; i++) {
-      if (!taken.has(i as PartyGridPosition)) {
-        pos = i as PartyGridPosition;
-        break;
-      }
-    }
+    const pos = firstFreePosition(party) ?? 0;
 
     party.members.push({
       username,
@@ -249,6 +273,7 @@ export class PartySystem {
 
     party.members = party.members.filter(m => m.username !== username);
     setPlayerPartyId(username, null);
+    this.cancelInvitesInvolving(new Set([username]));
 
     if (party.members.length === 0) {
       this.parties.delete(partyId);
@@ -293,6 +318,7 @@ export class PartySystem {
 
     party.members = party.members.filter(m => m.username !== targetUsername);
     setPlayerPartyId(targetUsername, null);
+    this.cancelInvitesInvolving(new Set([targetUsername]));
     return true;
   }
 
@@ -310,15 +336,136 @@ export class PartySystem {
     const party = this.parties.get(partyId);
     if (!party) return 'Party not found';
 
-    // Check if position is taken
-    const existing = party.members.find(m => m.gridPosition === position);
-    if (existing && existing.username !== username) return 'Position is taken';
+    if (occupiedPositions(party, username).has(position)) return 'Position is taken';
 
     const member = party.members.find(m => m.username === username);
     if (!member) return 'You are not in this party';
 
     member.gridPosition = position;
     return true;
+  }
+
+  /** Hire a henchman into the caller's party. Returns the hire or error string. */
+  hireHenchman(
+    callerUsername: string,
+    henchmanId: string,
+    mapId: string,
+    getPlayerPartyId: (u: string) => string | null,
+  ): HiredHenchman | string {
+    const partyId = getPlayerPartyId(callerUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    const caller = party.members.find(m => m.username === callerUsername);
+    if (!caller || !canInvite(caller.role)) {
+      return 'Only owners and leaders can hire henchmen';
+    }
+
+    if (partyBodyCount(party) >= MAX_PARTY_SIZE) {
+      return `Party is full (max ${MAX_PARTY_SIZE}) — dismiss someone first`;
+    }
+
+    const gridPosition = firstFreePosition(party);
+    if (gridPosition === null) return 'No free position in the party formation';
+
+    const hired: HiredHenchman = {
+      instanceId: generateHenchmanInstanceId(),
+      henchmanId,
+      gridPosition,
+      mapId,
+    };
+    party.henchmen = [...(party.henchmen ?? []), hired];
+    return hired;
+  }
+
+  /** Dismiss a hired henchman. Returns the dismissed hire or error string. */
+  dismissHenchman(
+    callerUsername: string,
+    instanceId: string,
+    getPlayerPartyId: (u: string) => string | null,
+  ): HiredHenchman | string {
+    const partyId = getPlayerPartyId(callerUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    const caller = party.members.find(m => m.username === callerUsername);
+    if (!caller || !canKick(caller.role)) {
+      return 'Only owners and leaders can dismiss henchmen';
+    }
+
+    const idx = (party.henchmen ?? []).findIndex(h => h.instanceId === instanceId);
+    if (idx < 0) return 'That henchman is not in your party';
+
+    const [removed] = party.henchmen!.splice(idx, 1);
+    return removed;
+  }
+
+  /** Move a henchman to a different square in the party formation. */
+  setHenchmanGridPosition(
+    callerUsername: string,
+    instanceId: string,
+    position: PartyGridPosition,
+    getPlayerPartyId: (u: string) => string | null,
+  ): true | string {
+    if (position < 0 || position > 8) return 'Invalid position';
+
+    const partyId = getPlayerPartyId(callerUsername);
+    if (!partyId) return 'You are not in a party';
+
+    const party = this.parties.get(partyId);
+    if (!party) return 'Party not found';
+
+    const caller = party.members.find(m => m.username === callerUsername);
+    if (!caller || !canInvite(caller.role)) {
+      return 'Only owners and leaders can move henchmen';
+    }
+
+    const henchman = (party.henchmen ?? []).find(h => h.instanceId === instanceId);
+    if (!henchman) return 'That henchman is not in your party';
+
+    if (occupiedPositions(party, instanceId).has(position)) return 'Position is taken';
+
+    henchman.gridPosition = position;
+    return true;
+  }
+
+  /** Dismiss every henchman not hired on `mapId`, returning those removed. */
+  dismissHenchmenOffMap(partyId: string, mapId: string): HiredHenchman[] {
+    const party = this.parties.get(partyId);
+    if (!party || !party.henchmen?.length) return [];
+
+    const leaving = party.henchmen.filter(h => h.mapId !== mapId);
+    if (leaving.length === 0) return [];
+
+    party.henchmen = party.henchmen.filter(h => h.mapId === mapId);
+    return leaving;
+  }
+
+  /** Hired henchmen for a party. */
+  getHenchmen(partyId: string): HiredHenchman[] {
+    return this.parties.get(partyId)?.henchmen ?? [];
+  }
+
+  /** Restore a party's henchmen from saved data (server restart). */
+  restoreHenchmen(partyId: string, henchmen: HiredHenchman[]): void {
+    const party = this.parties.get(partyId);
+    if (!party) return;
+    // party.henchmen aliases `kept` mid-loop so each re-placement counts as taken.
+    const kept: HiredHenchman[] = [];
+    party.henchmen = kept;
+    for (const h of henchmen) {
+      if (!occupiedPositions(party).has(h.gridPosition)) {
+        kept.push(h);
+        continue;
+      }
+      const free = firstFreePosition(party);
+      if (free === null) continue;
+      kept.push({ ...h, gridPosition: free });
+    }
   }
 
   /** Promote a member to leader (owner or leader). */

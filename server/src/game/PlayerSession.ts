@@ -46,6 +46,8 @@ import {
   emptyNotificationPreferences,
 } from '@idle-party-rpg/shared';
 import type {
+  HiredHenchman,
+  HenchmanOffer,
   ServerStateMessage,
   ServerBattleState,
   ServerPartyState,
@@ -365,7 +367,7 @@ export class PlayerSession {
     }
 
     // Shop items (so client has defs for buyable items)
-    const shop = this.getCurrentShopDefinition();
+    const shop = this.getCurrentShop();
     if (shop) {
       for (const si of shop.inventory) {
         if (!defs[si.itemId]) {
@@ -409,22 +411,43 @@ export class PlayerSession {
     return result;
   }
 
-  /** Get the shop definition for the player's current tile, if any. */
-  private getCurrentShopDefinition(): ShopDefinition | undefined {
-    const pos = this.getPosition();
-    const world = this.content.getWorld();
-    const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
-    if (!tile?.shopId) return undefined;
-    return this.content.getShop(tile.shopId);
+  /** Shop for the player's current room. Resolve rooms by GUID — col/row repeat across maps. */
+  getCurrentShop(): ShopDefinition | undefined {
+    const tileId = this.getCurrentTile?.()?.id;
+    if (!tileId) return undefined;
+    const tileDef = this.content.getTileById(tileId);
+    if (!tileDef?.shopId) return undefined;
+    return this.content.getShop(tileDef.shopId);
   }
 
-  /** Get the NPC definition for the player's current tile, if any. */
+  getHenchmanOffers(): HenchmanOffer[] {
+    const shop = this.getCurrentShop();
+    if (!shop?.henchmanIds?.length) return [];
+    const offers: HenchmanOffer[] = [];
+    for (const id of shop.henchmanIds) {
+      const def = this.content.getHenchman(id);
+      if (!def) continue;
+      offers.push({
+        henchmanId: def.id,
+        name: def.name,
+        description: def.description,
+        emoji: def.emoji,
+        artworkUrl: def.artworkUrl,
+        level: def.level,
+        maxHp: def.maxHp,
+        baseDamage: def.baseDamage,
+      });
+    }
+    return offers;
+  }
+
+  /** NPC definition for the player's current room, if any. */
   private getCurrentNpc(): import('@idle-party-rpg/shared').NpcDefinition | undefined {
-    const pos = this.getPosition();
-    const world = this.content.getWorld();
-    const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
-    if (!tile?.npcId) return undefined;
-    return this.content.getNpc(tile.npcId);
+    const tileId = this.getCurrentTile?.()?.id;
+    if (!tileId) return undefined;
+    const tileDef = this.content.getTileById(tileId);
+    if (!tileDef?.npcId) return undefined;
+    return this.content.getNpc(tileDef.npcId);
   }
 
   /** Quest data block for the state message: active progress, completed history, defs, offered IDs. */
@@ -622,7 +645,8 @@ export class PlayerSession {
       social: this.getSocialState?.(),
       itemDefinitions: this.getOwnedItemDefinitions(setDefs),
       setDefinitions: setDefs,
-      shopDefinition: this.getCurrentShopDefinition(),
+      shopDefinition: this.getCurrentShop(),
+      henchmanOffers: this.getHenchmanOffers(),
       crafting: this.getCraftingState(),
       activeQuests: questBlock.activeQuests,
       completedQuests: questBlock.completedQuests,
@@ -1076,7 +1100,7 @@ export class PlayerSession {
     dungeonId: string;
     currentFloorIndex: number;
     entrance: { col: number; row: number };
-  } | null): PlayerSaveData {
+  } | null, partyHenchmen?: HiredHenchman[]): PlayerSaveData {
     const pos = movementData?.position ?? this.getPosition();
 
     return {
@@ -1115,6 +1139,7 @@ export class PlayerSession {
       completedQuests: this.quests.toSaveData().completed,
       weeklyCompletions: this.quests.toSaveData().weeklyCompletions,
       dungeonRun: dungeonRun ?? undefined,
+      partyHenchmen: partyHenchmen?.length ? partyHenchmen : undefined,
       clearedDungeons: [...this.clearedDungeons],
       notifications: this.getNotifications ? this.getNotifications() : this.initialNotifications,
       notificationPreferences: this.notificationPreferences,

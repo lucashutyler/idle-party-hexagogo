@@ -191,7 +191,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Inventory tab (merged Char + Items — hero card, equipped gear, skill loadout, stat card, inventory grid)
 - [x] Class system (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong together)
 - [x] Damage types (physical/magical on monsters, Knight reduces physical, Priest reduces magical)
-- [ ] Henchmen (hireable NPCs for solo players)
+- [x] Henchmen (hireable NPCs for solo players)
 - [x] Party formation and management (always in a party, join, leave, kick, 3x3 grid, max 5 members)
 - [x] Party roles (owner > leader > member, promote/demote, transfer ownership)
 - [x] Party movement (owner/leader controls unified group movement)
@@ -277,7 +277,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Mobile-first responsive design
 - [x] Pixel/retro RPG visual style (Silkscreen + Pixelify Sans)
 - [x] Combat cards with portrait + name + HP bar; per-zone backgrounds; lunge/hit/dodge animations
-- [x] Image-everywhere convention (`<mount>/{id}.png` with placeholder fallback) across all 16 asset kinds — items, monsters, classes, rooms, room types, sets, shops, zones, NPCs, map parchment, combat/room backdrops, the splash logo, and the class/slot/nav icon sets — all declared once in a shared registry
+- [x] Image-everywhere convention (`<mount>/{id}.png` with placeholder fallback) across all 17 asset kinds — items, monsters, classes, rooms, room types, sets, shops, zones, NPCs, henchmen, map parchment, combat/room backdrops, the splash logo, and the class/slot/nav icon sets — all declared once in a shared registry
 - [x] Nav bar battle status indicators (pulse/flash on combat events)
 - [x] Server unavailable / offline screen with retry
 - [x] Desktop font scaling (larger fonts on desktop via media query)
@@ -296,7 +296,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Quest editor (Quests tab; NPCs tab links quests to NPCs)
 - [x] Recipe editor (Recipes tab — author/edit crafting recipes without touching JSON)
 - [x] Skill tree editor (skills as versioned content — composable effect options, editable unlock levels, per-class slot schedules, item/set skill grants)
-- [x] CRM artwork upload pipeline (14 of the 16 asset kinds share one upload API; items / monsters / zones / tile types / map parchment also have an in-modal uploader)
+- [x] CRM artwork upload pipeline (15 of the 17 asset kinds share one upload API; items / monsters / zones / tile types / map parchment also have an in-modal uploader)
 - [ ] Set and shop artwork management (deferred — set art has no render site, and shop art is fetched by zone id rather than shop id)
 - [x] Asset coverage report (which content is still missing artwork, accounting for fallback chains, plus orphaned files)
 - [x] Game designer access only

@@ -617,17 +617,9 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // Find the tile the player is on and check for a shop
-        const pos = session.getPosition();
-        const world = gameLoop.contentStore.getWorld();
-        const tile = world.tiles.find(t => t.col === pos.col && t.row === pos.row);
-        if (!tile?.shopId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
-          return;
-        }
-        const shop = gameLoop.contentStore.getShop(tile.shopId);
+        const shop = session.getCurrentShop();
         if (!shop) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Shop not found' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
           return;
         }
 
@@ -1140,12 +1132,13 @@ wss.on('connection', (ws) => {
             }
           }
         } else if (channelType === 'tile') {
-          // All players on the same tile
+          // All players in the same room on the same map
           const pos = session.getPosition();
+          const mapId = session.getMapId();
           for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
             if (u === username) continue;
             const otherPos = s.getPosition();
-            if (otherPos.col === pos.col && otherPos.row === pos.row) {
+            if (s.getMapId() === mapId && otherPos.col === pos.col && otherPos.row === pos.row) {
               recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
             }
           }
@@ -1382,11 +1375,10 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'set_party_grid_position' && typeof msg.position === 'number') {
-        const result = playerManager.parties.setGridPosition(
-          username,
-          msg.position,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-        );
+        const getPartyId = (u: string) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null;
+        const result = msg.henchmanInstanceId
+          ? playerManager.parties.setHenchmanGridPosition(username, msg.henchmanInstanceId, msg.position, getPartyId)
+          : playerManager.parties.setGridPosition(username, msg.position, getPartyId);
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
@@ -1399,6 +1391,70 @@ wss.on('connection', (ws) => {
             for (const m of party.members) {
               playerManager.sendStateToPlayer(m.username);
             }
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'hire_henchman' && typeof msg.henchmanId === 'string') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) return;
+
+        const shop = session.getCurrentShop();
+        if (!shop?.henchmanIds?.includes(msg.henchmanId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'That henchman is not for hire here.' }));
+          return;
+        }
+        const def = gameLoop.contentStore.getHenchman(msg.henchmanId);
+        if (!def) {
+          ws.send(JSON.stringify({ type: 'error', message: 'That henchman is no longer available.' }));
+          return;
+        }
+
+        const result = playerManager.parties.hireHenchman(
+          username,
+          msg.henchmanId,
+          session.getMapId(),
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+
+        const partyId = session.getPartyId();
+        if (partyId) {
+          playerManager.partyBattles.restartBattle(partyId);
+          const party = playerManager.parties.getParty(partyId);
+          for (const m of party?.members ?? []) {
+            playerManager.getSessionByUsername(m.username)?.addLogEntry(`${def.name} joins the party.`, 'move');
+            playerManager.sendStateToPlayer(m.username);
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'dismiss_henchman' && typeof msg.instanceId === 'string') {
+        const result = playerManager.parties.dismissHenchman(
+          username,
+          msg.instanceId,
+          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+        );
+        if (typeof result === 'string') {
+          ws.send(JSON.stringify({ type: 'error', message: result }));
+          return;
+        }
+
+        // No handlePartyLeave/notify here — both assume a real account.
+        const name = gameLoop.contentStore.getHenchman(result.henchmanId)?.name ?? 'Your henchman';
+        const session = playerManager.getSessionByUsername(username);
+        const partyId = session?.getPartyId();
+        if (partyId) {
+          playerManager.partyBattles.restartBattle(partyId);
+          const party = playerManager.parties.getParty(partyId);
+          for (const m of party?.members ?? []) {
+            playerManager.getSessionByUsername(m.username)?.addLogEntry(`${name} leaves the party.`, 'move');
+            playerManager.sendStateToPlayer(m.username);
           }
         }
         return;

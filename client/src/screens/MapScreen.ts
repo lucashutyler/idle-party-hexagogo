@@ -165,6 +165,7 @@ export class MapScreen implements Screen {
       const playerOnTile = state && state.party.col === tileInfo.col && state.party.row === tileInfo.row;
       this.roomView!.hasShop = !!(playerOnTile && state?.shopDefinition);
       const tileDef = this.worldCache.getTile(tileInfo.col, tileInfo.row);
+      this.roomView!.roomId = tileDef?.id ?? null;
       this.roomView!.npc = (playerOnTile && tileDef?.npcId)
         ? (this.worldCache.getNpc(tileDef.npcId) ?? null)
         : null;

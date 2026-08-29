@@ -79,6 +79,8 @@ export interface PartyCombatant {
   gridPosition: PartyGridPosition;
   className: ClassName;
   level: number;
+  /** Set for hired henchmen — the only thing distinguishing one from a player. */
+  isHenchman?: boolean;
   /** Resolved equipped skill definitions (indexed by slot). */
   equippedSkills: (SkillDefinition | null)[];
   /** Number of attacks this combatant has made (for cooldown tracking). */

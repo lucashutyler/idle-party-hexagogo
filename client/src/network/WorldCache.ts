@@ -190,6 +190,14 @@ export class WorldCache {
     return this.tiles.get(`${this.currentMapId}:${col},${row}`);
   }
 
+  /**
+   * Get a tile on an explicitly named map. Prefer this over `getTile` outside the map renderer:
+   * `currentMapId` only advances when ThreeWorldMap calls `setCurrentMap`, so it can lag the party's real map.
+   */
+  getTileOn(mapId: string, col: number, row: number): WorldTileDefinition | undefined {
+    return this.tiles.get(`${mapId}:${col},${row}`);
+  }
+
   /** Get the start tile position. */
   getStartTile(): { col: number; row: number } {
     return this.startTile;

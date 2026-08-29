@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, NotificationEntry, RoomEntryFailure } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -73,6 +73,10 @@ export class PlayerManager {
       (members) => {
         this.cancelInvitesOnMove(members);
       },
+    );
+    this.partyBattles.setHenchmenCallbacks(
+      (partyId) => this.parties.getHenchmen(partyId),
+      (partyId, mapId) => this.parties.dismissHenchmenOffMap(partyId, mapId),
     );
   }
 
@@ -195,7 +199,8 @@ export class PlayerManager {
           if (member) partyInfo = { role: member.role, gridPosition: member.gridPosition };
         }
       }
-      const saveData = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData);
+      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
+      const saveData = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen);
       await saveStore.saveAll([saveData]);
     }
 
@@ -384,6 +389,24 @@ export class PlayerManager {
     return Array.from(this.playerConnections.keys());
   }
 
+  private validHenchmen(saved: HiredHenchman[], partyMapId: string): HiredHenchman[] {
+    return saved.filter(h => h.mapId === partyMapId && this.content.getHenchman(h.henchmanId));
+  }
+
+  private resolveHenchmen(henchmen: HiredHenchman[] | undefined): HiredHenchman[] {
+    if (!henchmen?.length) return [];
+    return henchmen.map(h => {
+      const def = this.content.getHenchman(h.henchmanId);
+      return {
+        ...h,
+        name: def?.name ?? 'Unknown henchman',
+        emoji: def?.emoji ?? '❓',
+        artworkUrl: def?.artworkUrl,
+        level: def?.level,
+      };
+    });
+  }
+
   /** Build ClientSocialState for a player. */
   getSocialState(username: string): ClientSocialState {
     const session = this.sessions.get(username);
@@ -398,7 +421,7 @@ export class PlayerManager {
       outgoingFriendRequests: this.friends.getOutgoingRequests(username),
       guild: guildData?.info ?? null,
       guildMembers: guildData?.members ?? [],
-      party: partyData,
+      party: partyData && { ...partyData, henchmen: this.resolveHenchmen(partyData.henchmen) },
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: this.getOnlinePlayers(),
@@ -519,6 +542,10 @@ export class PlayerManager {
 
     // Add to new party's battle
     this.partyBattles.addMember(partyId, username);
+
+    const joiner = this.sessions.get(username);
+    const tile = this.partyBattles.getTile(partyId);
+    if (joiner && tile) joiner.switchMapGrid(tile);
   }
 
   /** Handle a player leaving/being kicked from a party. Creates new solo party at current position. */
@@ -674,7 +701,8 @@ export class PlayerManager {
         }
       }
 
-      data.push(session.toSaveData(movementData ?? undefined, partyInfo, dungeonData));
+      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
+      data.push(session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen));
     }
     return data;
   }
@@ -713,6 +741,8 @@ export class PlayerManager {
       const tile = this.grids.get(saveMapId)?.getTile(offsetToCube(data.position));
       if (!tile) {
         console.warn(`[PlayerManager] Moved "${data.username}" to start tile (old position ${saveMapId}:${data.position.col},${data.position.row} no longer exists)`);
+        // dungeonRun.entrance is a bare (col,row) against the old map — it cannot survive.
+        data.dungeonRun = undefined;
         data.position = { col: startPos.col, row: startPos.row };
         data.mapId = defaultMapId;
         data.target = null;
@@ -816,6 +846,11 @@ export class PlayerManager {
         this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
       }
 
+      // Every member's save mirrors the roster — read only the owner's or they duplicate.
+      if (ownerData.partyHenchmen?.length) {
+        this.parties.restoreHenchmen(party.id, this.validHenchmen(ownerData.partyHenchmen, partyMapId));
+      }
+
       console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
     }
 
@@ -849,6 +884,11 @@ export class PlayerManager {
       if (data.dungeonRun) {
         const partyId = this.sessions.get(data.username)?.getPartyId();
         if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
+      }
+
+      if (data.partyHenchmen?.length) {
+        const partyId = this.sessions.get(data.username)?.getPartyId();
+        if (partyId) this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
       }
     }
 
@@ -934,8 +974,14 @@ export class PlayerManager {
         bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
       } else if (currentMapId !== defaultMapId) {
         // Off the start tile's map, reachability isn't decidable from one grid
-        // alone — see the note on this method. Leave the party alone.
-        continue;
+        // alone — see the note on this method. Existence still is.
+        if (grid.getTile(tile.coord)) continue;
+        const meta = world.maps.find(m => m.id === currentMapId);
+        bestTile = grid.getTile(offsetToCube(meta?.startTile ?? world.startTile)) ?? null;
+        if (!bestTile) {
+          targetMapId = defaultMapId;
+          bestTile = this.defaultGrid().getTile(offsetToCube(world.startTile)) ?? null;
+        }
       } else {
         // Reachability is computed within the party's own map.
         const meta = world.maps.find(m => m.id === currentMapId);

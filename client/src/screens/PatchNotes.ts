@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.08.28.1',
+    notes: [
+      'Some shops now keep henchmen on hand — hired help who join your party and fight alongside you. Hiring is free.',
+      'A henchman takes a party seat like anyone else, so a party with one has room for one fewer player. Dismiss them to make space.',
+      'You can move henchmen around your party formation the same way you move yourself — drag them, or tap to pick one up and tap an empty square to set them down.',
+      'Henchmen stay with you only on the map where you hired them. Cross to another map and they part ways, and the combat log will say so.',
+      'Henchmen cannot come into dungeons. You will be asked to dismiss them at the entrance rather than being turned away without a reason.',
+    ],
+  },
+  {
     version: '2026.08.18.2',
     notes: [
       'Some rooms can now ask more of your party than the right gear. A room may require everyone to have reached a certain level, or to have finished certain quests, before the party can set foot in it.',

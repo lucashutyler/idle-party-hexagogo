@@ -111,8 +111,8 @@ interface RequiredId {
   nameSlug?: string;
   /**
    * Art this entity points at directly rather than through the asset folders —
-   * today only `NpcDefinition.artworkUrl`. Such an entity isn't missing art
-   * even with nothing on disk under its id.
+   * today `NpcDefinition.artworkUrl` and `HenchmanDefinition.artworkUrl`. Such an
+   * entity isn't missing art even with nothing on disk under its id.
    */
   externalUrl?: string;
 }
@@ -154,6 +154,13 @@ function requiredIdsFor(kind: AssetKind, info: AssetKindInfo, content: ContentSt
         nameSlug: slugify(npc.name),
         externalUrl: npc.artworkUrl,
       }));
+    case 'henchmen':
+      return Object.values(content.getAllHenchmen()).map(h => ({
+        id: h.id,
+        label: h.name,
+        nameSlug: slugify(h.name),
+        externalUrl: h.artworkUrl,
+      }));
     case 'zones':
       // Backdrop kinds key off the zone too, and their fallback chain needs to
       // know which zone each entry is, so carry the id through as `zoneIds`.
@@ -179,13 +186,16 @@ function requiredIdsFor(kind: AssetKind, info: AssetKindInfo, content: ContentSt
 /**
  * Ids that may legitimately sit in a kind's folder on top of its required set —
  * per-room overrides. Anything outside both sets is an orphan, usually art left
- * behind by a deleted entity.
+ * behind by a deleted entity. Legacy `zone-col-row` keys stay in the set beside
+ * the room GUIDs — art filed under them still renders, so it isn't an orphan.
  */
 function overrideIdsFor(info: AssetKindInfo, content: ContentStore): Set<string> {
   if (!info.overrideIdSource) return new Set();
   const tiles = content.getWorld().tiles;
-  if (info.overrideIdSource === 'tiles') return new Set(tiles.map(tile => tile.id));
-  return new Set(tiles.map(tile => `${tile.zone}-${tile.col}-${tile.row}`));
+  const ids = new Set(tiles.map(tile => tile.id));
+  if (info.overrideIdSource === 'tiles') return ids;
+  for (const tile of tiles) ids.add(`${tile.zone}-${tile.col}-${tile.row}`);
+  return ids;
 }
 
 /**

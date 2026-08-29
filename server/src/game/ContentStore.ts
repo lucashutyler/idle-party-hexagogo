@@ -4,13 +4,15 @@ import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, WorldMapMeta, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
+import { zoneMapConflict } from '@idle-party-rpg/shared';
+import type { HenchmanDefinition } from '@idle-party-rpg/shared';
 import type { RecipeDefinition } from '@idle-party-rpg/shared';
 import type { NpcDefinition } from '@idle-party-rpg/shared';
 import type { QuestDefinition } from '@idle-party-rpg/shared';
 import type { DungeonDefinition } from '@idle-party-rpg/shared';
 import type { SkillDefinition, SkillSlot } from '@idle-party-rpg/shared';
 import type { DesignNote } from '@idle-party-rpg/shared';
-import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_DUNGEONS, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, migrateLegacySet, migrateLegacySkill, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
+import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_HENCHMEN, SEED_DUNGEONS, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, migrateLegacySet, migrateLegacySkill, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
 const DATA_DIR = path.resolve('data');
@@ -21,6 +23,7 @@ const WORLD_FILE = path.join(DATA_DIR, 'world.json');
 const ENCOUNTERS_FILE = path.join(DATA_DIR, 'encounters.json');
 const SETS_FILE = path.join(DATA_DIR, 'sets.json');
 const SHOPS_FILE = path.join(DATA_DIR, 'shops.json');
+const HENCHMEN_FILE = path.join(DATA_DIR, 'henchmen.json');
 const TILE_TYPES_FILE = path.join(DATA_DIR, 'tile-types.json');
 const RECIPES_FILE = path.join(DATA_DIR, 'recipes.json');
 const NPCS_FILE = path.join(DATA_DIR, 'npcs.json');
@@ -42,6 +45,7 @@ export class ContentStore {
   private encounters = new Map<string, EncounterDefinition>();
   private sets = new Map<string, SetDefinition>();
   private shops = new Map<string, ShopDefinition>();
+  private henchmen = new Map<string, HenchmanDefinition>();
   private tileTypes = new Map<string, TileTypeDefinition>();
   private recipes = new Map<string, RecipeDefinition>();
   private npcs = new Map<string, NpcDefinition>();
@@ -75,6 +79,7 @@ export class ContentStore {
     await fs.writeFile(ENCOUNTERS_FILE, JSON.stringify(Array.from(this.encounters.values()), null, 2));
     await fs.writeFile(SETS_FILE, JSON.stringify(Array.from(this.sets.values()), null, 2));
     await fs.writeFile(SHOPS_FILE, JSON.stringify(Array.from(this.shops.values()), null, 2));
+    await fs.writeFile(HENCHMEN_FILE, JSON.stringify(Array.from(this.henchmen.values()), null, 2));
     await fs.writeFile(TILE_TYPES_FILE, JSON.stringify(Array.from(this.tileTypes.values()), null, 2));
     await fs.writeFile(RECIPES_FILE, JSON.stringify(Array.from(this.recipes.values()), null, 2));
     await fs.writeFile(NPCS_FILE, JSON.stringify(Array.from(this.npcs.values()), null, 2));
@@ -144,6 +149,16 @@ export class ContentStore {
   getAllShops(): Record<string, ShopDefinition> {
     const result: Record<string, ShopDefinition> = {};
     for (const [id, def] of this.shops) result[id] = def;
+    return result;
+  }
+
+  getHenchman(id: string): HenchmanDefinition | undefined {
+    return this.henchmen.get(id);
+  }
+
+  getAllHenchmen(): Record<string, HenchmanDefinition> {
+    const result: Record<string, HenchmanDefinition> = {};
+    for (const [id, def] of this.henchmen) result[id] = def;
     return result;
   }
 
@@ -241,7 +256,10 @@ export class ContentStore {
 
   // --- Tile CRUD ---
 
-  async addOrUpdateTile(tile: WorldTileDefinition): Promise<void> {
+  async addOrUpdateTile(tile: WorldTileDefinition): Promise<{ success: boolean; error?: string }> {
+    const zoneConflict = zoneMapConflict(this.world.tiles, tile);
+    if (zoneConflict) return { success: false, error: zoneConflict };
+
     // Tiles are unique per (mapId, col, row) — two maps may share a (col, row).
     const idx = this.world.tiles.findIndex(t => t.mapId === tile.mapId && t.col === tile.col && t.row === tile.row);
     if (idx >= 0) {
@@ -254,6 +272,7 @@ export class ContentStore {
       this.world.tiles.push(tile);
     }
     await this.save();
+    return { success: true };
   }
 
   async deleteTile(mapId: string, col: number, row: number): Promise<{ success: boolean; error?: string }> {
@@ -397,14 +416,14 @@ export class ContentStore {
    * Bulk-merge generated content (used by the dev seed). Adds the given
    * zones + tiles to the in-memory maps and persists once at the end —
    * much cheaper than 1000 individual `addOrUpdateTile` calls. Skips
-   * any tile whose (col,row) already has a tile so a partial re-seed
+   * any tile whose (mapId, col, row) already has a tile so a partial re-seed
    * doesn't clobber existing content.
    */
   async mergeSeedContent(zones: ZoneDefinition[], tiles: WorldTileDefinition[]): Promise<void> {
     for (const z of zones) this.zones.set(z.id, z);
-    const occupied = new Set(this.world.tiles.map(t => `${t.col},${t.row}`));
+    const occupied = new Set(this.world.tiles.map(t => `${t.mapId}:${t.col},${t.row}`));
     for (const t of tiles) {
-      const key = `${t.col},${t.row}`;
+      const key = `${t.mapId}:${t.col},${t.row}`;
       if (occupied.has(key)) continue;
       this.world.tiles.push(t);
       occupied.add(key);
@@ -497,6 +516,27 @@ export class ContentStore {
       return { success: false, error: `Cannot delete: shop is used by room "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` };
     }
     this.shops.delete(id);
+    await this.save();
+    return { success: true };
+  }
+
+  // --- Henchman CRUD ---
+
+  async addOrUpdateHenchman(henchman: HenchmanDefinition): Promise<void> {
+    this.henchmen.set(henchman.id, henchman);
+    await this.save();
+  }
+
+  async deleteHenchman(id: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.henchmen.has(id)) {
+      return { success: false, error: 'Henchman not found.' };
+    }
+    for (const shop of this.shops.values()) {
+      if (shop.henchmanIds?.includes(id)) {
+        return { success: false, error: `Cannot delete: henchman is offered by shop "${shop.name}".` };
+      }
+    }
+    this.henchmen.delete(id);
     await this.save();
     return { success: true };
   }
@@ -641,6 +681,12 @@ export class ContentStore {
         return { success: false, error: `Cannot delete: skill is granted by set "${set.name}".` };
       }
     }
+    // Block delete if any henchman's fixed loadout uses this skill
+    for (const henchman of this.henchmen.values()) {
+      if (henchman.skillIds.includes(id)) {
+        return { success: false, error: `Cannot delete: skill is used by henchman "${henchman.name}".` };
+      }
+    }
     this.skills.delete(id);
     await this.save();
     return { success: true };
@@ -654,7 +700,7 @@ export class ContentStore {
   // --- Snapshot ---
 
   /** Export current live state as a ContentSnapshot. */
-  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; tileTypes: TileTypeDefinition[]; recipes: RecipeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; skills: SkillDefinition[]; skillSlotSchedules: { className: string; slots: SkillSlot[] }[]; designNotes: DesignNote[]; world: WorldData } {
+  toSnapshot(): { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters: EncounterDefinition[]; sets: SetDefinition[]; shops: ShopDefinition[]; henchmen: HenchmanDefinition[]; tileTypes: TileTypeDefinition[]; recipes: RecipeDefinition[]; npcs: NpcDefinition[]; quests: QuestDefinition[]; dungeons: DungeonDefinition[]; skills: SkillDefinition[]; skillSlotSchedules: { className: string; slots: SkillSlot[] }[]; designNotes: DesignNote[]; world: WorldData } {
     return {
       monsters: Array.from(this.monsters.values()),
       items: Array.from(this.items.values()),
@@ -662,6 +708,7 @@ export class ContentStore {
       encounters: Array.from(this.encounters.values()),
       sets: Array.from(this.sets.values()),
       shops: Array.from(this.shops.values()),
+      henchmen: Array.from(this.henchmen.values()),
       tileTypes: Array.from(this.tileTypes.values()),
       recipes: Array.from(this.recipes.values()),
       npcs: Array.from(this.npcs.values()),
@@ -675,7 +722,7 @@ export class ContentStore {
   }
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
-  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; skills?: SkillDefinition[]; skillSlotSchedules?: { className: string; slots: SkillSlot[] }[]; designNotes?: DesignNote[]; world: WorldData }): Promise<void> {
+  async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; henchmen?: HenchmanDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; skills?: SkillDefinition[]; skillSlotSchedules?: { className: string; slots: SkillSlot[] }[]; designNotes?: DesignNote[]; world: WorldData }): Promise<void> {
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -734,6 +781,12 @@ export class ContentStore {
     // Old snapshots predate skills (key absent) — keep existing skills intact; an
     // empty array means the snapshot genuinely has none and should clear them.
 
+    if (snapshot.henchmen !== undefined) {
+      this.henchmen.clear();
+      for (const h of snapshot.henchmen) this.henchmen.set(h.id, h);
+    }
+    // keep-when-absent: an absent `henchmen` key keeps live henchmen; `[]` clears them.
+
     if (snapshot.skillSlotSchedules !== undefined) {
       this.skillSlotSchedules.clear();
       for (const entry of snapshot.skillSlotSchedules) this.skillSlotSchedules.set(entry.className, entry.slots);
@@ -764,7 +817,7 @@ export class ContentStore {
     this.migrateItems();
 
     await this.save();
-    console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.sets.size} sets, ${this.shops.size} shops, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
+    console.log(`[ContentStore] Replaced all content: ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.sets.size} sets, ${this.shops.size} shops, ${this.henchmen.size} henchmen, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
   }
 
   // --- Private ---
@@ -817,6 +870,19 @@ export class ContentStore {
         for (const s of shopsArr) this.shops.set(s.id, s);
       } catch {
         // shops.json doesn't exist yet
+      }
+
+      let henchmenSeeded = false;
+      try {
+        const henchmenRaw = await fs.readFile(HENCHMEN_FILE, 'utf-8');
+        const henchmenArr: HenchmanDefinition[] = JSON.parse(henchmenRaw);
+        for (const h of henchmenArr) this.henchmen.set(h.id, h);
+      } catch {
+        // henchmen.json doesn't exist yet
+        if (process.env.NODE_ENV !== 'production') {
+          for (const h of Object.values(SEED_HENCHMEN)) this.henchmen.set(h.id, h);
+          henchmenSeeded = true;
+        }
       }
 
       let tileTypesSeeded = false;
@@ -919,7 +985,7 @@ export class ContentStore {
       // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
       const itemsMigrated = this.migrateItems();
 
-      if (migrated > 0 || worldMigrated || encountersMigrated || itemsMigrated || tileTypesSeeded || recipesSeeded || skillsSeeded || skillSlotsSeeded) {
+      if (migrated > 0 || worldMigrated || encountersMigrated || itemsMigrated || henchmenSeeded || tileTypesSeeded || recipesSeeded || skillsSeeded || skillSlotsSeeded) {
         await this.save();
       }
 
@@ -1077,6 +1143,13 @@ export class ContentStore {
     if (process.env.NODE_ENV !== 'production') {
       for (const n of Object.values(SEED_NPCS)) {
         this.npcs.set(n.id, n);
+      }
+    }
+
+    // Henchmen — dev only. Production deploys boot with no henchmen; admins create them.
+    if (process.env.NODE_ENV !== 'production') {
+      for (const h of Object.values(SEED_HENCHMEN)) {
+        this.henchmen.set(h.id, h);
       }
     }
 

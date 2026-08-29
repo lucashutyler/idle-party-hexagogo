@@ -28,7 +28,7 @@ export { HexGrid } from './hex/HexGrid.js';
 export { HexPathfinder } from './hex/HexPathfinder.js';
 
 // Map
-export { WORLD_MAP, DEFAULT_MAP_ID, migrateWorldData } from './hex/MapSchema.js';
+export { WORLD_MAP, DEFAULT_MAP_ID, migrateWorldData, zoneMapConflict, findZonesSpanningMaps } from './hex/MapSchema.js';
 export type { MapSchema, TileDefinition, WorldTileDefinition, WorldData, WorldMapMeta, MapTransitionLink } from './hex/MapSchema.js';
 export { generateWorldMap, getStartingPosition } from './hex/MapData.js';
 
@@ -309,6 +309,17 @@ export type {
   ShopDefinition,
 } from './systems/ShopTypes.js';
 
+export type {
+  HenchmanDefinition,
+  HiredHenchman,
+  HenchmanOffer,
+} from './systems/HenchmanTypes.js';
+export {
+  SEED_HENCHMEN,
+  henchmanDisplayNames,
+  buildHenchmanCombatant,
+} from './systems/HenchmanTypes.js';
+
 // Crafting types
 export {
   CRAFTING_UNLOCK_LEVEL,
@@ -414,6 +425,8 @@ export type {
   ClientLeavePartyMessage,
   ClientKickPartyMemberMessage,
   ClientSetPartyGridPositionMessage,
+  ClientHireHenchmanMessage,
+  ClientDismissHenchmanMessage,
   ClientPromotePartyLeaderMessage,
   ClientDemotePartyMemberMessage,
   ClientTransferPartyOwnershipMessage,

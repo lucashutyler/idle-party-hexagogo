@@ -25,6 +25,7 @@ export const ASSET_KINDS = [
   'parchment',
   'class',
   'npc',
+  'henchman',
   'logo',
   'combat-bg',
   'room-bg',
@@ -48,6 +49,7 @@ export type AssetIdSource =
   | 'zones'
   | 'tileTypes'
   | 'npcs'
+  | 'henchmen'
   | 'maps'
   | 'classes'
   | 'equipSlots'
@@ -59,7 +61,7 @@ export type AssetIdSource =
 export type AssetOverrideSource =
   /** Per-room art keyed by the room's GUID. */
   | 'tiles'
-  /** Per-room art keyed by the `{zoneId}-{col}-{row}` composite. */
+  /** Per-room art keyed by the room's GUID; the legacy `{zoneId}-{col}-{row}` composite still resolves too. */
   | 'rooms';
 
 /**
@@ -208,6 +210,15 @@ export const ASSET_KIND_INFO: Record<AssetKind, AssetKindInfo> = {
     idFormat: 'NpcDefinition.id',
     shape: 'square',
   },
+  henchman: {
+    label: 'Henchman',
+    description: 'Henchman photos in the hire list and the party grid. Henchmen may instead point at any URL via HenchmanDefinition.artworkUrl.',
+    dir: 'data/henchman-artwork',
+    mount: '/henchman-artwork',
+    idSource: 'henchmen',
+    idFormat: 'HenchmanDefinition.id',
+    shape: 'square',
+  },
   logo: {
     label: 'Logo',
     description: 'Splash-screen logo shown while the game loads.',
@@ -224,7 +235,9 @@ export const ASSET_KIND_INFO: Record<AssetKind, AssetKindInfo> = {
     dir: 'data/combat-bg-artwork',
     mount: '/combat-bg-artwork',
     idSource: 'zones',
-    idFormat: 'Zone id for the zone default; `{zoneId}-{col}-{row}` for a per-room override',
+    idFormat:
+      'Zone id for the zone default; `WorldTileDefinition.id` (room GUID) for a per-room override. '
+      + 'The legacy `{zoneId}-{col}-{row}` override key is still served, but it collides across maps — upload new overrides under the room GUID',
     overrideIdSource: 'rooms',
     shape: 'any',
     fallbacks: [{ kind: 'zone', idFrom: 'zoneId' }],
@@ -235,7 +248,9 @@ export const ASSET_KIND_INFO: Record<AssetKind, AssetKindInfo> = {
     dir: 'data/room-bg-artwork',
     mount: '/room-bg-artwork',
     idSource: 'zones',
-    idFormat: 'Zone id for the zone default; `{zoneId}-{col}-{row}` for a per-room override',
+    idFormat:
+      'Zone id for the zone default; `WorldTileDefinition.id` (room GUID) for a per-room override. '
+      + 'The legacy `{zoneId}-{col}-{row}` override key is still served, but it collides across maps — upload new overrides under the room GUID',
     overrideIdSource: 'rooms',
     shape: 'any',
   },
@@ -289,6 +304,7 @@ export const MANAGED_ASSET_KINDS = [
   'parchment',
   'class',
   'npc',
+  'henchman',
   'logo',
   'combat-bg',
   'room-bg',
@@ -352,9 +368,10 @@ export function assetPublicPath(kind: AssetKind, id: string): string {
 /**
  * Ids are interpolated straight into a filename, so anything that could climb
  * out of the folder or hide an extension is rejected. Hyphens and dots must
- * stay legal — room overrides are `{zoneId}-{col}-{row}` and class ids carry
- * mixed case — so the guard bans path separators and any `..` run instead of
- * allow-listing a narrower shape.
+ * stay legal — room overrides are room GUIDs (or the legacy
+ * `{zoneId}-{col}-{row}` composite) and class ids carry mixed case — so the
+ * guard bans path separators and any `..` run instead of allow-listing a
+ * narrower shape.
  */
 export const ASSET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,127}$/;
 

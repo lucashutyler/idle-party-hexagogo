@@ -7,7 +7,7 @@ import type { DraftContentType } from '../../game/DraftEditor.js';
 import type { McpToolDeps } from './McpToolDeps.js';
 import { toolResult, errorMessage } from './mcpResult.js';
 
-/** The 13 content types editable through the generic draft-write surface — single source of truth, shared with writeTools.ts. */
+/** The 14 content types editable through the generic draft-write surface — single source of truth, shared with writeTools.ts. */
 const CONTENT_TYPES = DRAFT_CONTENT_TYPES;
 
 /** Per-type field-shape cheat sheet, verbatim — used by `get_content_schema` so the calling AI doesn't have to guess field names. */
@@ -15,7 +15,8 @@ const CONTENT_TYPE_DESCRIPTIONS: Record<DraftContentType, string> = {
   monsters: "MonsterDefinition — id, name, hp, damage, damageType ('physical'|'magical'), xp, goldMin, goldMax, optional description (combat-popup flavor text), optional drops (ItemDrop[]: {itemId, chance, quantity?}), optional passive:true (makes it a \"wall\": never attacks, doesn't count toward victory — use for tactical obstacles, not real enemies).",
   items: "ItemDefinition — id, name, rarity ('janky'|'common'|'uncommon'|'rare'|'epic'|'legendary'|'heirloom'), optional slot (EquipSlot union: head/shoulders/chest/bracers/gloves/mainhand/offhand/twohanded/foot/ring/necklace/back/relic — omit entirely for non-equippable items), optional bonusAttackMin/Max, damageReductionMin/Max, magicReductionMin/Max, optional classRestriction (string[] of class names that can equip), optional value (gold sell price), optional grantedSkillIds (skills equippable ONLY while this item is equipped).",
   sets: 'SetDefinition — id, name, itemIds (string[]), optional classRestriction, breakpoints (SetBreakpoint[]: {piecesRequired, bonuses: SetBonuses}). Bonuses do NOT stack across tiers within one set (highest unlocked tier wins) but DO stack across different sets. SetBonuses: cooldownReduction, damagePercent, damageResistancePercent, damageReductionMin/Max, magicReductionMin/Max, bonusAttackMin/Max, flatHp, percentHp, optional grantedSkillIds.',
-  shops: 'ShopDefinition — id, name, inventory (ShopItem[]: {itemId, stock, price}).',
+  shops: 'ShopDefinition — id, name, inventory (ShopItem[]: {itemId, stock, price}), optional henchmanIds (string[] of HenchmanDefinition ids this shop offers for hire — hires are free, so there is no price to pair with them).',
+  henchmen: "HenchmanDefinition — id, name, optional description (flavour line shown in the hire list), className ('Knight'|'Archer'|'Priest'|'Mage'|'Bard'), level, maxHp, baseDamage, optional damageType ('physical'|'magical'|'holy', overrides the archetype's damage type when set), skillIds (string[] of skill definition ids — the fixed loadout; ids the live server lacks resolve to an empty slot), emoji (REQUIRED, always renders even with no artwork), optional artworkUrl. Stats are FIXED: a henchman never levels, holds no equipment and has no inventory, so the definition is the whole of its power (level is a cosmetic display number — the stats above are authoritative, not derived from it). className is a HIDDEN combat archetype, not a player-facing label: the engine keys class checks off it (Sanctuary targeting, War Cry's targetClass, Martyr, monster all_class skill filters), but the hire UI never shows it. A shop offers henchmen for hire via its own henchmanIds array — there is no room/tile field for henchmen and no separate henchmen-shop content type.",
   recipes: 'RecipeDefinition — id, name, durationSeconds (>0), ingredients (RecipeIngredient[]: {itemId, quantity>0}), result ({itemId, quantity>0}).',
   npcs: 'NpcDefinition — id, name, emoji (REQUIRED, always renders even with no artwork), greeting, optional artworkUrl, optional questIds (string[] quests this NPC offers).',
   quests: "QuestDefinition — id, name, description, scope ('solo' — only acceptable while in a solo party — or 'party_shared'), objectives (kill:{monsterId,count} | collect:{itemId,count, consumed on turn-in} | visit:{tileId}), rewards (xp|gold|item kinds), optional prerequisiteQuestIds, optional requiredLevel, repeat ('once'|'weekly').",
@@ -39,6 +40,7 @@ function getLiveContentArray(deps: McpToolDeps, type: DraftContentType): unknown
     case 'items': return Object.values(store.getAllItems());
     case 'sets': return Object.values(store.getAllSets());
     case 'shops': return Object.values(store.getAllShops());
+    case 'henchmen': return Object.values(store.getAllHenchmen());
     case 'recipes': return Object.values(store.getAllRecipes());
     case 'npcs': return Object.values(store.getAllNpcs());
     case 'quests': return Object.values(store.getAllQuests());
@@ -87,6 +89,7 @@ export async function getOverview(deps: McpToolDeps) {
       encounters: Object.keys(store.getAllEncounters()).length,
       sets: Object.keys(store.getAllSets()).length,
       shops: Object.keys(store.getAllShops()).length,
+      henchmen: Object.keys(store.getAllHenchmen()).length,
       tileTypes: Object.keys(store.getAllTileTypes()).length,
       recipes: Object.keys(store.getAllRecipes()).length,
       npcs: Object.keys(store.getAllNpcs()).length,

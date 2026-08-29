@@ -10,6 +10,10 @@ Every player is always in a party (solo party auto-created, max 5 members). Thre
 
 Pending invite flow: owner/leader invites → target sees pending invite with accept/decline → same-room validated on both invite and accept. Invites auto-expire when either the inviter or invitee moves to a different room (via `PartySystem.cancelInvitesInvolving`, hooked into the `onMembersMoved` callback in `PartyBattleManager`). Badge indicator on Party tab when invites pending.
 
+**An invite must not outlive its sender's membership.** `acceptInvite` validates the accepter against the *inviter's* room, not the party's — so an invite left over from someone who has since left or been kicked would admit a player to wherever that ex-inviter now stands, on any map. `leaveParty` and `kickMember` therefore cancel invites involving the departing player, which is what keeps the inviter-based check sound: an inviter who is still a member always travels with the party.
+
+**Joining a party can change a player's map.** It is the third such path, alongside a map transition and a forced relocation, and all three must re-seat the joiner's fog-of-war grid (`PlayerSession.switchMapGrid`) — a `PlayerSession`'s `UnlockSystem` is bound to one map's grid, so a joiner who skips this keeps revealing rooms against the map they came from.
+
 3x3 grid positioning for combat formation. Combat is shared — all members fight the same monsters together with grid-based targeting. Movement is party-level (owner/leader moves all members). On victory, each member gets XP/gold/loot independently. Leaving/kicked auto-creates new solo party at current position (captured before the old party entry can be torn down). If owner leaves, first leader becomes owner; if no leaders, first member becomes owner.
 
 Party events (join, kick, promotion, demotion, ownership change) post personalized chat announcements — the subject sees "You were ..." while others see "<name> was ..." — via `PlayerManager.broadcastPartyEvent` (party channel for in-party recipients, server channel for kicked players who are no longer in the party). The same events also fire through the notification framework (invite received, kicked, promoted, demoted, ownership transferred, member joined/left) — see [`notifications.md`](notifications.md).
@@ -69,3 +73,19 @@ Badge dot (red) on the Social bottom-nav tab when there are pending friend reque
 `ClientSocialState` is included in every `ServerStateMessage.social`. Contains friends, incoming/outgoing friend requests, guild info, guild members, party info, pending party invites, outgoing party invites (sent by this player), online players list, all registered players list (as `PlayerListEntry[]` with className and level), blocked users, chat preferences (send channel + DM target), and the player's notification inbox + preferences (see [`notifications.md`](notifications.md)). `PlayerManager` builds this via `getSocialState()` callback on each `PlayerSession`.
 
 Incoming friend requests also fire a `friend_request_received` notification, and an accepted outgoing request fires `friend_request_accepted` for the original sender (including the auto-accept case when both sides happen to request each other).
+
+## Henchmen in the party
+
+Hired henchmen live in `GamePartyInfo.henchmen: HiredHenchman[]`, a **sibling** of `members` — never inside it. `members` means accounts: ~70 server call sites resolve one to a `PlayerSession`, transfer ownership to one, count one toward a reward divisor, or notify one. A henchman in that array makes each of those wrong silently rather than at compile time, so ownership transfer, the XP/gold divisor, the drop lottery, room-entry gating and battle-timer teardown all stay correct by construction.
+
+The two rosters **share** the nine grid squares. `PartySystem` allocates across both through one `occupiedPositions` helper — the only place that knows it — so two occupants can never land on one square. Henchmen count toward `MAX_PARTY_SIZE` everywhere, invites included.
+
+**Balance**: henchmen are *typically* worse than a party mate, not *strictly* worse. Nothing in code ties a henchman's stats to the party's lowest level — stats are fixed content, so balance is a job for whoever authors the definition and picks which shop and map it appears on. Henchmen also count toward party-size-scaled effects (Bard Rally, Nimble Dodge, Unnerve, party-wide cooldown reduction) exactly as a player does, which is deliberate: a hire is a real contribution, not a pure handicap. Superseded the original "must be lower than the lowest party member / last resort" rule — see `ideas/backlog-2026-april.md`.
+
+**Roles**: hiring and moving a henchman are gated on the invite role, dismissing on the kick role (owner or leader). The client hides those affordances for plain members rather than letting the server refuse silently.
+
+**Identity**: a henchman's combat name is its definition name, disambiguated with ` #2`/` #3` against both other henchmen and the party's real usernames (`henchmanDisplayNames`). `PartyCombatant.username` is interpolated verbatim into ~25 combat-log lines and keys DoT attribution and heal-target prose, so a henchman sharing a name with a member would corrupt combat, not just prose.
+
+**Map scoping**: a hire is scoped to the map it was made on, dismissed immediately after either `ServerParty.switchMap` call — the transition the party chose, and the forced relocation a content deploy causes. Departures are announced in the combat log.
+
+**Client**: `SocialScreen` renders henchmen in the 3x3 grid and the party list with a photo (`artworkUrl`, emoji fallback) and a Henchman badge. They carry no `data-username` and no clickable-name class, so the user popup, DM, trade, gift, friend-request, block, promote, demote and transfer flows — all of which resolve a real account — can never reach one. The only actions are Dismiss and moving on the grid.

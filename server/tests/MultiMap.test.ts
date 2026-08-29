@@ -360,6 +360,24 @@ describe('Displaced-party sweep and multi-map reachability', () => {
     expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
   });
 
+  it('relocates a party on a non-default map when its room is DELETED', async () => {
+    // refreshAllPartyTiles leaves the stale HexTile in place when a room vanishes.
+    const { pm, grids, content, partyId } = await setup();
+
+    expect(pm.handleEnterTransition('alice', ISLAND_ID).success).toBe(true);
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(ISLAND_ID);
+
+    const world = content.getWorld();
+    world.tiles = world.tiles.filter(t => t.id !== ISLAND_ID);
+    grids.rebuild();
+    pm.partyBattles.refreshAllPartyTiles(grids);
+
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(1);
+    expect(pm.partyBattles.getMapId(partyId)).toBe('sewers');
+    expect(pm.partyBattles.getTile(partyId)!.id).not.toBe(ISLAND_ID);
+    expect(grids.getOrThrow('sewers').getTileById(pm.partyBattles.getTile(partyId)!.id)).toBeTruthy();
+  });
+
   it('still relocates a party stranded on the map that holds the world start tile', async () => {
     const { pm, grids, content, partyId } = await setup();
 
