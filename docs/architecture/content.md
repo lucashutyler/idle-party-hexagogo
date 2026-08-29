@@ -95,6 +95,8 @@ Stats are **fixed**: no levelling, no equipment, no inventory, so the definition
 
 **Referential guards** (written twice, once per surface — `ContentStore` for live edits, `DraftEditor` for draft edits): deleting a henchman is blocked while any shop offers it, and deleting a skill is blocked while any henchman's fixed loadout uses it. Unlike a player's loadout, a henchman's cannot be re-picked, so a dangling skill id would silently cost it an ability.
 
+**Runtime & UI**: hired henchmen live in `GamePartyInfo.henchmen`, a sibling of `members` — see `docs/architecture/social.md`. `ShopPopup` gains a Hire list driven by `ServerStateMessage.henchmanOffers`; a shop with no `henchmanIds` shows no hire list at all.
+
 **Snapshot semantics**: `henchmen` is **keep-when-absent** in `ContentStore.replaceAll` (the `skills` form, not the `shops` form), and `VersionStore.loadSnapshot` deliberately does **not** back-fill it to `[]`. Every snapshot published before the type existed lacks the key, so a clear-then-fill would wipe the live catalogue on the first deploy or rollback. `DraftEditor`'s henchman cores hydrate an absent key from live content before mutating, so editing one henchman in a pre-henchmen draft cannot collapse the set to a single entry.
 
 ## NPC system

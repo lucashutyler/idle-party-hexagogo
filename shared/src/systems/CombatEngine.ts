@@ -79,6 +79,12 @@ export interface PartyCombatant {
   gridPosition: PartyGridPosition;
   className: ClassName;
   level: number;
+  /**
+   * Set for hired henchmen. `className` is their combat archetype, so nothing
+   * else distinguishes them from a player — the client needs this to render a
+   * photo and to suppress player-only actions (View Player, DM, trade).
+   */
+  isHenchman?: boolean;
   /** Resolved equipped skill definitions (indexed by slot). */
   equippedSkills: (SkillDefinition | null)[];
   /** Number of attacks this combatant has made (for cooldown tracking). */

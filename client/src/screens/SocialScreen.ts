@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman } from '@idle-party-rpg/shared';
 import { MAX_PARTY_SIZE, classIconHtml, serverIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
@@ -103,6 +103,24 @@ export class SocialScreen implements Screen {
   private gridDragGhost: HTMLElement | null = null;
   private gridDragHoverCell: HTMLElement | null = null;
   private gridAnimating = false;
+  /**
+   * Henchman being dragged, by instanceId — null when the player is dragging
+   * themselves. The drag knows its source from the press that started it; the
+   * tap path cannot, hence the separate pick-up below.
+   */
+  private gridDragHenchmanId: string | null = null;
+  /**
+   * Henchman picked up by tapping its square, by instanceId. Tap-to-move needs
+   * a held selection because its two halves are separate taps. null means the
+   * next tap on an empty square moves the player, as it always has.
+   */
+  private gridPickedUpHenchmanId: string | null = null;
+  /**
+   * Whether the viewer may act on henchmen. The server gates hire/dismiss/move
+   * on the owner-or-leader role; the drag and tap handlers run outside
+   * renderPartyPanel, so the role is cached here rather than recomputed.
+   */
+  private canManageHenchmen = false;
 
   // Structural change detection keys — only re-render when these change
   private lastRenderedUsersKey = '';
@@ -247,6 +265,13 @@ export class SocialScreen implements Screen {
       if (btn.matches('.social-transfer-btn') && username) { this.gameClient.sendTransferPartyOwnership(username); return; }
       if (btn.matches('.social-kick-btn') && username) { this.gameClient.sendKickPartyMember(username); return; }
       if (btn.matches('.social-party-leave-btn')) { this.gameClient.sendLeaveParty(); return; }
+      // Dismiss is the ONLY action a henchman has. It is a hire, not an account,
+      // so every username-keyed action above is deliberately absent for it.
+      if (btn.matches('.social-dismiss-henchman-btn')) {
+        const instanceId = btn.getAttribute('data-henchman-instance');
+        if (instanceId) this.gameClient.sendDismissHenchman(instanceId);
+        return;
+      }
       if (btn.matches('.social-accept-invite') && partyId) { this.gameClient.sendAcceptPartyInvite(partyId); return; }
       if (btn.matches('.social-decline-invite') && partyId) { this.gameClient.sendDeclinePartyInvite(partyId); return; }
       if (btn.matches('.social-nearby-invite') && username) {
@@ -329,7 +354,9 @@ export class SocialScreen implements Screen {
       if (isNaN(pos)) return;
 
       if (cell.classList.contains('occupied')) {
-        // Occupied by another player → flash red
+        // Tapping a square we're allowed to move (our own, or a henchman's) is
+        // resolved in onGridDragEnd instead — see the tap note there. All that
+        // is left here is the "someone else is standing there" flash.
         const selfUsername = this.lastState?.username;
         const party = this.lastSocial?.party;
         if (!party) return;
@@ -338,9 +365,13 @@ export class SocialScreen implements Screen {
           this.flashGridCell(cell);
         }
       } else {
-        // Empty cell → animate self to that position
-        this.animateGridMove(pos);
-        this.gameClient.sendSetPartyGridPosition(pos);
+        // Empty cell → put the picked-up henchman there, else animate self to it.
+        // A role change while holding one drops it rather than animating a move
+        // the server will refuse.
+        const henchmanInstanceId = this.canManageHenchmen ? this.gridPickedUpHenchmanId : null;
+        this.setGridPickedUp(null);
+        this.animateGridMove(pos, henchmanInstanceId);
+        this.gameClient.sendSetPartyGridPosition(pos, henchmanInstanceId ?? undefined);
       }
     });
 
@@ -577,6 +608,7 @@ export class SocialScreen implements Screen {
     const key = JSON.stringify({
       partyId: party?.id ?? null,
       members: (party?.members ?? []).map(m => `${m.username}:${m.role}:${m.gridPosition}`),
+      henchmen: (party?.henchmen ?? []).map(h => `${h.instanceId}:${h.name ?? ''}:${h.gridPosition}`),
       pending: pendingInvites.map(i => `${i.partyId}:${i.inviterUsername}`),
       outgoing,
       sameTile,
@@ -675,13 +707,14 @@ export class SocialScreen implements Screen {
     if (!isPartyMember) {
       const selfMember = social.party?.members.find(m => m.username === selfUsername);
       const isLeaderOrOwner = selfMember?.role === 'owner' || selfMember?.role === 'leader';
-      const partyFull = (social.party?.members.length ?? 1) >= MAX_PARTY_SIZE;
+      const seatsUsed = this.partySeatsUsed(social.party);
+      const partyFull = seatsUsed >= MAX_PARTY_SIZE;
       const alreadyInvited = (social.outgoingPartyInvites ?? []).includes(username);
 
       if (!isLeaderOrOwner) {
         items.push(`<button class="user-popup-item disabled" disabled title="Only the party owner or a leader can invite">Invite to Party</button>`);
       } else if (partyFull) {
-        items.push(`<button class="user-popup-item disabled" disabled title="Party is full (${MAX_PARTY_SIZE}/${MAX_PARTY_SIZE})">Invite to Party</button>`);
+        items.push(`<button class="user-popup-item disabled" disabled title="Party is full (${seatsUsed}/${MAX_PARTY_SIZE}) — hired henchmen take a seat too">Invite to Party</button>`);
       } else if (alreadyInvited) {
         items.push(`<button class="user-popup-item disabled" disabled title="Already invited to your party">Invited to Party</button>`);
       } else if (!sameRoom) {
@@ -1151,6 +1184,33 @@ export class SocialScreen implements Screen {
 
   // ── Party Panel ─────────────────────────────────────────────
 
+  /**
+   * Seats a party occupies. Henchmen share the nine squares and the five-seat
+   * cap with members server-side, so every capacity number shown to the player
+   * has to count them as well.
+   */
+  private partySeatsUsed(party: ClientSocialState['party']): number {
+    if (!party) return 0;
+    return party.members.length + (party.henchmen?.length ?? 0);
+  }
+
+  /**
+   * Henchman portrait — the authored photo when there is one, the emoji when
+   * there isn't or when the photo fails to load. The emoji span ships hidden
+   * alongside the image so the two never render at once.
+   */
+  private henchmanPortrait(h: HiredHenchman): string {
+    const emoji = `<span class="social-henchman-emoji"${h.artworkUrl ? ' style="display:none;"' : ''}>${this.escapeHtml(h.emoji ?? '🗡️')}</span>`;
+    if (!h.artworkUrl) return emoji;
+    const onerror = `this.style.display='none';this.nextElementSibling.style.display='inline';`;
+    return `<img class="icon-inline icon-class" src="${this.escapeHtml(h.artworkUrl)}" alt="${this.escapeHtml(h.name ?? 'Henchman')}" onerror="${onerror}" loading="lazy" />${emoji}`;
+  }
+
+  /** Display name for a henchman whose definition the server could not resolve. */
+  private henchmanName(h: HiredHenchman): string {
+    return this.escapeHtml(h.name ?? 'Henchman');
+  }
+
   private renderPartyPanel(): void {
     const social = this.lastSocial;
     if (!social) {
@@ -1170,10 +1230,18 @@ export class SocialScreen implements Screen {
     const selfRole = selfMember?.role ?? 'member';
     const isOwner = selfRole === 'owner';
     const isLeaderOrOwner = selfRole === 'owner' || selfRole === 'leader';
+    this.canManageHenchmen = isLeaderOrOwner;
     const isSolo = party.members.length === 1;
     const onlineSet = new Set(social.onlinePlayers ?? []);
     const memberMap = new Map(party.members.map(m => [m.gridPosition, m]));
     const partyMembers = new Set(party.members.map(m => m.username));
+    // Henchmen ride alongside members: same nine squares, same seat cap, but a
+    // separate roster because they are hires rather than accounts.
+    const henchmen = party.henchmen ?? [];
+    const henchmanMap = new Map(henchmen.map(h => [h.gridPosition, h]));
+    const seatsUsed = this.partySeatsUsed(party);
+    // "Alone" is about players — a hired henchman is company enough to drop the nudge.
+    const isAlone = isSolo && henchmen.length === 0;
 
     // Pending invites for this player
     const pendingInvites = social.pendingInvites ?? [];
@@ -1223,9 +1291,11 @@ export class SocialScreen implements Screen {
     let gridHtml = '<div class="social-party-grid">';
     for (let i = 0; i < 9; i++) {
       const member = memberMap.get(i as any);
+      const henchman = member ? undefined : henchmanMap.get(i as any);
       const row = Math.floor(i / 3);
       const rowLabel = row === 0 ? 'Front' : row === 1 ? 'Mid' : 'Back';
-      gridHtml += `<div class="social-party-cell${member ? ' occupied' : ''}" data-pos="${i}" title="${rowLabel} row">`;
+      const henchmanAttr = henchman ? ` data-henchman-instance="${this.escapeHtml(henchman.instanceId)}"` : '';
+      gridHtml += `<div class="social-party-cell${member || henchman ? ' occupied' : ''}" data-pos="${i}"${henchmanAttr} title="${rowLabel} row">`;
       if (member) {
         const isOnline = onlineSet.has(member.username);
         gridHtml += `<span class="social-status-dot ${isOnline ? 'online' : 'offline'}"></span>`;
@@ -1235,6 +1305,12 @@ export class SocialScreen implements Screen {
         if (roleBadge) {
           gridHtml += `<span class="social-badge ${badgeClass}">${roleBadge}</span>`;
         }
+      } else if (henchman) {
+        // No status dot and no clickable name: a henchman has no account behind
+        // it to be online or to open a user popup for.
+        const levelHtml = henchman.level !== undefined ? ` <span class="social-user-level">Lv ${henchman.level}</span>` : '';
+        gridHtml += `<span class="social-party-cell-name">${this.henchmanPortrait(henchman)} ${this.henchmanName(henchman)}${levelHtml}</span>`;
+        gridHtml += '<span class="social-badge" title="Henchman — a hire, not a player">H</span>';
       } else {
         gridHtml += '<span class="social-party-cell-empty">Empty</span>';
       }
@@ -1268,16 +1344,33 @@ export class SocialScreen implements Screen {
       return actions.join('');
     };
 
+    // A henchman row carries exactly one action — Dismiss. No promote, demote,
+    // transfer, kick, DM, trade, gift or profile: all of those resolve a real
+    // account by username, and a henchman has none.
+    const henchmenHtml = henchmen.map(h => `
+      <div class="social-user-row" data-henchman-instance="${this.escapeHtml(h.instanceId)}">
+        ${this.henchmanPortrait(h)}
+        ${h.level !== undefined ? `<span class="social-user-level">Lv ${h.level}</span><span class="social-user-sep">—</span>` : ''}
+        <span class="social-user-name">${this.henchmanName(h)}</span>
+        <span class="social-user-badges">
+          <span class="social-badge">Henchman</span>
+        </span>
+        <div class="social-user-actions">
+          ${isLeaderOrOwner ? `<button class="social-action-btn remove-friend social-dismiss-henchman-btn" data-henchman-instance="${this.escapeHtml(h.instanceId)}">Dismiss</button>` : ''}
+        </div>
+      </div>
+    `).join('');
+
     this.panelContainer.innerHTML = `
       ${invitesHtml}
-      ${isSolo ? '<div class="social-empty">You\'re all alone. Invite someone to your party!</div>' : ''}
+      ${isAlone ? '<div class="social-empty">You\'re all alone. Invite someone to your party!</div>' : ''}
       ${gridHtml}
       ${!isSolo ? `
         <div class="social-party-actions">
           <button class="social-action-btn remove-friend social-party-leave-btn">Leave Party</button>
         </div>
       ` : ''}
-      <div class="social-group-header">Members (${party.members.length}/${MAX_PARTY_SIZE})</div>
+      <div class="social-group-header">Party (${seatsUsed}/${MAX_PARTY_SIZE})</div>
       <div class="social-user-list">
         ${party.members.map(m => `
           <div class="social-user-row" data-username="${this.escapeHtml(m.username)}">
@@ -1292,9 +1385,18 @@ export class SocialScreen implements Screen {
             </div>
           </div>
         `).join('')}
+        ${henchmenHtml}
       </div>
       ${nearbyHtml}
     `;
+
+    // A pick-up does not survive its henchman leaving the roster (dismissed, or
+    // the party re-formed under us), and the marker is painted onto cells the
+    // rebuild above just replaced.
+    if (this.gridPickedUpHenchmanId && !henchmen.some(h => h.instanceId === this.gridPickedUpHenchmanId)) {
+      this.gridPickedUpHenchmanId = null;
+    }
+    this.paintGridPickedUp();
   }
 
   // ── Chat Panel ───────────────────────────────────────────────
@@ -2056,15 +2158,44 @@ export class SocialScreen implements Screen {
     }, { once: true });
   }
 
-  /** Animate the current player's cell tilting and sliding toward targetPos. */
-  private animateGridMove(targetPos: number): void {
-    const party = this.lastSocial?.party;
-    const selfUsername = this.lastState?.username;
-    if (!party || !selfUsername) return;
-    const self = party.members.find(m => m.username === selfUsername);
-    if (!self || self.gridPosition === undefined) return;
+  /** Pick a henchman up for tap-to-move, or put down whatever is held (null). */
+  private setGridPickedUp(instanceId: string | null): void {
+    this.gridPickedUpHenchmanId = instanceId;
+    this.paintGridPickedUp();
+  }
 
-    const srcPos = self.gridPosition as number;
+  /**
+   * Mark the picked-up henchman's square. Styled inline rather than through a
+   * class rule so the marker needs no stylesheet of its own, and re-applied
+   * after every party render because the grid is rebuilt from innerHTML.
+   */
+  private paintGridPickedUp(): void {
+    for (const cell of this.panelContainer.querySelectorAll<HTMLElement>('.social-party-cell[data-henchman-instance]')) {
+      const held = cell.getAttribute('data-henchman-instance') === this.gridPickedUpHenchmanId;
+      cell.classList.toggle('grid-picked-up', held);
+      cell.style.boxShadow = held ? '0 0 8px var(--accent-gold)' : '';
+      cell.style.borderColor = held ? 'var(--accent-gold)' : '';
+    }
+  }
+
+  /**
+   * Animate a cell tilting and sliding toward targetPos — the current player's
+   * by default, or a henchman's when one is named. Both ways into the grid (tap
+   * and drag) can move either, so the source is a parameter rather than self.
+   */
+  private animateGridMove(targetPos: number, henchmanInstanceId?: string | null): void {
+    const party = this.lastSocial?.party;
+    if (!party) return;
+    let srcPos: number | undefined;
+    if (henchmanInstanceId) {
+      srcPos = (party.henchmen ?? []).find(h => h.instanceId === henchmanInstanceId)?.gridPosition;
+    } else {
+      const selfUsername = this.lastState?.username;
+      if (!selfUsername) return;
+      srcPos = party.members.find(m => m.username === selfUsername)?.gridPosition;
+    }
+    if (srcPos === undefined) return;
+
     const grid = this.panelContainer.querySelector('.social-party-grid');
     if (!grid) return;
     const sourceCell = grid.querySelector(`.social-party-cell[data-pos="${srcPos}"]`) as HTMLElement | null;
@@ -2099,10 +2230,18 @@ export class SocialScreen implements Screen {
       // Optimistic UI: swap cell contents so player appears at new position immediately
       const srcHtml = sourceCell.innerHTML;
       const srcOccupied = sourceCell.classList.contains('occupied');
+      // Both interaction paths key off data-henchman-instance, so it has to move
+      // with the contents or the optimistic state contradicts itself.
+      const srcHench = sourceCell.getAttribute('data-henchman-instance');
+      const tgtHench = targetCell.getAttribute('data-henchman-instance');
       sourceCell.innerHTML = targetCell.innerHTML;
       sourceCell.classList.toggle('occupied', targetCell.classList.contains('occupied'));
       targetCell.innerHTML = srcHtml;
       targetCell.classList.toggle('occupied', srcOccupied);
+      if (tgtHench) sourceCell.setAttribute('data-henchman-instance', tgtHench);
+      else sourceCell.removeAttribute('data-henchman-instance');
+      if (srcHench) targetCell.setAttribute('data-henchman-instance', srcHench);
+      else targetCell.removeAttribute('data-henchman-instance');
       this.gridAnimating = false;
     }, { once: true });
   }
@@ -2117,16 +2256,25 @@ export class SocialScreen implements Screen {
     if (!party || !selfUsername) return;
 
     const member = party.members.find(m => m.gridPosition === pos);
-    if (!member || member.username !== selfUsername) return; // can only drag self
+    if (member && member.username !== selfUsername) return; // can only drag self
+    // A square with no member on it is a henchman's — ours to move as well.
+    const henchman = member ? undefined : (party.henchmen ?? []).find(h => h.gridPosition === pos);
+    if (!member && !henchman) return;
+    // Only owners and leaders may rearrange a henchman. Bail before animating —
+    // the optimistic swap would otherwise show a move the server then refuses.
+    if (henchman && !this.canManageHenchmen) return;
 
     e.preventDefault();
     this.gridDragging = true;
     this.gridDragSourcePos = pos;
+    this.gridDragHenchmanId = henchman?.instanceId ?? null;
 
     // Create ghost
     const ghost = document.createElement('div');
     ghost.className = 'party-drag-ghost';
-    ghost.innerHTML = `${this.classIcon(this.getPlayerClassName(selfUsername))} ${this.escapeHtml(selfUsername)}`;
+    ghost.innerHTML = henchman
+      ? `${this.henchmanPortrait(henchman)} ${this.henchmanName(henchman)}`
+      : `${this.classIcon(this.getPlayerClassName(selfUsername))} ${this.escapeHtml(selfUsername)}`;
     document.body.appendChild(ghost);
     this.gridDragGhost = ghost;
 
@@ -2169,6 +2317,9 @@ export class SocialScreen implements Screen {
   private onGridDragEnd(e: MouseEvent | TouchEvent): void {
     if (!this.gridDragging) return;
     this.gridDragging = false;
+    // Read once, up front, so every early return below leaves the drag clean.
+    const draggedHenchmanId = this.gridDragHenchmanId;
+    this.gridDragHenchmanId = null;
 
     // Remove ghost
     if (this.gridDragGhost) {
@@ -2191,15 +2342,26 @@ export class SocialScreen implements Screen {
     if (!cell) { this.gridDragSourcePos = null; return; }
 
     const pos = parseInt(cell.getAttribute('data-pos')!, 10);
-    if (isNaN(pos) || pos === this.gridDragSourcePos) { this.gridDragSourcePos = null; return; }
+    if (isNaN(pos)) { this.gridDragSourcePos = null; return; }
+
+    if (pos === this.gridDragSourcePos) {
+      // A press that never left its own square is a tap: pick the henchman up,
+      // or put down whatever was held. This lives here rather than in the click
+      // handler because the preventDefault in onGridDragStart eats the synthetic
+      // click on touch, so on a phone that click never arrives.
+      this.setGridPickedUp(draggedHenchmanId && draggedHenchmanId !== this.gridPickedUpHenchmanId ? draggedHenchmanId : null);
+      this.gridDragSourcePos = null;
+      return;
+    }
 
     if (cell.classList.contains('occupied')) {
-      // Dropped on another player → flash red
+      // Dropped on another occupant → flash red
       this.flashGridCell(cell);
     } else {
       // Dropped on empty cell → animate then move
-      this.animateGridMove(pos);
-      this.gameClient.sendSetPartyGridPosition(pos);
+      this.setGridPickedUp(null);
+      this.animateGridMove(pos, draggedHenchmanId);
+      this.gameClient.sendSetPartyGridPosition(pos, draggedHenchmanId ?? undefined);
     }
 
     this.gridDragSourcePos = null;

@@ -1,7 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
-import type { ServerStateMessage, CombatLogEntry, ClientCombatAction } from '@idle-party-rpg/shared';
-import { classIconHtml, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, CombatLogEntry, ClientCombatAction, HiredHenchman } from '@idle-party-rpg/shared';
+import { classIconHtml, henchmanDisplayNames, RUN_AVAILABLE_ROUNDS } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
@@ -62,6 +62,10 @@ export class CombatScreen implements Screen {
   private selfUsername = '';
   private partyUsernames = new Set<string>();
   private monsterNamesSeen = new Set<string>();
+  // Hired henchmen keyed by their combat display name. They arrive in the
+  // combat players array with no portrait of their own, so their emoji/photo
+  // is looked up here rather than derived from `className` (a hidden archetype).
+  private henchmenByCombatName = new Map<string, HiredHenchman>();
   private renderedPlayerKey = '';
   private renderedEnemyKey = '';
 
@@ -236,6 +240,19 @@ export class CombatScreen implements Screen {
     this.partyUsernames = new Set(
       partyMembers.map(m => m.username).filter(u => u !== this.selfUsername),
     );
+
+    // Henchmen are a sibling of `members`, never inside it. Their combat name
+    // is derived from the roster the same way the server derives it (roster
+    // order, ` #2` on a repeat), so it lines the two lists up. They fight as
+    // party members, so their names colour like one in the log too.
+    const henchmen = state.social?.party?.henchmen ?? [];
+    const henchmanNames = henchmanDisplayNames(henchmen.map(h => h.name ?? ''));
+    this.henchmenByCombatName.clear();
+    henchmen.forEach((h, i) => {
+      this.henchmenByCombatName.set(henchmanNames[i], h);
+      this.partyUsernames.add(henchmanNames[i]);
+    });
+
     for (const m of state.battle.combat?.monsters ?? []) {
       this.monsterNamesSeen.add(m.name);
     }
@@ -279,20 +296,46 @@ export class CombatScreen implements Screen {
         if (card) {
           card.classList.toggle('dead', p.currentHp <= 0);
           card.classList.toggle('stunned', !!(p.stunTurns && p.stunTurns > 0));
+          // A henchman's `className` is a hidden combat archetype — it must
+          // never drive a class icon or class artwork. Its portrait is the
+          // authored photo with the emoji showing through behind it.
+          const henchman = p.henchman ? this.henchmenByCombatName.get(p.username) : undefined;
           const icon = card.querySelector('.combat-card-icon') as HTMLElement | null;
-          if (icon) icon.innerHTML = CombatScreen.classIcon(p.className);
+          if (icon) {
+            icon.innerHTML = p.henchman
+              ? this.escapeHtml(henchman?.emoji ?? '❓')
+              : CombatScreen.classIcon(p.className);
+          }
           const img = card.querySelector('.combat-card-img') as HTMLImageElement | null;
           if (img) {
-            const { real, fallback } = classArtSrc(p.className);
-            const desired = real;
-            if (img.dataset.src !== desired) {
-              img.dataset.src = desired;
-              img.dataset.fb = '0';
-              img.src = real;
-              img.onerror = () => {
-                if (img.dataset.fb !== '1') { img.dataset.fb = '1'; img.src = fallback; }
-                else { img.style.display = 'none'; }
-              };
+            if (p.henchman) {
+              // No photo authored (or a 404) leaves the emoji as the portrait.
+              const real = henchman?.artworkUrl ?? '';
+              if (img.dataset.src !== real) {
+                img.dataset.src = real;
+                img.dataset.fb = '0';
+                img.onerror = () => { img.style.display = 'none'; };
+                if (real) {
+                  img.style.display = '';
+                  img.src = real;
+                } else {
+                  img.style.display = 'none';
+                  img.removeAttribute('src');
+                }
+              }
+            } else {
+              const { real, fallback } = classArtSrc(p.className);
+              const desired = real;
+              if (img.dataset.src !== desired) {
+                img.dataset.src = desired;
+                img.dataset.fb = '0';
+                img.style.display = '';
+                img.src = real;
+                img.onerror = () => {
+                  if (img.dataset.fb !== '1') { img.dataset.fb = '1'; img.src = fallback; }
+                  else { img.style.display = 'none'; }
+                };
+              }
             }
           }
           const nameEl = card.querySelector('.combat-card-name') as HTMLElement | null;
@@ -497,11 +540,19 @@ export class CombatScreen implements Screen {
       }
       const isSelf = p.username === selfUsername;
       card.classList.toggle('self', isSelf);
-      card.setAttribute('data-player-username', p.username);
-      card.onclick = (e) => {
-        e.stopPropagation();
-        this.onUserClick?.(p.username, card);
-      };
+      if (p.henchman) {
+        // No account sits behind a henchman, and every action in the user
+        // popup (View Player, DM, trade, gift, friend, party role) resolves a
+        // real username — so its card is deliberately inert.
+        card.removeAttribute('data-player-username');
+        card.onclick = null;
+      } else {
+        card.setAttribute('data-player-username', p.username);
+        card.onclick = (e) => {
+          e.stopPropagation();
+          this.onUserClick?.(p.username, card);
+        };
+      }
     }
 
     for (const m of combat.monsters) {

@@ -85,20 +85,31 @@ export interface HenchmanOffer {
 // --- Helpers ---
 
 /**
- * Combat-log and targeting handle for a hired henchman.
+ * Combat display names for a party's henchmen, in roster order.
  *
- * Usernames are validated as `/^[a-zA-Z0-9_-]+$/`, so the colons guarantee this
- * can never collide with a real account. That is load-bearing: it is what keeps
- * trade and gift lookups (which resolve targets through the account store)
- * safe against a henchman target for free.
+ * `PartyCombatant.username` is interpolated verbatim into ~25 combat-log lines,
+ * so a henchman's must read as a name. It must also be unique across the WHOLE
+ * combat array — it keys DoT `sourceUsername`, heal-target prose, and the
+ * client's self-substitution ("You") — and neither uniqueness source is safe on
+ * its own: a party may hold two hires of one definition, and an authored
+ * henchman called "Grim" collides exactly with a player account called "Grim".
+ *
+ * So `reserved` takes the party's real usernames, and any name colliding with
+ * an account or with an earlier henchman gains ` #2`, ` #3`. Uniqueness only
+ * has to hold for the lifetime of a battle, which is how long the array lives.
  */
-export function henchmanHandle(instanceId: string): string {
-  return `hench:${instanceId}`;
-}
-
-/** Whether a party-member handle refers to a henchman rather than an account. */
-export function isHenchmanHandle(handle: string): boolean {
-  return handle.startsWith('hench:');
+export function henchmanDisplayNames(names: string[], reserved: readonly string[] = []): string[] {
+  const used = new Set<string>(reserved);
+  return names.map(name => {
+    let candidate = name;
+    let n = 1;
+    while (used.has(candidate)) {
+      n += 1;
+      candidate = `${name} #${n}`;
+    }
+    used.add(candidate);
+    return candidate;
+  });
 }
 
 /**
@@ -114,12 +125,14 @@ export function buildHenchmanCombatant(
   def: HenchmanDefinition,
   hired: HiredHenchman,
   resolveSkill: (id: string) => SkillDefinition | undefined,
+  displayName: string,
 ): PartyCombatant {
   const equippedSkills: (SkillDefinition | null)[] = def.skillIds.map(id => resolveSkill(id) ?? null);
   const maxHp = Math.max(1, Math.floor(def.maxHp));
 
   return {
-    username: henchmanHandle(hired.instanceId),
+    username: displayName,
+    isHenchman: true,
     maxHp,
     currentHp: maxHp,
     baseDamage: Math.max(0, Math.floor(def.baseDamage)),

@@ -316,8 +316,7 @@ export type {
 } from './systems/HenchmanTypes.js';
 export {
   SEED_HENCHMEN,
-  henchmanHandle,
-  isHenchmanHandle,
+  henchmanDisplayNames,
   buildHenchmanCombatant,
 } from './systems/HenchmanTypes.js';
 

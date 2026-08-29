@@ -11,6 +11,7 @@ import {
   rewardAppliesToClass,
   validateRoomEntry,
   buildHenchmanCombatant,
+  henchmanDisplayNames,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -27,6 +28,7 @@ import type {
   RoomEntryFailure,
   RoomEntryRequirements,
   HiredHenchman,
+  HenchmanDefinition,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
@@ -456,6 +458,7 @@ export class PartyBattleManager {
         gridPosition: p.gridPosition,
         className: p.className,
         stunTurns: p.stunTurns > 0 ? p.stunTurns : undefined,
+        henchman: p.isHenchman || undefined,
       })),
       monsters: combat.monsters.map(m => ({
         id: m.id,
@@ -596,11 +599,15 @@ export class PartyBattleManager {
     // Hired henchmen fight alongside the party. A definition deleted by a
     // content deploy is skipped rather than thrown on — this runs inside the
     // battle timer's interval callback, which has no try/catch above it.
-    for (const hired of this.getPartyHenchmen(partyId)) {
-      const def = this.content.getHenchman(hired.henchmanId);
-      if (!def) continue;
-      players.push(buildHenchmanCombatant(def, hired, id => this.content.getSkill(id)));
-    }
+    const hires = this.getPartyHenchmen(partyId)
+      .map(hired => ({ hired, def: this.content.getHenchman(hired.henchmanId) }))
+      .filter((h): h is { hired: HiredHenchman; def: HenchmanDefinition } => !!h.def);
+    // Reserve the party's real usernames: a henchman named the same as a
+    // member would otherwise share its combat identity.
+    const names = henchmanDisplayNames(hires.map(h => h.def.name), players.map(p => p.username));
+    hires.forEach(({ hired, def }, i) => {
+      players.push(buildHenchmanCombatant(def, hired, id => this.content.getSkill(id), names[i]));
+    });
 
     const zone = entry.serverParty.tile.zone;
 
