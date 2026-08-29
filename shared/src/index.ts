@@ -28,7 +28,7 @@ export { HexGrid } from './hex/HexGrid.js';
 export { HexPathfinder } from './hex/HexPathfinder.js';
 
 // Map
-export { WORLD_MAP, DEFAULT_MAP_ID, migrateWorldData } from './hex/MapSchema.js';
+export { WORLD_MAP, DEFAULT_MAP_ID, migrateWorldData, zoneMapConflict, findZonesSpanningMaps } from './hex/MapSchema.js';
 export type { MapSchema, TileDefinition, WorldTileDefinition, WorldData, WorldMapMeta, MapTransitionLink } from './hex/MapSchema.js';
 export { generateWorldMap, getStartingPosition } from './hex/MapData.js';
 

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, WorldMapMeta, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
 import type { SetDefinition } from '@idle-party-rpg/shared';
 import type { ShopDefinition } from '@idle-party-rpg/shared';
+import { zoneMapConflict } from '@idle-party-rpg/shared';
 import type { HenchmanDefinition } from '@idle-party-rpg/shared';
 import type { RecipeDefinition } from '@idle-party-rpg/shared';
 import type { NpcDefinition } from '@idle-party-rpg/shared';
@@ -255,7 +256,10 @@ export class ContentStore {
 
   // --- Tile CRUD ---
 
-  async addOrUpdateTile(tile: WorldTileDefinition): Promise<void> {
+  async addOrUpdateTile(tile: WorldTileDefinition): Promise<{ success: boolean; error?: string }> {
+    const zoneConflict = zoneMapConflict(this.world.tiles, tile);
+    if (zoneConflict) return { success: false, error: zoneConflict };
+
     // Tiles are unique per (mapId, col, row) — two maps may share a (col, row).
     const idx = this.world.tiles.findIndex(t => t.mapId === tile.mapId && t.col === tile.col && t.row === tile.row);
     if (idx >= 0) {
@@ -268,6 +272,7 @@ export class ContentStore {
       this.world.tiles.push(tile);
     }
     await this.save();
+    return { success: true };
   }
 
   async deleteTile(mapId: string, col: number, row: number): Promise<{ success: boolean; error?: string }> {

@@ -20,7 +20,7 @@ import type {
   WorldTileDefinition,
   WorldMapMeta,
 } from '@idle-party-rpg/shared';
-import { migrateLegacySet, migrateLegacySkill, findSetConflicts, validateSkillDefinition, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
+import { migrateLegacySet, migrateLegacySkill, findSetConflicts, zoneMapConflict, validateSkillDefinition, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
 
 /** Content types editable through the generic (MCP) draft-write surface. Single source of truth — derive z.enum(...) lists from this array, don't hand-copy the literals. */
 export const DRAFT_CONTENT_TYPES = [
@@ -724,7 +724,10 @@ export class DraftEditor {
 
   // --- World: tiles ---
 
-  private upsertTileCore(snapshot: ContentSnapshot, input: Omit<WorldTileDefinition, 'id'> & { id?: string }): void {
+  private upsertTileCore(snapshot: ContentSnapshot, input: Omit<WorldTileDefinition, 'id'> & { id?: string }): string | null {
+    const zoneConflict = zoneMapConflict(snapshot.world.tiles, input);
+    if (zoneConflict) return zoneConflict;
+
     const idx = snapshot.world.tiles.findIndex(t => t.mapId === input.mapId && t.col === input.col && t.row === input.row);
     if (idx >= 0) {
       // Preserve the existing GUID on update.
@@ -732,13 +735,15 @@ export class DraftEditor {
     } else {
       snapshot.world.tiles.push({ ...input, id: crypto.randomUUID() });
     }
+    return null;
   }
 
   async upsertTile(versionId: string, input: Omit<WorldTileDefinition, 'id'> & { id?: string }): Promise<DraftWorldResult> {
     const draft = await this.loadDraft(versionId);
     if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
     const { snapshot } = draft;
-    this.upsertTileCore(snapshot, input);
+    const err = this.upsertTileCore(snapshot, input);
+    if (err) return { success: false, status: 400, error: err };
     await this.persist(versionId, snapshot);
     return { success: true, world: snapshot.world };
   }
@@ -748,7 +753,12 @@ export class DraftEditor {
     const draft = await this.loadDraft(versionId);
     if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
     const { snapshot } = draft;
-    for (const input of inputs) this.upsertTileCore(snapshot, input);
+    // All-or-nothing, mirroring deleteTilesBulk: abort without persisting on the
+    // first room that can't be written, so a partial batch never lands.
+    for (const input of inputs) {
+      const err = this.upsertTileCore(snapshot, input);
+      if (err) return { success: false, status: 400, error: err };
+    }
     await this.persist(versionId, snapshot);
     return { success: true, world: snapshot.world };
   }

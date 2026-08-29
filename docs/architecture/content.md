@@ -85,6 +85,14 @@ Runtime: shared skill helpers take a `SkillContent` bundle; `reconcileSkillLoado
 
 `ShopTypes.ts` defines `ShopDefinition` with `id`, `name`, `inventory: ShopItem[]` (item ID + stock + price), and `henchmanIds?: string[]` — the henchmen this shop offers for hire (see Henchman system). A shop may vend items, henchmen, or both. Shops are linked to tiles via `shopId?: string` on `WorldTileDefinition`. Shop definitions stored in `data/shops.json`, managed by `ContentStore`. The client shows a shop button in the room info popup when the current tile has a shop. `ShopPopup` (`client/src/ui/ShopPopup.ts`) provides buy/sell UI — buy mode shows shop inventory with prices, sell mode shows unequipped inventory items only with quantity controls (-/+/All) and sell prices.
 
+## Zone / map constraint
+
+**A zone belongs to exactly one map.** Zones are referenced by id from `WorldTileDefinition.zone`, and `ZoneDefinition` carries no map of its own, so nothing structural stopped one zone id from appearing on two maps. That ambiguity is load-bearing wherever a zone is treated as a *place* rather than a label: zone chat delivers to everyone in the zone, the Social screen's "Zone" filter lists them, and encounter tables resolve per zone. With the constraint each of those is unambiguous.
+
+Enforced by `zoneMapConflict` (`shared/src/hex/MapSchema.ts`) at **every** tile write — `ContentStore.addOrUpdateTile` for live edits and `DraftEditor.upsertTileCore` for draft edits, which also backs the MCP `upsert_tiles` tool. Bulk upserts are all-or-nothing: the first offending room aborts the batch without persisting, mirroring `deleteTilesBulk`.
+
+It is deliberately **not retroactive**. Content authored before the constraint may already span maps, and refusing those writes would make the rooms uneditable — so a write is refused only when it would *add* a map to a zone that is not already on it. Existing violations stay editable and are reported by `findZonesSpanningMaps`, surfaced through `validate_draft`, so an author can split the zone deliberately rather than discovering the ambiguity through misrouted zone chat.
+
 ## Henchman system
 
 `HenchmanTypes.ts` defines `HenchmanDefinition` with `id`, `name`, optional `description`, `className`, `level`, `maxHp`, `baseDamage`, optional `damageType`, `skillIds`, `emoji` (required), and optional `artworkUrl`. Definitions live in `data/henchmen.json`, managed by `ContentStore`. **Dev-only seed**: `SEED_HENCHMEN` is only seeded when `NODE_ENV !== 'production'`.

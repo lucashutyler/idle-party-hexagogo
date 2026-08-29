@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import type { HenchmanDefinition, ShopDefinition, SkillDefinition } from '@idle-party-rpg/shared';
+import { findZonesSpanningMaps } from '@idle-party-rpg/shared';
 
 // ContentStore resolves its data dir from process.cwd() at module load, so the
 // tmp-dir chdir must happen BEFORE the module is imported (dynamic import below).
@@ -163,5 +164,52 @@ describe('ContentStore henchmen snapshot semantics', () => {
 
     expect(store.getHenchman('hench_old')).toBeUndefined();
     expect(store.getHenchman('hench_new')).toBeDefined();
+  });
+});
+
+describe('ContentStore zone/map constraint', () => {
+  function worldTile(mapId: string, col: number, row: number, zone: string) {
+    return { id: '', mapId, col, row, type: 'plains', zone, name: `${col},${row}` };
+  }
+
+  it('the seeded default world satisfies the constraint', async () => {
+    // A guard on our own content: the constraint is worthless if a fresh install
+    // violates it out of the box.
+    const store = await loadFreshStore();
+    expect(findZonesSpanningMaps(store.getWorld().tiles)).toEqual([]);
+  });
+
+  it('accepts a room whose zone is new to the world', async () => {
+    const store = await loadFreshStore();
+    const result = await store.addOrUpdateTile(worldTile('overworld', 40, 40, 'brand_new_zone'));
+    expect(result.success).toBe(true);
+  });
+
+  it('refuses a room that would put an existing zone onto a second map', async () => {
+    const store = await loadFreshStore();
+    await store.addOrUpdateTile(worldTile('overworld', 41, 41, 'shared_zone'));
+
+    const result = await store.addOrUpdateTile(worldTile('sewers', 41, 41, 'shared_zone'));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('cannot span maps');
+    // And the refused room must not have been written.
+    expect(store.getWorld().tiles.some(t => t.mapId === 'sewers' && t.zone === 'shared_zone')).toBe(false);
+  });
+
+  it('still allows editing a room in a zone that already spans maps', async () => {
+    const store = await loadFreshStore();
+    // Force a pre-constraint violation directly into the world, the way legacy
+    // content would already look.
+    const world = store.getWorld();
+    world.tiles.push(
+      { ...worldTile('overworld', 42, 42, 'legacy_zone'), id: 'legacy-a' },
+      { ...worldTile('crypt', 42, 42, 'legacy_zone'), id: 'legacy-b' },
+    );
+
+    const result = await store.addOrUpdateTile({ ...worldTile('crypt', 42, 42, 'legacy_zone'), name: 'Renamed' });
+
+    expect(result.success).toBe(true);
+    expect(store.getWorld().tiles.find(t => t.id === 'legacy-b')?.name).toBe('Renamed');
   });
 });

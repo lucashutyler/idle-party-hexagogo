@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { migrateLegacySet } from '@idle-party-rpg/shared';
+import { migrateLegacySet, findZonesSpanningMaps } from '@idle-party-rpg/shared';
 import type { RoomEntryRequirements } from '@idle-party-rpg/shared';
 import type { ContentSnapshot } from '../../game/VersionStore.js';
 import type { McpToolDeps } from './McpToolDeps.js';
@@ -163,6 +163,14 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
         }
       });
     }
+  }
+
+  // --- Zones ---
+  // A zone belongs to exactly one map. The tile write guard stops new
+  // violations, but content authored before the constraint may already span —
+  // and nothing else surfaces it, so report it here.
+  for (const { zone, mapIds } of findZonesSpanningMaps(snapshot.world.tiles)) {
+    problems.push(`Zone '${zone}' spans ${mapIds.length} maps (${mapIds.join(', ')}). A zone must belong to exactly one map — split it so each map has its own zone.`);
   }
 
   // --- Henchmen ---

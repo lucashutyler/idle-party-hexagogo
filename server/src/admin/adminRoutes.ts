@@ -363,7 +363,8 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       res.json({ success: true, world: result.world });
     } else {
       const content = getContentStore();
-      await content.addOrUpdateTile({ id: '', ...tileInput });
+      const result = await content.addOrUpdateTile({ id: '', ...tileInput });
+      if (!result.success) { res.status(400).json({ error: result.error }); return; }
       const relocated = rebuildGrid();
       res.json({ success: true, world: content.getWorld(), relocated });
     }
