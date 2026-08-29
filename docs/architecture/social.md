@@ -76,6 +76,8 @@ Hired henchmen live in `GamePartyInfo.henchmen: HiredHenchman[]`, a **sibling** 
 
 The two rosters **share** the nine grid squares. `PartySystem` allocates across both through one `occupiedPositions` helper — the only place that knows it — so two occupants can never land on one square. Henchmen count toward `MAX_PARTY_SIZE` everywhere, invites included.
 
+**Balance**: henchmen are *typically* worse than a party mate, not *strictly* worse. Nothing in code ties a henchman's stats to the party's lowest level — stats are fixed content, so balance is a job for whoever authors the definition and picks which shop and map it appears on. Henchmen also count toward party-size-scaled effects (Bard Rally, Nimble Dodge, Unnerve, party-wide cooldown reduction) exactly as a player does, which is deliberate: a hire is a real contribution, not a pure handicap. Superseded the original "must be lower than the lowest party member / last resort" rule — see `ideas/backlog-2026-april.md`.
+
 **Roles**: hiring and moving a henchman are gated on the invite role, dismissing on the kick role (owner or leader). The client hides those affordances for plain members rather than letting the server refuse silently.
 
 **Identity**: a henchman's combat name is its definition name, disambiguated with ` #2`/` #3` against both other henchmen and the party's real usernames (`henchmanDisplayNames`). `PartyCombatant.username` is interpolated verbatim into ~25 combat-log lines and keys DoT attribution and heal-target prose, so a henchman sharing a name with a member would corrupt combat, not just prose.
