@@ -166,6 +166,71 @@ describe('PartySystem henchmen', () => {
     expect(party.henchmen).toHaveLength(0);
   });
 
+  it('replaces the henchman when asked to, in a party of four players and a henchman', () => {
+    // The case the cap must not block: the swap leaves the body count unchanged,
+    // so a party that is already full can still change who it has hired.
+    const party = soloParty('alice');
+    fillWithPlayers(party, ['bob', 'carol', 'dave']);
+    const first = hire('alice', 'hench_a');
+    expect(party.members.length + party.henchmen!.length).toBe(MAX_PARTY_SIZE);
+
+    const replaced = system.hireHenchman('alice', 'hench_b', 'overworld', state.getPartyId, true);
+
+    expect(typeof replaced).not.toBe('string');
+    expect(party.henchmen).toHaveLength(1);
+    expect(party.henchmen![0].henchmanId).toBe('hench_b');
+    expect(party.henchmen![0].instanceId).not.toBe(first.instanceId);
+    expect(party.members.length + party.henchmen!.length).toBe(MAX_PARTY_SIZE);
+  });
+
+  it('replaces in a solo party too', () => {
+    const party = soloParty('alice');
+    hire('alice', 'hench_a');
+
+    const replaced = system.hireHenchman('alice', 'hench_b', 'overworld', state.getPartyId, true);
+
+    expect(typeof replaced).not.toBe('string');
+    expect(party.henchmen!.map(h => h.henchmanId)).toEqual(['hench_b']);
+  });
+
+  it('the replacement inherits the square its predecessor held', () => {
+    const party = soloParty('alice');
+    const first = hire('alice', 'hench_a');
+    system.setHenchmanGridPosition('alice', first.instanceId, 7, state.getPartyId);
+
+    system.hireHenchman('alice', 'hench_b', 'overworld', state.getPartyId, true);
+
+    expect(party.henchmen![0].gridPosition).toBe(7);
+  });
+
+  it('replacing the same definition still swaps to a fresh hire', () => {
+    const party = soloParty('alice');
+    const first = hire('alice', 'hench_a');
+
+    system.hireHenchman('alice', 'hench_a', 'overworld', state.getPartyId, true);
+
+    expect(party.henchmen).toHaveLength(1);
+    expect(party.henchmen![0].instanceId).not.toBe(first.instanceId);
+  });
+
+  it('still refuses a replacement when the party is full of players and has no henchman', () => {
+    const party = soloParty('alice');
+    fillWithPlayers(party, ['bob', 'carol', 'dave', 'erin']);
+
+    expect(system.hireHenchman('alice', 'hench_a', 'overworld', state.getPartyId, true))
+      .toContain('Party is full');
+  });
+
+  it('only lets owners and leaders replace', () => {
+    const party = soloParty('alice');
+    fillWithPlayers(party, ['bob']);
+    hire('alice', 'hench_a');
+
+    expect(system.hireHenchman('bob', 'hench_b', 'overworld', state.getPartyId, true))
+      .toBe('Only owners and leaders can hire henchmen');
+    expect(party.henchmen![0].henchmanId).toBe('hench_a');
+  });
+
   it('refuses a hire when the party is already full of players', () => {
     const party = soloParty('alice');
     fillWithPlayers(party, ['bob', 'carol', 'dave', 'erin']);

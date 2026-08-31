@@ -351,6 +351,7 @@ export class PartySystem {
     henchmanId: string,
     mapId: string,
     getPlayerPartyId: (u: string) => string | null,
+    replace = false,
   ): HiredHenchman | string {
     const partyId = getPlayerPartyId(callerUsername);
     if (!partyId) return 'You are not in a party';
@@ -363,17 +364,25 @@ export class PartySystem {
       return 'Only owners and leaders can hire henchmen';
     }
 
-    const henchmanCount = party.henchmen?.length ?? 0;
-    if (henchmanCount >= MAX_HENCHMEN_PER_PARTY) {
-      const noun = MAX_HENCHMEN_PER_PARTY === 1 ? 'henchman' : 'henchmen';
-      return `Your party can only have ${MAX_HENCHMEN_PER_PARTY} ${noun} at a time — dismiss to hire another`;
+    let vacatedPosition: PartyGridPosition | null = null;
+    if ((party.henchmen?.length ?? 0) >= MAX_HENCHMEN_PER_PARTY) {
+      if (!replace) {
+        const noun = MAX_HENCHMEN_PER_PARTY === 1 ? 'henchman' : 'henchmen';
+        return `Your party can only have ${MAX_HENCHMEN_PER_PARTY} ${noun} at a time`;
+      }
+      // Drop the outgoing hire first so the body count never rises: a party of
+      // four players and a henchman is full, yet swapping it is still legal.
+      // The newcomer inherits its square, keeping the formation as arranged.
+      const outgoing = party.henchmen![0];
+      vacatedPosition = outgoing.gridPosition;
+      party.henchmen = party.henchmen!.slice(1);
     }
 
     if (partyBodyCount(party) >= MAX_PARTY_SIZE) {
       return `Party is full (max ${MAX_PARTY_SIZE}) — dismiss someone first`;
     }
 
-    const gridPosition = firstFreePosition(party);
+    const gridPosition = vacatedPosition ?? firstFreePosition(party);
     if (gridPosition === null) return 'No free position in the party formation';
 
     const hired: HiredHenchman = {

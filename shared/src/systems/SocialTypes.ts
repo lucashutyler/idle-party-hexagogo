@@ -234,6 +234,8 @@ export interface ClientSetPartyGridPositionMessage {
 export interface ClientHireHenchmanMessage {
   type: 'hire_henchman';
   henchmanId: string;
+  /** Swap out the henchman the party already has. Refused without it. */
+  replace?: boolean;
 }
 
 export interface ClientDismissHenchmanMessage {
