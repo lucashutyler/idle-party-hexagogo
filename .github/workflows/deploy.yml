@@ -14,28 +14,85 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          # Covers the whole loop, not one command. `npm ci` reinstalls from
+          # scratch, so the 10m default is not enough for several instances.
+          command_timeout: 30m
           # Deploys every instance installed on the host. The primary lives at
           # /opt/idle-party-rpg; setup-prod.sh --instance NAME adds siblings at
           # /opt/idle-party-rpg-NAME, and the directory name is also the unit name.
           # One instance failing doesn't block the others — the job fails at the end.
           script: |
+            DEPLOYED=""
+            SKIPPED=""
             FAILED=""
             for DIR in /opt/idle-party-rpg /opt/idle-party-rpg-*; do
-              [ -d "$DIR/.git" ] || continue
+              [ -e "$DIR/.git" ] || continue
               NAME=$(basename "$DIR")
-              echo "=== Deploying $NAME ($DIR) ==="
+
+              BRANCH=$(cd "$DIR" && git rev-parse --abbrev-ref HEAD 2>/dev/null) || BRANCH=""
+              if [ -z "$BRANCH" ]; then
+                echo "=== FAILING $NAME — not a usable git checkout ==="
+                FAILED="$FAILED $NAME"
+                continue
+              fi
+              if [ "$BRANCH" = "HEAD" ]; then
+                # Pinned to a commit deliberately (a rollback). `git pull` refused to
+                # touch this; `git reset --hard` would roll it forward instead.
+                echo "=== SKIPPING $NAME — detached HEAD ==="
+                SKIPPED="$SKIPPED $NAME"
+                continue
+              fi
+
+              echo "=== Deploying $NAME ($DIR) on $BRANCH ==="
               (
                 set -e
                 cd "$DIR"
-                git pull
-                npm install
-                npm run build
+
+                git fetch --prune origin
+                # reset, not merge: a merge aborts on any local drift, and npm
+                # rewriting package-lock.json is enough to cause some. Ignored
+                # paths (data/) are untouched.
+                git reset --hard "origin/$BRANCH"
+
+                # Before the build: it renders the new commit's nginx template, and
+                # failing here must not leave a rebuilt client behind an old server.
                 bash deploy/sync-nginx.sh
+
+                npm ci
+                npm run build
                 sudo systemctl restart "$NAME"
-              ) || FAILED="$FAILED $NAME"
+
+                # The unit is Type=simple with Restart=always, so restart returns 0
+                # the moment the process is forked — a crash-looping build would
+                # otherwise report as a successful deploy.
+                sleep 10
+                systemctl is-active --quiet "$NAME"
+
+                echo "$NAME deployed at $(git rev-parse --short HEAD)"
+              )
+              # Capture the status rather than `( ... ) || FAILED=...`: that puts the
+              # subshell in an AND-OR list, where the shell ignores `set -e` inside it
+              # and every later step runs even after one fails.
+              if [ $? -ne 0 ]; then
+                FAILED="$FAILED $NAME"
+              else
+                DEPLOYED="$DEPLOYED $NAME"
+              fi
             done
+
+            if [ -n "$SKIPPED" ]; then
+              echo "Skipped (detached HEAD):$SKIPPED"
+            fi
             if [ -n "$FAILED" ]; then
               echo "Deploy failed for:$FAILED"
               exit 1
             fi
-            echo "All instances deployed."
+            if [ -z "$DEPLOYED" ]; then
+              if [ -n "$SKIPPED" ]; then
+                echo "No instances deployed — every instance was skipped:$SKIPPED"
+              else
+                echo "No instances deployed — nothing under /opt/idle-party-rpg* looked like a checkout"
+              fi
+              exit 1
+            fi
+            echo "Deployed:$DEPLOYED"
