@@ -1411,11 +1411,18 @@ wss.on('connection', (ws) => {
           return;
         }
 
+        const partyIdForHire = session.getPartyId();
+        const outgoing = partyIdForHire ? playerManager.parties.getHenchmen(partyIdForHire)[0] : undefined;
+        const outgoingName = outgoing
+          ? gameLoop.contentStore.getHenchman(outgoing.henchmanId)?.name
+          : undefined;
+
         const result = playerManager.parties.hireHenchman(
           username,
           msg.henchmanId,
           session.getMapId(),
           (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
+          msg.replace === true,
         );
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
@@ -1427,7 +1434,9 @@ wss.on('connection', (ws) => {
           playerManager.partyBattles.restartBattle(partyId);
           const party = playerManager.parties.getParty(partyId);
           for (const m of party?.members ?? []) {
-            playerManager.getSessionByUsername(m.username)?.addLogEntry(`${def.name} joins the party.`, 'move');
+            const s = playerManager.getSessionByUsername(m.username);
+            if (outgoingName) s?.addLogEntry(`${outgoingName} leaves the party.`, 'move');
+            s?.addLogEntry(`${def.name} joins the party.`, 'move');
             playerManager.sendStateToPlayer(m.username);
           }
         }

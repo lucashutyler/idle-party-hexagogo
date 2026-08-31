@@ -24,7 +24,7 @@ export interface HenchmanDefinition {
 
 /** A henchman a party currently holds. */
 export interface HiredHenchman {
-  /** Unique per hire — a party may hold two hires of one `henchmanId`. */
+  /** Unique per hire; `henchmanId` is the definition and is not unique in principle. */
   instanceId: string;
   henchmanId: string;
   gridPosition: PartyGridPosition;

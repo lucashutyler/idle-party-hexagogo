@@ -154,18 +154,21 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     expect(henchman.baseDamage).toBe(6);
   });
 
-  it('gives two hires of the same definition distinct combat names', async () => {
+  it('refuses a second hire — one henchman per party', async () => {
     const { pm, partyId } = await setup();
     hire(pm);
-    hire(pm);
 
-    expect(combatPlayers(pm, partyId).map(p => p.username).sort())
-      .toEqual(['Grim the Sellsword', 'Grim the Sellsword #2', 'alice']);
+    const second = pm.parties.hireHenchman(
+      'alice', HENCH_ID, DEFAULT_MAP_ID,
+      (u) => pm.getSessionByUsername(u)?.getPartyId() ?? null,
+    );
+
+    expect(typeof second).toBe('string');
+    expect(combatPlayers(pm, partyId)).toHaveLength(2);
   });
 
-  it('places henchmen on squares no player occupies', async () => {
+  it('places the henchman on a square no player occupies', async () => {
     const { pm, partyId } = await setup();
-    hire(pm);
     hire(pm);
 
     const positions = combatPlayers(pm, partyId).map(p => p.gridPosition);

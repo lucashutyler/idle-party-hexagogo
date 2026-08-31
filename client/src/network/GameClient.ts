@@ -528,8 +528,8 @@ export class GameClient {
   // --- Henchmen ---
 
   /** Hire a henchman from the current room's shop; a refusal comes back as an `error` message. */
-  sendHireHenchman(henchmanId: string): void {
-    this.sendRaw({ type: 'hire_henchman', henchmanId });
+  sendHireHenchman(henchmanId: string, replace = false): void {
+    this.sendRaw({ type: 'hire_henchman', henchmanId, ...(replace ? { replace: true } : {}) });
   }
 
   sendDismissHenchman(instanceId: string): void {
