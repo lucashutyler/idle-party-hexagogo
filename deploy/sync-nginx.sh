@@ -38,8 +38,10 @@ fi
 
 # Domain and port both come from this instance's .env, so the rendered config
 # can never point at another instance's port.
-DOMAIN=$(grep '^APP_URL=' "$ENV_FILE" | head -1 | cut -d= -f2- | sed -e 's|^https://||' -e 's|^http://||' -e 's|/.*$||')
-PORT=$(grep '^PORT=' "$ENV_FILE" | head -1 | cut -d= -f2)
+# `|| true`: under `set -euo pipefail` a bare assignment from a no-match grep
+# aborts the script, which made the fallbacks below unreachable.
+DOMAIN=$(grep '^APP_URL=' "$ENV_FILE" | head -1 | cut -d= -f2- | sed -e 's|^https://||' -e 's|^http://||' -e 's|/.*$||' || true)
+PORT=$(grep '^PORT=' "$ENV_FILE" | head -1 | cut -d= -f2 || true)
 PORT="${PORT:-3001}"
 
 if [[ -z "$DOMAIN" ]]; then
