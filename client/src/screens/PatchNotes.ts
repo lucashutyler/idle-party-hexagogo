@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.08.29.1',
+    notes: [
+      'Your party can now only have one henchman at a time. Hiring a second — including another copy of the same one — is turned down until you dismiss the one you have.',
+    ],
+  },
+  {
     version: '2026.08.28.1',
     notes: [
       'Some shops now keep henchmen on hand — hired help who join your party and fight alongside you. Hiring is free.',

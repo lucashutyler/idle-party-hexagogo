@@ -1,5 +1,5 @@
 import type { GamePartyInfo, HiredHenchman, PartyGridPosition, PartyInvite, PartyRole } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY } from '@idle-party-rpg/shared';
 
 let partyIdCounter = 0;
 
@@ -363,6 +363,12 @@ export class PartySystem {
       return 'Only owners and leaders can hire henchmen';
     }
 
+    const henchmanCount = party.henchmen?.length ?? 0;
+    if (henchmanCount >= MAX_HENCHMEN_PER_PARTY) {
+      const noun = MAX_HENCHMEN_PER_PARTY === 1 ? 'henchman' : 'henchmen';
+      return `Your party can only have ${MAX_HENCHMEN_PER_PARTY} ${noun} at a time — dismiss to hire another`;
+    }
+
     if (partyBodyCount(party) >= MAX_PARTY_SIZE) {
       return `Party is full (max ${MAX_PARTY_SIZE}) — dismiss someone first`;
     }
@@ -457,7 +463,8 @@ export class PartySystem {
     // party.henchmen aliases `kept` mid-loop so each re-placement counts as taken.
     const kept: HiredHenchman[] = [];
     party.henchmen = kept;
-    for (const h of henchmen) {
+    // Saves written before the cap existed may hold more than it allows.
+    for (const h of henchmen.slice(0, MAX_HENCHMEN_PER_PARTY)) {
       if (!occupiedPositions(party).has(h.gridPosition)) {
         kept.push(h);
         continue;

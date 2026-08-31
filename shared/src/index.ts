@@ -395,7 +395,7 @@ export type {
 } from './systems/DungeonTypes.js';
 
 // Social types
-export { MAX_PARTY_SIZE } from './systems/SocialTypes.js';
+export { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY } from './systems/SocialTypes.js';
 export type {
   PlayerListEntry,
   FriendEntry,

@@ -97,6 +97,8 @@ It is deliberately **not retroactive**. Content authored before the constraint m
 
 `HenchmanTypes.ts` defines `HenchmanDefinition` with `id`, `name`, optional `description`, `className`, `level`, `maxHp`, `baseDamage`, optional `damageType`, `skillIds`, `emoji` (required), and optional `artworkUrl`. Definitions live in `data/henchmen.json`, managed by `ContentStore`. **Dev-only seed**: `SEED_HENCHMEN` is only seeded when `NODE_ENV !== 'production'`.
 
+A party may hold only one henchman at a time (`MAX_HENCHMEN_PER_PARTY`) — see `social.md`.
+
 Henchmen are **vended through shops**, not through a content type of their own — a shop lists them in `henchmanIds`, and the shop is linked to a room by the existing `shopId?: string` on `WorldTileDefinition`. There is no henchmen-specific tile field.
 
 Stats are **fixed**: no levelling, no equipment, no inventory, so the definition is the whole of a henchman's power. `level` is cosmetic — `maxHp` and `baseDamage` are authoritative and are not derived from it. `className` is a **hidden combat archetype**, not a player-facing label: the combat engine keys five behaviours off it (Sanctuary's non-Knight target pick, War Cry's `targetClass` match, Martyr's Knight-damage trigger, and monster `all_class` skill filters), so every henchman must carry a real `ClassName`, but the hire UI never shows it.

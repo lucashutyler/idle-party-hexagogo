@@ -34,6 +34,8 @@ export interface GuildMemberEntry {
 export type PartyRole = 'owner' | 'leader' | 'member';
 export type PartyGridPosition = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export const MAX_PARTY_SIZE = 5;
+/** Henchmen one party may hold at once. Henchmen also count toward MAX_PARTY_SIZE. */
+export const MAX_HENCHMEN_PER_PARTY = 1;
 
 export interface GamePartyMember {
   username: string;
