@@ -163,7 +163,7 @@ if [[ "$SKIP_ENV" == "false" ]]; then
     echo "Ports already in use by other instances:"
     echo "$USED_PORTS" | while read -r used owner; do
       [[ -n "$used" ]] && echo "  $used  ($owner)"
-    done
+    done || true
   fi
   read -rp "Server port [$SUGGESTED_PORT]: " PORT
   PORT="${PORT:-$SUGGESTED_PORT}"
