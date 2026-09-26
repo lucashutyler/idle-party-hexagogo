@@ -1,4 +1,8 @@
 import './styles/pixel-theme.css';
+import './styles/charitems.css';
+import './styles/crafting.css';
+import './styles/mobile-theme.css';
+import './styles/combat.css';
 import { App } from './App';
 import { registerServiceWorker } from './network/PushNotifications';
 
