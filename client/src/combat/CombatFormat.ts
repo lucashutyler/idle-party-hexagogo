@@ -1,4 +1,6 @@
-import type { ClientCombatStatus, CombatEvent } from '@idle-party-rpg/shared';
+import type { ClientCombatStatus, CombatEvent, LevelCon, MasteryEntry, MonsterLevelSource, MonsterTier } from '@idle-party-rpg/shared';
+import { LEVEL_CON_INFO, levelCon } from '@idle-party-rpg/shared';
+import type { EnrageDisplay } from './CombatPlayback';
 
 export interface StatusPip {
   icon: string;
@@ -64,6 +66,8 @@ export function statusIcon(status: ClientCombatStatus): { icon: string; tone: 'b
       return { icon: '♨', tone: 'bad' };
     case 'buff':
       return { icon: /song|anthem|rally/.test(name) ? '🎵' : '⬆', tone: 'good' };
+    case 'enrage':
+      return { icon: '😡', tone: 'bad' };
     default:
       return { icon: '⬇', tone: 'bad' };
   }
@@ -106,4 +110,68 @@ export function initials(name: string): string {
   if (words.length === 0) return '?';
   const letters = words.length === 1 ? words[0].slice(0, 2) : words[0][0] + words[1][0];
   return letters.toUpperCase();
+}
+
+/** "×1.6": enrage and other damage multipliers, at most two decimals. */
+export function formatMultiplier(value: number): string {
+  return `×${Math.round(value * 100) / 100}`;
+}
+
+/** Boss bar enrage slot: "⏱ 4:48" counting down (rounded up), then "🔥 ×1.6". */
+export function enrageSlotText(display: Pick<EnrageDisplay, 'state' | 'remainingMs' | 'multiplier'>): string {
+  if (display.state === 'on') return `🔥 ${formatMultiplier(display.multiplier)}`;
+  return `⏱ ${formatClock(Math.ceil(display.remainingMs / 1000) * 1000)}`;
+}
+
+/** Regroups left on a checkpoint floor; null when the floor has no budget. */
+export function retriesLeft(wipes: number | undefined, maxWipes: number | undefined): number | null {
+  if (maxWipes === undefined || !(maxWipes > 0)) return null;
+  return Math.max(0, maxWipes - Math.max(0, wipes ?? 0));
+}
+
+export function retriesText(left: number): string {
+  if (left === 0) return 'No retries left';
+  return `${left} ${left === 1 ? 'retry' : 'retries'} left`;
+}
+
+export interface MonsterLevelBadge {
+  level: number;
+  con: LevelCon;
+  label: string;
+  glyph: string;
+}
+
+/** Badge for an authored monster level, coloured by the gap to the viewer; derived levels get none. */
+export function monsterLevelBadge(
+  info: { level?: number; levelSource?: MonsterLevelSource } | undefined,
+  viewerLevel: number | undefined,
+): MonsterLevelBadge | null {
+  if (!info || info.levelSource !== 'authored' || !info.level || !(info.level > 0)) return null;
+  const con = levelCon(info.level, viewerLevel ?? info.level);
+  return { level: info.level, con, ...LEVEL_CON_INFO[con] };
+}
+
+export const TIER_INFO: Record<MonsterTier, { label: string; glyph: string }> = {
+  trash: { label: 'Normal', glyph: '' },
+  elite: { label: 'Elite', glyph: '◆' },
+  boss: { label: 'Boss', glyph: '♛' },
+  raid: { label: 'Raid boss', glyph: '♛' },
+};
+
+export function isBossOrRaid(tier: MonsterTier | undefined): boolean {
+  return tier === 'boss' || tier === 'raid';
+}
+
+export function hasToughTier(tier: MonsterTier | undefined): boolean {
+  return tier === 'elite' || isBossOrRaid(tier);
+}
+
+/** "★★☆☆☆ +4 % · 212 / 250 kills", or "★★★★★ Mastered · +10 %". */
+export function masteryLine(entry: Pick<MasteryEntry, 'rank' | 'maxRank' | 'kills' | 'nextAt' | 'bonusPct'>): string {
+  const maxRank = Math.max(1, entry.maxRank);
+  const rank = Math.max(0, Math.min(maxRank, entry.rank));
+  const stars = '★'.repeat(rank) + '☆'.repeat(maxRank - rank);
+  const bonus = entry.bonusPct > 0 ? ` · +${Math.round(entry.bonusPct)} %` : '';
+  if (entry.nextAt === null) return `${stars} Mastered${bonus}`;
+  return `${stars}${bonus} · ${entry.kills.toLocaleString('en-US')} / ${entry.nextAt.toLocaleString('en-US')} kills`;
 }

@@ -1,10 +1,16 @@
-import type { SkillDefinition, SkillCardType } from '@idle-party-rpg/shared';
+import type { PassiveEffectKind, SkillDefinition, SkillCardType } from '@idle-party-rpg/shared';
 import {
   SKILL_CARD_TYPE_INFO,
   SKILL_TRIGGER_INFO,
   getSkillCardType,
   getSkillTrigger,
+  skillRatingMitigation,
 } from '@idle-party-rpg/shared';
+
+const RATING_KIND_LABELS: Partial<Record<PassiveEffectKind, string>> = {
+  physical_reduction: 'Physical',
+  magical_reduction_party: 'Magical & holy',
+};
 
 export interface SkillCardSummary {
   cardType: SkillCardType;
@@ -40,6 +46,16 @@ export function skillMetaParts(skill: SkillDefinition): string[] {
     .filter((p): p is string => p !== null);
 }
 
+/** Mitigation of Guard/Bless-style rating options against enemies of the owner's level: "≈50 % vs same-level enemies". */
+export function skillComputedLine(skill: SkillDefinition): string | null {
+  const parts = (skill.passiveEffects ?? [])
+    .filter(e => RATING_KIND_LABELS[e.kind] && (e.valuePerLevel ?? 0) > 0)
+    .map(e => ({ label: RATING_KIND_LABELS[e.kind]!, pct: Math.round(skillRatingMitigation(e.valuePerLevel ?? 0) * 100) }));
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return `≈${parts[0].pct}\u202f% vs same-level enemies`;
+  return `${parts.map(p => `${p.label} ≈${p.pct}\u202f%`).join(' · ')} vs same-level enemies`;
+}
+
 export function renderSkillCardChip(skill: SkillDefinition): string {
   const cardType = getSkillCardType(skill);
   const info = SKILL_CARD_TYPE_INFO[cardType];
@@ -56,7 +72,9 @@ export function renderSkillCardMeta(skill: SkillDefinition): string {
   const trigger = s.trigger
     ? `<span class="skill-card-meta-trigger" title="${escapeAttr(s.triggerDescription ?? '')}"><span class="skill-card-meta-trigger-prefix">Trigger: </span>${s.trigger}</span>`
     : '';
-  return `<span class="skill-card-meta" data-card-type="${s.cardType}">${renderSkillCardChip(skill)}${timing}${trigger}</span>`;
+  const line = skillComputedLine(skill);
+  const computed = line ? `<span class="skill-card-meta-computed">${line}</span>` : '';
+  return `<span class="skill-card-meta" data-card-type="${s.cardType}">${renderSkillCardChip(skill)}${timing}${trigger}${computed}</span>`;
 }
 
 function escapeAttr(s: string): string {

@@ -10,7 +10,7 @@ import {
   MOVE_DURATION,
   RUN_AVAILABLE_MS,
 } from '@idle-party-rpg/shared';
-import type { BattleResult, BattleTimerState, PartyCombatantInit, PartyCombatState } from '@idle-party-rpg/shared';
+import type { BattleResult, BattleTimerState, PartyCombatantInit, PartyCombatState, PartyGridPosition } from '@idle-party-rpg/shared';
 import { ServerBattleTimer, LIVE_LOG_RING_SIZE } from '../src/game/ServerBattleTimer.js';
 import type { CombatFlush, ServerBattleCallbacks } from '../src/game/ServerBattleTimer.js';
 import type { ServerParty } from '../src/game/ServerParty.js';
@@ -43,7 +43,7 @@ function makeCombat(fight: Fight): PartyCombatState {
 
 /** Two players act 100 ms apart, so half the lines land on steps between flushes. */
 function twoPlayerLongFight(): PartyCombatState {
-  const player = (username: string, gridPosition: number): PartyCombatantInit => ({
+  const player = (username: string, gridPosition: PartyGridPosition): PartyCombatantInit => ({
     username,
     maxHp: 1_000_000,
     baseDamage: 1,
@@ -514,6 +514,164 @@ describe('ServerBattleTimer', () => {
       h.timer.destroy();
       vi.advanceTimersByTime(120_000);
       expect(h.createCombat).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('retreat', () => {
+    it('refuses before Run is available, then ends the fight as a retreat without a result', () => {
+      const h = harness('long');
+      h.timer.start();
+      const battleId = h.timer.battleId;
+      vi.advanceTimersByTime(RUN_AVAILABLE_MS - 500);
+      expect(h.timer.retreat(battleId, 'Your party slips away.')).toBe(false);
+      vi.advanceTimersByTime(500);
+      expect(h.timer.retreat(battleId + 1, 'nope')).toBe(false);
+      expect(h.timer.retreat(battleId, 'Your party slips away.')).toBe(true);
+
+      const last = h.flushes[h.flushes.length - 1];
+      expect(last.battleId).toBe(battleId);
+      expect(last.snapshot).toBe('dynamic');
+      expect(last.events.filter(e => e.kind === 'battle_end').map(e => e.result)).toEqual(['retreat']);
+      expect(last.log).toContain('Your party slips away.');
+      expect(h.timer.currentCombat!.result).toBe('retreat');
+      expect(h.timer.visual).toBe('retreat');
+      expect(h.timer.currentState).toBe('result');
+      expect(h.timer.lastResult).toBeUndefined();
+      expect(h.ends).toEqual([]);
+      expect(h.timer.retreat(battleId, 'again')).toBe(false);
+
+      vi.advanceTimersByTime(RESULT_PAUSE + MOVE_DURATION);
+      expect(h.createCombat).toHaveBeenCalledTimes(2);
+      expect(h.timer.battleId).not.toBe(battleId);
+      expect(h.timer.visual).toBe('fighting');
+      expect(h.ends).toEqual([]);
+      h.timer.destroy();
+    });
+
+    it('lets onRetreat set a route, then walks it after the result pause', () => {
+      let party: FakeParty | null = null;
+      const h = harness('long', {
+        callbacks: {
+          onRetreat: () => { party!.hasDestination = true; },
+          canMoveToNextTile: () => true,
+        },
+      });
+      party = h.party;
+      h.timer.start();
+      vi.advanceTimersByTime(RUN_AVAILABLE_MS);
+      expect(h.timer.retreat(h.timer.battleId, 'Falling back.')).toBe(true);
+      vi.advanceTimersByTime(RESULT_PAUSE - 1);
+      expect(h.party.moveToNextTile).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(h.party.moveToNextTile).toHaveBeenCalledTimes(1);
+      h.timer.destroy();
+    });
+
+    it('scheduleRetreat waits until Run is available', () => {
+      const h = harness('long');
+      h.timer.start();
+      const battleId = h.timer.battleId;
+      h.timer.scheduleRetreat(battleId, 0, 'Slipping away.');
+      vi.advanceTimersByTime(RUN_AVAILABLE_MS - COMBAT_STEP_MS);
+      expect(h.timer.isFighting(battleId)).toBe(true);
+      vi.advanceTimersByTime(2 * COMBAT_STEP_MS);
+      expect(h.timer.isFighting(battleId)).toBe(false);
+      expect(h.timer.currentCombat!.result).toBe('retreat');
+      expect(h.timer.currentCombat!.elapsedMs).toBeGreaterThanOrEqual(RUN_AVAILABLE_MS);
+      h.timer.destroy();
+    });
+
+    it('a scheduled retreat dies with its battle', () => {
+      const h = harness('long');
+      h.timer.start();
+      const first = h.timer.battleId;
+      h.timer.scheduleRetreat(first, RUN_AVAILABLE_MS, 'Slipping away.');
+      vi.advanceTimersByTime(2000);
+      h.timer.restartBattle();
+      const second = h.timer.battleId;
+      vi.advanceTimersByTime(RUN_AVAILABLE_MS * 2);
+      expect(h.timer.battleId).toBe(second);
+      expect(h.timer.isFighting(second)).toBe(true);
+      expect(h.flushes.some(f => f.events.some(e => e.result === 'retreat'))).toBe(false);
+      h.timer.destroy();
+    });
+
+    it('never retreats from a decided fight', () => {
+      const h = harness('win');
+      h.timer.start();
+      const battleId = h.timer.battleId;
+      h.timer.scheduleRetreat(battleId, 0, 'Slipping away.');
+      vi.advanceTimersByTime(1000);
+      expect(h.timer.isFighting(battleId)).toBe(false);
+      vi.advanceTimersByTime(KILL_BEAT_MS);
+      expect(h.ends.map(e => e.result)).toEqual(['victory']);
+      vi.advanceTimersByTime(RUN_AVAILABLE_MS * 2);
+      expect(h.flushes.some(f => f.events.some(e => e.result === 'retreat'))).toBe(false);
+      h.timer.destroy();
+    });
+  });
+
+  describe('boss checkpoints', () => {
+    function bossFight(resumePhase?: number): PartyCombatState {
+      const player: PartyCombatantInit = {
+        username: 'alice',
+        maxHp: 100_000,
+        baseDamage: 10,
+        playerDamageType: 'physical',
+        gridPosition: 4,
+        className: 'Knight',
+        level: 1,
+        equippedSkills: [null, null, null, null, null],
+      };
+      const boss = createMonsterInstance(
+        { id: 'chief', name: 'Chief', hp: 100, damage: 1, damageType: 'physical', xp: 5, goldMin: 0, goldMax: 0, tier: 'boss' },
+        4,
+      );
+      return createPartyCombatState([player], [boss], { bossPhases: { thresholds: [0.66, 0.33], resumePhase } });
+    }
+
+    it('reports each checkpoint from the step that crosses it, before the fight ends', () => {
+      const seen: { battleId: number; phase: number; finished: boolean; hpFrac: number }[] = [];
+      const h = harness(() => bossFight(), {
+        callbacks: {
+          onPhase: (battleId, phase) => {
+            const combat = h.timer.currentCombat!;
+            const boss = combat.monsters[0];
+            seen.push({ battleId, phase, finished: combat.finished, hpFrac: boss.currentHp / boss.maxHp });
+          },
+        },
+      });
+      h.timer.start();
+      const battleId = h.timer.battleId;
+      vi.advanceTimersByTime(30_000);
+
+      const first = seen.filter(s => s.battleId === battleId);
+      expect(first.map(s => s.phase)).toEqual([1, 2]);
+      expect(first[0].finished).toBe(false);
+      expect(first[0].hpFrac).toBeLessThanOrEqual(0.66);
+      expect(h.ends[0]?.result).toBe('victory');
+      h.timer.destroy();
+    });
+
+    it('does not report the checkpoint a resumed fight starts at', () => {
+      const phases: { battleId: number; phase: number }[] = [];
+      const h = harness(() => bossFight(1), { callbacks: { onPhase: (battleId, phase) => phases.push({ battleId, phase }) } });
+      h.timer.start();
+      const battleId = h.timer.battleId;
+      expect(h.timer.currentCombat!.bossPhases!.phase).toBe(1);
+      vi.advanceTimersByTime(30_000);
+      expect(phases.filter(p => p.battleId === battleId).map(p => p.phase)).toEqual([2]);
+      h.timer.destroy();
+    });
+
+    it('keeps fighting when recording a checkpoint throws', () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const h = harness(() => bossFight(), { callbacks: { onPhase: () => { throw new Error('boom'); } } });
+      h.timer.start();
+      vi.advanceTimersByTime(30_000);
+      expect(error).toHaveBeenCalled();
+      expect(h.ends[0]?.result).toBe('victory');
+      h.timer.destroy();
     });
   });
 });

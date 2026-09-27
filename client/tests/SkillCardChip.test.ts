@@ -4,6 +4,7 @@ import {
   formatSeconds,
   renderSkillCardChip,
   renderSkillCardMeta,
+  skillComputedLine,
   skillMetaParts,
   summarizeSkillCard,
 } from '../src/ui/SkillCardChip';
@@ -91,5 +92,39 @@ describe('rendering', () => {
     const trigger = meta.querySelector('.skill-card-meta-trigger')!;
     expect(trigger.textContent).toBe('Trigger: Ally targeted');
     expect(trigger.getAttribute('title')).toContain('single-target');
+  });
+});
+
+describe('skillComputedLine', () => {
+  const guard = skill({
+    type: 'passive',
+    activeEffects: undefined,
+    passiveEffects: [{ kind: 'physical_reduction', valuePerLevel: 2 }],
+  });
+
+  it('computes Guard/Bless-style mitigation against same-level enemies', () => {
+    expect(skillComputedLine(guard)).toBe('≈50\u202f% vs same-level enemies');
+    const weak = skill({ type: 'passive', activeEffects: undefined, passiveEffects: [{ kind: 'magical_reduction_party', valuePerLevel: 1 }] });
+    expect(skillComputedLine(weak)).toBe('≈33\u202f% vs same-level enemies');
+  });
+
+  it('labels each rating when a skill has both', () => {
+    const both = skill({
+      type: 'passive',
+      activeEffects: undefined,
+      passiveEffects: [{ kind: 'physical_reduction', valuePerLevel: 2 }, { kind: 'magical_reduction_party', valuePerLevel: 1 }],
+    });
+    expect(skillComputedLine(both)).toBe('Physical ≈50\u202f% · Magical & holy ≈33\u202f% vs same-level enemies');
+  });
+
+  it('has no line for other skills', () => {
+    expect(skillComputedLine(skill({}))).toBeNull();
+    expect(skillComputedLine(skill({ type: 'passive', activeEffects: undefined, passiveEffects: [{ kind: 'crit_chance', flatValue: 0.2 }] }))).toBeNull();
+  });
+
+  it('appends the line to the meta row', () => {
+    const el = document.createElement('div');
+    el.innerHTML = renderSkillCardMeta(guard);
+    expect(el.querySelector('.skill-card-meta-computed')!.textContent).toBe('≈50\u202f% vs same-level enemies');
   });
 });

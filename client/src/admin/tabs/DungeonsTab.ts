@@ -9,10 +9,27 @@ import type {
   ItemDefinition,
   EncounterDefinition,
   ClassName,
+  MonsterDefinition,
 } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
+import {
+  ALL_CLASS_NAMES,
+  DEFAULT_CHECKPOINT_REWARD_FRACTION,
+  DEFAULT_MAX_WIPES,
+  isBossTier,
+} from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal, type ModalHandle } from '../components/Modal';
+
+const MAX_WIPES_LIMIT = 20;
+const ENTRY_REQUIREMENT_KEYS: readonly (keyof DungeonEntryRequirements)[] = [
+  'minLevel', 'maxLevel', 'requiredItemId', 'consumeRequiredItem', 'requiredClasses', 'minPartySize', 'maxPartySize',
+];
+
+interface FloorCheckpointFields {
+  checkpoints?: number[];
+  maxWipes?: number;
+  checkpointRewardFraction?: number;
+}
 
 export class DungeonsTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -32,9 +49,13 @@ export class DungeonsTab implements Tab {
             <button class="admin-btn admin-btn-sm dungeon-edit-btn" data-id="${d.id}">Edit</button>
             <button class="admin-btn admin-btn-sm admin-btn-danger dungeon-delete-btn" data-id="${d.id}">Del</button>
           </td>`;
+      const checkpointFloors = d.floors.filter(f => (f.checkpoints?.length ?? 0) > 0).length;
+      const checkpointNote = checkpointFloors > 0
+        ? ` <span class="admin-muted">(checkpoints on ${checkpointFloors})</span>`
+        : '';
       return `<tr>
         <td>${escapeHtml(d.name)}</td>
-        <td>${d.floors.length}</td>
+        <td>${d.floors.length}${checkpointNote}</td>
         <td>${escapeHtml(reqs)}</td>
         ${actions}
       </tr>`;
@@ -115,7 +136,7 @@ export class DungeonsTab implements Tab {
       `<option value="${i.id}" ${i.id === reqs.requiredItemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
     ).join('');
 
-    const floorRows = d.floors.map((f, i) => this.floorRowHtml(i, f, encounters, items)).join('');
+    const floorRows = d.floors.map((f, i) => this.floorRowHtml(i, f, encounters, items, i)).join('');
     const firstClearRows = (d.firstClearRewards ?? []).map((r, i) => this.rewardRowHtml('df-first-clear', i, r, items)).join('');
 
     const formHtml = `
@@ -193,9 +214,9 @@ export class DungeonsTab implements Tab {
     root.querySelector('#df-add-floor')?.addEventListener('click', () => {
       const list = root.querySelector('#df-floor-list');
       if (!list) return;
-      const index = list.children.length;
+      const index = this.nextFloorIndex(root);
       const blank: DungeonFloor = {
-        floorNumber: index + 1,
+        floorNumber: list.children.length + 1,
         gridShape: { cols: 3, rows: 3 },
         encounterTable: [],
         rewards: [],
@@ -205,14 +226,28 @@ export class DungeonsTab implements Tab {
     });
 
     root.querySelector('#df-cancel')?.addEventListener('click', modal.close);
-    root.querySelector('#df-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal));
+    root.querySelector('#df-save')?.addEventListener('click', () => this.saveForm(root, ctx, modal, dungeon));
   }
 
-  private floorRowHtml(index: number, floor: DungeonFloor, encounters: EncounterDefinition[], items: ItemDefinition[]): string {
+  private nextFloorIndex(root: HTMLElement): number {
+    let max = -1;
+    root.querySelectorAll<HTMLElement>('.df-floor').forEach(el => {
+      max = Math.max(max, Number(el.dataset.floorIndex) || 0);
+    });
+    return max + 1;
+  }
+
+  private floorRowHtml(
+    index: number,
+    floor: DungeonFloor,
+    encounters: EncounterDefinition[],
+    items: ItemDefinition[],
+    originalIndex?: number,
+  ): string {
     const rewardRows = (floor.rewards ?? []).map((r, i) => this.rewardRowHtml(`df-floor-${index}-reward`, i, r, items)).join('');
     const encounterRows = (floor.encounterTable ?? []).map((e, i) => this.encounterRowHtml(`df-floor-${index}-enc`, i, e, encounters)).join('');
     return `
-      <fieldset class="admin-form-fieldset df-floor" data-floor-index="${index}">
+      <fieldset class="admin-form-fieldset df-floor" data-floor-index="${index}"${originalIndex !== undefined ? ` data-orig-floor="${originalIndex}"` : ''}>
         <legend>
           Floor ${index + 1}
           <button class="admin-btn admin-btn-sm admin-btn-danger df-floor-remove" type="button" data-floor-index="${index}">×</button>
@@ -234,10 +269,32 @@ export class DungeonsTab implements Tab {
           <legend>Encounter Table <button class="admin-btn admin-btn-sm df-floor-add-enc" type="button" data-floor-index="${index}">+ Encounter</button></legend>
           <div class="df-floor-enc-list" data-floor-index="${index}">${encounterRows}</div>
         </fieldset>
+        ${this.checkpointFieldsHtml(floor)}
         <fieldset class="admin-form-fieldset">
           <legend>Floor Rewards <button class="admin-btn admin-btn-sm df-floor-add-reward" type="button" data-floor-index="${index}">+ Reward</button></legend>
           <div class="df-floor-reward-list" data-floor-index="${index}">${rewardRows}</div>
         </fieldset>
+      </fieldset>
+    `;
+  }
+
+  private checkpointFieldsHtml(floor: DungeonFloor): string {
+    const checkpoints = Array.isArray(floor.checkpoints) ? floor.checkpoints.join(', ') : '';
+    return `
+      <fieldset class="admin-form-fieldset df-floor-checkpoints-fieldset">
+        <legend>Boss checkpoints</legend>
+        <div class="admin-form-grid">
+          <label>Checkpoints (boss HP)
+            <input type="text" class="df-floor-checkpoints" value="${escapeHtml(checkpoints)}" placeholder="none — e.g. 0.66, 0.33">
+          </label>
+          <label>Max wipes
+            <input type="number" class="df-floor-max-wipes" value="${floor.maxWipes ?? ''}" min="0" max="${MAX_WIPES_LIMIT}" step="1" placeholder="${DEFAULT_MAX_WIPES} (default)">
+          </label>
+          <label>Checkpoint reward
+            <input type="number" class="df-floor-checkpoint-reward" value="${floor.checkpointRewardFraction ?? ''}" min="0" max="1" step="0.01" placeholder="${DEFAULT_CHECKPOINT_REWARD_FRACTION} (default)">
+          </label>
+        </div>
+        <div class="admin-form-hint">Boss-HP fractions, highest first. Only works when every encounter on this floor is explicit and places a boss- or raid-tier monster. A wipe on this floor regroups the party at its last checkpoint (the boss restarts at that HP) up to Max wipes times; one more ejects the party. Each checkpoint reached pays every member the reward share of the boss's XP and gold, once per run.</div>
       </fieldset>
     `;
   }
@@ -380,7 +437,12 @@ export class DungeonsTab implements Tab {
     return reward;
   }
 
-  private async saveForm(root: HTMLElement, ctx: AdminContext, modal: ModalHandle): Promise<void> {
+  private async saveForm(
+    root: HTMLElement,
+    ctx: AdminContext,
+    modal: ModalHandle,
+    original: DungeonDefinition | null,
+  ): Promise<void> {
     const existingId = (root.querySelector('#df-id') as HTMLInputElement).value.trim();
     const name = (root.querySelector('#df-name') as HTMLInputElement).value.trim();
     if (!name) { alert('Name is required.'); return; }
@@ -388,7 +450,10 @@ export class DungeonsTab implements Tab {
     const description = (root.querySelector('#df-description') as HTMLTextAreaElement).value.trim();
 
     const floors: DungeonFloor[] = [];
-    root.querySelectorAll<HTMLElement>('.df-floor').forEach(floorEl => {
+    const floorErrors: string[] = [];
+    root.querySelectorAll<HTMLElement>('.df-floor').forEach((floorEl, position) => {
+      const origIndex = floorEl.dataset.origFloor;
+      const originalFloor = origIndex !== undefined ? original?.floors[parseInt(origIndex)] : undefined;
       const floorNumber = parseInt((floorEl.querySelector('.df-floor-number') as HTMLInputElement).value) || floors.length + 1;
       const cols = parseInt((floorEl.querySelector('.df-floor-cols') as HTMLInputElement).value) || 3;
       const rows = parseInt((floorEl.querySelector('.df-floor-rows') as HTMLInputElement).value) || 3;
@@ -404,17 +469,27 @@ export class DungeonsTab implements Tab {
         const r = this.parseRewardRow(row);
         if (r) rewards.push(r);
       });
-      const floor: DungeonFloor = {
+      const checkpointFields = this.readCheckpointFields(floorEl, `Floor ${position + 1}`);
+      if (typeof checkpointFields === 'string') {
+        floorErrors.push(checkpointFields);
+        return;
+      }
+      floors.push({
+        ...originalFloor,
         floorNumber,
-        gridShape: { cols, rows },
+        gridShape: { ...originalFloor?.gridShape, cols, rows },
         encounterTable,
-      };
-      if (isBoss) floor.isBoss = true;
-      if (rewards.length) floor.rewards = rewards;
-      floors.push(floor);
+        isBoss: isBoss ? true : undefined,
+        rewards: rewards.length ? rewards : undefined,
+        ...checkpointFields,
+      });
     });
+    if (floorErrors.length > 0) { alert(floorErrors.join('\n')); return; }
+    const bossWarnings = this.checkpointEncounterWarnings(floors, ctx);
+    if (bossWarnings.length > 0 && !confirm(`${bossWarnings.join('\n')}\n\nCheckpoints on these floors will do nothing. Save anyway?`)) return;
 
-    const reqs: DungeonEntryRequirements = {};
+    const reqs: DungeonEntryRequirements = { ...original?.entryRequirements };
+    for (const key of ENTRY_REQUIREMENT_KEYS) delete reqs[key];
     const minLevel = parseInt((root.querySelector('#df-req-min-level') as HTMLInputElement).value);
     const maxLevel = parseInt((root.querySelector('#df-req-max-level') as HTMLInputElement).value);
     const minParty = parseInt((root.querySelector('#df-req-min-party') as HTMLInputElement).value);
@@ -445,12 +520,17 @@ export class DungeonsTab implements Tab {
     const firstClearXp = parseInt((root.querySelector('#df-first-clear-xp') as HTMLInputElement).value);
     const firstClearGold = parseInt((root.querySelector('#df-first-clear-gold') as HTMLInputElement).value);
 
-    const dungeon: DungeonDefinition = { id, name, floors };
-    if (description) dungeon.description = description;
-    if (Object.keys(reqs).length) dungeon.entryRequirements = reqs;
-    if (firstClearRewards.length) dungeon.firstClearRewards = firstClearRewards;
-    if (Number.isFinite(firstClearXp) && firstClearXp > 0) dungeon.firstClearXp = firstClearXp;
-    if (Number.isFinite(firstClearGold) && firstClearGold > 0) dungeon.firstClearGold = firstClearGold;
+    const dungeon: DungeonDefinition = {
+      ...original,
+      id,
+      name,
+      floors,
+      description: description || undefined,
+      entryRequirements: Object.keys(reqs).length ? reqs : undefined,
+      firstClearRewards: firstClearRewards.length ? firstClearRewards : undefined,
+      firstClearXp: Number.isFinite(firstClearXp) && firstClearXp > 0 ? firstClearXp : undefined,
+      firstClearGold: Number.isFinite(firstClearGold) && firstClearGold > 0 ? firstClearGold : undefined,
+    };
 
     try {
       const data = await putAdmin<{ dungeons: Record<string, DungeonDefinition> }>(
@@ -461,6 +541,65 @@ export class DungeonsTab implements Tab {
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Network error');
     }
+  }
+
+  /** Parsed checkpoint inputs (blank = field omitted), or an error message. */
+  private readCheckpointFields(floorEl: HTMLElement, label: string): FloorCheckpointFields | string {
+    const checkpointsRaw = floorEl.querySelector<HTMLInputElement>('.df-floor-checkpoints')?.value.trim() ?? '';
+    const maxWipesRaw = floorEl.querySelector<HTMLInputElement>('.df-floor-max-wipes')?.value.trim() ?? '';
+    const rewardRaw = floorEl.querySelector<HTMLInputElement>('.df-floor-checkpoint-reward')?.value.trim() ?? '';
+    const fields: FloorCheckpointFields = { checkpoints: undefined, maxWipes: undefined, checkpointRewardFraction: undefined };
+
+    if (checkpointsRaw !== '') {
+      const parts = checkpointsRaw.split(',').map(p => p.trim()).filter(p => p !== '');
+      const values = parts.map(Number);
+      const inRange = values.every(v => Number.isFinite(v) && v > 0 && v < 1);
+      const descending = values.every((v, i) => i === 0 || v < values[i - 1]);
+      if (!inRange || !descending) {
+        return `${label}: checkpoints must be boss-HP fractions between 0 and 1 (exclusive), highest first, separated by commas — e.g. 0.66, 0.33.`;
+      }
+      if (values.length > 0) fields.checkpoints = values;
+    }
+    if (maxWipesRaw !== '') {
+      const maxWipes = Number(maxWipesRaw);
+      if (!Number.isInteger(maxWipes) || maxWipes < 0 || maxWipes > MAX_WIPES_LIMIT) {
+        return `${label}: max wipes must be a whole number from 0 to ${MAX_WIPES_LIMIT} (blank = ${DEFAULT_MAX_WIPES}).`;
+      }
+      fields.maxWipes = maxWipes;
+    }
+    if (rewardRaw !== '') {
+      const fraction = Number(rewardRaw);
+      if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) {
+        return `${label}: checkpoint reward must be a fraction from 0 to 1 (blank = ${DEFAULT_CHECKPOINT_REWARD_FRACTION}).`;
+      }
+      fields.checkpointRewardFraction = fraction;
+    }
+    return fields;
+  }
+
+  private checkpointEncounterWarnings(floors: DungeonFloor[], ctx: AdminContext): string[] {
+    const content = ctx.getDisplayContent();
+    const encounters: Record<string, EncounterDefinition> = content?.encounters ?? {};
+    const monsters: Record<string, MonsterDefinition> = content?.monsters ?? {};
+    const warnings: string[] = [];
+    floors.forEach((floor, i) => {
+      if (!floor.checkpoints?.length) return;
+      const label = `Floor ${i + 1}`;
+      if (floor.encounterTable.length === 0) {
+        warnings.push(`${label} has checkpoints but no encounters.`);
+        return;
+      }
+      for (const entry of floor.encounterTable) {
+        const encounter = encounters[entry.encounterId];
+        if (!encounter) continue;
+        const hasBoss = encounter.type === 'explicit'
+          && (encounter.placements ?? []).some(p => isBossTier(monsters[p.monsterId]?.tier));
+        if (!hasBoss) {
+          warnings.push(`${label} has checkpoints, but encounter "${encounter.name}" is not an explicit encounter with a boss- or raid-tier monster.`);
+        }
+      }
+    });
+    return warnings;
   }
 
   private async deleteDungeon(ctx: AdminContext, id: string): Promise<void> {

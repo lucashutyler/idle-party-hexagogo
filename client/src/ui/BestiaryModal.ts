@@ -1,0 +1,234 @@
+import type { MasteryEntry, MasterySummary, MonsterTier } from '@idle-party-rpg/shared';
+import { LEVEL_CON_INFO, levelCon } from '@idle-party-rpg/shared';
+import type { GameClient } from '../network/GameClient';
+import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { renderAssetImg } from './assets';
+
+export type BestiarySort = 'closest' | 'kills' | 'name' | 'rank';
+
+export const BESTIARY_SORT_LABELS: Record<BestiarySort, string> = {
+  closest: 'Closest',
+  kills: 'Kills',
+  rank: 'Rank',
+  name: 'Name',
+};
+
+const TIER_BADGES: Partial<Record<MonsterTier, { glyph: string; label: string }>> = {
+  elite: { glyph: '◆', label: 'Elite' },
+  boss: { glyph: '♛', label: 'Boss' },
+  raid: { glyph: '♛', label: 'Raid boss' },
+};
+
+const PCT = ' %';
+
+/** Progress from the current rank's threshold to the next (1 when mastered). */
+export function masteryProgress(entry: Pick<MasteryEntry, 'kills' | 'prevAt' | 'nextAt'>): number {
+  if (entry.nextAt === null) return 1;
+  const span = entry.nextAt - entry.prevAt;
+  if (!(span > 0)) return 0;
+  return Math.max(0, Math.min(1, (entry.kills - entry.prevAt) / span));
+}
+
+export function nextRankText(entry: Pick<MasteryEntry, 'nextAt'>): string {
+  return entry.nextAt === null ? 'Mastered' : `Next rank at ${entry.nextAt.toLocaleString('en-US')}`;
+}
+
+export function masteryStars(entry: Pick<MasteryEntry, 'rank' | 'maxRank'>): string {
+  const max = Math.max(1, entry.maxRank);
+  const rank = Math.max(0, Math.min(max, entry.rank));
+  return '★'.repeat(rank) + '☆'.repeat(max - rank);
+}
+
+function compareClosest(a: MasteryEntry, b: MasteryEntry): number {
+  const aDone = a.nextAt === null;
+  const bDone = b.nextAt === null;
+  if (aDone !== bDone) return aDone ? 1 : -1;
+  const diff = masteryProgress(b) - masteryProgress(a);
+  if (diff !== 0) return diff;
+  const aLeft = (a.nextAt ?? 0) - a.kills;
+  const bLeft = (b.nextAt ?? 0) - b.kills;
+  return aLeft - bLeft || a.name.localeCompare(b.name);
+}
+
+export function sortBestiary(entries: readonly MasteryEntry[], mode: BestiarySort): MasteryEntry[] {
+  const list = [...entries];
+  switch (mode) {
+    case 'closest':
+      return list.sort(compareClosest);
+    case 'kills':
+      return list.sort((a, b) => b.kills - a.kills || a.name.localeCompare(b.name));
+    case 'rank':
+      return list.sort((a, b) => b.rank - a.rank || masteryProgress(b) - masteryProgress(a) || a.name.localeCompare(b.name));
+    case 'name':
+      return list.sort((a, b) => a.name.localeCompare(b.name));
+  }
+}
+
+export function filterBestiary(entries: readonly MasteryEntry[], query: string): MasteryEntry[] {
+  const q = query.trim().toLowerCase();
+  return q ? entries.filter(e => e.name.toLowerCase().includes(q)) : [...entries];
+}
+
+/** The `count` entries nearest to their next rank (mastered entries excluded). */
+export function closestToNextRank(entries: readonly MasteryEntry[], count: number): MasteryEntry[] {
+  return sortBestiary(entries.filter(e => e.nextAt !== null && e.kills > 0), 'closest').slice(0, Math.max(0, count));
+}
+
+/** Full-list entries refreshed with the (fresher) recent entries from state. */
+export function mergeBestiaryEntries(full: readonly MasteryEntry[], recent: readonly MasteryEntry[]): MasteryEntry[] {
+  const byId = new Map<string, MasteryEntry>();
+  for (const e of full) byId.set(e.monsterId, e);
+  for (const e of recent) byId.set(e.monsterId, e);
+  return [...byId.values()];
+}
+
+export function bestiarySummaryText(summary: Pick<MasterySummary, 'discovered' | 'mastered'>): string {
+  return `${summary.discovered.toLocaleString('en-US')} discovered · ${summary.mastered.toLocaleString('en-US')} mastered`;
+}
+
+/** One bestiary row; levels show only when authored. */
+export function renderBestiaryRow(entry: MasteryEntry, viewerLevel: number | undefined, opts?: { compact?: boolean }): string {
+  const progress = masteryProgress(entry);
+  const pct = Math.round(progress * 100);
+  const levelHtml = entry.level !== undefined && !entry.levelDerived && entry.level > 0
+    ? levelBadge(entry.level, viewerLevel)
+    : '';
+  const tier = entry.tier ? TIER_BADGES[entry.tier] : undefined;
+  const tierHtml = tier
+    ? `<span class="bestiary-tier" data-tier="${entry.tier}">${tier.glyph} ${tier.label}</span>`
+    : '';
+  const bonus = entry.bonusPct > 0
+    ? `<span class="bestiary-bonus">+${entry.bonusPct}${PCT} damage · −${entry.bonusPct}${PCT} taken</span>`
+    : '';
+  const kills = `<span class="bestiary-kills">${entry.kills.toLocaleString('en-US')} defeated</span>`;
+  const next = `<span class="bestiary-next">${nextRankText(entry)}</span>`;
+  const art = renderAssetImg('monster', entry.monsterId, { label: entry.name, width: 96, height: 96, alt: '' });
+  const compact = opts?.compact ? ' bestiary-row-compact' : '';
+  return `<div class="bestiary-row${compact}" role="listitem" data-monster-id="${escapeHtml(entry.monsterId)}" data-rank="${entry.rank}"${entry.nextAt === null ? ' data-mastered="true"' : ''}>`
+    + `<span class="bestiary-art">${art}</span>`
+    + '<div class="bestiary-main">'
+    + `<div class="bestiary-title"><span class="bestiary-name">${escapeHtml(entry.name)}</span>${levelHtml}${tierHtml}</div>`
+    + '<div class="bestiary-progress">'
+    + `<div class="bestiary-bar" role="progressbar" aria-label="Progress to next rank" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">`
+    + `<div class="bestiary-bar-fill" style="width:${pct}%"></div></div>`
+    + `<span class="bestiary-stars" role="img" aria-label="Rank ${entry.rank} of ${entry.maxRank}">${masteryStars(entry)}</span></div>`
+    + `<div class="bestiary-sub">${kills}${next}${opts?.compact ? '' : bonus}</div>`
+    + '</div></div>';
+}
+
+function levelBadge(level: number, viewerLevel: number | undefined): string {
+  const con = levelCon(level, viewerLevel ?? level);
+  const info = LEVEL_CON_INFO[con];
+  return `<span class="lvl-badge bestiary-lvl" data-con="${con}" aria-label="Level ${level}, ${info.label}">`
+    + `<span aria-hidden="true">${info.glyph} L${level}</span></span>`;
+}
+
+/** Full bestiary list on the modal stack: search, sort, rank bars. */
+export class BestiaryModal {
+  private overlay: HTMLElement | null = null;
+  private listEl: HTMLElement | null = null;
+  private summaryEl: HTMLElement | null = null;
+  private query = '';
+  private sort: BestiarySort = 'closest';
+  private unsubBestiary?: () => void;
+  private keyHandler = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') this.close();
+  };
+
+  constructor(private gameClient: GameClient) {}
+
+  get isOpen(): boolean {
+    return this.overlay !== null;
+  }
+
+  open(): void {
+    if (this.overlay) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'player-options-overlay bestiary-overlay';
+    overlay.innerHTML = `
+      <div class="player-options-modal bestiary-modal" role="dialog" aria-modal="true" aria-label="Bestiary">
+        <div class="player-options-header">
+          <span class="player-options-title">Bestiary</span>
+          <button type="button" class="player-options-close" aria-label="Close">×</button>
+        </div>
+        <div class="bestiary-body">
+          <div class="bestiary-summary"></div>
+          <div class="items-search-sort bestiary-controls">
+            <input type="search" class="items-search-input bestiary-search" placeholder="Search…" aria-label="Search monsters" />
+            <select class="items-sort-select bestiary-sort" aria-label="Sort by">
+              ${(Object.keys(BESTIARY_SORT_LABELS) as BestiarySort[])
+                .map(k => `<option value="${k}"${k === this.sort ? ' selected' : ''}>${BESTIARY_SORT_LABELS[k]}</option>`).join('')}
+            </select>
+          </div>
+          <div class="bestiary-list" role="list"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    this.overlay = overlay;
+    this.listEl = overlay.querySelector('.bestiary-list');
+    this.summaryEl = overlay.querySelector('.bestiary-summary');
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this.close();
+    });
+    overlay.querySelector('.player-options-close')!.addEventListener('click', () => this.close());
+    const search = overlay.querySelector('.bestiary-search') as HTMLInputElement;
+    search.value = this.query;
+    search.addEventListener('input', () => {
+      this.query = search.value;
+      this.renderList();
+    });
+    const sort = overlay.querySelector('.bestiary-sort') as HTMLSelectElement;
+    sort.addEventListener('change', () => {
+      this.sort = sort.value as BestiarySort;
+      this.renderList();
+    });
+    document.addEventListener('keydown', this.keyHandler);
+
+    this.unsubBestiary = this.gameClient.onBestiary(() => this.renderList());
+    this.gameClient.requestBestiary();
+    this.renderList();
+
+    bringToFront(overlay);
+    wireFocusOnInteract(overlay);
+  }
+
+  close(): void {
+    if (!this.overlay) return;
+    this.unsubBestiary?.();
+    this.unsubBestiary = undefined;
+    document.removeEventListener('keydown', this.keyHandler);
+    release(this.overlay);
+    this.overlay.remove();
+    this.overlay = null;
+    this.listEl = null;
+    this.summaryEl = null;
+  }
+
+  private renderList(): void {
+    if (!this.listEl || !this.summaryEl) return;
+    const state = this.gameClient.lastState;
+    const summary = state?.character?.mastery;
+    const bestiary = this.gameClient.lastBestiary;
+    if (summary) this.summaryEl.textContent = bestiarySummaryText(summary);
+    if (!bestiary) {
+      this.listEl.innerHTML = '<div class="bestiary-empty">Loading…</div>';
+      return;
+    }
+    const entries = mergeBestiaryEntries(bestiary.entries, summary?.recent ?? []);
+    if (entries.length === 0) {
+      this.listEl.innerHTML = '<div class="bestiary-empty">Defeat monsters to fill your bestiary.</div>';
+      return;
+    }
+    const shown = sortBestiary(filterBestiary(entries, this.query), this.sort);
+    const viewerLevel = state?.character?.level;
+    this.listEl.innerHTML = shown.length > 0
+      ? shown.map(e => renderBestiaryRow(e, viewerLevel)).join('')
+      : '<div class="bestiary-empty">No monsters match your search.</div>';
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}

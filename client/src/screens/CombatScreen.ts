@@ -1,6 +1,14 @@
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
-import type { CombatEvent, ServerCombatMessage, ServerStateMessage, SkillCardType } from '@idle-party-rpg/shared';
+import type {
+  CombatEvent,
+  ForecastResult,
+  MasteryEntry,
+  ServerCombatMessage,
+  ServerForecastMessage,
+  ServerStateMessage,
+  SkillCardType,
+} from '@idle-party-rpg/shared';
 import {
   CLASS_ICONS,
   getSkillCardType,
@@ -12,17 +20,35 @@ import {
 import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
-import { CombatPlayback, guessCooldownMs, skillDisplayState, unitKey } from '../combat/CombatPlayback';
-import type { PlaybackUnit } from '../combat/CombatPlayback';
+import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, unitKey } from '../combat/CombatPlayback';
+import type { PlaybackUnit, UnitStatics } from '../combat/CombatPlayback';
 import { CombatFx } from '../combat/CombatFx';
-import type { FloaterVariant, FxPoint } from '../combat/CombatFx';
+import type { BannerTone, FloaterVariant, FxPoint } from '../combat/CombatFx';
 import { CombatLogFormatter } from '../combat/CombatLogFormatter';
 import { CombatLogView } from '../combat/CombatLogView';
 import { CombatSkillBar } from '../combat/CombatSkillBar';
 import type { SkillBarLayout, SkillBarState } from '../combat/CombatSkillBar';
 import { UnitCard } from '../combat/CombatUnitCard';
 import type { CardIdentity } from '../combat/CombatUnitCard';
-import { escapeHtml, formatAmount, formatClock, formatDuration, interruptStampText, pipsKey, statusPips } from '../combat/CombatFormat';
+import {
+  enrageSlotText,
+  escapeHtml,
+  formatAmount,
+  formatClock,
+  formatDuration,
+  formatMultiplier,
+  hasToughTier,
+  interruptStampText,
+  isBossOrRaid,
+  masteryLine,
+  monsterLevelBadge,
+  pipsKey,
+  retriesLeft,
+  retriesText,
+  statusPips,
+  TIER_INFO,
+} from '../combat/CombatFormat';
+import { OPEN_OPTIONS_ATTR, renderForecastPopover, renderForecastRing } from '../ui/ForecastChip';
 
 type Axis = 'x' | 'y';
 
@@ -31,6 +57,10 @@ const RUN_HINT_MS = 3000;
 const POP_IN_STAGGER_MS = 45;
 const CAST_LABEL_EDGE_PX = 70;
 const SHORT_SCREEN_QUERY = '(max-height: 480px)';
+const BOSS_HP_EPSILON = 0.005;
+const ANNOUNCE_DELAY_MS = 60;
+const LIVE_FORECASTS_KEPT = 4;
+const ANNOUNCED_LOG_TYPES = new Set(['retreat', 'checkpoint']);
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
@@ -69,6 +99,16 @@ export class CombatScreen implements Screen {
   private runBtn!: HTMLButtonElement;
   private runHint!: HTMLElement;
   private dungeonLeaveBtn!: HTMLButtonElement;
+  private runLabel!: HTMLElement;
+  private forecastBtn!: HTMLButtonElement;
+  private bossBar!: HTMLElement;
+  private bossName!: HTMLElement;
+  private bossTrack!: HTMLElement;
+  private bossTicks!: HTMLElement;
+  private bossPct!: HTMLElement;
+  private bossRetries!: HTMLElement;
+  private bossEnrage!: HTMLElement;
+  private announcer!: HTMLElement;
   private skillBarRoot!: HTMLElement;
   private logWrapper!: HTMLElement;
   private fx!: CombatFx;
@@ -95,6 +135,16 @@ export class CombatScreen implements Screen {
   private snapping = false;
   private syncingShown = false;
   private monsterPopup: { overlay: HTMLElement; key: string; battleId: number | null; lastKey: string } | null = null;
+  private bossStructureKey = '';
+  private bossHpShown = -1;
+  private bossTextKey = '';
+  private toughFight = false;
+  private liveForecasts = new Map<number, ServerForecastMessage>();
+  private forecastChipKey = '';
+  private forecastPopover: HTMLElement | null = null;
+  private announceQueue: string[] = [];
+  private announceTimer?: ReturnType<typeof setTimeout>;
+  private lastJournalSeq = 0;
 
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
@@ -133,6 +183,7 @@ export class CombatScreen implements Screen {
     this.gameClient.combatLog.setHoldLive(true);
     this.gameClient.sendCombatView(true);
     this.logView.setActive(true);
+    this.lastJournalSeq = this.newestJournalSeq();
     if (this.lastState) this.applyState(this.lastState);
     this.centresDirty = true;
     if (visible) this.startLoop();
@@ -146,6 +197,7 @@ export class CombatScreen implements Screen {
     this.logView.setActive(false);
     this.stopLoop();
     this.closePopover();
+    this.closeForecastPopover();
     this.fx.clearAll();
   }
 
@@ -154,14 +206,26 @@ export class CombatScreen implements Screen {
       <div class="combat-header">
         <span class="combat-run-location"></span>
         <span class="combat-dungeon-floor" style="display:none"></span>
+        <button class="combat-forecast" type="button" style="display:none"></button>
         <span class="combat-clock">0:00</span>
-        <button class="combat-run-btn combat-run-locked" type="button">Run</button>
-        <button class="combat-dungeon-leave" type="button" style="display:none">Leave</button>
+        <button class="combat-run-btn combat-run-locked" type="button"><span class="combat-run-label">Run</span><span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
+        <button class="combat-dungeon-leave" type="button" style="display:none">Leave<span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <span class="combat-run-hint" style="display:none"></span>
       </div>
       <div class="combat-stage">
         <div class="combat-stage-bg"></div>
         <div class="combat-stage-scrim"></div>
+        <div class="combat-boss-bar" style="display:none" data-enrage="off">
+          <span class="combat-boss-name"></span>
+          <div class="combat-boss-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div class="combat-boss-skipped"></div>
+            <div class="combat-boss-fill"></div>
+            <div class="combat-boss-ticks"></div>
+            <span class="combat-boss-pct"></span>
+          </div>
+          <span class="combat-boss-retries"></span>
+          <span class="combat-boss-enrage" style="display:none"></span>
+        </div>
         <svg class="combat-telegraph" aria-hidden="true"></svg>
         <div class="combat-stage-grid">
           <div class="combat-block combat-block-enemy">
@@ -177,6 +241,7 @@ export class CombatScreen implements Screen {
       </div>
       <div class="combat-skillbar"></div>
       <div class="combat-log-wrapper"></div>
+      <div class="combat-announcer" role="status" aria-live="polite"></div>
     `;
 
     this.header = this.container.querySelector('.combat-header')!;
@@ -186,6 +251,16 @@ export class CombatScreen implements Screen {
     this.runBtn = this.container.querySelector('.combat-run-btn')!;
     this.runHint = this.container.querySelector('.combat-run-hint')!;
     this.dungeonLeaveBtn = this.container.querySelector('.combat-dungeon-leave')!;
+    this.runLabel = this.container.querySelector('.combat-run-label')!;
+    this.forecastBtn = this.container.querySelector('.combat-forecast')!;
+    this.bossBar = this.container.querySelector('.combat-boss-bar')!;
+    this.bossName = this.container.querySelector('.combat-boss-name')!;
+    this.bossTrack = this.container.querySelector('.combat-boss-track')!;
+    this.bossTicks = this.container.querySelector('.combat-boss-ticks')!;
+    this.bossPct = this.container.querySelector('.combat-boss-pct')!;
+    this.bossRetries = this.container.querySelector('.combat-boss-retries')!;
+    this.bossEnrage = this.container.querySelector('.combat-boss-enrage')!;
+    this.announcer = this.container.querySelector('.combat-announcer')!;
     this.stage = this.container.querySelector('.combat-stage')!;
     this.stageBg = this.container.querySelector('.combat-stage-bg')!;
     this.stageGrid = this.container.querySelector('.combat-stage-grid')!;
@@ -220,6 +295,10 @@ export class CombatScreen implements Screen {
       }
       this.gameClient.sendLeaveDungeon();
     });
+    this.forecastBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleForecastPopover();
+    });
     this.header.addEventListener('click', () => {
       if (headerOpensLog(window.matchMedia?.(SHORT_SCREEN_QUERY).matches ?? false, document.body.dataset.chatOpen === '1')) {
         this.logView.setOpen(true);
@@ -227,7 +306,11 @@ export class CombatScreen implements Screen {
     });
     this.stageGrid.addEventListener('click', (e) => this.onStageClick(e));
     this.container.addEventListener('click', (e) => {
-      if (this.popover && !(e.target as HTMLElement).closest('.combat-skill-popover, [data-skill-id]')) this.closePopover();
+      const target = e.target as HTMLElement;
+      if (this.popover && !target.closest('.combat-skill-popover, [data-skill-id]')) this.closePopover();
+      if (this.forecastPopover && (!target.closest('.combat-forecast-popover') || target.closest(`[${OPEN_OPTIONS_ATTR}]`))) {
+        this.closeForecastPopover();
+      }
     });
 
     if (typeof ResizeObserver === 'function') {
@@ -241,6 +324,8 @@ export class CombatScreen implements Screen {
   private wireSubscriptions(): void {
     this.gameClient.subscribe((state) => this.handleState(state));
     this.gameClient.onCombat((msg, receivedAt) => this.handleCombat(msg, receivedAt));
+    this.gameClient.onForecast((msg) => this.handleForecast(msg));
+    this.gameClient.combatLog.subscribe(() => this.announceJournal());
     document.addEventListener('visibilitychange', () => {
       if (!this.isActive) return;
       const visible = document.visibilityState !== 'hidden';
@@ -262,13 +347,15 @@ export class CombatScreen implements Screen {
   }
 
   private applyState(state: ServerStateMessage): void {
-    this.stage.classList.remove('fighting', 'victory', 'defeat');
+    this.stage.classList.remove('fighting', 'victory', 'defeat', 'retreat');
     if (state.battle.visual !== 'none') this.stage.classList.add(state.battle.visual);
     this.updateBackground(state);
     this.updateHeader(state);
     this.refreshIdentities();
     this.refreshSkillLayout();
     this.updateRoster();
+    this.refreshBossBar();
+    this.renderForecastChip();
   }
 
   private startLoop(): void {
@@ -305,12 +392,14 @@ export class CombatScreen implements Screen {
     for (const ev of tick.events) this.playEvent(ev, now);
     for (const unit of this.playback.units) this.cards.get(unit.key)?.update(unit, now);
     this.updateTelegraphs();
+    this.updateBossHp();
 
     const writeText = now - this.lastTextAt >= TEXT_INTERVAL_MS;
     if (writeText) this.lastTextAt = now;
     this.updateSkillBar(writeText);
     if (writeText) {
       this.updateClock();
+      this.updateBossText();
       if (this.lastState) this.updateRunButton(this.lastState);
       this.refreshMonsterPopup();
     }
@@ -352,6 +441,12 @@ export class CombatScreen implements Screen {
     this.refreshIdentities();
     this.refreshSkillLayout();
     this.updateRoster();
+    this.refreshBossBar();
+    if (battleChanged) {
+      this.closeForecastPopover();
+      this.adoptCachedForecast();
+    }
+    this.renderForecastChip();
   }
 
   private fillEmptySlots(side: HTMLElement): void {
@@ -370,6 +465,8 @@ export class CombatScreen implements Screen {
     const state = this.lastState;
     const username = state?.username ?? '';
     const henchmen = state?.social?.party?.henchmen ?? [];
+    const viewerLevel = state?.character?.level;
+    let tough = false;
     this.selfKey = null;
     for (const unit of this.playback.units) {
       const card = this.cards.get(unit.key);
@@ -393,14 +490,18 @@ export class CombatScreen implements Screen {
         }
       } else {
         const artKey = st?.id || slugify(name);
+        if (hasToughTier(st?.tier)) tough = true;
         identity = {
           name, isSelf: false, henchman: false, passive: !!st?.passive,
           art: artworkUrl('monster', artKey),
           artFallback: placeholderUrl(name, { w: 160, h: 160 }),
+          level: monsterLevelBadge(st, viewerLevel),
+          tier: st?.tier,
         };
       }
       card.setIdentity(identity);
     }
+    this.toughFight = tough;
   }
 
   private rememberMonsterNames(): void {
@@ -478,7 +579,7 @@ export class CombatScreen implements Screen {
       if (!st.henchman && st.name) this.onUserClick?.(st.name, cardEl);
       return;
     }
-    this.showMonsterPopup(unit, st.name, st.id, st.description);
+    this.showMonsterPopup(unit, st);
   }
 
   private playEvent(ev: CombatEvent, now: number): void {
@@ -492,12 +593,30 @@ export class CombatScreen implements Screen {
 
     switch (ev.kind) {
       case 'battle_start':
-        this.fx.banner('FIGHT!', 'fight', 950);
+        this.showStartBanner();
         break;
-      case 'battle_end': {
-        const victory = ev.result === 'victory';
-        this.fx.banner(victory ? 'VICTORY!' : 'DEFEAT', victory ? 'victory' : 'defeat', 1400);
-        if (victory) this.fx.sparkles(this.stageCentre());
+      case 'battle_end':
+        if (ev.result === 'victory') {
+          this.showBanner('VICTORY!', 'victory', 1400);
+          this.fx.sparkles(this.stageCentre());
+        } else if (ev.result === 'retreat') {
+          this.showBanner('RETREAT', 'retreat', 1400);
+        } else {
+          this.showBanner('DEFEAT', 'defeat', 1400);
+        }
+        break;
+      case 'phase': {
+        const total = this.playback.bossPhases?.thresholds.length ?? 0;
+        const n = ev.amount ?? 0;
+        this.showBanner('CHECKPOINT!', 'checkpoint', 1300, total > 0 ? `Checkpoint ${n} of ${total}` : `Checkpoint ${n}`);
+        this.fx.sparkles(this.bossBarCentre(), 10);
+        break;
+      }
+      case 'enrage': {
+        if ((ev.amount ?? 0) !== 1) break;
+        const unit = srcKey ? this.playback.unitByKey(srcKey) : undefined;
+        const mult = unit?.enrage ? 1 + unit.enrage.stepPercent : undefined;
+        this.showBanner('ENRAGED!', 'enrage', 1200, mult ? `Enemy damage ${formatMultiplier(mult)} and rising` : undefined);
         break;
       }
       case 'attack':
@@ -588,6 +707,247 @@ export class CombatScreen implements Screen {
 
   private stageCentre(): FxPoint {
     return { x: this.stage.clientWidth / 2, y: this.stage.clientHeight / 2, w: 0, h: 0 };
+  }
+
+  private bossBarCentre(): FxPoint {
+    const stageRect = this.stage.getBoundingClientRect();
+    const r = this.bossTrack.getBoundingClientRect();
+    if (r.width === 0) return this.stageCentre();
+    return { x: r.left + r.width / 2 - stageRect.left, y: r.top + r.height / 2 - stageRect.top, w: r.width, h: r.height };
+  }
+
+  private showStartBanner(): void {
+    const boss = this.playback.bossPhases;
+    if (!boss) {
+      this.showBanner('FIGHT!', 'fight', 950);
+      return;
+    }
+    const resumed = boss.resumedFromPhase ?? 0;
+    if (resumed > 0) {
+      const d = this.lastState?.dungeon;
+      const left = retriesLeft(d?.wipes, d?.maxWipes);
+      const sub = `Checkpoint ${resumed}${left !== null ? ` · ${retriesText(left)}` : ''}`;
+      this.showBanner('REGROUP', 'regroup', 1400, sub);
+      return;
+    }
+    this.showBanner('BOSS FIGHT!', 'boss', 1300);
+  }
+
+  private showBanner(text: string, tone: BannerTone, holdMs: number, sub?: string): void {
+    this.fx.banner(text, tone, holdMs, sub);
+    this.announce(sub ? `${text} ${sub}` : text);
+  }
+
+  private announce(text: string): void {
+    if (!this.isActive) return;
+    this.announceQueue.push(text);
+    if (this.announceTimer) return;
+    this.announcer.textContent = '';
+    this.announceTimer = setTimeout(() => {
+      this.announceTimer = undefined;
+      this.announcer.textContent = this.announceQueue.join('. ');
+      this.announceQueue = [];
+    }, ANNOUNCE_DELAY_MS);
+  }
+
+  private newestJournalSeq(): number {
+    const entries = this.gameClient.combatLog.entries;
+    return entries.length > 0 ? entries[entries.length - 1].seq : 0;
+  }
+
+  private announceJournal(): void {
+    const entries = this.gameClient.combatLog.entries;
+    if (this.isActive) {
+      const fresh: string[] = [];
+      for (let i = entries.length - 1; i >= 0 && entries[i].seq > this.lastJournalSeq; i--) {
+        if (ANNOUNCED_LOG_TYPES.has(entries[i].type)) fresh.push(entries[i].text);
+      }
+      for (const text of fresh.reverse()) this.announce(text);
+    }
+    this.lastJournalSeq = this.newestJournalSeq();
+  }
+
+  private refreshBossBar(): void {
+    const boss = this.playback.bossPhases;
+    const bossUnits = boss ? boss.bossPos.map(pos => this.playback.statics(unitKey('monster', pos))).filter((s): s is UnitStatics => !!s) : [];
+    const name = bossUnits[0]?.name ?? '';
+    const key = boss
+      ? `${this.playback.battleId}|${boss.thresholds.join(',')}|${boss.resumedFromPhase ?? 0}|${name}|${bossUnits.length}`
+      : '';
+    this.stage.classList.toggle('boss-fight', !!boss);
+    if (key === this.bossStructureKey) return;
+    this.bossStructureKey = key;
+    this.bossHpShown = -1;
+    this.bossTextKey = '';
+    if (!boss) {
+      this.bossBar.style.display = 'none';
+      this.centresDirty = true;
+      return;
+    }
+    this.bossBar.style.display = '';
+    const tier = bossUnits.find(s => isBossOrRaid(s.tier))?.tier;
+    if (tier) this.bossBar.dataset.tier = tier;
+    else delete this.bossBar.dataset.tier;
+    const label = bossUnits.length > 1 ? `${name} +${bossUnits.length - 1}` : name;
+    this.bossName.textContent = label;
+    this.bossName.title = label;
+    const resumedAt = (boss.resumedFromPhase ?? 0) > 0 ? boss.thresholds[(boss.resumedFromPhase ?? 0) - 1] : undefined;
+    this.bossTrack.style.setProperty('--skipped', resumedAt !== undefined ? String(1 - resumedAt) : '0');
+    this.bossTicks.innerHTML = boss.thresholds
+      .map((t, i) => `<i class="combat-boss-tick" style="--at:${t.toFixed(4)}" data-checkpoint="${i + 1}" title="Checkpoint ${i + 1}"><b aria-hidden="true">🚩</b></i>`)
+      .join('');
+    this.centresDirty = true;
+  }
+
+  private updateBossHp(): void {
+    if (!this.bossStructureKey) return;
+    const frac = this.playback.bossHpFraction();
+    if (frac === null) return;
+    if (Math.abs(frac - this.bossHpShown) < BOSS_HP_EPSILON && (frac === 0) === (this.bossHpShown === 0)) return;
+    this.bossHpShown = frac;
+    this.bossTrack.style.setProperty('--boss-hp', frac.toFixed(4));
+  }
+
+  private updateBossText(): void {
+    const boss = this.playback.bossPhases;
+    if (!boss || !this.bossStructureKey) return;
+    const frac = Math.max(0, this.bossHpShown);
+    const pct = frac > 0 ? Math.max(1, Math.ceil(frac * 100)) : 0;
+    const d = this.lastState?.dungeon;
+    const left = d?.checkpoints?.length ? retriesLeft(d.wipes, d.maxWipes) : null;
+    const enrage = enrageDisplay(this.playback.enrageSource()?.enrage, this.playback.elapsedMs);
+    const enrageText = enrage ? enrageSlotText(enrage) : '';
+    const key = `${pct}|${boss.phase}|${left}|${d?.maxWipes}|${enrageText}|${enrage?.state}`;
+    if (key === this.bossTextKey) return;
+    this.bossTextKey = key;
+
+    this.bossPct.textContent = `${pct}%`;
+    this.bossTrack.setAttribute('aria-valuenow', String(pct));
+    this.bossTrack.setAttribute('aria-label', `Boss health ${pct}%, checkpoint ${boss.phase} of ${boss.thresholds.length}`);
+    this.bossTicks.querySelectorAll<HTMLElement>('.combat-boss-tick').forEach((tick) => {
+      tick.classList.toggle('reached', Number(tick.dataset.checkpoint) <= boss.phase);
+    });
+
+    if (left === null || !d?.maxWipes) {
+      this.bossRetries.style.display = 'none';
+    } else {
+      this.bossRetries.style.display = '';
+      this.bossRetries.innerHTML = Array.from({ length: d.maxWipes }, (_, i) => `<i class="${i < left ? 'left' : 'used'}"></i>`).join('');
+      this.bossRetries.title = retriesText(left);
+      this.bossRetries.setAttribute('aria-label', retriesText(left));
+    }
+
+    this.bossBar.dataset.enrage = enrage?.state === 'on' ? 'on' : enrage?.state === 'soon' ? 'soon' : 'off';
+    if (!enrage) {
+      this.bossEnrage.style.display = 'none';
+      return;
+    }
+    this.bossEnrage.style.display = '';
+    this.bossEnrage.dataset.state = enrage.state;
+    this.bossEnrage.textContent = enrageText;
+    this.bossEnrage.title = enrage.state === 'on'
+      ? `Enraged: enemy damage ${formatMultiplier(enrage.multiplier)}`
+      : `Enrages in ${formatClock(enrage.remainingMs)}: enemy damage rises from then on`;
+  }
+
+  private handleForecast(msg: ServerForecastMessage): void {
+    if (msg.target?.kind !== 'battle') return;
+    const battleId = msg.target.battleId;
+    this.liveForecasts.delete(battleId);
+    this.liveForecasts.set(battleId, msg);
+    while (this.liveForecasts.size > LIVE_FORECASTS_KEPT) {
+      const oldest = this.liveForecasts.keys().next().value;
+      if (oldest === undefined) break;
+      this.liveForecasts.delete(oldest);
+    }
+    if (battleId !== this.playback.battleId) return;
+    this.renderForecastChip();
+    if (this.forecastPopover) this.renderForecastPopoverContent();
+  }
+
+  private adoptCachedForecast(): void {
+    const battleId = this.playback.battleId;
+    if (battleId === null || this.liveForecasts.has(battleId)) return;
+    const cached = this.gameClient.peekForecast({ kind: 'battle', battleId });
+    if (cached) this.liveForecasts.set(battleId, cached);
+  }
+
+  /** The live forecast to show: a result, 'loading' while the server works, or null to hide the chip. */
+  private liveForecast(): ForecastResult | 'loading' | null {
+    const battleId = this.playback.battleId;
+    if (!this.toughFight || battleId === null) return null;
+    const msg = this.liveForecasts.get(battleId);
+    if (!msg) return null;
+    if (msg.status === 'pending') return 'loading';
+    return msg.status === 'ok' ? msg.result : null;
+  }
+
+  private renderForecastChip(): void {
+    const forecast = this.liveForecast();
+    const key = forecast === null ? '' : forecast === 'loading' ? 'loading' : `${forecast.key}|${forecast.winPct}|${forecast.ci.join(',')}|${forecast.sims}`;
+    if (key === this.forecastChipKey) return;
+    this.forecastChipKey = key;
+    if (forecast === null) {
+      this.forecastBtn.style.display = 'none';
+      this.forecastBtn.innerHTML = '';
+      this.closeForecastPopover();
+      return;
+    }
+    this.forecastBtn.style.display = '';
+    this.forecastBtn.innerHTML = renderForecastRing(forecast, { kind: 'battle', compact: true });
+    this.forecastBtn.dataset.state = forecast === 'loading' ? 'loading' : 'ready';
+    this.forecastBtn.setAttribute('aria-label', forecast === 'loading'
+      ? 'Estimating your chances'
+      : `${this.forecastBtn.querySelector('.forecast-chip')?.getAttribute('aria-label') ?? 'Win chance'}. Show details`);
+    this.forecastBtn.setAttribute('aria-expanded', String(!!this.forecastPopover));
+  }
+
+  private toggleForecastPopover(): void {
+    if (this.forecastPopover) {
+      this.closeForecastPopover();
+      return;
+    }
+    const forecast = this.liveForecast();
+    if (!forecast || forecast === 'loading') return;
+    this.closePopover();
+    const pop = document.createElement('div');
+    pop.className = 'combat-forecast-popover';
+    this.container.appendChild(pop);
+    this.forecastPopover = pop;
+    this.renderForecastPopoverContent();
+    this.forecastBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  private renderForecastPopoverContent(): void {
+    const pop = this.forecastPopover;
+    const forecast = this.liveForecast();
+    if (!pop) return;
+    if (!forecast || forecast === 'loading') {
+      this.closeForecastPopover();
+      return;
+    }
+    const state = this.lastState;
+    pop.innerHTML = renderForecastPopover(forecast, {
+      kind: 'battle',
+      autoRetreat: state?.dungeon ? undefined : state?.social?.party?.autoRetreat ?? null,
+      elapsedMs: this.playback.elapsedMs,
+      viewerLevel: state?.character?.level,
+    });
+    const host = this.container.getBoundingClientRect();
+    const header = this.header.getBoundingClientRect();
+    const chip = this.forecastBtn.getBoundingClientRect();
+    const width = pop.offsetWidth || 280;
+    const left = Math.max(8, Math.min(host.width - width - 8, chip.left - host.left + chip.width / 2 - width / 2));
+    pop.style.left = `${left}px`;
+    pop.style.top = `${Math.max(0, header.bottom - host.top) + 6}px`;
+    pop.style.setProperty('--arrow-x', `${Math.max(14, Math.min(width - 14, chip.left - host.left + chip.width / 2 - left))}px`);
+  }
+
+  private closeForecastPopover(): void {
+    if (!this.forecastPopover) return;
+    this.forecastPopover.remove();
+    this.forecastPopover = null;
+    this.forecastBtn.setAttribute('aria-expanded', 'false');
   }
 
   private updateTelegraphs(): void {
@@ -783,8 +1143,22 @@ export class CombatScreen implements Screen {
       this.dungeonLeaveBtn.style.display = 'none';
     }
     this.locationLabel.title = this.locationLabel.textContent ?? '';
+    this.updateAutoRetreatFlag(state);
     this.lastRunKey = '';
     this.updateRunButton(state);
+  }
+
+  /** Auto-retreat only acts in the overworld, so the flag rides on Run and never on Leave. */
+  private updateAutoRetreatFlag(state: ServerStateMessage): void {
+    const below = state.dungeon ? 0 : state.social?.party?.autoRetreat?.belowPct ?? 0;
+    for (const btn of [this.runBtn, this.dungeonLeaveBtn]) {
+      const flag = btn.querySelector<HTMLElement>('.combat-auto-retreat');
+      const on = btn === this.runBtn && below > 0;
+      if (flag) flag.hidden = !on;
+      if (on) btn.dataset.autoRetreat = String(below);
+      else delete btn.dataset.autoRetreat;
+    }
+    this.runBtn.title = below > 0 ? `Auto-retreat is on (below ${below} %)` : '';
   }
 
   private updateRunButton(state: ServerStateMessage): void {
@@ -795,16 +1169,19 @@ export class CombatScreen implements Screen {
     const elapsed = this.playback.elapsedMs;
     const available = fighting && canRun && elapsed >= RUN_AVAILABLE_MS;
     const progress = fighting && canRun ? Math.min(1, elapsed / RUN_AVAILABLE_MS) : 0;
-    const hint = !canRun
+    const below = state.social?.party?.autoRetreat?.belowPct ?? 0;
+    const retreatNote = below > 0 ? `Auto-retreat is on (below ${below} %)` : '';
+    const lockedHint = !canRun
       ? 'Only the party owner or a leader can run'
       : fighting ? `Run becomes available ${RUN_AVAILABLE_MS / 1000} seconds into a fight` : '';
+    const hint = [lockedHint, retreatNote].filter(Boolean).join('. ');
     const key = `${available}|${progress.toFixed(2)}|${hint}`;
     if (key === this.lastRunKey) return;
     this.lastRunKey = key;
     this.runBtn.classList.toggle('combat-run-locked', !available);
     this.runBtn.classList.toggle('ready', available);
     this.runBtn.style.setProperty('--run', progress.toFixed(2));
-    this.runBtn.textContent = available ? 'Run' : '🔒 Run';
+    this.runLabel.textContent = available ? 'Run' : '🔒 Run';
     this.runHint.textContent = hint;
   }
 
@@ -841,22 +1218,25 @@ export class CombatScreen implements Screen {
     }
   }
 
-  private showMonsterPopup(unit: PlaybackUnit, name: string, id: string | undefined, description: string | undefined): void {
+  private showMonsterPopup(unit: PlaybackUnit, st: UnitStatics): void {
     const existing = document.querySelector('.monster-popup-overlay') as HTMLElement | null;
     if (existing) { release(existing); existing.remove(); }
     const overlay = document.createElement('div');
     overlay.className = 'monster-popup-overlay';
-    const real = artworkUrl('monster', id || slugify(name));
+    const name = st.name;
+    const real = artworkUrl('monster', st.id || slugify(name));
     const fallback = placeholderUrl(name, { w: 160, h: 160 });
-    const desc = description?.trim();
+    const desc = st.description?.trim();
+    const tier = st.tier && st.tier !== 'trash' ? st.tier : undefined;
     overlay.innerHTML = `
-      <div class="monster-popup">
+      <div class="monster-popup"${tier ? ` data-tier="${tier}"` : ''}>
         <button class="monster-popup-close" aria-label="Close">×</button>
         <div class="monster-popup-art">
           <img src="${real}" alt="${escapeHtml(name)}"
                onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallback}';}else{this.style.display='none';}" />
         </div>
         <div class="monster-popup-name">${escapeHtml(name)}</div>
+        ${this.monsterMetaHtml(st)}
         <div class="monster-popup-hp"><div class="monster-popup-hp-fill"></div><span></span></div>
         <div class="monster-popup-status"></div>
         <div class="monster-popup-cast"></div>
@@ -876,6 +1256,31 @@ export class CombatScreen implements Screen {
     wireFocusOnInteract(overlay);
     this.monsterPopup = { overlay, key: unit.key, battleId: this.playback.battleId, lastKey: '' };
     this.refreshMonsterPopup();
+  }
+
+  private monsterMetaHtml(st: UnitStatics): string {
+    const badge = monsterLevelBadge(st, this.lastState?.character?.level);
+    const tier = st.tier && st.tier !== 'trash' ? st.tier : undefined;
+    const parts: string[] = [];
+    if (badge) {
+      parts.push(`<span class="monster-popup-level lvl-badge" data-con="${badge.con}" aria-label="Level ${badge.level}, ${badge.label}">`
+        + `<i aria-hidden="true">${escapeHtml(badge.glyph)}</i> L${badge.level}</span>`
+        + `<span class="monster-popup-con" data-con="${badge.con}" aria-hidden="true">${escapeHtml(badge.label)}</span>`);
+    } else {
+      parts.push('<span class="monster-popup-nolevel">No level set</span>');
+    }
+    if (tier) parts.push(`<span class="monster-popup-tier" data-tier="${tier}">${escapeHtml(`${TIER_INFO[tier].glyph} ${TIER_INFO[tier].label}`)}</span>`);
+    let html = `<div class="monster-popup-meta">${parts.join('')}</div>`;
+    if (isBossOrRaid(tier)) html += '<div class="monster-popup-group">Built for a group of 3 or more</div>';
+    const mastery = this.masteryEntry(st.id);
+    if (mastery) html += `<div class="monster-popup-mastery"><b>Mastery</b> ${escapeHtml(masteryLine(mastery))}</div>`;
+    return html;
+  }
+
+  private masteryEntry(monsterId: string | undefined): MasteryEntry | undefined {
+    if (!monsterId) return undefined;
+    return this.gameClient.lastBestiary?.entries.find(e => e.monsterId === monsterId)
+      ?? this.lastState?.character?.mastery?.recent.find(e => e.monsterId === monsterId);
   }
 
   private refreshMonsterPopup(): void {

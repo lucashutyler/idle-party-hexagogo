@@ -1,5 +1,7 @@
+import type { MonsterTier } from '@idle-party-rpg/shared';
 import type { PlaybackUnit } from './CombatPlayback';
-import { escapeHtml, hpTier, initials, MAX_VISIBLE_PIPS, pipsKey, statusPips } from './CombatFormat';
+import { escapeHtml, hpTier, initials, MAX_VISIBLE_PIPS, pipsKey, statusPips, TIER_INFO } from './CombatFormat';
+import type { MonsterLevelBadge } from './CombatFormat';
 
 export interface CardIdentity {
   name: string;
@@ -13,6 +15,9 @@ export interface CardIdentity {
   icon?: string;
   /** Replaces the initials (henchman emoji). */
   emoji?: string;
+  /** Authored monster levels only; derived levels show no number. */
+  level?: MonsterLevelBadge | null;
+  tier?: MonsterTier;
 }
 
 const CHANGE_EPSILON = 0.005;
@@ -29,6 +34,8 @@ export class UnitCard {
   private readonly nameEl: HTMLElement;
   private readonly pipsEl: HTMLElement;
   private readonly castLabel: HTMLElement;
+  private readonly levelEl: HTMLElement;
+  private readonly tierEl: HTMLElement;
   private identityKey = '';
   private lastAct = -1;
   private lastHp = -1;
@@ -43,6 +50,7 @@ export class UnitCard {
   private lastStunned: boolean | null = null;
   private lastPaused: boolean | null = null;
   private lastTargeted = false;
+  private lastEnraged = false;
   private brokenUntil = 0;
 
   constructor(readonly key: string, side: 'player' | 'monster', pos: number) {
@@ -62,6 +70,8 @@ export class UnitCard {
           <div class="combat-card-flash"></div>
           <div class="combat-card-glow"></div>
           <div class="combat-card-stun"><span>💫</span></div>
+          <span class="combat-card-tier" aria-hidden="true"></span>
+          <span class="combat-card-level lvl-badge"></span>
         </div>
         <div class="combat-card-info">
           <div class="combat-card-name"></div>
@@ -84,10 +94,13 @@ export class UnitCard {
     this.nameEl = this.el.querySelector('.combat-card-name')!;
     this.pipsEl = this.el.querySelector('.combat-card-pips')!;
     this.castLabel = this.el.querySelector('.combat-card-cast-label')!;
+    this.levelEl = this.el.querySelector('.combat-card-level')!;
+    this.tierEl = this.el.querySelector('.combat-card-tier')!;
   }
 
   setIdentity(id: CardIdentity): void {
-    const key = `${id.name}|${id.isSelf}|${id.henchman}|${id.passive}|${id.art ?? ''}|${id.icon ?? ''}|${id.emoji ?? ''}`;
+    const level = id.level ? `${id.level.level}:${id.level.con}` : '';
+    const key = `${id.name}|${id.isSelf}|${id.henchman}|${id.passive}|${id.art ?? ''}|${id.icon ?? ''}|${id.emoji ?? ''}|${level}|${id.tier ?? ''}`;
     if (key === this.identityKey) return;
     this.identityKey = key;
     this.el.classList.toggle('self', id.isSelf);
@@ -95,11 +108,13 @@ export class UnitCard {
     this.el.classList.toggle('passive', id.passive);
     this.el.classList.toggle('one-word', !/\s/.test(id.name.trim()));
     this.nameEl.textContent = id.name;
-    this.el.title = id.name;
+    this.el.title = id.tier && id.tier !== 'trash' ? `${id.name} (${TIER_INFO[id.tier].label})` : id.name;
     this.iconEl.textContent = id.emoji || initials(id.name);
     this.iconEl.classList.toggle('emoji', !!id.emoji);
     loadImage(this.classIcon, id.icon, undefined);
     loadImage(this.img, id.art, id.artFallback);
+    this.writeTier(id.tier);
+    this.writeLevel(id.level ?? null);
   }
 
   update(unit: PlaybackUnit, now: number): void {
@@ -136,6 +151,12 @@ export class UnitCard {
       this.el.style.setProperty('--act', act.toFixed(3));
     }
 
+    const enraged = !dead && (unit.enrage?.stacks ?? 0) > 0;
+    if (enraged !== this.lastEnraged) {
+      this.lastEnraged = enraged;
+      this.el.classList.toggle('enraged', enraged);
+    }
+
     this.updateCast(unit, dead, now);
 
     const flags = `${dead}|${stunned}|${unit.shield > 0 ? Math.round(unit.shield) : 0}`;
@@ -170,6 +191,28 @@ export class UnitCard {
   breakCast(now: number): void {
     this.brokenUntil = now + 650;
     this.el.classList.add('cast-broken');
+  }
+
+  private writeTier(tier: MonsterTier | undefined): void {
+    const shown = tier && tier !== 'trash' ? tier : undefined;
+    if (shown) this.el.dataset.tier = shown;
+    else delete this.el.dataset.tier;
+    this.tierEl.textContent = shown ? TIER_INFO[shown].glyph : '';
+  }
+
+  private writeLevel(badge: MonsterLevelBadge | null): void {
+    this.el.classList.toggle('has-level', !!badge);
+    if (!badge) {
+      this.levelEl.textContent = '';
+      this.levelEl.removeAttribute('data-con');
+      this.levelEl.removeAttribute('aria-label');
+      this.levelEl.removeAttribute('title');
+      return;
+    }
+    this.levelEl.dataset.con = badge.con;
+    this.levelEl.setAttribute('aria-label', `Level ${badge.level}, ${badge.label}`);
+    this.levelEl.title = `Level ${badge.level} · ${badge.label}`;
+    this.levelEl.innerHTML = `<i aria-hidden="true">${escapeHtml(badge.glyph)}</i>${badge.level}`;
   }
 
   private updateCast(unit: PlaybackUnit, dead: boolean, now: number): void {

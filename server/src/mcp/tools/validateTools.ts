@@ -4,11 +4,18 @@ import {
   MIN_MONSTER_ACTION_INTERVAL_MS,
   MONSTER_SKILL_CATALOG,
   findZonesSpanningMaps,
+  isAuthoredMonsterLevel,
+  suggestTierFromHp,
   migrateLegacySet,
   migrateLegacySkill,
   validateSkillDefinition,
 } from '@idle-party-rpg/shared';
 import type { RoomEntryRequirements } from '@idle-party-rpg/shared';
+import {
+  checkpointEncounterProblems,
+  floorCheckpointProblems,
+  monsterScalingProblems,
+} from '../../admin/contentChecks.js';
 import type { ContentSnapshot } from '../../game/VersionStore.js';
 import type { McpToolDeps } from './McpToolDeps.js';
 import { toolResult, errorMessage } from './mcpResult.js';
@@ -138,6 +145,7 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
         problems.push(`${label} castTime must be a number of seconds, 0 or more (got ${String(entry.castTime)}).`);
       }
     });
+    problems.push(...monsterScalingProblems(monster));
   }
 
   // --- Skills ---
@@ -148,8 +156,13 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
   }
 
   // --- Dungeons ---
+  const encountersById = new Map((snapshot.encounters ?? []).map(e => [e.id, e]));
+  const monstersById = new Map(snapshot.monsters.map(m => [m.id, m]));
   for (const dungeon of snapshot.dungeons ?? []) {
     dungeon.floors.forEach((floor, floorIndex) => {
+      const floorLabel = `Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber})`;
+      problems.push(...floorCheckpointProblems(floor, floorLabel));
+      problems.push(...checkpointEncounterProblems(floor, floorLabel, encountersById, monstersById));
       floor.encounterTable.forEach((entry, entryIndex) => {
         if (!encounterIds.has(entry.encounterId)) {
           problems.push(`Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber}) encounter table references unknown encounter '${entry.encounterId}' (index ${entryIndex}).`);
@@ -325,6 +338,37 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
   return problems;
 }
 
+const MAX_LISTED_IDS = 20;
+
+/** Advisory findings that don't block publishing (unauthored levels, tier hints, inert dungeon fields). */
+function collectInfo(snapshot: ContentSnapshot): string[] {
+  const info: string[] = [];
+  const unleveled = snapshot.monsters.filter(m => !m.passive && !isAuthoredMonsterLevel(m.level)).map(m => m.id);
+  if (unleveled.length > 0) {
+    const listed = unleveled.slice(0, MAX_LISTED_IDS).join(', ');
+    const more = unleveled.length > MAX_LISTED_IDS ? `, … (+${unleveled.length - MAX_LISTED_IDS} more)` : '';
+    info.push(`No level scaling for ${unleveled.length} monster${unleveled.length === 1 ? '' : 's'} with no level set: ${listed}${more}. Set a level (1–200) to make a monster scale against player levels.`);
+  }
+  for (const monster of snapshot.monsters) {
+    if (monster.tier !== undefined) continue;
+    const suggested = suggestTierFromHp(monster);
+    if (suggested !== 'trash') {
+      info.push(`Monster '${monster.id}' has no tier, but its HP is in the '${suggested}' range for its damage — consider tier '${suggested}' (tiers are never set automatically).`);
+    }
+  }
+  for (const dungeon of snapshot.dungeons ?? []) {
+    dungeon.floors.forEach((floor, floorIndex) => {
+      const hasCheckpoints = Array.isArray(floor.checkpoints) && floor.checkpoints.length > 0;
+      if (hasCheckpoints) return;
+      const inert = (['maxWipes', 'checkpointRewardFraction'] as const).filter(key => floor[key] !== undefined);
+      if (inert.length > 0) {
+        info.push(`Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber}) sets ${inert.join(' and ')} without checkpoints — they have no effect.`);
+      }
+    });
+  }
+  return info;
+}
+
 function isNumberAtLeast(value: unknown, min: number): boolean {
   return typeof value === 'number' && Number.isFinite(value) && value >= min;
 }
@@ -362,15 +406,17 @@ function findQuestCycle(
   return null;
 }
 
-export async function validateDraft(deps: McpToolDeps, versionId: string): Promise<{ error?: string; problems?: string[] }> {
+export async function validateDraft(
+  deps: McpToolDeps,
+  versionId: string,
+): Promise<{ error?: string; problems?: string[]; info?: string[] }> {
   try {
     const version = deps.versionStore().get(versionId);
     if (!version) return { error: 'Version not found.' };
     if (version.status !== 'draft') return { error: 'Only drafts can be validated (this is a published/active version).' };
 
     const snapshot = await deps.versionStore().loadSnapshot(versionId);
-    const problems = collectProblems(snapshot);
-    return { problems };
+    return { problems: collectProblems(snapshot), info: collectInfo(snapshot) };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -380,7 +426,7 @@ export function registerValidateTools(server: McpServer, deps: McpToolDeps): voi
   server.registerTool(
     'validate_draft',
     {
-      description: 'Run referential-integrity and range checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc, unknown monster skills, monster attackInterval/cooldown/castTime ranges, invalid skill definitions). Returns a list of human-readable problems, empty if the draft is clean.',
+      description: "Run referential-integrity and range checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc, unknown monster skills, monster attackInterval/cooldown/castTime ranges, monster level (whole number 1-200)/tier/enrage ranges, dungeon checkpoints (descending fractions in (0,1)), maxWipes and checkpointRewardFraction ranges, checkpoint floors that don't roll an explicit encounter with a boss/raid monster, invalid skill definitions). Returns `problems` (human-readable, empty if the draft is clean) and `info` (advisory, never blocking: monsters with no level set and therefore no level scaling, tier hints from HP, dungeon fields that have no effect).",
       inputSchema: {
         versionId: z.string(),
       },

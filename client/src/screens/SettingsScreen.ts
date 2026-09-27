@@ -6,6 +6,9 @@ import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import type { GameClient } from '../network/GameClient';
 import { renderNotificationPreferences } from '../ui/NotificationPreferences';
 import { placeholderUrl } from '../ui/assets';
+import type { AutoRetreatPct } from '@idle-party-rpg/shared';
+import { AUTO_RETREAT_OPTIONS, DEFAULT_COMBAT_PREFS } from '@idle-party-rpg/shared';
+import { autoRetreatLine, formatPct } from '../combat/ForecastFormat';
 
 const SETTINGS_NAV_PLACEHOLDER = placeholderUrl('Settings', { w: 96, h: 96, glyph: '⚙️' });
 
@@ -89,9 +92,11 @@ export class SettingsScreen implements Screen {
    * a new option is one HTML block + one change listener — no plumbing
    * through to SettingsScreen state.
    */
-  private openPlayerOptions(): void {
-    // Idempotent: re-clicking the button while open is a no-op.
-    if (this.optionsOverlay) return;
+  openPlayerOptions(): void {
+    if (this.optionsOverlay) {
+      bringToFront(this.optionsOverlay);
+      return;
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'player-options-overlay';
@@ -109,6 +114,7 @@ export class SettingsScreen implements Screen {
             </label>
             <div class="settings-option-desc">Highlight quest-giver rooms and visit objectives on the map.</div>
           </li>
+          ${this.renderAutoRetreatRow()}
         </ul>
       </div>
     `;
@@ -132,8 +138,67 @@ export class SettingsScreen implements Screen {
       setQuestHintsEnabled(questHintsToggle.checked);
     });
 
+    this.wireAutoRetreat(overlay);
+
     bringToFront(overlay);
     wireFocusOnInteract(overlay);
+  }
+
+  private renderAutoRetreatRow(): string {
+    const current = this.gameClient.lastState?.character?.combatPrefs?.autoRetreatBelowPct
+      ?? DEFAULT_COMBAT_PREFS.autoRetreatBelowPct;
+    const buttons = AUTO_RETREAT_OPTIONS.map(pct => {
+      const on = pct === current;
+      return `<button type="button" class="settings-seg-btn${on ? ' active' : ''}" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}" data-retreat="${pct}">`
+        + `${pct === 0 ? 'Off' : formatPct(pct)}</button>`;
+    }).join('');
+    return `
+      <li class="settings-option-row settings-option-row-retreat">
+        <div class="settings-option-label" id="po-retreat-label">Auto-retreat</div>
+        <div class="settings-segmented" role="radiogroup" aria-labelledby="po-retreat-label">${buttons}</div>
+        <div class="settings-option-desc">Leave overworld fights when your party's chance to win is below this. Dungeons are not affected.</div>
+        ${this.autoRetreatNote()}
+      </li>
+    `;
+  }
+
+  /** Non-owners follow their party owner's setting. */
+  private autoRetreatNote(): string {
+    const state = this.gameClient.lastState;
+    const party = state?.social?.party;
+    const me = party?.members.find(m => m.username === state?.username);
+    if (!party || !me || me.role === 'owner') return '';
+    const policy = party.autoRetreat ? ` (${autoRetreatLine(party.autoRetreat.belowPct).replace('Auto-retreat: ', '')})` : '';
+    return `<div class="settings-option-note">Your party owner's setting is used${policy}.</div>`;
+  }
+
+  private wireAutoRetreat(overlay: HTMLElement): void {
+    const group = overlay.querySelector<HTMLElement>('.settings-segmented');
+    if (!group) return;
+    const buttons = [...group.querySelectorAll<HTMLButtonElement>('.settings-seg-btn[data-retreat]')];
+    const select = (btn: HTMLButtonElement): void => {
+      if (btn.getAttribute('aria-checked') === 'true') return;
+      for (const b of buttons) {
+        const on = b === btn;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', String(on));
+        b.tabIndex = on ? 0 : -1;
+      }
+      this.gameClient.sendSetCombatPrefs(Number(btn.dataset.retreat) as AutoRetreatPct);
+    };
+    group.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.settings-seg-btn[data-retreat]');
+      if (btn) select(btn);
+    });
+    group.addEventListener('keydown', (e) => {
+      const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+      if (step === 0) return;
+      e.preventDefault();
+      const current = buttons.findIndex(b => b.getAttribute('aria-checked') === 'true');
+      const next = buttons[(current + step + buttons.length) % buttons.length];
+      select(next);
+      next.focus();
+    });
   }
 
   private openNotificationPreferences(): void {

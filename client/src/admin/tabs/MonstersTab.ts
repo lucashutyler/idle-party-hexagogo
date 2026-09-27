@@ -1,8 +1,23 @@
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
-import { MIN_MONSTER_ACTION_INTERVAL_MS, MONSTER_SKILL_CATALOG } from '@idle-party-rpg/shared';
+import {
+  ENRAGE_MAX_STACKS,
+  ENRAGE_STEP_PERCENT,
+  ENRAGE_STEP_SECONDS,
+  ENRAGE_TIER_DEFAULTS,
+  MIN_MONSTER_ACTION_INTERVAL_MS,
+  MONSTER_SKILL_CATALOG,
+  MONSTER_TIERS,
+  isAuthoredMonsterLevel,
+  isBossTier,
+  suggestMonsterStats,
+  suggestTierFromHp,
+} from '@idle-party-rpg/shared';
 import type {
   MonsterDefinition,
+  MonsterEnrage,
+  MonsterRole,
+  MonsterTier,
   ItemDefinition,
   Resistance,
   MonsterSkillEntry,
@@ -13,6 +28,27 @@ import { openModal } from '../components/Modal';
 import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
 const MIN_ATTACK_INTERVAL_SECONDS = MIN_MONSTER_ACTION_INTERVAL_MS / 1000;
+const MONSTER_LEVEL_MIN = 1;
+const MONSTER_LEVEL_MAX = 200;
+const LEVEL_NOT_SET = 'not set — no level scaling';
+const MONSTER_ROLES: readonly MonsterRole[] = ['bruiser', 'caster', 'skirmisher'];
+
+type EnrageKey = keyof MonsterEnrage;
+interface EnrageField {
+  key: EnrageKey;
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  step: string;
+  integer: boolean;
+}
+const ENRAGE_FIELDS: readonly EnrageField[] = [
+  { key: 'afterSeconds', id: 'mf-enrage-after', label: 'Starts after (s)', min: 0, max: 86_400, step: '1', integer: false },
+  { key: 'stepSeconds', id: 'mf-enrage-step', label: 'Stack every (s)', min: 1, max: 3_600, step: '1', integer: false },
+  { key: 'stepPercent', id: 'mf-enrage-percent', label: 'Per stack (0.1 = +10 %)', min: 0, max: 1, step: '0.01', integer: false },
+  { key: 'maxStacks', id: 'mf-enrage-max', label: 'Max stacks', min: 0, max: 1_000, step: '1', integer: true },
+];
 
 export class MonstersTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -38,9 +74,17 @@ export class MonstersTab implements Tab {
             <button class="admin-btn admin-btn-sm admin-btn-danger monster-delete-btn" data-id="${m.id}">Del</button>
           </td>`;
 
+      const level = isAuthoredMonsterLevel(m.level)
+        ? String(m.level)
+        : `<span class="admin-muted" title="${LEVEL_NOT_SET}">—</span>`;
+      const tier = m.tier && m.tier !== 'trash'
+        ? `<span class="admin-pill${isBossTier(m.tier) ? ' admin-pill-gold' : ''}">${escapeHtml(String(m.tier))}</span>`
+        : '<span class="admin-muted">trash</span>';
       return `
         <tr>
           <td>${escapeHtml(m.name)}${m.passive ? ' <span class="admin-pill">passive</span>' : ''}</td>
+          <td class="monster-level-cell">${level}</td>
+          <td class="monster-tier-cell">${tier}</td>
           <td>${m.hp}</td>
           <td>${m.damage}${m.attackInterval != null && m.attackInterval !== 1 ? ` <span class="admin-muted">/ ${m.attackInterval}s</span>` : ''}</td>
           <td>${m.damageType}</td>
@@ -67,6 +111,8 @@ export class MonstersTab implements Tab {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Level</th>
+                <th>Tier</th>
                 <th>HP</th>
                 <th>Dmg / Speed</th>
                 <th>Type</th>
@@ -141,6 +187,7 @@ export class MonstersTab implements Tab {
           Passive (wall — never attacks, doesn't count toward victory)
         </label>
       </div>
+      ${this.scalingHtml(m)}
       <label class="admin-form-fullrow">Description (optional)
         <textarea id="mf-description" rows="3">${escapeHtml(m.description ?? '')}</textarea>
       </label>
@@ -229,7 +276,153 @@ export class MonstersTab implements Tab {
       this.saveForm(root, ctx, monster, modal.close);
     });
 
+    this.wireScaling(root, m);
+
     wireArtworkSection(root, { kind: 'monster', id: m.id });
+  }
+
+  private scalingHtml(m: MonsterDefinition): string {
+    const tier = m.tier ?? 'trash';
+    const unknownTier = (MONSTER_TIERS as readonly string[]).includes(tier)
+      ? ''
+      : `<option value="${escapeHtml(String(tier))}" selected>Unknown: ${escapeHtml(String(tier))}</option>`;
+    const tierOptions = MONSTER_TIERS.map(t =>
+      `<option value="${t}" ${t === tier ? 'selected' : ''}>${t[0].toUpperCase()}${t.slice(1)}</option>`
+    ).join('');
+    const roleOptions = '<option value="">Standard</option>' + MONSTER_ROLES.map(r =>
+      `<option value="${r}">${r[0].toUpperCase()}${r.slice(1)}</option>`
+    ).join('');
+    const enrageInputs = ENRAGE_FIELDS.map(f => {
+      const value = m.enrage?.[f.key];
+      return `<label>${f.label}<input type="number" id="${f.id}" value="${value ?? ''}" min="${f.min}" max="${f.max}" step="${f.step}"></label>`;
+    }).join('');
+    return `
+      <fieldset class="admin-form-fieldset">
+        <legend>Level &amp; tier</legend>
+        <div class="admin-form-grid">
+          <label>Level
+            <input type="number" id="mf-level" value="${m.level ?? ''}" min="${MONSTER_LEVEL_MIN}" max="${MONSTER_LEVEL_MAX}" step="1" placeholder="${LEVEL_NOT_SET}">
+          </label>
+          <label>Tier
+            <select id="mf-tier">${unknownTier}${tierOptions}</select>
+            <span class="admin-form-hint" id="mf-tier-hint"></span>
+          </label>
+        </div>
+        <div class="admin-form-hint">A level (${MONSTER_LEVEL_MIN}–${MONSTER_LEVEL_MAX}) turns on level scaling against players and shows players a level badge. Blank = ${LEVEL_NOT_SET}: the monster fights on its raw stats and players see no level. Boss and raid tiers get a boss bar, dungeon checkpoints and enrage.</div>
+        <div class="admin-form-row">
+          <label>Role<select id="mf-role">${roleOptions}</select></label>
+          <button class="admin-btn admin-btn-sm" id="mf-suggest" type="button">Suggest stats</button>
+          <span class="admin-form-hint">Fills HP, damage, attack interval, XP and gold with on-level starting values for the level and tier.</span>
+        </div>
+      </fieldset>
+      <fieldset class="admin-form-fieldset" id="mf-enrage-fieldset">
+        <legend>Enrage</legend>
+        <div class="admin-form-hint">Outgoing damage × (1 + stacks × per stack). Blank fields use the default shown in grey; all blank = the tier default.</div>
+        <div class="admin-form-grid">${enrageInputs}</div>
+      </fieldset>
+    `;
+  }
+
+  private wireScaling(root: HTMLElement, m: MonsterDefinition): void {
+    const tierSelect = root.querySelector<HTMLSelectElement>('#mf-tier');
+    if (!tierSelect) return;
+    const refresh = () => {
+      const tier = tierSelect.value as MonsterTier;
+      this.refreshEnrage(root, tier, !!m.enrage);
+      this.refreshTierHint(root, m, tier);
+    };
+    tierSelect.addEventListener('change', refresh);
+    for (const id of ['#mf-hp', '#mf-damage', '#mf-attackInterval', '#mf-level']) {
+      root.querySelector(id)?.addEventListener('input', refresh);
+    }
+    root.querySelector('#mf-suggest')?.addEventListener('click', () => this.applySuggestedStats(root));
+    refresh();
+  }
+
+  private refreshEnrage(root: HTMLElement, tier: MonsterTier, hasEnrage: boolean): void {
+    const fieldset = root.querySelector<HTMLElement>('#mf-enrage-fieldset');
+    if (fieldset) fieldset.hidden = !isBossTier(tier) && !hasEnrage;
+    const defaults: Record<EnrageKey, string> = {
+      afterSeconds: ENRAGE_TIER_DEFAULTS[tier] ? String(ENRAGE_TIER_DEFAULTS[tier]!.afterSeconds) : 'required',
+      stepSeconds: String(ENRAGE_STEP_SECONDS),
+      stepPercent: String(ENRAGE_STEP_PERCENT),
+      maxStacks: String(ENRAGE_MAX_STACKS),
+    };
+    for (const f of ENRAGE_FIELDS) {
+      const input = root.querySelector<HTMLInputElement>(`#${f.id}`);
+      if (input) input.placeholder = defaults[f.key];
+    }
+  }
+
+  private refreshTierHint(root: HTMLElement, m: MonsterDefinition, tier: MonsterTier): void {
+    const hint = root.querySelector<HTMLElement>('#mf-tier-hint');
+    if (!hint) return;
+    const levelRaw = (root.querySelector('#mf-level') as HTMLInputElement).value.trim();
+    const intervalRaw = (root.querySelector('#mf-attackInterval') as HTMLInputElement).value.trim();
+    const suggested = suggestTierFromHp({
+      ...m,
+      hp: Number((root.querySelector('#mf-hp') as HTMLInputElement).value),
+      damage: Number((root.querySelector('#mf-damage') as HTMLInputElement).value),
+      attackInterval: intervalRaw === '' ? undefined : Number(intervalRaw),
+      level: levelRaw === '' ? undefined : Number(levelRaw),
+      tier,
+    });
+    hint.textContent = suggested !== tier ? `suggested: ${suggested}` : '';
+  }
+
+  private applySuggestedStats(root: HTMLElement): void {
+    const level = Number((root.querySelector('#mf-level') as HTMLInputElement).value.trim() || NaN);
+    if (!this.isValidLevel(level)) {
+      alert(`Set a level (${MONSTER_LEVEL_MIN}–${MONSTER_LEVEL_MAX}) first — stats are suggested for a level.`);
+      return;
+    }
+    const tier = (root.querySelector('#mf-tier') as HTMLSelectElement).value as MonsterTier;
+    if (!(MONSTER_TIERS as readonly string[]).includes(tier)) {
+      alert('Pick a known tier first.');
+      return;
+    }
+    const role = (root.querySelector('#mf-role') as HTMLSelectElement).value as MonsterRole | '';
+    const stats = suggestMonsterStats(level, tier, role || undefined);
+    const fill: [string, number][] = [
+      ['#mf-hp', stats.hp],
+      ['#mf-damage', stats.damage],
+      ['#mf-attackInterval', stats.attackInterval],
+      ['#mf-xp', stats.xp],
+      ['#mf-goldMin', stats.goldMin],
+      ['#mf-goldMax', stats.goldMax],
+    ];
+    for (const [selector, value] of fill) {
+      (root.querySelector(selector) as HTMLInputElement).value = String(value);
+    }
+    root.querySelector('#mf-hp')?.dispatchEvent(new Event('input'));
+  }
+
+  private isValidLevel(level: number): boolean {
+    return Number.isInteger(level) && level >= MONSTER_LEVEL_MIN && level <= MONSTER_LEVEL_MAX;
+  }
+
+  /** Reads the enrage inputs; undefined = no explicit enrage, string = validation error. */
+  private readEnrage(root: HTMLElement, tier: MonsterTier, original: MonsterEnrage | undefined): MonsterEnrage | undefined | string {
+    const raw = ENRAGE_FIELDS.map(f => ({ f, text: (root.querySelector(`#${f.id}`) as HTMLInputElement).value.trim() }));
+    if (raw.every(r => r.text === '')) return undefined;
+    const enrage: Record<string, unknown> = { ...original };
+    for (const { f, text } of raw) {
+      if (text === '') {
+        delete enrage[f.key];
+        continue;
+      }
+      const value = Number(text);
+      if (!Number.isFinite(value) || value < f.min || value > f.max || (f.integer && !Number.isInteger(value))) {
+        return `Enrage "${f.label}" must be ${f.integer ? 'a whole number' : 'a number'} from ${f.min} to ${f.max}.`;
+      }
+      enrage[f.key] = value;
+    }
+    if (enrage.afterSeconds === undefined) {
+      const fallback = ENRAGE_TIER_DEFAULTS[tier]?.afterSeconds;
+      if (fallback === undefined) return 'Enrage needs "Starts after (s)" on trash and elite monsters (they have no default).';
+      enrage.afterSeconds = fallback;
+    }
+    return enrage as unknown as MonsterEnrage;
   }
 
   private wireRowRemovers(root: HTMLElement, btnSel: string, rowSel: string): void {
@@ -323,11 +516,23 @@ export class MonstersTab implements Tab {
     const attackIntervalRaw = (root.querySelector('#mf-attackInterval') as HTMLInputElement).value.trim();
     const attackInterval = attackIntervalRaw === '' ? undefined : parseFloat(attackIntervalRaw);
 
+    const levelRaw = (root.querySelector('#mf-level') as HTMLInputElement).value.trim();
+    const level = levelRaw === '' ? undefined : Number(levelRaw);
+    const tierValue = (root.querySelector('#mf-tier') as HTMLSelectElement).value as MonsterTier;
+    const tier = tierValue === 'trash' && original?.tier === undefined ? undefined : tierValue;
+
     if (!name) { alert('Name is required.'); return; }
     if (attackInterval !== undefined && !(attackInterval >= MIN_ATTACK_INTERVAL_SECONDS)) {
       alert(`Attack interval must be at least ${MIN_ATTACK_INTERVAL_SECONDS} seconds (blank = 1).`);
       return;
     }
+    if (level !== undefined && !this.isValidLevel(level)) {
+      alert(`Level must be a whole number from ${MONSTER_LEVEL_MIN} to ${MONSTER_LEVEL_MAX} (blank = ${LEVEL_NOT_SET}).`);
+      return;
+    }
+    const enrageShown = !root.querySelector<HTMLElement>('#mf-enrage-fieldset')?.hidden;
+    const enrage = enrageShown ? this.readEnrage(root, tierValue, original?.enrage) : undefined;
+    if (typeof enrage === 'string') { alert(enrage); return; }
 
     const content = ctx.getDisplayContent();
     if (content) {
@@ -378,6 +583,9 @@ export class MonstersTab implements Tab {
       skills: skills.length > 0 ? skills : undefined,
       passive: passive ? true : undefined,
       description: description || undefined,
+      level,
+      tier,
+      enrage,
     };
 
     try {

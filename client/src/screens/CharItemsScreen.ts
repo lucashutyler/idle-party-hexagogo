@@ -26,6 +26,13 @@ import { renderItemPopupContent } from '../ui/ItemPopup';
 import { renderAssetImg } from '../ui/assets';
 import { bringToFront, release } from '../ui/ModalStack';
 import { renderSkillCardMeta } from '../ui/SkillCardChip';
+import {
+  BestiaryModal,
+  bestiarySummaryText,
+  closestToNextRank,
+  mergeBestiaryEntries,
+  renderBestiaryRow,
+} from '../ui/BestiaryModal';
 
 /** Left column slots (top to bottom). Mainhand sits at the bottom of the
  *  left column with a small visual gap (no separate row anymore). */
@@ -74,6 +81,8 @@ export class CharItemsScreen implements Screen {
   private xpRateEl!: HTMLElement;
   private xpRateFromEl!: HTMLElement;
   private classPassiveEl!: HTMLElement;
+  private bestiaryEl!: HTMLElement;
+  private bestiaryModal: BestiaryModal;
 
   // Inventory refs
   private inventoryGrid!: HTMLElement;
@@ -85,6 +94,7 @@ export class CharItemsScreen implements Screen {
 
   private unsubscribe?: () => void;
   private unsubEquipBlocked?: () => void;
+  private unsubBestiary?: () => void;
 
   /** Cached item definitions. */
   private itemDefs: Record<string, ItemDefinition> = {};
@@ -106,6 +116,7 @@ export class CharItemsScreen implements Screen {
   private lastTradesKey = '';
   private lastHeroKey = '';
   private lastStatKey = '';
+  private lastBestiaryKey = '';
 
   /** Search/sort filter state. */
   private searchFilter = '';
@@ -123,6 +134,7 @@ export class CharItemsScreen implements Screen {
     this.container = el;
     this.gameClient = gameClient;
     this.worldCache = worldCache;
+    this.bestiaryModal = new BestiaryModal(gameClient);
 
     this.buildDOM();
   }
@@ -142,6 +154,12 @@ export class CharItemsScreen implements Screen {
       if (this.isActive) this.showEquipBlockedModal(msg);
     });
 
+    this.unsubBestiary = this.gameClient.onBestiary(() => {
+      const current = this.gameClient.lastState;
+      if (this.isActive && current) this.updateFromState(current);
+    });
+    if (this.gameClient.lastState?.character?.mastery) this.gameClient.requestBestiary();
+
     const state = this.gameClient.lastState;
     if (state) this.updateFromState(state);
   }
@@ -152,6 +170,9 @@ export class CharItemsScreen implements Screen {
     this.unsubscribe = undefined;
     this.unsubEquipBlocked?.();
     this.unsubEquipBlocked = undefined;
+    this.unsubBestiary?.();
+    this.unsubBestiary = undefined;
+    this.bestiaryModal.close();
     this.hideModal();
     this.closeSkillPopup();
     this.removeStatTooltip();
@@ -192,6 +213,8 @@ export class CharItemsScreen implements Screen {
 
         <div class="charitems-passive-info"></div>
 
+        <div class="charitems-bestiary"></div>
+
         <div class="items-mailbox"></div>
         <div class="items-trades"></div>
 
@@ -222,6 +245,10 @@ export class CharItemsScreen implements Screen {
     this.xpRateEl = this.container.querySelector('.charitems-xp-rate-value')!;
     this.xpRateFromEl = this.container.querySelector('.charitems-xp-rate-from')!;
     this.classPassiveEl = this.container.querySelector('.charitems-passive-info')!;
+    this.bestiaryEl = this.container.querySelector('.charitems-bestiary')!;
+    this.bestiaryEl.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.bestiary-view-all')) this.bestiaryModal.open();
+    });
 
     this.inventoryGrid = this.container.querySelector('.items-inv-grid')!;
     this.mailboxContainer = this.container.querySelector('.items-mailbox')!;
@@ -390,6 +417,15 @@ export class CharItemsScreen implements Screen {
 
     // XP rate — every tick (cheap)
     this.renderXpRate(char.xpRate);
+
+    const mastery = char.mastery;
+    const bestiaryKey = mastery
+      ? `${mastery.version}|${mastery.discovered}|${mastery.mastered}|${char.level}|${this.gameClient.lastBestiary?.version ?? ''}`
+      : '';
+    if (bestiaryKey !== this.lastBestiaryKey) {
+      this.lastBestiaryKey = bestiaryKey;
+      this.renderBestiaryCard(state);
+    }
 
     // Mailbox & trades — re-render on change
     const mailboxKey = JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false]));
@@ -833,6 +869,30 @@ export class CharItemsScreen implements Screen {
     }
     if (key === 'material') return 'Materials';
     return SLOT_LABELS[key] ?? (key.charAt(0).toUpperCase() + key.slice(1));
+  }
+
+  // ── Bestiary ───────────────────────────────────────────────
+
+  private renderBestiaryCard(state: ServerStateMessage): void {
+    const mastery = state.character?.mastery;
+    if (!mastery) {
+      this.bestiaryEl.innerHTML = '';
+      return;
+    }
+    const label = `<div class="items-section-label">Bestiary <span class="items-section-count">(${mastery.discovered})</span></div>`;
+    if (mastery.discovered === 0) {
+      this.bestiaryEl.innerHTML = `${label}<div class="bestiary-card"><div class="bestiary-card-empty">`
+        + 'Defeat monsters to fill your bestiary. Each rank makes you a little stronger against them.</div></div>';
+      return;
+    }
+    const entries = mergeBestiaryEntries(this.gameClient.lastBestiary?.entries ?? [], mastery.recent);
+    const rows = closestToNextRank(entries, 3)
+      .map(e => renderBestiaryRow(e, state.character?.level, { compact: true })).join('');
+    this.bestiaryEl.innerHTML = `${label}<div class="bestiary-card">`
+      + `<div class="bestiary-card-summary">${bestiarySummaryText(mastery)}</div>`
+      + (rows ? `<div class="bestiary-card-rows" role="list" aria-label="Closest to the next rank">${rows}</div>` : '')
+      + '<button type="button" class="pixel-btn bestiary-view-all">View all ›</button>'
+      + '</div>';
   }
 
   // ── Mailbox / trades ───────────────────────────────────────

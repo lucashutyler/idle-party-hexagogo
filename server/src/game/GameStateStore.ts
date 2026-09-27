@@ -1,4 +1,4 @@
-import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription } from '@idle-party-rpg/shared';
+import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription, DungeonRunState, DungeonCheckpoint, CombatPrefs, AwayLedger } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -48,14 +48,22 @@ export interface PlayerSaveData {
   completedQuests?: CompletedQuestEntry[];
   /** ISO timestamp of last completion per weekly-repeatable quest ID. */
   weeklyCompletions?: Record<string, string>;
-  /** Active dungeon run (floor progress + entrance), restored across restarts. */
-  dungeonRun?: {
-    dungeonId: string;
-    currentFloorIndex: number;
-    entrance: { col: number; row: number };
-  };
+  /** Active dungeon run (floor progress, entrance, checkpoint, wipes), restored across restarts. */
+  dungeonRun?: DungeonRunState;
   /** Dungeon IDs this player has cleared at least once (gates first-clear rewards). */
   clearedDungeons?: string[];
+  /** Resume points stored on leaving a checkpoint floor, by dungeon id. */
+  dungeonCheckpoints?: Record<string, DungeonCheckpoint>;
+  /** Lifetime kills per monster definition id (kill mastery). */
+  monsterKills?: Record<string, number>;
+  /** Absent → DEFAULT_COMBAT_PREFS. */
+  combatPrefs?: CombatPrefs;
+  /** The one-time "auto-retreat kept your party out of a losing fight" notification was sent. */
+  autoRetreatNotified?: boolean;
+  /** The "while you were away" ledger still being recorded. */
+  awayLedger?: AwayLedger | null;
+  /** A finished recap the player has not acknowledged yet. */
+  pendingRecap?: AwayLedger | null;
   /** Henchmen the party holds, mirrored onto every member's save like `dungeonRun`. */
   partyHenchmen?: HiredHenchman[];
   /** Capped notification inbox (most recent last). */

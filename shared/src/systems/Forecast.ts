@@ -165,8 +165,8 @@ interface PartyProfile {
 interface EnemySummary {
   enemyLevels?: [number, number];
   enemyLevelsDerived?: boolean;
+  /** Strongest common enemy with an authored level; derived levels never drive level reasons. */
   enemyLevel?: number;
-  enemyLevelDerived?: boolean;
   bossFight: boolean;
   casterEnemies: boolean;
   afflictingEnemies: boolean;
@@ -535,13 +535,8 @@ function summarizeEnemies(all: readonly EnemyProfile[], common: readonly EnemyPr
   summary.enemyLevels = [Math.min(...levels), Math.max(...levels)];
   summary.enemyLevelsDerived = fighters.some(e => e.derived);
   const pool = common.filter(e => !e.passive);
-  let strongest: EnemyProfile | null = null;
-  for (const e of pool.length > 0 ? pool : fighters) {
-    if (!strongest || e.level > strongest.level || (e.level === strongest.level && e.derived && !strongest.derived)) strongest = e;
-  }
-  if (strongest) {
-    summary.enemyLevel = strongest.level;
-    summary.enemyLevelDerived = strongest.derived;
+  for (const e of (pool.length > 0 ? pool : fighters).filter(f => !f.derived)) {
+    if (summary.enemyLevel === undefined || e.level > summary.enemyLevel) summary.enemyLevel = e.level;
   }
   return summary;
 }
@@ -558,7 +553,6 @@ function reasonsFor(stats: ForecastStats, party: PartyProfile, enemies: EnemySum
     partyLevel: party.partyLevel,
     humanPlayers: party.humanPlayers,
     enemyLevel: enemies.enemyLevel,
-    enemyLevelDerived: enemies.enemyLevelDerived,
     bossFight: enemies.bossFight,
     casterEnemies: enemies.casterEnemies,
     afflictingEnemies: enemies.afflictingEnemies,

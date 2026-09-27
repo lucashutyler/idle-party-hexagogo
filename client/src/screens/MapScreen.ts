@@ -1,7 +1,11 @@
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
+import type { ServerForecastMessage } from '@idle-party-rpg/shared';
+import { DEFAULT_COMBAT_PREFS } from '@idle-party-rpg/shared';
 import { RoomView } from '../ui/RoomView';
+import type { RoomForecastState } from '../ui/RoomView';
+import { isForecastStale } from '../combat/ForecastFormat';
 import { ShopPopup } from '../ui/ShopPopup';
 import { ThreeWorldMap } from '../ui/ThreeWorldMap';
 import { NpcTalkPopup } from '../ui/NpcTalkPopup';
@@ -58,6 +62,29 @@ export class MapScreen implements Screen {
         this.map.applyServerState(this.gameClient.lastState, true);
       }
     }
+  }
+
+  private roomForecastState(tileId: string): RoomForecastState {
+    const target = { kind: 'room' as const, tileId };
+    const fresh = this.gameClient.requestForecast(target);
+    if (fresh) return this.toRoomForecastState(fresh, false);
+    const previous = this.gameClient.peekForecast(target);
+    return previous?.result ? this.toRoomForecastState(previous, true) : 'loading';
+  }
+
+  private toRoomForecastState(msg: ServerForecastMessage, forceStale: boolean): RoomForecastState {
+    if (msg.status === 'pending') return 'loading';
+    if (msg.status !== 'ok' || !msg.result) return null;
+    const state = this.gameClient.lastState;
+    const party = state?.social?.party;
+    return {
+      result: msg.result,
+      stale: forceStale || isForecastStale(msg.result, party?.forecastKey),
+      autoRetreat: party?.autoRetreat
+        ?? state?.character?.combatPrefs?.autoRetreatBelowPct
+        ?? DEFAULT_COMBAT_PREFS.autoRetreatBelowPct,
+      viewerLevel: state?.character?.level,
+    };
   }
 
   private canMove(): boolean {
@@ -149,8 +176,7 @@ export class MapScreen implements Screen {
         const state = this.gameClient.lastState;
         if (!state) return;
         if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
-        if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can enter'); return; }
-        this.dungeonEntryPopup!.show(dungeon, state.party.col, state.party.row);
+        this.dungeonEntryPopup!.show(dungeon, state.party.col, state.party.row, { canEnter: this.canMove() });
       },
       (tileId: string) => {
         const state = this.gameClient.lastState;
@@ -159,7 +185,12 @@ export class MapScreen implements Screen {
         if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can travel'); return; }
         this.gameClient.sendEnterTransition(tileId);
       },
+      (tileId) => this.roomForecastState(tileId),
     );
+    this.gameClient.onForecast((msg) => {
+      if (msg.target.kind !== 'room' || msg.status === 'pending') return;
+      this.roomView?.updateForecast(msg.target.tileId, this.toRoomForecastState(msg, false));
+    });
     this.map.setOnTileClick((tileInfo) => {
       const state = this.gameClient.lastState;
       const playerOnTile = state && state.party.col === tileInfo.col && state.party.row === tileInfo.row;
@@ -177,6 +208,10 @@ export class MapScreen implements Screen {
       this.roomView!.transitions = (playerOnTile && !state?.dungeon && tileDef?.transitions)
         ? tileDef.transitions.map(t => ({ tileId: t.tileId, name: this.resolveTransitionName(t) }))
         : [];
+      const explored = playerOnTile || tileInfo.isUnlocked;
+      this.roomView!.forecastTileId = (tileDef?.id && explored && tileInfo.isTraversable && !(playerOnTile && state?.dungeon))
+        ? tileDef.id
+        : null;
       this.roomView!.show(tileInfo);
     });
 

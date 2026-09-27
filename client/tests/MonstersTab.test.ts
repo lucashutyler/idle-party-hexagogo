@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MONSTER_SKILL_CATALOG } from '@idle-party-rpg/shared';
+import { ENRAGE_STEP_SECONDS, MONSTER_SKILL_CATALOG, suggestMonsterStats } from '@idle-party-rpg/shared';
 import type { MonsterDefinition } from '@idle-party-rpg/shared';
 import { MonstersTab } from '../src/admin/tabs/MonstersTab';
 import type { AdminContext } from '../src/admin/AdminContext';
@@ -190,5 +190,128 @@ describe('MonstersTab', () => {
     modal.querySelector<HTMLButtonElement>('#mf-save')!.click();
     await flush();
     expect(put.bodies[0].skills).toEqual([{ skillId: 'meteor', value: 9, cooldown: 4 }]);
+  });
+
+  it('shows level and tier columns, with "not set" for a monster without a level', () => {
+    const boss = { ...SHAMAN, id: 'test_boss', name: 'Test Boss', level: 12, tier: 'boss' } as MonsterDefinition;
+    new MonstersTab().render(container, makeCtx([SHAMAN, boss]));
+    const headers = [...container.querySelectorAll('thead th')].map(th => th.textContent);
+    expect(headers).toContain('Level');
+    expect(headers).toContain('Tier');
+    const [shamanRow, bossRow] = [...container.querySelectorAll('tbody tr')];
+    expect(shamanRow.querySelector('.monster-level-cell span')!.getAttribute('title')).toBe('not set — no level scaling');
+    expect(shamanRow.querySelector('.monster-tier-cell')!.textContent).toBe('trash');
+    expect(bossRow.querySelector('.monster-level-cell')!.textContent).toBe('12');
+    expect(bossRow.querySelector('.monster-tier-cell')!.textContent).toBe('boss');
+  });
+
+  it('blank level stays unset; a level outside 1-200 or a fraction is rejected', async () => {
+    const put = stubPut();
+    new MonstersTab().render(container, makeCtx());
+    let modal = openEdit(container, 'test_shaman');
+    const level = modal.querySelector<HTMLInputElement>('#mf-level')!;
+    expect(level.value).toBe('');
+    expect(level.placeholder).toBe('not set — no level scaling');
+
+    for (const bad of ['0', '201', '2.5']) {
+      setValue(modal, '#mf-level', bad);
+      modal.querySelector<HTMLButtonElement>('#mf-save')!.click();
+      await flush();
+    }
+    expect(put.bodies).toHaveLength(0);
+    expect(alert).toHaveBeenCalledTimes(3);
+
+    closeAllModals();
+    modal = openEdit(container, 'test_shaman');
+    setValue(modal, '#mf-level', '7');
+    setValue(modal, '#mf-tier', 'elite');
+    modal.querySelector<HTMLButtonElement>('#mf-save')!.click();
+    await flush();
+    expect(put.bodies[0]).toMatchObject({ level: 7, tier: 'elite', futureField: { keep: 'me' } });
+    expect('enrage' in put.bodies[0]).toBe(false);
+  });
+
+  it('shows enrage fields only for boss and raid tiers, with tier defaults as placeholders', async () => {
+    const put = stubPut();
+    new MonstersTab().render(container, makeCtx());
+    const modal = openEdit(container, 'test_shaman');
+    const fieldset = modal.querySelector<HTMLElement>('#mf-enrage-fieldset')!;
+    expect(fieldset.hidden).toBe(true);
+
+    setValue(modal, '#mf-tier', 'raid');
+    expect(fieldset.hidden).toBe(false);
+    expect(modal.querySelector<HTMLInputElement>('#mf-enrage-after')!.placeholder).toBe('3600');
+    expect(modal.querySelector<HTMLInputElement>('#mf-enrage-step')!.placeholder).toBe(String(ENRAGE_STEP_SECONDS));
+
+    setValue(modal, '#mf-enrage-percent', '0.2');
+    modal.querySelector<HTMLButtonElement>('#mf-save')!.click();
+    await flush();
+    expect(put.bodies[0].tier).toBe('raid');
+    expect(put.bodies[0].enrage).toEqual({ afterSeconds: 3600, stepPercent: 0.2 });
+  });
+
+  it('drops enrage input typed while the tier was boss once the tier is back to trash', async () => {
+    const put = stubPut();
+    new MonstersTab().render(container, makeCtx());
+    const modal = openEdit(container, 'test_shaman');
+    setValue(modal, '#mf-tier', 'boss');
+    setValue(modal, '#mf-enrage-after', '120');
+    setValue(modal, '#mf-tier', 'trash');
+    modal.querySelector<HTMLButtonElement>('#mf-save')!.click();
+    await flush();
+    expect('enrage' in put.bodies[0]).toBe(false);
+    expect('tier' in put.bodies[0]).toBe(false);
+  });
+
+  it('rejects an out-of-range enrage field', async () => {
+    const put = stubPut();
+    const boss = { ...SHAMAN, tier: 'boss' } as MonsterDefinition;
+    new MonstersTab().render(container, makeCtx([boss]));
+    const modal = openEdit(container, 'test_shaman');
+    setValue(modal, '#mf-tier', 'boss');
+    expect(modal.querySelector<HTMLElement>('#mf-enrage-fieldset')!.hidden).toBe(false);
+    setValue(modal, '#mf-enrage-percent', '5');
+    modal.querySelector<HTMLButtonElement>('#mf-save')!.click();
+    await flush();
+    expect(put.bodies).toHaveLength(0);
+    expect(alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('Suggest stats needs a level, then fills stats for the level, tier and role', () => {
+    new MonstersTab().render(container, makeCtx());
+    const modal = openEdit(container, 'test_shaman');
+    modal.querySelector<HTMLButtonElement>('#mf-suggest')!.click();
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(modal.querySelector<HTMLInputElement>('#mf-hp')!.value).toBe('18');
+
+    setValue(modal, '#mf-level', '20');
+    setValue(modal, '#mf-tier', 'elite');
+    setValue(modal, '#mf-role', 'bruiser');
+    modal.querySelector<HTMLButtonElement>('#mf-suggest')!.click();
+    const stats = suggestMonsterStats(20, 'elite', 'bruiser');
+    expect(modal.querySelector<HTMLInputElement>('#mf-hp')!.value).toBe(String(stats.hp));
+    expect(modal.querySelector<HTMLInputElement>('#mf-damage')!.value).toBe(String(stats.damage));
+    expect(modal.querySelector<HTMLInputElement>('#mf-attackInterval')!.value).toBe(String(stats.attackInterval));
+    expect(modal.querySelector<HTMLInputElement>('#mf-xp')!.value).toBe(String(stats.xp));
+    expect(modal.querySelector<HTMLInputElement>('#mf-goldMin')!.value).toBe(String(stats.goldMin));
+    expect(modal.querySelector<HTMLInputElement>('#mf-goldMax')!.value).toBe(String(stats.goldMax));
+    expect(modal.querySelector('#mf-tier-hint')!.textContent).toBe('');
+  });
+
+  it('hints a tier from HP when it differs from the selected tier', () => {
+    new MonstersTab().render(container, makeCtx());
+    const modal = openEdit(container, 'test_shaman');
+    const hint = modal.querySelector('#mf-tier-hint')!;
+    expect(hint.textContent).toBe('');
+
+    const boss = suggestMonsterStats(10, 'boss');
+    setValue(modal, '#mf-level', '10');
+    const hp = modal.querySelector<HTMLInputElement>('#mf-hp')!;
+    hp.value = String(boss.hp);
+    hp.dispatchEvent(new Event('input'));
+    expect(hint.textContent).toBe('suggested: boss');
+
+    setValue(modal, '#mf-tier', 'boss');
+    expect(hint.textContent).toBe('');
   });
 });

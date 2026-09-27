@@ -31,6 +31,12 @@
   --cyan: #37e3ff;
   --pink: #ff5fb7;
 
+  --con-trivial: var(--text-3);
+  --con-easy: var(--green);
+  --con-even: var(--gold);
+  --con-hard: var(--orange);
+  --con-deadly: var(--red);
+
   --grad-app: radial-gradient(120% 80% at 50% 0%, #22306e 0%, #0f1736 55%, #0a0f24 100%);
   --grad-panel: linear-gradient(180deg, #2a387f 0%, #1c2659 100%);
   --grad-primary: linear-gradient(180deg, #ffdd66 0%, #ffb31f 100%);

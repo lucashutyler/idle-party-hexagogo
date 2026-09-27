@@ -1,8 +1,23 @@
 import type { TileClickInfo } from './ThreeWorldMap';
-import type { NpcDefinition, DungeonDefinition } from '@idle-party-rpg/shared';
+import type { NpcDefinition, DungeonDefinition, ForecastResult, PartyAutoRetreatInfo, AutoRetreatPct } from '@idle-party-rpg/shared';
 import { classIconHtml } from '@idle-party-rpg/shared';
 import { renderAssetImg } from './assets';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { renderForecastPopover, renderForecastRing } from './ForecastChip';
+import { forecastHeadline } from '../combat/ForecastFormat';
+
+export type RoomForecastState =
+  | {
+    result: ForecastResult;
+    stale?: boolean;
+    autoRetreat?: PartyAutoRetreatInfo | AutoRetreatPct | null;
+    viewerLevel?: number;
+  }
+  | 'loading'
+  | null;
+
+/** Returns what to show for a room's forecast right now (requesting it when needed). */
+export type RoomForecastProvider = (tileId: string) => RoomForecastState;
 
 /**
  * RoomView replaces the old TileInfoModal with three states:
@@ -34,8 +49,13 @@ export class RoomView {
   transitions: { tileId: string; name: string }[] = [];
   /** GUID of the room being shown — the per-room artwork override id. Set externally before showing. */
   roomId: string | null = null;
+  /** Room to forecast (null hides the forecast). Set externally before showing. */
+  forecastTileId: string | null = null;
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
+  private forecastProvider?: RoomForecastProvider;
+  private shownForecastTileId: string | null = null;
+  private forecastExpanded = false;
 
   constructor(
     parent: HTMLElement,
@@ -45,7 +65,9 @@ export class RoomView {
     onNpcTalk?: (npc: NpcDefinition) => void,
     onEnterDungeon?: (dungeon: DungeonDefinition) => void,
     onEnterTransition?: (tileId: string) => void,
+    forecastProvider?: RoomForecastProvider,
   ) {
+    this.forecastProvider = forecastProvider;
     this.onMove = onMove;
     this.onUserClick = onUserClick;
     this.onShopClick = onShopClick;
@@ -81,8 +103,17 @@ export class RoomView {
     return classIconHtml(className);
   }
 
+  /** Patches the forecast slot when `tileId` is the room on screen. */
+  updateForecast(tileId: string, state: RoomForecastState): void {
+    if (this.overlay.style.display === 'none' || this.shownForecastTileId !== tileId) return;
+    const slot = this.modal.querySelector<HTMLElement>('.room-view-forecast');
+    if (slot) this.fillForecastSlot(slot, state);
+  }
+
   show(info: TileClickInfo): void {
     const isCurrent = info.isCurrentTile;
+    this.shownForecastTileId = this.forecastProvider ? this.forecastTileId : null;
+    this.forecastExpanded = false;
 
     if (isCurrent) {
       this.renderCurrentRoom(info);
@@ -93,6 +124,7 @@ export class RoomView {
     this.overlay.style.display = 'flex';
     this.overlay.classList.toggle('room-view-overlay-current', isCurrent);
     bringToFront(this.overlay);
+    this.initForecastSlot();
 
     // If we just transitioned from a remote popup at this same tile, animate
     // the modal expanding from compact → full ("you have arrived").
@@ -155,6 +187,7 @@ export class RoomView {
           <div class="room-view-zone">${this.escapeHtml(info.zoneName)}</div>
           <div class="room-view-name">${this.escapeHtml(info.roomName || 'Unnamed Room')}</div>
         </div>
+        ${this.forecastSlotHtml()}
         <div class="room-view-here-label">You are here</div>
         <div class="room-view-parties">
           ${partySection}
@@ -233,6 +266,7 @@ export class RoomView {
       <button class="room-view-close" aria-label="Close">×</button>
       <div class="room-view-zone">${this.escapeHtml(info.zoneName)}</div>
       <div class="room-view-name">${this.escapeHtml(info.roomName || 'Unexplored Room')}</div>
+      ${this.forecastSlotHtml()}
       ${partiesBlock}
       ${shopHint}
       ${undiscoveredNote}
@@ -257,6 +291,56 @@ export class RoomView {
         }
       });
     }
+  }
+
+  private forecastSlotHtml(): string {
+    if (!this.shownForecastTileId) return '';
+    return `<div class="room-view-forecast" data-tile-id="${this.escapeHtml(this.shownForecastTileId)}"></div>`;
+  }
+
+  private initForecastSlot(): void {
+    const tileId = this.shownForecastTileId;
+    const slot = this.modal.querySelector<HTMLElement>('.room-view-forecast');
+    if (!tileId || !slot || !this.forecastProvider) return;
+    slot.addEventListener('click', (e) => {
+      const toggle = (e.target as HTMLElement).closest('.room-view-forecast-btn');
+      if (!toggle || (toggle as HTMLButtonElement).disabled) return;
+      this.forecastExpanded = !this.forecastExpanded;
+      toggle.setAttribute('aria-expanded', String(this.forecastExpanded));
+      const details = slot.querySelector<HTMLElement>('.room-view-forecast-details');
+      if (details) details.hidden = !this.forecastExpanded;
+    });
+    this.fillForecastSlot(slot, this.forecastProvider(tileId));
+  }
+
+  private fillForecastSlot(slot: HTMLElement, state: RoomForecastState): void {
+    if (state === null) {
+      slot.hidden = true;
+      slot.innerHTML = '';
+      return;
+    }
+    slot.hidden = false;
+    if (state === 'loading') {
+      slot.dataset.state = 'loading';
+      slot.innerHTML = `<button type="button" class="room-view-forecast-btn" disabled>${renderForecastRing('loading', { kind: 'room' })}`
+        + '<span class="room-view-forecast-text">Estimating your chances…</span></button>';
+      return;
+    }
+    slot.dataset.state = state.stale ? 'stale' : 'ready';
+    const headline = forecastHeadline(state.result, 'room');
+    const detailsId = `room-forecast-details-${this.shownForecastTileId ?? ''}`;
+    slot.innerHTML = `<button type="button" class="room-view-forecast-btn" aria-expanded="${this.forecastExpanded}" aria-controls="${this.escapeHtml(detailsId)}">`
+      + renderForecastRing(state.result, { kind: 'room', stale: state.stale })
+      + `<span class="room-view-forecast-text">${this.escapeHtml(headline)}</span>`
+      + '<span class="room-view-forecast-more" aria-hidden="true">ⓘ</span></button>'
+      + `<div class="room-view-forecast-details" id="${this.escapeHtml(detailsId)}"${this.forecastExpanded ? '' : ' hidden'}>`
+      + renderForecastPopover(state.result, {
+        kind: 'room',
+        autoRetreat: state.autoRetreat,
+        viewerLevel: state.viewerLevel,
+        stale: state.stale,
+      })
+      + '</div>';
   }
 
   /**
@@ -334,6 +418,7 @@ export class RoomView {
 
   hide(): void {
     this.overlay.style.display = 'none';
+    this.shownForecastTileId = null;
     release(this.overlay);
   }
 }

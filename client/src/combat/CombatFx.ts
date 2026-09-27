@@ -31,6 +31,30 @@ export const FLOATER_MERGE_MS = 150;
 const MAX_REACTION_CARDS = 4;
 const STACK_OFFSET_PX = 20;
 const BANNER_MAX_MS = 1400;
+const LONG_BANNER_CHARS = 8;
+
+export type BannerTone = 'fight' | 'boss' | 'enrage' | 'checkpoint' | 'regroup' | 'victory' | 'defeat' | 'retreat';
+
+/** A banner never replaces a higher-priority one still showing; it waits up to BANNER_QUEUE_MS instead. */
+export const BANNER_PRIORITY: Record<BannerTone, number> = {
+  fight: 0,
+  boss: 1,
+  enrage: 2,
+  checkpoint: 3,
+  regroup: 4,
+  victory: 5,
+  defeat: 5,
+  retreat: 5,
+};
+export const BANNER_QUEUE_MS = 1000;
+
+interface BannerRequest {
+  text: string;
+  tone: BannerTone;
+  holdMs: number;
+  sub?: string;
+  expiresAt: number;
+}
 
 /** Transient combat effects drawn over the stage: numbers, callouts, banners. Only transform/opacity animate. */
 export class CombatFx {
@@ -40,13 +64,17 @@ export class CombatFx {
   private readonly svg: SVGSVGElement;
   private readonly floaters: Floater[] = [];
   private reactionCards: HTMLElement[] = [];
+  private readonly clock: () => number;
   private bannerTimer?: ReturnType<typeof setTimeout>;
   private bannerAnim: Animation | null = null;
+  private bannerShown: BannerTone | null = null;
+  private bannerQueue: BannerRequest[] = [];
 
-  constructor(layer: HTMLElement, shakeTarget: HTMLElement, banner: HTMLElement) {
+  constructor(layer: HTMLElement, shakeTarget: HTMLElement, banner: HTMLElement, clock: () => number = () => performance.now()) {
     this.layer = layer;
     this.shakeTarget = shakeTarget;
     this.bannerEl = banner;
+    this.clock = clock;
     this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.svg.setAttribute('class', 'combat-fx-svg');
     this.layer.appendChild(this.svg);
@@ -60,6 +88,10 @@ export class CombatFx {
 
   get liveFloaters(): number {
     return this.floaters.filter(f => f.busy).length;
+  }
+
+  get currentBanner(): BannerTone | null {
+    return this.bannerShown;
   }
 
   /** Damage/heal number over a unit; hits on the same unit within FLOATER_MERGE_MS merge into one. */
@@ -230,30 +262,21 @@ export class CombatFx {
     ], { duration: 260, easing: 'linear' });
   }
 
-  banner(text: string, tone: 'fight' | 'victory' | 'defeat', holdMs = 1100): void {
-    this.clearBanner();
-    this.bannerEl.className = `combat-banner combat-banner-${tone} show`;
-    this.bannerEl.innerHTML = `<span class="combat-banner-text">${escapeHtml(text)}</span>`;
-    const total = Math.min(BANNER_MAX_MS, holdMs);
-    this.bannerAnim = reducedMotion()
-      ? fx(this.bannerEl, [{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 1, offset: 0.8 }, { opacity: 0 }], { duration: total, fill: 'forwards' })
-      : fx(this.bannerEl, [
-        { transform: 'translate(-50%, -50%) scale(2.2)', opacity: 0 },
-        { transform: 'translate(-50%, -50%) scale(0.94)', opacity: 1, offset: 0.16 },
-        { transform: 'translate(-50%, -50%) scale(1)', opacity: 1, offset: 0.24 },
-        { transform: 'translate(-50%, -50%) scale(1.02)', opacity: 1, offset: 0.8 },
-        { transform: 'translate(-50%, -50%) scale(1.25)', opacity: 0 },
-      ], { duration: total, easing: 'ease-out', fill: 'forwards' });
-    this.bannerTimer = setTimeout(() => this.clearBanner(), total);
+  /** Shows the banner now, or queues it behind a more important one; false when queued. */
+  banner(text: string, tone: BannerTone, holdMs = 1100, sub?: string): boolean {
+    const request: BannerRequest = { text, tone, holdMs, sub, expiresAt: this.clock() + BANNER_QUEUE_MS };
+    if (this.bannerShown && BANNER_PRIORITY[this.bannerShown] > BANNER_PRIORITY[tone]) {
+      this.bannerQueue.push(request);
+      return false;
+    }
+    this.showBanner(request);
+    return true;
   }
 
+  /** Removes the banner on screen and everything queued behind it. */
   clearBanner(): void {
-    if (this.bannerTimer) clearTimeout(this.bannerTimer);
-    this.bannerTimer = undefined;
-    this.bannerAnim?.cancel();
-    this.bannerAnim = null;
-    this.bannerEl.className = 'combat-banner';
-    this.bannerEl.textContent = '';
+    this.bannerQueue = [];
+    this.hideBanner();
   }
 
   sparkles(at: FxPoint, count = 14): void {
@@ -282,6 +305,49 @@ export class CombatFx {
     this.reactionCards = [];
     for (const el of this.layer.querySelectorAll('.combat-stamp, .combat-arc-token, .combat-spark')) el.remove();
     this.svg.replaceChildren();
+  }
+
+  private showBanner(request: BannerRequest): void {
+    this.hideBanner();
+    const { text, tone, holdMs, sub } = request;
+    this.bannerShown = tone;
+    this.bannerEl.className = `combat-banner combat-banner-${tone}${text.length > LONG_BANNER_CHARS ? ' long' : ''} show`;
+    this.bannerEl.innerHTML = `<span class="combat-banner-text">${escapeHtml(text)}</span>`
+      + (sub ? `<span class="combat-banner-sub">${escapeHtml(sub)}</span>` : '');
+    const total = Math.min(BANNER_MAX_MS, holdMs);
+    this.bannerAnim = reducedMotion()
+      ? fx(this.bannerEl, [{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 1, offset: 0.8 }, { opacity: 0 }], { duration: total, fill: 'forwards' })
+      : fx(this.bannerEl, [
+        { transform: 'translate(-50%, -50%) scale(2.2)', opacity: 0 },
+        { transform: 'translate(-50%, -50%) scale(0.94)', opacity: 1, offset: 0.16 },
+        { transform: 'translate(-50%, -50%) scale(1)', opacity: 1, offset: 0.24 },
+        { transform: 'translate(-50%, -50%) scale(1.02)', opacity: 1, offset: 0.8 },
+        { transform: 'translate(-50%, -50%) scale(1.25)', opacity: 0 },
+      ], { duration: total, easing: 'ease-out', fill: 'forwards' });
+    this.bannerTimer = setTimeout(() => this.nextBanner(), total);
+  }
+
+  private nextBanner(): void {
+    this.hideBanner();
+    const now = this.clock();
+    this.bannerQueue = this.bannerQueue.filter(r => r.expiresAt >= now);
+    if (this.bannerQueue.length === 0) return;
+    let best = 0;
+    for (let i = 1; i < this.bannerQueue.length; i++) {
+      if (BANNER_PRIORITY[this.bannerQueue[i].tone] > BANNER_PRIORITY[this.bannerQueue[best].tone]) best = i;
+    }
+    const [next] = this.bannerQueue.splice(best, 1);
+    this.showBanner(next);
+  }
+
+  private hideBanner(): void {
+    if (this.bannerTimer) clearTimeout(this.bannerTimer);
+    this.bannerTimer = undefined;
+    this.bannerAnim?.cancel();
+    this.bannerAnim = null;
+    this.bannerShown = null;
+    this.bannerEl.className = 'combat-banner';
+    this.bannerEl.textContent = '';
   }
 
   private acquire(key: string): Floater {

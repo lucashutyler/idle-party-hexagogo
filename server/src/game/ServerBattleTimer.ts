@@ -42,6 +42,10 @@ export interface ServerBattleCallbacks {
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
   onCombatFlush?: (flush: CombatFlush) => void;
+  /** The boss crossed checkpoint `phase` this step (never for the phase a resumed fight starts at). */
+  onPhase?: (battleId: number, phase: number) => void;
+  /** A retreat is ending battle `battleId`; runs before the party moves on, so it may still set the route. */
+  onRetreat?: (battleId: number) => void;
 }
 
 /** Drives one party's battle loop. See docs/architecture/combat.md (battle state machine). */
@@ -53,6 +57,7 @@ export class ServerBattleTimer {
   private currentResult?: BattleResult;
   private battleDuration = 0;
   private currentBattleId = 0;
+  private lastPhase = 0;
 
   private started = false;
   private destroyed = false;
@@ -64,6 +69,7 @@ export class ServerBattleTimer {
   private resultTimeout?: ReturnType<typeof setTimeout>;
   private moveTimeout?: ReturnType<typeof setTimeout>;
   private retryTimeout?: ReturnType<typeof setTimeout>;
+  private retreatTimeout?: ReturnType<typeof setTimeout>;
 
   private combatState: PartyCombatState | null = null;
   private createCombat: () => PartyCombatState;
@@ -82,6 +88,8 @@ export class ServerBattleTimer {
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
   onCombatFlush?: (flush: CombatFlush) => void;
+  onPhase?: (battleId: number, phase: number) => void;
+  onRetreat?: (battleId: number) => void;
 
   constructor(
     party: ServerParty,
@@ -100,6 +108,8 @@ export class ServerBattleTimer {
       this.onMove = callbacks.onMove;
       this.canMoveToNextTile = callbacks.canMoveToNextTile;
       this.onCombatFlush = callbacks.onCombatFlush;
+      this.onPhase = callbacks.onPhase;
+      this.onRetreat = callbacks.onRetreat;
     }
   }
 
@@ -171,7 +181,57 @@ export class ServerBattleTimer {
     this.combatState = null;
     this.currentVisual = 'none';
     this.party.exitBattle();
+    this.moveOnOrFightHere();
+    return true;
+  }
 
+  /** Whether battle `battleId` is the current one and still undecided (not won, lost or retreated from). */
+  isFighting(battleId: number): boolean {
+    const combat = this.combatState;
+    return !this.destroyed && battleId === this.currentBattleId && !!combat && !combat.finished && this.pendingResult === null;
+  }
+
+  /**
+   * End battle `battleId` as a retreat: no rewards, no defeat. Only a live, undecided fight at least
+   * RUN_AVAILABLE_MS old can be left. The party then shows the result and walks on, or fights here again.
+   */
+  retreat(battleId: number, reason: string): boolean {
+    const combat = this.combatState;
+    if (!combat || !this.isLive || !this.isFighting(battleId) || combat.elapsedMs < RUN_AVAILABLE_MS) return false;
+    this.clearTimers();
+    combat.finished = true;
+    combat.result = 'retreat';
+    this.pendingEvents.push({ id: combat.nextEventId++, t: combat.elapsedMs, kind: 'battle_end', result: 'retreat' });
+    this.pendingLog.push(reason);
+    try {
+      this.onRetreat?.(battleId);
+    } catch (err) {
+      console.error(`[ServerBattleTimer] ${this.label} battle ${battleId}: retreat bookkeeping failed:`, err);
+    }
+    this.flush('dynamic');
+    this.currentResult = undefined;
+    this.currentVisual = 'retreat';
+    this.party.exitBattle();
+    this.continueAfterResult(this.party.hasDestination && (this.canMoveToNextTile?.() ?? false));
+    return true;
+  }
+
+  /** Retreat from battle `battleId` after `delayMs`, or as soon after as it is allowed. Cancelled with the battle. */
+  scheduleRetreat(battleId: number, delayMs: number, reason: string): void {
+    if (!this.isFighting(battleId)) return;
+    if (this.retreatTimeout) clearTimeout(this.retreatTimeout);
+    this.retreatTimeout = setTimeout(() => this.guard(() => {
+      this.retreatTimeout = undefined;
+      const combat = this.combatState;
+      if (!combat || !this.isFighting(battleId)) return;
+      const wait = RUN_AVAILABLE_MS - combat.elapsedMs;
+      if (wait > 0) this.scheduleRetreat(battleId, Math.max(COMBAT_STEP_MS, wait), reason);
+      else this.retreat(battleId, reason);
+    }), Math.max(0, delayMs));
+  }
+
+  /** After a fight ends early: walk on if the next room is open (after the result pause), else fight again here at once. */
+  private moveOnOrFightHere(): void {
     const canMove = this.party.hasDestination && (this.canMoveToNextTile?.() ?? false);
     if (canMove) {
       this.setState('result');
@@ -179,7 +239,6 @@ export class ServerBattleTimer {
     } else {
       this.guard(() => this.triggerBattle());
     }
-    return true;
   }
 
   /** Grant a finished-but-unshown battle's result now, without moving. The kill beat stays armed
@@ -227,6 +286,7 @@ export class ServerBattleTimer {
     this.battleDuration = 0;
 
     this.combatState = this.createCombat();
+    this.lastPhase = this.combatState.bossPhases?.phase ?? 0;
     this.currentVisual = 'fighting';
     this.party.enterBattle();
 
@@ -245,6 +305,7 @@ export class ServerBattleTimer {
     this.battleDuration = combat.elapsedMs;
     if (tick.events.length > 0) this.pendingEvents.push(...tick.events);
     if (tick.logEntries.length > 0) this.pendingLog.push(...tick.logEntries);
+    this.reportPhase(combat);
 
     if (tick.finished) {
       this.stopStepping();
@@ -260,6 +321,17 @@ export class ServerBattleTimer {
       this.flush(snapshotDue ? 'dynamic' : null);
     } else {
       this.lastFlushMs = combat.elapsedMs;
+    }
+  }
+
+  private reportPhase(combat: PartyCombatState): void {
+    const phase = combat.bossPhases?.phase ?? 0;
+    if (phase <= this.lastPhase) return;
+    this.lastPhase = phase;
+    try {
+      this.onPhase?.(this.currentBattleId, phase);
+    } catch (err) {
+      console.error(`[ServerBattleTimer] ${this.label} battle ${this.currentBattleId}: recording checkpoint ${phase} failed:`, err);
     }
   }
 
@@ -299,7 +371,11 @@ export class ServerBattleTimer {
       result === 'victory' ||
       (this.canMoveToNextTile?.() ?? false)
     );
+    this.continueAfterResult(canMove);
+  }
 
+  /** Show the result, then walk on or fight again in this room. */
+  private continueAfterResult(canMove: boolean): void {
     this.setState('result');
 
     if (canMove) {
@@ -362,13 +438,14 @@ export class ServerBattleTimer {
 
   private clearTimers(): void {
     this.stopStepping();
-    for (const t of [this.killBeatTimeout, this.resultTimeout, this.moveTimeout, this.retryTimeout]) {
+    for (const t of [this.killBeatTimeout, this.resultTimeout, this.moveTimeout, this.retryTimeout, this.retreatTimeout]) {
       if (t) clearTimeout(t);
     }
     this.killBeatTimeout = undefined;
     this.resultTimeout = undefined;
     this.moveTimeout = undefined;
     this.retryTimeout = undefined;
+    this.retreatTimeout = undefined;
   }
 
   private setState(newState: BattleTimerState): void {

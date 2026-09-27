@@ -21,6 +21,8 @@ import { ChatPopout } from './ui/ChatPopout';
 import { PersistentXpBar } from './ui/PersistentXpBar';
 import { TopHud } from './ui/TopHud';
 import { NotificationCenter } from './ui/NotificationCenter';
+import { RecapModal } from './ui/RecapModal';
+import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 
 const CONNECTION_ERROR = 'Could not connect to server';
@@ -41,6 +43,8 @@ export class App {
   private topHud?: TopHud;
   private chatPopout?: ChatPopout;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private recapModal?: RecapModal;
+  private openOptionsDelegate?: (e: MouseEvent) => void;
 
   constructor() {
     this.screenManager = new ScreenManager();
@@ -522,5 +526,21 @@ export class App {
 
     // Switch to saved screen (or combat by default)
     this.screenManager.switchTo(savedScreen);
+
+    if (this.openOptionsDelegate) document.removeEventListener('click', this.openOptionsDelegate, true);
+    this.openOptionsDelegate = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest?.(`[${OPEN_OPTIONS_ATTR}]`)) settingsScreen.openPlayerOptions();
+    };
+    document.addEventListener('click', this.openOptionsDelegate, true);
+
+    this.recapModal?.destroy();
+    this.recapModal = new RecapModal(this.gameClient, {
+      onOpenMap: () => {
+        this.screenManager.switchTo('map');
+        nav.setActive('map');
+        sessionStorage.setItem('activeScreen', 'map');
+      },
+    });
   }
 }

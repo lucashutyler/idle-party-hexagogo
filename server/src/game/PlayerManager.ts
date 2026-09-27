@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -30,6 +30,8 @@ export class PlayerManager {
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
   private combatViewHidden = new WeakSet<WebSocket>();
+  /** Sockets whose page reported itself hidden; a socket that never sent `presence` counts as visible. */
+  private pageHidden = new WeakSet<WebSocket>();
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -87,6 +89,20 @@ export class PlayerManager {
       isOnline: (username) => this.hasCombatViewer(username),
       sendRaw: (username, payload, opts) => this.sendCombatRaw(username, payload, opts),
     });
+    this.partyBattles.setGridPositionLookup(
+      (partyId, username) => this.parties.getParty(partyId)?.members.find(m => m.username === username)?.gridPosition,
+    );
+    this.partyBattles.setAutoRetreatPolicy((partyId) => this.autoRetreatPolicy(partyId));
+    this.partyBattles.setNotifier((username, eventKey, vars) => this.notify.notify(username, eventKey, vars));
+  }
+
+  /** The party's auto-retreat setting: its owner's, read at use time. */
+  autoRetreatPolicy(partyId: string): PartyAutoRetreatInfo | null {
+    const members = this.parties.getParty(partyId)?.members;
+    const owner = members?.find(m => m.role === 'owner') ?? members?.[0];
+    const session = owner ? this.sessions.get(owner.username) : undefined;
+    if (!owner || !session) return null;
+    return { belowPct: session.getCombatPrefs().autoRetreatBelowPct, setBy: owner.username };
   }
 
   /** The world's default (spawn) map grid. */
@@ -143,6 +159,8 @@ export class PlayerManager {
       console.log(`[PlayerManager] "${username}" connected (${wsSet.size} connections, ${this.sessions.size} sessions)`);
     }
 
+    // The caller pushes state right after login, which carries any recap this produces.
+    this.refreshPresence(username);
     return session;
   }
 
@@ -160,6 +178,7 @@ export class PlayerManager {
         // Trades are async — they persist across disconnect. Nothing to cancel here.
       }
     }
+    this.refreshPresence(username);
 
     console.log(`[PlayerManager] "${username}" disconnected (session preserved, ${this.connectionCount} connections)`);
   }
@@ -404,6 +423,77 @@ export class PlayerManager {
     }
   }
 
+  /** Record a socket's page visibility (`presence`); becoming visible delivers any recap at once. */
+  setPresence(ws: WebSocket, visible: boolean, now: number = Date.now()): void {
+    const username = this.connections.get(ws);
+    if (!username) return;
+    if (visible) this.pageHidden.delete(ws);
+    else this.pageHidden.add(ws);
+    if (this.refreshPresence(username, now)) this.sendStateToPlayer(username);
+  }
+
+  /** Whether any of this player's sockets shows the game (sockets that never sent `presence` count). */
+  hasVisibleSocket(username: string): boolean {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet) return false;
+    for (const ws of wsSet) {
+      if (!this.pageHidden.has(ws)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Away begins the moment no socket shows the game (all hidden or all closed) and ends when one does;
+   * the session decides whether the finished ledger is worth a recap. Returns whether the pending
+   * recap changed.
+   */
+  private refreshPresence(username: string, now: number = Date.now()): boolean {
+    const session = this.sessions.get(username);
+    if (!session) return false;
+    if (this.hasVisibleSocket(username)) return session.endAway(now);
+    session.beginAway(now);
+    return false;
+  }
+
+  /** Clear the player's recap once the client has shown it; state goes to every socket. */
+  handleAckRecap(username: string, id: string): boolean {
+    const session = this.sessions.get(username);
+    if (!session?.ackRecap(id)) return false;
+    this.sendStateToPlayer(username);
+    return true;
+  }
+
+  /** Change the player's auto-retreat threshold. Party members see the owner's setting, so they all get state. */
+  handleSetCombatPrefs(username: string, autoRetreatBelowPct: AutoRetreatPct): boolean {
+    const session = this.sessions.get(username);
+    if (!session) return false;
+    const changed = session.setCombatPrefs({ autoRetreatBelowPct });
+    const partyId = session.getPartyId();
+    if (changed && partyId && this.autoRetreatPolicy(partyId)?.setBy === username) {
+      this.partyBattles.clearRetreatHold(partyId);
+    }
+    const members = partyId ? this.parties.getParty(partyId)?.members.map(m => m.username) : undefined;
+    for (const member of members ?? [username]) this.sendStateToPlayer(member);
+    return changed;
+  }
+
+  /** A player's forecast request for a room or dungeon; every reply goes through `reply`. */
+  handleForecastRequest(username: string, target: ForecastRequestTarget, reply: (message: ServerForecastMessage) => void): void {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    if (!partyId) {
+      reply({ type: 'forecast', target, key: '', result: null, status: 'unavailable' });
+      return;
+    }
+    this.partyBattles.requestForecast(partyId, username, target, reply);
+  }
+
+  /** The player's full kill-mastery list for the bestiary. */
+  buildBestiary(username: string): ServerBestiaryMessage | null {
+    const session = this.sessions.get(username);
+    if (!session) return null;
+    return { type: 'bestiary', version: session.getMasterySummary().version, entries: session.getBestiary() };
+  }
+
   /** Send one socket the live fight as a full snapshot plus the recent log. No-op between battles. */
   sendCombatResync(ws: WebSocket): void {
     if (!this.wantsCombat(ws)) return;
@@ -477,7 +567,12 @@ export class PlayerManager {
       outgoingFriendRequests: this.friends.getOutgoingRequests(username),
       guild: guildData?.info ?? null,
       guildMembers: guildData?.members ?? [],
-      party: partyData && { ...partyData, henchmen: this.resolveHenchmen(partyData.henchmen) },
+      party: partyData && {
+        ...partyData,
+        henchmen: this.resolveHenchmen(partyData.henchmen),
+        autoRetreat: this.autoRetreatPolicy(partyData.id) ?? undefined,
+        forecastKey: this.partyBattles.forecastKey(partyData.id),
+      },
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: this.getOnlinePlayers(),
@@ -653,7 +748,7 @@ export class PlayerManager {
       return 'You must be at the dungeon entrance.';
     }
 
-    const result = this.partyBattles.enterDungeon(partyId, dungeonId);
+    const result = this.partyBattles.enterDungeon(partyId, dungeonId, username);
     if (!result.success) return result.error;
 
     // State for every member is pushed by enterDungeon's broadcast.
@@ -1142,6 +1237,7 @@ export class PlayerManager {
       }
       count++;
     }
+    for (const username of this.playerConnections.keys()) this.refreshPresence(username);
 
     console.log(`[PlayerManager] Master reset: ${count} players reset to start`);
     return count;

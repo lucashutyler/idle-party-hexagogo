@@ -4,10 +4,11 @@
  *
  * Two seed passes, both idempotent:
  *   1. seedDevContent — merges 20 generated zones + ~1000 tiles (plus the
- *      dev encounters and missing caster monsters) into ContentStore. A world
- *      that has the marker zone but no dev_mixed encounter predates it and
- *      is upgraded once; any other seeded world is left alone. Tiles that
- *      collide with existing coords are skipped too.
+ *      zone-scaled monsters, encounters and the raid dungeon) into
+ *      ContentStore. A world that has the marker zone but no raid predates
+ *      v3 and is upgraded once without clobbering edits; a world with the
+ *      raid is left alone. Tiles that collide with existing coords are
+ *      skipped too.
  *   2. seedDevPlayers — creates 100 verified accounts (bot_001..100),
  *      assigns each a class/level/position/party, and persists their
  *      saves to disk. Skipped if even one bot's save already exists,
@@ -24,8 +25,10 @@ import {
   generateDevWorld,
   DEV_SEED_MARKER_ZONE_ID,
   DEV_MIXED_ENCOUNTER_ID,
+  DEV_RAID_DUNGEON_ID,
   ALL_CLASS_NAMES,
   type ClassName,
+  type EncounterTableEntry,
   type WorldTileDefinition,
 } from '@idle-party-rpg/shared';
 import type { ContentStore } from './ContentStore.js';
@@ -53,25 +56,35 @@ function mulberry32(seed: number): () => number {
 }
 
 /**
- * Merge the procedurally-generated dev world (zones, rooms, encounters, missing
- * monsters) into the content store, or upgrade a seed that predates `dev_mixed`
- * once. True when content changed.
+ * Merge the procedurally-generated dev world (zones, rooms, zone-scaled monsters,
+ * encounters, raid) into the content store, or upgrade a pre-raid dev world once.
+ * True when content changed.
  */
 export async function seedDevContent(content: ContentStore): Promise<boolean> {
   const t0 = performance.now();
-  if (content.getZone(DEV_SEED_MARKER_ZONE_ID) && content.getEncounter(DEV_MIXED_ENCOUNTER_ID)) {
+  if (content.getDungeon(DEV_RAID_DUNGEON_ID)) {
     console.log('[DevSeed] Dev world already seeded — skipping.');
     return false;
   }
-  const { zones, tiles, encounters, monsters } = generateDevWorld({ seed: 1 });
+  const { zones, tiles, encounters, monsters, dungeons } = generateDevWorld({ seed: 1 });
   if (content.getZone(DEV_SEED_MARKER_ZONE_ID)) {
-    const changes = await content.upgradeSeedContent(zones, encounters, monsters);
+    const zoneTables = zones
+      .filter(z => isUntouchedLegacyTable(content.getZone(z.id)?.encounterTable))
+      .map(z => ({ zoneId: z.id, encounterTable: z.encounterTable }));
+    const entrance = raidEntranceUpgrade(content, tiles);
+    const changes = await content.upgradeSeedContent({
+      encounters,
+      monsters,
+      dungeons,
+      zoneTables,
+      tiles: entrance ? [entrance] : [],
+    });
     console.log(changes > 0
-      ? `[DevSeed] Upgraded existing dev world (${changes} additions).`
+      ? `[DevSeed] Upgraded existing dev world (${changes} changes).`
       : '[DevSeed] Dev world already seeded — skipping.');
     return changes > 0;
   }
-  await content.mergeSeedContent(zones, tiles, { encounters, monsters });
+  await content.mergeSeedContent(zones, tiles, { encounters, monsters, dungeons });
   console.log(
     `[DevSeed] Merged ${zones.length} dev zones + ${tiles.length} dev tiles in ` +
     `${(performance.now() - t0).toFixed(1)}ms.`,
@@ -151,6 +164,28 @@ export async function seedDevPlayers(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
+
+/** A v2 dev zone table nobody edited: exactly the shared mixed encounter at weight 1. */
+function isUntouchedLegacyTable(table: EncounterTableEntry[] | undefined): boolean {
+  return table?.length === 1 && table[0].encounterId === DEV_MIXED_ENCOUNTER_ID && table[0].weight === 1;
+}
+
+/**
+ * The generated raid entrance, when the live room at its position is still the plain generated room
+ * (same GUID and zone, walkable, nothing linked or gated). Null when it was edited or already links.
+ */
+function raidEntranceUpgrade(content: ContentStore, generatedTiles: WorldTileDefinition[]): WorldTileDefinition | null {
+  const generated = generatedTiles.find(t => t.dungeonId === DEV_RAID_DUNGEON_ID);
+  if (!generated) return null;
+  const live = content.getWorld().tiles.find(t => t.mapId === generated.mapId && t.col === generated.col && t.row === generated.row);
+  const untouched = !!live
+    && live.id === generated.id
+    && live.zone === generated.zone
+    && isLikelyTraversable(live.type)
+    && !live.dungeonId && !live.shopId && !live.npcId && !live.requiredItemId
+    && !live.encounterTable && !live.entryRequirements && !live.transitions?.length;
+  return untouched ? generated : null;
+}
 
 function botUsername(n: number): string {
   return `bot_${String(n).padStart(3, '0')}`;

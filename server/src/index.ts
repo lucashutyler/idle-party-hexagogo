@@ -30,8 +30,9 @@ import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition, RoomEntryFailure, ServerMoveBlockedMessage } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO, isAutoRetreatPct } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
+import { parseForecastRequestTarget } from './game/ForecastService.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 import { isEmailConfigured } from './auth/EmailService.js';
 
@@ -314,6 +315,11 @@ wss.on('connection', (ws) => {
 
       if (msg.type === 'combat_view' && typeof msg.visible === 'boolean') {
         playerManager.setCombatView(ws, msg.visible);
+        return;
+      }
+
+      if (msg.type === 'presence' && typeof msg.visible === 'boolean') {
+        playerManager.setPresence(ws, msg.visible);
         return;
       }
 
@@ -937,6 +943,38 @@ wss.on('connection', (ws) => {
         delete blocked[msg.username];
         session.setBlockedUsers(blocked);
         playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'set_combat_prefs') {
+        if (!isAutoRetreatPct(msg.autoRetreatBelowPct)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid auto-retreat setting' }));
+          return;
+        }
+        playerManager.handleSetCombatPrefs(username, msg.autoRetreatBelowPct);
+        return;
+      }
+
+      if (msg.type === 'request_forecast') {
+        const target = parseForecastRequestTarget(msg.target);
+        if (!target) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid forecast target' }));
+          return;
+        }
+        playerManager.handleForecastRequest(username, target, (reply) => {
+          if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(reply));
+        });
+        return;
+      }
+
+      if (msg.type === 'ack_recap' && typeof msg.id === 'string') {
+        playerManager.handleAckRecap(username, msg.id);
+        return;
+      }
+
+      if (msg.type === 'request_bestiary') {
+        const bestiary = playerManager.buildBestiary(username);
+        if (bestiary) ws.send(JSON.stringify(bestiary));
         return;
       }
 

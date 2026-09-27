@@ -56,6 +56,7 @@ export const NOTIFICATION_EVENT_REGISTRY: NotificationEventDefinition[] = [
   { eventKey: 'dm_received', category: 'dm', label: 'New direct message', defaultChannels: ['in_app'] },
   { eventKey: 'friend_request_received', category: 'friend', label: 'New friend request', defaultChannels: ['in_app'] },
   { eventKey: 'friend_request_accepted', category: 'friend', label: 'Friend request accepted', defaultChannels: ['in_app'] },
+  { eventKey: 'auto_retreat', category: 'system', label: 'Auto-retreat pulled your party out of a fight for the first time', defaultChannels: ['in_app'] },
 ];
 
 export function getNotificationEventDefinition(eventKey: string): NotificationEventDefinition | undefined {

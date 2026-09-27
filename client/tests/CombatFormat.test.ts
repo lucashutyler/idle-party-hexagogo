@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { formatAmount, formatClock, formatDuration, formatSeconds, hpTier, initials, interruptStampText, pipsKey, statusIcon, statusPips } from '../src/combat/CombatFormat';
+import {
+  enrageSlotText,
+  formatAmount,
+  formatClock,
+  formatDuration,
+  formatMultiplier,
+  formatSeconds,
+  hasToughTier,
+  hpTier,
+  initials,
+  interruptStampText,
+  isBossOrRaid,
+  masteryLine,
+  monsterLevelBadge,
+  pipsKey,
+  retriesLeft,
+  retriesText,
+  statusIcon,
+  statusPips,
+} from '../src/combat/CombatFormat';
 import { CombatLogFormatter } from '../src/combat/CombatLogFormatter';
 
 describe('number formatting', () => {
@@ -121,5 +140,70 @@ describe('interruptStampText', () => {
     expect(interruptStampText({ cardType: 'interrupt' })).toBe('COUNTERED!');
     expect(interruptStampText({})).toBe('INTERRUPTED!');
     expect(interruptStampText({ cardType: 'instant' })).toBe('INTERRUPTED!');
+  });
+});
+
+describe('monster levels and tiers', () => {
+  it('badges authored levels only, coloured by the gap to the viewer', () => {
+    expect(monsterLevelBadge({ level: 9, levelSource: 'authored' }, 5)).toEqual({ level: 9, con: 'deadly', label: 'Deadly', glyph: '☠' });
+    expect(monsterLevelBadge({ level: 12, levelSource: 'authored' }, 10)).toMatchObject({ con: 'even', glyph: '●' });
+    expect(monsterLevelBadge({ level: 2, levelSource: 'authored' }, 30)).toMatchObject({ con: 'trivial', glyph: '·' });
+    expect(monsterLevelBadge({ level: 9, levelSource: 'authored' }, undefined)).toMatchObject({ con: 'even' });
+  });
+
+  it('never badges derived or missing levels', () => {
+    expect(monsterLevelBadge({ level: 41, levelSource: 'derived' }, 5)).toBeNull();
+    expect(monsterLevelBadge({ level: 4 }, 5)).toBeNull();
+    expect(monsterLevelBadge({ levelSource: 'authored' }, 5)).toBeNull();
+    expect(monsterLevelBadge(undefined, 5)).toBeNull();
+  });
+
+  it('classifies tiers', () => {
+    expect(hasToughTier('trash')).toBe(false);
+    expect(hasToughTier(undefined)).toBe(false);
+    expect(hasToughTier('elite')).toBe(true);
+    expect(isBossOrRaid('elite')).toBe(false);
+    expect(isBossOrRaid('boss')).toBe(true);
+    expect(isBossOrRaid('raid')).toBe(true);
+  });
+});
+
+describe('boss bar text', () => {
+  it('counts the enrage down rounded up, then shows the multiplier', () => {
+    expect(enrageSlotText({ state: 'pending', remainingMs: 287_400, multiplier: 1 })).toBe('⏱ 4:48');
+    expect(enrageSlotText({ state: 'soon', remainingMs: 200, multiplier: 1 })).toBe('⏱ 0:01');
+    expect(enrageSlotText({ state: 'on', remainingMs: 0, multiplier: 1.6000000001 })).toBe('🔥 ×1.6');
+  });
+
+  it('formats multipliers with at most two decimals', () => {
+    expect(formatMultiplier(1.1)).toBe('×1.1');
+    expect(formatMultiplier(1.256)).toBe('×1.26');
+    expect(formatMultiplier(2)).toBe('×2');
+  });
+
+  it('counts retries left on a checkpoint floor', () => {
+    expect(retriesLeft(0, 3)).toBe(3);
+    expect(retriesLeft(1, 3)).toBe(2);
+    expect(retriesLeft(5, 3)).toBe(0);
+    expect(retriesLeft(undefined, 3)).toBe(3);
+    expect(retriesLeft(1, undefined)).toBeNull();
+    expect(retriesLeft(0, 0)).toBeNull();
+    expect(retriesText(2)).toBe('2 retries left');
+    expect(retriesText(1)).toBe('1 retry left');
+    expect(retriesText(0)).toBe('No retries left');
+  });
+
+  it('marks enrage as a bad status', () => {
+    expect(statusIcon({ kind: 'enrage', name: 'Enraged', stacks: 3 })).toEqual({ icon: '😡', tone: 'bad' });
+    expect(statusPips({ hp: 10, stunMs: 0, shield: 0, statuses: [{ kind: 'enrage', name: 'Enraged', stacks: 3 }] }))
+      .toEqual([{ icon: '😡', tone: 'bad', title: 'Enraged', count: 3 }]);
+  });
+});
+
+describe('masteryLine', () => {
+  it('shows stars, bonus and progress to the next rank', () => {
+    expect(masteryLine({ rank: 2, maxRank: 5, kills: 212, nextAt: 250, bonusPct: 4 })).toBe('★★☆☆☆ · +4 % · 212 / 250 kills');
+    expect(masteryLine({ rank: 0, maxRank: 5, kills: 3, nextAt: 10, bonusPct: 0 })).toBe('☆☆☆☆☆ · 3 / 10 kills');
+    expect(masteryLine({ rank: 5, maxRank: 5, kills: 12_000, nextAt: null, bonusPct: 10 })).toBe('★★★★★ Mastered · +10 %');
   });
 });

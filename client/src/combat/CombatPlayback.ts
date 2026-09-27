@@ -1,16 +1,29 @@
 import type {
+  ClientCombatEnrage,
   ClientCombatSkill,
   ClientCombatSnapshot,
   ClientCombatStatus,
   ClientCombatUnit,
   CombatEvent,
   CombatRef,
+  CombatResult,
   CombatSide,
+  MonsterLevelSource,
+  MonsterTier,
   SkillCardType,
   SkillDefinition,
   SkillTrigger,
 } from '@idle-party-rpg/shared';
-import { BASE_ACTION_INTERVAL_MS, COMBAT_STEP_MS, getSkillTrigger, MIN_COOLDOWN_MS, PLAYBACK_DELAY_MS } from '@idle-party-rpg/shared';
+import {
+  BASE_ACTION_INTERVAL_MS,
+  COMBAT_STEP_MS,
+  ENRAGE_MAX_STACKS,
+  ENRAGE_STEP_PERCENT,
+  ENRAGE_STEP_SECONDS,
+  getSkillTrigger,
+  MIN_COOLDOWN_MS,
+  PLAYBACK_DELAY_MS,
+} from '@idle-party-rpg/shared';
 
 export const CLOCK_SNAP_MS = 500;
 export const CLOCK_SLEW_MS = 15;
@@ -29,6 +42,19 @@ export interface UnitStatics {
   passive: boolean;
   description?: string;
   passives: string[];
+  level?: number;
+  /** Monsters only. */
+  levelSource?: MonsterLevelSource;
+  /** Monsters only. */
+  tier?: MonsterTier;
+}
+
+/** Boss checkpoint progress: thresholds and resume point are static per battle, `phase` follows playback. */
+export interface PlaybackBossPhases {
+  bossPos: number[];
+  thresholds: number[];
+  phase: number;
+  resumedFromPhase?: number;
 }
 
 export interface SkillStatics {
@@ -75,6 +101,7 @@ export interface PlaybackUnit {
   cast: PlaybackCast | null;
   statuses: ClientCombatStatus[];
   skills: PlaybackSkill[] | null;
+  enrage: ClientCombatEnrage | null;
   /** Server time the timer values above are valid at. */
   t0: number;
   castEndedAt: number;
@@ -91,6 +118,13 @@ export interface PlaybackTick {
   jumped: boolean;
 }
 
+export interface EnrageDisplay {
+  state: 'pending' | 'soon' | 'on';
+  remainingMs: number;
+  stacks: number;
+  multiplier: number;
+}
+
 export interface PlaybackOptions {
   now?: () => number;
   delayMs?: number;
@@ -99,6 +133,9 @@ export interface PlaybackOptions {
 }
 
 const STACKING_STATUSES = new Set(['Ignite', 'Sunder']);
+export const ENRAGED_STATUS = 'Enraged';
+/** The enrage countdown turns amber this long before the first stack. */
+export const ENRAGE_SOON_MS = 30_000;
 
 export function unitKey(side: CombatSide, pos: number): string {
   return `${side}:${pos}`;
@@ -111,6 +148,7 @@ export function refKey(ref: CombatRef | undefined): string | undefined {
 /** Best guess of a status's kind from its name, for statuses seen in events before a snapshot names them. */
 export function guessStatusKind(name: string): ClientCombatStatus['kind'] {
   const n = name.toLowerCase();
+  if (n.includes('enrage')) return 'enrage';
   if (n.includes('sunder')) return 'mark';
   if (n.includes('chaos')) return 'chaos';
   if (n.includes('scorch')) return 'scorch';
@@ -144,7 +182,8 @@ export class CombatPlayback {
   private skillStaticMap = new Map<string, SkillStatics>();
   private endT = Infinity;
   private isFinished = false;
-  private battleResult: 'victory' | 'defeat' | null = null;
+  private battleResult: CombatResult | null = null;
+  private boss: PlaybackBossPhases | null = null;
   private structureVersion = 0;
   private newestEventT = -Infinity;
   private syncUntil = 0;
@@ -177,8 +216,44 @@ export class CombatPlayback {
     return this.isFinished;
   }
 
-  get result(): 'victory' | 'defeat' | null {
+  get result(): CombatResult | null {
     return this.battleResult;
+  }
+
+  /** Null unless the fight has a boss or raid monster. */
+  get bossPhases(): PlaybackBossPhases | null {
+    return this.boss;
+  }
+
+  /** Pooled HP fraction of the boss units, or null without bosses. */
+  bossHpFraction(): number | null {
+    if (!this.boss) return null;
+    let hp = 0;
+    let max = 0;
+    for (const pos of this.boss.bossPos) {
+      const unit = this.unit('monster', pos);
+      if (!unit) continue;
+      hp += Math.max(0, unit.hp);
+      max += unit.maxHp;
+    }
+    return max > 0 ? Math.min(1, hp / max) : null;
+  }
+
+  /** The living monster that enrages first (bosses before adds), for the boss bar's enrage slot. */
+  enrageSource(): PlaybackUnit | undefined {
+    const bossKeys = new Set((this.boss?.bossPos ?? []).map(pos => unitKey('monster', pos)));
+    let best: PlaybackUnit | undefined;
+    for (const unit of this.unitOrder) {
+      if (unit.side !== 'monster' || unit.hp <= 0 || !unit.enrage) continue;
+      if (!best) {
+        best = unit;
+        continue;
+      }
+      const boss = bossKeys.has(unit.key);
+      const bestBoss = bossKeys.has(best.key);
+      if (boss !== bestBoss ? boss : unit.enrage.atMs < best.enrage!.atMs) best = unit;
+    }
+    return best;
   }
 
   get queuedEvents(): number {
@@ -352,6 +427,7 @@ export class CombatPlayback {
     this.endT = Infinity;
     this.isFinished = false;
     this.battleResult = null;
+    this.boss = null;
     this.newestEventT = -Infinity;
     this.syncUntil = 0;
     this.structureVersion++;
@@ -402,6 +478,9 @@ export class CombatPlayback {
         passive: !!u.passive,
         description: u.description,
         passives: u.passives ?? [],
+        level: u.level,
+        levelSource: u.levelSource,
+        tier: u.tier,
       });
       for (const s of u.skills ?? []) {
         this.skillStaticMap.set(`${key}:${s.id}`, {
@@ -409,6 +488,17 @@ export class CombatPlayback {
         });
       }
     }
+    const bp = snapshot.bossPhases;
+    if (bp) {
+      const boss = this.ensureBoss(bp.bossPos, bp.resumedFromPhase ?? 0);
+      if (bp.thresholds) boss.thresholds = bp.thresholds.filter(t => Number.isFinite(t) && t > 0 && t < 1).sort((a, b) => b - a);
+      if (bp.resumedFromPhase !== undefined) boss.resumedFromPhase = bp.resumedFromPhase;
+    }
+  }
+
+  private ensureBoss(bossPos: readonly number[], phase: number): PlaybackBossPhases {
+    this.boss ??= { bossPos: [...bossPos], thresholds: [], phase };
+    return this.boss;
   }
 
   private applySnapshot(snapshot: ClientCombatSnapshot): void {
@@ -434,6 +524,13 @@ export class CombatPlayback {
     }
     this.unitOrder = nextOrder;
     this.lastAppliedT = Math.max(this.lastAppliedT, snapshot.elapsedMs);
+    const bp = snapshot.bossPhases;
+    if (bp) {
+      const boss = this.ensureBoss(bp.bossPos, bp.phase);
+      boss.bossPos = [...bp.bossPos];
+      boss.phase = bp.phase;
+      if (bp.resumedFromPhase !== undefined) boss.resumedFromPhase = bp.resumedFromPhase;
+    }
     if (snapshot.finished) {
       this.isFinished = true;
       this.battleResult = snapshot.result;
@@ -528,6 +625,25 @@ export class CombatPlayback {
       case 'status':
         if (dst && ev.name) addStatus(dst, ev.name);
         break;
+      case 'phase':
+        if (amount > 0) {
+          const boss = this.ensureBoss([], 0);
+          boss.phase = Math.max(boss.phase, amount);
+        }
+        break;
+      case 'enrage':
+        if (src && amount > 0) {
+          src.enrage ??= {
+            atMs: ev.t,
+            stacks: 0,
+            stepMs: ENRAGE_STEP_SECONDS * 1000,
+            stepPercent: ENRAGE_STEP_PERCENT,
+            maxStacks: ENRAGE_MAX_STACKS,
+          };
+          src.enrage.stacks = Math.max(src.enrage.stacks, amount);
+          setEnragedStatus(src, amount);
+        }
+        break;
       case 'cleanse':
         if (dst) {
           if (dst.side === 'player') {
@@ -593,6 +709,7 @@ function createUnit(u: ClientCombatUnit): PlaybackUnit {
     cast: null,
     statuses: [],
     skills: null,
+    enrage: null,
     t0: -Infinity,
     castEndedAt: -Infinity,
     attacks: 0,
@@ -620,6 +737,7 @@ function writeSnapshotUnit(unit: PlaybackUnit, u: ClientCombatUnit, t: number): 
     ? { skill: u.cast.skill, skillId: u.cast.skillId, totalMs: u.cast.totalMs, remainingMs: u.cast.remainingMs, target: u.cast.target }
     : null;
   unit.statuses = (u.statuses ?? []).map(s => ({ ...s }));
+  unit.enrage = u.enrage ? { ...u.enrage } : null;
   const previous = new Map((unit.skills ?? []).map(s => [s.id, s]));
   unit.skills = u.skills
     ? u.skills.map(s => {
@@ -652,6 +770,13 @@ function addStatus(unit: PlaybackUnit, name: string): void {
   unit.statuses = unit.statuses.map((s, i) => (i === index ? { ...existing, stacks: (existing.stacks ?? 1) + 1 } : s));
 }
 
+function setEnragedStatus(unit: PlaybackUnit, stacks: number): void {
+  const existing = unit.statuses.find(s => s.kind === 'enrage');
+  if (existing && (existing.stacks ?? 1) >= stacks) return;
+  const status: ClientCombatStatus = { kind: 'enrage', name: existing?.name ?? ENRAGED_STATUS, stacks };
+  unit.statuses = existing ? unit.statuses.map(s => (s === existing ? status : s)) : [...unit.statuses, status];
+}
+
 function latestEventTime(events: CombatEvent[]): number | undefined {
   let latest: number | undefined;
   for (const ev of events) if (latest === undefined || ev.t > latest) latest = ev.t;
@@ -675,6 +800,15 @@ export function guessCooldownMs(def: SkillDefinition, warmupMs: number | undefin
   if (derivedWarmup && warmupMs !== undefined && warmupMs >= 0) return warmupMs + MIN_COOLDOWN_MS;
   const base = typeof def.cooldown === 'number' && Number.isFinite(def.cooldown) ? def.cooldown * 1000 : MIN_COOLDOWN_MS;
   return Math.max(MIN_COOLDOWN_MS, base);
+}
+
+/** The enrage countdown or current multiplier at combat time `elapsedMs`. */
+export function enrageDisplay(enrage: ClientCombatEnrage | null | undefined, elapsedMs: number): EnrageDisplay | null {
+  if (!enrage || !Number.isFinite(enrage.atMs)) return null;
+  const stacks = Math.max(0, enrage.stacks);
+  const remainingMs = Math.max(0, enrage.atMs - elapsedMs);
+  const state = stacks > 0 ? 'on' : remainingMs <= ENRAGE_SOON_MS ? 'soon' : 'pending';
+  return { state, remainingMs, stacks, multiplier: 1 + stacks * Math.max(0, enrage.stepPercent) };
 }
 
 /** Display state of a skill at the playback's current time. */
