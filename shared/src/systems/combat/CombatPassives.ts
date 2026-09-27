@@ -5,6 +5,13 @@ import type { ActiveEffect, PassiveEffect, PassiveEffectKind, SkillDefinition } 
 import { getSkillTrigger } from '../SkillTypes.js';
 import type { CombatMonster, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
 import { COMBAT_STEP_MS, MIN_COOLDOWN_MS } from '../CombatTiming.js';
+import {
+  MAX_ENEMY_DAMAGE_REDUCTION,
+  SKILL_RATING_SCALE,
+  percentResistFactor,
+  ratingMitigation,
+  scaleDamage,
+} from '../CombatScaling.js';
 
 const MAX_CAST_TIME_MS = 10000;
 const MAX_WARMUP_MS = 60000;
@@ -46,25 +53,28 @@ export function getPassiveValue(player: PartyCombatant, kind: PassiveEffectKind)
   return 0;
 }
 
-export function getPhysicalReduction(target: PartyCombatant): number {
+/** Guard: self-only physical rating. */
+export function getGuardRating(target: PartyCombatant): number {
   if (target.currentHp <= 0) return 0;
-  let reduction = 0;
-  for (const effect of getPassiveEffects(target, 'physical_reduction')) {
-    reduction += (effect.valuePerLevel ?? 0) * target.level;
-  }
-  return reduction;
+  return SKILL_RATING_SCALE * perLevelSum(target, 'physical_reduction');
 }
 
-/** Party-wide magical/holy reduction from every living owner. */
-export function getMagicalReduction(allPlayers: PartyCombatant[]): number {
-  let reduction = 0;
+/** Bless: party-wide magical/holy rating from the strongest living owner (owners don't stack). */
+export function getBlessRating(allPlayers: PartyCombatant[]): number {
+  let best = 0;
   for (const p of allPlayers) {
     if (p.currentHp <= 0) continue;
-    for (const effect of getPassiveEffects(p, 'magical_reduction_party')) {
-      reduction += (effect.valuePerLevel ?? 0) * p.level;
-    }
+    best = Math.max(best, SKILL_RATING_SCALE * perLevelSum(p, 'magical_reduction_party'));
   }
-  return reduction;
+  return best;
+}
+
+function perLevelSum(player: PartyCombatant, kind: PassiveEffectKind): number {
+  let total = 0;
+  for (const effect of getPassiveEffects(player, kind)) {
+    total += (effect.valuePerLevel ?? 0) * player.level;
+  }
+  return total;
 }
 
 export function getCritChance(player: PartyCombatant): number {
@@ -192,61 +202,68 @@ export function initialWarmupMs(owner: PartyCombatant, skill: SkillDefinition, a
 
 // --- Damage helpers ---
 
-/** Apply monster resistance to incoming damage. Percent first, then flat, min 0. */
+/** Damage factor of a monster's resistance to one damage type: flat is a rating vs `attackerLevel`, percent may be negative. */
+export function monsterResistFactor(resistances: Resistance[], damageType: DamageType, attackerLevel: number): number {
+  const res = resistances.find(r => r.damageType === damageType);
+  if (!res) return 1;
+  return (1 - ratingMitigation(res.flatReduction, attackerLevel)) * percentResistFactor(res.percentReduction, -1);
+}
+
+/** Resisted damage (floor 1 for damage ≥ 1) from an attacker of the given level. */
 export function applyMonsterResistance(
   damage: number,
   damageType: DamageType,
   resistances: Resistance[],
+  attackerLevel = 1,
 ): number {
-  const res = resistances.find(r => r.damageType === damageType);
-  if (!res) return damage;
-  damage = damage * (1 - res.percentReduction / 100);
-  damage = damage - res.flatReduction;
-  return Math.max(0, Math.floor(damage));
+  return scaleDamage(damage, monsterResistFactor(resistances, damageType, attackerLevel));
 }
 
-export function computeAttackBonus(equipBonuses?: EquipmentBonuses): number {
+export function computeAttackBonus(equipBonuses: EquipmentBonuses | undefined, rng: () => number): number {
   if (!equipBonuses || equipBonuses.bonusAttackMax <= 0) return 0;
   const { bonusAttackMin, bonusAttackMax } = equipBonuses;
-  return bonusAttackMin + Math.floor(Math.random() * (bonusAttackMax - bonusAttackMin + 1));
+  return bonusAttackMin + Math.floor(rng() * (bonusAttackMax - bonusAttackMin + 1));
 }
 
-export function computeEquipReduction(equipBonuses?: EquipmentBonuses): number {
-  if (!equipBonuses || equipBonuses.damageReductionMax <= 0) return 0;
-  const { damageReductionMin, damageReductionMax } = equipBonuses;
-  return damageReductionMin + Math.floor(Math.random() * (damageReductionMax - damageReductionMin + 1));
+/** Gear rating is the average of the min/max roll. */
+function gearRating(min: number | undefined, max: number | undefined): number {
+  const total = (min ?? 0) + (max ?? 0);
+  return Number.isFinite(total) ? total / 2 : 0;
 }
 
-export function computeEquipMagicReduction(equipBonuses?: EquipmentBonuses): number {
-  if (!equipBonuses || equipBonuses.magicReductionMax <= 0) return 0;
-  const { magicReductionMin, magicReductionMax } = equipBonuses;
-  return magicReductionMin + Math.floor(Math.random() * (magicReductionMax - magicReductionMin + 1));
-}
-
-/** Flat reduction a player applies to incoming damage of a type (equip DR + Guard, equip MR + Bless, Bless only for holy). */
-export function incomingFlatReduction(target: PartyCombatant, damageType: DamageType, allPlayers: PartyCombatant[]): number {
+/** Rating a player brings against a damage type: gear DR + Guard (physical), gear MR + Bless (magical), Bless (holy). */
+export function incomingRating(target: PartyCombatant, damageType: DamageType, allPlayers: PartyCombatant[]): number {
+  const gear = target.equipBonuses;
   if (damageType === 'physical') {
-    return computeEquipReduction(target.equipBonuses) + getPhysicalReduction(target);
+    return gearRating(gear?.damageReductionMin, gear?.damageReductionMax) + getGuardRating(target);
   }
   if (damageType === 'magical') {
-    return computeEquipMagicReduction(target.equipBonuses) + getMagicalReduction(allPlayers);
+    return gearRating(gear?.magicReductionMin, gear?.magicReductionMax) + getBlessRating(allPlayers);
   }
-  return getMagicalReduction(allPlayers);
+  return getBlessRating(allPlayers);
 }
 
-/** Monster auto-attack / chaos damage after Unnerve, Lullaby and Crippling Shot. Skills stay flat. */
+export function enrageMultiplier(monster: CombatMonster): number {
+  const enrage = monster.enrageState;
+  return enrage && enrage.stacks > 0 ? 1 + enrage.stacks * enrage.stepPercent : 1;
+}
+
+/** Enemy damage debuffs (Unnerve, Lullaby, Crippling Shot) as one factor; the combined reduction is capped. */
+export function enemyDebuffFactor(monster: CombatMonster, state: PartyCombatState): number {
+  let factor = 1 - clamp01(state.unnerveReduction);
+  for (const debuff of monster.debuffs) {
+    if (debuff.type === 'lullaby' || debuff.type === 'crippling_shot') factor *= 1 - clamp01(debuff.value);
+  }
+  return Math.max(1 - MAX_ENEMY_DAMAGE_REDUCTION, factor);
+}
+
+/** Monster auto-attack / chaos damage after enemy debuffs and enrage. Skills ignore the debuffs. */
 export function getMonsterDamage(monster: CombatMonster, state: PartyCombatState): number {
-  let damage = monster.damage;
-  if (state.unnerveReduction > 0) {
-    damage = Math.floor(damage * (1 - state.unnerveReduction));
-  }
-  for (const debuff of monster.debuffs) {
-    if (debuff.type === 'lullaby') damage = Math.floor(damage * (1 - debuff.value));
-  }
-  for (const debuff of monster.debuffs) {
-    if (debuff.type === 'crippling_shot') damage = Math.floor(damage * (1 - debuff.value));
-  }
-  return Math.max(0, damage);
+  return scaleDamage(monster.damage, enemyDebuffFactor(monster, state) * enrageMultiplier(monster));
+}
+
+function clamp01(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
 /** Heal amount of a heal option after heal power (before Martyr/Tenacity). */

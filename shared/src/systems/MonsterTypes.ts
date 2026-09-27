@@ -1,8 +1,26 @@
 import type { ItemDrop } from './ItemTypes.js';
 import type { DamageType } from './CharacterStats.js';
 import type { PartyGridPosition } from './SocialTypes.js';
+import { effectiveMonsterLevel } from './MonsterLevels.js';
 
 // --- Types ---
+
+export type MonsterTier = 'trash' | 'elite' | 'boss' | 'raid';
+export const MONSTER_TIERS: readonly MonsterTier[] = ['trash', 'elite', 'boss', 'raid'];
+
+/** `authored` = set on the definition; `derived` = estimated from its damage output. */
+export type MonsterLevelSource = 'authored' | 'derived';
+
+/** Outgoing damage × (1 + stacks × stepPercent); a stack every stepSeconds from afterSeconds. */
+export interface MonsterEnrage {
+  afterSeconds: number;
+  /** Default 30. */
+  stepSeconds?: number;
+  /** Default 0.10. */
+  stepPercent?: number;
+  /** Default 30. */
+  maxStacks?: number;
+}
 
 export interface Resistance {
   damageType: DamageType;
@@ -37,6 +55,12 @@ export interface MonsterDefinition {
   passive?: boolean;
   /** Optional flavor text shown in the monster popup. */
   description?: string;
+  /** 1..200. Absent → derived from damage output. */
+  level?: number;
+  /** Absent → 'trash'. */
+  tier?: MonsterTier;
+  /** Absent → the tier default (boss 480 s, raid 3600 s, none for trash/elite). */
+  enrage?: MonsterEnrage;
 }
 
 export interface MonsterInstance {
@@ -58,6 +82,10 @@ export interface MonsterInstance {
   passive?: boolean;
   /** Optional flavor text shown in the monster popup. */
   description?: string;
+  level?: number;
+  levelSource?: MonsterLevelSource;
+  tier?: MonsterTier;
+  enrage?: MonsterEnrage;
 }
 
 // --- Seed data (used as defaults when data files don't exist) ---
@@ -72,6 +100,7 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     xp: 5,
     goldMin: 1,
     goldMax: 2,
+    level: 1,
     drops: [
       { itemId: 'janky_helmet', chance: 0.01 },
       { itemId: 'rusty_dagger', chance: 0.01 },
@@ -92,6 +121,7 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     xp: 10,
     goldMin: 3,
     goldMax: 5,
+    level: 3,
     drops: [
       { itemId: 'mangy_pelt', chance: 0.01 },
       { itemId: 'moth_eaten_cloak', chance: 0.005 },
@@ -110,6 +140,7 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     xp: 15,
     goldMin: 2,
     goldMax: 5,
+    level: 4,
     drops: [
       { itemId: 'leather_vest', chance: 0.008 },
       { itemId: 'old_leather_boots', chance: 0.01 },
@@ -128,6 +159,7 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     xp: 9,
     goldMin: 2,
     goldMax: 4,
+    level: 2,
     skills: [
       { skillId: 'fireball', value: 4, cooldown: 5 },
       { skillId: 'heal', value: 8, cooldown: 4 },
@@ -141,12 +173,14 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
   bandit_cutthroat: {
     id: 'bandit_cutthroat',
     name: 'Bandit Cutthroat',
-    hp: 26,
+    hp: 60,
     damage: 5,
     damageType: 'physical',
-    xp: 18,
-    goldMin: 3,
-    goldMax: 6,
+    xp: 30,
+    goldMin: 4,
+    goldMax: 8,
+    level: 5,
+    tier: 'elite',
     skills: [
       { skillId: 'assassinate', value: 12, cooldown: 6 },
     ],
@@ -154,6 +188,30 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     drops: [
       { itemId: 'rusty_dagger', chance: 0.01 },
       { itemId: 'old_leather_boots', chance: 0.008 },
+    ],
+  },
+  goblin_chieftain: {
+    id: 'goblin_chieftain',
+    name: 'Goblin Chieftain',
+    hp: 19000,
+    damage: 70,
+    damageType: 'physical',
+    attackInterval: 2,
+    xp: 2300,
+    goldMin: 650,
+    goldMax: 1200,
+    level: 6,
+    tier: 'boss',
+    enrage: { afterSeconds: 480 },
+    skills: [
+      { skillId: 'fireball', value: 18, cooldown: 10 },
+      { skillId: 'fear', value: 0, cooldown: 15 },
+    ],
+    description: 'The warlord of the Crystal Caves goblins, scarred and bellowing, flanked by his guards. Built for a group.',
+    drops: [
+      { itemId: 'iron_battleaxe', chance: 0.15 },
+      { itemId: 'leather_vest', chance: 0.2 },
+      { itemId: 'magma_boots', chance: 0.05 },
     ],
   },
   stone_wall: {
@@ -166,6 +224,7 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     goldMin: 0,
     goldMax: 0,
     passive: true,
+    level: 1,
   },
 };
 
@@ -196,6 +255,11 @@ export function createMonsterInstance(def: MonsterDefinition, gridPosition: Part
   }
   if (def.passive) instance.passive = true;
   if (def.description) instance.description = def.description;
+  const { level, source } = effectiveMonsterLevel(def);
+  instance.level = level;
+  instance.levelSource = source;
+  if (def.tier && MONSTER_TIERS.includes(def.tier)) instance.tier = def.tier;
+  if (def.enrage) instance.enrage = { ...def.enrage };
   return instance;
 }
 

@@ -18,6 +18,17 @@ describe('combat public API', () => {
     expect(shared.GAME_VERSION).toBe('2026.09.26.1');
   });
 
+  it('exports the scaling, cloning and forecasting entry points', () => {
+    for (const name of [
+      'cloneCombatState', 'createRng', 'ratingMitigation', 'levelGapMultiplier', 'pairScaling', 'scaleDamage',
+      'masteryFactor', 'resolveEnrage', 'enrageStacksAt', 'pickWeightedEncounter',
+      'createForecastJob', 'runForecast', 'simulateToEnd', 'summarize', 'wilsonInterval', 'forecastReasons',
+      'partyKey', 'seedFromKey', 'defaultHorizonMs', 'formatForecastClock',
+    ]) {
+      expect(typeof (shared as Record<string, unknown>)[name], name).toBe('function');
+    }
+  });
+
   it('exports every timing constant with the spec values', () => {
     const expected = {
       COMBAT_STEP_MS: 100,
@@ -33,7 +44,9 @@ describe('combat public API', () => {
       FIRST_ACTION_PLAYER_MS: 1000,
       FIRST_ACTION_MONSTER_MS: 1400,
       STALEMATE_WINDOW_MS: 30000,
+      BOSS_STALEMATE_WINDOW_MS: 180000,
       LOW_HP_THRESHOLD: 0.5,
+      HEAL_NEEDED_THRESHOLD: 0.7,
       COMBAT_SEND_MS: 200,
       COMBAT_SNAPSHOT_MS: 500,
       PLAYBACK_DELAY_MS: 300,

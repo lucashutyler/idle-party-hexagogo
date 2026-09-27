@@ -1,8 +1,13 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SEED_ENCOUNTERS, resolveEncounter } from '../src/systems/EncounterTypes';
 import { SEED_MONSTERS } from '../src/systems/MonsterTypes';
+import type { MonsterTier } from '../src/systems/MonsterTypes';
 import { SEED_ITEMS } from '../src/systems/ItemTypes';
-import { DEV_MIXED_ENCOUNTER_ID, DEV_SEED_VERSION, DEV_ZONE_PREFIX, generateDevWorld } from '../src/seed/SeedDevWorld';
+import { SEED_DUNGEONS } from '../src/systems/DungeonTypes';
+import { MONSTER_SKILL_CATALOG } from '../src/systems/MonsterSkills';
+import { effectiveMonsterLevel, effectiveMonsterTier } from '../src/systems/MonsterLevels';
+import { suggestMonsterStats } from '../src/systems/MonsterTemplates';
+import { DEV_MIXED_ENCOUNTER_ID, DEV_RAID_DUNGEON_ID, DEV_SEED_VERSION, generateDevWorld } from '../src/seed/SeedDevWorld';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -16,8 +21,8 @@ describe('seed encounters', () => {
 
   it('only reference seed monsters, whose drops are seed items', () => {
     for (const encounter of Object.values(SEED_ENCOUNTERS)) {
-      for (const entry of encounter.monsterPool ?? []) {
-        expect(SEED_MONSTERS[entry.monsterId], `${encounter.id} → ${entry.monsterId}`).toBeDefined();
+      for (const id of [...(encounter.monsterPool ?? []), ...(encounter.placements ?? [])].map(e => e.monsterId)) {
+        expect(SEED_MONSTERS[id], `${encounter.id} → ${id}`).toBeDefined();
       }
     }
     for (const monster of Object.values(SEED_MONSTERS)) {
@@ -35,42 +40,105 @@ describe('seed encounters', () => {
   });
 });
 
+describe('seed levels, tiers and the Chieftain', () => {
+  it('authors a level and tier on every seed monster', () => {
+    const expected: Record<string, [number, MonsterTier]> = {
+      goblin: [1, 'trash'], goblin_shaman: [2, 'trash'], wolf: [3, 'trash'], bandit: [4, 'trash'],
+      bandit_cutthroat: [5, 'elite'], stone_wall: [1, 'trash'], goblin_chieftain: [6, 'boss'],
+    };
+    expect(Object.keys(SEED_MONSTERS).sort()).toEqual(Object.keys(expected).sort());
+    for (const [id, [level, tier]] of Object.entries(expected)) {
+      expect(effectiveMonsterLevel(SEED_MONSTERS[id]), id).toEqual({ level, source: 'authored' });
+      expect(effectiveMonsterTier(SEED_MONSTERS[id]), id).toBe(tier);
+    }
+  });
+
+  it('gives the Chieftain catalog skills and an 8-minute enrage', () => {
+    const chief = SEED_MONSTERS.goblin_chieftain;
+    for (const s of chief.skills ?? []) expect(MONSTER_SKILL_CATALOG[s.skillId], s.skillId).toBeDefined();
+    expect(chief.enrage).toEqual({ afterSeconds: 480 });
+  });
+
+  it('ends the seed dungeon on an explicit Chieftain floor with checkpoints', () => {
+    const floors = SEED_DUNGEONS.crystal_caves_trial.floors;
+    const boss = floors[floors.length - 1];
+    expect(boss.isBoss).toBe(true);
+    expect(boss.checkpoints).toEqual([0.66, 0.33]);
+    expect(boss.maxWipes).toBe(3);
+    expect(boss.encounterTable).toEqual([{ encounterId: 'goblin_chieftain_court', weight: 1 }]);
+    const court = SEED_ENCOUNTERS.goblin_chieftain_court;
+    expect(court.type).toBe('explicit');
+    expect(court.placements!.map(p => p.monsterId).sort()).toEqual(['goblin', 'goblin', 'goblin_chieftain']);
+    expect(new Set(court.placements!.map(p => p.gridPosition)).size).toBe(3);
+  });
+});
+
 describe('dev world seed', () => {
   const world = generateDevWorld();
+  const monsters = new Map(world.monsters.map(m => [m.id, m]));
+  const encounters = new Map(world.encounters.map(e => [e.id, e]));
+  const themed = world.zones.filter(z => z.encounterTable.length > 0);
 
   it('bumps the seed version', () => {
-    expect(DEV_SEED_VERSION).toBe(2);
+    expect(DEV_SEED_VERSION).toBe(3);
   });
 
-  it('ships the dev_mixed encounter built from seed monsters', () => {
-    expect(world.encounters).toHaveLength(1);
-    const mixed = world.encounters[0];
-    expect(mixed.id).toBe(DEV_MIXED_ENCOUNTER_ID);
-    expect(mixed.id.startsWith(DEV_ZONE_PREFIX)).toBe(true);
-    const ids = (mixed.monsterPool ?? []).map(e => e.monsterId).sort();
-    expect(ids).toEqual(['bandit', 'bandit_cutthroat', 'goblin', 'goblin_shaman', 'wolf']);
-    for (const id of ids) expect(SEED_MONSTERS[id]).toBeDefined();
-  });
-
-  it('points every themed dev zone at dev_mixed and keeps the road zone peaceful', () => {
-    const themed = world.zones.filter(z => z.encounterTable.length > 0);
-    const peaceful = world.zones.filter(z => z.encounterTable.length === 0);
+  it('gives each themed zone its own encounters, and keeps the road zone peaceful', () => {
     expect(themed).toHaveLength(20);
-    for (const zone of themed) expect(zone.encounterTable).toEqual([{ encounterId: DEV_MIXED_ENCOUNTER_ID, weight: 1 }]);
-    expect(peaceful.map(z => z.displayName)).toEqual(['Old Roads']);
+    expect(world.zones.filter(z => z.encounterTable.length === 0).map(z => z.displayName)).toEqual(['Old Roads']);
+    for (const zone of themed) {
+      expect(zone.encounterTable.map(e => e.encounterId)).not.toContain(DEV_MIXED_ENCOUNTER_ID);
+      for (const entry of zone.encounterTable) {
+        expect(entry.encounterId.startsWith(zone.id), entry.encounterId).toBe(true);
+        expect(encounters.has(entry.encounterId), entry.encounterId).toBe(true);
+      }
+    }
   });
 
-  it('ships copies of the caster monsters for servers seeded before they existed', () => {
-    expect(world.monsters.map(m => m.id).sort()).toEqual(['bandit_cutthroat', 'goblin_shaman']);
-    const shaman = world.monsters.find(m => m.id === 'goblin_shaman')!;
-    expect(shaman).toEqual(SEED_MONSTERS.goblin_shaman);
-    expect(shaman).not.toBe(SEED_MONSTERS.goblin_shaman);
-    expect(shaman.skills).not.toBe(SEED_MONSTERS.goblin_shaman.skills);
+  it('scales every zone monster to its zone with an authored level from the templates', () => {
+    const roles = { brute: 'bruiser', skirmisher: 'skirmisher', caster: 'caster', elite: undefined } as const;
+    for (const zone of themed) {
+      const [lo, hi] = zone.levelRange;
+      const ids = new Set(zone.encounterTable.flatMap(e => encounters.get(e.encounterId)!.monsterPool!.map(p => p.monsterId)));
+      expect(ids.size).toBe(4);
+      for (const id of ids) {
+        const m = monsters.get(id)!;
+        expect(m.level, id).toBeGreaterThanOrEqual(lo);
+        expect(m.level, id).toBeLessThanOrEqual(hi);
+        const kind = id.slice(zone.id.length + 1) as keyof typeof roles;
+        expect(m.hp, id).toBe(suggestMonsterStats(m.level!, m.tier ?? 'trash', roles[kind]).hp);
+      }
+      expect([...ids].filter(id => monsters.get(id)!.tier === 'elite')).toHaveLength(1);
+    }
+  });
+
+  it('ships a checkpointed raid linked from one Forgotten Vale room', () => {
+    expect(world.dungeons.map(d => d.id)).toEqual([DEV_RAID_DUNGEON_ID]);
+    const raid = world.dungeons[0];
+    const bossFloor = raid.floors[raid.floors.length - 1];
+    expect(bossFloor.checkpoints).toEqual([0.8, 0.6, 0.4, 0.2]);
+    expect(bossFloor.maxWipes).toBe(3);
+    const bossIds = bossFloor.encounterTable.flatMap(e => encounters.get(e.encounterId)!.placements!.map(p => p.monsterId));
+    expect(bossIds.map(id => [monsters.get(id)!.tier, monsters.get(id)!.level])).toEqual([['raid', 25]]);
+    for (const floor of raid.floors) for (const e of floor.encounterTable) expect(encounters.get(e.encounterId)?.type).toBe('explicit');
+    const entrances = world.tiles.filter(t => t.dungeonId);
+    expect(entrances).toHaveLength(1);
+    expect(entrances[0]).toMatchObject({ dungeonId: DEV_RAID_DUNGEON_ID, zone: 'dev_forgotten_vale', type: 'dungeon' });
+  });
+
+  it('references only monsters it ships', () => {
+    for (const e of world.encounters) {
+      for (const id of [...(e.monsterPool ?? []).map(p => p.monsterId), ...(e.placements ?? []).map(p => p.monsterId)]) {
+        expect(monsters.has(id), `${e.id} → ${id}`).toBe(true);
+      }
+    }
   });
 
   it('is deterministic', () => {
     const again = generateDevWorld();
     expect(again.encounters).toEqual(world.encounters);
     expect(again.zones).toEqual(world.zones);
+    expect(again.monsters).toEqual(world.monsters);
+    expect(again.dungeons).toEqual(world.dungeons);
   });
 });

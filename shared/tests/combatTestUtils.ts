@@ -19,6 +19,7 @@ export interface PlayerOptions {
   isHenchman?: boolean;
   equipBonuses?: PartyCombatantInit['equipBonuses'];
   setBonuses?: PartyCombatantInit['setBonuses'];
+  mastery?: Record<string, number>;
 }
 
 export function makePlayer(username: string, pos: PartyGridPosition, opts: PlayerOptions = {}): PartyCombatantInit {
@@ -36,6 +37,7 @@ export function makePlayer(username: string, pos: PartyGridPosition, opts: Playe
   if (opts.isHenchman) player.isHenchman = true;
   if (opts.equipBonuses) player.equipBonuses = opts.equipBonuses;
   if (opts.setBonuses) player.setBonuses = opts.setBonuses;
+  if (opts.mastery) player.mastery = opts.mastery;
   return player;
 }
 

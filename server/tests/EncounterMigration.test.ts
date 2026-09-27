@@ -69,10 +69,10 @@ describe('Encounter Migration', () => {
     });
   });
 
-  describe('MonsterDefinition without level', () => {
-    it('seed monsters do not have a level field', () => {
+  describe('MonsterDefinition level', () => {
+    it('seed monsters carry an authored level', () => {
       for (const monster of Object.values(SEED_MONSTERS)) {
-        expect(monster).not.toHaveProperty('level');
+        expect(monster.level, monster.id).toBeGreaterThanOrEqual(1);
       }
     });
 
@@ -85,7 +85,7 @@ describe('Encounter Migration', () => {
         expect(SEED_MONSTERS[id].skills).toBeUndefined();
       }
       const casters = monsters.filter(m => m.skills !== undefined);
-      expect(casters.map(m => m.id).sort()).toEqual(['bandit_cutthroat', 'goblin_shaman']);
+      expect(casters.map(m => m.id).sort()).toEqual(['bandit_cutthroat', 'goblin_chieftain', 'goblin_shaman']);
       for (const caster of casters) {
         expect(caster.skills!.length).toBeGreaterThan(0);
       }

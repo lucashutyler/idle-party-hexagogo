@@ -18,6 +18,9 @@ import type { SkillLoadout } from './SkillTypes.js';
 import type { DungeonRunInfo } from './DungeonTypes.js';
 import type { ClientNotificationMessage, ServerNotificationMessage } from './NotificationTypes.js';
 import type { RoomEntryFailureKind } from './RoomRequirements.js';
+import type { CombatPrefs, ForecastRequestTarget, ForecastResult, ForecastStatus, ForecastTarget } from './ForecastTypes.js';
+import type { MasteryEntry, MasterySummary } from './Mastery.js';
+import type { AwayLedger } from './AwayTypes.js';
 
 
 export type BattleTimerState = 'battle' | 'result';
@@ -30,7 +33,7 @@ export const GAME_VERSION = '2026.09.26.1'; // Keep in sync with PATCH_NOTES in 
 
 // --- Protocol types (server → client, client → server) ---
 
-export type BattleVisual = 'none' | 'fighting' | 'victory' | 'defeat';
+export type BattleVisual = 'none' | 'fighting' | 'victory' | 'defeat' | 'retreat';
 
 export interface ServerPartyState {
   col: number;
@@ -84,6 +87,8 @@ export interface ClientCharacterState {
   xpRate: { startTime: number; totalXp: number };
   craftLevel: number;
   craftXp: number;
+  combatPrefs?: CombatPrefs;
+  mastery?: MasterySummary;
 }
 
 export interface ClientResetXpRateMessage {
@@ -108,7 +113,7 @@ export interface OtherPlayerState {
   dungeonName?: string;
 }
 
-export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup';
+export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'checkpoint' | 'mastery';
 
 export interface CombatLogEntry {
   id: number;
@@ -159,6 +164,10 @@ export interface ServerStateMessage {
   dungeon?: DungeonRunInfo;
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
+  /** Sent on every state until the client acks it with `ack_recap`. */
+  awayRecap?: AwayLedger;
+  /** Definitions for the recap's notable items. */
+  awayRecapItemDefinitions?: Record<string, ItemDefinition>;
 }
 
 export interface ClientCraftingState {
@@ -257,6 +266,20 @@ export interface ClientUnequipSkillMessage {
  */
 export type ServerErrorCode = 'trade_nonce_mismatch';
 
+export interface ServerForecastMessage {
+  type: 'forecast';
+  target: ForecastTarget;
+  key: string;
+  result: ForecastResult | null;
+  status: ForecastStatus;
+}
+
+export interface ServerBestiaryMessage {
+  type: 'bestiary';
+  version: number;
+  entries: MasteryEntry[];
+}
+
 export type ServerMessage =
   | ServerStateMessage
   | ServerCombatMessage
@@ -270,6 +293,8 @@ export type ServerMessage =
   | ServerTradeCompletedMessage
   | ServerNotificationMessage
   | PlayerProfileMessage
+  | ServerForecastMessage
+  | ServerBestiaryMessage
   | { type: 'error'; message: string; code?: ServerErrorCode };
 
 export interface ClientViewPlayerMessage {
@@ -349,6 +374,31 @@ export interface ClientEnterTransitionMessage {
   tileId: string;
 }
 
+export interface ClientRequestForecastMessage {
+  type: 'request_forecast';
+  target: ForecastRequestTarget;
+}
+
+export interface ClientSetCombatPrefsMessage {
+  type: 'set_combat_prefs';
+  autoRetreatBelowPct: CombatPrefs['autoRetreatBelowPct'];
+}
+
+export interface ClientRequestBestiaryMessage {
+  type: 'request_bestiary';
+}
+
+export interface ClientAckRecapMessage {
+  type: 'ack_recap';
+  id: string;
+}
+
+/** Page visibility, separate from `combat_view`; a socket that never sends it counts as visible. */
+export interface ClientPresenceMessage {
+  type: 'presence';
+  visible: boolean;
+}
+
 export type ClientMessage =
   | ClientMoveMessage
   | ClientCombatViewMessage
@@ -372,5 +422,10 @@ export type ClientMessage =
   | ClientEnterDungeonMessage
   | ClientLeaveDungeonMessage
   | ClientEnterTransitionMessage
+  | ClientRequestForecastMessage
+  | ClientSetCombatPrefsMessage
+  | ClientRequestBestiaryMessage
+  | ClientAckRecapMessage
+  | ClientPresenceMessage
   | ClientSocialMessage
   | ClientNotificationMessage;

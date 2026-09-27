@@ -31,7 +31,7 @@ export const SEED_ZONES: Record<string, ZoneDefinition> = {
       { encounterId: 'darkwood_wolves', weight: 4 },
       { encounterId: 'darkwood_bandits', weight: 3 },
     ],
-    levelRange: [2, 3],
+    levelRange: [3, 5],
   },
   crystal_caves: {
     id: 'crystal_caves',
@@ -40,7 +40,7 @@ export const SEED_ZONES: Record<string, ZoneDefinition> = {
       { encounterId: 'crystal_caves_goblins', weight: 2 },
       { encounterId: 'crystal_caves_wolves', weight: 3 },
     ],
-    levelRange: [1, 2],
+    levelRange: [1, 3],
   },
 };
 

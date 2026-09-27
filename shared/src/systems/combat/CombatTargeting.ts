@@ -1,7 +1,7 @@
 import type { PartyGridPosition } from '../SocialTypes.js';
 import type { CombatRef } from '../CombatEvents.js';
 import type { CombatMonster, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
-import { LOW_HP_THRESHOLD } from '../CombatTiming.js';
+import { HEAL_NEEDED_THRESHOLD, LOW_HP_THRESHOLD } from '../CombatTiming.js';
 
 export function getRow(pos: PartyGridPosition): number {
   return Math.floor(pos / 3);
@@ -131,14 +131,12 @@ export function findLivePlayerAt(state: PartyCombatState, pos: PartyGridPosition
 
 // --- Ally targets (shared by the "needed" check and the executor) ---
 
-export function needsHeal(player: PartyCombatant, healAmount: number): boolean {
-  const missing = player.maxHp - player.currentHp;
-  if (missing <= 0) return false;
-  return hpFraction(player) < LOW_HP_THRESHOLD || missing >= healAmount * 0.5;
+export function needsHeal(player: PartyCombatant): boolean {
+  return player.currentHp < player.maxHp && hpFraction(player) < HEAL_NEEDED_THRESHOLD;
 }
 
-export function healTarget(allies: PartyCombatant[], healAmount: number, preferred?: PartyCombatant): PartyCombatant | null {
-  return findLowestFraction(preferredOrAll(allies, preferred).filter(p => needsHeal(p, healAmount)));
+export function healTarget(allies: PartyCombatant[], preferred?: PartyCombatant): PartyCombatant | null {
+  return findLowestFraction(preferredOrAll(allies, preferred).filter(needsHeal));
 }
 
 export function isAfflicted(player: PartyCombatant): boolean {

@@ -2,7 +2,7 @@ import type { ActiveEffect, SkillDefinition } from '../SkillTypes.js';
 import { MONSTER_SKILL_CATALOG, getMonsterSkillCastTimeMs } from '../MonsterSkills.js';
 import type { MonsterSkillDefinition } from '../MonsterSkills.js';
 import type { EffectContext, InFlightAttack, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
-import { healOptionAmount } from './CombatPassives.js';
+import { WAR_SONG_MAX_STACKS } from '../CombatScaling.js';
 import {
   cureTarget,
   healTarget,
@@ -21,20 +21,20 @@ export function wouldHaveEffect(
   state: PartyCombatState,
   ctx: EffectContext = {},
 ): boolean {
-  return (skill.activeEffects ?? []).some(effect => optionWouldHaveEffect(player, effect, state, ctx));
+  return (skill.activeEffects ?? []).some(effect => optionWouldHaveEffect(player, skill, effect, state, ctx));
 }
 
 export function optionWouldHaveEffect(
   player: PartyCombatant,
+  skill: SkillDefinition,
   effect: ActiveEffect,
   state: PartyCombatState,
   ctx: EffectContext,
 ): boolean {
   switch (effect.kind) {
     case 'heal_lowest':
-      return healTarget(state.players, healOptionAmount(player, effect, 4), ctx.ally) !== null;
     case 'hot_lowest':
-      return healTarget(state.players, healOptionAmount(player, effect, 2), ctx.ally) !== null;
+      return healTarget(state.players, ctx.ally) !== null;
     case 'cure_debuffs':
       return cureTarget(state.players, ctx.ally) !== null;
     case 'shield_non_knight':
@@ -45,9 +45,15 @@ export function optionWouldHaveEffect(
       return ctx.trigger === 'self_hit' && ctx.hit?.damageType === 'physical' && state.monsters.some(isAlive);
     case 'stun_aoe':
       return state.monsters.some(m => isAlive(m) && !m.passive);
+    case 'party_buff_permanent':
+      return partyBuffStacks(state, skill.name) < WAR_SONG_MAX_STACKS && state.monsters.some(isAlive);
     default:
       return state.monsters.some(isAlive);
   }
+}
+
+export function partyBuffStacks(state: PartyCombatState, name: string): number {
+  return state.partyBuffs.find(b => b.name === name)?.stacks ?? 0;
 }
 
 /**

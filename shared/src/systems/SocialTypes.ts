@@ -3,6 +3,7 @@
 import type { NotificationEntry, NotificationPreferences } from './NotificationTypes.js';
 // Must stay `import type`: erases the HenchmanTypes <-> SocialTypes cycle at compile time.
 import type { HiredHenchman } from './HenchmanTypes.js';
+import type { PartyAutoRetreatInfo } from './ForecastTypes.js';
 
 // --- Friend System ---
 export interface FriendRequest {
@@ -48,6 +49,10 @@ export interface GamePartyInfo {
   members: GamePartyMember[];
   /** Never merge into `members` — member call sites all resolve an account. Grid slots are shared. */
   henchmen?: HiredHenchman[];
+  /** Auto-retreat policy in effect: the party owner's setting. */
+  autoRetreat?: PartyAutoRetreatInfo;
+  /** Digest of the party's forecast inputs; a forecast whose `partyKey` differs is stale. */
+  forecastKey?: string;
 }
 
 export interface PartyInvite {

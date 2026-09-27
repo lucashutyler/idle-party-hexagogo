@@ -389,14 +389,14 @@ describe('Combat integration — set bonuses are applied', () => {
     }
   });
 
-  it('damage resistance is applied BEFORE flat reductions', () => {
-    // Percent-then-flat: floor(100 × 0.5) − 10 = 40 per hit; flat-then-percent would be 45.
+  it('damage resistance multiplies with gear rating mitigation, one floor at the end', () => {
+    // Rating 10 vs L1: 10 / 14 mitigation. floor(100 × 4/14 × 0.5) = 14 per hit.
     const lost = hpLostToThreeHits({ damageResistancePercent: 50 }, {
       bonusAttackMin: 0, bonusAttackMax: 0,
       damageReductionMin: 10, damageReductionMax: 10,
       magicReductionMin: 0, magicReductionMax: 0,
     });
-    expect(lost).toBe(3 * 40);
+    expect(lost).toBe(3 * 14);
   });
 
   it('set cooldownReduction shortens active cooldowns by seconds', () => {

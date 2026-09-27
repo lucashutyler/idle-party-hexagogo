@@ -43,7 +43,7 @@ describe('buildClientCombatSnapshot', () => {
 
     expect(unit(snap, 'player', 2)).toEqual({
       side: 'player', pos: 2, hp: 1000, maxHp: 1000, actionMs: 1000, actionTotalMs: 1000, actionIntervalMs: 1000,
-      name: 'K', className: 'Knight', passives: ['knight_guard'],
+      name: 'K', level: 1, className: 'Knight', passives: ['knight_guard'],
       skills: [
         { id: 'knight_bash', remainingMs: 1000, cooldownMs: 1000, state: 'cooldown', name: 'Bash', cardType: 'attack', castTimeMs: 0 },
         { id: 'knight_intercept', remainingMs: 0, cooldownMs: 0, state: 'armed', name: 'Intercept', cardType: 'instant', trigger: 'ally_targeted', castTimeMs: 0 },
@@ -60,6 +60,7 @@ describe('buildClientCombatSnapshot', () => {
     expect(unit(snap, 'monster', 0)).toEqual({
       side: 'monster', pos: 0, hp: 15, maxHp: 15, actionMs: 1400, actionTotalMs: 1400, actionIntervalMs: 1000,
       name: 'Goblin', id: 'goblin', description: 'A goblin.',
+      level: expect.any(Number), levelSource: expect.any(String), tier: 'trash',
     });
     expect(unit(snap, 'monster', 3)).toMatchObject({ passive: true, actionMs: 0, actionTotalMs: 0, id: 'stone_wall' });
   });

@@ -394,16 +394,16 @@ describe('class-aware damage', () => {
     expect(state.players[0].currentHp).toBe(200 - 2);
   });
 
-  it('Knight Guard scales with level (a hit still lands for 0)', () => {
+  it('Knight Guard scales with level: still 50 % vs a same-level attacker, never a 0-damage hit', () => {
     pinRandom();
     const knight = makePlayer('Arthur', 2, {
       className: 'Knight', level: 5, hp: 200, baseDamage: 1, skills: [SEED_SKILLS.knight_guard],
     });
-    const state = createPartyCombatState([knight], [createMonsterInstance(SEED_MONSTERS.goblin, 4)]);
+    const state = createPartyCombatState([knight], [makeMonster(4, { damage: 4 })]);
     const { events } = runTo(state, 1400);
-    expect(state.players[0].currentHp).toBe(200);
+    expect(state.players[0].currentHp).toBe(198);
     const hit = ofKind(events, 'damage').find(e => e.dst?.side === 'player');
-    expect(hit).toMatchObject({ amount: 0, dmgType: 'physical', t: 1400 });
+    expect(hit).toMatchObject({ amount: 2, dmgType: 'physical', t: 1400 });
   });
 
   it('two physical_reduction options on one skill SUM at the consumption site', () => {
@@ -420,14 +420,14 @@ describe('class-aware damage', () => {
 
   it('Priest Bless provides party-wide magical damage reduction', () => {
     pinRandom();
-    const wolf = createMonsterInstance({ ...SEED_MONSTERS.wolf, hp: 1000 }, 4);
+    const wolf = makeMonster(4, { hp: 1000, damage: 5, damageType: 'magical' });
     const priest = makePlayer('Cleric', 0, {
       className: 'Priest', hp: 200, baseDamage: 3, skills: [SEED_SKILLS.priest_bless],
     });
     const archer = makePlayer('Legolas', 2, { className: 'Archer', hp: 200, baseDamage: 15 });
     const state = createPartyCombatState([priest, archer], [wolf]);
     runTo(state, 1400);
-    expect(player(state, 'Legolas').currentHp).toBe(200 - (SEED_MONSTERS.wolf.damage - 2));
+    expect(player(state, 'Legolas').currentHp).toBe(200 - Math.floor(5 * 0.5));
     expect(player(state, 'Cleric').currentHp).toBe(200);
   });
 
@@ -537,12 +537,14 @@ describe('end checks', () => {
   });
 
   it('declares a stalemate defeat after 30 s without monster HP progress', () => {
+    pinRandom();
     const state = createPartyCombatState([makePlayer('A', 2)], [
-      makeMonster(0, { resistances: [{ damageType: 'physical', flatReduction: 1000, percentReduction: 0 }] }),
+      makeMonster(0, { skills: [{ skillId: 'heal', value: 100000, cooldown: 0, castTime: 0 }] }),
     ]);
     const r = runTo(state, 60000);
     expect(state.result).toBe('defeat');
-    expect(state.elapsedMs).toBe(STALEMATE_WINDOW_MS);
+    expect(state.lastProgressMs).toBe(1000);
+    expect(state.elapsedMs).toBe(1000 + STALEMATE_WINDOW_MS);
     expect(r.log[r.log.length - 1]).toBe('The fight drags on — the party withdraws.');
     expect(ofKind(r.events, 'battle_end')).toEqual([expect.objectContaining({ result: 'defeat' })]);
   });
@@ -552,7 +554,8 @@ describe('end checks', () => {
     const state = createPartyCombatState([makePlayer('A', 2, { baseDamage: 10 })], [makeMonster(0, { hp: 20000 })]);
     runTo(state, 5000);
     expect(state.lastProgressMs).toBe(5000);
-    state.monsters[0].resistances = [{ damageType: 'physical', flatReduction: 0, percentReduction: 100 }];
+    state.monsters[0].skills = [{ skillId: 'heal', value: 100000, cooldown: 0, castTime: 0 }];
+    state.monsters[0].skillCooldowns = { heal: 0 };
     runTo(state, 60000);
     expect(state.result).toBe('defeat');
     expect(state.elapsedMs).toBe(5000 + STALEMATE_WINDOW_MS);
@@ -575,11 +578,11 @@ describe('end checks', () => {
     expect(monsterAt(state, 3).currentHp).toBe(0);
   });
 
-  it('an untouchable goblin behind a wall still ends in a stalemate once the wall falls', () => {
+  it('an out-healing goblin behind a wall still ends in a stalemate once the wall falls', () => {
     pinRandom();
     const state = createPartyCombatState([makePlayer('K', 5, { className: 'Knight', baseDamage: 50 })], [
       createMonsterInstance(SEED_MONSTERS.stone_wall, 3),
-      makeMonster(4, { resistances: [{ damageType: 'physical', flatReduction: 1000, percentReduction: 0 }] }),
+      makeMonster(4, { skills: [{ skillId: 'heal', value: 100000, cooldown: 0, castTime: 0 }] }),
     ]);
     const r = runTo(state, 60000);
     expect(monsterAt(state, 3).currentHp).toBe(0);

@@ -79,7 +79,7 @@ const CATALOG = {
     kind: 'physical_reduction',
     slotType: 'passive',
     label: 'Physical damage reduction',
-    description: 'Reduces physical damage the owner takes by (value × owner level). Applies to direct hits and to physical DoT pulses. Contributions from multiple options/skills sum.',
+    description: 'Physical armor for the owner: rating = 2 × value × owner level; mitigation = rating / (rating + 4 × attacker level), max 80%. Applies to direct hits and to physical DoT pulses. Contributions from multiple options/skills sum.',
     targeting: 'self',
     params: [
       { key: 'valuePerLevel', label: 'Reduction per level', input: 'number', min: 0, step: 1, required: true },
@@ -102,7 +102,7 @@ const CATALOG = {
     kind: 'magical_reduction_party',
     slotType: 'passive',
     label: 'Party magic/holy reduction',
-    description: 'Reduces magical AND holy damage taken by every party member by (value × owner level) while the owner is alive. Applies to direct hits and DoT pulses; this is the only reduction that touches holy damage. Contributions sum across owners.',
+    description: 'Party-wide magical AND holy rating while the owner is alive: rating = 2 × value × owner level; mitigation = rating / (rating + 4 × attacker level), max 80%. Applies to direct hits and DoT pulses; this is the only reduction that touches holy damage. Bless uses the highest owner — owners do not stack.',
     targeting: 'party',
     params: [
       { key: 'valuePerLevel', label: 'Reduction per level', input: 'number', min: 0, step: 1, required: true },

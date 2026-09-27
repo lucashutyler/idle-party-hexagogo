@@ -1,8 +1,12 @@
 import type { DamageType } from './CharacterStats.js';
+import type { MonsterLevelSource, MonsterTier } from './MonsterTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type { SkillCardType, SkillTrigger } from './SkillTypes.js';
 
 export type CombatSide = 'player' | 'monster';
+
+/** How a fight ended; the engine only produces victory/defeat, the server timer can end one as a retreat. */
+export type CombatResult = 'victory' | 'defeat' | 'retreat';
 
 export interface CombatRef {
   side: CombatSide;
@@ -20,7 +24,8 @@ export type CombatEventKind =
   | 'reaction'
   | 'redirect'
   | 'status'
-  | 'cleanse' | 'death' | 'revive' | 'buff' | 'fizzle';
+  | 'cleanse' | 'death' | 'revive' | 'buff' | 'fizzle'
+  | 'phase' | 'enrage';
 
 /** One timestamped combat happening. See docs/architecture/combat.md for per-kind fields. */
 export interface CombatEvent {
@@ -38,11 +43,11 @@ export interface CombatEvent {
   cardType?: SkillCardType;
   durationMs?: number;
   name?: string;
-  result?: 'victory' | 'defeat';
+  result?: CombatResult;
 }
 
 export interface ClientCombatStatus {
-  kind: 'dot' | 'hot' | 'debuff' | 'buff' | 'mark' | 'chaos' | 'scorch';
+  kind: 'dot' | 'hot' | 'debuff' | 'buff' | 'mark' | 'chaos' | 'scorch' | 'enrage';
   name: string;
   stacks?: number;
   remainingMs?: number;
@@ -66,6 +71,23 @@ export interface ClientCombatCast {
   remainingMs: number;
   target?: CombatRef;
   paused?: boolean;
+}
+
+/** A monster's enrage clock in battle time: first stack at `atMs`, one more every `stepMs`. */
+export interface ClientCombatEnrage {
+  atMs: number;
+  stacks: number;
+  stepMs: number;
+  stepPercent: number;
+  maxStacks: number;
+}
+
+/** Boss checkpoint progress. `thresholds` (descending HP fractions) is static: full snapshots only. */
+export interface ClientCombatBossPhases {
+  bossPos: PartyGridPosition[];
+  thresholds?: number[];
+  phase: number;
+  resumedFromPhase?: number;
 }
 
 export interface ClientCombatUnit {
@@ -96,6 +118,13 @@ export interface ClientCombatUnit {
   description?: string;
   /** Real players only: equipped passive skill ids this battle was built with. */
   passives?: string[];
+  level?: number;
+  /** Monsters only. */
+  levelSource?: MonsterLevelSource;
+  /** Monsters only. */
+  tier?: MonsterTier;
+  /** Monsters with an enrage clock; present in every snapshot. */
+  enrage?: ClientCombatEnrage;
 }
 
 /** Static unit fields (name, id, className, …, skill names/types) are present only when `full`. */
@@ -104,6 +133,8 @@ export interface ClientCombatSnapshot {
   elapsedMs: number;
   full: boolean;
   finished: boolean;
-  result: 'victory' | 'defeat' | null;
+  result: CombatResult | null;
   units: ClientCombatUnit[];
+  /** Present when the fight has a boss; `phase` is in every snapshot. */
+  bossPhases?: ClientCombatBossPhases;
 }

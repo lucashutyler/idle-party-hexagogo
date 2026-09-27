@@ -191,32 +191,32 @@ describe('wouldHaveEffect (the "needed" check)', () => {
     ], [makeMonster(0)]);
   }
 
-  it('heal_lowest: needed when an ally misses at least half the heal amount', () => {
+  it('heal_lowest: needed once an ally is below 70 % HP', () => {
     const state = party();
     const healer = player(state, 'Healer');
     expect(wouldHaveEffect(healer, heal(4), state)).toBe(false);
-    player(state, 'Tank').currentHp = 91;
+    player(state, 'Tank').currentHp = 70;
     expect(wouldHaveEffect(healer, heal(4), state)).toBe(false);
-    player(state, 'Tank').currentHp = 90;
+    player(state, 'Tank').currentHp = 69;
     expect(wouldHaveEffect(healer, heal(4), state)).toBe(true);
   });
 
-  it('heal_lowest: always needed for an ally below half health, even if the heal is huge', () => {
+  it('heal_lowest: the heal size does not matter', () => {
     const state = party();
     const healer = player(state, 'Healer');
-    player(state, 'Tank').currentHp = 60;
-    expect(wouldHaveEffect(healer, heal(100), state)).toBe(false);
-    player(state, 'Tank').currentHp = 49;
+    player(state, 'Tank').currentHp = 71;
+    expect(wouldHaveEffect(healer, heal(1), state)).toBe(false);
+    player(state, 'Tank').currentHp = 69;
     expect(wouldHaveEffect(healer, heal(100), state)).toBe(true);
   });
 
-  it('heal_lowest counts heal power (Devotion) in the heal amount', () => {
+  it('heal_lowest ignores heal power (Devotion)', () => {
     const state = createPartyCombatState([
       makePlayer('Healer', 2, { className: 'Priest', level: 5, hp: 100, skills: [SEED_SKILLS.priest_devotion] }),
       makePlayer('Tank', 5, { hp: 100 }),
     ], [makeMonster(0)]);
-    player(state, 'Tank').currentHp = 89;
-    expect(wouldHaveEffect(player(state, 'Healer'), heal(4), state)).toBe(false);
+    player(state, 'Tank').currentHp = 69;
+    expect(wouldHaveEffect(player(state, 'Healer'), heal(4), state)).toBe(true);
     player(state, 'Healer').equippedSkills = [];
     expect(wouldHaveEffect(player(state, 'Healer'), heal(4), state)).toBe(true);
   });
@@ -233,12 +233,12 @@ describe('wouldHaveEffect (the "needed" check)', () => {
     expect(log).toContain('Healer uses heal on Tank for 20 HP');
   });
 
-  it('hot_lowest uses one pulse as the heal amount', () => {
+  it('hot_lowest uses the same 70 % rule', () => {
     const state = party();
     const healer = player(state, 'Healer');
-    player(state, 'Tank').currentHp = 96;
+    player(state, 'Tank').currentHp = 70;
     expect(wouldHaveEffect(healer, hot, state)).toBe(false);
-    player(state, 'Tank').currentHp = 95;
+    player(state, 'Tank').currentHp = 69;
     expect(wouldHaveEffect(healer, hot, state)).toBe(true);
   });
 

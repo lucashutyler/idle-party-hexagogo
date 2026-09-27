@@ -1,6 +1,7 @@
 import { getSkillCardType, getSkillTrigger } from '../SkillTypes.js';
 import type { SkillDefinition } from '../SkillTypes.js';
 import type {
+  ClientCombatBossPhases,
   ClientCombatCast,
   ClientCombatSkill,
   ClientCombatSnapshot,
@@ -28,7 +29,7 @@ export function buildClientCombatSnapshot(state: PartyCombatState, battleId: num
     ...state.players.map(p => playerUnit(state, p, full, isFlash)),
     ...state.monsters.map(m => monsterUnit(m, full)),
   ];
-  return {
+  const snapshot: ClientCombatSnapshot = {
     battleId,
     elapsedMs: state.elapsedMs,
     full,
@@ -36,6 +37,19 @@ export function buildClientCombatSnapshot(state: PartyCombatState, battleId: num
     result: state.result,
     units,
   };
+  if (state.bossPhases) snapshot.bossPhases = bossPhasesView(state, full);
+  return snapshot;
+}
+
+function bossPhasesView(state: PartyCombatState, full: boolean): ClientCombatBossPhases {
+  const phases = state.bossPhases!;
+  const view: ClientCombatBossPhases = {
+    bossPos: phases.bossIndices.map(i => state.monsters[i]?.gridPosition).filter(pos => pos !== undefined),
+    phase: phases.phase,
+  };
+  if (full) view.thresholds = [...phases.thresholds];
+  if (phases.resumedFromPhase !== undefined) view.resumedFromPhase = phases.resumedFromPhase;
+  return view;
 }
 
 function playerUnit(
@@ -65,6 +79,7 @@ function playerUnit(
 
   if (full) {
     unit.name = player.username;
+    unit.level = player.level;
     unit.actionIntervalMs = player.actionIntervalMs;
     if (player.isHenchman) {
       unit.henchman = true;
@@ -94,10 +109,17 @@ function monsterUnit(monster: CombatMonster, full: boolean): ClientCombatUnit {
   if (monster.cast) unit.cast = castView(monster.cast, false);
   const statuses = monster.currentHp > 0 ? monsterStatuses(monster) : [];
   if (statuses.length > 0) unit.statuses = statuses;
+  if (monster.enrageState) {
+    const { atMs, stacks, stepMs, stepPercent, maxStacks } = monster.enrageState;
+    unit.enrage = { atMs, stacks, stepMs, stepPercent, maxStacks };
+  }
 
   if (full) {
     unit.name = monster.name;
     unit.id = monster.id;
+    unit.level = monster.level ?? 1;
+    unit.levelSource = monster.levelSource ?? (monster.level === undefined ? 'derived' : 'authored');
+    unit.tier = monster.tier ?? 'trash';
     if (!monster.passive) unit.actionIntervalMs = monster.actionIntervalMs;
     if (monster.passive) unit.passive = true;
     if (monster.description) unit.description = monster.description;
@@ -239,5 +261,8 @@ function monsterStatuses(monster: CombatMonster): ClientCombatStatus[] {
     statuses.push(status);
   }
   if (monster.chaosActive) statuses.push({ kind: 'chaos', name: monster.chaosName ?? 'Chaos' });
+  if (monster.enrageState && monster.enrageState.stacks > 0) {
+    statuses.push({ kind: 'enrage', name: 'Enraged', stacks: monster.enrageState.stacks });
+  }
   return statuses;
 }

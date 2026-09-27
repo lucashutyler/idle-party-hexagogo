@@ -42,7 +42,7 @@ describe('Intercept (ally_targeted)', () => {
     expect(ofKind(r.events, 'attack').at(-1)!.dst).toEqual({ side: 'player', pos: 0 });
     expect(r.log).toContain('Arthur intercepts the attack on Robin!');
     expect(player(state, 'Robin').currentHp).toBe(200);
-    expect(player(state, 'Arthur').currentHp).toBe(500 - 3);
+    expect(player(state, 'Arthur').currentHp).toBe(500 - 2);
     expect(player(state, 'Arthur').skillCooldowns.knight_intercept).toBe(2000);
 
     runTo(state, 2400, r);
@@ -199,11 +199,12 @@ describe('Shield Slam (self_hit)', () => {
     expect(state.players[0].skillCooldowns.knight_shield_slam).toBe(0);
   });
 
-  it('does not react to a hit fully absorbed by reductions', () => {
+  it('does not react to a hit fully absorbed by a shield', () => {
     const state = createPartyCombatState(
       [makePlayer('K', 2, { className: 'Knight', level: 30, skills: [SEED_SKILLS.knight_guard, shieldSlam] })],
       [makeMonster(0, { damage: 50 })],
     );
+    state.players[0].damageShield = 1000;
     const r = runTo(state, 1400);
     expect(state.players[0].currentHp).toBe(1000);
     expect(ofKind(r.events, 'reaction')).toHaveLength(0);

@@ -7,9 +7,10 @@ import type { SetBonuses } from './SetTypes.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type { ActiveEffect, SkillDefinition, SkillTrigger } from './SkillTypes.js';
 import { getSkillCardType, getSkillTrigger } from './SkillTypes.js';
-import type { CombatEvent, CombatEventKind, CombatRef } from './CombatEvents.js';
+import type { CombatEvent, CombatEventKind, CombatRef, CombatResult } from './CombatEvents.js';
 import {
   BASE_ACTION_INTERVAL_MS,
+  BOSS_STALEMATE_WINDOW_MS,
   COMBAT_STEP_MS,
   FIRST_ACTION_MONSTER_MS,
   FIRST_ACTION_PLAYER_MS,
@@ -20,6 +21,23 @@ import {
   STATUS_PULSE_MS,
   STUN_MS,
 } from './CombatTiming.js';
+import {
+  FOCUS_MAX_STACKS,
+  IGNITE_MAX_STACKS,
+  MAX_DODGE,
+  SUNDER_MAX_STACKS,
+  WAR_SONG_MAX_STACKS,
+  enrageStacksAt,
+  isBossTier,
+  masteryFactor,
+  pairScaling,
+  percentResistFactor,
+  ratingMitigation,
+  resolveEnrage,
+  sanitizeLevel,
+  scaleDamage,
+} from './CombatScaling.js';
+import type { CombatLevel } from './CombatScaling.js';
 import {
   aliveOrUndefined,
   assassinateTarget,
@@ -42,13 +60,13 @@ import {
   stunSingleTarget,
 } from './combat/CombatTargeting.js';
 import {
-  applyMonsterResistance,
   computeAttackBonus,
   computeBlessedArmsDamage,
   computeNimbleDodge,
   computeRallyMultiplier,
   computeUnnerveReduction,
   effectiveCooldownMs,
+  enrageMultiplier,
   getCritChance,
   getCritMultiplier,
   getHealPowerMultiplier,
@@ -60,14 +78,16 @@ import {
   hasArcaneSurge,
   hasPassive,
   healOptionAmount,
-  incomingFlatReduction,
+  incomingRating,
   initialWarmupMs,
   isUsableActive,
+  monsterResistFactor,
   skillCastTimeMs,
 } from './combat/CombatPassives.js';
 import {
   isInterruptFlashMode,
   monsterSkillWouldHaveEffect,
+  partyBuffStacks,
   redirectAllowed,
   wouldHaveEffect,
 } from './combat/CombatNeeds.js';
@@ -76,6 +96,7 @@ export { findTarget } from './combat/CombatTargeting.js';
 export { applyMonsterResistance, effectiveCooldownMs } from './combat/CombatPassives.js';
 export { isInterruptFlashMode, wouldHaveEffect } from './combat/CombatNeeds.js';
 export { buildClientCombatSnapshot } from './combat/CombatSnapshot.js';
+export { createRng } from './combat/CombatRng.js';
 
 // --- Types ---
 
@@ -83,7 +104,7 @@ export interface TickResult {
   logEntries: string[];
   events: CombatEvent[];
   finished: boolean;
-  result: 'victory' | 'defeat' | null;
+  result: CombatResult | null;
 }
 
 export interface DotEffect {
@@ -173,8 +194,10 @@ export interface PartyCombatant {
   gridPosition: PartyGridPosition;
   className: ClassName;
   level: number;
-  /** Set for hired henchmen — the only thing distinguishing one from a player. */
+  /** Set for hired henchmen — the only thing distinguishing one from a player. Their level counts as derived. */
   isHenchman?: boolean;
+  /** Kill-mastery rank per monster definition id. */
+  mastery?: Record<string, number>;
   /** Resolved equipped skill definitions (indexed by slot). */
   equippedSkills: (SkillDefinition | null)[];
   /** Actions taken this combat. */
@@ -238,6 +261,38 @@ export interface CombatMonster extends MonsterInstance {
   stunTotalMs: number;
   pulseRemainingMs: number;
   cast: CombatCast | null;
+  enrageState: CombatEnrage | null;
+}
+
+/** A monster's enrage clock in battle time (see `enrageStacksAt`). */
+export interface CombatEnrage {
+  atMs: number;
+  stepMs: number;
+  stepPercent: number;
+  maxStacks: number;
+  stacks: number;
+}
+
+export interface CombatBossPhases {
+  /** Indices into `state.monsters`. */
+  bossIndices: number[];
+  /** Descending boss-HP fractions in (0, 1). */
+  thresholds: number[];
+  /** Thresholds crossed so far (resumed fights start at `resumedFromPhase`). */
+  phase: number;
+  resumedFromPhase?: number;
+}
+
+export interface CombatSetup {
+  bossPhases?: {
+    /** Indices into the `monsters` argument; default = every boss/raid-tier monster. */
+    bossIndices?: number[];
+    thresholds: number[];
+    /** Start at checkpoint k: bosses at `thresholds[k − 1]` of max HP. */
+    resumePhase?: number;
+    /** Enrage clock offset on resume; default `(1 − thresholds[k − 1]) × afterSeconds`. */
+    resumeElapsedMs?: number;
+  };
 }
 
 export interface PartyCombatState {
@@ -248,7 +303,8 @@ export interface PartyCombatState {
   elapsedMs: number;
   nextEventId: number;
   finished: boolean;
-  result: 'victory' | 'defeat' | null;
+  /** 'retreat' is only ever set by the server timer. */
+  result: CombatResult | null;
   /** Stalemate tracking: when the living monsters' HP sum last reached a new low. */
   lastProgressMs: number;
   lowestMonsterHp: number;
@@ -259,6 +315,9 @@ export interface PartyCombatState {
   nimbleDodge: number;
   unnerveReduction: number;
   blessedArmsDamage: number;
+  bossPhases: CombatBossPhases | null;
+  /** Lowest Σ player HP / Σ max HP seen at a step boundary. */
+  minPartyHpFrac: number;
 }
 
 /** A monster's single-target attack between target selection and damage; Intercept rewrites `target`. */
@@ -288,6 +347,7 @@ interface Step {
   events: CombatEvent[];
   /** Cooldowns started this step — not decremented until the next one. */
   fresh: Set<string>;
+  rng: () => number;
 }
 
 type EventFields = Omit<CombatEvent, 'id' | 't' | 'kind'>;
@@ -302,6 +362,7 @@ const MONSTER_STAGGER_CAP = 8;
 export function createPartyCombatState(
   players: PartyCombatantInit[],
   monsters: MonsterInstance[],
+  setup: CombatSetup = {},
 ): PartyCombatState {
   const sortedPlayers: PartyCombatant[] = players.map(p => ({
     ...p,
@@ -356,7 +417,7 @@ export function createPartyCombatState(
     }
   });
 
-  const sortedMonsters: CombatMonster[] = monsters.map(m => ({
+  const builtMonsters: CombatMonster[] = monsters.map(m => ({
     ...m,
     dots: [],
     sunderMark: null,
@@ -374,11 +435,14 @@ export function createPartyCombatState(
     stunTotalMs: 0,
     pulseRemainingMs: 0,
     cast: null,
-  })).sort((a, b) => {
+    enrageState: m.passive ? null : initialEnrage(m),
+  }));
+  const sortedMonsters = [...builtMonsters].sort((a, b) => {
     const colDiff = getCol(a.gridPosition) - getCol(b.gridPosition);
     if (colDiff !== 0) return colDiff;
     return getRow(a.gridPosition) - getRow(b.gridPosition);
   });
+  const bossPhases = setupBossPhases(builtMonsters, sortedMonsters, setup.bossPhases);
 
   sortedMonsters.forEach((m, i) => {
     const offset = FIRST_ACTION_MONSTER_MS + FIRST_ACTION_STAGGER_MS * Math.min(i, MONSTER_STAGGER_CAP);
@@ -403,43 +467,158 @@ export function createPartyCombatState(
     partyBuffs: [],
     rallyMultiplier: computeRallyMultiplier(sortedPlayers),
     warSongBonus: 0,
-    nimbleDodge: computeNimbleDodge(sortedPlayers),
+    nimbleDodge: Math.min(MAX_DODGE, computeNimbleDodge(sortedPlayers)),
     unnerveReduction: computeUnnerveReduction(sortedPlayers),
     blessedArmsDamage: computeBlessedArmsDamage(sortedPlayers),
+    bossPhases,
+    minPartyHpFrac: partyHpFraction(sortedPlayers),
   };
 }
 
-/** Advance combat by one step (`dtMs` clamped to (0, COMBAT_STEP_MS]). Mutates `state`. */
-export function processCombatStep(state: PartyCombatState, dtMs: number = COMBAT_STEP_MS): TickResult {
+/**
+ * Advance combat by one step (`dtMs` clamped to (0, COMBAT_STEP_MS]). Mutates `state`.
+ * `rng` is read per call so `vi.spyOn(Math, 'random')` keeps working.
+ */
+export function processCombatStep(
+  state: PartyCombatState,
+  dtMs: number = COMBAT_STEP_MS,
+  rng: () => number = Math.random,
+): TickResult {
   if (state.finished) {
     return { logEntries: [], events: [], finished: true, result: state.result };
   }
   const dt = Number.isFinite(dtMs) ? Math.min(COMBAT_STEP_MS, Math.max(1, dtMs)) : COMBAT_STEP_MS;
   state.elapsedMs += dt;
   state.tickCount++;
-  const step: Step = { state, log: [], events: [], fresh: new Set() };
+  const step: Step = { state, log: [], events: [], fresh: new Set(), rng };
   if (state.tickCount === 1) emit(step, 'battle_start');
   runStep(step, dt);
+  state.minPartyHpFrac = Math.min(state.minPartyHpFrac, partyHpFraction(state.players));
   return { logEntries: step.log, events: step.events, finished: state.finished, result: state.result };
 }
 
 /** Run `ceil(ms / COMBAT_STEP_MS)` full steps, stopping early when the fight ends. */
-export function advanceCombat(state: PartyCombatState, ms: number): TickResult {
+export function advanceCombat(state: PartyCombatState, ms: number, rng: () => number = Math.random): TickResult {
   const logEntries: string[] = [];
   const events: CombatEvent[] = [];
   const steps = Math.ceil(ms / COMBAT_STEP_MS);
   for (let i = 0; i < steps && !state.finished; i++) {
-    const result = processCombatStep(state, COMBAT_STEP_MS);
+    const result = processCombatStep(state, COMBAT_STEP_MS, rng);
     logEntries.push(...result.logEntries);
     events.push(...result.events);
   }
   return { logEntries, events, finished: state.finished, result: state.result };
 }
 
+/** Deep-copies every per-battle mutable field; content (skills, gear, resistances, monster skills) stays shared. */
+export function cloneCombatState(state: PartyCombatState): PartyCombatState {
+  return {
+    ...state,
+    players: state.players.map(clonePlayer),
+    monsters: state.monsters.map(cloneMonster),
+    pendingCounters: state.pendingCounters.map(c => ({ ...c })),
+    partyBuffs: state.partyBuffs.map(b => ({ ...b })),
+    bossPhases: state.bossPhases
+      ? { ...state.bossPhases, bossIndices: [...state.bossPhases.bossIndices], thresholds: [...state.bossPhases.thresholds] }
+      : null,
+  };
+}
+
+// --- Setup ---
+
+function initialEnrage(monster: MonsterInstance): CombatEnrage | null {
+  const resolved = resolveEnrage(monster.tier, monster.enrage);
+  if (!resolved) return null;
+  const { afterMs, stepMs, stepPercent, maxStacks } = resolved;
+  return { atMs: afterMs, stepMs, stepPercent, maxStacks, stacks: 0 };
+}
+
+function setupBossPhases(
+  built: CombatMonster[],
+  sorted: CombatMonster[],
+  opts: CombatSetup['bossPhases'],
+): CombatBossPhases | null {
+  const bosses = opts?.bossIndices
+    ? [...new Set(opts.bossIndices)].filter(i => Number.isInteger(i) && i >= 0 && i < built.length).map(i => built[i])
+    : built.filter(m => !m.passive && isBossTier(m.tier));
+  if (bosses.length === 0) return null;
+  const thresholds = [...new Set((opts?.thresholds ?? []).filter(isPhaseThreshold))].sort((a, b) => b - a);
+  const phases: CombatBossPhases = {
+    bossIndices: bosses.map(b => sorted.indexOf(b)).sort((a, b) => a - b),
+    thresholds,
+    phase: 0,
+  };
+  const k = opts?.resumePhase;
+  if (typeof k !== 'number' || !Number.isInteger(k) || k < 1 || k > thresholds.length) return phases;
+
+  const fraction = thresholds[k - 1];
+  for (const boss of bosses) {
+    if (Number.isFinite(boss.maxHp) && boss.maxHp > 0) boss.currentHp = Math.max(1, Math.ceil(boss.maxHp * fraction));
+  }
+  const offsetMs = opts?.resumeElapsedMs;
+  for (const monster of built) {
+    const enrage = monster.enrageState;
+    if (!enrage) continue;
+    enrage.atMs = typeof offsetMs === 'number' && Number.isFinite(offsetMs) && offsetMs >= 0
+      ? Math.max(0, enrage.atMs - offsetMs)
+      : Math.round(enrage.atMs / 1000 * fraction) * 1000;
+  }
+  phases.phase = k;
+  phases.resumedFromPhase = k;
+  return phases;
+}
+
+function isPhaseThreshold(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 1;
+}
+
+function partyHpFraction(players: PartyCombatant[]): number {
+  let hp = 0;
+  let max = 0;
+  for (const p of players) {
+    hp += Math.max(0, finiteOr0(p.currentHp));
+    max += Math.max(0, finiteOr0(p.maxHp));
+  }
+  return max > 0 ? hp / max : 0;
+}
+
+function clonePlayer(p: PartyCombatant): PartyCombatant {
+  return {
+    ...p,
+    equippedSkills: [...p.equippedSkills],
+    dots: p.dots.map(d => ({ ...d })),
+    hots: p.hots.map(h => ({ ...h })),
+    debuffs: p.debuffs.map(d => ({ ...d })),
+    cast: p.cast ? cloneCast(p.cast) : null,
+    skillCooldowns: { ...p.skillCooldowns },
+    skillCooldownTotals: { ...p.skillCooldownTotals },
+  };
+}
+
+function cloneMonster(m: CombatMonster): CombatMonster {
+  return {
+    ...m,
+    dots: m.dots.map(d => ({ ...d })),
+    sunderMark: m.sunderMark ? { ...m.sunderMark } : null,
+    debuffs: m.debuffs.map(d => ({ ...d })),
+    buffs: m.buffs.map(b => ({ ...b })),
+    cast: m.cast ? cloneCast(m.cast) : null,
+    skillCooldowns: { ...m.skillCooldowns },
+    enrageState: m.enrageState ? { ...m.enrageState } : null,
+  };
+}
+
+function cloneCast(cast: CombatCast): CombatCast {
+  const copy: CombatCast = { ...cast };
+  if (cast.counter) copy.counter = { ...cast.counter };
+  return copy;
+}
+
 // --- Step ---
 
 function runStep(step: Step, dt: number): void {
   const { state } = step;
+  enragePass(step);
   statusPass(step, dt);
   if (checkEnd(step)) return;
 
@@ -481,6 +660,7 @@ function checkEnd(step: Step): boolean {
     finish(step, 'victory');
     return true;
   }
+  updateBossPhase(step);
   if (state.players.every(p => !isAlive(p))) {
     finish(step, 'defeat');
     return true;
@@ -504,10 +684,101 @@ function checkStalemate(step: Step): void {
     state.lastProgressMs = state.elapsedMs;
     return;
   }
-  if (state.elapsedMs - state.lastProgressMs >= STALEMATE_WINDOW_MS) {
+  const bossAlive = state.monsters.some(m => isAlive(m) && isBossTier(m.tier));
+  if (state.elapsedMs - state.lastProgressMs >= (bossAlive ? BOSS_STALEMATE_WINDOW_MS : STALEMATE_WINDOW_MS)) {
     step.log.push('The fight drags on — the party withdraws.');
     finish(step, 'defeat');
   }
+}
+
+function updateBossPhase(step: Step): void {
+  const { state } = step;
+  const phases = state.bossPhases;
+  if (!phases || phases.phase >= phases.thresholds.length) return;
+  let hp = 0;
+  let max = 0;
+  for (const i of phases.bossIndices) {
+    const boss = state.monsters[i];
+    if (!boss) continue;
+    hp += Math.max(0, boss.currentHp);
+    max += boss.maxHp;
+  }
+  if (!(max > 0)) return;
+  const fraction = hp / max;
+  let advanced = false;
+  while (phases.phase < phases.thresholds.length && fraction <= phases.thresholds[phases.phase]) {
+    phases.phase++;
+    advanced = true;
+    emit(step, 'phase', { amount: phases.phase });
+    step.log.push(`Checkpoint ${phases.phase} reached!`);
+  }
+  if (advanced) {
+    state.lowestMonsterHp = livingMonsterHp(state.monsters);
+    state.lastProgressMs = state.elapsedMs;
+  }
+}
+
+function enragePass(step: Step): void {
+  for (const monster of step.state.monsters) {
+    const enrage = monster.enrageState;
+    if (!enrage || !isAlive(monster)) continue;
+    const stacks = enrageStacksAt(enrage, step.state.elapsedMs);
+    if (stacks <= enrage.stacks) continue;
+    enrage.stacks = stacks;
+    emit(step, 'enrage', { src: monsterRef(monster), amount: stacks });
+    step.log.push(`${monster.name} is enraged! (×${formatMultiplier(enrageMultiplier(monster))})`);
+  }
+}
+
+function formatMultiplier(value: number): string {
+  return String(Math.round(value * 100) / 100);
+}
+
+// --- Level-relative scaling ---
+
+function playerLevel(player: PartyCombatant): CombatLevel {
+  return { level: sanitizeLevel(player.level), derived: !!player.isHenchman };
+}
+
+function monsterLevel(monster: CombatMonster): CombatLevel {
+  const derived = monster.levelSource ? monster.levelSource !== 'authored' : monster.level === undefined;
+  return { level: sanitizeLevel(monster.level), derived };
+}
+
+/** A monster's damage to a player: gap × mastery × rating mitigation × set resist %, floor 1. */
+function mitigateHitOnPlayer(
+  state: PartyCombatState,
+  target: PartyCombatant,
+  raw: number,
+  damageType: DamageType,
+  attacker: CombatMonster | undefined,
+): number {
+  const defender = playerLevel(target);
+  const { gap, mitigationLevel } = pairScaling(attacker ? monsterLevel(attacker) : { ...defender, derived: true }, defender);
+  const mastery = attacker ? masteryFactor(target.mastery?.[attacker.id], 'taken') : 1;
+  const mitigation = ratingMitigation(incomingRating(target, damageType, state.players), mitigationLevel);
+  return scaleDamage(raw, gap * mastery * (1 - mitigation) * percentResistFactor(target.setBonuses?.damageResistancePercent));
+}
+
+/** A player's damage to a monster: gap × mastery × the monster's resistance, floor 1. */
+function mitigateHitOnMonster(
+  target: CombatMonster,
+  raw: number,
+  damageType: DamageType,
+  attacker: PartyCombatant | undefined,
+): number {
+  const defender = monsterLevel(target);
+  const { gap, mitigationLevel } = pairScaling(attacker ? playerLevel(attacker) : { ...defender, derived: true }, defender);
+  const mastery = attacker ? masteryFactor(attacker.mastery?.[target.id], 'dealt') : 1;
+  return scaleDamage(raw, gap * mastery * monsterResistFactor(target.resistances, damageType, mitigationLevel));
+}
+
+function playerFromRef(state: PartyCombatState, ref: CombatRef | undefined): PartyCombatant | undefined {
+  return ref?.side === 'player' ? state.players.find(p => p.gridPosition === ref.pos) : undefined;
+}
+
+function monsterFromRef(state: PartyCombatState, ref: CombatRef | undefined): CombatMonster | undefined {
+  return ref?.side === 'monster' ? state.monsters.find(m => m.gridPosition === ref.pos) : undefined;
 }
 
 function monsterActionIntervalMs(attackInterval: number | undefined): number {
@@ -613,10 +884,7 @@ function pulsePlayer(step: Step, player: PartyCombatant): void {
   const { state } = step;
   if (player.dots.length > 0) {
     for (const group of pulseDotGroups(player.dots)) {
-      let damage = group.total;
-      const resistPct = player.setBonuses?.damageResistancePercent ?? 0;
-      if (resistPct > 0) damage = Math.max(0, Math.floor(damage * (1 - resistPct / 100)));
-      damage = Math.max(0, damage - incomingFlatReduction(player, group.damageType, state.players));
+      const damage = mitigateHitOnPlayer(state, player, group.total, group.damageType, monsterFromRef(state, group.source));
       player.currentHp = Math.max(0, player.currentHp - damage);
       emit(step, 'damage', {
         src: group.source, dst: playerRef(player), amount: damage, dmgType: group.damageType, overTime: true, skill: group.label,
@@ -658,7 +926,7 @@ function pulsePlayer(step: Step, player: PartyCombatant): void {
 function pulseMonster(step: Step, monster: CombatMonster): void {
   if (monster.dots.length === 0) return;
   for (const group of pulseDotGroups(monster.dots)) {
-    const damage = applyMonsterResistance(group.total, group.damageType, monster.resistances);
+    const damage = mitigateHitOnMonster(monster, group.total, group.damageType, playerFromRef(step.state, group.source));
     monster.currentHp = Math.max(0, monster.currentHp - damage);
     emit(step, 'damage', {
       src: group.source, dst: monsterRef(monster), amount: damage, dmgType: group.damageType, overTime: true, skill: group.label,
@@ -745,7 +1013,7 @@ function playerAct(step: Step, player: PartyCombatant): number {
 function playerAutoAttack(step: Step, player: PartyCombatant): void {
   const target = findTarget(player.gridPosition, step.state.monsters, false);
   if (!target) return;
-  const { amount, crit } = computePlayerDamage(player, step.state, target);
+  const { amount, crit } = computePlayerDamage(player, step.state, step.rng, target);
   emit(step, 'attack', { src: playerRef(player), dst: monsterRef(target) });
   applyDamageToMonster(step, amount, crit, target, player, false);
 }
@@ -826,10 +1094,8 @@ function optionTargetRef(
       monster = gridEnemyTarget(player, state.monsters, ctx.enemy);
       break;
     case 'heal_lowest':
-      ally = healTarget(state.players, healOptionAmount(player, effect, 4), ctx.ally);
-      break;
     case 'hot_lowest':
-      ally = healTarget(state.players, healOptionAmount(player, effect, 2), ctx.ally);
+      ally = healTarget(state.players, ctx.ally);
       break;
     case 'cure_debuffs':
       ally = cureTarget(state.players, ctx.ally);
@@ -850,11 +1116,12 @@ function optionTargetRef(
 function computePlayerDamage(
   player: PartyCombatant,
   state: PartyCombatState,
+  rng: () => number,
   target?: CombatMonster,
   options?: { isActive?: boolean },
 ): { amount: number; crit: boolean } {
-  const variance = Math.floor(Math.random() * 5) - 2;
-  const attackBonus = computeAttackBonus(player.equipBonuses);
+  const variance = Math.floor(rng() * 5) - 2;
+  const attackBonus = computeAttackBonus(player.equipBonuses, rng);
   let damage = Math.max(1, player.baseDamage + variance + attackBonus);
 
   const intensifyMod = getIntensifyMod(player);
@@ -915,8 +1182,8 @@ function computePlayerDamage(
   }
 
   let crit = false;
-  const critChance = getCritChance(player);
-  if (critChance > 0 && Math.random() < critChance) {
+  const critChance = Math.min(1, getCritChance(player));
+  if (critChance > 0 && rng() < critChance) {
     damage = Math.floor(damage * getCritMultiplier(player));
     crit = true;
   }
@@ -933,16 +1200,11 @@ function applyDamageToMonster(
   skill?: SkillDefinition,
 ): void {
   const { state } = step;
-  // DoT riders use pre-resistance damage; resistance applies again at pulse time.
+  // DoT riders use pre-scaling damage; gap, mastery and resistance apply again at pulse time.
   const preMrDamage = damage;
 
-  if (target.resistances.length > 0) {
-    damage = applyMonsterResistance(damage, player.playerDamageType, target.resistances);
-  }
-  let holyDamage = state.blessedArmsDamage;
-  if (holyDamage > 0 && target.resistances.length > 0) {
-    holyDamage = applyMonsterResistance(holyDamage, 'holy', target.resistances);
-  }
+  damage = mitigateHitOnMonster(target, damage, player.playerDamageType, player);
+  const holyDamage = mitigateHitOnMonster(target, state.blessedArmsDamage, 'holy', player);
   const totalDamage = damage + holyDamage;
   const prevHp = target.currentHp;
   target.currentHp = Math.max(0, target.currentHp - totalDamage);
@@ -981,7 +1243,7 @@ function applyDamageToMonster(
         if (effect.kind !== 'dot_on_auto') continue;
         const perTick = Math.floor(preMrDamage * (effect.dotPercent ?? 0));
         if (perTick <= 0 || !isAlive(target)) continue;
-        target.dots.push({
+        const added = addCappedPermanentDot(target, {
           sourceUsername: player.username,
           name: passiveSkill.name.toLowerCase(),
           label: passiveSkill.name,
@@ -991,14 +1253,14 @@ function applyDamageToMonster(
           damageType: 'magical',
           permanent: true,
         });
-        emit(step, 'status', { src, dst, name: passiveSkill.name });
+        if (added) emit(step, 'status', { src, dst, name: passiveSkill.name });
       }
     }
   }
 
   if (hasPassive(player, 'stacking_same_target')) {
     if (player.lastTargetId === target.name) {
-      player.consecutiveHits++;
+      player.consecutiveHits = Math.min(FOCUS_MAX_STACKS, player.consecutiveHits + 1);
     } else {
       player.consecutiveHits = 1;
       player.lastTargetId = target.name;
@@ -1014,11 +1276,28 @@ function applyDamageToMonster(
   }
 }
 
+/** Ignite-style stacks per (source, target) are capped; at the cap a stronger stack replaces the weakest. */
+function addCappedPermanentDot(target: CombatMonster, dot: DotEffect): boolean {
+  let count = 0;
+  let weakest: DotEffect | null = null;
+  for (const d of target.dots) {
+    if (!d.permanent || d.sourceUsername !== dot.sourceUsername || d.name !== dot.name) continue;
+    count++;
+    if (!weakest || d.damagePerTick < weakest.damagePerTick) weakest = d;
+  }
+  if (count >= IGNITE_MAX_STACKS) {
+    if (!weakest || weakest.damagePerTick >= dot.damagePerTick) return false;
+    target.dots.splice(target.dots.indexOf(weakest), 1);
+  }
+  target.dots.push(dot);
+  return true;
+}
+
 function overflowSplash(step: Step, player: PartyCombatant, killed: CombatMonster, overkill: number): void {
   if (overkill <= 0) return;
   const others = step.state.monsters.filter(m => isAlive(m) && m !== killed);
   if (others.length === 0) return;
-  const splashTarget = others[Math.floor(Math.random() * others.length)];
+  const splashTarget = others[Math.floor(step.rng() * others.length)];
   splashTarget.currentHp = Math.max(0, splashTarget.currentHp - overkill);
   const src = playerRef(player);
   emit(step, 'damage', {
@@ -1077,7 +1356,7 @@ function strikeMonster(
   arcaneMult: number,
   percent?: number,
 ): number {
-  const { amount, crit } = computePlayerDamage(player, step.state, target, { isActive: true });
+  const { amount, crit } = computePlayerDamage(player, step.state, step.rng, target, { isActive: true });
   const raw = amount * arcaneMult;
   const damage = percent === undefined ? raw : Math.max(1, Math.floor(raw * percent));
   applyDamageToMonster(step, damage, crit, target, player, false, skill);
@@ -1101,7 +1380,7 @@ function executeEffect(
       const target = stunSingleTarget(player, state.monsters, ctx.enemy);
       if (!target) return false;
       strikeMonster(step, player, skill, target, arcaneMult);
-      if (isAlive(target) && Math.random() < (effect.stunChance ?? 0)) {
+      if (isAlive(target) && step.rng() < (effect.stunChance ?? 0)) {
         applyStunToMonster(step, target, src, ctx.suppressInterruptFor);
       }
       return true;
@@ -1111,7 +1390,7 @@ function executeEffect(
       let anyStunned = false;
       for (const monster of state.monsters) {
         if (!isAlive(monster) || monster.passive) continue;
-        if (Math.random() < (effect.stunChance ?? 0)) {
+        if (step.rng() < (effect.stunChance ?? 0)) {
           step.log.push(`${player.username}'s ${sn} stuns ${monster.name}!`);
           applyStunToMonster(step, monster, src, ctx.suppressInterruptFor);
           anyStunned = true;
@@ -1121,14 +1400,14 @@ function executeEffect(
     }
 
     case 'heal_lowest': {
-      const target = healTarget(state.players, healOptionAmount(player, effect, 4), ctx.ally);
+      const target = healTarget(state.players, ctx.ally);
       if (!target) return false;
       return applyHeal(step, player, target, player.level * (effect.healMultiplier ?? 4), skill) > 0;
     }
 
     case 'multi_hit': {
       const hitCount = effect.hitCount ?? 4;
-      const { amount, crit } = computePlayerDamage(player, state, undefined, { isActive: true });
+      const { amount, crit } = computePlayerDamage(player, state, step.rng, undefined, { isActive: true });
       const perHit = Math.max(1, Math.floor(amount * arcaneMult * (effect.damagePercent ?? 0.30)));
       let hit = false;
       for (let i = 0; i < hitCount; i++) {
@@ -1187,7 +1466,7 @@ function executeEffect(
         const markMultiplier = effect.markMultiplier ?? 0.25;
         if (!target.sunderMark) {
           target.sunderMark = { stacks: 1, totalBonus: markMultiplier, name: sn };
-        } else {
+        } else if (target.sunderMark.stacks < SUNDER_MAX_STACKS) {
           const priorBonus = target.sunderMark.totalBonus ?? target.sunderMark.stacks * 0.25;
           target.sunderMark.stacks++;
           target.sunderMark.totalBonus = priorBonus + markMultiplier;
@@ -1213,13 +1492,13 @@ function executeEffect(
 
     case 'multi_hit_random': {
       const hitCount = effect.hitCount ?? 3;
-      const { amount, crit } = computePlayerDamage(player, state, undefined, { isActive: true });
+      const { amount, crit } = computePlayerDamage(player, state, step.rng, undefined, { isActive: true });
       const perHit = Math.max(1, Math.floor(amount * arcaneMult * (effect.damagePercent ?? 0.50)));
       let hit = false;
       for (let i = 0; i < hitCount; i++) {
         const alive = state.monsters.filter(isAlive);
         if (alive.length === 0) break;
-        const target = alive[Math.floor(Math.random() * alive.length)];
+        const target = alive[Math.floor(step.rng() * alive.length)];
         applyDamageToMonster(step, perHit, crit, target, player, true, skill);
         hit = true;
       }
@@ -1229,7 +1508,7 @@ function executeEffect(
     case 'ignore_dr_single': {
       const target = gridEnemyTarget(player, state.monsters, ctx.enemy);
       if (!target) return false;
-      const { amount, crit } = computePlayerDamage(player, state, target, { isActive: true });
+      const { amount, crit } = computePlayerDamage(player, state, step.rng, target, { isActive: true });
       const damage = Math.max(1, Math.floor(amount * arcaneMult * (effect.damagePercent ?? 2.0)));
       const prevHp = target.currentHp;
       target.currentHp = Math.max(0, target.currentHp - damage);
@@ -1305,7 +1584,7 @@ function executeEffect(
 
     case 'hot_lowest': {
       const healPerPulse = healOptionAmount(player, effect, 2);
-      const target = healTarget(state.players, healPerPulse, ctx.ally);
+      const target = healTarget(state.players, ctx.ally);
       if (!target) return false;
       const pulses = effect.dotTicks ?? 3;
       let adjustedHeal = healPerPulse;
@@ -1358,7 +1637,7 @@ function executeEffect(
           }
         }
       } else {
-        const { amount, crit } = computePlayerDamage(player, state, undefined, { isActive: true });
+        const { amount, crit } = computePlayerDamage(player, state, step.rng, undefined, { isActive: true });
         const damage = Math.max(1, Math.floor(amount * arcaneMult * (effect.damagePercent ?? 1.0)));
         for (const monster of state.monsters) {
           if (!isAlive(monster)) continue;
@@ -1377,6 +1656,7 @@ function executeEffect(
     }
 
     case 'party_buff_permanent': {
+      if (partyBuffStacks(state, sn) >= WAR_SONG_MAX_STACKS) return false;
       const buffAmount = effect.buffPercent ?? 0.10;
       state.warSongBonus += buffAmount;
       const existing = state.partyBuffs.find(b => b.name === sn);
@@ -1570,7 +1850,7 @@ function resolveMonsterSkill(
   switch (def.effect) {
     case 'damage': {
       const damageType = def.damageType ?? 'physical';
-      const value = Math.max(1, finiteOr0(entry.value));
+      const value = scaleDamage(Math.max(1, finiteOr0(entry.value)), enrageMultiplier(monster));
       if (def.targeting === 'aoe_all') {
         const targets = state.players.filter(isAlive);
         if (targets.length === 0) return false;
@@ -1578,7 +1858,7 @@ function resolveMonsterSkill(
         emit(step, 'attack', { src, skill: def.name, skillId: entry.skillId });
         for (const p of targets) {
           if (!isAlive(p)) continue;
-          if (rollDodge(state)) {
+          if (rollDodge(state, step.rng)) {
             emit(step, 'dodge', { src, dst: playerRef(p), skill: def.name });
             step.log.push(`${p.username} dodges ${def.name}!`);
             continue;
@@ -1621,7 +1901,7 @@ function resolveMonsterSkill(
       if (!target) return false;
       const pulses = def.dotDuration ?? 3;
       const damageType = def.damageType ?? 'magical';
-      const perPulse = Math.max(1, finiteOr0(entry.value));
+      const perPulse = scaleDamage(Math.max(1, finiteOr0(entry.value)), enrageMultiplier(monster));
       target.dots.push({
         sourceUsername: monster.name,
         name: def.name.toLowerCase(),
@@ -1660,8 +1940,8 @@ function monsterAutoAttack(step: Step, monster: CombatMonster): void {
   });
 }
 
-function rollDodge(state: PartyCombatState): boolean {
-  return state.nimbleDodge > 0 && Math.random() < state.nimbleDodge;
+function rollDodge(state: PartyCombatState, rng: () => number): boolean {
+  return state.nimbleDodge > 0 && rng() < Math.min(MAX_DODGE, state.nimbleDodge);
 }
 
 // Order: ally_targeted reactions (Intercept) → dodge → damage; a dead attacker's swing is cancelled.
@@ -1691,7 +1971,7 @@ function monsterSingleTargetAttack(
   const finalTarget = attack.target;
   const src = monsterRef(monster);
   emit(step, 'attack', { src, dst: playerRef(finalTarget), skill: opts.skillName, skillId: opts.skillId });
-  if (rollDodge(state)) {
+  if (rollDodge(state, step.rng)) {
     emit(step, 'dodge', { src, dst: playerRef(finalTarget), skill: opts.skillName });
     step.log.push(opts.skillName
       ? `${finalTarget.username} dodges ${monster.name}'s ${opts.skillName}!`
@@ -1706,7 +1986,7 @@ function chaosStrike(step: Step, monster: CombatMonster): void {
   const { state } = step;
   const alive = state.monsters.filter(isAlive);
   if (alive.length === 0) return;
-  const target = alive[Math.floor(Math.random() * alive.length)];
+  const target = alive[Math.floor(step.rng() * alive.length)];
   const damage = getMonsterDamage(monster, state);
   target.currentHp = Math.max(0, target.currentHp - damage);
   const src = monsterRef(monster);
@@ -1733,12 +2013,7 @@ function applyMonsterDirectDamage(
   const src = monsterRef(attacker);
   const dst = playerRef(target);
 
-  const setResistPct = target.setBonuses?.damageResistancePercent ?? 0;
-  let scaledRaw = rawDamage;
-  if (setResistPct > 0) {
-    scaledRaw = Math.max(0, Math.floor(scaledRaw * (1 - setResistPct / 100)));
-  }
-  let damage = Math.max(0, scaledRaw - incomingFlatReduction(target, damageType, state.players));
+  let damage = mitigateHitOnPlayer(state, target, rawDamage, damageType, attacker);
 
   if (target.damageShield > 0) {
     const absorbed = Math.min(damage, target.damageShield);
@@ -1756,7 +2031,7 @@ function applyMonsterDirectDamage(
 
   if (damageType === 'physical' && isAlive(attacker)) {
     const bashSkill = getSkillWithPassive(target, 'stun_on_phys_hit');
-    if (bashSkill && Math.random() < getPassiveValue(target, 'stun_on_phys_hit')) {
+    if (bashSkill && step.rng() < getPassiveValue(target, 'stun_on_phys_hit')) {
       step.log.push(`${target.username}'s ${bashSkill.name} stuns ${attacker.name}!`);
       applyStunToMonster(step, attacker, dst, undefined);
     }

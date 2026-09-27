@@ -11,9 +11,9 @@ export interface SkillSlot {
 }
 
 export type PassiveEffectKind =
-  | 'physical_reduction'        // Knight Guard: flat physical DR per level
+  | 'physical_reduction'        // Knight Guard: physical armor rating per level
   | 'party_damage_mult'         // Bard Rally: +% damage per party member (all types)
-  | 'magical_reduction_party'   // Priest Bless: flat magical/holy DR party-wide per level
+  | 'magical_reduction_party'   // Priest Bless: party-wide magical/holy rating per level (strongest owner)
   | 'crit_chance'               // Archer Pierce: % chance to crit (2x damage)
   | 'bonus_damage'              // Mage Burn: flat damage per level
   | 'max_hp_percent'            // Knight Fortify: +% max HP per level
@@ -297,7 +297,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'knight_guard',
       name: 'Guard',
-      description: '+2 physical damage reduction per level.',
+      description: 'Armor that grows with your level: blocks about 50% of physical damage from enemies your level (less from stronger ones).',
       className: 'Knight',
       type: 'passive',
       treeOrder: 0,
@@ -542,7 +542,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'priest_bless',
       name: 'Bless',
-      description: '+2 magical/holy damage reduction for the whole party per level.',
+      description: 'Wards the whole party: blocks about 50% of magical and holy damage from enemies your level. Only the strongest Bless in the party counts.',
       className: 'Priest',
       type: 'passive',
       treeOrder: 0,

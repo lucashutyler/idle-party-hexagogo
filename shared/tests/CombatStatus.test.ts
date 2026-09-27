@@ -85,11 +85,12 @@ describe('status pulses', () => {
     const mage = makePlayer('M', 2, { className: 'Mage', baseDamage: 20, skills: [SEED_SKILLS.mage_ignite] });
     const state = createPartyCombatState([mage], [makeMonster(0, { resistances: [{ damageType: 'magical', flatReduction: 2, percentReduction: 0 }] })]);
     const r = runTo(state, 3400);
-    expect(ofKind(r.events, 'damage').filter(e => !e.overTime && e.src?.side === 'player').map(e => e.amount)).toEqual([18, 18, 18]);
-    expect(ofKind(r.events, 'damage').filter(e => e.overTime).map(e => e.amount)).toEqual([3, 8, 13]);
+    // Flat 2 is a rating: 2 / (2 + 4 × L1) = 1/3 mitigation. Stacks store 25 % of the unresisted 20.
+    expect(ofKind(r.events, 'damage').filter(e => !e.overTime && e.src?.side === 'player').map(e => e.amount)).toEqual([13, 13, 13]);
+    expect(ofKind(r.events, 'damage').filter(e => e.overTime).map(e => e.amount)).toEqual([3, 6, 10]);
     expect(state.monsters[0].dots).toHaveLength(3);
     expect(state.monsters[0].dots.every(d => d.permanent)).toBe(true);
-    expect(r.log).toContain('Dummy receives 13 magical damage from ignite (x3)!');
+    expect(r.log).toContain('Dummy receives 10 magical damage from ignite (x3)!');
   });
 
   it('player DoTs pulse on the player\'s own pulse and Rot stacks', () => {
@@ -205,12 +206,13 @@ describe('direct monster hit pipeline', () => {
     expect(state.monsters[0].stunRemainingMs).toBe(1000);
   });
 
-  it('Shield Bash stuns even on a 0-damage hit; no Martyr and no self_hit then', () => {
+  it('Shield Bash stuns even when a shield absorbs the whole hit; no Martyr and no self_hit then', () => {
     pinRandom(0.05);
     const state = createPartyCombatState([
       makePlayer('K', 2, { className: 'Knight', level: 30, skills: [SEED_SKILLS.knight_guard, ...bashAndSlam] }),
       makePlayer('P', 5, { className: 'Priest', skills: [SEED_SKILLS.priest_martyr] }),
     ], [makeMonster(0, { damage: 50 })]);
+    player(state, 'K').damageShield = 1000;
     const r = runTo(state, 1400);
     expect(ofKind(r.events, 'stun')).toHaveLength(1);
     expect(ofKind(r.events, 'reaction')).toHaveLength(0);
@@ -252,7 +254,7 @@ describe('direct monster hit pipeline', () => {
     const state = createPartyCombatState([
       makePlayer('K', 2, { className: 'Knight', hp: 200 }),
       makePlayer('P', 5, { className: 'Priest', level: 5, skills: [SEED_SKILLS.priest_martyr, SEED_SKILLS.priest_minor_heal] }),
-    ], [makeMonster(0, { damage: 30 }), makeMonster(3, { damage: 30 })]);
+    ], [makeMonster(0, { damage: 70 }), makeMonster(3, { damage: 30 })]);
     runTo(state, 1500);
     expect(player(state, 'P').martyrBonus).toBe(0.25);
     const r = runTo(state, 2100);
