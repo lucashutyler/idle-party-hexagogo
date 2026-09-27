@@ -62,7 +62,7 @@ export class NotificationCenter {
       this.notifications = state.social?.notifications ?? [];
       this.updateBadge();
       if (this.dropdown) this.renderDropdownList();
-    });
+    }, { replay: true });
 
     this.gameClient.onNotification((notification) => {
       this.showToast(notification);

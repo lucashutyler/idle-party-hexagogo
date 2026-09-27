@@ -268,6 +268,6 @@ export class BottomNav {
       }
 
       lastVisual = visual;
-    });
+    }, { replay: true });
   }
 }

@@ -4306,6 +4306,30 @@ button, input, select, textarea {
   font-size: var(--fs-xl);
   line-height: 1;
 }
+.nav-icon {
+  position: relative;
+}
+.nav-icon-glyph {
+  font-size: 22px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+  transition: transform 150ms ease-out;
+}
+.nav-icon.has-art .nav-icon-glyph {
+  display: none;
+}
+.nav-icon-glyph + .nav-icon-img {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+}
+.nav-tab.active .nav-icon-glyph,
+.nav-tab.overlay-active .nav-icon-glyph {
+  transform: translateY(-1px) scale(1.1);
+}
+.nav-tab[data-screen="combat"] .nav-icon-glyph {
+  font-size: 30px;
+}
 .nav-icon-img {
   display: block;
   width: 26px;

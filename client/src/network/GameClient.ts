@@ -103,9 +103,13 @@ export class GameClient {
     });
   }
 
-  /** Subscribe to state updates. Returns an unsubscribe function. */
-  subscribe(listener: StateListener): () => void {
+  /**
+   * Subscribe to state updates. Returns an unsubscribe function. `replay` also delivers
+   * the cached last state immediately — state pushes are rare mid-fight, so late mounts need it.
+   */
+  subscribe(listener: StateListener, opts?: { replay?: boolean }): () => void {
     this.stateListeners.add(listener);
+    if (opts?.replay && this.lastState) listener(this.lastState);
     return () => { this.stateListeners.delete(listener); };
   }
 

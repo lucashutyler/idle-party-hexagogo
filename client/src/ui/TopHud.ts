@@ -63,7 +63,7 @@ export class TopHud {
         this.lastClassName = char.className;
         this.renderAvatar(char.className);
       }
-    });
+    }, { replay: true });
   }
 
   setVisible(visible: boolean): void {

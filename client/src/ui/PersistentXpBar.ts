@@ -32,7 +32,7 @@ export class PersistentXpBar {
         ? Math.max(0, Math.min(100, (char.xp / char.xpForNextLevel) * 100))
         : 0;
       this.fill.style.width = `${pct}%`;
-    });
+    }, { replay: true });
   }
 
   setVisible(visible: boolean): void {

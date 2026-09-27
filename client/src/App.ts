@@ -416,29 +416,24 @@ export class App {
     let savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';
     if (savedScreen === 'character') savedScreen = 'items';
 
-    // Nav icons render as <img> tags (no emoji). Drop PNGs into
-    // data/nav-icons/{id}.png and add an Express mount at /nav-icons in
-    // server/src/index.ts. Missing art falls through to a placehold.co stub.
-    const navImg = (id: string, label: string) => {
-      const placeholder = `https://placehold.co/24x24/2a2a40/e8e8e8/png?text=${encodeURIComponent(label.slice(0, 4))}`;
-      // opacity:0 until a load resolves so a missing PNG doesn't flash the
-      // browser's broken-image glyph during the swap to the placehold stub.
-      return `<img class="nav-icon-img" src="/nav-icons/${id}.png" alt="${label}" style="opacity:0"`
-        + ` onload="this.style.opacity='1'"`
-        + ` onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}" />`;
-    };
+    // Nav art is content (/nav-icons/{id}.png); the emoji glyph shows until/unless it loads.
+    const navImg = (id: string, label: string, glyph: string) =>
+      `<span class="nav-icon-glyph" aria-hidden="true">${glyph}</span>`
+      + `<img class="nav-icon-img" src="/nav-icons/${id}.png" alt="${label}" style="opacity:0"`
+      + ` onload="this.style.opacity='1';this.parentElement.classList.add('has-art')"`
+      + ` onerror="this.remove()" />`;
     const nav = new BottomNav(
       [
-        { id: 'map', label: 'Map', icon: navImg('map', 'Map') },
-        { id: 'items', label: 'Char', icon: navImg('items', 'Char') },
-        { id: 'craft', label: 'Craft', icon: navImg('craft', 'Craft') },
-        { id: 'combat', label: 'Battle', icon: navImg('combat', 'Fight') },
+        { id: 'map', label: 'Map', icon: navImg('map', 'Map', '🗺️') },
+        { id: 'items', label: 'Char', icon: navImg('items', 'Char', '🎒') },
+        { id: 'craft', label: 'Craft', icon: navImg('craft', 'Craft', '🔨') },
+        { id: 'combat', label: 'Battle', icon: navImg('combat', 'Battle', '⚔️') },
         // Social opens a fly-out submenu with the three sub-views; the
         // pill bar inside the screen is gone in favor of this.
         {
           id: 'social',
           label: 'Social',
-          icon: navImg('social', 'Soc'),
+          icon: navImg('social', 'Social', '👥'),
           mode: 'submenu',
           submenu: [
             { id: 'party', label: 'Party', badge: 'party-invites' },
@@ -446,7 +441,7 @@ export class App {
             { id: 'users', label: 'Leaderboard', badge: 'friend-requests' },
           ],
         },
-        { id: 'settings', label: 'Settings', icon: navImg('settings', 'Set') },
+        { id: 'settings', label: 'Settings', icon: navImg('settings', 'Settings', '⚙️') },
         // Chat is pinned to the far right as a square overlay button. The
         // icon is a chevron (▲ when closed → "open me upward", ▼ when open
         // → "tap to close") so it visually reads as a separate widget, not
