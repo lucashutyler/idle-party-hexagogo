@@ -65,6 +65,7 @@ function playerUnit(
 
   if (full) {
     unit.name = player.username;
+    unit.actionIntervalMs = player.actionIntervalMs;
     if (player.isHenchman) {
       unit.henchman = true;
     } else {
@@ -97,6 +98,7 @@ function monsterUnit(monster: CombatMonster, full: boolean): ClientCombatUnit {
   if (full) {
     unit.name = monster.name;
     unit.id = monster.id;
+    if (!monster.passive) unit.actionIntervalMs = monster.actionIntervalMs;
     if (monster.passive) unit.passive = true;
     if (monster.description) unit.description = monster.description;
   }

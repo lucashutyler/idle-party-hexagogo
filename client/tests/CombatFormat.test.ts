@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatAmount, formatClock, formatDuration, formatSeconds, hpTier, initials, pipsKey, statusIcon, statusPips } from '../src/combat/CombatFormat';
+import { formatAmount, formatClock, formatDuration, formatSeconds, hpTier, initials, interruptStampText, pipsKey, statusIcon, statusPips } from '../src/combat/CombatFormat';
 import { CombatLogFormatter } from '../src/combat/CombatLogFormatter';
 
 describe('number formatting', () => {
@@ -113,5 +113,13 @@ describe('CombatLogFormatter', () => {
     expect(f.format('Wolf bites', 'k1')).toContain('log-name-enemy');
     f.setRoster('Kay', ['Pia'], []);
     expect(f.format('Wolf bites', 'k1')).toBe('Wolf bites');
+  });
+});
+
+describe('interruptStampText', () => {
+  it('stamps COUNTERED! only for interrupts the engine marks as counters', () => {
+    expect(interruptStampText({ cardType: 'interrupt' })).toBe('COUNTERED!');
+    expect(interruptStampText({})).toBe('INTERRUPTED!');
+    expect(interruptStampText({ cardType: 'instant' })).toBe('INTERRUPTED!');
   });
 });

@@ -48,6 +48,33 @@ describe('Dev seed content merge', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it('upgrades once, so later dev edits to the upgraded world survive a reboot', async () => {
+    const store = new ContentStore();
+    await legacyDevWorld(store);
+    expect(await seedDevContent(store)).toBe(true);
+
+    const quietZone: ZoneDefinition = { ...store.getZone(DEV_SEED_MARKER_ZONE_ID)!, encounterTable: [] };
+    await store.addOrUpdateZone(quietZone);
+    expect((await store.deleteMonster('goblin_shaman')).success).toBe(true);
+    save.mockClear();
+
+    expect(await seedDevContent(store)).toBe(false);
+    expect(store.getZone(DEV_SEED_MARKER_ZONE_ID)!.encounterTable).toEqual([]);
+    expect(store.getMonster('goblin_shaman')).toBeUndefined();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('leaves a freshly seeded world alone on the next boot', async () => {
+    const store = new ContentStore();
+    expect(await seedDevContent(store)).toBe(true);
+    await store.addOrUpdateZone({ ...store.getZone(DEV_SEED_MARKER_ZONE_ID)!, encounterTable: [] });
+    save.mockClear();
+
+    expect(await seedDevContent(store)).toBe(false);
+    expect(store.getZone(DEV_SEED_MARKER_ZONE_ID)!.encounterTable).toEqual([]);
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('never overwrites authored encounters, monsters or non-empty zone tables', async () => {
     const store = new ContentStore();
     await legacyDevWorld(store);

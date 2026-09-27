@@ -70,6 +70,8 @@ export interface PlaybackUnit {
   actionMs: number;
   actionTotalMs: number;
   intervalMs: number;
+  /** `intervalMs` came from the server rather than being inferred from observed waits. */
+  intervalKnown: boolean;
   cast: PlaybackCast | null;
   statuses: ClientCombatStatus[];
   skills: PlaybackSkill[] | null;
@@ -583,7 +585,8 @@ function createUnit(u: ClientCombatUnit): PlaybackUnit {
     stunTotalMs: 0,
     actionMs: u.actionMs,
     actionTotalMs: u.actionTotalMs,
-    intervalMs: BASE_ACTION_INTERVAL_MS,
+    intervalMs: u.actionIntervalMs && u.actionIntervalMs > 0 ? u.actionIntervalMs : BASE_ACTION_INTERVAL_MS,
+    intervalKnown: !!u.actionIntervalMs && u.actionIntervalMs > 0,
     cast: null,
     statuses: [],
     skills: null,
@@ -604,7 +607,12 @@ function writeSnapshotUnit(unit: PlaybackUnit, u: ClientCombatUnit, t: number): 
   const keepLead = u.hp > 0 && u.actionTotalMs === unit.actionTotalMs && lag > 0 && lag <= RING_LEAD_TOLERANCE_MS;
   if (!keepLead) unit.actionMs = u.actionMs;
   unit.actionTotalMs = u.actionTotalMs;
-  if (!u.cast && !unit.waitIsCast && unit.attacks > 0 && u.actionTotalMs > 0) unit.intervalMs = u.actionTotalMs;
+  if (u.actionIntervalMs && u.actionIntervalMs > 0) {
+    unit.intervalMs = u.actionIntervalMs;
+    unit.intervalKnown = true;
+  } else if (!unit.intervalKnown && !u.cast && !unit.waitIsCast && unit.attacks > 0 && u.actionTotalMs > 0) {
+    unit.intervalMs = u.actionTotalMs;
+  }
   unit.cast = u.cast
     ? { skill: u.cast.skill, skillId: u.cast.skillId, totalMs: u.cast.totalMs, remainingMs: u.cast.remainingMs, target: u.cast.target }
     : null;

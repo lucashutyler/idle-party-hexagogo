@@ -41,6 +41,25 @@ function makeCombat(fight: Fight): PartyCombatState {
   return createPartyCombatState([player], [monster]);
 }
 
+/** Two players act 100 ms apart, so half the lines land on steps between flushes. */
+function twoPlayerLongFight(): PartyCombatState {
+  const player = (username: string, gridPosition: number): PartyCombatantInit => ({
+    username,
+    maxHp: 1_000_000,
+    baseDamage: 1,
+    playerDamageType: 'physical',
+    gridPosition,
+    className: 'Knight',
+    level: 1,
+    equippedSkills: [null, null, null, null, null],
+  });
+  const monster = createMonsterInstance(
+    { id: 'dummy', name: 'Dummy', hp: 1_000_000, damage: 1, damageType: 'physical', xp: 5, goldMin: 0, goldMax: 0 },
+    4,
+  );
+  return createPartyCombatState([player('alice', 4), player('bob', 1)], [monster]);
+}
+
 interface FakeParty {
   hasDestination: boolean;
   enterBattle: ReturnType<typeof vi.fn>;
@@ -234,6 +253,32 @@ describe('ServerBattleTimer', () => {
 
       h.timer.restartBattle();
       expect(h.timer.recentLog).toEqual([]);
+      h.timer.destroy();
+    });
+
+    it('holds only lines already flushed, and flushPending sends the rest at once', () => {
+      const h = harness(twoPlayerLongFight);
+      h.timer.start();
+      let sawPending = false;
+      for (let step = 0; step < 50; step++) {
+        vi.advanceTimersByTime(COMBAT_STEP_MS);
+        const delivered = h.flushes.flatMap(f => f.log);
+        expect(h.timer.recentLog).toEqual(delivered.slice(-LIVE_LOG_RING_SIZE));
+
+        const flushCount = h.flushes.length;
+        h.timer.flushPending();
+        if (h.flushes.length === flushCount) continue;
+        sawPending = true;
+        const pending = h.flushes[h.flushes.length - 1];
+        expect(pending.snapshot).toBeNull();
+        expect(pending.events.length + pending.log.length).toBeGreaterThan(0);
+        expect(h.timer.recentLog).toEqual(h.flushes.flatMap(f => f.log).slice(-LIVE_LOG_RING_SIZE));
+      }
+      expect(sawPending).toBe(true);
+
+      const flushCount = h.flushes.length;
+      h.timer.flushPending();
+      expect(h.flushes).toHaveLength(flushCount);
       h.timer.destroy();
     });
   });

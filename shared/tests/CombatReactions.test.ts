@@ -380,7 +380,7 @@ describe('interrupts (enemy_cast)', () => {
     const at1700 = r.events.filter(e => e.t === 1700);
     expect(at1700.map(e => e.kind)).toEqual(['damage', 'cleanse', 'interrupt']);
     expect(at1700[2]).toMatchObject({
-      src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 0 }, skill: 'Fireball', skillId: 'fireball',
+      src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 0 }, skill: 'Fireball', skillId: 'fireball', cardType: 'interrupt',
     });
     expect(r.log).toContain('K\'s Dispel counters Shaman\'s Fireball!');
     expect(state.monsters[0].cast).toBeNull();
@@ -429,6 +429,8 @@ describe('interrupts (enemy_cast)', () => {
     expect(ofKind(r.events, 'reaction')).toEqual([expect.objectContaining({ t: 1400, dst: { side: 'monster', pos: 0 } })]);
     const interrupts = ofKind(r.events, 'interrupt');
     expect(interrupts.map(e => e.dst!.pos).sort()).toEqual([0, 3]);
+    expect(interrupts.find(e => e.dst!.pos === 0)!.cardType).toBe('interrupt');
+    expect(interrupts.find(e => e.dst!.pos === 3)!.cardType).toBeUndefined();
     expect(r.log).toContain('Second\'s Fireball is interrupted!');
     expect(r.log).toContain('B\'s Drumroll counters First\'s Fireball!');
   });
@@ -521,12 +523,14 @@ describe('interrupt flash mode', () => {
     expect(isInterruptFlashMode(withMage)).toBe(true);
   });
 
-  it('Heal counts only while the healer has another living non-passive ally', () => {
+  it('a cast Heal counts even for a lone healer, since it can heal itself', () => {
     const heal = [{ skillId: 'heal', value: 10, cooldown: 3 }];
     const alone = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: heal }), createMonsterInstance(SEED_MONSTERS.stone_wall, 3)]);
-    expect(isInterruptFlashMode(alone)).toBe(true);
+    expect(isInterruptFlashMode(alone)).toBe(false);
     const pair = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: heal }), makeMonster(3)]);
     expect(isInterruptFlashMode(pair)).toBe(false);
+    const instant = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: [{ ...heal[0], castTime: 0 }] })]);
+    expect(isInterruptFlashMode(instant)).toBe(true);
   });
 
   it('in flash mode an interrupt is an ordinary action skill', () => {

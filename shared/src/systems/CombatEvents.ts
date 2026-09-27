@@ -80,6 +80,8 @@ export interface ClientCombatUnit {
   actionMs: number;
   /** Length of the current wait. */
   actionTotalMs: number;
+  /** Static: the unit's normal action interval (full snapshots only). */
+  actionIntervalMs?: number;
   cast?: ClientCombatCast;
   statuses?: ClientCombatStatus[];
   /** Real players only (not henchmen): equipped actives in slot order. */

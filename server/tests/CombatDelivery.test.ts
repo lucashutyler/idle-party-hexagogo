@@ -123,8 +123,33 @@ function combatMessages(ws: FakeWs): ServerCombatMessage[] {
   return sent(ws).map(s => s.msg).filter((m): m is ServerCombatMessage => m.type === 'combat');
 }
 
-function newManager(usernames: string[]): PlayerManager {
-  return new PlayerManager(wrapGrids(createGrid()), createContent(), new GuildStore(), createAccounts(usernames), createStore());
+function newManager(usernames: string[], content: ContentStore = createContent()): PlayerManager {
+  return new PlayerManager(wrapGrids(createGrid()), content, new GuildStore(), createAccounts(usernames), createStore());
+}
+
+function contentWithGoblinDrops(): ContentStore {
+  const looter: MonsterDefinition = { ...GOBLIN, drops: [{ itemId: 'gem', chance: 1 }] };
+  const content = createContent() as unknown as Record<string, unknown>;
+  content.getMonster = (id: string) => (id === 'goblin' ? looter : undefined);
+  content.getAllMonsters = () => ({ goblin: looter });
+  return content as unknown as ContentStore;
+}
+
+/** Replays a socket's combat messages the way the client's live log does: resyncs replace, streams append. */
+function clientLiveLog(ws: FakeWs, resyncCalls: ReadonlySet<number>): string[] {
+  let battleId = -1;
+  let lines: string[] = [];
+  ws.send.mock.calls.forEach((call, i) => {
+    const msg = JSON.parse(call[0] as string) as { type: string };
+    if (msg.type !== 'combat') return;
+    const combat = msg as ServerCombatMessage;
+    if (combat.battleId !== battleId) {
+      battleId = combat.battleId;
+      lines = [];
+    }
+    lines = resyncCalls.has(i) ? [...combat.log] : [...lines, ...combat.log];
+  });
+  return lines;
 }
 
 async function loginKnight(pm: PlayerManager, username: string, ws: FakeWs = createWs()): Promise<FakeWs> {
@@ -341,7 +366,7 @@ describe('Combat delivery (PartyBattleManager ↔ PlayerManager)', () => {
 
       pm.sendCombatResync(asWs(ws));
 
-      const [resync] = combatMessages(ws);
+      const resync = combatMessages(ws).at(-1)!;
       const timer = timerOf(pm, partyId);
       expect(resync).toEqual({
         type: 'combat',
@@ -350,7 +375,32 @@ describe('Combat delivery (PartyBattleManager ↔ PlayerManager)', () => {
         events: [],
         log: timer.recentLog,
       });
-      expect(other.send).not.toHaveBeenCalled();
+      expect(combatMessages(other).some(m => m.snapshot?.full)).toBe(false);
+    });
+
+    it('never makes the client show a line twice when a resync lands between flushes', async () => {
+      const pm = newManager(['alice', 'bob']);
+      const resyncing = await loginKnight(pm, 'alice');
+      const streaming = await loginKnight(pm, 'bob');
+      joinParty(pm, 'alice', 'bob');
+      const partyId = partyOf(pm, 'alice');
+      resyncing.send.mockClear();
+      streaming.send.mockClear();
+      pm.partyBattles.restartBattle(partyId);
+
+      const resyncCalls = new Set<number>();
+      for (let step = 0; step < 60; step++) {
+        vi.advanceTimersByTime(100);
+        if (!timerOf(pm, partyId).isLive) continue;
+        pm.sendCombatResync(asWs(resyncing));
+        resyncCalls.add(resyncing.send.mock.calls.length - 1);
+
+        const shown = clientLiveLog(resyncing, resyncCalls);
+        const reference = clientLiveLog(streaming, new Set());
+        expect(shown).toEqual(reference.slice(reference.length - shown.length));
+        expect(shown).toEqual(timerOf(pm, partyId).recentLog);
+      }
+      expect(resyncCalls.size).toBeGreaterThan(10);
     });
 
     it('sends nothing between battles or to a hidden socket', async () => {
@@ -479,6 +529,56 @@ describe('Combat delivery (PartyBattleManager ↔ PlayerManager)', () => {
       runUntilFinished(pm, partyId);
       pm.partyBattles.destroyEntry(partyId);
       expect(session.getState([]).combatLog.filter(e => e.text === 'Victory!')).toHaveLength(1);
+    });
+
+    it('pays the last member who leaves during the kill beat exactly once, loot included', async () => {
+      const pm = newManager(['alice'], contentWithGoblinDrops());
+      await loginKnight(pm, 'alice');
+      const session = pm.getSessionByUsername('alice')!;
+      const partyId = partyOf(pm, 'alice');
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      runUntilFinished(pm, partyId);
+      const victories = () => session.getState([]).combatLog.filter(e => e.text === 'Victory!').length;
+      expect(victories()).toBe(0);
+
+      pm.partyBattles.removeMember(partyId, 'alice');
+      expect(victories()).toBe(1);
+      expect(pm.partyBattles.getAllPartyIds()).not.toContain(partyId);
+
+      vi.advanceTimersByTime(KILL_BEAT_MS + 5000);
+      expect(victories()).toBe(1);
+      expect(errors).not.toHaveBeenCalled();
+    });
+
+    it('pays a member who leaves a party during the kill beat, and the rest only once', async () => {
+      const pm = newManager(['alice', 'bob'], contentWithGoblinDrops());
+      await loginKnight(pm, 'alice');
+      await loginKnight(pm, 'bob');
+      joinParty(pm, 'alice', 'bob');
+      const partyId = partyOf(pm, 'alice');
+      pm.partyBattles.restartBattle(partyId);
+      const victories = (u: string) => pm.getSessionByUsername(u)!.getState([]).combatLog.filter(e => e.text === 'Victory!').length;
+      const before = { alice: victories('alice'), bob: victories('bob') };
+      runUntilFinished(pm, partyId);
+      expect(timerOf(pm, partyId).currentCombat!.result).toBe('victory');
+
+      pm.partyBattles.removeMember(partyId, 'bob');
+      vi.advanceTimersByTime(KILL_BEAT_MS);
+      expect(victories('bob')).toBe(before.bob + 1);
+      expect(victories('alice')).toBe(before.alice + 1);
+    });
+
+    it('settles a won fight against an emptied roster without throwing', async () => {
+      const pm = newManager(['alice'], contentWithGoblinDrops());
+      await loginKnight(pm, 'alice');
+      const partyId = partyOf(pm, 'alice');
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      runUntilFinished(pm, partyId);
+      const entries = (pm.partyBattles as unknown as { entries: Map<string, { members: Set<string> }> }).entries;
+      entries.get(partyId)!.members.clear();
+
+      pm.partyBattles.destroyEntry(partyId);
+      expect(errors).not.toHaveBeenCalled();
     });
 
     it('settles a pending floor clear before entering or leaving a dungeon', async () => {

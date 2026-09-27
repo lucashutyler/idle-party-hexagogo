@@ -532,6 +532,7 @@ describe('stun_single targeting', () => {
     expect(ofKind(r.events, 'interrupt')).toEqual([expect.objectContaining({
       t: 2000, src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 3 }, skill: 'Fireball', skillId: 'fireball',
     })]);
+    expect(ofKind(r.events, 'interrupt')[0].cardType).toBeUndefined();
     expect(r.log).toContain('Shaman is stunned!');
     expect(r.log).toContain('Shaman\'s Fireball is interrupted!');
     const shaman = monsterAt(state, 3);

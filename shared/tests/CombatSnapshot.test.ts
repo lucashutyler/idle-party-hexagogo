@@ -42,7 +42,7 @@ describe('buildClientCombatSnapshot', () => {
     expect(snap.units.map(u => `${u.side}:${u.pos}`)).toEqual(['player:2', 'player:5', 'monster:0', 'monster:3']);
 
     expect(unit(snap, 'player', 2)).toEqual({
-      side: 'player', pos: 2, hp: 1000, maxHp: 1000, actionMs: 1000, actionTotalMs: 1000,
+      side: 'player', pos: 2, hp: 1000, maxHp: 1000, actionMs: 1000, actionTotalMs: 1000, actionIntervalMs: 1000,
       name: 'K', className: 'Knight', passives: ['knight_guard'],
       skills: [
         { id: 'knight_bash', remainingMs: 1000, cooldownMs: 1000, state: 'cooldown', name: 'Bash', cardType: 'attack', castTimeMs: 0 },
@@ -58,7 +58,7 @@ describe('buildClientCombatSnapshot', () => {
     expect(hench.passives).toBeUndefined();
 
     expect(unit(snap, 'monster', 0)).toEqual({
-      side: 'monster', pos: 0, hp: 15, maxHp: 15, actionMs: 1400, actionTotalMs: 1400,
+      side: 'monster', pos: 0, hp: 15, maxHp: 15, actionMs: 1400, actionTotalMs: 1400, actionIntervalMs: 1000,
       name: 'Goblin', id: 'goblin', description: 'A goblin.',
     });
     expect(unit(snap, 'monster', 3)).toMatchObject({ passive: true, actionMs: 0, actionTotalMs: 0, id: 'stone_wall' });
@@ -78,6 +78,19 @@ describe('buildClientCombatSnapshot', () => {
     });
     expect(unit(snap, 'monster', 0)).toEqual({ side: 'monster', pos: 0, hp: 15, maxHp: 15, actionMs: 1400, actionTotalMs: 1400 });
     expect(unit(snap, 'monster', 3).passive).toBeUndefined();
+  });
+
+  it('only full snapshots carry actionIntervalMs, and never for walls', () => {
+    const state = party();
+    state.players[1].actionIntervalMs = 1250;
+    state.monsters[0].actionIntervalMs = 800;
+    const full = buildClientCombatSnapshot(state, 42, true);
+    expect(unit(full, 'player', 2).actionIntervalMs).toBe(1000);
+    expect(unit(full, 'player', 5).actionIntervalMs).toBe(1250);
+    expect(unit(full, 'monster', 0).actionIntervalMs).toBe(800);
+    expect(unit(full, 'monster', 3)).not.toHaveProperty('actionIntervalMs');
+    const dynamic = buildClientCombatSnapshot(state, 42, false);
+    expect(dynamic.units.filter(u => 'actionIntervalMs' in u)).toEqual([]);
   });
 
   it('tracks elapsed time, action timers and the end result', () => {

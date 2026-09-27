@@ -140,9 +140,16 @@ export class ServerBattleTimer {
     return !this.destroyed && this.state === 'battle' && this.combatState !== null;
   }
 
-  /** The current battle's last live log lines, oldest first. */
+  /** The current battle's last flushed live log lines, oldest first. */
   get recentLog(): string[] {
     return [...this.liveLog];
+  }
+
+  /** Send whatever the stream is holding now, so a snapshot built next already accounts for it. */
+  flushPending(): void {
+    if (!this.isLive) return;
+    if (this.pendingEvents.length === 0 && this.pendingLog.length === 0) return;
+    this.flush(null);
   }
 
   /** Begin the loop. Idempotent; a destroyed timer never starts. */
@@ -237,11 +244,7 @@ export class ServerBattleTimer {
     const tick = processCombatStep(combat, COMBAT_STEP_MS);
     this.battleDuration = combat.elapsedMs;
     if (tick.events.length > 0) this.pendingEvents.push(...tick.events);
-    if (tick.logEntries.length > 0) {
-      this.pendingLog.push(...tick.logEntries);
-      this.liveLog.push(...tick.logEntries);
-      if (this.liveLog.length > LIVE_LOG_RING_SIZE) this.liveLog.splice(0, this.liveLog.length - LIVE_LOG_RING_SIZE);
-    }
+    if (tick.logEntries.length > 0) this.pendingLog.push(...tick.logEntries);
 
     if (tick.finished) {
       this.stopStepping();
@@ -267,6 +270,10 @@ export class ServerBattleTimer {
     const log = this.pendingLog;
     this.pendingEvents = [];
     this.pendingLog = [];
+    if (log.length > 0) {
+      this.liveLog.push(...log);
+      if (this.liveLog.length > LIVE_LOG_RING_SIZE) this.liveLog.splice(0, this.liveLog.length - LIVE_LOG_RING_SIZE);
+    }
     this.lastFlushMs = combat.elapsedMs;
     if (snapshot) this.lastSnapshotMs = combat.elapsedMs;
     this.onCombatFlush?.({ battleId: this.currentBattleId, combat, events, log, snapshot });

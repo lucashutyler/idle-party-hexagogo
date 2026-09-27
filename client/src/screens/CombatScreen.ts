@@ -22,7 +22,7 @@ import { CombatSkillBar } from '../combat/CombatSkillBar';
 import type { SkillBarLayout, SkillBarState } from '../combat/CombatSkillBar';
 import { UnitCard } from '../combat/CombatUnitCard';
 import type { CardIdentity } from '../combat/CombatUnitCard';
-import { escapeHtml, formatAmount, formatClock, formatDuration, pipsKey, statusPips } from '../combat/CombatFormat';
+import { escapeHtml, formatAmount, formatClock, formatDuration, interruptStampText, pipsKey, statusPips } from '../combat/CombatFormat';
 
 type Axis = 'x' | 'y';
 
@@ -30,9 +30,15 @@ const TEXT_INTERVAL_MS = 100;
 const RUN_HINT_MS = 3000;
 const POP_IN_STAGGER_MS = 45;
 const CAST_LABEL_EDGE_PX = 70;
+const SHORT_SCREEN_QUERY = '(max-height: 480px)';
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
+}
+
+/** The header stands in for the log ticker only on short screens, where the ticker is hidden; the chat sheet hides the log too. */
+export function headerOpensLog(shortScreen: boolean, chatOpen: boolean): boolean {
+  return shortScreen && !chatOpen;
 }
 
 function variantFor(dmgType: string | undefined): FloaterVariant {
@@ -79,7 +85,6 @@ export class CombatScreen implements Screen {
   private axis: Axis = 'y';
   private telegraphs = new Map<string, { line: SVGLineElement; ring: SVGCircleElement; targetKey: string; drawnKey: string }>();
   private targetedKeys = new Set<string>();
-  private pendingCounters = new Set<string>();
   private monsterNames: { battleId: number; names: string[] }[] = [];
   private selfKey: string | null = null;
   private rafId = 0;
@@ -126,7 +131,7 @@ export class CombatScreen implements Screen {
     const visible = document.visibilityState !== 'hidden';
     this.playback.setActive(visible);
     this.gameClient.combatLog.setHoldLive(true);
-    this.gameClient.sendCombatView(visible);
+    this.gameClient.sendCombatView(true);
     this.logView.setActive(true);
     if (this.lastState) this.applyState(this.lastState);
     this.centresDirty = true;
@@ -216,7 +221,9 @@ export class CombatScreen implements Screen {
       this.gameClient.sendLeaveDungeon();
     });
     this.header.addEventListener('click', () => {
-      if (getComputedStyle(this.logWrapper).display === 'none') this.logView.setOpen(true);
+      if (headerOpensLog(window.matchMedia?.(SHORT_SCREEN_QUERY).matches ?? false, document.body.dataset.chatOpen === '1')) {
+        this.logView.setOpen(true);
+      }
     });
     this.stageGrid.addEventListener('click', (e) => this.onStageClick(e));
     this.container.addEventListener('click', (e) => {
@@ -237,7 +244,6 @@ export class CombatScreen implements Screen {
     document.addEventListener('visibilitychange', () => {
       if (!this.isActive) return;
       const visible = document.visibilityState !== 'hidden';
-      this.gameClient.sendCombatView(visible);
       this.playback.setActive(visible);
       if (visible) this.startLoop();
       else this.stopLoop();
@@ -318,7 +324,6 @@ export class CombatScreen implements Screen {
       this.cards.clear();
       this.fx.clearAll();
       this.clearTelegraphs();
-      this.pendingCounters.clear();
     }
     const live = new Set<string>();
     let order = 0;
@@ -557,10 +562,9 @@ export class CombatScreen implements Screen {
         }
         break;
       case 'interrupt':
-        if (dstCard && dstAt && dstKey) {
+        if (dstCard && dstAt) {
           dstCard.breakCast(now);
-          this.fx.stamp(dstAt, this.pendingCounters.has(dstKey) ? 'COUNTERED!' : 'INTERRUPTED!');
-          this.pendingCounters.delete(dstKey);
+          this.fx.stamp(dstAt, interruptStampText(ev));
         }
         break;
       case 'reaction':
@@ -568,7 +572,6 @@ export class CombatScreen implements Screen {
           const kind = ev.cardType === 'interrupt' ? 'interrupt' : 'instant';
           const icon = SKILL_CARD_TYPE_INFO[ev.cardType ?? 'instant']?.icon ?? '⚡';
           this.fx.reactionCard(srcAt, ev.skill ?? '', kind, icon, this.towardEnemy(ev.src.side).dy || -1);
-          if (kind === 'interrupt' && dstKey) this.pendingCounters.add(dstKey);
         }
         if (fromSelf && ev.skillId) this.skillBar.flash(ev.skillId);
         break;

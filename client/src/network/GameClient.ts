@@ -38,7 +38,8 @@ export class GameClient {
   private notificationListeners = new Set<NotificationListener>();
   private serverErrorListeners = new Set<ServerErrorListener>();
   private combatListeners = new Set<CombatListener>();
-  private combatViewVisible: boolean | null = null;
+  private combatViewRequested = false;
+  private combatViewSent: boolean | null = null;
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -70,6 +71,7 @@ export class GameClient {
 
     // Snap party position when returning from a background browser tab
     document.addEventListener('visibilitychange', () => {
+      this.syncCombatView();
       if (document.visibilityState === 'visible') {
         this.isInitialState = true;
         for (const listener of this.resumeListeners) {
@@ -146,7 +148,7 @@ export class GameClient {
       console.log('[GameClient] connected');
       this.connected = true;
       this.isInitialState = true;
-      if (this.combatViewVisible !== null) this.sendRaw({ type: 'combat_view', visible: this.combatViewVisible });
+      this.syncCombatView(true);
       for (const listener of this.connectionListeners) {
         listener(true);
       }
@@ -334,10 +336,19 @@ export class GameClient {
     this.sendRaw({ type: 'run' });
   }
 
-  /** Tells the server whether this socket is showing the live combat view (it skips combat messages otherwise). */
+  /**
+   * Whether the active screen shows the live combat view. The server only streams combat messages
+   * while this is true and the page is visible; every new socket is told the current value.
+   */
   sendCombatView(visible: boolean): void {
-    if (this.combatViewVisible === visible) return;
-    this.combatViewVisible = visible;
+    this.combatViewRequested = visible;
+    this.syncCombatView();
+  }
+
+  private syncCombatView(force = false): void {
+    const visible = this.combatViewRequested && document.visibilityState !== 'hidden';
+    if (!force && this.combatViewSent === visible) return;
+    this.combatViewSent = visible;
     this.sendRaw({ type: 'combat_view', visible });
   }
 

@@ -449,7 +449,7 @@ export class App {
         {
           id: 'chat',
           label: 'Chat',
-          icon: '<span class="nav-chat-chevron"><span class="nav-chat-chevron-up">▲</span><span class="nav-chat-chevron-down">▼</span></span>',
+          icon: '<span class="nav-chat-chevron" aria-hidden="true"><span class="nav-chat-chevron-up">▲</span><span class="nav-chat-chevron-down">▼</span></span>',
           mode: 'overlay',
         },
       ],

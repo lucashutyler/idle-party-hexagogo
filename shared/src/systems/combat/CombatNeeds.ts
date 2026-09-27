@@ -1,7 +1,7 @@
 import type { ActiveEffect, SkillDefinition } from '../SkillTypes.js';
 import { MONSTER_SKILL_CATALOG, getMonsterSkillCastTimeMs } from '../MonsterSkills.js';
 import type { MonsterSkillDefinition } from '../MonsterSkills.js';
-import type { CombatMonster, EffectContext, InFlightAttack, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
+import type { EffectContext, InFlightAttack, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
 import { healOptionAmount } from './CombatPassives.js';
 import {
   cureTarget,
@@ -65,7 +65,6 @@ export function redirectAllowed(reactor: PartyCombatant, attack: InFlightAttack,
 
 /** Monster skill "needed" check at the monster's action — a skill with nothing to do keeps its cooldown. */
 export function monsterSkillWouldHaveEffect(
-  monster: CombatMonster,
   def: MonsterSkillDefinition,
   state: PartyCombatState,
 ): boolean {
@@ -79,18 +78,16 @@ export function monsterSkillWouldHaveEffect(
       return def.targeting === 'all_class' && !!def.targetClasses
         && state.players.some(p => isAlive(p) && def.targetClasses!.includes(p.className));
     case 'heal':
-      return def.targeting === 'lowest_hp_ally' && monsterHealTarget(monster, state.monsters) !== null;
+      return def.targeting === 'lowest_hp_ally' && monsterHealTarget(state.monsters) !== null;
     default:
       return false;
   }
 }
 
-function monsterSkillCanApplyThisFight(monster: CombatMonster, def: MonsterSkillDefinition, state: PartyCombatState): boolean {
+function monsterSkillCanApplyThisFight(def: MonsterSkillDefinition, state: PartyCombatState): boolean {
   switch (def.effect) {
     case 'stun':
       return !!def.targetClasses && state.players.some(p => isAlive(p) && def.targetClasses!.includes(p.className));
-    case 'heal':
-      return state.monsters.some(m => m !== monster && isAlive(m) && !m.passive);
     default:
       return true;
   }
@@ -104,6 +101,6 @@ export function isInterruptFlashMode(state: PartyCombatState): boolean {
   return !state.monsters.some(m => isAlive(m) && !m.passive && m.skills.some(entry => {
     const def = MONSTER_SKILL_CATALOG[entry.skillId];
     if (!def || getMonsterSkillCastTimeMs(entry, def) <= 0) return false;
-    return monsterSkillCanApplyThisFight(m, def, state);
+    return monsterSkillCanApplyThisFight(def, state);
   }));
 }

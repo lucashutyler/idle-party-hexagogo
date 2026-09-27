@@ -149,7 +149,7 @@ describe('Monster Skills', () => {
     it('a monster cast with nothing left to do at resolution fizzles', () => {
       const wounded = makeMonster(1, { name: 'Wounded', hp: 100 });
       wounded.currentHp = 10;
-      const healer = makeMonster(4, { name: 'Healer', skills: [{ skillId: 'heal', value: 50, cooldown: 2 }] });
+      const healer = makeMonster(4, { name: 'Healer', skills: [{ skillId: 'heal', value: 50, cooldown: 2 }], resistances: [{ damageType: 'physical', flatReduction: 1000, percentReduction: 0 }] });
       const state = createPartyCombatState([knight('Alice', 4, { baseDamage: 1 })], [healer, wounded]);
       runTo(state, 1500);
       monsterAt(state, 1).currentHp = 100;
@@ -160,17 +160,31 @@ describe('Monster Skills', () => {
       expect(monsterAt(state, 4).skillCooldowns.heal).toBeGreaterThan(0);
     });
 
-    it('never heals itself or a wall, and a skill with nothing to do keeps its cooldown', () => {
-      const healer = makeMonster(0, { skills: [{ skillId: 'heal', value: 50, cooldown: 2 }] });
+    it('never heals a wall, and a skill with nothing to do keeps its cooldown', () => {
+      const healer = makeMonster(0, { skills: [{ skillId: 'heal', value: 50, cooldown: 2 }], resistances: [{ damageType: 'physical', flatReduction: 1000, percentReduction: 0 }] });
       const wall = createMonsterInstance(SEED_MONSTERS.stone_wall, 3);
       wall.currentHp = 1;
-      const state = createPartyCombatState([knight('Alice', 4)], [healer, wall]);
-      state.monsters[0].currentHp = 5000;
+      const state = createPartyCombatState([knight('Alice', 1)], [healer, wall]);
       const r = runTo(state, 3000);
+      expect(monsterAt(state, 3).currentHp).toBe(1);
       expect(ofKind(r.events, 'cast_start')).toHaveLength(0);
       expect(ofKind(r.events, 'heal')).toHaveLength(0);
       expect(ofKind(r.events, 'attack').filter(e => e.src?.side === 'monster').map(e => e.t)).toEqual([1400, 2400]);
       expect(monsterAt(state, 0).skillCooldowns.heal).toBe(0);
+    });
+
+    it('a lone wounded monster heals itself', () => {
+      const boss = makeMonster(4, {
+        name: 'Boss', hp: 200, skills: [{ skillId: 'heal', value: 50, cooldown: 2 }],
+        resistances: [{ damageType: 'physical', flatReduction: 1000, percentReduction: 0 }],
+      });
+      const state = createPartyCombatState([knight('Alice', 4)], [boss]);
+      state.monsters[0].currentHp = 100;
+      const r = runTo(state, 2400);
+      expect(ofKind(r.events, 'cast_start')).toEqual([expect.objectContaining({ t: 1400, src: { side: 'monster', pos: 4 }, dst: { side: 'monster', pos: 4 }, skill: 'Heal' })]);
+      expect(ofKind(r.events, 'heal')).toEqual([expect.objectContaining({ t: 2400, src: { side: 'monster', pos: 4 }, dst: { side: 'monster', pos: 4 }, amount: 50 })]);
+      expect(r.log).toContain('Boss casts Heal on Boss for 50 HP!');
+      expect(monsterAt(state, 4).currentHp).toBe(150);
     });
 
     it('Fear is held while no Archer or Mage is in reach, then fires as soon as one is', () => {
@@ -202,6 +216,7 @@ describe('Monster Skills', () => {
           { skillId: 'heal', value: 5, cooldown: 0 },
           { skillId: 'rot', value: 2, cooldown: 5 },
         ],
+        resistances: [{ damageType: 'physical', flatReduction: 1000, percentReduction: 0 }],
       });
       const state = createPartyCombatState([knight('A', 4)], [monster]);
       const r = runTo(state, 2400);

@@ -59,6 +59,7 @@ export {
   inlineIconHtml,
   classIconHtml,
   serverIconHtml,
+  CLASS_GLYPHS,
   ALL_CLASS_NAMES,
   CRAFT_SKILL_NAMES,
   getCraftSkillName,

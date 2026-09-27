@@ -61,6 +61,7 @@ export class BottomNav {
       button.className = `nav-tab nav-tab-${mode}${tab.id === defaultTab ? ' active' : ''}`;
       button.dataset.screen = tab.id;
       button.dataset.mode = mode;
+      button.setAttribute('aria-label', tab.label);
 
       button.innerHTML = `
         <span class="nav-tab-bg"></span>

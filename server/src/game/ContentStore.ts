@@ -437,8 +437,8 @@ export class ContentStore {
     await this.save();
   }
 
-  /** Top up an already-seeded dev world without overwriting anything authored: missing encounters/monsters,
-   *  and the generator's table for generated zones whose table is still empty. Returns the change count. */
+  /** Add seed encounters/monsters whose ids are missing and give generated zones with an empty table the
+   *  generator's table; existing definitions and non-empty tables are kept. Returns the change count. */
   async upgradeSeedContent(
     zones: ZoneDefinition[],
     encounters: EncounterDefinition[],

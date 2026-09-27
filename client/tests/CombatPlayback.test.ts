@@ -232,6 +232,28 @@ describe('CombatPlayback event model', () => {
     expect(pb.unit('monster', 1)!.actionMs).toBeLessThan(frozen);
   });
 
+  it('resets the ring to the unit\'s own interval from a full snapshot on the first attack', () => {
+    const pb = ready([player(), monster({ actionMs: 500, actionTotalMs: 700, actionIntervalMs: 700 })]);
+    play(pb, [ev(1100, 'attack', { src: M, dst: P })]);
+    const m = pb.unit('monster', 1)!;
+    expect(m.intervalMs).toBe(700);
+    expect(m.actionTotalMs).toBe(700);
+    pb.ingestMessage({ battleId: 1, snapshot: snap(1200, [player(), monster({ actionMs: 600, actionTotalMs: 1500 })]), events: [] }, clock);
+    clock += DELAY + 1;
+    pb.tick();
+    expect(pb.unit('monster', 1)!.intervalMs).toBe(700);
+  });
+
+  it('falls back to the base interval and infers it from observed waits without actionIntervalMs', () => {
+    const pb = ready();
+    play(pb, [ev(1100, 'attack', { src: M, dst: P })]);
+    expect(pb.unit('monster', 1)!.intervalMs).toBe(1000);
+    pb.ingestMessage({ battleId: 1, snapshot: snap(1200, [player(), monster({ actionMs: 700, actionTotalMs: 800 })]), events: [] }, clock);
+    clock += DELAY + 1;
+    pb.tick();
+    expect(pb.unit('monster', 1)!.intervalMs).toBe(800);
+  });
+
   it('does not reset the ring on the attack that resolves a cast', () => {
     const pb = ready();
     play(pb, [ev(1100, 'cast_start', { src: M, dst: P, skill: 'Fireball', skillId: 'fireball', durationMs: 1500 })]);

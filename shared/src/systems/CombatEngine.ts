@@ -491,7 +491,7 @@ function checkEnd(step: Step): boolean {
 function livingMonsterHp(monsters: CombatMonster[]): number {
   let total = 0;
   for (const m of monsters) {
-    if (!m.passive && isAlive(m)) total += m.currentHp;
+    if (isAlive(m)) total += m.currentHp;
   }
   return total;
 }
@@ -1482,7 +1482,7 @@ function monsterAct(step: Step, monster: CombatMonster): number {
     const def = MONSTER_SKILL_CATALOG[entry.skillId];
     if (!def) continue;
     if ((monster.skillCooldowns[entry.skillId] ?? 0) > 0) continue;
-    if (!monsterSkillWouldHaveEffect(monster, def, step.state)) continue;
+    if (!monsterSkillWouldHaveEffect(def, step.state)) continue;
 
     startMonsterCooldown(step, monster, entry);
     const castMs = getMonsterSkillCastTimeMs(entry, def);
@@ -1508,7 +1508,7 @@ function startMonsterCooldown(step: Step, monster: CombatMonster, entry: Monster
 
 function monsterCastTarget(state: PartyCombatState, monster: CombatMonster, def: MonsterSkillDefinition): CombatRef | undefined {
   if (def.effect === 'heal') {
-    const ally = monsterHealTarget(monster, state.monsters);
+    const ally = monsterHealTarget(state.monsters);
     return ally ? monsterRef(ally) : undefined;
   }
   let target: PartyCombatant | null = null;
@@ -1639,7 +1639,7 @@ function resolveMonsterSkill(
 
     case 'heal': {
       if (def.targeting !== 'lowest_hp_ally') return false;
-      const target = monsterHealTarget(monster, state.monsters);
+      const target = monsterHealTarget(state.monsters);
       if (!target) return false;
       const amount = Math.max(0, Math.min(entry.value, target.maxHp - target.currentHp));
       target.currentHp += amount;
@@ -1911,6 +1911,7 @@ function resolveCounter(step: Step, counter: PendingCounter): void {
     caster.cast = null;
     emit(step, 'interrupt', {
       src: playerRef(reactor), dst: monsterRef(caster), skill: cast.skillName, skillId: counter.monsterSkillId,
+      cardType: 'interrupt',
     });
     step.log.push(`${reactor.username}'s ${skill.name} counters ${caster.name}'s ${cast.skillName}!`);
   } else if (!effective) {

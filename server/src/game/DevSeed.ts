@@ -4,9 +4,10 @@
  *
  * Two seed passes, both idempotent:
  *   1. seedDevContent — merges 20 generated zones + ~1000 tiles (plus the
- *      dev encounters and missing caster monsters) into ContentStore. If the
- *      marker zone is already present it only tops up what an older seed
- *      lacked. Tiles that collide with existing coords are skipped too.
+ *      dev encounters and missing caster monsters) into ContentStore. A world
+ *      that has the marker zone but no dev_mixed encounter predates it and
+ *      is upgraded once; any other seeded world is left alone. Tiles that
+ *      collide with existing coords are skipped too.
  *   2. seedDevPlayers — creates 100 verified accounts (bot_001..100),
  *      assigns each a class/level/position/party, and persists their
  *      saves to disk. Skipped if even one bot's save already exists,
@@ -22,6 +23,7 @@
 import {
   generateDevWorld,
   DEV_SEED_MARKER_ZONE_ID,
+  DEV_MIXED_ENCOUNTER_ID,
   ALL_CLASS_NAMES,
   type ClassName,
   type WorldTileDefinition,
@@ -52,10 +54,15 @@ function mulberry32(seed: number): () => number {
 
 /**
  * Merge the procedurally-generated dev world (zones, rooms, encounters, missing
- * monsters) into the content store, or top up an older seed. True when content changed.
+ * monsters) into the content store, or upgrade a seed that predates `dev_mixed`
+ * once. True when content changed.
  */
 export async function seedDevContent(content: ContentStore): Promise<boolean> {
   const t0 = performance.now();
+  if (content.getZone(DEV_SEED_MARKER_ZONE_ID) && content.getEncounter(DEV_MIXED_ENCOUNTER_ID)) {
+    console.log('[DevSeed] Dev world already seeded — skipping.');
+    return false;
+  }
   const { zones, tiles, encounters, monsters } = generateDevWorld({ seed: 1 });
   if (content.getZone(DEV_SEED_MARKER_ZONE_ID)) {
     const changes = await content.upgradeSeedContent(zones, encounters, monsters);

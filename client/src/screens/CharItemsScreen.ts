@@ -14,6 +14,7 @@ import {
   computeEquipmentBonuses,
   classIconHtml,
   CLASS_DEFINITIONS,
+  CLASS_GLYPHS,
   getSkillsForClass,
   getOwnedItemIds,
   getEquippedItemIds,
@@ -407,12 +408,13 @@ export class CharItemsScreen implements Screen {
   // ── Hero / portrait ──────────────────────────────────────────
 
   private renderPortrait(className: string): void {
-    // TODO: drop-in `class-artwork/Knight.png` etc. when art exists; placeholder shows class name + icon for now.
+    // TODO: drop-in `class-artwork/Knight.png` etc. when art exists; the placeholder shows the class glyph for now.
     this.portraitEl.innerHTML = renderAssetImg('class', className, {
       label: className,
       width: 360,
       height: 440,
       alt: `${className} portrait`,
+      glyph: CLASS_GLYPHS[className],
     });
   }
 

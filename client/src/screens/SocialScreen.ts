@@ -1,7 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { ChatLocalStore } from '../network/ChatLocalStore';
 import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, classIconHtml, serverIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_GLYPHS, classIconHtml, serverIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
 import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
@@ -2390,14 +2390,13 @@ export class SocialScreen implements Screen {
     const leftSlotsHtml = LEFT_SLOTS.map(renderProfileSlot).join('');
     const rightSlotsHtml = RIGHT_SLOTS.map(renderProfileSlot).join('');
 
-    // Class portrait replaces the old CSS silhouette in the equipment panel
-    // center slot. Falls through to placehold.co if the artwork is missing.
     const portraitHtml = renderAssetImg('class', profile.className, {
       label: profile.className,
       width: 360,
       height: 440,
       className: 'profile-portrait-img',
       alt: `${profile.className} portrait`,
+      glyph: CLASS_GLYPHS[profile.className],
     });
 
     const equipHtml = `

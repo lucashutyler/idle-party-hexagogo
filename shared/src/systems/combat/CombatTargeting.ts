@@ -171,7 +171,7 @@ export function monsterGridTarget(monster: CombatMonster, players: PartyCombatan
   return aliveOrUndefined(preferred) ?? findTarget(monster.gridPosition, players, true);
 }
 
-/** Wounded, living, non-passive monsters other than the caster; lowest absolute HP first. */
-export function monsterHealTarget(caster: CombatMonster, monsters: CombatMonster[]): CombatMonster | null {
-  return findLowestHp(monsters.filter(m => m !== caster && !m.passive && isAlive(m) && m.currentHp < m.maxHp));
+/** Wounded, living, non-passive monsters (the caster included); lowest absolute HP first. */
+export function monsterHealTarget(monsters: CombatMonster[]): CombatMonster | null {
+  return findLowestHp(monsters.filter(m => !m.passive && isAlive(m) && m.currentHp < m.maxHp));
 }

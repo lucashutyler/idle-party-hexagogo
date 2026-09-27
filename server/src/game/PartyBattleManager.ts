@@ -209,6 +209,7 @@ export class PartyBattleManager {
   removeMember(partyId: string, username: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
+    entry.battleTimer.settlePendingResult();
     entry.members.delete(username);
 
     if (entry.members.size === 0) {
@@ -264,6 +265,7 @@ export class PartyBattleManager {
     const timer = this.entries.get(partyId)?.battleTimer;
     const combat = timer?.currentCombat;
     if (!timer || !combat || !timer.isLive) return null;
+    timer.flushPending();
     return {
       type: 'combat',
       battleId: timer.battleId,
@@ -618,7 +620,7 @@ export class PartyBattleManager {
 
   private handleBattleEnd(partyId: string, result: BattleResult): void {
     const entry = this.entries.get(partyId);
-    if (!entry) return;
+    if (!entry || entry.members.size === 0) return;
 
     if (result === 'victory') {
       const combat = entry.battleTimer.currentCombat;

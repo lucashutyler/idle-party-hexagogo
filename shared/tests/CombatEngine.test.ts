@@ -558,6 +558,36 @@ describe('end checks', () => {
     expect(state.elapsedMs).toBe(5000 + STALEMATE_WINDOW_MS);
   });
 
+  it.each([
+    ['the seed stone wall', SEED_MONSTERS.stone_wall],
+    ['a 400 HP wall', { ...SEED_MONSTERS.stone_wall, hp: 400 }],
+  ])('chipping through %s counts as progress, so a slow Knight still wins', (_label, wallDef) => {
+    pinRandom();
+    const knight = makePlayer('K', 5, { className: 'Knight', level: 1, hp: 1000, baseDamage: 3 });
+    const state = createPartyCombatState([knight], [
+      createMonsterInstance(wallDef, 3),
+      createMonsterInstance({ ...SEED_MONSTERS.goblin, damage: 1 }, 4),
+    ]);
+    const r = runTo(state, 300000);
+    expect(state.result).toBe('victory');
+    expect(state.elapsedMs).toBeGreaterThan(STALEMATE_WINDOW_MS);
+    expect(r.log).not.toContain('The fight drags on — the party withdraws.');
+    expect(monsterAt(state, 3).currentHp).toBe(0);
+  });
+
+  it('an untouchable goblin behind a wall still ends in a stalemate once the wall falls', () => {
+    pinRandom();
+    const state = createPartyCombatState([makePlayer('K', 5, { className: 'Knight', baseDamage: 50 })], [
+      createMonsterInstance(SEED_MONSTERS.stone_wall, 3),
+      makeMonster(4, { resistances: [{ damageType: 'physical', flatReduction: 1000, percentReduction: 0 }] }),
+    ]);
+    const r = runTo(state, 60000);
+    expect(monsterAt(state, 3).currentHp).toBe(0);
+    expect(state.result).toBe('defeat');
+    expect(state.elapsedMs).toBe(state.lastProgressMs + STALEMATE_WINDOW_MS);
+    expect(r.log[r.log.length - 1]).toBe('The fight drags on — the party withdraws.');
+  });
+
   it('healing monsters do not reset the stalemate window', () => {
     pinRandom();
     const state = createPartyCombatState([makePlayer('A', 2, { baseDamage: 10 })], [makeMonster(0, { hp: 20000 })]);
