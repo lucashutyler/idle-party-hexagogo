@@ -14,14 +14,10 @@ import {
   getSetBonusText,
 } from '../src/systems/SetTypes';
 import type { SetDefinition, SetBreakpoint, SetBonuses } from '../src/systems/SetTypes';
-import { createPartyCombatState, processPartyTick } from '../src/systems/CombatEngine';
-import type { PartyCombatant } from '../src/systems/CombatEngine';
-import { calculateMaxHp, calculateBaseDamage, CLASS_DEFINITIONS } from '../src/systems/CharacterStats';
-import type { ClassName, DamageType } from '../src/systems/CharacterStats';
-import type { PartyGridPosition } from '../src/systems/SocialTypes';
+import { createPartyCombatState } from '../src/systems/CombatEngine';
+import type { EquipmentBonuses } from '../src/systems/ItemTypes';
 import type { SkillDefinition } from '../src/systems/SkillTypes';
-import { createMonsterInstance } from '../src/systems/MonsterTypes';
-import type { MonsterDefinition } from '../src/systems/MonsterTypes';
+import { activeSkill, makeMonster, makePlayer, runTo } from './combatTestUtils';
 
 const emptyEquipment: Record<string, string | null> = {
   head: null, chest: null, mainhand: null, offhand: null, foot: null,
@@ -338,67 +334,6 @@ describe('getSetInfoForItem & getSetsForItem with class filtering', () => {
   });
 });
 
-// ── Combat integration ───────────────────────────────────────
-
-function makePlayer(
-  username: string,
-  pos: PartyGridPosition,
-  overrides: Partial<{
-    hp: number;
-    className: ClassName;
-    level: number;
-    baseDamage: number;
-    damageType: DamageType;
-    equippedSkills: (SkillDefinition | null)[];
-    setBonuses: SetBonuses;
-  }> = {},
-): PartyCombatant {
-  const className = overrides.className ?? 'Archer';
-  const level = overrides.level ?? 1;
-  const hp = overrides.hp ?? calculateMaxHp(level, className);
-  const baseDamage = overrides.baseDamage ?? calculateBaseDamage(level, className);
-  const damageType = overrides.damageType ?? CLASS_DEFINITIONS[className].damageType;
-  return {
-    username,
-    maxHp: hp,
-    currentHp: hp,
-    baseDamage,
-    playerDamageType: damageType,
-    gridPosition: pos,
-    className,
-    level,
-    setBonuses: overrides.setBonuses,
-    equippedSkills: overrides.equippedSkills ?? [null, null, null, null, null],
-    attackCount: 0,
-    stunTurns: 0,
-    dots: [],
-    hots: [],
-    damageShield: 0,
-    debuffs: [],
-    consecutiveHits: 0,
-    lastTargetId: '',
-    hasResurrected: false,
-    martyrBonus: 0,
-    braceActive: false,
-    braceDamageTaken: 0,
-    interceptActive: false,
-    activeSkillCount: 0,
-  };
-}
-
-function makeStaticMonster(damage: number, damageType: DamageType = 'physical', hp = 1000): MonsterDefinition {
-  return {
-    id: 'test_monster',
-    name: 'Test Monster',
-    hp,
-    damage,
-    damageType,
-    xp: 0,
-    goldMin: 0,
-    goldMax: 0,
-  };
-}
-
 describe('mergeSetBonusesIntoEquip', () => {
   it('adds set flat DR/MR/attack into equipment bonuses', () => {
     const equip = {
@@ -419,93 +354,67 @@ describe('mergeSetBonusesIntoEquip', () => {
 });
 
 describe('Combat integration — set bonuses are applied', () => {
-  // Some cases below pin Math.random to make damage rolls deterministic.
   afterEach(() => { vi.restoreAllMocks(); });
 
-  /**
-   * Run one player against a monster that always hits for 100, and report the
-   * HP lost. Give the player enough HP to survive the whole run: a player who
-   * dies mid-loop ends the battle, and `processPartyTick` then no-ops, so a
-   * dead arm silently stops accruing damage and the two arms stop being
-   * comparable. Combat alternates player, monster, player, ... so `ticks`
-   * ticks land `ticks / 2` monster attacks.
-   */
-  function hpLostAgainstStaticMonster(
-    ticks: number,
-    setBonuses?: SetBonuses,
-    equipBonuses?: PartyCombatant['equipBonuses'],
-  ): number {
-    const player = makePlayer('hero', 0, { hp: 1000, className: 'Knight', setBonuses });
-    player.equipBonuses = equipBonuses;
-    const monster = createMonsterInstance(makeStaticMonster(100));
-    monster.gridPosition = 0;
-
-    const state = createPartyCombatState([player], [monster]);
-    for (let i = 0; i < ticks; i++) processPartyTick(state);
+  /** HP a 1000-HP Knight loses to three 100-damage monster hits (at 1.4 s, 2.4 s and 3.4 s). */
+  function hpLostToThreeHits(setBonuses?: SetBonuses, equipBonuses?: EquipmentBonuses): number {
+    const knight = makePlayer('hero', 0, { hp: 1000, className: 'Knight', setBonuses, equipBonuses });
+    const state = createPartyCombatState([knight], [makeMonster(0, { damage: 100, hp: 100000 })]);
+    const { events } = runTo(state, 3400);
+    expect(events.filter(e => e.kind === 'damage' && e.dst?.side === 'player')).toHaveLength(3);
     return state.players[0].maxHp - state.players[0].currentHp;
   }
 
   it('damageResistancePercent halves incoming monster damage', () => {
-    // Three monster attacks of 100: 300 unprotected, 150 behind a 50% resist.
-    const plain = hpLostAgainstStaticMonster(6);
-    const resisted = hpLostAgainstStaticMonster(6, { damageResistancePercent: 50 });
-
-    expect(plain).toBe(300);
-    expect(resisted).toBe(150);
+    expect(hpLostToThreeHits()).toBe(300);
+    expect(hpLostToThreeHits({ damageResistancePercent: 50 })).toBe(150);
   });
 
   it('damagePercent scales player attack damage at every damage roll', () => {
-    // A player attacks a wall — a passive monster that never fights back.
-    //
-    // Note the player lands exactly ONE attack no matter how many ticks are
-    // run: `processPartyTick` ends the battle when every
-    // non-passive monster is dead, and with only passive monsters present that
-    // test is vacuously true, so the party wins on the first tick and every
-    // later tick is a no-op. Ticking in a loop here would measure nothing extra.
-    const wallDef: MonsterDefinition = {
-      id: 'wall', name: 'Wall', hp: 10000, damage: 0,
-      damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0, passive: true,
-    };
-
     const damageDealt = (setBonuses?: SetBonuses): number => {
-      const wall = createMonsterInstance(wallDef);
-      wall.gridPosition = 0;
-      const player = makePlayer('hero', 8, {
-        className: 'Archer', level: 1, baseDamage: 10, setBonuses,
-      });
-      const state = createPartyCombatState([player], [wall]);
-      processPartyTick(state);
+      const player = makePlayer('hero', 8, { className: 'Archer', baseDamage: 10, setBonuses });
+      const state = createPartyCombatState([player], [makeMonster(0, { hp: 10000 })]);
+      runTo(state, 1000);
       return state.monsters[0].maxHp - state.monsters[0].currentHp;
     };
 
-    // Attack damage carries a `floor(random() * 5) - 2` variance, so comparing
-    // one unpinned roll against another is a coin flip — that made this test
-    // fail ~1 run in 25. Pin the roll instead and check every value it takes.
     const rolls: [number, number][] = [[0, -2], [0.2, -1], [0.4, 0], [0.6, 1], [0.8, 2]];
     for (const [roll, variance] of rolls) {
       vi.spyOn(Math, 'random').mockReturnValue(roll);
-
       const plain = damageDealt();
       const boosted = damageDealt({ damagePercent: 100 });
-
       expect(plain).toBe(10 + variance);
       expect(boosted).toBe(plain * 2);
+      vi.restoreAllMocks();
     }
   });
 
   it('damage resistance is applied BEFORE flat reductions', () => {
-    // Percent-then-flat: floor(100 * 0.5) - 10 = 40 per hit.
-    // Flat-then-percent would be (100 - 10) * 0.5 = 45 per hit.
-    // Over three monster attacks that is 120 vs 135 — so an exact assertion is
-    // what actually pins the ordering. The old bounds check (0 < lost < 400)
-    // was satisfied by both.
-    const lost = hpLostAgainstStaticMonster(6, { damageResistancePercent: 50 }, {
+    // Percent-then-flat: floor(100 × 0.5) − 10 = 40 per hit; flat-then-percent would be 45.
+    const lost = hpLostToThreeHits({ damageResistancePercent: 50 }, {
       bonusAttackMin: 0, bonusAttackMax: 0,
       damageReductionMin: 10, damageReductionMax: 10,
       magicReductionMin: 0, magicReductionMax: 0,
     });
-
     expect(lost).toBe(3 * 40);
+  });
+
+  it('set cooldownReduction shortens active cooldowns by seconds', () => {
+    const skill = activeSkill({ id: 'cd4', cooldown: 4, warmup: 0 });
+    const state = createPartyCombatState(
+      [makePlayer('hero', 2, { className: 'Bard', skills: [skill], setBonuses: { cooldownReduction: 1.5 } })],
+      [makeMonster(0)],
+    );
+    const { events } = runTo(state, 6000);
+    expect(state.players[0].skillCooldownTotals.cd4).toBe(2500);
+    expect(events.filter(e => e.kind === 'attack' && e.skillId === 'cd4').map(e => e.t)).toEqual([1000, 4000]);
+  });
+});
+
+describe('getSetBonusText cooldown reduction', () => {
+  it('shows the reduction in seconds', () => {
+    expect(getSetBonusText({ cooldownReduction: 1 })).toBe('-1s Active CD');
+    expect(getSetBonusText({ cooldownReduction: 1.5, damagePercent: 15 })).toBe('-1.5s Active CD, +15% Damage');
   });
 });
 

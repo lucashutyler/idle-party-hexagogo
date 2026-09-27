@@ -3,7 +3,7 @@ import type { SetDefinition } from './SetTypes.js';
 import type { ShopDefinition } from './ShopTypes.js';
 import type { HenchmanOffer } from './HenchmanTypes.js';
 import type { RecipeDefinition, CraftQueueState, ActiveJobProgress } from './CraftingTypes.js';
-import type { PartyGridPosition } from './SocialTypes.js';
+import type { ClientCombatSnapshot, CombatEvent } from './CombatEvents.js';
 import type {
   ClientSocialState,
   ClientSocialMessage,
@@ -26,8 +26,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.08.29.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.09.26.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -42,63 +41,28 @@ export interface ServerPartyState {
   path: { col: number; row: number }[];
 }
 
-export interface ClientPlayerCombatant {
-  username: string;
-  currentHp: number;
-  maxHp: number;
-  gridPosition: PartyGridPosition;
-  className: string;
-  /** Remaining stun turns (0 or undefined = not stunned). */
-  stunTurns?: number;
-  /** Set for hired henchmen — the client must not offer player-only actions on them. */
-  henchman?: boolean;
-}
-
-export interface ClientMonsterState {
-  /** Monster definition id (its artwork key). Same for all instances of a type. */
-  id: string;
-  name: string;
-  currentHp: number;
-  maxHp: number;
-  gridPosition: PartyGridPosition;
-  /** Remaining stun turns (0 or undefined = not stunned). */
-  stunTurns?: number;
-  /** Optional flavor text shown in the monster popup. */
-  description?: string;
-}
-
-export interface ClientCombatAction {
-  attackerSide: 'player' | 'monster';
-  attackerPos: PartyGridPosition;
-  targetPos: PartyGridPosition | null;
-  targetSide: 'player' | 'monster' | null;
-  dodged: boolean;
-  /** Name of the skill used (if any). */
-  skillName?: string;
-  /** Whether a stun was applied. */
-  stunApplied?: boolean;
-  /** Amount healed (if any). */
-  healAmount?: number;
-  /** Username of the heal target. */
-  healTarget?: string;
-}
-
-export interface ClientCombatState {
-  players: ClientPlayerCombatant[];
-  monsters: ClientMonsterState[];
-  tickCount: number;
-  /** Number of full combat rounds completed. */
-  roundCount: number;
-  /** The action that occurred on the most recent tick. */
-  lastAction?: ClientCombatAction;
-}
-
 export interface ServerBattleState {
   state: BattleTimerState;
   result?: BattleResult;
   visual: BattleVisual;
   duration: number;
-  combat?: ClientCombatState;
+  /** Always a full snapshot. */
+  combat?: ClientCombatSnapshot;
+}
+
+/** Live combat stream: events and log lines since the last message, plus an optional snapshot. */
+export interface ServerCombatMessage {
+  type: 'combat';
+  battleId: number;
+  snapshot?: ClientCombatSnapshot;
+  events: CombatEvent[];
+  log: string[];
+}
+
+/** Tells the server whether this socket currently shows the combat view. */
+export interface ClientCombatViewMessage {
+  type: 'combat_view';
+  visible: boolean;
 }
 
 export interface ClientCharacterState {
@@ -295,6 +259,7 @@ export type ServerErrorCode = 'trade_nonce_mismatch';
 
 export type ServerMessage =
   | ServerStateMessage
+  | ServerCombatMessage
   | ServerSocialStateMessage
   | ServerChatMessageMessage
   | ServerSyncChatMessage
@@ -386,6 +351,7 @@ export interface ClientEnterTransitionMessage {
 
 export type ClientMessage =
   | ClientMoveMessage
+  | ClientCombatViewMessage
   | ClientRequestStateMessage
   | ClientEquipItemMessage
   | ClientUnequipItemMessage

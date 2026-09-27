@@ -1,24 +1,14 @@
 import type { ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
 
+/** CSS colour values (theme tokens) per rarity; usable in inline `color`/`background`. */
 export const RARITY_COLORS: Record<string, string> = {
-  janky: '#808080',
-  common: '#e8e8e8',
-  uncommon: '#66bb6a',
-  rare: '#4fc3f7',
-  epic: '#ee66e3',
-  legendary: '#9233df',
-  heirloom: '#e9bc18',
-};
-
-/** Border colors: gray for all rarities. Epic+ get animated glow via CSS. */
-export const RARITY_BORDER_COLORS: Record<string, string> = {
-  janky: 'rgba(180,180,180,0.25)',
-  common: 'rgba(180,180,180,0.25)',
-  uncommon: 'rgba(180,180,180,0.25)',
-  rare: 'rgba(180,180,180,0.25)',
-  epic: 'rgba(180,180,180,0.4)',
-  legendary: 'rgba(180,180,180,0.4)',
-  heirloom: 'rgba(180,180,180,0.4)',
+  janky: 'var(--rarity-janky)',
+  common: 'var(--rarity-common)',
+  uncommon: 'var(--rarity-uncommon)',
+  rare: 'var(--rarity-rare)',
+  epic: 'var(--rarity-epic)',
+  legendary: 'var(--rarity-legendary)',
+  heirloom: 'var(--rarity-heirloom)',
 };
 
 /**
@@ -112,8 +102,8 @@ export interface ItemIconOptions {
  */
 export function renderItemIcon(itemId: string, def: ItemDefinition, options?: ItemIconOptions): string {
   const rarity = def.rarity ?? 'common';
-  const bgColor = def.iconColor ?? RARITY_COLORS[rarity] ?? '#e8e8e8';
-  const borderColor = RARITY_BORDER_COLORS[rarity] ?? 'rgba(180,180,180,0.25)';
+  const rarityColor = RARITY_COLORS[rarity] ?? RARITY_COLORS.common;
+  const itemBg = def.iconColor ? `;--item-bg:${escapeHtml(def.iconColor)}` : '';
   const shinyClass = SHINY_RARITIES.has(rarity) ? ` item-rarity-${rarity}` : '';
   const initials = getItemInitials(def.name);
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
@@ -149,7 +139,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
     }
   }
 
-  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${escapeHtml(def.name)}" style="background:${bgColor};border-color:${borderColor}"${dataStr}>${inner}</div>`;
+  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${escapeHtml(def.name)}" style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
 }
 
 /**
@@ -162,5 +152,5 @@ export function renderEmptySlotIcon(slot: string, options?: { extraClass?: strin
     : '';
   const label = SLOT_LABELS[slot] ?? slot;
 
-  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" style="background:#2a2a3a;border-color:rgba(255,255,255,0.08)"${dataStr}>${renderSlotDogear(slot)}</div>`;
+  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}"${dataStr}>${renderSlotDogear(slot)}</div>`;
 }

@@ -22,8 +22,8 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Global notification bell + dropdown inbox + live toast stack. Mounted once
- * outside #app (like ChatPopout) so it survives screen switches.
+ * Global notification bell + dropdown inbox + live toast stack. The bell mounts into the
+ * top HUD's bell slot when present; the dropdown and toasts live in #notification-center-root.
  */
 export class NotificationCenter {
   private root: HTMLElement;
@@ -49,7 +49,8 @@ export class NotificationCenter {
       e.stopPropagation();
       this.toggleDropdown();
     });
-    this.root.appendChild(this.bellButton);
+    const hudSlot = document.querySelector<HTMLElement>('#top-hud .top-hud-bell-slot');
+    (hudSlot ?? this.root).appendChild(this.bellButton);
 
     this.toastStack = document.createElement('div');
     this.toastStack.className = 'notif-toast-stack';

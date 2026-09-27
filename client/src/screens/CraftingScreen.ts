@@ -3,86 +3,6 @@ import type { ServerStateMessage, RecipeDefinition, ItemDefinition, ClientCrafti
 import { canQueueRecipe, MAX_CRAFT_QUEUE } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 
-function injectCraftingStyles(): void {
-  if (document.getElementById('crafting-screen-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'crafting-screen-styles';
-  style.textContent = `
-    .craft-screen { padding: 12px; display: flex; flex-direction: column; gap: 14px; }
-    .craft-skill-header {
-      display: flex; flex-direction: column; gap: 4px;
-      padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
-      background: rgba(0,0,0,0.25);
-    }
-    .craft-skill-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-    .craft-skill-name { font-size: 0.95em; font-weight: 600; letter-spacing: 1px; }
-    .craft-skill-level { font-size: 0.8em; opacity: 0.85; }
-    .craft-skill-xpbar {
-      height: 8px; border-radius: 4px; overflow: hidden;
-      background: rgba(255,255,255,0.08);
-    }
-    .craft-skill-xpfill {
-      height: 100%; background: linear-gradient(90deg, #c9a64f, #f0d574);
-      transition: width 0.3s ease-out;
-    }
-    .craft-skill-xptext { font-size: 0.7em; opacity: 0.7; text-align: right; }
-    .craft-locked {
-      padding: 24px; text-align: center;
-      border: 1px solid var(--panel-border, rgba(255,255,255,0.15));
-      border-radius: 8px; background: rgba(0,0,0,0.2);
-    }
-    .craft-locked h3 { margin: 0 0 8px; }
-    .craft-section {
-      border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
-      padding: 10px; background: rgba(0,0,0,0.2);
-    }
-    .craft-section h3 { margin: 0 0 8px; font-size: 0.85em; letter-spacing: 1px; opacity: 0.85; }
-    .craft-queue-empty { opacity: 0.6; font-size: 0.85em; }
-    .craft-queue-list { display: flex; flex-direction: column; gap: 6px; }
-    .craft-queue-row {
-      display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
-      padding: 6px 8px; background: rgba(255,255,255,0.04); border-radius: 4px;
-    }
-    .craft-queue-name { font-size: 0.85em; }
-    .craft-queue-status { font-size: 0.7em; opacity: 0.7; }
-    .craft-progress {
-      grid-column: 1 / -1;
-      height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;
-    }
-    .craft-progress-fill { height: 100%; background: linear-gradient(90deg, #5a8, #7c8); transition: width 0.5s linear; }
-    .craft-cancel-btn {
-      font-size: 0.7em; padding: 3px 8px;
-      background: rgba(180,80,80,0.4); border: 1px solid rgba(220,120,120,0.5);
-      color: #fff; border-radius: 3px; cursor: pointer;
-    }
-    .craft-cancel-btn:hover { background: rgba(200,100,100,0.6); }
-    .craft-recipe-list { display: flex; flex-direction: column; gap: 8px; }
-    .craft-recipe-card {
-      padding: 10px; background: rgba(255,255,255,0.04); border-radius: 4px;
-      display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
-    }
-    .craft-recipe-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-    .craft-recipe-name { font-size: 0.85em; }
-    .craft-recipe-meta { font-size: 0.7em; opacity: 0.75; }
-    .craft-recipe-ings { font-size: 0.7em; opacity: 0.85; }
-    .craft-recipe-ing-missing { color: #f88; }
-    .craft-recipe-result { font-size: 0.7em; opacity: 0.85; }
-    .craft-queue-btn {
-      font-size: 0.75em; padding: 5px 10px;
-      background: rgba(80,140,180,0.45); border: 1px solid rgba(120,180,220,0.6);
-      color: #fff; border-radius: 3px; cursor: pointer;
-    }
-    .craft-queue-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .craft-queue-btn:not(:disabled):hover { background: rgba(100,160,200,0.6); }
-    .craft-class-tag {
-      font-size: 0.65em; padding: 1px 5px; margin-left: 6px;
-      background: rgba(180,140,80,0.3); border-radius: 3px;
-    }
-  `;
-  document.head.appendChild(style);
-}
-
 function fmtSeconds(seconds: number): string {
   if (seconds < 60) return `${Math.ceil(seconds)}s`;
   const m = Math.floor(seconds / 60);
@@ -112,7 +32,6 @@ export class CraftingScreen implements Screen {
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
-    injectCraftingStyles();
   }
 
   onActivate(): void {

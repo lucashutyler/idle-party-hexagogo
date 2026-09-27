@@ -19,6 +19,7 @@ import { BottomNav } from './ui/BottomNav';
 import { ChatLocalStore } from './network/ChatLocalStore';
 import { ChatPopout } from './ui/ChatPopout';
 import { PersistentXpBar } from './ui/PersistentXpBar';
+import { TopHud } from './ui/TopHud';
 import { NotificationCenter } from './ui/NotificationCenter';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 
@@ -36,17 +37,20 @@ export class App {
   private suspensionScreen!: SuspensionScreen;
   private navEl!: HTMLElement;
   private xpBarEl!: HTMLElement;
+  private topHudEl!: HTMLElement;
+  private topHud?: TopHud;
   private chatPopout?: ChatPopout;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.screenManager = new ScreenManager();
 
-    // Hide bottom nav + persistent xp bar until logged in
     this.navEl = document.getElementById('bottom-nav')!;
     this.navEl.style.display = 'none';
     this.xpBarEl = document.getElementById('persistent-xp-bar')!;
     this.xpBarEl.style.display = 'none';
+    this.topHudEl = document.getElementById('top-hud')!;
+    this.topHudEl.style.display = 'none';
 
     // Splash overlay: minimum 2-second hold, then fade once the window has
     // finished loading. Whichever takes longer wins — fast loads still see
@@ -353,6 +357,8 @@ export class App {
     }
     this.suspensionScreen.setEmail(email ?? localStorage.getItem('suspendedEmail') ?? '');
     this.navEl.style.display = 'none';
+    this.topHudEl.style.display = 'none';
+    this.topHud?.setVisible(false);
     this.screenManager.switchTo('suspended');
   }
 
@@ -397,8 +403,8 @@ export class App {
     this.navEl.style.display = '';
     this.xpBarEl.style.display = '';
 
-    // Persistent XP bar above nav — visible on every screen
     new PersistentXpBar(this.gameClient);
+    this.topHud = new TopHud(this.gameClient);
 
     // Chat popout — global overlay, toggled from the Chat nav tab
     this.chatPopout = new ChatPopout(this.gameClient);
@@ -423,10 +429,10 @@ export class App {
     };
     const nav = new BottomNav(
       [
-        { id: 'combat', label: 'Combat', icon: navImg('combat', 'Fight') },
         { id: 'map', label: 'Map', icon: navImg('map', 'Map') },
         { id: 'items', label: 'Char', icon: navImg('items', 'Char') },
         { id: 'craft', label: 'Craft', icon: navImg('craft', 'Craft') },
+        { id: 'combat', label: 'Battle', icon: navImg('combat', 'Fight') },
         // Social opens a fly-out submenu with the three sub-views; the
         // pill bar inside the screen is gone in favor of this.
         {

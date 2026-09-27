@@ -1,7 +1,7 @@
 import type { ClassName, DamageType } from './CharacterStats.js';
 import type { PartyGridPosition } from './SocialTypes.js';
 import type { SkillDefinition } from './SkillTypes.js';
-import type { PartyCombatant } from './CombatEngine.js';
+import type { PartyCombatantInit } from './CombatEngine.js';
 
 /** A hireable NPC party member, authored as content. See docs/architecture/content.md. */
 export interface HenchmanDefinition {
@@ -67,16 +67,13 @@ export function henchmanDisplayNames(names: string[], reserved: readonly string[
   });
 }
 
-/**
- * Build the combatant a henchman fights as.
- * Must never throw — runs inside a `setInterval` callback with no try/catch above it.
- */
+/** Build the combatant a henchman fights as. Must never throw — it runs inside battle creation. */
 export function buildHenchmanCombatant(
   def: HenchmanDefinition,
   hired: HiredHenchman,
   resolveSkill: (id: string) => SkillDefinition | undefined,
   displayName: string,
-): PartyCombatant {
+): PartyCombatantInit {
   const equippedSkills: (SkillDefinition | null)[] = def.skillIds.map(id => resolveSkill(id) ?? null);
   const maxHp = Math.max(1, Math.floor(def.maxHp));
 
@@ -92,7 +89,6 @@ export function buildHenchmanCombatant(
     level: def.level,
     equippedSkills,
     attackCount: 0,
-    stunTurns: 0,
     dots: [],
     hots: [],
     damageShield: 0,
@@ -101,9 +97,6 @@ export function buildHenchmanCombatant(
     lastTargetId: '',
     hasResurrected: false,
     martyrBonus: 0,
-    braceActive: false,
-    braceDamageTaken: 0,
-    interceptActive: false,
     activeSkillCount: 0,
   };
 }

@@ -93,6 +93,11 @@ export {
   getSkillsForClass,
   getSlotSchedule,
   getUnlockedSkillsForLevel,
+  SKILL_TRIGGER_VALUES,
+  SKILL_TRIGGER_INFO,
+  SKILL_CARD_TYPE_INFO,
+  getSkillTrigger,
+  getSkillCardType,
 } from './systems/SkillTypes.js';
 export type {
   SkillSlotType,
@@ -105,6 +110,8 @@ export type {
   SkillDefinition,
   SkillLoadout,
   SkillContent,
+  SkillTrigger,
+  SkillCardType,
 } from './systems/SkillTypes.js';
 
 // Skill option catalog (admin editor + validation)
@@ -174,6 +181,7 @@ export type {
 // Monster skills
 export {
   MONSTER_SKILL_CATALOG,
+  getMonsterSkillCastTimeMs,
 } from './systems/MonsterSkills.js';
 export type {
   MonsterSkillDefinition,
@@ -207,6 +215,7 @@ export {
   DEV_SEED_VERSION,
   DEV_ZONE_PREFIX,
   DEV_SEED_MARKER_ZONE_ID,
+  DEV_MIXED_ENCOUNTER_ID,
 } from './seed/SeedDevWorld.js';
 export type {
   DevWorldOutput,
@@ -216,22 +225,67 @@ export type {
 // Combat engine
 export {
   createPartyCombatState,
-  processPartyTick,
+  processCombatStep,
+  advanceCombat,
+  buildClientCombatSnapshot,
   findTarget,
   applyMonsterResistance,
+  effectiveCooldownMs,
+  wouldHaveEffect,
+  isInterruptFlashMode,
 } from './systems/CombatEngine.js';
 export type {
   TickResult,
   PartyCombatant,
+  PartyCombatantInit,
   CombatMonster,
   PartyCombatState,
-  CombatAction,
+  CombatCast,
+  PendingCounter,
+  PartyBuff,
+  InFlightAttack,
+  EffectContext,
   DotEffect,
   HotEffect,
   CombatBuff,
   CombatDebuff,
   SunderMark,
 } from './systems/CombatEngine.js';
+
+// Combat timing
+export {
+  COMBAT_STEP_MS,
+  BASE_ACTION_INTERVAL_MS,
+  MIN_MONSTER_ACTION_INTERVAL_MS,
+  STATUS_PULSE_MS,
+  STUN_MS,
+  SCORCH_MS,
+  MIN_COOLDOWN_MS,
+  INTERRUPT_DELAY_MS,
+  RUN_AVAILABLE_MS,
+  KILL_BEAT_MS,
+  FIRST_ACTION_PLAYER_MS,
+  FIRST_ACTION_MONSTER_MS,
+  STALEMATE_WINDOW_MS,
+  LOW_HP_THRESHOLD,
+  COMBAT_SEND_MS,
+  COMBAT_SNAPSHOT_MS,
+  PLAYBACK_DELAY_MS,
+  STATE_LOG_TAIL,
+} from './systems/CombatTiming.js';
+
+// Combat events & client snapshot
+export type {
+  CombatSide,
+  CombatRef,
+  CombatEventKind,
+  CombatEvent,
+  ClientCombatStatus,
+  ClientCombatSkill,
+  ClientCombatCast,
+  ClientCombatUnit,
+  ClientCombatSnapshot,
+} from './systems/CombatEvents.js';
 
 // Battle types & constants
 export type {
@@ -240,11 +294,9 @@ export type {
   PartyState,
   BattleVisual,
   ServerPartyState,
-  ClientPlayerCombatant,
-  ClientMonsterState,
-  ClientCombatAction,
-  ClientCombatState,
   ServerBattleState,
+  ServerCombatMessage,
+  ClientCombatViewMessage,
   ClientCharacterState,
   OtherPlayerState,
   CombatLogType,
@@ -278,7 +330,6 @@ export type {
 export {
   RESULT_PAUSE,
   MOVE_DURATION,
-  RUN_AVAILABLE_ROUNDS,
   GAME_VERSION,
 } from './systems/BattleTypes.js';
 

@@ -39,7 +39,10 @@ export const SEED_ENCOUNTERS: Record<string, EncounterDefinition> = {
     id: 'darkwood_goblins',
     name: 'Darkwood Goblins',
     type: 'random',
-    monsterPool: [{ monsterId: 'goblin', min: 2, max: 3 }],
+    monsterPool: [
+      { monsterId: 'goblin', min: 2, max: 3 },
+      { monsterId: 'goblin_shaman', min: 0, max: 1 },
+    ],
     roomMax: 9,
   },
   darkwood_wolves: {
@@ -53,14 +56,20 @@ export const SEED_ENCOUNTERS: Record<string, EncounterDefinition> = {
     id: 'darkwood_bandits',
     name: 'Darkwood Bandits',
     type: 'random',
-    monsterPool: [{ monsterId: 'bandit', min: 1, max: 2 }],
+    monsterPool: [
+      { monsterId: 'bandit', min: 1, max: 2 },
+      { monsterId: 'bandit_cutthroat', min: 0, max: 1 },
+    ],
     roomMax: 9,
   },
   crystal_caves_goblins: {
     id: 'crystal_caves_goblins',
     name: 'Crystal Caves Goblins',
     type: 'random',
-    monsterPool: [{ monsterId: 'goblin', min: 1, max: 2 }],
+    monsterPool: [
+      { monsterId: 'goblin', min: 1, max: 2 },
+      { monsterId: 'goblin_shaman', min: 0, max: 1 },
+    ],
     roomMax: 9,
   },
   crystal_caves_wolves: {

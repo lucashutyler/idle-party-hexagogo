@@ -23,6 +23,9 @@ import { TileType } from '../hex/HexTile.js';
 import { DEFAULT_MAP_ID } from '../hex/MapSchema.js';
 import type { WorldTileDefinition } from '../hex/MapSchema.js';
 import type { ZoneDefinition } from '../systems/ZoneTypes.js';
+import type { EncounterDefinition } from '../systems/EncounterTypes.js';
+import { SEED_MONSTERS } from '../systems/MonsterTypes.js';
+import type { MonsterDefinition } from '../systems/MonsterTypes.js';
 import {
   type CubeCoord,
   cubeDistance,
@@ -33,7 +36,7 @@ import {
 } from '../hex/HexUtils.js';
 
 /** Bumped when the generator's output structure changes. */
-export const DEV_SEED_VERSION = 1;
+export const DEV_SEED_VERSION = 2;
 
 /** Prefix shared by every generated zone id; lets server-side code
  *  recognise + skip already-seeded content idempotently. */
@@ -42,6 +45,26 @@ export const DEV_ZONE_PREFIX = 'dev_';
 /** First zone in the generated output; presence of this id in the
  *  ContentStore indicates the dev seed has already been applied. */
 export const DEV_SEED_MARKER_ZONE_ID = `${DEV_ZONE_PREFIX}sunscar_plains`;
+
+export const DEV_MIXED_ENCOUNTER_ID = `${DEV_ZONE_PREFIX}mixed`;
+
+/** Mixed melee + caster rooms so dev fights exercise casts, interrupts and reactions. */
+const DEV_MIXED_ENCOUNTER: EncounterDefinition = {
+  id: DEV_MIXED_ENCOUNTER_ID,
+  name: 'Dev Mixed Warband',
+  type: 'random',
+  monsterPool: [
+    { monsterId: 'goblin', min: 1, max: 2 },
+    { monsterId: 'wolf', min: 0, max: 2 },
+    { monsterId: 'bandit', min: 0, max: 1 },
+    { monsterId: 'goblin_shaman', min: 0, max: 1 },
+    { monsterId: 'bandit_cutthroat', min: 0, max: 1 },
+  ],
+  roomMax: 6,
+};
+
+/** Monsters `DEV_MIXED_ENCOUNTER` needs beyond the classic seed trio, for servers seeded before they existed. */
+const DEV_CASTER_MONSTER_IDS = ['goblin_shaman', 'bandit_cutthroat'];
 
 // ─── PRNG ────────────────────────────────────────────────────────
 // mulberry32 — small, fast, well-distributed, fine for layout
@@ -543,6 +566,10 @@ function toRoman(n: number): string {
 export interface DevWorldOutput {
   zones: ZoneDefinition[];
   tiles: WorldTileDefinition[];
+  /** Encounters the dev zones reference; merge them alongside the zones. */
+  encounters: EncounterDefinition[];
+  /** Monsters those encounters need that older content may lack; merge only when missing. */
+  monsters: MonsterDefinition[];
 }
 
 export interface GenerateOptions {
@@ -574,10 +601,7 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
     zones.push({
       id: zoneId,
       displayName: theme.displayName,
-      // Dev zones don't reference real encounters — encounter IDs that
-      // don't exist in ContentStore would crash combat. Empty table is
-      // safe: the encounter selector falls back gracefully.
-      encounterTable: [],
+      encounterTable: [{ encounterId: DEV_MIXED_ENCOUNTER_ID, weight: 1 }],
       levelRange: theme.levelRange,
     });
 
@@ -639,7 +663,19 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
 
   ensureConnectivity(tiles, rng, idFactory);
 
-  return { zones, tiles };
+  return {
+    zones,
+    tiles,
+    encounters: [cloneEncounter(DEV_MIXED_ENCOUNTER)],
+    monsters: DEV_CASTER_MONSTER_IDS
+      .map(id => SEED_MONSTERS[id])
+      .filter((m): m is MonsterDefinition => !!m)
+      .map(m => ({ ...m, skills: m.skills?.map(s => ({ ...s })), drops: m.drops?.map(d => ({ ...d })) })),
+  };
+}
+
+function cloneEncounter(encounter: EncounterDefinition): EncounterDefinition {
+  return { ...encounter, monsterPool: encounter.monsterPool?.map(e => ({ ...e })) };
 }
 
 /**

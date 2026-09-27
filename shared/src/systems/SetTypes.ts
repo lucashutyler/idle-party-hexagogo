@@ -4,7 +4,7 @@ import type { SkillDefinition } from './SkillTypes.js';
 // --- Types ---
 
 export interface SetBonuses {
-  /** Lower active skill cooldown by X ticks. */
+  /** Lower active skill cooldowns by X seconds. */
   cooldownReduction?: number;
   /** X% increased damage (applied after flat damage calc, stacks additively). */
   damagePercent?: number;
@@ -321,7 +321,7 @@ export function getSetDisplayName(set: SetDefinition): string {
  */
 export function getSetBonusText(bonuses: SetBonuses, skills?: Record<string, SkillDefinition>): string {
   const parts: string[] = [];
-  if (bonuses.cooldownReduction) parts.push(`-${bonuses.cooldownReduction} Active CD`);
+  if (bonuses.cooldownReduction) parts.push(`-${bonuses.cooldownReduction}s Active CD`);
   if (bonuses.damagePercent) parts.push(`+${bonuses.damagePercent}% Damage`);
   if (bonuses.damageResistancePercent) parts.push(`${bonuses.damageResistancePercent}% Damage Resistance`);
   if (bonuses.damageReductionMin || bonuses.damageReductionMax) {

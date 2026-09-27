@@ -1,9 +1,8 @@
 import type { GameClient } from '../network/GameClient';
 
 /**
- * Thin XP strip that lives directly above the bottom nav, visible on every
- * screen. Level badge sits on the left; the fill bar takes the rest. No raw
- * numbers — those live on the Character screen.
+ * Thin XP strip directly above the bottom nav, visible on every screen. The level
+ * label is hidden by CSS (the top HUD shows the level); raw numbers live on the Character screen.
  */
 export class PersistentXpBar {
   private container: HTMLElement;

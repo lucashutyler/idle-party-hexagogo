@@ -13,7 +13,10 @@ export interface Resistance {
 export interface MonsterSkillEntry {
   skillId: string;
   value: number;
+  /** Seconds after use; 0 = usable on every action. */
   cooldown: number;
+  /** Seconds of telegraphed wind-up; overrides the catalog default. */
+  castTime?: number;
 }
 
 export interface MonsterDefinition {
@@ -28,6 +31,8 @@ export interface MonsterDefinition {
   drops?: ItemDrop[];
   resistances?: Resistance[];
   skills?: MonsterSkillEntry[];
+  /** Seconds between actions; default 1, clamped to at least 0.3 by the engine. */
+  attackInterval?: number;
   /** Passive monsters (e.g. walls) never attack and don't count toward victory. */
   passive?: boolean;
   /** Optional flavor text shown in the monster popup. */
@@ -43,12 +48,12 @@ export interface MonsterInstance {
   damageType: DamageType;
   xp: number;
   gridPosition: PartyGridPosition;
-  /** Remaining stun turns (0 = not stunned). */
-  stunTurns: number;
   resistances?: Resistance[];
   skills?: MonsterSkillEntry[];
-  /** Cooldown ticks remaining per skill ID. */
+  /** Cooldown milliseconds remaining per skill ID. */
   skillCooldowns?: Record<string, number>;
+  /** Seconds between actions (see MonsterDefinition.attackInterval). */
+  attackInterval?: number;
   /** Passive monsters (e.g. walls) never attack and don't count toward victory. */
   passive?: boolean;
   /** Optional flavor text shown in the monster popup. */
@@ -81,8 +86,9 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     id: 'wolf',
     name: 'Wolf',
     hp: 20,
-    damage: 6,
+    damage: 5,
     damageType: 'magical',
+    attackInterval: 0.8,
     xp: 10,
     goldMin: 3,
     goldMax: 5,
@@ -98,8 +104,9 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
     id: 'bandit',
     name: 'Bandit',
     hp: 30,
-    damage: 5,
+    damage: 6,
     damageType: 'physical',
+    attackInterval: 1.25,
     xp: 15,
     goldMin: 2,
     goldMax: 5,
@@ -110,6 +117,43 @@ export const SEED_MONSTERS: Record<string, MonsterDefinition> = {
       { itemId: 'splintered_buckler', chance: 0.005 },
       { itemId: 'cracked_idol', chance: 0.004 },
       { itemId: 'iron_battleaxe', chance: 0.003 },
+    ],
+  },
+  goblin_shaman: {
+    id: 'goblin_shaman',
+    name: 'Goblin Shaman',
+    hp: 18,
+    damage: 3,
+    damageType: 'magical',
+    xp: 9,
+    goldMin: 2,
+    goldMax: 4,
+    skills: [
+      { skillId: 'fireball', value: 4, cooldown: 5 },
+      { skillId: 'heal', value: 8, cooldown: 4 },
+    ],
+    description: 'A wiry goblin draped in charms, muttering over a smoking fetish. It hurls fire and patches up its kin.',
+    drops: [
+      { itemId: 'gnarled_wand', chance: 0.01 },
+      { itemId: 'tarnished_ring', chance: 0.005 },
+    ],
+  },
+  bandit_cutthroat: {
+    id: 'bandit_cutthroat',
+    name: 'Bandit Cutthroat',
+    hp: 26,
+    damage: 5,
+    damageType: 'physical',
+    xp: 18,
+    goldMin: 3,
+    goldMax: 6,
+    skills: [
+      { skillId: 'assassinate', value: 12, cooldown: 6 },
+    ],
+    description: 'A quiet killer who picks out the weakest in a group and waits for an opening.',
+    drops: [
+      { itemId: 'rusty_dagger', chance: 0.01 },
+      { itemId: 'old_leather_boots', chance: 0.008 },
     ],
   },
   stone_wall: {
@@ -138,13 +182,13 @@ export function createMonsterInstance(def: MonsterDefinition, gridPosition: Part
     damageType: def.damageType,
     xp: def.xp,
     gridPosition,
-    stunTurns: 0,
   };
+  if (def.attackInterval !== undefined) instance.attackInterval = def.attackInterval;
   if (def.resistances?.length) {
-    instance.resistances = def.resistances;
+    instance.resistances = def.resistances.map(r => ({ ...r }));
   }
   if (def.skills?.length) {
-    instance.skills = def.skills;
+    instance.skills = def.skills.map(s => ({ ...s }));
     instance.skillCooldowns = {};
     for (const s of def.skills) {
       instance.skillCooldowns[s.skillId] = 0;
