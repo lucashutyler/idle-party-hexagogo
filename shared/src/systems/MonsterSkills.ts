@@ -1,5 +1,6 @@
 import type { DamageType } from './CharacterStats.js';
 import type { MonsterSkillEntry } from './MonsterTypes.js';
+import { COMBAT_STEP_MS } from './CombatTiming.js';
 
 // --- Types ---
 
@@ -56,7 +57,7 @@ export const MONSTER_SKILL_CATALOG: Record<string, MonsterSkillDefinition> = {
   heal: {
     id: 'heal',
     name: 'Heal',
-    description: 'Casts for 1 second, then heals the most wounded other ally',
+    description: 'Casts for 1 second, then heals the ally with the lowest HP (itself included)',
     targeting: 'lowest_hp_ally',
     effect: 'heal',
     cooldown: 2,
@@ -78,5 +79,5 @@ export const MONSTER_SKILL_CATALOG: Record<string, MonsterSkillDefinition> = {
 export function getMonsterSkillCastTimeMs(entry: MonsterSkillEntry, def?: MonsterSkillDefinition): number {
   const seconds = entry.castTime ?? def?.castTime ?? MONSTER_SKILL_CATALOG[entry.skillId]?.castTime ?? 0;
   if (!Number.isFinite(seconds) || seconds <= 0) return 0;
-  return Math.round(seconds * 1000);
+  return Math.ceil(Math.round(seconds * 1000) / COMBAT_STEP_MS) * COMBAT_STEP_MS;
 }

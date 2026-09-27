@@ -481,7 +481,10 @@ export class CombatPlayback {
         }
         break;
       case 'revive':
-        if (dst) dst.hp = Math.max(1, amount);
+        if (dst) {
+          dst.hp = Math.max(1, amount);
+          dst.cast = null;
+        }
         break;
       case 'stun':
         if (dst && (ev.durationMs ?? 0) > dst.stunMs) {

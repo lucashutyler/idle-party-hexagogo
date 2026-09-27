@@ -128,6 +128,9 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
       if (!MONSTER_SKILL_CATALOG[entry.skillId]) {
         problems.push(`${label} references unknown monster skill '${entry.skillId}' (known: ${Object.keys(MONSTER_SKILL_CATALOG).join(', ')}).`);
       }
+      if (!isNumberAtLeast(entry.value, 0)) {
+        problems.push(`${label} value must be a number, 0 or more (got ${String(entry.value)}).`);
+      }
       if (!isNumberAtLeast(entry.cooldown, 0)) {
         problems.push(`${label} cooldown must be a number of seconds, 0 or more (got ${String(entry.cooldown)}).`);
       }

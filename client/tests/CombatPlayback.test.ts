@@ -267,6 +267,13 @@ describe('CombatPlayback event model', () => {
     expect(after.attacks).toBe(0);
   });
 
+  it('drops a cast when its caster is revived mid-cast', () => {
+    const pb = ready();
+    play(pb, [ev(1100, 'cast_start', { src: P, dst: M, skill: 'Blizzard', skillId: 'mage_blizzard', durationMs: 1500 })]);
+    play(pb, [ev(1200, 'revive', { dst: P, amount: 20 })]);
+    expect(pb.unit('player', 4)!.cast).toBeNull();
+  });
+
   it('removes a cast on interrupt and pauses a stunned player cast', () => {
     const pb = ready();
     play(pb, [ev(1100, 'cast_start', { src: M, dst: P, skill: 'Heal', skillId: 'heal', durationMs: 1000 })]);

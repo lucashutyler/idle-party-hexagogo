@@ -4,7 +4,7 @@ import type { Resistance } from '../MonsterTypes.js';
 import type { ActiveEffect, PassiveEffect, PassiveEffectKind, SkillDefinition } from '../SkillTypes.js';
 import { getSkillTrigger } from '../SkillTypes.js';
 import type { CombatMonster, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
-import { MIN_COOLDOWN_MS } from '../CombatTiming.js';
+import { COMBAT_STEP_MS, MIN_COOLDOWN_MS } from '../CombatTiming.js';
 
 const MAX_CAST_TIME_MS = 10000;
 const MAX_WARMUP_MS = 60000;
@@ -149,7 +149,12 @@ function secondsToMs(seconds: number | undefined, fallbackMs: number, maxMs: num
 /** Wind-up of an action skill; skills with a trigger never cast. */
 export function skillCastTimeMs(skill: SkillDefinition): number {
   if (getSkillTrigger(skill)) return 0;
-  return secondsToMs(skill.castTime, 0, MAX_CAST_TIME_MS);
+  return ceilToStep(secondsToMs(skill.castTime, 0, MAX_CAST_TIME_MS));
+}
+
+/** Casts only resolve on step boundaries, so their length is rounded up to whole steps. */
+function ceilToStep(ms: number): number {
+  return Math.ceil(ms / COMBAT_STEP_MS) * COMBAT_STEP_MS;
 }
 
 /**

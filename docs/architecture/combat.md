@@ -107,7 +107,7 @@ Warm-up (cooldown remaining at battle start): explicit `warmup` if set; otherwis
 
 ### Casts
 
-Skills with `castTime > 0` (players) or an effective monster cast time (below) are telegraphed:
+Skills with `castTime > 0` (players) or an effective monster cast time (below) are telegraphed (cast lengths round up to whole 100 ms combat steps):
 
 1. **Start** — the cooldown starts, `cast` is set, `cast_start {src, dst?, skill, skillId, durationMs}` is emitted and "X begins casting Y!" logged. Single-target kinds lock their target (`cast.target`); AoE kinds pick at resolution. The next action is pushed out by `max(interval, castMs)`.
 2. **Progress** — `remainingMs` counts down on every non-stunned step; a unit never starts an action while casting.
@@ -129,13 +129,13 @@ A skill with a trigger never uses its owner's action timer. It may fire while it
 
 Reactions target from the trigger context: ally kinds take the trigger's ally, single-enemy kinds its enemy, falling back to the kind's normal rule when that slot is missing or dead.
 
-- **Intercept (`redirect_hit`)** fires only for `ally_targeted`, only when the original target's max HP is lower than the reactor's, and never re-redirects. While a monster has a telegraphed damage cast locked on a *different* player, Intercept holds itself for that cast's resolution. The reactor becomes the target (`reaction` + `redirect {src: reactor, dst: original}` events); if the attacker died during the reaction, the attack is cancelled.
+- **Intercept (`redirect_hit`)** fires only for `ally_targeted`, only when the original target's max HP is lower than the reactor's, and never re-redirects. While a monster has a telegraphed damage cast locked on a *different* player, Intercept holds itself for that cast's resolution. The reactor becomes the target (`reaction` + `redirect {src: reactor, dst: original}` events); if an `ally_targeted` reaction killed or stunned the attacker, the attack is cancelled (a telegraphed cast that already resolved still lands).
 - **Shield Slam (`brace_reflect`)** fires only for `self_hit` on a physical hit, dealing `max(1, floor(hit × reflectPercent))` direct damage to every living monster (doubled on Arcane Surge's even count; Intensify does not apply). Its `reaction` event uses the reactor itself as `dst`.
 - **Cure** (`ally_afflicted`) and **Mending** (`ally_low_hp`) are the seed level-trigger instants.
 
 ### Interrupts (`enemy_cast`)
 
-When a monster starts a cast, the first off-cooldown `enemy_cast` skill (player order, slot order; no needed check) **commits**: a `reaction {cardType: 'interrupt'}` is emitted and its cooldown starts. `INTERRUPT_DELAY_MS` (300 ms) later — or immediately if the cast would finish sooner — its effects hit the caster (stun options roll their normal chance, e.g. Drumroll's 25 % per enemy; a stun landing on the caster does not raise its own interrupt). Then, if the caster is alive and still casting that spell, the cast is **countered**: cancelled, exactly one `interrupt {src: reactor, dst: caster, cardType: 'interrupt'}` event (a stun's interrupt carries no `cardType`), and "X's Dispel counters Y's Fireball!" logged. The monster's skill stays on cooldown and its action timer is not refunded. A counter still applies its effects if another stun cancelled the cast first. Casts started in the same step are handled in monster order, each committing its own interrupt.
+When a monster starts a cast, the first off-cooldown `enemy_cast` skill (player order, slot order; no needed check) **commits**: a `reaction {cardType: 'interrupt'}` is emitted and its cooldown starts. `INTERRUPT_DELAY_MS` (300 ms) later — or immediately if the cast would finish sooner — its effects hit the caster (stun options roll their normal chance, e.g. Drumroll's 25 % per enemy; a stun landing on the caster does not raise its own interrupt). Then, if the caster is alive and still casting that spell, the cast is **countered**: cancelled, exactly one `interrupt {src: reactor, dst: caster, cardType: 'interrupt'}` event (a stun's interrupt carries no `cardType`), and "X's Dispel counters Y's Fireball!" logged. The monster's skill stays on cooldown and its action timer is not refunded. A counter still applies its effects if another stun cancelled the cast first. A reactor that is dead or stunned when the delay elapses loses the counter: its cooldown stays spent and a `fizzle` is emitted. Casts started in the same step are handled in monster order, each committing its own interrupt.
 
 **Flash mode** (`isInterruptFlashMode`): when no living non-passive monster has a known skill with a cast time that could do something this fight (fear needs a target-class player, heal and damage/dot always — a lone healer can heal itself), `enemy_cast` skills behave as ordinary action skills (needed check, fizzle fallback, snapshot `ready`/`held`). It is re-evaluated at each owner action and each cast; both modes share one cooldown.
 

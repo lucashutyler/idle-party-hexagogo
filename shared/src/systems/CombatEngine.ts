@@ -1570,7 +1570,7 @@ function resolveMonsterSkill(
   switch (def.effect) {
     case 'damage': {
       const damageType = def.damageType ?? 'physical';
-      const value = Math.max(1, entry.value);
+      const value = Math.max(1, finiteOr0(entry.value));
       if (def.targeting === 'aoe_all') {
         const targets = state.players.filter(isAlive);
         if (targets.length === 0) return false;
@@ -1621,7 +1621,7 @@ function resolveMonsterSkill(
       if (!target) return false;
       const pulses = def.dotDuration ?? 3;
       const damageType = def.damageType ?? 'magical';
-      const perPulse = Math.max(1, entry.value);
+      const perPulse = Math.max(1, finiteOr0(entry.value));
       target.dots.push({
         sourceUsername: monster.name,
         name: def.name.toLowerCase(),
@@ -1641,7 +1641,7 @@ function resolveMonsterSkill(
       if (def.targeting !== 'lowest_hp_ally') return false;
       const target = monsterHealTarget(state.monsters);
       if (!target) return false;
-      const amount = Math.max(0, Math.min(entry.value, target.maxHp - target.currentHp));
+      const amount = Math.max(0, Math.min(finiteOr0(entry.value), target.maxHp - target.currentHp));
       target.currentHp += amount;
       emit(step, 'attack', { src, dst: monsterRef(target), skill: def.name, skillId: entry.skillId });
       emit(step, 'heal', { src, dst: monsterRef(target), amount, skill: def.name });
@@ -1686,6 +1686,7 @@ function monsterSingleTargetAttack(
     trigger: 'ally_targeted', ally: target, enemy: aliveOrUndefined(monster), attack,
   }, playerRef(target));
   if (!isAlive(monster) || !isAlive(attack.target)) return;
+  if (!opts.lockedCast && monster.stunRemainingMs > 0) return;
 
   const finalTarget = attack.target;
   const src = monsterRef(monster);
@@ -1893,11 +1894,19 @@ function resolveDueCounters(step: Step): void {
   for (const counter of due) resolveCounter(step, counter);
 }
 
+function finiteOr0(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
 function resolveCounter(step: Step, counter: PendingCounter): void {
   const { state } = step;
   const reactor = state.players.find(p => p.username === counter.reactorUsername);
   const skill = reactor?.equippedSkills.find(s => s?.id === counter.skillId);
-  if (!reactor || !skill || !isAlive(reactor)) return;
+  if (!reactor || !skill) return;
+  if (!isAlive(reactor) || reactor.stunRemainingMs > 0) {
+    emitPlayerFizzle(step, reactor, skill);
+    return;
+  }
   const caster = state.monsters[counter.casterIndex];
 
   const effective = executeSkill(step, reactor, skill, {
