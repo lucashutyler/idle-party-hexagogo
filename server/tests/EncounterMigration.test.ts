@@ -77,11 +77,17 @@ describe('Encounter Migration', () => {
     });
 
     it('seed monsters have resistances and skills as optional', () => {
-      for (const monster of Object.values(SEED_MONSTERS)) {
-        // These should not be defined on seed monsters (they're optional)
-        // but the fields should be accepted by the type
+      const monsters = Object.values(SEED_MONSTERS);
+      for (const monster of monsters) {
         expect(monster.resistances).toBeUndefined();
-        expect(monster.skills).toBeUndefined();
+      }
+      for (const id of ['goblin', 'wolf', 'bandit']) {
+        expect(SEED_MONSTERS[id].skills).toBeUndefined();
+      }
+      const casters = monsters.filter(m => m.skills !== undefined);
+      expect(casters.map(m => m.id).sort()).toEqual(['bandit_cutthroat', 'goblin_shaman']);
+      for (const caster of casters) {
+        expect(caster.skills!.length).toBeGreaterThan(0);
       }
     });
   });

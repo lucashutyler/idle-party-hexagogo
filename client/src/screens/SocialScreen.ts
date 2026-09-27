@@ -8,6 +8,8 @@ import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIc
 import { renderItemPopupContent } from '../ui/ItemPopup';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { renderAssetImg } from '../ui/assets';
+import { renderSkillCardMeta } from '../ui/SkillCardChip';
+import { partyGridCell } from '../ui/partyGridLayout';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
 
@@ -1264,14 +1266,17 @@ export class SocialScreen implements Screen {
     ` : '';
 
     // Render 3x3 grid
-    let gridHtml = '<div class="social-party-grid">';
+    let gridHtml = `<div class="social-party-front-label" aria-hidden="true">
+      <span class="social-party-front-label-wide">FRONT ▶</span><span class="social-party-front-label-tall">FRONT ▲</span>
+    </div>`;
+    gridHtml += '<div class="social-party-grid">';
     for (let i = 0; i < 9; i++) {
       const member = memberMap.get(i as any);
       const henchman = member ? undefined : henchmanMap.get(i as any);
-      const row = Math.floor(i / 3);
-      const rowLabel = row === 0 ? 'Front' : row === 1 ? 'Mid' : 'Back';
+      const cellPos = partyGridCell(i);
       const henchmanAttr = henchman ? ` data-henchman-instance="${this.escapeHtml(henchman.instanceId)}"` : '';
-      gridHtml += `<div class="social-party-cell${member || henchman ? ' occupied' : ''}" data-pos="${i}"${henchmanAttr} title="${rowLabel} row">`;
+      gridHtml += `<div class="social-party-cell${member || henchman ? ' occupied' : ''}" data-pos="${i}"${henchmanAttr}`
+        + ` data-portrait-row="${cellPos.portraitRow}" data-portrait-col="${cellPos.portraitCol}" title="${cellPos.columnLabel}">`;
       if (member) {
         const isOnline = onlineSet.has(member.username);
         gridHtml += `<span class="social-status-dot ${isOnline ? 'online' : 'offline'}"></span>`;
@@ -2136,8 +2141,6 @@ export class SocialScreen implements Screen {
     for (const cell of this.panelContainer.querySelectorAll<HTMLElement>('.social-party-cell[data-henchman-instance]')) {
       const held = cell.getAttribute('data-henchman-instance') === this.gridPickedUpHenchmanId;
       cell.classList.toggle('grid-picked-up', held);
-      cell.style.boxShadow = held ? '0 0 8px var(--accent-gold)' : '';
-      cell.style.borderColor = held ? 'var(--accent-gold)' : '';
     }
   }
 
@@ -2167,11 +2170,9 @@ export class SocialScreen implements Screen {
     const dx = dstRect.left - srcRect.left;
     const dy = dstRect.top - srcRect.top;
 
-    const srcCol = srcPos % 3;
-    const dstCol = targetPos % 3;
-    const srcRow = Math.floor(srcPos / 3);
-    const dstRow = Math.floor(targetPos / 3);
-    const tiltDeg = (dstCol - srcCol) * 8 + (dstRow - srcRow) * 4;
+    const colSteps = srcRect.width > 0 ? Math.round(dx / srcRect.width) : 0;
+    const rowSteps = srcRect.height > 0 ? Math.round(dy / srcRect.height) : 0;
+    const tiltDeg = colSteps * 8 + rowSteps * 4;
 
     sourceCell.style.setProperty('--tilt', `${tiltDeg}deg`);
     sourceCell.style.setProperty('--move-x', `${dx}px`);
@@ -2425,8 +2426,9 @@ export class SocialScreen implements Screen {
         </div>`;
       }
       return `<div class="profile-skill-slot ${skill.type}">
-        <span class="profile-skill-type">${skill.type}${skill.cooldown ? ` CD${skill.cooldown}` : ''}</span>
+        <span class="profile-skill-type">${skill.type}</span>
         <span class="profile-skill-name">${this.escapeHtml(skill.name)}</span>
+        ${renderSkillCardMeta(skill)}
       </div>`;
     }).join('');
 

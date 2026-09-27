@@ -30,7 +30,7 @@ export interface ItemPopupOptions {
  * Useful for embedding in other modals.
  */
 export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupOptions): string {
-  const color = def.iconColor ?? RARITY_COLORS[def.rarity] ?? '#e8e8e8';
+  const color = def.iconColor ?? RARITY_COLORS[def.rarity] ?? 'var(--text-1)';
   const initials = getItemInitials(def.name);
   const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
 
@@ -48,7 +48,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     statLines.push(`<div><span class="stat-label">Type</span><span>Material</span></div>`);
   }
   if (def.consumable) {
-    statLines.push(`<div><span class="stat-label">Use</span><span style="color:#f6c177">Not usable yet — coming soon!</span></div>`);
+    statLines.push(`<div><span class="stat-label">Use</span><span class="item-popup-coming-soon">Not usable yet — coming soon!</span></div>`);
   }
   statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1)}</span></div>`);
   if (def.value != null && def.value > 0) {
@@ -66,8 +66,8 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     // red if not. The wrapper has a data attribute so the equip-restricted
     // animation can target it for an in-place attention pulse.
     const allowed = !!className && def.classRestriction.includes(className);
-    const restrictColor = allowed ? '#66bb6a' : '#ff6b6b';
-    const cls = def.classRestriction.map(c => `<span style="color:${restrictColor}">${c}</span>`).join(', ');
+    const restrictClass = allowed ? 'item-popup-class-allowed' : 'item-popup-class-denied';
+    const cls = def.classRestriction.map(c => `<span class="${restrictClass}">${c}</span>`).join(', ');
     statLines.push(`<div data-class-restriction="1"><span class="stat-label">Class</span><span>${cls}</span></div>`);
   }
 

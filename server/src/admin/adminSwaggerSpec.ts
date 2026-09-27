@@ -54,6 +54,35 @@ const sharedComponents = {
             },
           },
         },
+        attackInterval: { type: 'number', description: 'Seconds between the monster\'s actions (default 1; clamped to >= 0.3)' },
+        resistances: {
+          type: 'array',
+          description: 'Reduce incoming player damage of one type',
+          items: {
+            type: 'object',
+            properties: {
+              damageType: { type: 'string', enum: ['physical', 'magical', 'holy'] },
+              flatReduction: { type: 'number' },
+              percentReduction: { type: 'number', description: '0-100' },
+            },
+          },
+        },
+        skills: {
+          type: 'array',
+          description: 'On each action the monster uses the first entry that is off cooldown and would have an effect, else it attacks',
+          items: {
+            type: 'object',
+            required: ['skillId', 'value', 'cooldown'],
+            properties: {
+              skillId: { type: 'string', example: 'fireball', description: 'Key of MONSTER_SKILL_CATALOG (fireball, fear, rot, heal, assassinate at time of writing); unknown ids are skipped' },
+              value: { type: 'number', description: 'Damage / heal / DoT amount' },
+              cooldown: { type: 'number', description: 'Seconds after use (>= 0; 0 = every action)' },
+              castTime: { type: 'number', description: 'Seconds of telegraphed wind-up; overrides the catalog default' },
+            },
+          },
+        },
+        passive: { type: 'boolean', description: 'Wall: never acts and does not count toward victory' },
+        description: { type: 'string', description: 'Flavor text shown in the monster popup' },
       },
     },
     ZoneDefinition: {
@@ -90,7 +119,14 @@ const sharedComponents = {
         sortOrder: { type: 'number', description: 'Display order within the class tree' },
         passiveEffects: { type: 'array', items: { type: 'object' }, description: 'Effect options — allowed on both passive and active skills' },
         activeEffects: { type: 'array', items: { type: 'object' }, description: 'Effect options — allowed only on active skills' },
-        cooldown: { type: 'number', description: 'Actives: triggers every Nth attack (>= 1)' },
+        cooldown: { type: 'number', description: 'Actives only: seconds after use before it is ready again (>= 1, fractions allowed)' },
+        castTime: { type: 'number', description: 'Actives only: seconds of telegraphed wind-up (0-10, default 0; not allowed with a trigger)' },
+        warmup: { type: 'number', description: 'Actives only: seconds before first use each battle (0-60; omitted = derived from the cooldown)' },
+        trigger: {
+          type: 'string',
+          enum: ['ally_targeted', 'self_hit', 'enemy_cast', 'ally_afflicted', 'ally_low_hp'],
+          description: 'Actives only: fire as an off-action reaction. Omitted on a redirect_hit skill = ally_targeted, on a brace_reflect skill = self_hit',
+        },
       },
     },
     SkillSlot: {

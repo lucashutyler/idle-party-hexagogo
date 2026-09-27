@@ -3,10 +3,10 @@
  * player saves). Runs from GameLoop.init when NODE_ENV !== 'production'.
  *
  * Two seed passes, both idempotent:
- *   1. seedDevContent — merges 20 generated zones + ~1000 tiles into
- *      ContentStore. Skipped if the marker zone is already present (so
- *      restarts don't duplicate). Tiles that collide with existing
- *      coords are skipped too.
+ *   1. seedDevContent — merges 20 generated zones + ~1000 tiles (plus the
+ *      dev encounters and missing caster monsters) into ContentStore. If the
+ *      marker zone is already present it only tops up what an older seed
+ *      lacked. Tiles that collide with existing coords are skipped too.
  *   2. seedDevPlayers — creates 100 verified accounts (bot_001..100),
  *      assigns each a class/level/position/party, and persists their
  *      saves to disk. Skipped if even one bot's save already exists,
@@ -51,18 +51,20 @@ function mulberry32(seed: number): () => number {
 }
 
 /**
- * Merge the procedurally-generated dev world (20 zones, ~1000 rooms)
- * into the content store. Idempotent — re-runs return immediately if
- * the marker zone is already present.
+ * Merge the procedurally-generated dev world (zones, rooms, encounters, missing
+ * monsters) into the content store, or top up an older seed. True when content changed.
  */
 export async function seedDevContent(content: ContentStore): Promise<boolean> {
-  if (content.getZone(DEV_SEED_MARKER_ZONE_ID)) {
-    console.log('[DevSeed] Dev world already seeded — skipping.');
-    return false;
-  }
   const t0 = performance.now();
-  const { zones, tiles } = generateDevWorld({ seed: 1 });
-  await content.mergeSeedContent(zones, tiles);
+  const { zones, tiles, encounters, monsters } = generateDevWorld({ seed: 1 });
+  if (content.getZone(DEV_SEED_MARKER_ZONE_ID)) {
+    const changes = await content.upgradeSeedContent(zones, encounters, monsters);
+    console.log(changes > 0
+      ? `[DevSeed] Upgraded existing dev world (${changes} additions).`
+      : '[DevSeed] Dev world already seeded — skipping.');
+    return changes > 0;
+  }
+  await content.mergeSeedContent(zones, tiles, { encounters, monsters });
   console.log(
     `[DevSeed] Merged ${zones.length} dev zones + ${tiles.length} dev tiles in ` +
     `${(performance.now() - t0).toFixed(1)}ms.`,

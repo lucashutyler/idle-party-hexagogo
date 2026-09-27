@@ -23,7 +23,7 @@ export class SuspensionScreen implements Screen {
     const feedback = this.container.querySelector('.suspension-feedback') as HTMLElement;
     if (textarea) { textarea.value = ''; textarea.disabled = false; }
     if (btn) { btn.disabled = false; btn.textContent = 'Submit'; }
-    if (feedback) feedback.textContent = '';
+    if (feedback) setFeedback(feedback, '', null);
   }
 
   onDeactivate(): void {
@@ -33,12 +33,12 @@ export class SuspensionScreen implements Screen {
   private buildDOM(): void {
     this.container.innerHTML = `
       <div class="offline-content">
-        <div class="offline-icon" style="color: var(--color-danger, #e74c3c);">X</div>
+        <div class="offline-icon suspension-icon">X</div>
         <h2 class="offline-title">Account Suspended</h2>
         <p class="offline-status">Your account has been suspended. If you believe this is an error, you may submit a case for review below.</p>
-        <textarea class="suspension-textarea" placeholder="Explain why your account should be reactivated..." maxlength="500" rows="4" style="width: 100%; max-width: 400px; margin: 12px auto; display: block; font-family: inherit; font-size: inherit; padding: 8px; background: var(--color-bg-panel, #1a1a2e); color: var(--color-text, #eee); border: 2px solid var(--color-border, #333); resize: vertical;"></textarea>
-        <button class="suspension-submit" style="margin-top: 4px;">Submit</button>
-        <p class="suspension-feedback" style="margin-top: 8px; min-height: 1.2em;"></p>
+        <textarea class="suspension-textarea" placeholder="Explain why your account should be reactivated..." maxlength="500" rows="4"></textarea>
+        <button class="suspension-submit">Submit</button>
+        <p class="suspension-feedback"></p>
       </div>
     `;
   }
@@ -51,13 +51,11 @@ export class SuspensionScreen implements Screen {
     btn.addEventListener('click', async () => {
       const text = textarea.value.trim();
       if (!text) {
-        feedback.textContent = 'Please enter your case before submitting.';
-        feedback.style.color = 'var(--color-danger, #e74c3c)';
+        setFeedback(feedback, 'Please enter your case before submitting.', 'error');
         return;
       }
       if (!this.email) {
-        feedback.textContent = 'Unable to submit — no account email found.';
-        feedback.style.color = 'var(--color-danger, #e74c3c)';
+        setFeedback(feedback, 'Unable to submit — no account email found.', 'error');
         return;
       }
 
@@ -68,22 +66,25 @@ export class SuspensionScreen implements Screen {
       try {
         const result = await submitAppeal(this.email, text);
         if (result.success) {
-          feedback.textContent = 'Your case has been submitted for review.';
-          feedback.style.color = 'var(--color-success, #2ecc71)';
+          setFeedback(feedback, 'Your case has been submitted for review.', 'success');
         } else {
-          feedback.textContent = result.error ?? 'Failed to submit. Please try again.';
-          feedback.style.color = 'var(--color-danger, #e74c3c)';
+          setFeedback(feedback, result.error ?? 'Failed to submit. Please try again.', 'error');
           btn.disabled = false;
           btn.textContent = 'Submit';
           textarea.disabled = false;
         }
       } catch {
-        feedback.textContent = 'Could not connect to server. Please try again later.';
-        feedback.style.color = 'var(--color-danger, #e74c3c)';
+        setFeedback(feedback, 'Could not connect to server. Please try again later.', 'error');
         btn.disabled = false;
         btn.textContent = 'Submit';
         textarea.disabled = false;
       }
     });
   }
+}
+
+function setFeedback(el: HTMLElement, text: string, tone: 'error' | 'success' | null): void {
+  el.textContent = text;
+  if (tone) el.dataset.tone = tone;
+  else delete el.dataset.tone;
 }

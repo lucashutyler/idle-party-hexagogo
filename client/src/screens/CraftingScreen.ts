@@ -97,7 +97,7 @@ export class CraftingScreen implements Screen {
           <div class="craft-locked">
             <h3>Crafting locked</h3>
             <p>Reach level ${c.unlockLevel} to begin crafting.</p>
-            <p style="opacity:0.7;font-size:0.85em">Current Level: ${this.lastLevel}</p>
+            <p class="craft-locked-level">Current Level: ${this.lastLevel}</p>
           </div>
         </div>
       `;

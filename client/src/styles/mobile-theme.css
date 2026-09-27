@@ -1240,9 +1240,9 @@ button.notif-prefs-bulk-btn {
 .item-square {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0) 42%),
-    radial-gradient(120% 120% at 50% 15%,
-      color-mix(in srgb, var(--item-bg, var(--rarity, var(--rarity-common))) 60%, var(--surface-1)) 0%,
-      color-mix(in srgb, var(--item-bg, var(--rarity, var(--rarity-common))) 20%, var(--bg-0)) 100%);
+    var(--item-bg, radial-gradient(120% 120% at 50% 15%,
+      color-mix(in srgb, var(--rarity, var(--rarity-common)) 60%, var(--surface-1)) 0%,
+      color-mix(in srgb, var(--rarity, var(--rarity-common)) 20%, var(--bg-0)) 100%));
   border: 2px solid color-mix(in srgb, var(--rarity, var(--rarity-common)) 65%, var(--outline));
   border-radius: var(--radius-md);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -3px 0 rgba(0, 0, 0, 0.25), 0 2px 0 rgba(0, 0, 0, 0.35);
@@ -2800,4 +2800,315 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   .item-square:hover {
     transform: none;
   }
+}
+
+/* ── Player-screen polish (skill cards, party formation, inline-style replacements) ── */
+
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="attack"] { --skill-card-color: var(--card-attack); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="support"] { --skill-card-color: var(--card-support); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="enchantment"] { --skill-card-color: var(--card-enchantment); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="instant"] { --skill-card-color: var(--card-instant); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="interrupt"] { --skill-card-color: var(--card-interrupt); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="passive"] { --skill-card-color: var(--card-passive); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="triggered"] { --skill-card-color: var(--card-triggered); }
+
+.skill-card-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 6px;
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--font-body);
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-2);
+}
+
+.skill-card-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--skill-card-color, var(--card-passive)) 60%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--skill-card-color, var(--card-passive)) 18%, transparent);
+  color: var(--skill-card-color, var(--card-passive));
+  font-size: var(--fs-2xs);
+  font-weight: 900;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.skill-card-chip-icon {
+  line-height: 1;
+}
+
+.skill-card-meta-part {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.skill-card-meta-trigger {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--skill-card-color, var(--text-2));
+}
+
+.charitems-skill-slot .skill-card-meta {
+  justify-content: center;
+}
+
+.charitems-skill-slot .skill-card-meta-trigger {
+  white-space: normal;
+  text-align: center;
+}
+
+.charitems-skill-slot .skill-card-meta-trigger-prefix {
+  display: none;
+}
+
+.charitems-skill-popup-current {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.charitems-skill-popup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-skill-slot {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.profile-skill-slot .skill-card-meta {
+  margin-left: auto;
+}
+
+.social-party-front-label {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 4px 4px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.08em;
+  color: var(--gold);
+  text-shadow: 0 1px 0 var(--outline);
+}
+
+.social-party-front-label-tall {
+  display: none;
+}
+
+.social-party-cell.grid-picked-up {
+  border-color: var(--gold);
+  box-shadow: inset 0 1px 0 var(--stroke-hi), var(--glow-gold);
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .social-party-front-label {
+    justify-content: center;
+  }
+
+  .social-party-front-label-wide {
+    display: none;
+  }
+
+  .social-party-front-label-tall {
+    display: inline;
+  }
+
+  .social-party-cell[data-portrait-row="0"] { grid-row: 1; }
+  .social-party-cell[data-portrait-row="1"] { grid-row: 2; }
+  .social-party-cell[data-portrait-row="2"] { grid-row: 3; }
+  .social-party-cell[data-portrait-col="0"] { grid-column: 1; }
+  .social-party-cell[data-portrait-col="1"] { grid-column: 2; }
+  .social-party-cell[data-portrait-col="2"] { grid-column: 3; }
+}
+
+.items-modal-prompt {
+  text-align: center;
+}
+
+.items-modal-count-row {
+  justify-content: center;
+  margin: 8px 0;
+}
+
+.items-modal-count-row .items-modal-btn {
+  min-width: 44px;
+  min-height: 40px;
+  padding: 6px 12px;
+  font-size: var(--fs-md);
+}
+
+.items-modal-count-row .items-modal-count-value {
+  min-width: 32px;
+  text-align: center;
+}
+
+.items-slot-tooltip {
+  position: fixed;
+  z-index: 1000;
+  padding: 4px 10px;
+  border: 1px solid var(--stroke-hi);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-1);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.shop-hire-list {
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.shop-footer {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.shop-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+.shop-hire-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  text-align: left;
+}
+
+.shop-hire-portrait {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: rgba(6, 9, 24, 0.45);
+}
+
+.shop-hire-emoji {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xl);
+}
+
+.shop-hire-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+}
+
+.shop-hire-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-hire-name {
+  font-size: var(--fs-md);
+  color: var(--text-1);
+}
+
+.shop-hire-stats {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.shop-hire-desc {
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+.shop-replace-text {
+  padding: 4px 0 12px;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.shop-replace-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.suspension-icon {
+  color: var(--red);
+}
+
+.suspension-textarea {
+  display: block;
+  width: 100%;
+  max-width: 400px;
+  margin: 12px auto;
+  resize: vertical;
+}
+
+.suspension-submit {
+  margin-top: 4px;
+}
+
+.suspension-feedback {
+  margin-top: 8px;
+  min-height: 1.2em;
+}
+
+.suspension-feedback[data-tone="error"] {
+  color: var(--red);
+}
+
+.suspension-feedback[data-tone="success"] {
+  color: var(--green);
+}
+
+.craft-locked .craft-locked-level {
+  font-size: var(--fs-xs);
+  opacity: 0.7;
+}
+
+.item-popup-coming-soon {
+  color: var(--orange);
+}
+
+.item-popup-class-allowed {
+  color: var(--green);
+}
+
+.item-popup-class-denied {
+  color: var(--red);
 }

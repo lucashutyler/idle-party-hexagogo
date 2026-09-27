@@ -1,6 +1,6 @@
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
-import { MONSTER_SKILL_CATALOG } from '@idle-party-rpg/shared';
+import { MIN_MONSTER_ACTION_INTERVAL_MS, MONSTER_SKILL_CATALOG } from '@idle-party-rpg/shared';
 import type {
   MonsterDefinition,
   ItemDefinition,
@@ -11,6 +11,8 @@ import type {
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
 import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
+
+const MIN_ATTACK_INTERVAL_SECONDS = MIN_MONSTER_ACTION_INTERVAL_MS / 1000;
 
 export class MonstersTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
@@ -40,7 +42,7 @@ export class MonstersTab implements Tab {
         <tr>
           <td>${escapeHtml(m.name)}${m.passive ? ' <span class="admin-pill">passive</span>' : ''}</td>
           <td>${m.hp}</td>
-          <td>${m.damage}</td>
+          <td>${m.damage}${m.attackInterval != null && m.attackInterval !== 1 ? ` <span class="admin-muted">/ ${m.attackInterval}s</span>` : ''}</td>
           <td>${m.damageType}</td>
           <td>${m.xp}</td>
           <td>${m.goldMin}-${m.goldMax}</td>
@@ -66,7 +68,7 @@ export class MonstersTab implements Tab {
               <tr>
                 <th>Name</th>
                 <th>HP</th>
-                <th>Dmg</th>
+                <th>Dmg / Speed</th>
                 <th>Type</th>
                 <th>XP</th>
                 <th>Gold</th>
@@ -125,7 +127,11 @@ export class MonstersTab implements Tab {
           <select id="mf-damageType">
             <option value="physical" ${m.damageType === 'physical' ? 'selected' : ''}>Physical</option>
             <option value="magical" ${m.damageType === 'magical' ? 'selected' : ''}>Magical</option>
+            <option value="holy" ${m.damageType === 'holy' ? 'selected' : ''}>Holy</option>
           </select>
+        </label>
+        <label>Attack interval (s)
+          <input type="number" id="mf-attackInterval" value="${m.attackInterval ?? ''}" min="${MIN_ATTACK_INTERVAL_SECONDS}" step="0.05" placeholder="1 (default)">
         </label>
         <label>XP<input type="number" id="mf-xp" value="${m.xp}" min="0"></label>
         <label>Gold Min<input type="number" id="mf-goldMin" value="${m.goldMin}" min="0"></label>
@@ -148,6 +154,7 @@ export class MonstersTab implements Tab {
       </fieldset>
       <fieldset class="admin-form-fieldset">
         <legend>Skills ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="mf-add-skill" type="button">+ Skill</button>'}</legend>
+        <div class="admin-form-hint">On each action the monster uses the first listed skill that is off cooldown and has something to do, otherwise it attacks. Cooldown and cast time are in seconds; cooldown 0 = every action; blank cast time = the skill's default.</div>
         <div id="mf-skills-list">${skillRows}</div>
       </fieldset>
       <fieldset class="admin-form-fieldset">
@@ -211,8 +218,15 @@ export class MonstersTab implements Tab {
     this.wireRowRemovers(root, '.mf-res-remove', '.monster-resistance-row');
     this.wireRowRemovers(root, '.mf-skill-remove', '.monster-skill-row');
 
+    root.querySelector('#mf-skills-list')?.addEventListener('change', e => {
+      const select = e.target as HTMLElement;
+      if (!select.classList.contains('mf-skill-id')) return;
+      const row = select.closest<HTMLElement>('.monster-skill-row');
+      if (row) this.syncSkillRowDefaults(row);
+    });
+
     root.querySelector('#mf-save')?.addEventListener('click', () => {
-      this.saveForm(root, ctx, modal.close);
+      this.saveForm(root, ctx, monster, modal.close);
     });
 
     wireArtworkSection(root, { kind: 'monster', id: m.id });
@@ -259,20 +273,45 @@ export class MonstersTab implements Tab {
     const options = Object.values(MONSTER_SKILL_CATALOG).map(s =>
       `<option value="${s.id}" ${s.id === entry.skillId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
     ).join('');
+    const unknown = MONSTER_SKILL_CATALOG[entry.skillId]
+      ? ''
+      : `<option value="${escapeHtml(entry.skillId)}" selected>Unknown: ${escapeHtml(entry.skillId)}</option>`;
     const skillDef = MONSTER_SKILL_CATALOG[entry.skillId];
-    const info = skillDef ? `${skillDef.targeting} / ${skillDef.effect}` : '';
     return `
       <div class="monster-skill-row admin-form-row" data-index="${index}">
-        <select class="mf-skill-id">${options}</select>
+        <select class="mf-skill-id">${unknown}${options}</select>
         <label>Value<input type="number" class="mf-skill-value" value="${entry.value}" min="1"></label>
-        <label>CD<input type="number" class="mf-skill-cd" value="${entry.cooldown}" min="1"></label>
-        <span class="admin-form-hint">${escapeHtml(info)}</span>
+        <label>CD (s)<input type="number" class="mf-skill-cd" value="${entry.cooldown}" min="0" step="0.1"></label>
+        <label>Cast (s)<input type="number" class="mf-skill-cast" value="${entry.castTime ?? ''}" min="0" max="10" step="0.1" placeholder="${skillDef?.castTime ?? 0}"></label>
+        <span class="admin-form-hint mf-skill-info">${escapeHtml(this.skillInfo(entry.skillId))}</span>
         <button class="admin-btn admin-btn-sm admin-btn-danger mf-skill-remove" type="button">×</button>
       </div>
     `;
   }
 
-  private async saveForm(root: HTMLElement, ctx: AdminContext, close: () => void): Promise<void> {
+  private skillInfo(skillId: string): string {
+    const def = MONSTER_SKILL_CATALOG[skillId];
+    if (!def) return 'Not in the skill catalog — the monster will skip it';
+    return `${def.targeting} / ${def.effect} — ${def.description}`;
+  }
+
+  private syncSkillRowDefaults(row: HTMLElement): void {
+    const skillId = (row.querySelector('.mf-skill-id') as HTMLSelectElement).value;
+    const def = MONSTER_SKILL_CATALOG[skillId];
+    const info = row.querySelector<HTMLElement>('.mf-skill-info');
+    if (info) info.textContent = this.skillInfo(skillId);
+    const cast = row.querySelector<HTMLInputElement>('.mf-skill-cast');
+    if (cast) cast.placeholder = String(def?.castTime ?? 0);
+    const cd = row.querySelector<HTMLInputElement>('.mf-skill-cd');
+    if (cd && def) cd.value = String(def.cooldown);
+  }
+
+  private async saveForm(
+    root: HTMLElement,
+    ctx: AdminContext,
+    original: MonsterDefinition | null,
+    close: () => void,
+  ): Promise<void> {
     const existingId = (root.querySelector('#mf-id') as HTMLInputElement).value.trim();
     const name = (root.querySelector('#mf-name') as HTMLInputElement).value.trim();
     const hp = parseInt((root.querySelector('#mf-hp') as HTMLInputElement).value);
@@ -281,8 +320,14 @@ export class MonstersTab implements Tab {
     const xp = parseInt((root.querySelector('#mf-xp') as HTMLInputElement).value);
     const goldMin = parseInt((root.querySelector('#mf-goldMin') as HTMLInputElement).value);
     const goldMax = parseInt((root.querySelector('#mf-goldMax') as HTMLInputElement).value);
+    const attackIntervalRaw = (root.querySelector('#mf-attackInterval') as HTMLInputElement).value.trim();
+    const attackInterval = attackIntervalRaw === '' ? undefined : parseFloat(attackIntervalRaw);
 
     if (!name) { alert('Name is required.'); return; }
+    if (attackInterval !== undefined && !(attackInterval >= MIN_ATTACK_INTERVAL_SECONDS)) {
+      alert(`Attack interval must be at least ${MIN_ATTACK_INTERVAL_SECONDS} seconds (blank = 1).`);
+      return;
+    }
 
     const content = ctx.getDisplayContent();
     if (content) {
@@ -309,16 +354,25 @@ export class MonstersTab implements Tab {
     const skills: MonsterSkillEntry[] = [];
     root.querySelectorAll('.monster-skill-row').forEach(row => {
       const skillId = (row.querySelector('.mf-skill-id') as HTMLSelectElement).value;
+      if (!skillId) return;
       const value = parseInt((row.querySelector('.mf-skill-value') as HTMLInputElement).value) || 1;
-      const cooldown = parseInt((row.querySelector('.mf-skill-cd') as HTMLInputElement).value) || 3;
-      if (skillId) skills.push({ skillId, value, cooldown });
+      const cooldownRaw = parseFloat((row.querySelector('.mf-skill-cd') as HTMLInputElement).value);
+      const cooldown = Number.isFinite(cooldownRaw) && cooldownRaw >= 0
+        ? cooldownRaw
+        : (MONSTER_SKILL_CATALOG[skillId]?.cooldown ?? 3);
+      const castTime = parseFloat((row.querySelector('.mf-skill-cast') as HTMLInputElement).value);
+      const entry: MonsterSkillEntry = { skillId, value, cooldown };
+      if (Number.isFinite(castTime) && castTime >= 0) entry.castTime = castTime;
+      skills.push(entry);
     });
 
     const passive = (root.querySelector('#mf-passive') as HTMLInputElement).checked;
     const description = (root.querySelector('#mf-description') as HTMLTextAreaElement).value.trim();
 
     const monster: MonsterDefinition = {
+      ...original,
       id, name, hp, damage, damageType, xp, goldMin, goldMax,
+      attackInterval,
       drops: drops.length > 0 ? drops : undefined,
       resistances: resistances.length > 0 ? resistances : undefined,
       skills: skills.length > 0 ? skills : undefined,

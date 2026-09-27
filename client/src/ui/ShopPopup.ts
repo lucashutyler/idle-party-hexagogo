@@ -177,7 +177,7 @@ export class ShopPopup {
     const hireActive = this.mode === 'hire' ? ' active' : '';
 
     const listHtml = this.mode === 'hire'
-      ? `<div class="shop-hire-list" style="max-height:45vh;overflow-y:auto;">${this.renderHireList(offers, !!ShopPopup.currentHenchmanName(state))}</div>`
+      ? `<div class="shop-hire-list">${this.renderHireList(offers, !!ShopPopup.currentHenchmanName(state))}</div>`
       : `<div class="shop-items-grid">${this.mode === 'buy'
           ? this.renderBuyItems(shop, itemDefs, setDefs)
           : this.renderSellItems(char.inventory, char.equipment, itemDefs, setDefs)}</div>`;
@@ -201,7 +201,7 @@ export class ShopPopup {
           ${hireToggle}
         </div>
         ${listHtml}
-        <div style="margin-top:12px;text-align:center;">
+        <div class="shop-footer">
           <button class="item-popup-btn item-popup-btn-secondary shop-close-btn">Close</button>
         </div>
       </div>
@@ -257,7 +257,7 @@ export class ShopPopup {
       const def = itemDefs[si.itemId];
       if (!def) {
         const name = si.itemId;
-        return `<div class="item-square shop-item-square" data-item-id="${si.itemId}" data-price="${si.price}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(name)}">
+        return `<div class="item-square shop-item-square" data-item-id="${si.itemId}" data-price="${si.price}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(name)}">
           <span class="item-square-initials">${name.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
           <span class="shop-item-price">${si.price}g</span>
         </div>`;
@@ -281,13 +281,13 @@ export class ShopPopup {
     const entries = listUnequippedEntries(inventory);
 
     if (entries.length === 0) {
-      return '<div style="color:#888;text-align:center;padding:16px;">No items to sell</div>';
+      return '<div class="shop-empty">No items to sell</div>';
     }
 
     return entries.map(([itemId, qty]) => {
       const def = itemDefs[itemId];
       if (!def) {
-        return `<div class="item-square shop-item-square" data-item-id="${itemId}" data-qty="${qty}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(itemId)}">
+        return `<div class="item-square shop-item-square" data-item-id="${itemId}" data-qty="${qty}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(itemId)}">
           <span class="item-square-initials">${itemId.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
           <span class="shop-item-price">1g</span>
         </div>`;
@@ -320,19 +320,19 @@ export class ShopPopup {
     this.overlay.innerHTML = `
       <div class="shop-popup">
         <div class="shop-header"><span class="shop-title">Replace your henchman?</span></div>
-        <div class="shop-hire-row" style="display:flex;align-items:center;gap:8px;padding:8px 0;text-align:left;">
-          <div class="shop-hire-portrait" style="position:relative;flex:0 0 auto;width:44px;height:44px;border-radius:4px;overflow:hidden;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;">
+        <div class="shop-hire-row">
+          <div class="shop-hire-portrait">
             ${ShopPopup.henchmanPortrait(offer)}
           </div>
-          <div class="shop-hire-info" style="flex:1;min-width:0;">
-            <div class="shop-hire-name" style="font-size:15px;">${escapeHtml(offer.name)}</div>
-            <div class="shop-hire-stats" style="font-size:12px;color:#ccc;">Lv ${offer.level} · ${offer.maxHp} HP · ${offer.baseDamage} DMG</div>
+          <div class="shop-hire-info">
+            <div class="shop-hire-name">${escapeHtml(offer.name)}</div>
+            <div class="shop-hire-stats">Lv ${offer.level} · ${offer.maxHp} HP · ${offer.baseDamage} DMG</div>
           </div>
         </div>
-        <div style="font-size:13px;color:#ccc;line-height:1.5;padding:4px 0 12px;">
+        <div class="shop-replace-text">
           ${escapeHtml(currentName)} will leave your party, and ${escapeHtml(offer.name)} will take their place in your formation.
         </div>
-        <div style="display:flex;gap:8px;justify-content:center;">
+        <div class="shop-replace-actions">
           <button class="item-popup-btn item-popup-btn-primary shop-replace-confirm">Replace</button>
           <button class="item-popup-btn item-popup-btn-secondary shop-replace-cancel">Cancel</button>
         </div>
@@ -353,23 +353,23 @@ export class ShopPopup {
 
   private renderHireList(offers: HenchmanOffer[], hasHenchman: boolean): string {
     if (offers.length === 0) {
-      return '<div style="color:#888;text-align:center;padding:16px;">Nobody here is looking for work</div>';
+      return '<div class="shop-empty">Nobody here is looking for work</div>';
     }
 
     return offers.map(o => {
       const description = o.description?.trim();
       const descriptionHtml = description
-        ? `<div class="shop-hire-desc" style="font-size:12px;color:#999;line-height:1.4;">${escapeHtml(description)}</div>`
+        ? `<div class="shop-hire-desc">${escapeHtml(description)}</div>`
         : '';
       return `
-        <div class="shop-hire-row" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);text-align:left;">
-          <div class="shop-hire-portrait" style="position:relative;flex:0 0 auto;width:44px;height:44px;border-radius:4px;overflow:hidden;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;">
+        <div class="shop-hire-row">
+          <div class="shop-hire-portrait">
             ${ShopPopup.henchmanPortrait(o)}
           </div>
-          <div class="shop-hire-info" style="flex:1;min-width:0;">
-            <div class="shop-hire-name" style="font-size:15px;">${escapeHtml(o.name)}</div>
+          <div class="shop-hire-info">
+            <div class="shop-hire-name">${escapeHtml(o.name)}</div>
             ${descriptionHtml}
-            <div class="shop-hire-stats" style="font-size:12px;color:#ccc;">Lv ${o.level} · ${o.maxHp} HP · ${o.baseDamage} DMG</div>
+            <div class="shop-hire-stats">Lv ${o.level} · ${o.maxHp} HP · ${o.baseDamage} DMG</div>
           </div>
           <button class="item-popup-btn item-popup-btn-primary shop-hire-btn" data-henchman-id="${escapeHtml(o.henchmanId)}">${hasHenchman ? 'Replace' : 'Hire'}</button>
         </div>
@@ -379,9 +379,9 @@ export class ShopPopup {
 
   /** Photo layered over an emoji fallback, so a missing or broken image still renders a portrait. */
   private static henchmanPortrait(offer: HenchmanOffer): string {
-    const emoji = `<span class="shop-hire-emoji" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:24px;">${escapeHtml(offer.emoji)}</span>`;
+    const emoji = `<span class="shop-hire-emoji">${escapeHtml(offer.emoji)}</span>`;
     if (!offer.artworkUrl) return emoji;
-    const img = `<img class="shop-hire-img" style="opacity:0;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-rendering:pixelated;"`
+    const img = `<img class="shop-hire-img"`
       + ` src="${escapeHtml(offer.artworkUrl)}" alt="${escapeHtml(offer.name)}"`
       + ` onload="this.style.opacity='1'" onerror="this.style.display='none'" loading="lazy" decoding="async" />`;
     return `${emoji}${img}`;

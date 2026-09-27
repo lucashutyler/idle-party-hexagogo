@@ -2,6 +2,7 @@ import type { GameClient } from '../network/GameClient';
 import type { ChatMessage, ChatChannelType, ServerStateMessage } from '@idle-party-rpg/shared';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { chatFocusTracker } from '../network/ChatFocusTracker';
+import { floatingVerticalBounds } from './chatBounds';
 
 const STORAGE_KEY_GEOMETRY = 'chatPopoutGeometry';
 const STORAGE_KEY_FILTERS = 'chatPopoutFilters';
@@ -368,13 +369,13 @@ export class ChatPopout {
       // as a final safety net.
       const margin = 8;
       const vw = window.innerWidth;
-      const bottom = this.getBottomBoundary();
+      const bounds = this.getVerticalBounds();
       const w = this.window.offsetWidth;
       const h = this.window.offsetHeight;
       const maxLeft = vw - w - margin;
-      const maxTop = bottom - h - margin;
+      const maxTop = bounds.bottom - h - margin;
       const left = Math.max(margin, Math.min(maxLeft, startL + dx));
-      const top = Math.max(margin, Math.min(maxTop, startT + dy));
+      const top = Math.max(bounds.top + margin, Math.min(maxTop, startT + dy));
       this.window.style.left = `${left}px`;
       this.window.style.top = `${top}px`;
       this.window.style.right = 'auto';
@@ -412,7 +413,7 @@ export class ChatPopout {
       const margin = 8;
       const rect = this.window.getBoundingClientRect();
       const maxW = window.innerWidth - rect.left - margin;
-      const maxH = this.getBottomBoundary() - rect.top - margin;
+      const maxH = this.getVerticalBounds().bottom - rect.top - margin;
       const w = Math.max(280, Math.min(maxW, startW + (e.clientX - startX)));
       const h = Math.max(200, Math.min(maxH, startH + (e.clientY - startY)));
       this.window.style.width = `${w}px`;
@@ -428,31 +429,32 @@ export class ChatPopout {
     });
   }
 
-  /**
-   * Bottom of the usable area for the chat window — above the persistent
-   * XP bar and bottom nav. We measure live so the constraint is correct
-   * even if the user has resized the window or those elements are hidden.
-   */
-  private getBottomBoundary(): number {
-    const nav = document.getElementById('bottom-nav');
-    const xpbar = document.getElementById('persistent-xp-bar');
-    const navH = nav && nav.offsetHeight > 0 ? nav.offsetHeight : 0;
-    const xpH = xpbar && xpbar.offsetHeight > 0 ? xpbar.offsetHeight : 0;
-    return window.innerHeight - navH - xpH;
+  /** Usable band between the top HUD and the XP bar / floating nav (incl. the raised Battle button), measured live. */
+  private getVerticalBounds(): { top: number; bottom: number } {
+    const rectOf = (el: Element | null) => el?.getBoundingClientRect() ?? null;
+    return floatingVerticalBounds(
+      window.innerHeight,
+      [rectOf(document.getElementById('top-hud'))],
+      [
+        rectOf(document.getElementById('persistent-xp-bar')),
+        rectOf(document.getElementById('bottom-nav')),
+        rectOf(document.querySelector('#bottom-nav .nav-tab[data-screen="combat"] .nav-tab-bg')),
+      ],
+    );
   }
 
   private constrainToViewport(): void {
     if (this.isMobile()) return;
     const rect = this.window.getBoundingClientRect();
     const vw = window.innerWidth;
-    const bottom = this.getBottomBoundary();
+    const { top: minTop, bottom } = this.getVerticalBounds();
     const margin = 8;
     let left = rect.left;
     let top = rect.top;
     let width = Math.min(rect.width, vw - 2 * margin);
-    let height = Math.min(rect.height, bottom - 2 * margin);
+    let height = Math.min(rect.height, bottom - minTop - 2 * margin);
     if (left < margin) left = margin;
-    if (top < margin) top = margin;
+    if (top < minTop + margin) top = minTop + margin;
     if (left + width > vw - margin) left = vw - width - margin;
     if (top + height > bottom - margin) top = bottom - height - margin;
     this.window.style.left = `${left}px`;

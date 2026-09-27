@@ -1,0 +1,228 @@
+import type { PlaybackUnit } from './CombatPlayback';
+import { escapeHtml, hpTier, initials, MAX_VISIBLE_PIPS, pipsKey, statusPips } from './CombatFormat';
+
+export interface CardIdentity {
+  name: string;
+  isSelf: boolean;
+  henchman: boolean;
+  passive: boolean;
+  /** Primary art URL, then an optional fallback; the icon, emoji or initials show until one loads. */
+  art?: string;
+  artFallback?: string;
+  /** Small icon image (class icon) layered over the initials. */
+  icon?: string;
+  /** Replaces the initials (henchman emoji). */
+  emoji?: string;
+}
+
+const CHANGE_EPSILON = 0.005;
+
+/** One combatant's card. Writes to the DOM only when a value visibly changes. */
+export class UnitCard {
+  readonly el: HTMLElement;
+  readonly body: HTMLElement;
+  readonly flashEl: HTMLElement;
+  readonly glowEl: HTMLElement;
+  private readonly img: HTMLImageElement;
+  private readonly classIcon: HTMLImageElement;
+  private readonly iconEl: HTMLElement;
+  private readonly nameEl: HTMLElement;
+  private readonly pipsEl: HTMLElement;
+  private readonly castLabel: HTMLElement;
+  private identityKey = '';
+  private lastAct = -1;
+  private lastHp = -1;
+  private lastShield = -1;
+  private lastCast = -1;
+  private lastCastKey = '';
+  private lastPips = '';
+  private lastStatuses: unknown = null;
+  private lastPipFlags = '';
+  private lastTier = '';
+  private lastDead: boolean | null = null;
+  private lastStunned: boolean | null = null;
+  private lastPaused: boolean | null = null;
+  private lastTargeted = false;
+  private brokenUntil = 0;
+
+  constructor(readonly key: string, side: 'player' | 'monster', pos: number) {
+    this.el = document.createElement('div');
+    this.el.className = 'combat-card';
+    this.el.dataset.grid = String(pos);
+    this.el.dataset.side = side;
+    this.el.innerHTML = `
+      <div class="combat-card-body">
+        <div class="combat-card-portrait">
+          <div class="combat-card-ring"></div>
+          <div class="combat-card-art">
+            <span class="combat-card-icon"></span>
+            <img class="combat-card-classicon" alt="" draggable="false" />
+            <img class="combat-card-img" alt="" draggable="false" />
+          </div>
+          <div class="combat-card-flash"></div>
+          <div class="combat-card-glow"></div>
+          <div class="combat-card-stun"><span>💫</span></div>
+        </div>
+        <div class="combat-card-info">
+          <div class="combat-card-name"></div>
+          <div class="combat-card-hp">
+            <div class="combat-card-hp-chip"></div>
+            <div class="combat-card-hp-fill"></div>
+            <div class="combat-card-hp-shield"></div>
+          </div>
+          <div class="combat-card-pips"></div>
+        </div>
+      </div>
+      <div class="combat-card-cast"><div class="combat-card-cast-fill"></div><span class="combat-card-cast-label"></span></div>
+    `;
+    this.body = this.el.querySelector('.combat-card-body')!;
+    this.flashEl = this.el.querySelector('.combat-card-flash')!;
+    this.glowEl = this.el.querySelector('.combat-card-glow')!;
+    this.img = this.el.querySelector('.combat-card-img')!;
+    this.classIcon = this.el.querySelector('.combat-card-classicon')!;
+    this.iconEl = this.el.querySelector('.combat-card-icon')!;
+    this.nameEl = this.el.querySelector('.combat-card-name')!;
+    this.pipsEl = this.el.querySelector('.combat-card-pips')!;
+    this.castLabel = this.el.querySelector('.combat-card-cast-label')!;
+  }
+
+  setIdentity(id: CardIdentity): void {
+    const key = `${id.name}|${id.isSelf}|${id.henchman}|${id.passive}|${id.art ?? ''}|${id.icon ?? ''}|${id.emoji ?? ''}`;
+    if (key === this.identityKey) return;
+    this.identityKey = key;
+    this.el.classList.toggle('self', id.isSelf);
+    this.el.classList.toggle('henchman', id.henchman);
+    this.el.classList.toggle('passive', id.passive);
+    this.el.classList.toggle('one-word', !/\s/.test(id.name.trim()));
+    this.nameEl.textContent = id.name;
+    this.el.title = id.name;
+    this.iconEl.textContent = id.emoji || initials(id.name);
+    this.iconEl.classList.toggle('emoji', !!id.emoji);
+    loadImage(this.classIcon, id.icon, undefined);
+    loadImage(this.img, id.art, id.artFallback);
+  }
+
+  update(unit: PlaybackUnit, now: number): void {
+    const dead = unit.hp <= 0;
+    if (dead !== this.lastDead) {
+      this.lastDead = dead;
+      this.el.classList.toggle('dead', dead);
+    }
+    const stunned = !dead && unit.stunMs > 0;
+    if (stunned !== this.lastStunned) {
+      this.lastStunned = stunned;
+      this.el.classList.toggle('stunned', stunned);
+    }
+
+    const hpFrac = unit.maxHp > 0 ? Math.max(0, Math.min(1, unit.hp / unit.maxHp)) : 0;
+    if (Math.abs(hpFrac - this.lastHp) >= CHANGE_EPSILON || (hpFrac === 0) !== (this.lastHp === 0)) {
+      this.lastHp = hpFrac;
+      this.el.style.setProperty('--hp', hpFrac.toFixed(4));
+      const tier = hpTier(hpFrac);
+      if (tier !== this.lastTier) {
+        this.lastTier = tier;
+        this.el.dataset.hp = tier;
+      }
+    }
+    const shieldFrac = unit.maxHp > 0 ? Math.min(1, unit.shield / unit.maxHp) : 0;
+    if (Math.abs(shieldFrac - this.lastShield) >= CHANGE_EPSILON) {
+      this.lastShield = shieldFrac;
+      this.el.style.setProperty('--shield', shieldFrac.toFixed(4));
+    }
+
+    const act = dead || unit.actionTotalMs <= 0 ? 0 : 1 - Math.max(0, Math.min(1, unit.actionMs / unit.actionTotalMs));
+    if (Math.abs(act - this.lastAct) >= CHANGE_EPSILON || (act === 0 && this.lastAct !== 0)) {
+      this.lastAct = act;
+      this.el.style.setProperty('--act', act.toFixed(3));
+    }
+
+    this.updateCast(unit, now);
+
+    const flags = `${dead}|${stunned}|${unit.shield > 0 ? Math.round(unit.shield) : 0}`;
+    if (unit.statuses === this.lastStatuses && flags === this.lastPipFlags) return;
+    this.lastStatuses = unit.statuses;
+    this.lastPipFlags = flags;
+    const pips = statusPips(unit);
+    const pk = pipsKey(pips);
+    if (pk !== this.lastPips) {
+      this.lastPips = pk;
+      const shown = pips.slice(0, MAX_VISIBLE_PIPS);
+      const extra = pips.length - shown.length;
+      this.pipsEl.innerHTML = shown.map(p => `<span class="combat-pip ${p.tone}" title="${escapeHtml(p.title)}">${p.icon}${p.count ? `<b>${p.count}</b>` : ''}</span>`).join('')
+        + (extra > 0 ? `<span class="combat-pip more">+${extra}</span>` : '');
+    }
+  }
+
+  setTargeted(targeted: boolean): void {
+    if (targeted === this.lastTargeted) return;
+    this.lastTargeted = targeted;
+    this.el.classList.toggle('targeted', targeted);
+  }
+
+  /** Keep the cancelled cast bar on screen briefly under the COUNTERED! stamp. */
+  breakCast(now: number): void {
+    this.brokenUntil = now + 650;
+    this.el.classList.add('cast-broken');
+  }
+
+  private updateCast(unit: PlaybackUnit, now: number): void {
+    const cast = unit.cast;
+    if (!cast) {
+      if (this.brokenUntil > 0 && now >= this.brokenUntil) {
+        this.brokenUntil = 0;
+        this.el.classList.remove('cast-broken');
+      }
+      if (this.lastCastKey !== '' && this.brokenUntil === 0) {
+        this.lastCastKey = '';
+        this.el.classList.remove('casting', 'cast-paused');
+        this.lastPaused = null;
+      }
+      return;
+    }
+    if (this.brokenUntil > 0) {
+      this.brokenUntil = 0;
+      this.el.classList.remove('cast-broken');
+    }
+    const castKey = `${cast.skillId}:${cast.totalMs}`;
+    if (castKey !== this.lastCastKey) {
+      this.lastCastKey = castKey;
+      this.el.classList.add('casting');
+      this.castLabel.textContent = cast.skill;
+      this.lastCast = -1;
+    }
+    const paused = unit.side === 'player' && unit.stunMs > 0;
+    if (paused !== this.lastPaused) {
+      this.lastPaused = paused;
+      this.el.classList.toggle('cast-paused', paused);
+    }
+    const progress = cast.totalMs > 0 ? 1 - Math.max(0, Math.min(1, cast.remainingMs / cast.totalMs)) : 1;
+    if (Math.abs(progress - this.lastCast) >= CHANGE_EPSILON) {
+      this.lastCast = progress;
+      this.el.style.setProperty('--cast', progress.toFixed(3));
+    }
+  }
+}
+
+/** Reveal on load, try one fallback, hide on failure so the layer below shows through. */
+function loadImage(img: HTMLImageElement, real: string | undefined, fallback: string | undefined): void {
+  img.onerror = null;
+  img.onload = null;
+  img.classList.remove('loaded');
+  if (!real) {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+    return;
+  }
+  img.style.display = '';
+  img.dataset.fb = '0';
+  img.onload = () => img.classList.add('loaded');
+  img.onerror = () => {
+    if (fallback && img.dataset.fb !== '1') {
+      img.dataset.fb = '1';
+      img.src = fallback;
+    } else {
+      img.style.display = 'none';
+    }
+  };
+  img.src = real;
+}

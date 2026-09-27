@@ -12,14 +12,15 @@ import {
   validateRoomEntry,
   buildHenchmanCombatant,
   henchmanDisplayNames,
+  buildClientCombatSnapshot,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
-  PartyCombatant,
+  PartyCombatantInit,
   PartyCombatState,
   ServerPartyState,
   ServerBattleState,
-  ClientCombatState,
+  ServerCombatMessage,
   DungeonRunInfo,
   DungeonEntryMemberInfo,
   DungeonReward,
@@ -32,6 +33,7 @@ import type {
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
+import type { CombatFlush } from './ServerBattleTimer.js';
 import type { PlayerSession } from './PlayerSession.js';
 import type { ContentStore } from './ContentStore.js';
 import type { WorldGrids } from './WorldGrids.js';
@@ -57,6 +59,17 @@ interface PartyBattleEntry {
 /** Result of a dungeon entry attempt. */
 export type DungeonEntryResult = { success: true } | { success: false; error: string };
 
+export interface CombatSendOptions {
+  /** A congested socket may skip this message (anything without a full snapshot). */
+  droppable: boolean;
+}
+
+export interface CombatDelivery {
+  /** Whether anyone would receive this player's combat stream right now. */
+  isOnline: (username: string) => boolean;
+  sendRaw: (username: string, payload: string, opts: CombatSendOptions) => void;
+}
+
 export class PartyBattleManager {
   private entries = new Map<string, PartyBattleEntry>();
   private grids: WorldGrids;
@@ -66,6 +79,7 @@ export class PartyBattleManager {
   private onMembersMoved?: (members: ReadonlySet<string>) => void;
   private getPartyHenchmen: (partyId: string) => HiredHenchman[] = () => [];
   private dismissHenchmenOffMap: (partyId: string, mapId: string) => HiredHenchman[] = () => [];
+  private delivery: CombatDelivery = { isOnline: () => false, sendRaw: () => {} };
 
   constructor(
     grids: WorldGrids,
@@ -90,6 +104,11 @@ export class PartyBattleManager {
     this.dismissHenchmenOffMap = dismissHenchmenOffMap;
   }
 
+  /** Wire the live combat stream to the sockets. Called once by PlayerManager at boot. */
+  setCombatDelivery(delivery: CombatDelivery): void {
+    this.delivery = delivery;
+  }
+
   /**
    * Build the battle timer for a party and register the entry. Shared by
    * {@link createEntry} and {@link createEntryFromSave} so movement gating and
@@ -102,10 +121,7 @@ export class PartyBattleManager {
       {
         onBattleStart: () => {
           for (const m of members) {
-            const s = this.getSession(m);
-            if (!s) continue;
-            s.incrementBattleCount();
-            s.addLogEntry('Battle begins!', 'battle');
+            this.getSession(m)?.incrementBattleCount();
           }
         },
         onStateChange: () => {
@@ -113,19 +129,7 @@ export class PartyBattleManager {
             this.broadcastToMember(m);
           }
         },
-        onCombatTick: (_state: PartyCombatState, logEntries: string[]) => {
-          for (const m of members) {
-            const s = this.getSession(m);
-            if (s) {
-              for (const entry of logEntries) {
-                s.addLogEntry(entry, 'damage');
-              }
-            }
-          }
-          for (const m of members) {
-            this.broadcastToMember(m);
-          }
-        },
+        onCombatFlush: (flush) => this.deliverCombat(members, flush),
         onBattleEnd: (result: BattleResult) => {
           this.handleBattleEnd(partyId, result);
         },
@@ -159,20 +163,27 @@ export class PartyBattleManager {
           return false;
         },
       },
+      partyId,
     );
 
     this.entries.set(partyId, { partyId, serverParty, battleTimer, members });
   }
 
-  /** Create a party battle entry. Called when a party is created or on restore. */
+  /** Create a party battle entry and start fighting. */
   createEntry(partyId: string, username: string, startTile: HexTile, mapId: string): void {
     if (this.entries.has(partyId)) return;
 
     const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
     this.registerEntry(partyId, serverParty, new Set([username]));
+    this.startEntry(partyId);
   }
 
-  /** Create a party battle entry from saved movement state (for restoring). */
+  /** Start a registered party's battle loop (idempotent). Restored entries wait for this until fully assembled. */
+  startEntry(partyId: string): void {
+    this.entries.get(partyId)?.battleTimer.start();
+  }
+
+  /** Create a party battle entry from saved movement state (for restoring). Does not start fighting — call {@link startEntry}. */
   createEntryFromSave(
     partyId: string,
     username: string,
@@ -209,16 +220,22 @@ export class PartyBattleManager {
   restartBattle(partyId: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
+    entry.battleTimer.settlePendingResult();
     entry.battleTimer.restartBattle();
+  }
+
+  /** Whether the party may Run right now (overworld fight, far enough in, not already won or lost). */
+  canEscape(partyId: string): boolean {
+    const entry = this.entries.get(partyId);
+    if (!entry || entry.dungeonRun) return false;
+    return entry.battleTimer.canEscape();
   }
 
   /** Escape the current battle for a party. No rewards given. */
   escapeBattle(partyId: string): boolean {
     const entry = this.entries.get(partyId);
     if (!entry) return false;
-    // Can't flee a floor fight — you're locked in a dungeon instance (use leaveDungeon to bail).
-    if (entry.dungeonRun) return false;
-    if (entry.battleTimer.currentState !== 'battle') return false;
+    if (!this.canEscape(partyId)) return false;
 
     for (const m of entry.members) {
       const s = this.getSession(m);
@@ -233,12 +250,27 @@ export class PartyBattleManager {
     return true;
   }
 
-  /** Destroy a party battle entry and stop its timers. */
+  /** Destroy a party battle entry and stop its timers. A won-but-unshown fight is paid out first. */
   destroyEntry(partyId: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
+    entry.battleTimer.settlePendingResult();
     entry.battleTimer.destroy();
     this.entries.delete(partyId);
+  }
+
+  /** A full-snapshot combat message for a (re)connecting socket, or null when no fight is live. */
+  buildCombatResync(partyId: string): ServerCombatMessage | null {
+    const timer = this.entries.get(partyId)?.battleTimer;
+    const combat = timer?.currentCombat;
+    if (!timer || !combat || !timer.isLive) return null;
+    return {
+      type: 'combat',
+      battleId: timer.battleId,
+      snapshot: buildClientCombatSnapshot(combat, timer.battleId, true),
+      events: [],
+      log: timer.recentLog,
+    };
   }
 
   /** Handle move request. Returns the unmet requirement if the path is gated. */
@@ -279,6 +311,7 @@ export class PartyBattleManager {
   enterTransition(partyId: string, targetTileId: string): { success: true } | { success: false; error: string; blocked?: RoomEntryFailure } {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
+    entry.battleTimer.settlePendingResult();
     if (entry.dungeonRun) return { success: false, error: "Can't travel from inside a dungeon." };
 
     const fromDef = this.content.getTileById(entry.serverParty.tile.id);
@@ -437,47 +470,14 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return null;
 
-    const combat = entry.battleTimer.currentCombat;
-    const clientCombat: ClientCombatState | undefined = combat ? {
-      players: combat.players.map(p => ({
-        username: p.username,
-        currentHp: p.currentHp,
-        maxHp: p.maxHp,
-        gridPosition: p.gridPosition,
-        className: p.className,
-        stunTurns: p.stunTurns > 0 ? p.stunTurns : undefined,
-        henchman: p.isHenchman || undefined,
-      })),
-      monsters: combat.monsters.map(m => ({
-        id: m.id,
-        name: m.name,
-        currentHp: m.currentHp,
-        maxHp: m.maxHp,
-        gridPosition: m.gridPosition,
-        stunTurns: m.stunTurns > 0 ? m.stunTurns : undefined,
-        description: m.description,
-      })),
-      tickCount: combat.tickCount,
-      roundCount: combat.roundCount,
-      lastAction: combat.lastAction ? {
-        attackerSide: combat.lastAction.attackerSide,
-        attackerPos: combat.lastAction.attackerPos,
-        targetPos: combat.lastAction.targetPos,
-        targetSide: combat.lastAction.targetSide,
-        dodged: combat.lastAction.dodged,
-        skillName: combat.lastAction.skillName,
-        stunApplied: combat.lastAction.stunApplied,
-        healAmount: combat.lastAction.healAmount,
-        healTarget: combat.lastAction.healTarget,
-      } : undefined,
-    } : undefined;
-
+    const timer = entry.battleTimer;
+    const combat = timer.currentCombat;
     return {
-      state: entry.battleTimer.currentState,
-      result: entry.battleTimer.lastResult,
-      visual: entry.battleTimer.visual,
-      duration: entry.battleTimer.currentDuration,
-      combat: clientCombat,
+      state: timer.currentState,
+      result: timer.lastResult,
+      visual: timer.visual,
+      duration: timer.currentDuration,
+      combat: combat ? buildClientCombatSnapshot(combat, timer.battleId, true) : undefined,
     };
   }
 
@@ -530,6 +530,7 @@ export class PartyBattleManager {
   relocateParty(partyId: string, newTile: HexTile, mapId: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
+    entry.battleTimer.settlePendingResult();
     // A forced relocation (e.g. content deploy) ends any active dungeon run —
     // otherwise the party stays movement-locked on a fresh tile fighting stale
     // dungeon-floor encounters.
@@ -576,7 +577,7 @@ export class PartyBattleManager {
       return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones, allEncounters));
     }
 
-    const players: PartyCombatant[] = [];
+    const players: PartyCombatantInit[] = [];
     for (const username of entry.members) {
       const session = this.getSession(username);
       if (!session) continue;
@@ -728,10 +729,27 @@ export class PartyBattleManager {
         this.handleDungeonDefeat(entry);
       }
     }
+  }
 
-    for (const m of entry.members) {
-      this.broadcastToMember(m);
+  private deliverCombat(members: ReadonlySet<string>, flush: CombatFlush): void {
+    const recipients: string[] = [];
+    for (const m of members) {
+      if (this.delivery.isOnline(m)) recipients.push(m);
     }
+    if (recipients.length === 0) return;
+
+    const message: ServerCombatMessage = {
+      type: 'combat',
+      battleId: flush.battleId,
+      events: flush.events,
+      log: flush.log,
+    };
+    if (flush.snapshot) {
+      message.snapshot = buildClientCombatSnapshot(flush.combat, flush.battleId, flush.snapshot === 'full');
+    }
+    const payload = JSON.stringify(message);
+    const opts: CombatSendOptions = { droppable: flush.snapshot !== 'full' };
+    for (const m of recipients) this.delivery.sendRaw(m, payload, opts);
   }
 
   // --- Dungeon runtime ---
@@ -744,6 +762,7 @@ export class PartyBattleManager {
   enterDungeon(partyId: string, dungeonId: string): DungeonEntryResult {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
+    entry.battleTimer.settlePendingResult();
     if (entry.dungeonRun) return { success: false, error: 'Already in a dungeon.' };
     if (this.getPartyHenchmen(partyId).length > 0) {
       return { success: false, error: 'Dismiss your henchmen before entering.' };
@@ -817,15 +836,17 @@ export class PartyBattleManager {
   leaveDungeon(partyId: string): boolean {
     const entry = this.entries.get(partyId);
     if (!entry || !entry.dungeonRun) return false;
+    entry.battleTimer.settlePendingResult();
 
-    const dungeon = this.content.getDungeon(entry.dungeonRun.dungeonId);
-    const name = dungeon?.name ?? 'the dungeon';
-    for (const username of entry.members) {
-      this.getSession(username)?.addLogEntry(`Left ${name}.`, 'move');
+    // Settling can finish or fail the run on its own (last floor cleared, wipe).
+    if (entry.dungeonRun) {
+      const dungeon = this.content.getDungeon(entry.dungeonRun.dungeonId);
+      const name = dungeon?.name ?? 'the dungeon';
+      for (const username of entry.members) {
+        this.getSession(username)?.addLogEntry(`Left ${name}.`, 'move');
+      }
+      this.exitDungeon(entry, this.resolveEntranceTile(entry));
     }
-
-    const entranceTile = this.resolveEntranceTile(entry);
-    this.exitDungeon(entry, entranceTile);
     // Mid-battle bail-out — restart so overworld combat resumes immediately.
     entry.battleTimer.restartBattle();
     for (const m of entry.members) this.broadcastToMember(m);
@@ -861,7 +882,7 @@ export class PartyBattleManager {
 
   /**
    * Restore a saved dungeon run onto an already-created battle entry (startup).
-   * Validates the dungeon/floor still exist, then restarts combat on the saved floor.
+   * Validates the dungeon/floor still exist; a running timer restarts on the saved floor.
    */
   restoreDungeonRun(partyId: string, run: DungeonRunState): void {
     const entry = this.entries.get(partyId);
@@ -875,7 +896,7 @@ export class PartyBattleManager {
       currentFloorIndex: run.currentFloorIndex,
       entrance: { ...run.entrance },
     };
-    entry.battleTimer.restartBattle();
+    if (entry.battleTimer.isStarted) entry.battleTimer.restartBattle();
   }
 
   // --- Private dungeon helpers ---

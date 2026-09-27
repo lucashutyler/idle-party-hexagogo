@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ALL_CLASS_NAMES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
+import {
+  ALL_CLASS_NAMES,
+  SEED_SKILLS,
+  SEED_SKILL_SLOT_SCHEDULES,
+  SKILL_TRIGGER_INFO,
+  SKILL_TRIGGER_VALUES,
+} from '@idle-party-rpg/shared';
 import type { SkillDefinition } from '@idle-party-rpg/shared';
 import { SkillsTab } from '../src/admin/tabs/SkillsTab';
 import type { AdminContext } from '../src/admin/AdminContext';
@@ -17,17 +23,19 @@ const GRANT_ONLY_SKILL: SkillDefinition = {
   passiveEffects: [{ kind: 'physical_reduction', valuePerLevel: 1 }],
 };
 
-function makeCtx(opts: { readOnly?: boolean } = {}): AdminContext {
+function makeCtx(opts: { readOnly?: boolean; extraSkills?: SkillDefinition[] } = {}): AdminContext {
   const content = {
     skills: {
       knight_guard: { ...SEED_SKILLS.knight_guard },
       knight_bash: { ...SEED_SKILLS.knight_bash },
       mage_zap: { ...SEED_SKILLS.mage_zap },
       test_ember_ward: { ...GRANT_ONLY_SKILL },
+      ...Object.fromEntries((opts.extraSkills ?? []).map(sk => [sk.id, { ...sk }])),
     },
     skillSlotSchedules: { ...SEED_SKILL_SLOT_SCHEDULES },
   } as unknown as ContentData;
   return {
+    me: null,
     overview: null,
     accounts: [],
     versions: [],
@@ -46,17 +54,43 @@ function makeCtx(opts: { readOnly?: boolean } = {}): AdminContext {
   };
 }
 
+function openEdit(container: HTMLElement, id: string): HTMLElement {
+  container.querySelector<HTMLButtonElement>(`.skill-edit-btn[data-id="${id}"]`)!.click();
+  return document.body.querySelector<HTMLElement>('.admin-modal')!;
+}
+
+function setValue(modal: HTMLElement, selector: string, value: string): void {
+  const el = modal.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!;
+  el.value = value;
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function stubPut(): { bodies: SkillDefinition[] } {
+  const captured = { bodies: [] as SkillDefinition[] };
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+    captured.bodies.push(JSON.parse(String(init?.body)));
+    return { ok: true, status: 200, json: async () => ({ skills: {} }) };
+  }));
+  return captured;
+}
+
+async function flush(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 0));
+}
+
 describe('SkillsTab', () => {
   let container: HTMLElement;
 
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
+    vi.stubGlobal('alert', vi.fn());
   });
 
   afterEach(() => {
     closeAllModals();
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('renders one section per class, in class order, with rows from content', () => {
@@ -200,5 +234,137 @@ describe('SkillsTab', () => {
     mage.scrollIntoView = () => { scrolled = true; };
     [...buttons].find(b => b.dataset.skillsJump === 'Mage')!.click();
     expect(scrolled).toBe(true);
+  });
+
+  it('shows cooldowns in seconds with the card type, and no turn-based wording', () => {
+    new SkillsTab().render(container, makeCtx());
+    expect(container.textContent).not.toContain('Nth attack');
+
+    const knight = container.querySelector('[data-skills-class="Knight"]')!;
+    const bashRow = [...knight.querySelectorAll('tbody tr')].find(tr => tr.textContent!.includes('knight_bash'))!;
+    const cells = bashRow.querySelectorAll('td');
+    const cdCell = cells[cells.length - 2];
+    expect(cdCell.textContent).toContain(`${SEED_SKILLS.knight_bash.cooldown}s`);
+    expect(cdCell.querySelector('[data-card-type="attack"]')).not.toBeNull();
+
+    const guardRow = [...knight.querySelectorAll('tbody tr')].find(tr => tr.textContent!.includes('knight_guard'))!;
+    expect(guardRow.querySelector('[data-card-type="passive"]')).not.toBeNull();
+  });
+
+  it('shows cast time and trigger for casting and reacting skills in the table', () => {
+    new SkillsTab().render(container, makeCtx({
+      extraSkills: [SEED_SKILLS.mage_blizzard, SEED_SKILLS.knight_intercept],
+    }));
+    const mageRow = [...container.querySelectorAll('[data-skills-class="Mage"] tbody tr')]
+      .find(tr => tr.textContent!.includes('mage_blizzard'))!;
+    expect(mageRow.textContent).toContain(`cast ${SEED_SKILLS.mage_blizzard.castTime}s`);
+
+    const interceptRow = [...container.querySelectorAll('[data-skills-class="Knight"] tbody tr')]
+      .find(tr => tr.textContent!.includes('knight_intercept'))!;
+    expect(interceptRow.querySelector('[data-card-type="instant"]')).not.toBeNull();
+    expect(interceptRow.textContent).toContain('ally targeted');
+  });
+
+  it('edit form uses fractional-second cooldown and shows cast time, warm-up and trigger for actives', () => {
+    new SkillsTab().render(container, makeCtx());
+    const modal = openEdit(container, 'knight_bash');
+
+    const cooldown = modal.querySelector<HTMLInputElement>('#skf-cooldown')!;
+    expect(cooldown.step).toBe('0.1');
+    expect(cooldown.min).toBe('1');
+    expect(modal.querySelector('#skf-cooldown-wrap')!.textContent).toContain('Cooldown (seconds)');
+
+    for (const id of ['#skf-castTime-wrap', '#skf-warmup-wrap', '#skf-trigger-wrap']) {
+      expect(modal.querySelector<HTMLElement>(id)!.style.display).not.toBe('none');
+    }
+    const trigger = modal.querySelector<HTMLSelectElement>('#skf-trigger')!;
+    expect(trigger.value).toBe('');
+    expect([...trigger.options].map(o => o.value)).toEqual(['', ...SKILL_TRIGGER_VALUES]);
+    expect(trigger.options[1].textContent).toBe(SKILL_TRIGGER_INFO[SKILL_TRIGGER_VALUES[0]].label);
+
+    expect(modal.querySelector('#skf-card-type [data-card-type="attack"]')).not.toBeNull();
+    expect(modal.querySelector<HTMLInputElement>('#skf-warmup')!.placeholder).toContain(`${SEED_SKILLS.knight_bash.cooldown! - 1}s`);
+  });
+
+  it('hides the active-only timing fields for passives and reveals them when switched to active', () => {
+    new SkillsTab().render(container, makeCtx());
+    container.querySelector<HTMLButtonElement>('#skill-add-btn')!.click();
+    const modal = document.body.querySelector<HTMLElement>('.admin-modal')!;
+    const activeOnly = [...modal.querySelectorAll<HTMLElement>('.skf-active-only')];
+    expect(activeOnly.length).toBeGreaterThanOrEqual(5);
+    expect(activeOnly.every(el => el.style.display === 'none')).toBe(true);
+
+    setValue(modal, '#skf-type', 'active');
+    expect(activeOnly.every(el => el.style.display === '')).toBe(true);
+  });
+
+  it('updates the card-type chip and trigger help live as the trigger changes', () => {
+    new SkillsTab().render(container, makeCtx());
+    const modal = openEdit(container, 'knight_bash');
+    const chip = () => modal.querySelector('#skf-card-type [data-card-type]')!.getAttribute('data-card-type');
+
+    setValue(modal, '#skf-trigger', 'enemy_cast');
+    expect(chip()).toBe('interrupt');
+    expect(modal.querySelector('#skf-trigger-help')!.textContent).toContain(SKILL_TRIGGER_INFO.enemy_cast.description);
+
+    setValue(modal, '#skf-trigger', 'ally_low_hp');
+    expect(chip()).toBe('instant');
+
+    setValue(modal, '#skf-trigger', '');
+    expect(chip()).toBe('attack');
+  });
+
+  it('shows an inferred trigger for an Intercept skill authored without one', () => {
+    const legacyIntercept: SkillDefinition = { ...SEED_SKILLS.knight_intercept, id: 'legacy_intercept' };
+    delete legacyIntercept.trigger;
+    new SkillsTab().render(container, makeCtx({ extraSkills: [legacyIntercept] }));
+    const modal = openEdit(container, 'legacy_intercept');
+
+    expect(modal.querySelector<HTMLSelectElement>('#skf-trigger')!.value).toBe('');
+    expect(modal.querySelector('#skf-card-type [data-card-type="instant"]')).not.toBeNull();
+    expect(modal.querySelector('#skf-trigger-help')!.textContent).toContain('inferred');
+  });
+
+  it('saves fractional cooldown, cast time, warm-up and trigger', async () => {
+    const put = stubPut();
+    new SkillsTab().render(container, makeCtx());
+    const modal = openEdit(container, 'knight_bash');
+    setValue(modal, '#skf-cooldown', '2.5');
+    setValue(modal, '#skf-castTime', '0.5');
+    setValue(modal, '#skf-warmup', '0');
+    modal.querySelector<HTMLButtonElement>('#skf-save')!.click();
+    await flush();
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(put.bodies).toHaveLength(1);
+    expect(put.bodies[0]).toMatchObject({ id: 'knight_bash', cooldown: 2.5, castTime: 0.5, warmup: 0 });
+    expect(put.bodies[0].trigger).toBeUndefined();
+  });
+
+  it('omits blank warm-up and cast time, and never sends active timing on a passive', async () => {
+    const put = stubPut();
+    new SkillsTab().render(container, makeCtx());
+    const modal = openEdit(container, 'knight_guard');
+    modal.querySelector<HTMLButtonElement>('#skf-save')!.click();
+    await flush();
+
+    expect(put.bodies).toHaveLength(1);
+    for (const key of ['cooldown', 'castTime', 'warmup', 'trigger']) {
+      expect(key in put.bodies[0]).toBe(false);
+    }
+  });
+
+  it('surfaces validation errors (a triggered skill with a cast time) instead of saving', async () => {
+    const put = stubPut();
+    new SkillsTab().render(container, makeCtx());
+    const modal = openEdit(container, 'knight_bash');
+    setValue(modal, '#skf-trigger', 'self_hit');
+    setValue(modal, '#skf-castTime', '1');
+    modal.querySelector<HTMLButtonElement>('#skf-save')!.click();
+    await flush();
+
+    expect(put.bodies).toHaveLength(0);
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(alert).mock.calls[0][0])).toContain('cast time');
   });
 });

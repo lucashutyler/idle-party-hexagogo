@@ -1,6 +1,13 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { migrateLegacySet, findZonesSpanningMaps } from '@idle-party-rpg/shared';
+import {
+  MIN_MONSTER_ACTION_INTERVAL_MS,
+  MONSTER_SKILL_CATALOG,
+  findZonesSpanningMaps,
+  migrateLegacySet,
+  migrateLegacySkill,
+  validateSkillDefinition,
+} from '@idle-party-rpg/shared';
 import type { RoomEntryRequirements } from '@idle-party-rpg/shared';
 import type { ContentSnapshot } from '../../game/VersionStore.js';
 import type { McpToolDeps } from './McpToolDeps.js';
@@ -106,12 +113,35 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
   }
 
   // --- Monsters ---
+  const minAttackInterval = MIN_MONSTER_ACTION_INTERVAL_MS / 1000;
   for (const monster of snapshot.monsters) {
     (monster.drops ?? []).forEach((drop, index) => {
       if (!itemIds.has(drop.itemId)) {
         problems.push(`Monster '${monster.id}' drops reference unknown item '${drop.itemId}' (index ${index}).`);
       }
     });
+    if (monster.attackInterval !== undefined && !isNumberAtLeast(monster.attackInterval, minAttackInterval)) {
+      problems.push(`Monster '${monster.id}' attackInterval must be a number of seconds, at least ${minAttackInterval} (got ${String(monster.attackInterval)}).`);
+    }
+    (monster.skills ?? []).forEach((entry, index) => {
+      const label = `Monster '${monster.id}' skill ${index}`;
+      if (!MONSTER_SKILL_CATALOG[entry.skillId]) {
+        problems.push(`${label} references unknown monster skill '${entry.skillId}' (known: ${Object.keys(MONSTER_SKILL_CATALOG).join(', ')}).`);
+      }
+      if (!isNumberAtLeast(entry.cooldown, 0)) {
+        problems.push(`${label} cooldown must be a number of seconds, 0 or more (got ${String(entry.cooldown)}).`);
+      }
+      if (entry.castTime !== undefined && !isNumberAtLeast(entry.castTime, 0)) {
+        problems.push(`${label} castTime must be a number of seconds, 0 or more (got ${String(entry.castTime)}).`);
+      }
+    });
+  }
+
+  // --- Skills ---
+  for (const skill of snapshot.skills ?? []) {
+    for (const error of validateSkillDefinition(migrateLegacySkill(skill))) {
+      problems.push(`Skill '${skill.id}': ${error}`);
+    }
   }
 
   // --- Dungeons ---
@@ -292,6 +322,10 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
   return problems;
 }
 
+function isNumberAtLeast(value: unknown, min: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min;
+}
+
 /**
  * Depth-first search for a cycle in the prerequisite graph reachable from `questId`.
  * Returns the cycle as an ordered list of quest ids (first entry repeated at the end
@@ -343,7 +377,7 @@ export function registerValidateTools(server: McpServer, deps: McpToolDeps): voi
   server.registerTool(
     'validate_draft',
     {
-      description: 'Run referential-integrity checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc). Returns a list of human-readable problems, empty if the draft is clean.',
+      description: 'Run referential-integrity and range checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc, unknown monster skills, monster attackInterval/cooldown/castTime ranges, invalid skill definitions). Returns a list of human-readable problems, empty if the draft is clean.',
       inputSchema: {
         versionId: z.string(),
       },

@@ -24,6 +24,7 @@ import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon, RARITY_
 import { renderItemPopupContent } from '../ui/ItemPopup';
 import { renderAssetImg } from '../ui/assets';
 import { bringToFront, release } from '../ui/ModalStack';
+import { renderSkillCardMeta } from '../ui/SkillCardChip';
 
 /** Left column slots (top to bottom). Mainhand sits at the bottom of the
  *  left column with a small visual gap (no separate row anymore). */
@@ -475,7 +476,7 @@ export class CharItemsScreen implements Screen {
       } else if (skill) {
         html += `<div class="charitems-skill-slot filled ${skill.type}" data-slot-index="${i}">
           <span class="charitems-skill-slot-name">${this.escapeHtml(skill.name)}</span>
-          <span class="charitems-skill-slot-meta">${skill.type}${skill.cooldown ? ` &middot; CD${skill.cooldown}` : ''}</span>
+          ${renderSkillCardMeta(skill)}
         </div>`;
       } else {
         html += `<div class="charitems-skill-slot empty" data-slot-index="${i}">
@@ -563,7 +564,7 @@ export class CharItemsScreen implements Screen {
             : '';
         return `<div class="${classes.join(' ')}" ${attrs}>
           <div class="charitems-skill-row-name">${this.escapeHtml(s.name)}${isCurrent ? ' &middot; equipped' : ''}</div>
-          <div class="charitems-skill-row-meta">${s.type}${s.cooldown ? ` &middot; CD ${s.cooldown}` : ''}</div>
+          <div class="charitems-skill-row-meta">${renderSkillCardMeta(s)}</div>
           ${tagline}
           <div class="charitems-skill-row-desc">${this.escapeHtml(s.description)}</div>
         </div>`;
@@ -573,8 +574,8 @@ export class CharItemsScreen implements Screen {
     overlay.innerHTML = `
       <div class="charitems-skill-popup">
         <div class="charitems-skill-popup-title">Slot ${slotIndex + 1} &middot; ${slot.type} (Lv ${slot.unlocksAtLevel}+)</div>
-        ${equippedNow ? `<div style="font-size: 12px;color:var(--text-secondary)">Currently: <strong>${this.escapeHtml(equippedNow.name)}</strong></div>` : ''}
-        <div style="display:flex;flex-direction:column;gap:6px;">${rowsHtml}</div>
+        ${equippedNow ? `<div class="charitems-skill-popup-current">Currently: <strong>${this.escapeHtml(equippedNow.name)}</strong></div>` : ''}
+        <div class="charitems-skill-popup-list">${rowsHtml}</div>
         <div class="charitems-skill-popup-actions">
           <button class="charitems-skill-popup-btn cancel-btn">Cancel</button>
           ${equippedNow ? `<button class="charitems-skill-popup-btn danger clear-btn">Clear slot</button>` : ''}
@@ -839,7 +840,7 @@ export class CharItemsScreen implements Screen {
     }
     const rows = this.lastMailbox.map(entry => {
       const def = this.itemDefs[entry.itemId];
-      const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+      const color = def ? (RARITY_COLORS[def.rarity] ?? 'var(--text-1)') : 'var(--text-1)';
       const name = def?.name ?? entry.itemId;
       const fullCount = (this.lastInventory[entry.itemId] ?? 0) + entry.quantity;
       const willOverflow = fullCount > 99;
@@ -892,7 +893,7 @@ export class CharItemsScreen implements Screen {
           ? '<span class="trade-row-empty">— nothing —</span>'
           : items.map(({ itemId, quantity }) => {
               const def = this.itemDefs[itemId];
-              const color = def ? (RARITY_COLORS[def.rarity] ?? '#e8e8e8') : '#e8e8e8';
+              const color = def ? (RARITY_COLORS[def.rarity] ?? 'var(--text-1)') : 'var(--text-1)';
               return `<span class="trade-row-item" style="color:${color}">${this.escapeHtml(def?.name ?? itemId)} ×${quantity}</span>`;
             }).join(', ');
       return `<div class="trade-row${waitingOnMe ? ' trade-row-attention' : ''}" data-trade-id="${this.escapeHtml(t.id)}">
@@ -1033,7 +1034,7 @@ export class CharItemsScreen implements Screen {
       <div class="item-popup-overlay">
         <div class="item-popup">
           <div class="item-popup-name">${title}</div>
-          <div class="item-popup-stats" style="text-align:center">${message}</div>
+          <div class="item-popup-stats items-modal-prompt">${message}</div>
           <div class="item-popup-actions">
             <button class="items-modal-confirm danger">Destroy</button>
             <button class="items-modal-cancel">Cancel</button>
@@ -1055,12 +1056,12 @@ export class CharItemsScreen implements Screen {
       <div class="item-popup-overlay">
         <div class="item-popup">
           <div class="item-popup-name">Destroy ${itemName}</div>
-          <div class="item-popup-stats" style="text-align:center">How many? (1-${max})</div>
-          <div class="items-modal-count-row" style="display:flex;gap:8px;justify-content:center;align-items:center;margin:8px 0">
-            <button class="items-modal-minus" style="padding:4px 10px;border-radius:4px;border:1px solid #555;background:#2a2a40;color:#e8e8e8;cursor:pointer;font-family:inherit">-</button>
-            <span class="items-modal-count-value" style="min-width:24px;text-align:center">1</span>
-            <button class="items-modal-plus" style="padding:4px 10px;border-radius:4px;border:1px solid #555;background:#2a2a40;color:#e8e8e8;cursor:pointer;font-family:inherit">+</button>
-            <button class="items-modal-max" style="padding:4px 10px;border-radius:4px;border:1px solid #555;background:#2a2a40;color:#e8e8e8;cursor:pointer;font-family:inherit">Max</button>
+          <div class="item-popup-stats items-modal-prompt">How many? (1-${max})</div>
+          <div class="items-modal-count-row">
+            <button class="items-modal-btn items-modal-minus">-</button>
+            <span class="items-modal-count-value">1</span>
+            <button class="items-modal-btn items-modal-plus">+</button>
+            <button class="items-modal-btn items-modal-max">Max</button>
           </div>
           <div class="item-popup-actions">
             <button class="items-modal-confirm danger">Destroy</button>
@@ -1114,7 +1115,6 @@ export class CharItemsScreen implements Screen {
     const tooltip = document.createElement('div');
     tooltip.className = 'items-slot-tooltip';
     tooltip.textContent = label;
-    tooltip.style.cssText = 'position:fixed;background:#222;color:#e8e8e8;padding:4px 10px;border-radius:4px;font-size: 14px;z-index:1000;pointer-events:none;border:1px solid #555;white-space:nowrap;';
     document.body.appendChild(tooltip);
     const rect = anchor.getBoundingClientRect();
     tooltip.style.left = `${rect.left + rect.width / 2 - tooltip.offsetWidth / 2}px`;
@@ -1211,7 +1211,7 @@ export class CharItemsScreen implements Screen {
       `;
     }).join('');
 
-    const oldColor = (RARITY_COLORS[oldDef.rarity ?? 'common']) ?? '#e8e8e8';
+    const oldColor = (RARITY_COLORS[oldDef.rarity ?? 'common']) ?? 'var(--text-1)';
 
     return `
       <div class="item-popup-compare">

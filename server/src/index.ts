@@ -30,7 +30,7 @@ import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition, RoomEntryFailure, ServerMoveBlockedMessage } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 import { isEmailConfigured } from './auth/EmailService.js';
@@ -299,6 +299,7 @@ wss.on('connection', (ws) => {
   // Register the connection and send initial state
   playerManager.login(ws, username).then(() => {
     playerManager.sendStateToPlayer(username);
+    playerManager.sendCombatResync(ws);
   });
 
   ws.on('message', (data) => {
@@ -307,6 +308,12 @@ wss.on('connection', (ws) => {
 
       if (msg.type === 'request_state') {
         playerManager.sendStateToPlayer(username);
+        playerManager.sendCombatResync(ws);
+        return;
+      }
+
+      if (msg.type === 'combat_view' && typeof msg.visible === 'boolean') {
+        playerManager.setCombatView(ws, msg.visible);
         return;
       }
 
@@ -370,10 +377,9 @@ wss.on('connection', (ws) => {
           }
         }
 
-        // Check round threshold
-        const battleState = playerManager.partyBattles.getBattleState(partyId);
-        if (!battleState?.combat || battleState.combat.roundCount < RUN_AVAILABLE_ROUNDS) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot run yet' }));
+        if (playerManager.partyBattles.getDungeonRunInfo(partyId)) return;
+        if (!playerManager.partyBattles.canEscape(partyId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Run becomes available 5 seconds into a fight' }));
           return;
         }
 
@@ -507,13 +513,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot change class' }));
           return;
         }
-        // Create party + start battle (player just came into existence)
-        playerManager.ensureParty(username);
-        // Restart the current battle so combat uses the new class data
-        const classPartyId = session.getPartyId();
-        if (classPartyId) {
-          playerManager.partyBattles.restartBattle(classPartyId);
-        }
+        playerManager.applyClassChange(username);
         playerManager.sendStateToPlayer(username);
         // Only broadcast welcome for truly new players (not returning from ban/reset)
         if (wasNewPlayer) {

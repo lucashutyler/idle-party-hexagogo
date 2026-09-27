@@ -1,5 +1,6 @@
-import type { ServerStateMessage, ServerEquipBlockedMessage,
+import type { ServerStateMessage, ServerEquipBlockedMessage, ServerCombatMessage,
   ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode } from '@idle-party-rpg/shared';
+import { CombatLogBuffer } from '../combat/CombatLogBuffer';
 
 const RECONNECT_DELAY = 2000;
 
@@ -15,6 +16,7 @@ type MoveBlockedListener = (msg: ServerMoveBlockedMessage) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 type NotificationListener = (notification: NotificationEntry) => void;
 type ServerErrorListener = (message: string, code?: ServerErrorCode) => void;
+type CombatListener = (message: ServerCombatMessage, receivedAt: number) => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -35,6 +37,8 @@ export class GameClient {
   private playerProfileListeners = new Set<PlayerProfileListener>();
   private notificationListeners = new Set<NotificationListener>();
   private serverErrorListeners = new Set<ServerErrorListener>();
+  private combatListeners = new Set<CombatListener>();
+  private combatViewVisible: boolean | null = null;
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -44,6 +48,12 @@ export class GameClient {
 
   /** Most recent state from the server (null until first message). */
   lastState: ServerStateMessage | null = null;
+
+  /** Most recent `combat` message (null until one arrives). */
+  lastCombat: ServerCombatMessage | null = null;
+
+  /** Journal + live combat lines, kept whether or not the combat screen is showing. */
+  readonly combatLog = new CombatLogBuffer();
 
   /** Server version from first state message — reload if it changes. */
   private knownServerVersion: string | null = null;
@@ -99,6 +109,12 @@ export class GameClient {
     return () => { this.stateListeners.delete(listener); };
   }
 
+  /** Subscribe to live combat messages. Returns an unsubscribe function. */
+  onCombat(listener: CombatListener): () => void {
+    this.combatListeners.add(listener);
+    return () => { this.combatListeners.delete(listener); };
+  }
+
   /** Subscribe to connection status changes. Returns an unsubscribe function. */
   onConnection(listener: ConnectionListener): () => void {
     this.connectionListeners.add(listener);
@@ -126,6 +142,7 @@ export class GameClient {
       console.log('[GameClient] connected');
       this.connected = true;
       this.isInitialState = true;
+      if (this.combatViewVisible !== null) this.sendRaw({ type: 'combat_view', visible: this.combatViewVisible });
       for (const listener of this.connectionListeners) {
         listener(true);
       }
@@ -151,6 +168,7 @@ export class GameClient {
           }
         }
         this.lastState = msg;
+        this.combatLog.ingestJournal(msg.combatLog ?? []);
 
         // Resolve pending connect on first state message
         if (this.connectResolve) {
@@ -166,6 +184,8 @@ export class GameClient {
           }
         }
         this.isInitialState = false;
+      } else if (msg.type === 'combat') {
+        this.handleCombat(msg as ServerCombatMessage);
       } else if (msg.type === 'chat_message') {
         for (const listener of this.chatListeners) {
           try {
@@ -264,6 +284,27 @@ export class GameClient {
     };
   }
 
+  private handleCombat(msg: ServerCombatMessage): void {
+    const receivedAt = performance.now();
+    this.lastCombat = msg;
+    const events = msg.events ?? [];
+    const log = msg.log ?? [];
+    if (msg.snapshot?.full && events.length === 0) {
+      this.combatLog.replaceLive(msg.battleId, log);
+    } else {
+      let releaseAt = msg.snapshot?.elapsedMs;
+      for (const ev of events) if (releaseAt === undefined || ev.t > releaseAt) releaseAt = ev.t;
+      this.combatLog.pushLive(msg.battleId, log, releaseAt);
+    }
+    for (const listener of this.combatListeners) {
+      try {
+        listener(msg, receivedAt);
+      } catch (err) {
+        console.error('[GameClient] error in combat listener:', err);
+      }
+    }
+  }
+
   private scheduleReconnect(): void {
     if (this.destroyed) return;
     // Only auto-reconnect if we've connected at least once
@@ -287,6 +328,13 @@ export class GameClient {
 
   sendRun(): void {
     this.sendRaw({ type: 'run' });
+  }
+
+  /** Tells the server whether this socket is showing the live combat view (it skips combat messages otherwise). */
+  sendCombatView(visible: boolean): void {
+    if (this.combatViewVisible === visible) return;
+    this.combatViewVisible = visible;
+    this.sendRaw({ type: 'combat_view', visible });
   }
 
   // --- Dungeons ---
@@ -626,5 +674,6 @@ export class GameClient {
     this.resumeListeners.clear();
     this.notificationListeners.clear();
     this.serverErrorListeners.clear();
+    this.combatListeners.clear();
   }
 }

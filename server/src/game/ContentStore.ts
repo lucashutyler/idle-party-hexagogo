@@ -417,9 +417,14 @@ export class ContentStore {
    * zones + tiles to the in-memory maps and persists once at the end —
    * much cheaper than 1000 individual `addOrUpdateTile` calls. Skips
    * any tile whose (mapId, col, row) already has a tile so a partial re-seed
-   * doesn't clobber existing content.
+   * doesn't clobber existing content. Encounters and monsters are only added
+   * when their id is free.
    */
-  async mergeSeedContent(zones: ZoneDefinition[], tiles: WorldTileDefinition[]): Promise<void> {
+  async mergeSeedContent(
+    zones: ZoneDefinition[],
+    tiles: WorldTileDefinition[],
+    extras: { encounters?: EncounterDefinition[]; monsters?: MonsterDefinition[] } = {},
+  ): Promise<void> {
     for (const z of zones) this.zones.set(z.id, z);
     const occupied = new Set(this.world.tiles.map(t => `${t.mapId}:${t.col},${t.row}`));
     for (const t of tiles) {
@@ -428,7 +433,26 @@ export class ContentStore {
       this.world.tiles.push(t);
       occupied.add(key);
     }
+    this.addMissingSeedDefinitions(extras.encounters ?? [], extras.monsters ?? []);
     await this.save();
+  }
+
+  /** Top up an already-seeded dev world without overwriting anything authored: missing encounters/monsters,
+   *  and the generator's table for generated zones whose table is still empty. Returns the change count. */
+  async upgradeSeedContent(
+    zones: ZoneDefinition[],
+    encounters: EncounterDefinition[],
+    monsters: MonsterDefinition[],
+  ): Promise<number> {
+    let changes = this.addMissingSeedDefinitions(encounters, monsters);
+    for (const generated of zones) {
+      const live = this.zones.get(generated.id);
+      if (!live || live.encounterTable.length > 0 || generated.encounterTable.length === 0) continue;
+      this.zones.set(live.id, { ...live, encounterTable: generated.encounterTable.map(e => ({ ...e })) });
+      changes++;
+    }
+    if (changes > 0) await this.save();
+    return changes;
   }
 
   async deleteZone(id: string): Promise<{ success: boolean; error?: string }> {
@@ -821,6 +845,21 @@ export class ContentStore {
   }
 
   // --- Private ---
+
+  private addMissingSeedDefinitions(encounters: EncounterDefinition[], monsters: MonsterDefinition[]): number {
+    let added = 0;
+    for (const monster of monsters) {
+      if (this.monsters.has(monster.id)) continue;
+      this.monsters.set(monster.id, { ...monster, drops: monster.drops?.filter(d => this.items.has(d.itemId)) });
+      added++;
+    }
+    for (const encounter of encounters) {
+      if (this.encounters.has(encounter.id)) continue;
+      this.encounters.set(encounter.id, encounter);
+      added++;
+    }
+    return added;
+  }
 
   /** Serialize the per-class slot schedules as an array (snapshot/file shape). */
   private skillSlotSchedulesToArray(): { className: string; slots: SkillSlot[] }[] {

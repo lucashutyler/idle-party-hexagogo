@@ -18,13 +18,18 @@ import { InAppNotificationDriver } from './social/InAppNotificationDriver.js';
 import { BrowserPushNotificationDriver } from './social/BrowserPushNotificationDriver.js';
 import { EmailNotificationDriver } from './social/EmailNotificationDriver.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
+import type { CombatSendOptions } from './PartyBattleManager.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
+
+/** A socket buffering more than this skips droppable combat messages. */
+export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
+  private combatViewHidden = new WeakSet<WebSocket>();
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -78,6 +83,10 @@ export class PlayerManager {
       (partyId) => this.parties.getHenchmen(partyId),
       (partyId, mapId) => this.parties.dismissHenchmenOffMap(partyId, mapId),
     );
+    this.partyBattles.setCombatDelivery({
+      isOnline: (username) => this.hasCombatViewer(username),
+      sendRaw: (username, payload, opts) => this.sendCombatRaw(username, payload, opts),
+    });
   }
 
   /** The world's default (spawn) map grid. */
@@ -362,6 +371,49 @@ export class PlayerManager {
     }
   }
 
+  /** Send a pre-serialised combat message to every open socket of `username` that shows combat. */
+  sendCombatRaw(username: string, payload: string, opts: CombatSendOptions): void {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet) return;
+    for (const ws of wsSet) {
+      if (!this.wantsCombat(ws)) continue;
+      if (opts.droppable && ws.bufferedAmount > COMBAT_BACKPRESSURE_BYTES) continue;
+      ws.send(payload);
+    }
+  }
+
+  /** Whether any of this player's sockets would receive combat messages right now. */
+  hasCombatViewer(username: string): boolean {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet) return false;
+    for (const ws of wsSet) {
+      if (this.wantsCombat(ws)) return true;
+    }
+    return false;
+  }
+
+  /** Record whether a socket is showing the combat view; turning it on resyncs the live fight. */
+  setCombatView(ws: WebSocket, visible: boolean): void {
+    if (!this.connections.has(ws)) return;
+    const wasHidden = this.combatViewHidden.has(ws);
+    if (visible) {
+      this.combatViewHidden.delete(ws);
+      if (wasHidden) this.sendCombatResync(ws);
+    } else {
+      this.combatViewHidden.add(ws);
+    }
+  }
+
+  /** Send one socket the live fight as a full snapshot plus the recent log. No-op between battles. */
+  sendCombatResync(ws: WebSocket): void {
+    if (!this.wantsCombat(ws)) return;
+    const username = this.connections.get(ws);
+    const partyId = username ? this.sessions.get(username)?.getPartyId() : null;
+    if (!partyId) return;
+    const message = this.partyBattles.buildCombatResync(partyId);
+    if (message) ws.send(JSON.stringify(message));
+  }
+
   /** Send an error message to all connections for a specific player. */
   sendErrorToPlayer(username: string, message: string): void {
     const wsSet = this.playerConnections.get(username);
@@ -387,6 +439,10 @@ export class PlayerManager {
   /** Get list of online (connected) usernames. */
   getOnlinePlayers(): string[] {
     return Array.from(this.playerConnections.keys());
+  }
+
+  private wantsCombat(ws: WebSocket): boolean {
+    return ws.readyState === WebSocket.OPEN && !this.combatViewHidden.has(ws);
   }
 
   private validHenchmen(saved: HiredHenchman[], partyMapId: string): HiredHenchman[] {
@@ -514,6 +570,15 @@ export class PlayerManager {
       const startTile = session.getStartingTile();
       this.partyBattles.createEntry(result.id, username, startTile, this.content.getWorld().defaultMapId);
     }
+  }
+
+  /** After a class is set: a new character gets a party (its first fight already uses the class); an existing party restarts its fight. */
+  applyClassChange(username: string): void {
+    const session = this.sessions.get(username);
+    if (!session) return;
+    const existingPartyId = session.getPartyId();
+    this.ensureParty(username);
+    if (existingPartyId) this.partyBattles.restartBattle(existingPartyId);
   }
 
   /** Ensure a player is in a party, creating battle entry at a specific tile on `mapId`. */
@@ -851,6 +916,8 @@ export class PlayerManager {
         this.parties.restoreHenchmen(party.id, this.validHenchmen(ownerData.partyHenchmen, partyMapId));
       }
 
+      this.partyBattles.startEntry(party.id);
+
       console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
     }
 
@@ -865,7 +932,8 @@ export class PlayerManager {
       if (!soloGrid || !currentTile) {
         // Position was already corrected to start tile above, but double-check
         if (startTile) {
-          this.createSoloPartyAtTile(data.username, startTile, null, [], defaultMapId);
+          const partyId = this.createSoloPartyAtTile(data.username, startTile, null, [], defaultMapId);
+          if (partyId) this.partyBattles.startEntry(partyId);
         }
         continue;
       }
@@ -878,18 +946,14 @@ export class PlayerManager {
         .map(p => soloGrid.getTile(offsetToCube(p)))
         .filter((t): t is NonNullable<typeof t> => t !== null);
 
-      this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
+      const partyId = this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
+      if (!partyId) continue;
 
-      // Resume an in-progress dungeon run for this solo player.
-      if (data.dungeonRun) {
-        const partyId = this.sessions.get(data.username)?.getPartyId();
-        if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
-      }
-
+      if (data.dungeonRun) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
       if (data.partyHenchmen?.length) {
-        const partyId = this.sessions.get(data.username)?.getPartyId();
-        if (partyId) this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
+        this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
       }
+      this.partyBattles.startEntry(partyId);
     }
 
     if (saves.length > 0) {
@@ -898,30 +962,30 @@ export class PlayerManager {
     }
   }
 
-  /** Helper to create a solo party and its battle entry at a specific tile. */
+  /** Create a solo party and its (not yet started) battle entry at a specific tile. Returns the party id. */
   private createSoloPartyAtTile(
     username: string,
     currentTile: import('@idle-party-rpg/shared').HexTile,
     targetTile: import('@idle-party-rpg/shared').HexTile | null,
     movementQueue: import('@idle-party-rpg/shared').HexTile[],
     mapId: string,
-  ): void {
+  ): string | null {
     const partyResult = this.parties.createParty(
       username,
       (u) => this.sessions.get(u)?.getPartyId() ?? null,
       (u, id) => this.sessions.get(u)?.setPartyId(id),
     );
+    if (typeof partyResult === 'string') return null;
 
-    if (typeof partyResult !== 'string') {
-      this.partyBattles.createEntryFromSave(
-        partyResult.id,
-        username,
-        currentTile,
-        targetTile,
-        movementQueue,
-        mapId,
-      );
-    }
+    this.partyBattles.createEntryFromSave(
+      partyResult.id,
+      username,
+      currentTile,
+      targetTile,
+      movementQueue,
+      mapId,
+    );
+    return partyResult.id;
   }
 
   /**
@@ -1073,7 +1137,8 @@ export class PlayerManager {
 
       // Create a fresh solo party at start tile (only for players with characters)
       if (session.hasCharacter()) {
-        this.createSoloPartyAtTile(session.username, startTile, null, [], defaultMapId);
+        const partyId = this.createSoloPartyAtTile(session.username, startTile, null, [], defaultMapId);
+        if (partyId) this.partyBattles.startEntry(partyId);
       }
       count++;
     }

@@ -212,7 +212,7 @@ export class SetsTab implements Tab {
             <button class="admin-btn admin-btn-sm admin-btn-danger sf-bp-remove" type="button">Remove</button>
           </div>
           <div class="admin-form-grid">
-            <label>CD Reduction<input type="number" class="sf-bp-cd" value="${b.cooldownReduction ?? 0}" min="0"></label>
+            <label>CD Reduction (s)<input type="number" class="sf-bp-cd" value="${b.cooldownReduction ?? 0}" min="0" step="0.1"></label>
             <label>Damage %<input type="number" class="sf-bp-dmgPct" value="${b.damagePercent ?? 0}" min="0"></label>
             <label>Dmg Resist %<input type="number" class="sf-bp-dmgResist" value="${b.damageResistancePercent ?? 0}" min="0"></label>
             <label>DR Min<input type="number" class="sf-bp-drMin" value="${b.damageReductionMin ?? 0}" min="0"></label>
@@ -266,7 +266,8 @@ export class SetsTab implements Tab {
       const piecesRequired = parseInt((row.querySelector('.sf-bp-pieces') as HTMLInputElement).value, 10) || 1;
       const num = (sel: string) => parseInt((row.querySelector(sel) as HTMLInputElement)?.value || '0', 10) || 0;
       const bonuses: SetBonuses = {};
-      const cd = num('.sf-bp-cd'); if (cd) bonuses.cooldownReduction = cd;
+      const cd = parseFloat((row.querySelector('.sf-bp-cd') as HTMLInputElement)?.value || '0') || 0;
+      if (cd > 0) bonuses.cooldownReduction = cd;
       const dmgPct = num('.sf-bp-dmgPct'); if (dmgPct) bonuses.damagePercent = dmgPct;
       const dmgResist = num('.sf-bp-dmgResist'); if (dmgResist) bonuses.damageResistancePercent = dmgResist;
       const drMin = num('.sf-bp-drMin'); const drMax = num('.sf-bp-drMax');

@@ -44,6 +44,7 @@ import {
   xpForCraftLevel,
   getCraftSkillName,
   emptyNotificationPreferences,
+  STATE_LOG_TAIL,
 } from '@idle-party-rpg/shared';
 import type {
   HiredHenchman,
@@ -55,7 +56,7 @@ import type {
   CombatLogEntry,
   CharacterState,
   ClassName,
-  PartyCombatant,
+  PartyCombatantInit,
   ClientCharacterState,
   EquipSlot,
   ClientSocialState,
@@ -200,7 +201,7 @@ export class PlayerSession {
   }
 
   /** Get combat info for the party combat system. Requires character to exist. */
-  getCombatInfo(): PartyCombatant {
+  getCombatInfo(): PartyCombatantInit {
     if (!this.character) throw new Error('getCombatInfo called on characterless session');
     const baseMaxHp = calculateMaxHp(this.character.level, this.character.className);
     let baseDamage = calculateBaseDamage(this.character.level, this.character.className);
@@ -233,7 +234,6 @@ export class PlayerSession {
     return {
       username: this.username,
       maxHp,
-      currentHp: maxHp,
       baseDamage,
       playerDamageType,
       equipBonuses,
@@ -242,20 +242,6 @@ export class PlayerSession {
       className: this.character.className,
       level: this.character.level,
       equippedSkills,
-      attackCount: 0,
-      stunTurns: 0,
-      dots: [],
-      hots: [],
-      damageShield: 0,
-      debuffs: [],
-      consecutiveHits: 0,
-      lastTargetId: '',
-      hasResurrected: false,
-      martyrBonus: 0,
-      braceActive: false,
-      braceDamageTaken: 0,
-      interceptActive: false,
-      activeSkillCount: 0,
     };
   }
 
@@ -638,7 +624,7 @@ export class PlayerSession {
       mapSize: this.currentGrid().size,
       currentMapId: this.getMapId(),
       otherPlayers,
-      combatLog: this.combatLog,
+      combatLog: this.combatLog.slice(-STATE_LOG_TAIL),
       battleCount: this.battleCount,
       character: charState,
       zoneName,
