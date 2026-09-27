@@ -1281,15 +1281,16 @@ export class SocialScreen implements Screen {
         const isOnline = onlineSet.has(member.username);
         gridHtml += `<span class="social-status-dot ${isOnline ? 'online' : 'offline'}"></span>`;
         gridHtml += `<span class="social-party-cell-name">${this.classIcon(this.getPlayerClassName(member.username))} ${this.escapeHtml(member.username)}</span>`;
-        const roleBadge = member.role === 'owner' ? 'O' : member.role === 'leader' ? 'L' : '';
+        const roleBadge = member.role === 'owner' ? '👑' : member.role === 'leader' ? '★' : '';
         const badgeClass = member.role === 'owner' ? 'owner' : 'friend';
         if (roleBadge) {
-          gridHtml += `<span class="social-badge ${badgeClass}">${roleBadge}</span>`;
+          const roleTitle = member.role === 'owner' ? 'Party owner' : 'Party leader';
+          gridHtml += `<span class="social-badge social-party-cell-role ${badgeClass}" title="${roleTitle}">${roleBadge}</span>`;
         }
       } else if (henchman) {
         const levelHtml = henchman.level !== undefined ? ` <span class="social-user-level">Lv ${henchman.level}</span>` : '';
         gridHtml += `<span class="social-party-cell-name">${this.henchmanPortrait(henchman)} ${this.henchmanName(henchman)}${levelHtml}</span>`;
-        gridHtml += '<span class="social-badge" title="Henchman — a hire, not a player">H</span>';
+        gridHtml += '<span class="social-badge social-party-cell-role" title="Henchman — a hire, not a player">H</span>';
       } else {
         gridHtml += '<span class="social-party-cell-empty">Empty</span>';
       }

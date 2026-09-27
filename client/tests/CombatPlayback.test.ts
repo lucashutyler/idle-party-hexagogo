@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { ClientCombatSnapshot, ClientCombatUnit, CombatEvent } from '@idle-party-rpg/shared';
-import { CATCH_UP_MS, CLOCK_SLEW_MS, CombatPlayback, guessStatusKind, skillDisplayState } from '../src/combat/CombatPlayback';
+import type { ClientCombatSnapshot, ClientCombatUnit, CombatEvent, SkillDefinition } from '@idle-party-rpg/shared';
+import {
+  CATCH_UP_MS,
+  CLOCK_SLEW_MS,
+  CombatPlayback,
+  guessCooldownMs,
+  guessStatusKind,
+  skillDisplayState,
+  STALE_RESUME_MS,
+  SYNC_WAIT_MS,
+} from '../src/combat/CombatPlayback';
+import type { PlaybackSkill } from '../src/combat/CombatPlayback';
 
 const DELAY = 300;
 
@@ -28,8 +38,8 @@ function ev(t: number, kind: CombatEvent['kind'], fields: Partial<CombatEvent> =
   return { id: nextId++, t, kind, ...fields };
 }
 
-const P = { side: 'player' as const, pos: 4 };
-const M = { side: 'monster' as const, pos: 1 };
+const P = { side: 'player' as const, pos: 4 as const };
+const M = { side: 'monster' as const, pos: 1 as const };
 
 function startBattle(pb: CombatPlayback, units: ClientCombatUnit[] = [player(), monster()], elapsed = 1000, battleId = 1): void {
   pb.ingestMessage({ battleId, snapshot: fullSnap(elapsed, units, battleId), events: [] }, clock);
@@ -38,6 +48,27 @@ function startBattle(pb: CombatPlayback, units: ClientCombatUnit[] = [player(), 
 beforeEach(() => {
   clock = 10_000;
   nextId = 1;
+});
+
+describe('guessCooldownMs', () => {
+  const skill = (fields: Partial<SkillDefinition>): SkillDefinition => ({
+    id: 's', name: 'S', description: '', className: 'Knight', type: 'active', unlockLevel: 1, activeEffects: [], ...fields,
+  } as SkillDefinition);
+
+  it('reads the effective cooldown back from a derived warm-up', () => {
+    expect(guessCooldownMs(skill({ cooldown: 3 }), 1000)).toBe(2000);
+    expect(guessCooldownMs(skill({ cooldown: 2 }), 0)).toBe(1000);
+    expect(guessCooldownMs(skill({ cooldown: 5, trigger: 'enemy_cast' }), 4000)).toBe(5000);
+  });
+
+  it('falls back to the base cooldown for explicit warm-ups, other reactions and unknown warm-ups', () => {
+    expect(guessCooldownMs(skill({ cooldown: 3, warmup: 1 }), 1000)).toBe(3000);
+    expect(guessCooldownMs(skill({ cooldown: 4, warmup: 0 }), 0)).toBe(4000);
+    expect(guessCooldownMs(skill({ cooldown: 2, trigger: 'ally_targeted' }), 0)).toBe(2000);
+    expect(guessCooldownMs(skill({ cooldown: 6 }), undefined)).toBe(6000);
+    expect(guessCooldownMs(skill({ cooldown: 0.5 }), undefined)).toBe(1000);
+    expect(guessCooldownMs(skill({}), undefined)).toBe(1000);
+  });
 });
 
 describe('CombatPlayback clock', () => {
@@ -228,20 +259,49 @@ describe('CombatPlayback event model', () => {
     expect(pb.unit('player', 4)!.cast!.remainingMs).toBe(remaining);
   });
 
-  it('restarts a skill cooldown from its last length on attack, reaction and cast_start', () => {
+  it('restarts a skill cooldown on attack, reaction and cast_start, from the hint until a snapshot reports one after a use', () => {
     const skills = [
-      { id: 'bash', remainingMs: 0, cooldownMs: 2000, state: 'ready' as const },
+      { id: 'bash', remainingMs: 0, cooldownMs: 1000, state: 'ready' as const },
       { id: 'intercept', remainingMs: 0, cooldownMs: 0, state: 'armed' as const },
     ];
     const pb = ready([player({ skills }), monster()]);
     play(pb, [ev(1100, 'attack', { src: P, dst: M, skill: 'Bash', skillId: 'bash' })]);
-    const bash = pb.unit('player', 4)!.skills!.find(s => s.id === 'bash')!;
-    expect(bash.cooldownMs).toBe(2000);
-    expect(bash.remainingMs).toBeGreaterThan(1990);
+    const bash = (): PlaybackSkill => pb.unit('player', 4)!.skills!.find(s => s.id === 'bash')!;
+    expect(bash().cooldownMs).toBe(4000);
+    expect(bash().remainingMs).toBeGreaterThan(3990);
     play(pb, [ev(1120, 'reaction', { src: P, dst: P, skill: 'Intercept', skillId: 'intercept', cardType: 'instant' })]);
     const intercept = pb.unit('player', 4)!.skills!.find(s => s.id === 'intercept')!;
     expect(intercept.cooldownMs).toBe(4000);
     expect(skillDisplayState(pb.unit('player', 4)!, intercept, 'ally_targeted')).toBe('cooldown');
+
+    pb.ingestMessage({ battleId: 1, snapshot: snap(1500, [player({ skills: [{ ...skills[0], remainingMs: 1600, cooldownMs: 2000, state: 'cooldown' }, skills[1]] }), monster()]), events: [] }, clock);
+    clock += 500;
+    pb.tick();
+    expect(bash().useCooldownMs).toBe(2000);
+    play(pb, [ev(3200, 'attack', { src: P, dst: M, skill: 'Bash', skillId: 'bash' })]);
+    expect(bash().cooldownMs).toBe(2000);
+  });
+
+  it('passes the battle-start warm-up to the hint and ignores warm-ups as use cooldowns', () => {
+    const seen: (number | undefined)[] = [];
+    const pb = new CombatPlayback({ now, delayMs: DELAY, cooldownHint: (_id, warmupMs) => { seen.push(warmupMs); return 5000; } });
+    pb.setActive(true);
+    const skills = [{ id: 'dispel', remainingMs: 4000, cooldownMs: 4000, state: 'cooldown' as const }];
+    pb.ingestMessage({ battleId: 1, snapshot: fullSnap(0, [player({ skills }), monster()]), events: [] }, clock);
+    pb.ingestMessage({ battleId: 1, snapshot: snap(600, [player({ skills: [{ ...skills[0], remainingMs: 3400 }] }), monster()]), events: [] }, clock + 600);
+    clock += 600 + DELAY + 400;
+    pb.tick();
+    const dispel = pb.unit('player', 4)!.skills![0];
+    expect(dispel.warmupMs).toBe(4000);
+    expect(dispel.useCooldownMs).toBe(0);
+    play(pb, [ev(4100, 'reaction', { src: P, dst: M, skill: 'Dispel', skillId: 'dispel', cardType: 'interrupt' })]);
+    expect(seen).toEqual([4000]);
+    expect(pb.unit('player', 4)!.skills![0].cooldownMs).toBe(5000);
+  });
+
+  it('leaves the warm-up unknown when the first snapshot is mid-fight', () => {
+    const pb = ready([player({ skills: [{ id: 'bash', remainingMs: 500, cooldownMs: 2000, state: 'cooldown' }] }), monster()]);
+    expect(pb.unit('player', 4)!.skills![0].warmupMs).toBeUndefined();
   });
 
   it('adds statuses from events and cleanses player afflictions', () => {
@@ -288,6 +348,23 @@ describe('CombatPlayback timers', () => {
     pb.tick();
     expect(u.actionMs).toBe(0);
     expect(u.skills![0].remainingMs).toBe(0);
+  });
+
+  it('does not pull the action ring back for a snapshot only slightly behind it, but follows larger corrections', () => {
+    const pb = new CombatPlayback({ now, delayMs: DELAY });
+    pb.setActive(true);
+    const cd = (remainingMs: number) => [{ id: 's', remainingMs, cooldownMs: 3000, state: 'cooldown' as const }];
+    startBattle(pb, [player({ actionMs: 900, skills: cd(2000) }), monster()]);
+    pb.ingestMessage({ battleId: 1, snapshot: snap(1400, [player({ actionMs: 600, skills: cd(1700) }), monster()]), events: [] }, clock + 400);
+    clock += DELAY + 400;
+    pb.tick();
+    expect(pb.unit('player', 4)!.actionMs).toBe(500);
+    expect(pb.unit('player', 4)!.skills![0].remainingMs).toBe(1600);
+    pb.ingestMessage({ battleId: 1, snapshot: snap(1600, [player({ actionMs: 600 }), monster()]), events: [] }, clock);
+    clock += 300;
+    const rt = pb.tick().renderTime;
+    expect(rt).toBeGreaterThanOrEqual(1600);
+    expect(pb.unit('player', 4)!.actionMs).toBe(600 - (rt - 1600));
   });
 
   it('keeps dead units frozen', () => {
@@ -374,6 +451,46 @@ describe('CombatPlayback reconciliation', () => {
     expect(pb.unit('player', 4)!.hp).toBe(60);
     clock += 50;
     expect(pb.tick().events).toHaveLength(0);
+  });
+
+  it('freezes a stale model on activate until a fresh snapshot arrives, then jumps to it', () => {
+    const pb = new CombatPlayback({ now, delayMs: DELAY });
+    pb.setActive(true);
+    startBattle(pb, [player({ hp: 100 }), monster({ hp: 50 })]);
+    clock += 16;
+    pb.tick();
+    pb.setActive(false);
+    clock += STALE_RESUME_MS + 3000;
+    pb.setActive(true);
+    expect(pb.syncing).toBe(true);
+    const frozen = pb.tick();
+    expect(frozen.jumped).toBe(true);
+    expect(pb.unit('player', 4)!.actionMs).toBeGreaterThan(0);
+    clock += 80;
+    pb.ingestMessage({ battleId: 1, snapshot: fullSnap(5100, [player({ hp: 30 }), monster({ hp: 20 })]), events: [] }, clock);
+    expect(pb.syncing).toBe(false);
+    expect(pb.unit('player', 4)!.hp).toBe(30);
+    expect(pb.renderTime).toBeGreaterThanOrEqual(5100);
+    expect(pb.tick().jumped).toBe(true);
+    clock += 16;
+    expect(pb.tick().jumped).toBe(false);
+  });
+
+  it('does not wait on activate when the model is fresh, and gives up waiting after SYNC_WAIT_MS', () => {
+    const pb = new CombatPlayback({ now, delayMs: DELAY });
+    pb.setActive(true);
+    startBattle(pb);
+    pb.setActive(false);
+    clock += 200;
+    pb.setActive(true);
+    expect(pb.syncing).toBe(false);
+    pb.setActive(false);
+    clock += STALE_RESUME_MS + 500;
+    pb.setActive(true);
+    expect(pb.syncing).toBe(true);
+    clock += SYNC_WAIT_MS + 1;
+    pb.tick();
+    expect(pb.syncing).toBe(false);
   });
 
   it('drops queued events on deactivate', () => {

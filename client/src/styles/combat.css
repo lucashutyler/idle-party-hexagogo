@@ -151,7 +151,10 @@
   min-height: 0;
   overflow: hidden;
   isolation: isolate;
-  background: var(--bg-1);
+  background:
+    radial-gradient(75% 38% at 50% 50%, rgba(140, 160, 255, 0.12) 0%, rgba(140, 160, 255, 0) 100%),
+    radial-gradient(90% 55% at 50% 0%, rgba(168, 107, 255, 0.16) 0%, rgba(168, 107, 255, 0) 100%),
+    linear-gradient(180deg, #1c2660 0%, #151d4a 40%, #10173c 60%, #0b112e 100%);
 }
 .combat-stage-bg {
   position: absolute;
@@ -212,10 +215,10 @@
 /* Horizontal (landscape/desktop): party left, enemies right, fronts facing the centre. */
 .combat-stage-grid {
   --combat-axis: x;
-  --center-gap: 24px;
+  --center-gap: 30px;
   --label-gutter: 20px;
   --row-h: clamp(28px, (100cqh - 22px - var(--label-gutter)) / 3, 170px);
-  --col-w: clamp(40px, (100cqw - 48px) / 6, 170px);
+  --col-w: clamp(40px, (100cqw - 54px) / 6, 170px);
   --card-dir: column;
   --card-dir-enemy: column;
   --portrait: clamp(24px, min(var(--col-w) - 20px, var(--row-h) - 52px), 112px);
@@ -366,8 +369,8 @@
 @container combat-stage (aspect-ratio < 1.1) {
   .combat-stage-grid {
     --combat-axis: y;
-    --center-gap: 12px;
-    --row-h: clamp(28px, (100cqh - 24px - var(--label-gutter)) / 6, 76px);
+    --row-h: clamp(28px, (100cqh - 36px - var(--label-gutter)) / 6, 76px);
+    --center-gap: clamp(20px, 100cqh - 6 * var(--row-h) - 36px, 40px);
     --col-w: min((100cqw - 22px) / 3, 160px);
     --card-dir: row;
     --card-dir-enemy: row;
@@ -400,6 +403,11 @@
   .combat-side > [data-grid="8"] { grid-area: 1 / 3; }
   .combat-block::before {
     inset: -10% -6%;
+  }
+  .combat-stage-divider span {
+    width: 22px;
+    height: 22px;
+    font-size: 10px;
   }
 }
 @container combat-stage (aspect-ratio < 1.1) and (height >= 380px) {
@@ -613,6 +621,9 @@
 .combat-card.dead .combat-card-classicon {
   visibility: hidden;
 }
+.combat-card.dead .combat-card-img {
+  opacity: 0.3;
+}
 .combat-card.dead .combat-card-portrait::before {
   content: '💀';
   position: absolute;
@@ -662,11 +673,41 @@
 .combat-card.self .combat-card-name {
   color: var(--gold);
 }
-.combat-card.self .combat-card-name::before {
-  content: '★ ';
+.combat-card.self .combat-card-body::after {
+  content: '★';
+  position: absolute;
+  left: -3px;
+  top: -5px;
+  z-index: 3;
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--grad-primary);
+  border: 1.5px solid var(--outline);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  color: #7a3d00;
+  font-size: 10px;
+  line-height: 1;
 }
 .combat-card.henchman .combat-card-name {
   color: var(--text-2);
+}
+
+.combat-stage-grid {
+  transition: opacity 200ms ease-out;
+}
+.combat-stage.syncing .combat-stage-grid {
+  opacity: 0.6;
+  transition-delay: 150ms;
+}
+.combat-stage.combat-snap .combat-card-hp-chip,
+.combat-stage.combat-snap .combat-card-hp-fill,
+.combat-stage.combat-snap .combat-card-hp-shield,
+.combat-stage.combat-snap .combat-card-body {
+  transition: none;
 }
 
 .combat-card-hp {
@@ -842,6 +883,15 @@
 }
 .combat-card[data-side="monster"] .combat-card-cast-label {
   background: linear-gradient(180deg, #ff6f86 0%, #d8243c 100%);
+}
+.combat-card[data-edge="left"] .combat-card-cast-label {
+  left: -8%;
+  transform: none;
+}
+.combat-card[data-edge="right"] .combat-card-cast-label {
+  left: auto;
+  right: -8%;
+  transform: none;
 }
 /* ── FX layer ────────────────────────────────────────────── */
 .combat-fx-layer {
@@ -1055,7 +1105,7 @@
   font-family: var(--font-display);
   font-weight: 400;
   font-synthesis: none;
-  font-size: clamp(34px, 13cqw, 68px);
+  font-size: clamp(30px, min(13cqw, 17cqh), 68px);
   line-height: 1.1;
   letter-spacing: 0.03em;
   text-shadow:
@@ -1116,6 +1166,7 @@
 .combat-skill {
   --tc: var(--card-attack);
   --tc-rgb: 255, 122, 69;
+  container: skillcard / inline-size;
   position: relative;
   flex: 1 1 0;
   min-width: 72px;
@@ -1220,7 +1271,9 @@
   position: absolute;
   inset: 0;
   z-index: 2;
-  background: conic-gradient(rgba(4, 6, 18, 0.74) calc(var(--cd, 0) * 1turn), rgba(4, 6, 18, 0) 0);
+  background: linear-gradient(90deg, rgba(var(--tc-rgb), 0.5) 0, rgba(4, 6, 18, 0.72) 3px, rgba(4, 6, 18, 0.66) 100%);
+  transform: scaleX(var(--cd, 0));
+  transform-origin: right center;
   pointer-events: none;
 }
 .combat-skill-fill {
@@ -1249,7 +1302,28 @@
 .combat-skill[data-state="armed"] .combat-skill-status { color: var(--cyan); }
 .combat-skill[data-state="armed"] .combat-skill-status::before { content: '⚡'; }
 .combat-skill[data-state="casting"] .combat-skill-sweep {
-  background: linear-gradient(0deg, rgba(61, 178, 255, 0.55) calc(var(--cd, 0) * 100%), rgba(61, 178, 255, 0) calc(var(--cd, 0) * 100%));
+  background: linear-gradient(90deg, rgba(61, 178, 255, 0.2) 0%, rgba(61, 178, 255, 0.55) 100%);
+  transform-origin: left center;
+}
+@container skillcard (width < 112px) {
+  .combat-skill-top {
+    align-items: flex-start;
+  }
+  .combat-skill-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.05;
+  }
+  .combat-skill-badge {
+    display: none;
+  }
+  .combat-skill-bottom {
+    justify-content: flex-end;
+  }
 }
 .combat-skill[data-state="casting"] .combat-skill-status { color: var(--blue); }
 .combat-skill[data-state="cooldown"] .combat-skill-name,
@@ -1605,6 +1679,10 @@
   background: radial-gradient(circle at 35% 30%, rgba(255, 77, 109, 0.5) 0%, #141a3c 80%);
   box-shadow: 0 0 0 3px var(--red), 0 0 26px rgba(255, 77, 109, 0.45);
 }
+.monster-popup.defeated .monster-popup-art {
+  filter: grayscale(1) brightness(0.65);
+  box-shadow: 0 0 0 3px #5a6080;
+}
 .monster-popup-name {
   margin-bottom: 8px;
   color: var(--text-1);
@@ -1743,7 +1821,8 @@
   .combat-card-hp-fill,
   .combat-card-hp-shield,
   .combat-card-body,
+  .combat-stage-grid,
   .combat-run-btn.combat-run-locked::before {
-    transition-duration: 0s;
+    transition: none;
   }
 }

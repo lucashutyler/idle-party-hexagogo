@@ -1,5 +1,24 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.09.26.1',
+    notes: [
+      'Combat is now real-time! Everyone in a fight — your party and the enemies — acts on their own timer instead of waiting for turns, so battles move faster and more happens at once.',
+      'Skills are now cards with a type. Attack skills fire when they are ready, Support skills wait until someone actually needs them, Enchantments leave a lasting effect, Instants react the moment something happens, and Interrupts counter enemy spells. Your skill slots, the skill picker and player profiles show each skill\'s card type, cooldown, cast time and trigger.',
+      'Skill cooldowns are now counted in seconds instead of attacks, and cooldown reduction from skills and sets is in seconds too. No skill can drop below a 1 second cooldown.',
+      'Some big skills and enemy spells now take a moment to cast. A warning bar shows what is coming and who it is aimed at, and stunning an enemy mid-cast cuts the spell off. If you are stunned while casting, your spell pauses and carries on afterwards.',
+      'Instant skills react the moment something happens, without using up your turn. Intercept now steps in front of a frailer ally when an enemy goes for them, and Shield Slam hits back whenever you are struck. Other skills can react to an ally being stunned or poisoned, or dropping below half health.',
+      'Interrupt skills counter enemy spells as they are being cast. In fights where no enemy can cast, they are used like normal attacks instead. Stunning skills like Bash now go for an enemy that is in the middle of casting.',
+      'Enemies can now attack faster or slower than one another, and a skill that has nothing to do waits instead of being wasted.',
+      'Run now becomes available 5 seconds into a fight.',
+      'A brand-new look: new fonts, glossy panels and chunky buttons on every screen, a top bar with your portrait, level, gold and notifications, and a big Battle button in the middle of the navigation bar.',
+      'The battle screen has been rebuilt. Rings show when each fighter acts next, cast bars and target lines warn you about incoming spells, and damage numbers, reaction cards and a skill bar with cooldown timers show every moment of the fight. It fits both portrait and landscape and follows your device\'s reduced-motion setting.',
+      'Your party formation now labels its columns Front, Mid and Back. On phones it is drawn with the front row on top, matching the battle layout.',
+      'Item rarity colours have changed: legendary items are now gold and heirloom items are pink.',
+      'The floating chat window no longer slides under the top bar or the navigation bar.',
+      'Missing pictures now show colourful artwork instead of grey placeholder boxes.',
+    ],
+  },
+  {
     version: '2026.08.29.1',
     notes: [
       'Your party can now only have one henchman at a time. Hiring a second — including another copy of the same one — is turned down until you dismiss the one you have.',

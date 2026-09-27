@@ -45,7 +45,7 @@ import type {
   WorldTileDefinition,
 } from '@idle-party-rpg/shared';
 import type { WorldCache } from '../network/WorldCache';
-import { artworkUrl, placeholderUrl } from './assets';
+import { artworkUrl } from './assets';
 
 export interface TileClickInfo {
   col: number;
@@ -1620,7 +1620,6 @@ export class ThreeWorldMap {
     this.parchmentMapId = mapId;
     const loader = new THREE.TextureLoader();
     const url = artworkUrl('parchment', mapId);
-    const fallback = placeholderUrl('parchment', { w: 256, h: 256, bg: '3a2a1a', fg: '5a4a3a' });
     const onLoaded = (tex: THREE.Texture) => {
       // A later map switch already superseded this load — drop it.
       if (this.parchmentMapId !== mapId) { tex.dispose(); return; }
@@ -1638,8 +1637,68 @@ export class ThreeWorldMap {
       this.parchmentMaterial.needsUpdate = true;
       this.requestRender();
     };
-    loader.load(url, onLoaded, undefined, () => {
-      loader.load(fallback, onLoaded, undefined, () => { /* keep solid color */ });
-    });
+    loader.load(url, onLoaded, undefined, () => onLoaded(createParchmentFallbackTexture()));
   }
+}
+
+const PARCHMENT_TILE_PX = 256;
+
+/** Seamless procedural parchment (tileable value noise over the fallback colour) for maps without artwork. */
+function createParchmentFallbackTexture(): THREE.Texture {
+  const size = PARCHMENT_TILE_PX;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.Texture();
+  const hex = parseInt(PARCHMENT_FALLBACK_COLOR.slice(1), 16);
+  const base = [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
+  const rand = mulberry32(0x9a7c3e);
+  const octaves = [4, 8, 16, 32].map((cells, i) => ({
+    cells,
+    amp: [0.5, 0.26, 0.15, 0.09][i],
+    grid: Array.from({ length: cells * cells }, () => rand()),
+  }));
+  const img = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let n = 0;
+      for (const o of octaves) n += o.amp * periodicNoise(o.grid, o.cells, (x / size) * o.cells, (y / size) * o.cells);
+      const shade = 0.82 + n * 0.36 + (rand() - 0.5) * 0.05;
+      const i = (y * size + x) * 4;
+      img.data[i] = Math.min(255, base[0] * shade);
+      img.data[i + 1] = Math.min(255, base[1] * shade);
+      img.data[i + 2] = Math.min(255, base[2] * shade);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(canvas);
+}
+
+function periodicNoise(grid: number[], cells: number, x: number, y: number): number {
+  const x0 = Math.floor(x) % cells;
+  const y0 = Math.floor(y) % cells;
+  const x1 = (x0 + 1) % cells;
+  const y1 = (y0 + 1) % cells;
+  const fx = smooth(x - Math.floor(x));
+  const fy = smooth(y - Math.floor(y));
+  const top = grid[y0 * cells + x0] * (1 - fx) + grid[y0 * cells + x1] * fx;
+  const bottom = grid[y1 * cells + x0] * (1 - fx) + grid[y1 * cells + x1] * fx;
+  return top * (1 - fy) + bottom * fy;
+}
+
+function smooth(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

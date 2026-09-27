@@ -4,6 +4,7 @@ type NameRole = 'self' | 'party' | 'enemy';
 
 const DAMAGE_TYPE_RE = /\b(physical|magical|holy)\b/gi;
 const SELF_SPAN = '<span class="log-name-self">You</span>';
+const SENTENCE_START_RE = /(^|[.!?]\s+)$/;
 
 /**
  * Colours player, party and monster names in log lines with one combined RegExp,
@@ -47,9 +48,13 @@ export class CombatLogFormatter {
     }
     let html = escapeHtml(text);
     if (this.regex) {
-      html = html.replace(this.regex, (_m, lead: string, name: string, possessive: string | undefined) => {
+      html = html.replace(this.regex, (_m, lead: string, name: string, possessive: string | undefined, offset: number, whole: string) => {
         const role = this.roles.get(name);
-        if (role === 'self') return `${lead}${possessive ? '<span class="log-name-self">Your</span>' : SELF_SPAN}`;
+        if (role === 'self') {
+          const word = possessive ? 'Your' : 'You';
+          const shown = SENTENCE_START_RE.test(whole.slice(0, offset) + lead) ? word : word.toLowerCase();
+          return `${lead}<span class="log-name-self">${shown}</span>`;
+        }
         return `${lead}<span class="log-name-${role ?? 'enemy'}">${name}</span>${possessive ?? ''}`;
       });
       if (html.startsWith(SELF_SPAN)) html = SELF_SPAN + secondPerson(html.slice(SELF_SPAN.length));

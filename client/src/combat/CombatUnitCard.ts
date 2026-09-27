@@ -136,7 +136,7 @@ export class UnitCard {
       this.el.style.setProperty('--act', act.toFixed(3));
     }
 
-    this.updateCast(unit, now);
+    this.updateCast(unit, dead, now);
 
     const flags = `${dead}|${stunned}|${unit.shield > 0 ? Math.round(unit.shield) : 0}`;
     if (unit.statuses === this.lastStatuses && flags === this.lastPipFlags) return;
@@ -153,6 +153,13 @@ export class UnitCard {
     }
   }
 
+  /** Anchors the floating cast label inward when the card sits at a stage edge. */
+  setEdge(edge: 'left' | 'right' | ''): void {
+    if ((this.el.dataset.edge ?? '') === edge) return;
+    if (edge) this.el.dataset.edge = edge;
+    else delete this.el.dataset.edge;
+  }
+
   setTargeted(targeted: boolean): void {
     if (targeted === this.lastTargeted) return;
     this.lastTargeted = targeted;
@@ -165,10 +172,10 @@ export class UnitCard {
     this.el.classList.add('cast-broken');
   }
 
-  private updateCast(unit: PlaybackUnit, now: number): void {
-    const cast = unit.cast;
+  private updateCast(unit: PlaybackUnit, dead: boolean, now: number): void {
+    const cast = dead ? null : unit.cast;
     if (!cast) {
-      if (this.brokenUntil > 0 && now >= this.brokenUntil) {
+      if (this.brokenUntil > 0 && (dead || now >= this.brokenUntil)) {
         this.brokenUntil = 0;
         this.el.classList.remove('cast-broken');
       }

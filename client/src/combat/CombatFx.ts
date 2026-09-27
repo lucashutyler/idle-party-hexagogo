@@ -21,6 +21,7 @@ interface Floater {
   bornAt: number;
   busy: boolean;
   anim: Animation | null;
+  slot: number;
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -28,6 +29,7 @@ export const FLOATER_POOL_SIZE = 24;
 export const FLOATERS_PER_UNIT = 2;
 export const FLOATER_MERGE_MS = 150;
 const MAX_REACTION_CARDS = 4;
+const STACK_OFFSET_PX = 20;
 const BANNER_MAX_MS = 1400;
 
 /** Transient combat effects drawn over the stage: numbers, callouts, banners. Only transform/opacity animate. */
@@ -52,7 +54,7 @@ export class CombatFx {
       const el = document.createElement('span');
       el.className = 'combat-floater';
       this.layer.appendChild(el);
-      this.floaters.push({ el, key: '', variant: 'physical', amount: 0, crit: false, overTime: false, bornAt: -Infinity, busy: false, anim: null });
+      this.floaters.push({ el, key: '', variant: 'physical', amount: 0, crit: false, overTime: false, bornAt: -Infinity, busy: false, anim: null, slot: 0 });
     }
   }
 
@@ -106,8 +108,8 @@ export class CombatFx {
     this.layer.appendChild(card);
     this.reactionCards.push(card);
     while (this.reactionCards.length > MAX_REACTION_CARDS) this.reactionCards.shift()?.remove();
-    const x = at.x;
-    const y = at.y + towardsY * Math.min(at.h * 0.35, 26);
+    const x = clampInto(at.x, (card.offsetWidth || 120) / 2 + 4, this.layer.clientWidth);
+    const y = clampInto(at.y + towardsY * Math.min(at.h * 0.4, 30), (card.offsetHeight || 34) / 2 + 4, this.layer.clientHeight);
     const base = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
     const remove = (): void => {
       card.remove();
@@ -294,10 +296,10 @@ export class CombatFx {
 
   private launch(f: Floater, at: FxPoint, duration: number): void {
     f.busy = true;
-    const slot = this.floaters.filter(o => o.busy && o.key === f.key && o !== f).length;
-    const jitter = slot === 0 ? 0 : 16;
-    const x = at.x + jitter;
-    const y = at.y - at.h * 0.15;
+    const stacked = this.floaters.some(o => o.busy && o.key === f.key && o !== f && o.slot === 0);
+    f.slot = stacked ? 1 : 0;
+    const x = at.x + (stacked ? 10 : 0);
+    const y = at.y - at.h * 0.15 - (stacked ? STACK_OFFSET_PX : 0);
     const finish = (): void => this.release(f);
     if (reducedMotion()) {
       const base = `translate(${x}px, ${y - 10}px) translate(-50%, -50%)`;
@@ -337,6 +339,11 @@ export class CombatFx {
     f.el.className = `combat-floater combat-floater-${f.variant}${f.crit ? ' crit' : ''}${f.overTime ? ' dot' : ''} live`;
     f.el.innerHTML = f.crit ? `<span class="combat-floater-crit">CRIT!</span>${text}` : text;
   }
+}
+
+function clampInto(value: number, margin: number, size: number): number {
+  if (size <= margin * 2) return value;
+  return Math.max(margin, Math.min(size - margin, value));
 }
 
 function oldest(list: Floater[]): Floater {

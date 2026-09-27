@@ -87,8 +87,17 @@ describe('CombatLogFormatter', () => {
     expect(f.format('Kay misses Goblin')).toBe('<span class="log-name-self">You</span> miss <span class="log-name-enemy">Goblin</span>');
     expect(f.format('Kay applies Bleed')).toBe('<span class="log-name-self">You</span> apply Bleed');
     expect(f.format('Kay cures Pia')).toBe('<span class="log-name-self">You</span> cure <span class="log-name-party">Pia</span>');
-    expect(f.format('Goblin hits Kay for 3')).toBe('<span class="log-name-enemy">Goblin</span> hits <span class="log-name-self">You</span> for 3');
     expect(f.format('Old Tom heals Pia')).toBe('<span class="log-name-party">Old Tom</span> heals <span class="log-name-party">Pia</span>');
+  });
+
+  it('lowercases the viewer mid-sentence and keeps capitals after a sentence break', () => {
+    const f = new CombatLogFormatter();
+    f.setRoster('Kay', ['Pia'], ['Goblin']);
+    expect(f.format('Goblin hits Kay for 3')).toBe('<span class="log-name-enemy">Goblin</span> hits <span class="log-name-self">you</span> for 3');
+    expect(f.format("Pia intercepts Goblin's attack aimed at Kay!"))
+      .toBe('<span class="log-name-party">Pia</span> intercepts <span class="log-name-enemy">Goblin</span>\'s attack aimed at <span class="log-name-self">you</span>!');
+    expect(f.format("Pia counters Kay's foe")).toBe('<span class="log-name-party">Pia</span> counters <span class="log-name-self">your</span> foe');
+    expect(f.format("Goblin falls! Kay's turn")).toBe('<span class="log-name-enemy">Goblin</span> falls! <span class="log-name-self">Your</span> turn');
   });
 
   it('does not colour names inside longer words and escapes HTML', () => {

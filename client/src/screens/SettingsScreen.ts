@@ -5,9 +5,9 @@ import { getQuestHintsEnabled, setQuestHintsEnabled } from '../settings/UserSett
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import type { GameClient } from '../network/GameClient';
 import { renderNotificationPreferences } from '../ui/NotificationPreferences';
+import { placeholderUrl } from '../ui/assets';
 
-const SETTINGS_NAV_PLACEHOLDER =
-  'https://placehold.co/96x96/2a2a40/e8e8e8/png?text=Set';
+const SETTINGS_NAV_PLACEHOLDER = placeholderUrl('Settings', { w: 96, h: 96, glyph: '⚙️' });
 
 export class SettingsScreen implements Screen {
   private container: HTMLElement;

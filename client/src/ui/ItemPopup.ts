@@ -30,7 +30,8 @@ export interface ItemPopupOptions {
  * Useful for embedding in other modals.
  */
 export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupOptions): string {
-  const color = def.iconColor ?? RARITY_COLORS[def.rarity] ?? 'var(--text-1)';
+  const color = RARITY_COLORS[def.rarity] ?? 'var(--text-1)';
+  const artStyle = `--rarity:${color}${def.iconColor ? `;--item-bg:${escapeHtml(def.iconColor)}` : ''}`;
   const initials = getItemInitials(def.name);
   const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
 
@@ -119,7 +120,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
       <span class="item-popup-initials">${initials}</span>`;
 
   return `
-    <div class="item-popup-artwork${shinyClass}" style="background:${color}">
+    <div class="item-popup-artwork${shinyClass}" style="${artStyle}">
       ${artworkInner}
     </div>
     <div class="item-popup-name" style="color:${color}">${escapeHtml(def.name)}</div>

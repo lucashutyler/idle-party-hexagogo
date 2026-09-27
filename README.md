@@ -173,11 +173,14 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Room entry requirements (gate a room or a map transition on an equipped item, a minimum level, and/or completed quests — every party member must qualify)
 
 ### Combat
-Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both sides. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.
+Real-time auto-battle on a timeline: every combatant acts on its own timer (about once a second), skills are cards with cooldowns and cast times in seconds, and the server streams the fight to clients as events plus periodic snapshots. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.
 - [x] Auto-battle state machine (server-authoritative, always fighting)
 - [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
-- [x] HP-based combat (damage per tick, party/monster health pools)
+- [x] HP-based combat (party/monster health pools)
+- [x] Real-time timeline combat (per-unit action timers, status pulses, stuns in seconds, stalemate guard)
+- [x] Skill cards — Attack / Support / Enchantment / Instant / Interrupt (+ Passive / Triggered), cooldowns and cast times in seconds, triggers (Intercept, Shield Slam, Cure, Mending react instantly)
+- [x] Telegraphed enemy spellcasts that can be interrupted (stuns, Dispel, Drumroll); seed casters (goblin shaman, bandit cutthroat)
 - [x] Monster definitions (zone-aware encounter system)
 - [x] Class-based combat (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong in party)
 - [x] Difficulty scaling (zone-based encounters with per-zone difficulty)
@@ -263,7 +266,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Account system (email + username, username changeable)
 - [x] WebSocket auth via session cookie (no WS login messages)
 - [x] Multiple connections per username (same login in multiple tabs stays in sync)
-- [x] Server-side combat log (last 100 entries, streamed to all connections)
+- [x] Server-side combat journal (last 1000 entries saved, last 100 in each state push) + live combat stream (batched events/snapshots, only to sockets showing the combat view)
 - [x] Persistent game state across server restarts
 - [ ] Instanced worlds (soft-cap 1000 players)
 - [x] Real-time client sync
@@ -273,17 +276,18 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Map tab with hex rendering (three.js WebGL canvas + HTML overlay, lazy-created on first Map visit)
 - [x] Other players visible on map (per-tile flags within same zone, +N badge for other-room players on your tile)
 - [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
-- [x] Bottom navigation: Combat, Map, Char (merged Char+Items), Craft, Social (submenu), Settings, Chat (overlay)
+- [x] Floating bottom navigation: Map, Char (merged Char+Items), Craft, raised centre Battle button, Social (submenu), Settings, Chat (overlay); emoji icon fallbacks
+- [x] Top HUD (class avatar + level, name, gold, notification bell)
 - [x] Mobile-first responsive design
-- [x] Pixel/retro RPG visual style (Silkscreen + Pixelify Sans)
-- [x] Combat cards with portrait + name + HP bar; per-zone backgrounds; lunge/hit/dodge animations
+- [x] Modern mobile-game visual style (Lilita One + Nunito, glossy panels, chunky buttons, design tokens)
+- [x] Real-time combat screen (action rings, cast bars with telegraphs, status pips, floating numbers, reaction cards, skill bar with cooldown sweeps, live log ticker; adapts to portrait/landscape; honours reduced motion)
 - [x] Image-everywhere convention (`<mount>/{id}.png` with placeholder fallback) across all 17 asset kinds — items, monsters, classes, rooms, room types, sets, shops, zones, NPCs, henchmen, map parchment, combat/room backdrops, the splash logo, and the class/slot/nav icon sets — all declared once in a shared registry
-- [x] Nav bar battle status indicators (pulse/flash on combat events)
+- [x] Nav bar battle status indicators (glow while fighting, flash on victory/defeat)
 - [x] Server unavailable / offline screen with retry
-- [x] Desktop font scaling (larger fonts on desktop via media query)
+- [x] Desktop font scaling (token font scale, larger on desktop via media query)
 - [x] Mobile zoom controls (+/- buttons on map) + 2-finger pinch zoom
 - [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, shop/talk/dungeon affordances), remote discovered (small popup with Go button), undiscovered (minimal)
-- [x] Dungeon entry popup + in-combat dungeon banner (floor progress + Leave Dungeon)
+- [x] Dungeon entry popup + in-combat dungeon header (floor / BOSS badge + Leave)
 - [x] Global chat pop-out (floating/draggable/resizable on desktop, docked bottom-sheet on mobile)
 - [x] Persistent XP bar above the bottom nav, visible on every screen
 - [x] ModalStack click-order z-index across all overlays

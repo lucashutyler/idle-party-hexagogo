@@ -2,10 +2,10 @@
 
 ## State persistence
 
-Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added.
+Player state is periodically saved (every 30s) and on graceful shutdown via `GameStateStore` interface. The journal kept in memory and in saves is 1000 entries; each `state` message carries only the last `STATE_LOG_TAIL` (100). Current implementation uses JSON files on disk (`JsonFileStore`). On restore, battle timers start fresh (no retroactive simulation) — each restored party's timer starts only after its members, dungeon run and henchmen are restored (`PartyBattleManager.startEntry`); a "Server back online" log entry is added. On shutdown, a "Server shutting down" log entry is added.
 
 Saved state per player (`PlayerSaveData`):
-- `username`, `battleCount`, `combatLog` (last 1000 entries), `unlockedKeys`, `position`, `mapId` (which map the party is on; absent on legacy saves → defaults to the world's default map on restore), `target`, `movementQueue`
+- `username`, `battleCount`, `combatLog` (the journal — last 1000 entries: victory/defeat, rewards, level-ups, moves, unlocks and server notices; per-hit combat lines are live-only and never journaled, see `combat.md` → Journal vs live log), `unlockedKeys`, `position`, `mapId` (which map the party is on; absent on legacy saves → defaults to the world's default map on restore), `target`, `movementQueue`
 - `character` (className, level, xp, inventory, equipment, skillLoadout) — optional; old saves or saves with invalid/legacy classes get `character = null` on load, forcing class re-selection. Within `skillLoadout`, only `equippedSkills` is authoritative — `unlockedSkills` is derived and recomputed from level + skill content on every restore (`reconcileSkillLoadout` also clears slots whose skill no longer exists or lost availability). Legacy `skillPoints` is ignored on load.
 - `friends`, `outgoingFriendRequests`, `blockedUsers` — optional; default to empty
 - `guildId`, `partyId`, `partyRole`, `partyGridPosition` — party state survives server restarts for multi-player parties

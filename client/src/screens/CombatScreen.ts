@@ -12,7 +12,7 @@ import {
 import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
-import { CombatPlayback, skillDisplayState, unitKey } from '../combat/CombatPlayback';
+import { CombatPlayback, guessCooldownMs, skillDisplayState, unitKey } from '../combat/CombatPlayback';
 import type { PlaybackUnit } from '../combat/CombatPlayback';
 import { CombatFx } from '../combat/CombatFx';
 import type { FloaterVariant, FxPoint } from '../combat/CombatFx';
@@ -22,13 +22,14 @@ import { CombatSkillBar } from '../combat/CombatSkillBar';
 import type { SkillBarLayout, SkillBarState } from '../combat/CombatSkillBar';
 import { UnitCard } from '../combat/CombatUnitCard';
 import type { CardIdentity } from '../combat/CombatUnitCard';
-import { escapeHtml, formatAmount, formatClock, formatDuration, statusPips } from '../combat/CombatFormat';
+import { escapeHtml, formatAmount, formatClock, formatDuration, pipsKey, statusPips } from '../combat/CombatFormat';
 
 type Axis = 'x' | 'y';
 
 const TEXT_INTERVAL_MS = 100;
 const RUN_HINT_MS = 3000;
 const POP_IN_STAGGER_MS = 45;
+const CAST_LABEL_EDGE_PX = 70;
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
@@ -86,6 +87,9 @@ export class CombatScreen implements Screen {
   private lastClockText = '';
   private lastRunKey = '';
   private runHintTimer?: ReturnType<typeof setTimeout>;
+  private snapping = false;
+  private syncingShown = false;
+  private monsterPopup: { overlay: HTMLElement; key: string; battleId: number | null; lastKey: string } | null = null;
 
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
@@ -96,9 +100,9 @@ export class CombatScreen implements Screen {
     this.gameClient = gameClient;
     this.worldCache = worldCache;
     this.playback = new CombatPlayback({
-      cooldownHint: (id) => {
+      cooldownHint: (id, warmupMs) => {
         const skill = this.worldCache.getSkill(id);
-        return skill?.cooldown !== undefined ? skill.cooldown * 1000 : undefined;
+        return skill ? guessCooldownMs(skill, warmupMs) : undefined;
       },
     });
 
@@ -282,6 +286,14 @@ export class CombatScreen implements Screen {
 
   private renderFrame(now: number): void {
     const tick = this.playback.tick(now);
+    if (tick.jumped !== this.snapping) {
+      this.snapping = tick.jumped;
+      this.stage.classList.toggle('combat-snap', tick.jumped);
+    }
+    if (this.playback.syncing !== this.syncingShown) {
+      this.syncingShown = this.playback.syncing;
+      this.stage.classList.toggle('syncing', this.syncingShown);
+    }
     if (this.playback.battleId !== this.renderedBattleId || this.playback.version !== this.renderedVersion) this.syncCards();
     if (this.centresDirty) this.measureCentres();
     for (const ev of tick.events) this.playEvent(ev, now);
@@ -294,6 +306,7 @@ export class CombatScreen implements Screen {
     if (writeText) {
       this.updateClock();
       if (this.lastState) this.updateRunButton(this.lastState);
+      this.refreshMonsterPopup();
     }
     this.gameClient.combatLog.release(this.playback.battleId, this.playback.renderTime);
   }
@@ -419,12 +432,14 @@ export class CombatScreen implements Screen {
     if (stageRect.width === 0 && stageRect.height === 0) return;
     for (const [key, card] of this.cards) {
       const r = card.body.getBoundingClientRect();
+      const x = r.left + r.width / 2 - stageRect.left;
       this.centres.set(key, {
-        x: r.left + r.width / 2 - stageRect.left,
+        x,
         y: r.top + r.height / 2 - stageRect.top,
         w: card.body.offsetWidth || r.width,
         h: card.body.offsetHeight || r.height,
       });
+      card.setEdge(x < CAST_LABEL_EDGE_PX ? 'left' : x > stageRect.width - CAST_LABEL_EDGE_PX ? 'right' : '');
     }
     for (const t of this.telegraphs.values()) t.drawnKey = '';
   }
@@ -696,8 +711,12 @@ export class CombatScreen implements Screen {
     const trigger = snapStatics?.trigger ?? (def ? getSkillTrigger(def) : undefined);
     const live = this.selfUnit()?.skills?.find(s => s.id === skillId);
     const stats: string[] = [];
-    const cooldownMs = live && live.cooldownMs > 0 ? live.cooldownMs : def?.cooldown !== undefined ? def.cooldown * 1000 : 0;
-    if (def?.type !== 'passive') stats.push(`Cooldown ${formatDuration(Math.max(1000, cooldownMs))}`);
+    if (def?.type !== 'passive') {
+      const baseMs = def ? guessCooldownMs(def, undefined) : live?.cooldownMs ?? 0;
+      const effectiveMs = live?.useCooldownMs || (def ? guessCooldownMs(def, live?.warmupMs) : baseMs);
+      const reduced = effectiveMs > 0 && effectiveMs !== baseMs ? ` (base ${formatDuration(baseMs)})` : '';
+      if (effectiveMs > 0) stats.push(`Cooldown ${formatDuration(effectiveMs)}${reduced}`);
+    }
     const castMs = snapStatics?.castTimeMs ?? (def?.castTime ? def.castTime * 1000 : 0);
     if (castMs > 0) stats.push(`Cast ${formatDuration(castMs)}`);
     const triggerInfo = trigger ? SKILL_TRIGGER_INFO[trigger] : undefined;
@@ -804,7 +823,6 @@ export class CombatScreen implements Screen {
   }
 
   private updateBackground(state: ServerStateMessage): void {
-    const zoneName = (state.party?.col != null && state.party?.row != null) ? (state.zoneName ?? '') : '';
     const tile = state.party ? this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row) : null;
     const zoneId = tile?.zone ?? '';
     const enc = encodeURIComponent;
@@ -813,10 +831,9 @@ export class CombatScreen implements Screen {
     if (state.party && zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}-${state.party.col}-${state.party.row}.png`);
     if (zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}.png`);
     if (zoneId) layers.push(`/zone-artwork/${enc(zoneId)}.png`);
-    layers.push(placeholderUrl(zoneName || 'Combat', { w: 800, h: 400, bg: '18234d', fg: '304186' }));
     const layered = layers.map(u => `url('${u}')`).join(', ');
     if (this.stageBg.dataset.bgKey !== layered) {
-      this.stageBg.style.backgroundImage = layered;
+      this.stageBg.style.backgroundImage = layered || 'none';
       this.stageBg.dataset.bgKey = layered;
     }
   }
@@ -829,8 +846,6 @@ export class CombatScreen implements Screen {
     const real = artworkUrl('monster', id || slugify(name));
     const fallback = placeholderUrl(name, { w: 160, h: 160 });
     const desc = description?.trim();
-    const pips = statusPips(unit);
-    const hpPct = unit.maxHp > 0 ? Math.max(0, Math.min(100, (unit.hp / unit.maxHp) * 100)) : 0;
     overlay.innerHTML = `
       <div class="monster-popup">
         <button class="monster-popup-close" aria-label="Close">×</button>
@@ -839,21 +854,53 @@ export class CombatScreen implements Screen {
                onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallback}';}else{this.style.display='none';}" />
         </div>
         <div class="monster-popup-name">${escapeHtml(name)}</div>
-        <div class="monster-popup-hp"><div class="monster-popup-hp-fill" style="width:${hpPct.toFixed(1)}%"></div><span>${formatAmount(unit.hp)} / ${formatAmount(unit.maxHp)}</span></div>
-        ${pips.length > 0 ? `<div class="monster-popup-status">${pips.map(p => `<span class="combat-pip ${p.tone}">${p.icon}${p.count ? `<b>${p.count}</b>` : ''} ${escapeHtml(p.title)}</span>`).join('')}</div>` : ''}
-        ${unit.cast ? `<div class="monster-popup-cast">Casting <b>${escapeHtml(unit.cast.skill)}</b></div>` : ''}
+        <div class="monster-popup-hp"><div class="monster-popup-hp-fill"></div><span></span></div>
+        <div class="monster-popup-status"></div>
+        <div class="monster-popup-cast"></div>
         ${desc ? `<div class="monster-popup-description">${escapeHtml(desc)}</div>` : ''}
       </div>
     `;
     document.body.appendChild(overlay);
+    const close = (): void => {
+      release(overlay);
+      overlay.remove();
+      if (this.monsterPopup?.overlay === overlay) this.monsterPopup = null;
+    };
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay || (e.target as HTMLElement).closest('.monster-popup-close')) {
-        release(overlay);
-        overlay.remove();
-      }
+      if (e.target === overlay || (e.target as HTMLElement).closest('.monster-popup-close')) close();
     });
     bringToFront(overlay);
     wireFocusOnInteract(overlay);
+    this.monsterPopup = { overlay, key: unit.key, battleId: this.playback.battleId, lastKey: '' };
+    this.refreshMonsterPopup();
+  }
+
+  private refreshMonsterPopup(): void {
+    const pop = this.monsterPopup;
+    if (!pop) return;
+    if (!pop.overlay.isConnected) {
+      this.monsterPopup = null;
+      return;
+    }
+    if (pop.battleId !== this.playback.battleId) return;
+    const unit = this.playback.unitByKey(pop.key);
+    if (!unit) return;
+    const pips = statusPips(unit);
+    const dead = unit.hp <= 0;
+    const key = `${Math.round(unit.hp)}|${unit.maxHp}|${pipsKey(pips)}|${unit.cast?.skill ?? ''}`;
+    if (key === pop.lastKey) return;
+    pop.lastKey = key;
+    const root = pop.overlay;
+    const hpPct = unit.maxHp > 0 ? Math.max(0, Math.min(100, (unit.hp / unit.maxHp) * 100)) : 0;
+    root.querySelector<HTMLElement>('.monster-popup')!.classList.toggle('defeated', dead);
+    root.querySelector<HTMLElement>('.monster-popup-hp-fill')!.style.width = `${hpPct.toFixed(1)}%`;
+    root.querySelector<HTMLElement>('.monster-popup-hp span')!.textContent = dead ? 'Defeated' : `${formatAmount(unit.hp)} / ${formatAmount(unit.maxHp)}`;
+    const status = root.querySelector<HTMLElement>('.monster-popup-status')!;
+    status.innerHTML = pips.map(p => `<span class="combat-pip ${p.tone}">${p.icon}${p.count ? `<b>${p.count}</b>` : ''} ${escapeHtml(p.title)}</span>`).join('');
+    status.style.display = pips.length > 0 ? '' : 'none';
+    const cast = root.querySelector<HTMLElement>('.monster-popup-cast')!;
+    cast.innerHTML = unit.cast ? `Casting <b>${escapeHtml(unit.cast.skill)}</b>` : '';
+    cast.style.display = unit.cast ? '' : 'none';
   }
 }
 

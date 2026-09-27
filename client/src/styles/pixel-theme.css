@@ -261,9 +261,6 @@ button, input, select, textarea {
   font-size: var(--fs-3xl);
 }
 
-/* Settings header now uses the same nav icon as the bottom-nav Settings tab
-   (loaded from /nav-icons/settings.png with a placehold.co fallback) instead
-   of a raw emoji glyph. Sized larger than the nav button itself. */
 .settings-icon-img {
   width: 96px;
   height: 96px;
@@ -4072,6 +4069,72 @@ button, input, select, textarea {
   image-rendering: var(--art-rendering);
   filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.45));
 }
+.splash-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+.splash-wordmark {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  line-height: 0.95;
+  text-align: center;
+  animation: splash-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.splash-brand.no-art .splash-wordmark {
+  display: flex;
+}
+.splash-wordmark-main {
+  font-size: clamp(40px, 13vw, 76px);
+  color: var(--gold);
+  -webkit-text-stroke: 2px var(--outline);
+  paint-order: stroke fill;
+  text-shadow: 0 5px 0 var(--edge-primary), 0 10px 22px rgba(0, 0, 0, 0.55), var(--glow-gold);
+}
+.splash-wordmark-sub {
+  margin-top: 6px;
+  padding: 4px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--grad-secondary);
+  border: 2px solid var(--outline);
+  box-shadow: 0 3px 0 var(--edge-secondary), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  font-size: clamp(18px, 5vw, 26px);
+  letter-spacing: 0.12em;
+  color: var(--text-1);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
+}
+.splash-loader {
+  display: flex;
+  gap: 8px;
+}
+.splash-loader span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 2px 0 var(--edge-primary);
+  animation: splash-dot 900ms ease-in-out infinite;
+}
+.splash-loader span:nth-child(2) {
+  animation-delay: 150ms;
+}
+.splash-loader span:nth-child(3) {
+  animation-delay: 300ms;
+}
+@keyframes splash-pop {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes splash-dot {
+  0%, 100% { transform: translateY(0); opacity: 0.45; }
+  50% { transform: translateY(-6px); opacity: 1; }
+}
 
 /* ── Top HUD ─────────────────────────────────────────────── */
 #top-hud:empty {
@@ -4118,6 +4181,21 @@ button, input, select, textarea {
   width: 24px;
   height: 24px;
   vertical-align: middle;
+}
+.top-hud-avatar-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.top-hud-avatar-icon .icon-inline.icon-glyph {
+  width: 100%;
+  height: 100%;
+  font-size: 20px;
+  background: none;
+  box-shadow: none;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.45));
 }
 .top-hud-level {
   position: absolute;
@@ -4210,6 +4288,9 @@ button, input, select, textarea {
   position: relative;
   overflow: hidden;
   background: rgba(6, 9, 24, 0.9);
+}
+.xpbar-fill.xpbar-fill-empty {
+  box-shadow: none;
 }
 .xpbar-fill {
   height: 100%;
@@ -4487,10 +4568,60 @@ button, input, select, textarea {
     align-self: center;
     width: min(720px, calc(100% - 16px));
   }
+  #top-hud {
+    padding-left: max(calc(12px + var(--safe-left)), calc((100% - 1100px) / 2));
+    padding-right: max(calc(12px + var(--safe-right)), calc((100% - 1100px) / 2));
+  }
 }
 
 @media (max-width: 400px) {
   .nav-tab:not(.active):not([data-screen="combat"]) .nav-label {
+    display: none;
+  }
+}
+@media (max-width: 360px) {
+  .nav-tab:not([data-screen="combat"]) .nav-label {
+    display: none;
+  }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --hud-height: 40px;
+    --nav-height: 54px;
+    --nav-raise: 6px;
+  }
+  .top-hud-player {
+    width: 32px;
+    height: 32px;
+  }
+  .top-hud-gold {
+    height: 26px;
+  }
+  .nav-tab {
+    gap: 2px;
+    padding: 4px 0 3px;
+  }
+  .nav-icon-glyph {
+    font-size: 19px;
+  }
+  .nav-tab-bg {
+    top: 4px;
+    bottom: 4px;
+  }
+  .nav-tab[data-screen="combat"] .nav-tab-bg,
+  .nav-tab[data-screen="combat"] .nav-icon {
+    width: 50px;
+    height: 50px;
+    margin-left: -25px;
+  }
+  .nav-tab[data-screen="combat"] .nav-icon-glyph {
+    font-size: 24px;
+  }
+  .nav-tab[data-screen="combat"] .nav-icon-img {
+    width: 28px;
+    height: 28px;
+  }
+  .nav-tab[data-screen="combat"] .nav-label {
     display: none;
   }
 }
@@ -4709,6 +4840,21 @@ button, input, select, textarea {
   .chat-popout-resize { display: none; }
   .chat-popout-header { cursor: default; }
 
+  body {
+    --chat-sheet-height: clamp(220px, 44dvh, 400px);
+  }
+  .chat-popout-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+  }
+  .chat-popout-filters::-webkit-scrollbar {
+    display: none;
+  }
+  .chat-popout-filters .chat-filter {
+    flex-shrink: 0;
+  }
   body[data-chat-open="1"][data-chat-layout="sheet"] #screen-container {
     flex: 1 1 0;
     min-height: 0;
@@ -5120,14 +5266,76 @@ button, input, select, textarea {
   filter: hue-rotate(20deg) saturate(0.5);
 }
 
+.icon-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 0.8em;
+  width: 1.5em;
+  height: 1.5em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 30%, var(--surface-3) 0%, var(--surface-1) 100%);
+  box-shadow: inset 0 1px 0 var(--stroke-hi), 0 0 0 1px var(--outline);
+  vertical-align: -0.35em;
+  filter: none;
+}
+.icon-inline.icon-glyph.icon-class {
+  width: 1.75em;
+  height: 1.75em;
+}
+
 /* Class card icon on the class-select screen — bigger, centered */
 .class-card-icon .icon-inline {
   width: 32px;
   height: 32px;
   vertical-align: middle;
 }
+.class-card-icon .icon-inline.icon-glyph {
+  width: 44px;
+  height: 44px;
+  font-size: 26px;
+}
 
-/* Slot dogear image (was emoji) — fits inside the small dogear corner */
+.item-dogear-glyph {
+  font-size: 11px;
+  line-height: 1;
+}
+.item-dogear.has-art .item-dogear-glyph,
+.item-slot-ghost.has-art .item-slot-ghost-glyph {
+  display: none;
+}
+.item-dogear-glyph + .item-dogear-img {
+  position: absolute;
+  inset: 0;
+}
+.item-slot-ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0.38;
+  filter: grayscale(1) brightness(1.3);
+}
+.item-slot-ghost-glyph {
+  font-size: 22px;
+  line-height: 1;
+}
+.item-slot-ghost-img {
+  position: absolute;
+  inset: 18%;
+  width: 64%;
+  height: 64%;
+  object-fit: contain;
+  image-rendering: var(--art-rendering);
+}
+@media (min-width: 768px) {
+  .item-slot-ghost-glyph {
+    font-size: 28px;
+  }
+}
 .item-dogear-img {
   width: 100%;
   height: 100%;
@@ -5611,6 +5819,20 @@ button, input, select, textarea {
 .notif-dropdown-actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
+}
+.notif-dropdown-header {
+  gap: 8px;
+}
+.notif-dropdown-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.notif-mark-all-btn,
+.notif-clear-all-btn {
+  white-space: nowrap;
 }
 .notif-mark-all-btn,
 .notif-clear-all-btn {
@@ -5871,15 +6093,48 @@ button, input, select, textarea {
   .social-party-cell.drag-hover-green,
   .social-party-cell.drag-hover-red,
   .nav-tab.victory-flash .nav-icon,
-  .nav-tab.defeat-flash .nav-icon {
+  .nav-tab.defeat-flash .nav-icon,
+  .splash-wordmark,
+  .splash-loader span {
     animation: none;
   }
+  #splash,
   .nav-tab,
   .nav-tab-bg,
   .nav-active-bar,
   .nav-icon-img,
+  .nav-icon-glyph,
   .xpbar-fill,
   .nav-submenu {
     transition-duration: 0s;
+  }
+}
+
+.verify-panel {
+  align-items: center;
+  text-align: center;
+}
+.verify-panel .verify-message {
+  margin: 0;
+}
+.verify-panel .login-error:empty {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .notif-dropdown {
+    width: 380px;
+  }
+}
+@media (min-width: 900px) {
+  .notif-toast-stack {
+    right: max(calc(12px + var(--safe-right)), calc((100vw - 1100px) / 2));
+    width: 300px;
+  }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .top-hud-bell-slot .notif-bell-btn {
+    width: 30px;
+    height: 30px;
   }
 }

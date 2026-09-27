@@ -7,13 +7,19 @@ import type {
   CombatRef,
   CombatSide,
   SkillCardType,
+  SkillDefinition,
   SkillTrigger,
 } from '@idle-party-rpg/shared';
-import { BASE_ACTION_INTERVAL_MS, PLAYBACK_DELAY_MS } from '@idle-party-rpg/shared';
+import { BASE_ACTION_INTERVAL_MS, COMBAT_STEP_MS, getSkillTrigger, MIN_COOLDOWN_MS, PLAYBACK_DELAY_MS } from '@idle-party-rpg/shared';
 
 export const CLOCK_SNAP_MS = 500;
 export const CLOCK_SLEW_MS = 15;
 export const CATCH_UP_MS = 1500;
+/** Older than this (server time) on activation, the model waits for a fresh snapshot instead of extrapolating. */
+export const STALE_RESUME_MS = 1000;
+export const SYNC_WAIT_MS = 2500;
+/** A snapshot this little behind a local ring or cooldown (a step's actor-order skew) does not pull it back. */
+export const RING_LEAD_TOLERANCE_MS = 150;
 
 export interface UnitStatics {
   name: string;
@@ -37,6 +43,11 @@ export interface PlaybackSkill {
   remainingMs: number;
   cooldownMs: number;
   snapState: ClientCombatSkill['state'];
+  /** Cooldown length after a use, read from a snapshot taken after one; 0 until then. */
+  useCooldownMs: number;
+  /** Cooldown at battle start (the warm-up); undefined when the fight was joined mid-way. */
+  warmupMs: number | undefined;
+  usedAt: number;
 }
 
 export interface PlaybackCast {
@@ -74,13 +85,15 @@ export interface PlaybackTick {
   /** Events whose time was reached this tick, in timeline order. */
   events: CombatEvent[];
   snapshotApplied: boolean;
+  /** The model jumped (catch-up, resync or new battle) instead of playing forward. */
+  jumped: boolean;
 }
 
 export interface PlaybackOptions {
   now?: () => number;
   delayMs?: number;
-  /** Fallback cooldown length for a skill whose snapshot has not reported one yet. */
-  cooldownHint?: (skillId: string) => number | undefined;
+  /** Cooldown length to restart a skill with until a snapshot has reported one after a use. */
+  cooldownHint?: (skillId: string, warmupMs: number | undefined) => number | undefined;
 }
 
 const STACKING_STATUSES = new Set(['Ignite', 'Sunder']);
@@ -112,7 +125,7 @@ export function guessStatusKind(name: string): ClientCombatStatus['kind'] {
 export class CombatPlayback {
   private readonly now: () => number;
   private readonly delayMs: number;
-  private readonly cooldownHint?: (skillId: string) => number | undefined;
+  private readonly cooldownHint?: (skillId: string, warmupMs: number | undefined) => number | undefined;
 
   private active = false;
   private currentBattleId: number | null = null;
@@ -131,6 +144,9 @@ export class CombatPlayback {
   private isFinished = false;
   private battleResult: 'victory' | 'defeat' | null = null;
   private structureVersion = 0;
+  private newestEventT = -Infinity;
+  private syncUntil = 0;
+  private pendingJump = false;
 
   constructor(options: PlaybackOptions = {}) {
     this.now = options.now ?? (() => performance.now());
@@ -171,6 +187,11 @@ export class CombatPlayback {
     return this.active;
   }
 
+  /** Waiting for a fresh snapshot after the view was away; timers are frozen meanwhile. */
+  get syncing(): boolean {
+    return this.syncUntil > 0;
+  }
+
   /** Combat time shown to the player: the render clock, clamped to the fight's span. */
   get elapsedMs(): number {
     if (this.currentBattleId === null || !Number.isFinite(this.currentRenderTime)) return 0;
@@ -197,18 +218,22 @@ export class CombatPlayback {
     return this.skillStaticMap.get(`${key}:${skillId}`);
   }
 
-  setActive(active: boolean): void {
-    if (active === this.active) {
-      if (active) this.catchUp();
+  setActive(active: boolean, at = this.now()): void {
+    if (!active) {
+      this.active = false;
+      this.syncUntil = 0;
+      this.queue = [];
+      this.pendingSnapshots = this.pendingSnapshots.slice(-1);
       return;
     }
-    this.active = active;
-    if (active) {
-      this.catchUp();
-      return;
+    this.active = true;
+    this.catchUp(at);
+    this.pendingJump = true;
+    const serverNow = this.serverNow(at);
+    const newest = Math.max(this.newestSnapshotT, this.newestEventT);
+    if (serverNow !== null && this.currentBattleId !== null && !this.isFinished && serverNow - newest > STALE_RESUME_MS) {
+      this.syncUntil = at + SYNC_WAIT_MS;
     }
-    this.queue = [];
-    this.pendingSnapshots = this.pendingSnapshots.slice(-1);
   }
 
   ingestMessage(msg: { battleId: number; snapshot?: ClientCombatSnapshot; events: CombatEvent[] }, receivedAt = this.now()): void {
@@ -232,12 +257,19 @@ export class CombatPlayback {
   tick(at = this.now()): PlaybackTick {
     const played: CombatEvent[] = [];
     let snapshotApplied = false;
+    let jumped = this.pendingJump;
+    this.pendingJump = false;
     if (this.offset === null || this.currentBattleId === null) {
-      return { renderTime: this.currentRenderTime, events: played, snapshotApplied };
+      return { renderTime: this.currentRenderTime, events: played, snapshotApplied, jumped };
+    }
+    if (this.syncUntil > 0) {
+      if (at < this.syncUntil) return { renderTime: this.currentRenderTime, events: played, snapshotApplied, jumped };
+      this.syncUntil = 0;
     }
     const serverNow = at + this.offset;
     if (this.active && Number.isFinite(this.currentRenderTime) && serverNow - this.currentRenderTime > CATCH_UP_MS) {
       snapshotApplied = this.catchUp(at);
+      jumped = true;
     }
     const rt = Math.max(this.currentRenderTime, serverNow - this.delayMs);
     this.currentRenderTime = rt;
@@ -259,7 +291,7 @@ export class CombatPlayback {
       }
     }
     for (const unit of this.unitOrder) this.advance(unit, rt);
-    return { renderTime: rt, events: played, snapshotApplied };
+    return { renderTime: rt, events: played, snapshotApplied, jumped };
   }
 
   private ingest(battleId: number, snapshot: ClientCombatSnapshot | undefined, events: CombatEvent[], receivedAt: number): void {
@@ -270,11 +302,14 @@ export class CombatPlayback {
     const clockT = snapshot ? snapshot.elapsedMs : latestEventTime(events);
     if (clockT !== undefined) this.updateClock(clockT, receivedAt, changed, !!snapshot);
 
-    if (snapshot && snapshot.elapsedMs >= this.newestSnapshotT) {
+    const fresh = !!snapshot && snapshot.elapsedMs >= this.newestSnapshotT;
+    if (snapshot && fresh) {
       this.newestSnapshotT = snapshot.elapsedMs;
       if (this.active) insertSorted(this.pendingSnapshots, snapshot, s => s.elapsedMs);
       else this.pendingSnapshots = [snapshot];
     }
+    const latest = latestEventTime(events);
+    if (latest !== undefined) this.newestEventT = Math.max(this.newestEventT, latest);
 
     if (this.active) {
       for (const ev of events) {
@@ -284,7 +319,20 @@ export class CombatPlayback {
       }
     }
 
-    if (changed && this.active) this.applyNewestSnapshot();
+    if (changed && this.active) {
+      this.applyNewestSnapshot();
+      this.pendingJump = true;
+    } else if (snapshot && fresh && this.syncUntil > 0) {
+      this.resync(snapshot);
+    }
+  }
+
+  private resync(snapshot: ClientCombatSnapshot): void {
+    this.syncUntil = 0;
+    this.pendingJump = true;
+    this.applyNewestSnapshot();
+    this.queue = this.queue.filter(e => e.t > snapshot.elapsedMs || e.kind === 'battle_end');
+    this.currentRenderTime = Math.max(this.currentRenderTime, snapshot.elapsedMs);
   }
 
   private resetBattle(battleId: number | null): void {
@@ -302,6 +350,8 @@ export class CombatPlayback {
     this.endT = Infinity;
     this.isFinished = false;
     this.battleResult = null;
+    this.newestEventT = -Infinity;
+    this.syncUntil = 0;
     this.structureVersion++;
   }
 
@@ -369,6 +419,8 @@ export class CombatPlayback {
         unit = createUnit(u);
         this.unitMap.set(key, unit);
         structural = true;
+      } else {
+        this.advance(unit, snapshot.elapsedMs);
       }
       writeSnapshotUnit(unit, u, snapshot.elapsedMs);
       nextOrder.push(unit);
@@ -442,7 +494,7 @@ export class CombatPlayback {
           src.waitIsCast = true;
           src.actionTotalMs = Math.max(src.intervalMs, castMs);
           src.actionMs = src.actionTotalMs;
-          this.restartCooldown(src, ev.skillId);
+          this.restartCooldown(src, ev.skillId, ev.t);
         }
         break;
       case 'cast_end':
@@ -462,11 +514,11 @@ export class CombatPlayback {
             src.actionTotalMs = src.intervalMs;
             src.actionMs = src.intervalMs;
           }
-          this.restartCooldown(src, ev.skillId);
+          this.restartCooldown(src, ev.skillId, ev.t);
         }
         break;
       case 'reaction':
-        if (src) this.restartCooldown(src, ev.skillId);
+        if (src) this.restartCooldown(src, ev.skillId, ev.t);
         break;
       case 'status':
         if (dst && ev.name) addStatus(dst, ev.name);
@@ -486,11 +538,14 @@ export class CombatPlayback {
     }
   }
 
-  private restartCooldown(unit: PlaybackUnit, skillId: string | undefined): void {
+  private restartCooldown(unit: PlaybackUnit, skillId: string | undefined, t: number): void {
     if (!skillId || !unit.skills) return;
     const skill = unit.skills.find(s => s.id === skillId);
     if (!skill) return;
-    const length = skill.cooldownMs > 0 ? skill.cooldownMs : (this.cooldownHint?.(skillId) ?? 0);
+    skill.usedAt = t;
+    const length = skill.useCooldownMs > 0
+      ? skill.useCooldownMs
+      : this.cooldownHint?.(skillId, skill.warmupMs) ?? skill.cooldownMs;
     skill.cooldownMs = length;
     skill.remainingMs = length;
   }
@@ -545,15 +600,32 @@ function writeSnapshotUnit(unit: PlaybackUnit, u: ClientCombatUnit, t: number): 
   unit.shield = u.shield ?? 0;
   unit.stunMs = u.stunMs ?? 0;
   unit.stunTotalMs = u.stunTotalMs ?? unit.stunMs;
-  unit.actionMs = u.actionMs;
+  const lag = u.actionMs - unit.actionMs;
+  const keepLead = u.hp > 0 && u.actionTotalMs === unit.actionTotalMs && lag > 0 && lag <= RING_LEAD_TOLERANCE_MS;
+  if (!keepLead) unit.actionMs = u.actionMs;
   unit.actionTotalMs = u.actionTotalMs;
   if (!u.cast && !unit.waitIsCast && unit.attacks > 0 && u.actionTotalMs > 0) unit.intervalMs = u.actionTotalMs;
   unit.cast = u.cast
     ? { skill: u.cast.skill, skillId: u.cast.skillId, totalMs: u.cast.totalMs, remainingMs: u.cast.remainingMs, target: u.cast.target }
     : null;
   unit.statuses = (u.statuses ?? []).map(s => ({ ...s }));
+  const previous = new Map((unit.skills ?? []).map(s => [s.id, s]));
   unit.skills = u.skills
-    ? u.skills.map(s => ({ id: s.id, remainingMs: s.remainingMs, cooldownMs: s.cooldownMs, snapState: s.state }))
+    ? u.skills.map(s => {
+      const old = previous.get(s.id);
+      const usedAt = old?.usedAt ?? -Infinity;
+      const afterUse = Number.isFinite(usedAt) && usedAt <= t && s.cooldownMs > 0;
+      const lag = old && old.cooldownMs === s.cooldownMs ? s.remainingMs - old.remainingMs : 0;
+      return {
+        id: s.id,
+        remainingMs: old && lag > 0 && lag <= RING_LEAD_TOLERANCE_MS ? old.remainingMs : s.remainingMs,
+        cooldownMs: s.cooldownMs,
+        snapState: s.state,
+        useCooldownMs: afterUse ? s.cooldownMs : old?.useCooldownMs ?? 0,
+        warmupMs: old ? old.warmupMs : t < COMBAT_STEP_MS ? s.cooldownMs : undefined,
+        usedAt,
+      };
+    })
     : null;
   unit.t0 = t;
 }
@@ -580,6 +652,18 @@ function insertSorted<T>(list: T[], item: T, key: (item: T) => number): void {
   let i = list.length;
   while (i > 0 && key(list[i - 1]) > k) i--;
   list.splice(i, 0, item);
+}
+
+/**
+ * Cooldown to show when `def` is used before a snapshot reports one. Derived action and interrupt
+ * warm-ups are the effective cooldown minus one second, so they reveal cooldown reduction.
+ */
+export function guessCooldownMs(def: SkillDefinition, warmupMs: number | undefined): number {
+  const trigger = getSkillTrigger(def);
+  const derivedWarmup = def.warmup === undefined && (trigger === undefined || trigger === 'enemy_cast');
+  if (derivedWarmup && warmupMs !== undefined && warmupMs >= 0) return warmupMs + MIN_COOLDOWN_MS;
+  const base = typeof def.cooldown === 'number' && Number.isFinite(def.cooldown) ? def.cooldown * 1000 : MIN_COOLDOWN_MS;
+  return Math.max(MIN_COOLDOWN_MS, base);
 }
 
 /** Display state of a skill at the playback's current time. */

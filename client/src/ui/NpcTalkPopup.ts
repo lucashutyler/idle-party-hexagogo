@@ -9,6 +9,9 @@ import type {
 } from '@idle-party-rpg/shared';
 import { canAcceptQuest, getObjectiveTarget } from '@idle-party-rpg/shared';
 
+const NOTICE_WINDOW_MS = 3000;
+const NOTICE_DURATION_MS = 3500;
+
 export class NpcTalkPopup {
   private overlay: HTMLElement;
   private gameClient: GameClient;
@@ -18,15 +21,18 @@ export class NpcTalkPopup {
   private pendingTurnIns: Set<string> = new Set();
   /** Completion speech bubbles to render until the player dismisses them. */
   private completionMessages: { questId: string; questName: string; text: string }[] = [];
+  private lastHtml = '';
+  private unsubscribeError: (() => void) | null = null;
+  private actionSentAt = 0;
+  private notice: string | null = null;
+  private noticeTimer: number | null = null;
 
   constructor(gameClient: GameClient) {
     this.gameClient = gameClient;
     this.overlay = document.createElement('div');
     this.overlay.className = 'npc-talk-overlay';
     this.overlay.style.display = 'none';
-    this.overlay.addEventListener('click', (e) => {
-      if (e.target === this.overlay) this.hide();
-    });
+    this.overlay.addEventListener('click', (e) => this.handleClick(e));
     document.body.appendChild(this.overlay);
   }
 
@@ -41,13 +47,28 @@ export class NpcTalkPopup {
       if (this.overlay.style.display === 'none') return;
       this.render(s);
     });
+
+    this.unsubscribeError?.();
+    this.unsubscribeError = this.gameClient.onServerError((message) => {
+      if (this.overlay.style.display === 'none') return;
+      if (Date.now() - this.actionSentAt > NOTICE_WINDOW_MS) return;
+      this.actionSentAt = 0;
+      this.showNotice(message);
+    });
   }
 
   hide(): void {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = '';
+    this.lastHtml = '';
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.unsubscribeError?.();
+    this.unsubscribeError = null;
+    if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer);
+    this.noticeTimer = null;
+    this.notice = null;
+    this.actionSentAt = 0;
     this.currentNpc = null;
     this.pendingTurnIns.clear();
     this.completionMessages = [];
@@ -156,13 +177,14 @@ export class NpcTalkPopup {
       ? `<div class="npc-quest-section-empty">Nothing for you right now.</div>`
       : '';
 
-    this.overlay.innerHTML = `
+    const html = `
       <div class="npc-talk-modal">
         <div class="npc-talk-header">
           ${portrait}
           <div class="npc-talk-name">${this.escape(npc.name)}</div>
         </div>
         <div class="npc-talk-greeting">"${this.escape(npc.greeting)}"</div>
+        ${this.notice ? `<div class="npc-talk-notice" role="alert">${this.escape(this.notice)}</div>` : ''}
         ${completionHtml}
         ${readyHtml}
         ${inProgressHtml}
@@ -174,28 +196,47 @@ export class NpcTalkPopup {
       </div>
     `;
 
-    this.overlay.querySelector('.npc-talk-close')?.addEventListener('click', () => this.hide());
+    if (html === this.lastHtml) return;
+    const scrollTop = this.overlay.querySelector('.npc-talk-modal')?.scrollTop ?? 0;
+    this.overlay.innerHTML = html;
+    this.lastHtml = html;
+    const modal = this.overlay.querySelector('.npc-talk-modal');
+    if (modal) modal.scrollTop = scrollTop;
+  }
 
-    for (const btn of this.overlay.querySelectorAll<HTMLButtonElement>('[data-quest-accept]')) {
-      btn.addEventListener('click', () => {
-        const qid = btn.dataset.questAccept!;
-        this.gameClient.sendAcceptQuest(qid);
-      });
+  /** Delegated so a state push re-rendering the modal mid-tap can't swallow the click. */
+  private handleClick(e: MouseEvent): void {
+    if (e.target === this.overlay) {
+      this.hide();
+      return;
     }
-    for (const btn of this.overlay.querySelectorAll<HTMLButtonElement>('[data-quest-turnin]')) {
-      btn.addEventListener('click', () => {
-        const qid = btn.dataset.questTurnin!;
-        this.pendingTurnIns.add(qid);
-        this.gameClient.sendTurnInQuest(qid);
-      });
+    const btn = (e.target as HTMLElement).closest('button');
+    if (!btn || !this.overlay.contains(btn)) return;
+    if (btn.classList.contains('npc-talk-close')) {
+      this.hide();
+    } else if (btn.dataset.questAccept) {
+      this.actionSentAt = Date.now();
+      this.gameClient.sendAcceptQuest(btn.dataset.questAccept);
+    } else if (btn.dataset.questTurnin) {
+      this.actionSentAt = Date.now();
+      this.pendingTurnIns.add(btn.dataset.questTurnin);
+      this.gameClient.sendTurnInQuest(btn.dataset.questTurnin);
+    } else if (btn.dataset.dismissCompletion) {
+      const qid = btn.dataset.dismissCompletion;
+      this.completionMessages = this.completionMessages.filter(m => m.questId !== qid);
+      this.render(this.gameClient.lastState ?? null);
     }
-    for (const btn of this.overlay.querySelectorAll<HTMLButtonElement>('[data-dismiss-completion]')) {
-      btn.addEventListener('click', () => {
-        const qid = btn.dataset.dismissCompletion!;
-        this.completionMessages = this.completionMessages.filter(m => m.questId !== qid);
-        this.render(this.gameClient.lastState ?? null);
-      });
-    }
+  }
+
+  private showNotice(message: string): void {
+    this.notice = message;
+    if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer);
+    this.noticeTimer = window.setTimeout(() => {
+      this.notice = null;
+      this.noticeTimer = null;
+      this.render(this.gameClient.lastState ?? null);
+    }, NOTICE_DURATION_MS);
+    this.render(this.gameClient.lastState ?? null);
   }
 
   private renderAvailable(def: QuestDefinition): string {

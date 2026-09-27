@@ -573,7 +573,7 @@ export class CharItemsScreen implements Screen {
 
     overlay.innerHTML = `
       <div class="charitems-skill-popup">
-        <div class="charitems-skill-popup-title">Slot ${slotIndex + 1} &middot; ${slot.type} (Lv ${slot.unlocksAtLevel}+)</div>
+        <div class="charitems-skill-popup-title">Slot ${slotIndex + 1} &middot; ${slot.type === 'active' ? 'Active' : 'Passive'} skill</div>
         ${equippedNow ? `<div class="charitems-skill-popup-current">Currently: <strong>${this.escapeHtml(equippedNow.name)}</strong></div>` : ''}
         <div class="charitems-skill-popup-list">${rowsHtml}</div>
         <div class="charitems-skill-popup-actions">
@@ -629,7 +629,7 @@ export class CharItemsScreen implements Screen {
     const atkLow = baseAtk + bonuses.bonusAttackMin;
     const atkHigh = baseAtk + bonuses.bonusAttackMax;
     const atkVal = atkLow === atkHigh ? `${atkLow}` : `${atkLow}-${atkHigh}`;
-    const atkType = char.damageType ? ` ${char.damageType}` : '';
+    const atkType = char.damageType ?? '';
 
     const drVal = bonuses.damageReductionMax > 0
       ? (bonuses.damageReductionMin === bonuses.damageReductionMax
@@ -645,7 +645,8 @@ export class CharItemsScreen implements Screen {
     this.statCardEl.innerHTML = `
       <div class="charitems-stat">
         <span class="charitems-stat-label" data-tooltip="ATK">ATK</span>
-        <span class="charitems-stat-value">${atkVal}${atkType}</span>
+        <span class="charitems-stat-value">${atkVal}</span>
+        ${atkType ? `<span class="charitems-stat-sub">${this.escapeHtml(atkType)}</span>` : ''}
       </div>
       <div class="charitems-stat">
         <span class="charitems-stat-label" data-tooltip="DR">DR</span>
@@ -775,8 +776,9 @@ export class CharItemsScreen implements Screen {
       return;
     }
 
-    if (this.sortMode === 'rarity' || this.sortMode === 'type') {
-      // Group with headers
+    const grouped = this.sortMode === 'rarity' || this.sortMode === 'type';
+    this.inventoryGrid.classList.toggle('items-inv-grid-grouped', grouped);
+    if (grouped) {
       this.inventoryGrid.innerHTML = this.renderGroupedInventory(filtered);
     } else {
       this.inventoryGrid.innerHTML = filtered.map(([itemId, count]) => this.renderInventoryEntry(itemId, count)).join('');
@@ -788,7 +790,7 @@ export class CharItemsScreen implements Screen {
     if (!def) return '';
     return renderItemIcon(itemId, def, {
       qty: count,
-      showSlotIcon: true,
+      showSlotIcon: this.sortMode !== 'type',
       showSetIndicator: true,
       setDefs: this.setDefs,
       dataAttrs: { item: itemId },
@@ -812,8 +814,8 @@ export class CharItemsScreen implements Screen {
     for (const key of orderedKeys) {
       const items = buckets.get(key);
       if (!items) continue;
-      html += `<div class="charitems-inv-group-header">${this.escapeHtml(this.formatBucketLabel(key))}</div>`;
-      html += items.map(([id, count]) => this.renderInventoryEntry(id, count)).join('');
+      html += `<div class="charitems-inv-group"><div class="charitems-inv-group-header">${this.escapeHtml(this.formatBucketLabel(key))}</div>`;
+      html += `<div class="charitems-inv-group-items">${items.map(([id, count]) => this.renderInventoryEntry(id, count)).join('')}</div></div>`;
     }
     return html;
   }

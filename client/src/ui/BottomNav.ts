@@ -195,7 +195,8 @@ export class BottomNav {
       const margin = 8;
       let left = btnRect.left + btnRect.width / 2 - flyRect.width / 2;
       left = Math.max(margin, Math.min(window.innerWidth - flyRect.width - margin, left));
-      const top = btnRect.top - flyRect.height - 6;
+      const raisedTop = this.container.querySelector('.nav-tab[data-screen="combat"] .nav-tab-bg')?.getBoundingClientRect().top ?? btnRect.top;
+      const top = Math.min(btnRect.top, raisedTop) - flyRect.height - 6;
       fly.style.left = `${left}px`;
       fly.style.top = `${Math.max(margin, top)}px`;
       fly.classList.add('nav-submenu-shown');

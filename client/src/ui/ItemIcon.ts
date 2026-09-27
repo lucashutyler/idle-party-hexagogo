@@ -11,11 +11,7 @@ export const RARITY_COLORS: Record<string, string> = {
   heirloom: 'var(--rarity-heirloom)',
 };
 
-/**
- * Slot icon image URLs. Replace emoji glyphs that previously decorated
- * equipment-slot dogears. Drop PNGs into `data/slot-icons/{slot}.png` and
- * mount `/slot-icons` server-side; missing files fall through to placehold.co.
- */
+/** Slot icon art (content, served from `/slot-icons`); `SLOT_GLYPHS` shows until it loads or when it is missing. */
 export const SLOT_ICONS: Record<string, string> = {
   head: '/slot-icons/head.png',
   shoulders: '/slot-icons/shoulders.png',
@@ -30,6 +26,12 @@ export const SLOT_ICONS: Record<string, string> = {
   necklace: '/slot-icons/necklace.png',
   back: '/slot-icons/back.png',
   relic: '/slot-icons/relic.png',
+};
+
+export const SLOT_GLYPHS: Record<string, string> = {
+  head: '⛑️', shoulders: '🦺', chest: '👕', bracers: '🔗', gloves: '🧤',
+  mainhand: '🗡️', offhand: '🛡️', twohanded: '⚔️', foot: '🥾', ring: '💍',
+  necklace: '📿', back: '🧥', relic: '🏺',
 };
 
 export const SLOT_LABELS: Record<string, string> = {
@@ -63,24 +65,19 @@ export function getItemSetId(itemId: string, setDefs: Record<string, SetDefiniti
   return null;
 }
 
-/**
- * Render the dogear corner element with a slot icon image.
- * `slot` is one of EquipSlot; we look up the URL in SLOT_ICONS, fall through
- * to placehold.co on load failure, and hide the img if even that fails.
- *
- * The img starts at opacity:0 and only reveals on successful load (real
- * artwork OR placehold.co fallback). That hides the broken-image flash
- * the browser would otherwise paint between the 404 and the fallback
- * request resolving.
- */
-function renderSlotDogear(slot: string): string {
+function slotArtHtml(slot: string, imgClass: string, glyphClass: string): string {
   const src = SLOT_ICONS[slot];
   if (!src) return '';
-  const label = (SLOT_LABELS[slot] ?? slot).slice(0, 8);
-  const placeholder = `https://placehold.co/16x16/2a2a40/e8e8e8/png?text=${encodeURIComponent(label)}`;
-  const onerror = `if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}`;
-  const onload = `this.style.opacity='1'`;
-  return `<span class="item-dogear"><img class="item-dogear-img" src="${src}" alt="${escapeHtml(label)}" style="opacity:0" onload="${onload}" onerror="${onerror}" /></span>`;
+  const label = SLOT_LABELS[slot] ?? slot;
+  const glyph = SLOT_GLYPHS[slot] ?? '';
+  return `<span class="${glyphClass}" aria-hidden="true">${glyph}</span>`
+    + `<img class="${imgClass}" src="${src}" alt="${escapeHtml(label)}" style="opacity:0"`
+    + ` onload="this.style.opacity='1';this.parentElement.classList.add('has-art')" onerror="this.remove()" />`;
+}
+
+function renderSlotDogear(slot: string): string {
+  const inner = slotArtHtml(slot, 'item-dogear-img', 'item-dogear-glyph');
+  return inner ? `<span class="item-dogear">${inner}</span>` : '';
 }
 
 export interface ItemIconOptions {
@@ -142,9 +139,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${escapeHtml(def.name)}" style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
 }
 
-/**
- * Render an empty equipment slot icon with a dogear showing the slot icon.
- */
+/** Empty equipment slot showing a faded slot icon. */
 export function renderEmptySlotIcon(slot: string, options?: { extraClass?: string; dataAttrs?: Record<string, string> }): string {
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
   const dataStr = options?.dataAttrs
@@ -152,5 +147,7 @@ export function renderEmptySlotIcon(slot: string, options?: { extraClass?: strin
     : '';
   const label = SLOT_LABELS[slot] ?? slot;
 
-  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}"${dataStr}>${renderSlotDogear(slot)}</div>`;
+  const art = slotArtHtml(slot, 'item-slot-ghost-img', 'item-slot-ghost-glyph');
+  const ghost = art ? `<span class="item-slot-ghost">${art}</span>` : '';
+  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}"${dataStr}>${ghost}</div>`;
 }

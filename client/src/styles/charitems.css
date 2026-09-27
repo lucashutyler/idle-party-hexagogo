@@ -414,7 +414,7 @@
   right: 0;
   width: 18px;
   height: 18px;
-  background: rgba(240, 244, 255, 0.9);
+  background: rgba(6, 9, 24, 0.62);
   border-top-left-radius: var(--radius-sm);
   border-top: 1px solid var(--outline);
   border-left: 1px solid var(--outline);
