@@ -163,7 +163,7 @@ interface PartyProfile {
 
 interface EnemySummary {
   enemyLevels?: [number, number];
-  enemyLevelsDerived?: boolean;
+  someUnrated?: boolean;
   /** Strongest common enemy with an authored level; derived levels never drive level reasons. */
   enemyLevel?: number;
   bossFight: boolean;
@@ -365,17 +365,10 @@ function stableStringify(value: unknown): string {
   return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(record[k])}`).join(',')}}`;
 }
 
-function masteryFingerprint(mastery: Record<string, number> | undefined): string[] {
-  if (!mastery) return [];
-  const ranks: string[] = [];
-  for (const [id, rank] of Object.entries(mastery)) {
-    if (typeof rank !== 'number' || !Number.isFinite(rank) || rank < 1) continue;
-    ranks.push(`${id}:${Math.floor(rank)}`);
-  }
-  return ranks.sort();
-}
-
-/** Digest of everything about a party that changes combat outcomes (never usernames). */
+/**
+ * Digest of a party's forecast inputs (never usernames). Kill mastery is left out on purpose, so
+ * rank-ups don't invalidate cached forecasts. See docs/architecture/combat.md (forecasting).
+ */
 export function partyKey(players: readonly PartyCombatantInit[]): string {
   const parts = players.map(p => stableStringify([
     p.gridPosition,
@@ -388,7 +381,6 @@ export function partyKey(players: readonly PartyCombatantInit[]): string {
     p.equipBonuses ?? null,
     p.setBonuses ?? null,
     p.equippedSkills.map(skillFingerprint),
-    masteryFingerprint(p.mastery),
   ])).sort();
   return `pk${hashString(parts.join('|'))}`;
 }
@@ -404,9 +396,24 @@ export function formatForecastClock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
 
-function fightsShare(sharePct: number): string {
-  const n = Math.round(100 / Math.max(1, sharePct));
-  return n <= 1 ? 'Most fights' : `1 in ${n} fights`;
+const SHARE_FRACTIONS: readonly (readonly [number, number])[] = [
+  [1, 2], [1, 3], [2, 3], [1, 4], [3, 4], [1, 5], [2, 5], [3, 5], [4, 5], [1, 10], [3, 10], [7, 10], [9, 10],
+];
+
+/** The simple fraction `[numerator, denominator]` nearest to a share in percent (the simpler one on a tie). */
+export function nearestShareFraction(sharePct: number): [number, number] {
+  const share = Number.isFinite(sharePct) ? sharePct / 100 : 0;
+  let best = SHARE_FRACTIONS[0];
+  for (const f of SHARE_FRACTIONS) {
+    if (Math.abs(f[0] / f[1] - share) < Math.abs(best[0] / best[1] - share) - 1e-9) best = f;
+  }
+  return [best[0], best[1]];
+}
+
+/** "2 in 5 fights" for a 40 % share. */
+export function fightsShareText(sharePct: number): string {
+  const [n, d] = nearestShareFraction(sharePct);
+  return `${n} in ${d} fights`;
 }
 
 /** At most FORECAST_MAX_REASONS explanations, most important first. */
@@ -430,7 +437,7 @@ export function forecastReasons(input: ForecastReasonInput): ForecastReason[] {
   }
   const worst = input.worst;
   if (worst && worst.sharePct < 100 && worst.winPct < input.winPct - 10 && worst.winPct < 70) {
-    add('worst_encounter', 'bad', `${fightsShare(worst.sharePct)} here are ${worst.label}: wins ${Math.round(worst.winPct)} %`);
+    add('worst_encounter', 'bad', `${fightsShareText(worst.sharePct)} here are ${worst.label}: wins ${Math.round(worst.winPct)}%`);
   }
   if (!quiet && gap >= FORECAST_LEVEL_GAP_REASON) {
     add('level_gap', 'bad', `Enemies here are ${gap} levels above your party.`);
@@ -527,9 +534,12 @@ function summarizeEnemies(all: readonly EnemyProfile[], common: readonly EnemyPr
     if (e.enrageAtMs !== null) summary.enrageAtMs = Math.min(summary.enrageAtMs ?? Infinity, e.enrageAtMs);
   }
   if (fighters.length === 0) return summary;
-  const levels = fighters.map(e => e.level);
-  summary.enemyLevels = [Math.min(...levels), Math.max(...levels)];
-  summary.enemyLevelsDerived = fighters.some(e => e.derived);
+  const rated = fighters.filter(e => !e.derived);
+  if (rated.length > 0) {
+    const levels = rated.map(e => e.level);
+    summary.enemyLevels = [Math.min(...levels), Math.max(...levels)];
+    if (rated.length < fighters.length) summary.someUnrated = true;
+  }
   const pool = common.filter(e => !e.passive);
   for (const e of (pool.length > 0 ? pool : fighters).filter(f => !f.derived)) {
     if (summary.enemyLevel === undefined || e.level > summary.enemyLevel) summary.enemyLevel = e.level;
@@ -559,10 +569,10 @@ function reasonsFor(stats: ForecastStats, party: PartyProfile, enemies: EnemySum
   });
 }
 
-function applyEnemyLevels(target: Pick<ForecastResult, 'enemyLevels' | 'enemyLevelsDerived'>, enemies: EnemySummary): void {
+function applyEnemyLevels(target: Pick<ForecastResult, 'enemyLevels' | 'someUnrated'>, enemies: EnemySummary): void {
   if (!enemies.enemyLevels) return;
   target.enemyLevels = enemies.enemyLevels;
-  target.enemyLevelsDerived = !!enemies.enemyLevelsDerived;
+  if (enemies.someUnrated) target.someUnrated = true;
 }
 
 // --- Encounter tables ---

@@ -188,7 +188,7 @@ describe('Dungeon boss checkpoints', () => {
     expect(resumed.bossPhases!.phase).toBe(1);
 
     pbm.handleDungeonDefeat(entry());
-    expect(log()).toContain('Your party regroups at checkpoint 1 — 0 retries left.');
+    expect(log()).toContain('Your party regroups at checkpoint 1 — no retries left.');
     expect(pm.partyBattles.getDungeonRunInfo(partyId)).not.toBeNull();
 
     pbm.handleDungeonDefeat(entry());

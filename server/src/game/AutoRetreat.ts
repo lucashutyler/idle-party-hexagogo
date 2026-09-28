@@ -5,10 +5,19 @@ import type { ForecastResult, ForecastStratum, HexTile } from '@idle-party-rpg/s
 export const AUTO_RETREAT_SKIP_WINDOW = 10;
 export const AUTO_RETREAT_SKIPS_TO_RELOCATE = 3;
 
+/** Why a party relocates: the whole room is too dangerous, or lost-cause fights kept coming up in it. */
+export type RelocateCause = 'room' | 'skips';
+
 export type AutoRetreatDecision =
   | { kind: 'none' }
   | { kind: 'skip'; winPct: number }
-  | { kind: 'relocate'; winPct: number };
+  | { kind: 'relocate'; winPct: number; cause: RelocateCause };
+
+export type RetreatTargetPick =
+  | { kind: 'target'; tile: HexTile }
+  /** No room is known to be safe yet; these still need a forecast. */
+  | { kind: 'wait'; unknown: RetreatCandidate[] }
+  | { kind: 'none' };
 
 export interface RetreatCandidate {
   tile: HexTile;
@@ -35,25 +44,26 @@ export function decideAutoRetreat(
   recentSkips: number,
 ): AutoRetreatDecision {
   if (!(belowPct > 0) || !(room.sims > 0)) return { kind: 'none' };
-  if (room.ci[1] < belowPct) return { kind: 'relocate', winPct: room.winPct };
+  if (room.ci[1] < belowPct) return { kind: 'relocate', winPct: room.winPct, cause: 'room' };
   const stratum = rolledEntryId === null ? undefined : room.strata?.find(s => s.entryId === rolledEntryId);
   if (!stratum || stratumUpperPct(stratum, room.sims) >= belowPct) return { kind: 'none' };
-  if (recentSkips + 1 >= AUTO_RETREAT_SKIPS_TO_RELOCATE) return { kind: 'relocate', winPct: stratum.winPct };
+  if (recentSkips + 1 >= AUTO_RETREAT_SKIPS_TO_RELOCATE) return { kind: 'relocate', winPct: stratum.winPct, cause: 'skips' };
   return { kind: 'skip', winPct: stratum.winPct };
 }
 
-/** The previous room when it is safe enough, else the neighbour with the best forecast (unknown rooms last). */
-export function pickRetreatTarget(candidates: readonly RetreatCandidate[], belowPct: number): HexTile | null {
-  const safe = candidates.filter(c => c.forecast === null || c.forecast.winPct >= belowPct);
+/**
+ * Only a room known to be safe enough is a target: the previous room when it is, else the best
+ * known neighbour. With none known, wait for the unknown rooms' forecasts; with none left, give up.
+ */
+export function pickRetreatTarget(candidates: readonly RetreatCandidate[], belowPct: number): RetreatTargetPick {
+  const safe = candidates.filter(c => c.forecast !== null && c.forecast.winPct >= belowPct);
   const previous = safe.find(c => c.previous);
-  if (previous) return previous.tile;
+  if (previous) return { kind: 'target', tile: previous.tile };
   let best: RetreatCandidate | null = null;
   for (const c of safe) {
-    if (!best || score(c) > score(best)) best = c;
+    if (!best || c.forecast!.winPct > best.forecast!.winPct) best = c;
   }
-  return best?.tile ?? null;
-}
-
-function score(c: RetreatCandidate): number {
-  return c.forecast ? c.forecast.winPct : -1;
+  if (best) return { kind: 'target', tile: best.tile };
+  const unknown = candidates.filter(c => c.forecast === null);
+  return unknown.length > 0 ? { kind: 'wait', unknown } : { kind: 'none' };
 }

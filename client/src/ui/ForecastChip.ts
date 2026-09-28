@@ -84,7 +84,7 @@ export function renderForecastPopover(result: ForecastResult, opts: ForecastPopo
     const con = opts.viewerLevel ? levelCon(result.enemyLevels[1], opts.viewerLevel) : 'even';
     parts.push('<div class="forecast-pop-line">Enemies '
       + `<span class="lvl-badge forecast-lvl" data-con="${con}" aria-label="Level ${escapeHtml(levels.slice(1))}, ${LEVEL_CON_INFO[con].label}">`
-      + `${LEVEL_CON_INFO[con].glyph} ${levels}</span></div>`);
+      + `${LEVEL_CON_INFO[con].glyph} ${levels}</span>${result.someUnrated ? ' (some unrated)' : ''}</div>`);
   }
   if (opts.stale) parts.push('<div class="forecast-pop-stale">Your party changed — updating…</div>');
   if (reasons.length > 0) {

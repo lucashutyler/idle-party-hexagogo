@@ -800,6 +800,8 @@ export {
   seedFromKey,
   partyKey,
   formatForecastClock,
+  nearestShareFraction,
+  fightsShareText,
   forecastReasons,
   createForecastJob,
   runForecast,

@@ -22,7 +22,7 @@ const RETREAT_CYCLE_MS = RUN_AVAILABLE_MS + RESULT_PAUSE + MOVE_DURATION + 200;
 
 describe('auto-retreat decisions', () => {
   it('relocates only when the whole room is clearly below the threshold', () => {
-    expect(decideAutoRetreat(room(10, [5, 20]), null, 25, 0)).toEqual({ kind: 'relocate', winPct: 10 });
+    expect(decideAutoRetreat(room(10, [5, 20]), null, 25, 0)).toEqual({ kind: 'relocate', winPct: 10, cause: 'room' });
     expect(decideAutoRetreat(room(10, [2, 30]), null, 25, 0)).toEqual({ kind: 'none' });
     expect(decideAutoRetreat(room(10, [5, 20]), null, 0, 0)).toEqual({ kind: 'none' });
     expect(decideAutoRetreat(room(0, [0, 100], undefined, 0), null, 25, 0)).toEqual({ kind: 'none' });
@@ -44,27 +44,33 @@ describe('auto-retreat decisions', () => {
   it('turns the third skip within ten battles into a relocation', () => {
     const strata = [{ entryId: 'bandits', label: 'Bandits', winPct: 0, sharePct: 50 }];
     expect(decideAutoRetreat(room(50, [43, 57], strata), 'bandits', 25, AUTO_RETREAT_SKIPS_TO_RELOCATE - 2).kind).toBe('skip');
-    expect(decideAutoRetreat(room(50, [43, 57], strata), 'bandits', 25, AUTO_RETREAT_SKIPS_TO_RELOCATE - 1)).toEqual({ kind: 'relocate', winPct: 0 });
+    expect(decideAutoRetreat(room(50, [43, 57], strata), 'bandits', 25, AUTO_RETREAT_SKIPS_TO_RELOCATE - 1)).toEqual({ kind: 'relocate', winPct: 0, cause: 'skips' });
   });
 
-  it('prefers the previous room, then the best known neighbour, then unknown rooms, never a known-bad one', () => {
+  it('picks only rooms known to be safe: the previous room first, then the best neighbour', () => {
     const tile = (id: string) => new HexTile(offsetToCube({ col: 0, row: 0 }), 'forest', 'z', id);
     const [a, b, c, d] = ['a', 'b', 'c', 'd'].map(tile);
     expect(pickRetreatTarget([
       { tile: a, forecast: room(90, [85, 95]), previous: false },
-      { tile: b, forecast: null, previous: true },
-    ], 25)).toBe(b);
+      { tile: b, forecast: room(30, [25, 35]), previous: true },
+    ], 25)).toEqual({ kind: 'target', tile: b });
     expect(pickRetreatTarget([
       { tile: a, forecast: room(60, [55, 65]), previous: false },
       { tile: b, forecast: room(10, [5, 15]), previous: true },
       { tile: c, forecast: room(95, [90, 99]), previous: false },
       { tile: d, forecast: null, previous: false },
-    ], 25)).toBe(c);
-    expect(pickRetreatTarget([
-      { tile: a, forecast: room(20, [15, 26]), previous: false },
-      { tile: d, forecast: null, previous: false },
-    ], 25)).toBe(d);
-    expect(pickRetreatTarget([{ tile: a, forecast: room(20, [15, 26]), previous: true }], 25)).toBeNull();
+    ], 25)).toEqual({ kind: 'target', tile: c });
+  });
+
+  it('waits for unknown rooms to be forecast, and gives up when every known room is as bad', () => {
+    const tile = (id: string) => new HexTile(offsetToCube({ col: 0, row: 0 }), 'forest', 'z', id);
+    const [a, b, d] = ['a', 'b', 'd'].map(tile);
+    const unknownPrevious = { tile: b, forecast: null, previous: true };
+    const unknown = { tile: d, forecast: null, previous: false };
+    expect(pickRetreatTarget([{ tile: a, forecast: room(20, [15, 26]), previous: false }, unknownPrevious, unknown], 25))
+      .toEqual({ kind: 'wait', unknown: [unknownPrevious, unknown] });
+    expect(pickRetreatTarget([{ tile: a, forecast: room(20, [15, 26]), previous: true }], 25)).toEqual({ kind: 'none' });
+    expect(pickRetreatTarget([], 25)).toEqual({ kind: 'none' });
   });
 });
 
@@ -136,8 +142,8 @@ describe('auto-retreat in the overworld', () => {
     }
 
     const log = w.journal();
-    expect(log.filter(l => l === 'Avoided Ogre (win chance 0 %)')).toHaveLength(2);
-    expect(log.filter(l => l === 'Nowhere safer to retreat — fighting on')).toHaveLength(1);
+    expect(log.filter(l => l === 'Avoided Ogre (win chance 0%)')).toHaveLength(2);
+    expect(log.filter(l => l === `Nowhere safer to retreat from Room ${START.col}-${START.row} — fighting on`)).toHaveLength(1);
     expect(log.some(l => l.startsWith('Auto-retreat moved'))).toBe(false);
     expect(w.entry().serverParty.tile.id).toBe(here);
     expect(w.entry().retreatHold).toEqual({ tileId: here });
@@ -164,10 +170,36 @@ describe('auto-retreat in the overworld', () => {
     expect(w.entry().retreatHold).toBeUndefined();
     w.entry().battleTimer.restartBattle();
     vi.advanceTimersByTime(100);
+    expect(w.entry().retreatHold).toEqual({ tileId: here });
+    expect(w.journal().filter(l => l.startsWith('Nowhere safer'))).toHaveLength(1);
+  });
+
+  it('does not repeat "Nowhere safer" when the hold is lost, e.g. across a restart', async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    const here = tileId(START.col, START.row);
+    w.stub.fallback.verdict = DEADLY;
+    const neighbours = w.grid.getAllNeighbors(w.tileAt(START.col, START.row).coord).map(t => t.id);
+    w.prefill([here, ...neighbours]);
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(100);
+    expect(w.journal().filter(l => l.startsWith('Nowhere safer'))).toHaveLength(1);
+
+    for (let i = 0; i < 5; i++) w.session.addLogEntry('Defeat...', 'defeat');
+    w.entry().retreatHold = undefined;
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(100);
+    expect(w.entry().retreatHold).toEqual({ tileId: here });
+    expect(w.journal().filter(l => l.startsWith('Nowhere safer'))).toHaveLength(1);
+
+    w.session.addLogEntry('Avoided Ogre (win chance 0%)', 'retreat');
+    w.entry().retreatHold = undefined;
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(100);
     expect(w.journal().filter(l => l.startsWith('Nowhere safer'))).toHaveLength(2);
   });
 
-  it('two dangerous rooms side by side: one relocation back, then it stays put', async () => {
+  it('two dangerous rooms side by side: it forecasts the way back first, skips meanwhile, then stays put', async () => {
     const w = await forecastWorld();
     w.pm.partyBattles.setForecaster(w.svc);
     w.stub.fallback.verdict = DEADLY;
@@ -185,13 +217,60 @@ describe('auto-retreat in the overworld', () => {
       vi.advanceTimersByTime(RETREAT_CYCLE_MS);
     }
 
-    const moved = w.journal().filter(l => l.startsWith('Auto-retreat moved'));
+    const log = w.journal();
     const nextName = `Room ${cubeToOffset(next.coord).col}-${cubeToOffset(next.coord).row}`;
-    expect(moved).toEqual([`Auto-retreat moved your party from ${nextName} to Room ${START.col}-${START.row} (win chance 0 %)`]);
+    expect(w.stub.jobs.some(j => j.key.endsWith(`room:${start.id}`))).toBe(true);
+    expect(log.some(l => l.startsWith('Auto-retreat moved'))).toBe(false);
+    expect(log.filter(l => l === 'Avoided Ogre (win chance 0%)')).toHaveLength(1);
+    expect(log.filter(l => l.startsWith('Nowhere safer'))).toEqual([`Nowhere safer to retreat from ${nextName} — fighting on`]);
+    expect(party.tile.id).toBe(next.id);
+    expect(w.entry().retreatHold).toEqual({ tileId: next.id });
+  });
+
+  it('relocates once a neighbour is forecast safe, naming the room it left as the dangerous one', async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.stub.fallback.verdict = DEADLY;
+    const start = w.tileAt(START.col, START.row);
+    const next = w.grid.getAllNeighbors(start.coord).find(t => t.id !== start.id)!;
+    w.stub.verdicts.set(start.id, SAFE);
+    const party = w.entry().serverParty;
+    party.setDestination(next);
+    party.moveToNextTile();
+
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(RETREAT_CYCLE_MS);
+    expect(party.tile.id).toBe(next.id);
+    expect(w.journal().filter(l => l.startsWith('Avoided'))).toHaveLength(1);
+    vi.advanceTimersByTime(RETREAT_CYCLE_MS);
+
+    const nextName = `Room ${cubeToOffset(next.coord).col}-${cubeToOffset(next.coord).row}`;
+    expect(w.journal().filter(l => l.startsWith('Auto-retreat moved'))).toEqual([
+      `Auto-retreat moved your party from ${nextName} to Room ${START.col}-${START.row} — ${nextName} was too dangerous (win chance 0%)`,
+    ]);
     expect(party.tile.id).toBe(start.id);
-    expect(party.previousTile).toBeNull();
     expect(w.entry().retreatHold).toEqual({ tileId: start.id });
-    expect(w.journal().some(l => l.startsWith('Avoided'))).toBe(false);
+  });
+
+  it('says lost-cause fights kept coming up when repeated skips move the party', async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    const here = tileId(START.col, START.row);
+    const neighbours = w.grid.getAllNeighbors(w.tileAt(START.col, START.row).coord).map(t => t.id);
+    w.stub.verdicts.set(here, badPack('ogres'));
+    for (const id of neighbours) w.stub.verdicts.set(id, DEADLY);
+    w.stub.verdicts.set(neighbours[0], SAFE);
+    w.prefill(neighbours);
+
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(3 * RETREAT_CYCLE_MS);
+
+    const safeTile = w.grid.getTileById(neighbours[0])!;
+    const safeName = `Room ${cubeToOffset(safeTile.coord).col}-${cubeToOffset(safeTile.coord).row}`;
+    expect(w.journal().filter(l => l.startsWith('Avoided'))).toHaveLength(2);
+    expect(w.journal().filter(l => l.startsWith('Auto-retreat moved'))).toEqual([
+      `Auto-retreat moved your party from Room ${START.col}-${START.row} to ${safeName} (lost-cause fights kept coming up)`,
+    ]);
   });
 
   it('a relocation clears the queued route', async () => {

@@ -70,7 +70,7 @@ import type { CombatFlush } from './ServerBattleTimer.js';
 import { dungeonForecastKey, liveForecastKey, roomForecastKey } from './ForecastService.js';
 import type { ForecastService, ForecastWork } from './ForecastService.js';
 import { AUTO_RETREAT_SKIP_WINDOW, decideAutoRetreat, pickRetreatTarget } from './AutoRetreat.js';
-import type { RetreatCandidate } from './AutoRetreat.js';
+import type { RelocateCause, RetreatCandidate } from './AutoRetreat.js';
 import type { PlayerSession } from './PlayerSession.js';
 import type { ContentStore } from './ContentStore.js';
 import type { WorldGrids } from './WorldGrids.js';
@@ -104,7 +104,15 @@ interface PendingRetreat {
   battleId: number;
   kind: 'skip' | 'relocate';
   winPct: number;
+  cause?: RelocateCause;
   target?: HexTile;
+}
+
+/** The live forecast of the party's current fight: the latest result and the job still running. */
+interface LiveForecastState {
+  battleId: number;
+  result: ForecastResult | null;
+  pendingKey: string | null;
 }
 
 interface PartyBattleEntry {
@@ -123,6 +131,7 @@ interface PartyBattleEntry {
   recentSkips: boolean[];
   precheckKey?: string;
   liveForecastTimer?: ReturnType<typeof setTimeout>;
+  live?: LiveForecastState;
 }
 
 type Notifier = (username: string, eventKey: string, vars: { title: string; body: string }) => void;
@@ -136,8 +145,9 @@ export interface CombatSendOptions {
 }
 
 export interface CombatDelivery {
-  /** Whether anyone would receive this player's combat stream right now. */
-  isOnline: (username: string) => boolean;
+  /** Whether any of this player's sockets shows the combat view right now. */
+  isWatching: (username: string) => boolean;
+  /** Sends to this player's sockets that show the combat view. */
   sendRaw: (username: string, payload: string, opts: CombatSendOptions) => void;
 }
 
@@ -151,7 +161,7 @@ export class PartyBattleManager {
   private getPartyHenchmen: (partyId: string) => HiredHenchman[] = () => [];
   private dismissHenchmenOffMap: (partyId: string, mapId: string) => HiredHenchman[] = () => [];
   private getGridPosition: (partyId: string, username: string) => PartyGridPosition | undefined = () => undefined;
-  private delivery: CombatDelivery = { isOnline: () => false, sendRaw: () => {} };
+  private delivery: CombatDelivery = { isWatching: () => false, sendRaw: () => {} };
   private forecaster: ForecastService | null = null;
   private autoRetreatPolicy: (partyId: string) => PartyAutoRetreatInfo | null = () => null;
   private notify: Notifier = () => {};
@@ -741,9 +751,16 @@ export class PartyBattleManager {
 
   /**
    * Answer a player's forecast request for a room on their map or a dungeon whose entrance they
-   * have found. The reply echoes `target`; a queued job replies again when it finishes.
+   * have found. The reply echoes `target`; a queued job replies again when it finishes. A dungeon
+   * forecast starts from `entrant`'s saved progress: whoever would take the party in.
    */
-  requestForecast(partyId: string, requester: string, target: ForecastRequestTarget, reply: (message: ServerForecastMessage) => void): void {
+  requestForecast(
+    partyId: string,
+    requester: string,
+    target: ForecastRequestTarget,
+    reply: (message: ServerForecastMessage) => void,
+    entrant: string = requester,
+  ): void {
     const send = (status: ServerForecastMessage['status'], key = '', result: ForecastResult | null = null): void => {
       reply({ type: 'forecast', target, key, result, status });
     };
@@ -755,7 +772,7 @@ export class PartyBattleManager {
 
     const request = target.kind === 'room'
       ? this.roomRequest(entry, session, target.tileId)
-      : this.dungeonRequest(entry, session, target.dungeonId);
+      : this.dungeonRequest(entry, session, target.dungeonId, this.getSession(entrant) ?? session);
     if (request === 'denied' || request === 'unavailable') return send(request);
 
     const answer = svc.request({
@@ -980,7 +997,7 @@ export class PartyBattleManager {
   private deliverCombat(members: ReadonlySet<string>, flush: CombatFlush): void {
     const recipients: string[] = [];
     for (const m of members) {
-      if (this.delivery.isOnline(m)) recipients.push(m);
+      if (this.delivery.isWatching(m)) recipients.push(m);
     }
     if (recipients.length === 0) return;
 
@@ -1011,14 +1028,19 @@ export class PartyBattleManager {
     return { key: roomForecastKey(this.content.contentEpoch, pk, tileId), build: () => this.roomWork(players, pk, tileId) };
   }
 
-  private dungeonRequest(entry: PartyBattleEntry, session: PlayerSession, dungeonId: string): ForecastPlan | 'denied' | 'unavailable' {
+  private dungeonRequest(
+    entry: PartyBattleEntry,
+    session: PlayerSession,
+    dungeonId: string,
+    entrant: PlayerSession,
+  ): ForecastPlan | 'denied' | 'unavailable' {
     const dungeon = this.content.getDungeon(dungeonId);
     const entrance = this.content.getWorld().tiles.find(t => t.dungeonId === dungeonId && session.isTileIdUnlocked(t.id));
     if (!dungeon || !entrance) return 'denied';
     const players = this.buildPartyCombatants(entry.partyId);
     if (players.length === 0) return 'unavailable';
     const pk = partyKeyOf(players);
-    const start = this.dungeonForecastStart(entry, session, dungeon);
+    const start = this.dungeonForecastStart(entry, entrant, dungeon);
     const fallbackTable = this.content.getAllZones()[entrance.zone]?.encounterTable ?? [];
     return {
       key: dungeonForecastKey(this.content.contentEpoch, pk, dungeonId, start),
@@ -1037,14 +1059,14 @@ export class PartyBattleManager {
     };
   }
 
-  /** Where a run would start for this requester: the party's own run, else their stored checkpoint. */
-  private dungeonForecastStart(entry: PartyBattleEntry, session: PlayerSession, dungeon: DungeonDefinition): Required<DungeonForecastStart> {
+  /** Where a run would start: the party's own run, else the entrant's stored checkpoint. */
+  private dungeonForecastStart(entry: PartyBattleEntry, entrant: PlayerSession, dungeon: DungeonDefinition): Required<DungeonForecastStart> {
     const run = entry.dungeonRun;
     const floor = run?.dungeonId === dungeon.id ? dungeon.floors[run.currentFloorIndex] : undefined;
     if (run && floor) {
       return { floorIndex: run.currentFloorIndex, phase: clampCheckpointPhase(run.checkpointPhase, floor), wipes: run.wipes ?? 0 };
     }
-    const checkpoint = this.usableCheckpoint(session.getDungeonCheckpoint(dungeon.id), dungeon);
+    const checkpoint = this.usableCheckpoint(entrant.getDungeonCheckpoint(dungeon.id), dungeon);
     return checkpoint
       ? { floorIndex: checkpoint.floorIndex, phase: checkpoint.phase, wipes: checkpoint.wipes }
       : { floorIndex: 0, phase: 0, wipes: 0 };
@@ -1064,11 +1086,12 @@ export class PartyBattleManager {
   }
 
   /** Forecasting must never break a fight: its failures are logged and dropped. */
-  private guardForecast(what: string, fn: () => void): void {
+  private guardForecast<T>(what: string, fn: () => T): T | undefined {
     try {
-      fn();
+      return fn();
     } catch (err) {
       console.error(`[PartyBattleManager] forecasting (${what}) failed:`, err);
+      return undefined;
     }
   }
 
@@ -1127,25 +1150,29 @@ export class PartyBattleManager {
     const combat = timer.currentCombat;
     if (!combat || !timer.isFighting(battle.battleId)) return;
 
-    let target: HexTile | undefined;
+    let pending: PendingRetreat = { battleId: battle.battleId, kind: 'skip', winPct: decision.winPct };
     if (decision.kind === 'relocate') {
-      target = this.findRetreatTarget(entry, belowPct, battle.partyKey ?? partyKeyOf(battle.players)) ?? undefined;
-      if (!target) {
-        entry.retreatHold = { tileId: entry.serverParty.tile.id };
-        this.logToMembers(entry, 'Nowhere safer to retreat — fighting on', 'retreat');
+      const target = this.findRetreatTarget(entry, battle, belowPct);
+      if (target === null) {
+        this.holdHere(entry);
         return;
       }
+      if (target !== 'wait') pending = { ...pending, kind: 'relocate', cause: decision.cause, target };
     }
-    entry.pendingRetreat = { battleId: battle.battleId, kind: decision.kind, winPct: decision.winPct, target };
-    const reason = target ? 'Your party falls back to a safer room.' : 'Your party slips away from the fight.';
+    entry.pendingRetreat = pending;
+    const reason = pending.target ? 'Your party falls back to a safer room.' : 'Your party slips away from the fight.';
     timer.scheduleRetreat(battle.battleId, RUN_AVAILABLE_MS - combat.elapsedMs, reason);
   }
 
-  /** An adjacent room on this map that a member has found, the party may enter, and that isn't known to be as bad. */
-  private findRetreatTarget(entry: PartyBattleEntry, belowPct: number, pk: string): HexTile | null {
+  /**
+   * An adjacent room on this map that a member has found, the party may enter, and whose forecast is
+   * known to clear the threshold. 'wait' while neighbours are still being forecast.
+   */
+  private findRetreatTarget(entry: PartyBattleEntry, battle: OverworldBattle, belowPct: number): HexTile | 'wait' | null {
     const svc = this.forecaster;
     const grid = this.grids.get(entry.serverParty.currentMapId);
     if (!svc || !grid) return null;
+    const pk = battle.partyKey ?? partyKeyOf(battle.players);
     const here = entry.serverParty.tile;
     const previousId = entry.serverParty.previousTile?.id;
     const epoch = this.content.contentEpoch;
@@ -1156,7 +1183,29 @@ export class PartyBattleManager {
       if (this.checkRoomEntry(entry.members, tile.entryRequirements)) continue;
       candidates.push({ tile, forecast: svc.get(roomForecastKey(epoch, pk, tile.id)), previous: tile.id === previousId });
     }
-    return pickRetreatTarget(candidates, belowPct);
+    const pick = pickRetreatTarget(candidates, belowPct);
+    if (pick.kind === 'target') return pick.tile;
+    if (pick.kind === 'none') return null;
+    let queued = false;
+    for (const { tile } of pick.unknown) {
+      const answer = svc.request({
+        key: roomForecastKey(epoch, pk, tile.id),
+        priority: 'precheck',
+        build: () => this.roomWork(battle.players, pk, tile.id),
+      });
+      if (answer.status !== 'unavailable') queued = true;
+    }
+    return queued ? 'wait' : null;
+  }
+
+  /** Nowhere safer to go: fight on in this room, and journal it unless that is already the latest retreat line. */
+  private holdHere(entry: PartyBattleEntry): void {
+    entry.retreatHold = { tileId: entry.serverParty.tile.id };
+    const text = `Nowhere safer to retreat from ${this.describeLocation(entry)} — fighting on`;
+    for (const username of entry.members) {
+      const session = this.getSession(username);
+      if (session && session.lastLogEntryOfType('retreat')?.text !== text) session.addLogEntry(text, 'retreat');
+    }
   }
 
   /** The timer is ending the fight as a retreat: set the route, then journal, recap and the first-time notice. */
@@ -1176,12 +1225,15 @@ export class PartyBattleManager {
       entry.retreatHold = { tileId: target.id };
       entry.recentSkips = [];
       const to = this.roomName(target);
-      this.logToMembers(entry, `Auto-retreat moved your party from ${from} to ${to} (win chance ${pct} %)`, 'retreat');
+      const why = pending.cause === 'skips'
+        ? '(lost-cause fights kept coming up)'
+        : `— ${from} was too dangerous (win chance ${pct}%)`;
+      this.logToMembers(entry, `Auto-retreat moved your party from ${from} to ${to} ${why}`, 'retreat');
       this.recordRetreat(partyId, { at, kind: 'relocate', from, to, winPct: pending.winPct });
     } else {
       entry.recentSkips = [...entry.recentSkips.slice(0, -1), true];
       const names = opponentNames(entry.battleTimer.currentCombat);
-      this.logToMembers(entry, `Avoided ${names} (win chance ${pct} %)`, 'retreat');
+      this.logToMembers(entry, `Avoided ${names} (win chance ${pct}%)`, 'retreat');
       this.recordRetreat(partyId, { at, kind: 'skip', from, winPct: pending.winPct });
     }
 
@@ -1209,14 +1261,38 @@ export class PartyBattleManager {
     for (const username of entry.members) this.getSession(username)?.addLogEntry(text, type);
   }
 
-  /** Queue a forecast of the fight in progress for whoever is watching it (elite, boss and raid fights only). */
-  private startLiveForecast(entry: PartyBattleEntry): void {
+  /**
+   * Live-forecast messages for a socket that starts showing a fight mid-way: the latest result and
+   * any re-forecast still running, else a newly queued forecast (elite, boss and raid fights only).
+   */
+  liveForecastResync(partyId: string): ServerForecastMessage[] {
+    const entry = this.entries.get(partyId);
+    if (!entry || !this.forecaster) return [];
+    const timer = entry.battleTimer;
+    const combat = timer.currentCombat;
+    const battleId = timer.battleId;
+    if (!combat || !timer.isLive || !timer.isFighting(battleId) || !isToughFight(combat)) return [];
+    const live = entry.live?.battleId === battleId ? entry.live : undefined;
+    const target = { kind: 'battle' as const, battleId };
+    const messages: ServerForecastMessage[] = [];
+    if (live?.result) messages.push({ type: 'forecast', target, key: live.result.key, result: live.result, status: 'ok' });
+    if (live?.pendingKey) messages.push({ type: 'forecast', target, key: live.pendingKey, result: null, status: 'pending' });
+    if (messages.length > 0) return messages;
+    const queued = this.guardForecast('live resync', () => this.startLiveForecast(entry, false));
+    return queued ? [queued] : [];
+  }
+
+  /**
+   * Queue a forecast of the fight in progress when someone is watching it (elite, boss and raid fights
+   * only). The pending notice goes to the watchers when `announce`, and is returned either way.
+   */
+  private startLiveForecast(entry: PartyBattleEntry, announce = true): ServerForecastMessage | null {
     const svc = this.forecaster;
     const timer = entry.battleTimer;
     const combat = timer.currentCombat;
     const battleId = timer.battleId;
-    if (!svc || !combat || !timer.isFighting(battleId) || !isToughFight(combat)) return;
-    if (![...entry.members].some(u => this.delivery.isOnline(u))) return;
+    if (!svc || !combat || !timer.isFighting(battleId) || !isToughFight(combat)) return null;
+    if (![...entry.members].some(u => this.delivery.isWatching(u))) return null;
 
     const key = liveForecastKey(battleId, combat.elapsedMs);
     const pk = this.forecastKey(entry.partyId);
@@ -1228,23 +1304,29 @@ export class PartyBattleManager {
       build: () => ({ input: { kind: 'battle', state: combat }, opts: pk ? { partyKey: pk } : undefined }),
       onDone: (result) => this.guardForecast('live forecast', () => this.deliverLiveForecast(entry, battleId, key, result)),
     });
-    if (answer.status === 'pending') {
-      this.sendToViewers(entry, { type: 'forecast', target: { kind: 'battle', battleId }, key, result: null, status: 'pending' });
-    }
+    if (answer.status !== 'pending') return null;
+    const previous = entry.live?.battleId === battleId ? entry.live.result : null;
+    entry.live = { battleId, result: previous, pendingKey: key };
+    const pending: ServerForecastMessage = { type: 'forecast', target: { kind: 'battle', battleId }, key, result: null, status: 'pending' };
+    if (announce) this.sendToViewers(entry, pending);
+    return pending;
   }
 
   private deliverLiveForecast(entry: PartyBattleEntry, battleId: number, key: string, result: ForecastResult | null): void {
+    const live = entry.live?.battleId === battleId ? entry.live : undefined;
+    if (live?.pendingKey === key) live.pendingKey = null;
     if (!result || this.entries.get(entry.partyId) !== entry) return;
     const timer = entry.battleTimer;
     const combat = timer.currentCombat;
     if (timer.battleId !== battleId || !timer.isLive || !combat || combat.finished) return;
+    entry.live = { battleId, result, pendingKey: live?.pendingKey ?? null };
     this.sendToViewers(entry, { type: 'forecast', target: { kind: 'battle', battleId }, key, result, status: 'ok' });
   }
 
   private sendToViewers(entry: PartyBattleEntry, message: ServerForecastMessage): void {
     const payload = JSON.stringify(message);
     for (const username of entry.members) {
-      if (this.delivery.isOnline(username)) this.delivery.sendRaw(username, payload, { droppable: false });
+      if (this.delivery.isWatching(username)) this.delivery.sendRaw(username, payload, { droppable: false });
     }
   }
 
@@ -1537,7 +1619,8 @@ export class PartyBattleManager {
         const phase = run.checkpointPhase ?? 0;
         const left = maxWipes - wipes;
         const where = phase > 0 ? `at checkpoint ${phase}` : 'for another attempt';
-        const text = `Your party regroups ${where} — ${left} ${left === 1 ? 'retry' : 'retries'} left.`;
+        const retries = left === 0 ? 'no retries' : `${left} ${left === 1 ? 'retry' : 'retries'}`;
+        const text = `Your party regroups ${where} — ${retries} left.`;
         for (const username of entry.members) this.getSession(username)?.addLogEntry(text, 'checkpoint');
         this.recordDungeonOutcome(entry, dungeon, 'in_progress');
         return;

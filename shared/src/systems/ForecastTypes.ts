@@ -65,8 +65,10 @@ export interface ForecastResult extends ForecastStats {
   strata?: ForecastStratum[];
   /** Lowest stratum with a share ≥ 10 %. */
   worst?: { label: string; winPct: number; sharePct: number };
+  /** Level range of the enemies with an authored level. */
   enemyLevels?: [number, number];
-  enemyLevelsDerived?: boolean;
+  /** Some enemies have no authored level and are left out of `enemyLevels`. */
+  someUnrated?: boolean;
   /** At most 3. */
   reasons: ForecastReason[];
 }

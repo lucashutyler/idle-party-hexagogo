@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type {
+  ClassName,
   DungeonDefinition,
   EncounterDefinition,
   ForecastInput,
@@ -241,4 +242,23 @@ export async function forecastWorld(opts: WorldOptions = {}) {
   };
 
   return { grid, tiles, pm, ws, session, partyId, svc, stub, content, contentState, entry, tileAt, journal, roomKey, prefill };
+}
+
+export type ForecastWorld = Awaited<ReturnType<typeof forecastWorld>>;
+
+/** Log `username` in as `className` and bring them into alice's party as a member. Returns their socket. */
+export async function joinAlice(w: ForecastWorld, username: string, className: ClassName): Promise<FakeWs> {
+  const ws = createWs();
+  const session = await w.pm.login(ws as unknown as WebSocket, username);
+  session.setClass(className);
+  w.pm.applyClassChange(username);
+  const getPartyId = (u: string) => w.pm.getSessionByUsername(u)?.getPartyId() ?? null;
+  const setPartyId = (u: string, id: string | null) => { w.pm.getSessionByUsername(u)?.setPartyId(id); };
+  const oldParty = getPartyId(username);
+  const sameTile = (a: string, b: string) => w.pm.areSameTile(a, b);
+  if (w.pm.parties.inviteToParty('alice', username, getPartyId, sameTile) !== true) throw new Error('invite failed');
+  const accepted = w.pm.parties.acceptInvite(username, w.partyId, getPartyId, setPartyId, sameTile);
+  if (typeof accepted === 'string') throw new Error(accepted);
+  w.pm.handlePartyJoin(username, w.partyId, oldParty);
+  return ws;
 }

@@ -122,8 +122,15 @@ describe('renderForecastPopover', () => {
     const badge = authored.querySelector('.forecast-lvl')!;
     expect(badge.getAttribute('data-con')).toBe('deadly');
     expect(badge.textContent).toContain('L8–10');
-    const derived = mount(renderForecastPopover(result({ enemyLevels: [40, 51], enemyLevelsDerived: true }), { kind: 'room', viewerLevel: 5 }));
-    expect(derived.querySelector('.forecast-lvl')).toBeNull();
+    expect(authored.textContent).not.toContain('unrated');
+    const unrated = mount(renderForecastPopover(result({}), { kind: 'room', viewerLevel: 5 }));
+    expect(unrated.querySelector('.forecast-lvl')).toBeNull();
+  });
+
+  it('keeps the authored range when some enemies are unrated', () => {
+    const root = mount(renderForecastPopover(result({ enemyLevels: [1, 5], someUnrated: true }), { kind: 'room', viewerLevel: 5 }));
+    const line = root.querySelector('.forecast-lvl')!.parentElement!;
+    expect(line.textContent).toMatch(/^Enemies . L1–5 \(some unrated\)$/);
   });
 
   it('shows the first-try chance for checkpoint dungeons', () => {

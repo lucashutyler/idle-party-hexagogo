@@ -1331,6 +1331,14 @@ export class PlayerSession {
     }
   }
 
+  /** The newest journal entry of this type (the journal survives restarts). */
+  lastLogEntryOfType(type: CombatLogEntry['type']): CombatLogEntry | undefined {
+    for (let i = this.combatLog.length - 1; i >= 0; i--) {
+      if (this.combatLog[i].type === type) return this.combatLog[i];
+    }
+    return undefined;
+  }
+
   /** Force-unlock a tile and its adjacent tiles (for relocation after deploy). */
   forceUnlockTileArea(tile: HexTile): void {
     this.unlockSystem.forceUnlock(tile);

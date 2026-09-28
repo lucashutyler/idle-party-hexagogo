@@ -9,7 +9,7 @@ import { FriendsSystem } from './social/FriendsSystem.js';
 import { GuildSystem } from './social/GuildSystem.js';
 import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
-import { PartySystem } from './social/PartySystem.js';
+import { PartySystem, canMove } from './social/PartySystem.js';
 import { TradeSystem } from './social/TradeSystem.js';
 import { MailboxSystem } from './social/MailboxSystem.js';
 import { NotificationSystem } from './social/NotificationSystem.js';
@@ -86,7 +86,7 @@ export class PlayerManager {
       (partyId, mapId) => this.parties.dismissHenchmenOffMap(partyId, mapId),
     );
     this.partyBattles.setCombatDelivery({
-      isOnline: (username) => this.hasCombatViewer(username),
+      isWatching: (username) => this.hasCombatViewer(username),
       sendRaw: (username, payload, opts) => this.sendCombatRaw(username, payload, opts),
     });
     this.partyBattles.setGridPositionLookup(
@@ -472,9 +472,15 @@ export class PlayerManager {
     if (changed && partyId && this.autoRetreatPolicy(partyId)?.setBy === username) {
       this.partyBattles.clearRetreatHold(partyId);
     }
+    this.sendStateToParty(username);
+    return changed;
+  }
+
+  /** State to every socket of the player and of their party members (whose forecast key follows the player's build). */
+  sendStateToParty(username: string): void {
+    const partyId = this.sessions.get(username)?.getPartyId();
     const members = partyId ? this.parties.getParty(partyId)?.members.map(m => m.username) : undefined;
     for (const member of members ?? [username]) this.sendStateToPlayer(member);
-    return changed;
   }
 
   /** A player's forecast request for a room or dungeon; every reply goes through `reply`. */
@@ -484,7 +490,15 @@ export class PlayerManager {
       reply({ type: 'forecast', target, key: '', result: null, status: 'unavailable' });
       return;
     }
-    this.partyBattles.requestForecast(partyId, username, target, reply);
+    this.partyBattles.requestForecast(partyId, username, target, reply, this.dungeonEntrant(partyId, username));
+  }
+
+  /** Whose saved dungeon progress an entry would use: the requester's when they may lead the party in, else the owner's. */
+  private dungeonEntrant(partyId: string, username: string): string {
+    const members = this.parties.getParty(partyId)?.members;
+    const me = members?.find(m => m.username === username);
+    if (!members || !me || canMove(me.role)) return username;
+    return members.find(m => m.role === 'owner')?.username ?? username;
   }
 
   /** The player's full kill-mastery list for the bestiary. */
@@ -494,7 +508,7 @@ export class PlayerManager {
     return { type: 'bestiary', version: session.getMasterySummary().version, entries: session.getBestiary() };
   }
 
-  /** Send one socket the live fight as a full snapshot plus the recent log. No-op between battles. */
+  /** Send one socket the live fight as a full snapshot plus the recent log and live forecast. No-op between battles. */
   sendCombatResync(ws: WebSocket): void {
     if (!this.wantsCombat(ws)) return;
     const username = this.connections.get(ws);
@@ -502,6 +516,7 @@ export class PlayerManager {
     if (!partyId) return;
     const message = this.partyBattles.buildCombatResync(partyId);
     if (message) ws.send(JSON.stringify(message));
+    for (const forecast of this.partyBattles.liveForecastResync(partyId)) ws.send(JSON.stringify(forecast));
   }
 
   /** Send an error message to all connections for a specific player. */

@@ -7,9 +7,11 @@ import {
   FORECAST_SIM_BUDGET,
   createForecastJob,
   defaultHorizonMs,
+  fightsShareText,
   forecastReasons,
   formatForecastClock,
   killEtaFor,
+  nearestShareFraction,
   partyKey,
   quantile,
   runForecast,
@@ -191,7 +193,6 @@ describe('partyKey', () => {
       p => { p[0].className = 'Mage'; },
       p => { p[0].equippedSkills = [SEED_SKILLS.knight_guard]; },
       p => { p[0].equippedSkills = [SEED_SKILLS.knight_guard, { ...SEED_SKILLS.knight_bash, cooldown: 9 }]; },
-      p => { p[0].mastery = { goblin: 1 }; },
     ];
     for (const change of variants) {
       const p = party();
@@ -200,16 +201,30 @@ describe('partyKey', () => {
     }
   });
 
-  it('includes mastery ranks ≥ 1 only, in any key order', () => {
+  it('leaves kill mastery out, so rank-ups keep cached forecasts', () => {
     const withMastery = (mastery: Record<string, number>) => {
       const p = party();
       p[0].mastery = mastery;
+      p[1].mastery = { wolf: 4 };
       return partyKey(p);
     };
-    expect(withMastery({ goblin: 0, wolf: 0.5 })).toBe(partyKey(party()));
-    expect(withMastery({ goblin: 2, wolf: 1 })).toBe(withMastery({ wolf: 1, goblin: 2 }));
-    expect(withMastery({ goblin: 2.7 })).toBe(withMastery({ goblin: 2 }));
-    expect(withMastery({ goblin: 3 })).not.toBe(withMastery({ goblin: 2 }));
+    expect(withMastery({ goblin: 1 })).toBe(partyKey(party()));
+    expect(withMastery({ goblin: 3, brute: 2 })).toBe(withMastery({ goblin: 2 }));
+  });
+
+  it('still applies mastery inside the sims', () => {
+    const sponge = monsterDef({ id: 'sponge', name: 'Sponge', hp: 5000 });
+    const input = (players: PartyCombatantInit[]): RoomForecastInput => ({
+      kind: 'room',
+      players,
+      table: [entry('sponges')],
+      monsters: { sponge },
+      encounters: { sponges: { id: 'sponges', name: 'Sponges', type: 'explicit', placements: [{ monsterId: 'sponge', gridPosition: 4 }] } },
+    });
+    const plain = runForecast(input([hero()]), { key: 'k' });
+    const mastered = runForecast(input([{ ...hero(), mastery: { sponge: 5 } }]), { key: 'k' });
+    expect(mastered.partyKey).toBe(plain.partyKey);
+    expect(mastered.medianMs!).toBeLessThan(plain.medianMs!);
   });
 
   it('derives stable 32-bit seeds from keys', () => {
@@ -315,9 +330,19 @@ describe('room forecasts', () => {
     const leveled = { ...MONSTERS, caster: { ...MONSTERS.caster, level: 14 } };
     const r = runForecast({ ...room([entry('casters')]), monsters: leveled }, { key: 'k' });
     expect(r.enemyLevels).toEqual([14, 14]);
-    expect(r.enemyLevelsDerived).toBe(false);
+    expect(r.someUnrated).toBeUndefined();
     expect(r.reasons.map(x => x.code)).toEqual(['level_gap', 'no_interrupt']);
     expect(r.reasons[0].text).toBe('Enemies here are 13 levels above your party.');
+  });
+
+  it('reports the level range of authored enemies only and flags the unrated ones', () => {
+    const leveled = { ...MONSTERS, weakling: { ...MONSTERS.weakling, level: 3 }, caster: { ...MONSTERS.caster, level: 5 } };
+    const mixed = runForecast({ ...room([entry('easy'), entry('casters'), entry('deadly')]), monsters: leveled }, { key: 'k', maxSims: 30 });
+    expect(mixed.enemyLevels).toEqual([3, 5]);
+    expect(mixed.someUnrated).toBe(true);
+    const unrated = runForecast(room([entry('easy')]), { key: 'k' });
+    expect(unrated.enemyLevels).toBeUndefined();
+    expect(unrated.someUnrated).toBeUndefined();
   });
 });
 
@@ -424,6 +449,21 @@ describe('forecast horizon', () => {
   });
 });
 
+describe('share wording', () => {
+  it('names the nearest simple fraction, the simpler one on a tie', () => {
+    expect(nearestShareFraction(40)).toEqual([2, 5]);
+    expect(nearestShareFraction(33.3)).toEqual([1, 3]);
+    expect(nearestShareFraction(45)).toEqual([1, 2]);
+    expect(nearestShareFraction(66.7)).toEqual([2, 3]);
+    expect(nearestShareFraction(70)).toEqual([7, 10]);
+    expect(nearestShareFraction(25)).toEqual([1, 4]);
+    expect(nearestShareFraction(10)).toEqual([1, 10]);
+    expect(nearestShareFraction(95)).toEqual([9, 10]);
+    expect(nearestShareFraction(NaN)).toEqual([1, 10]);
+    expect(fightsShareText(40)).toBe('2 in 5 fights');
+  });
+});
+
 describe('forecast reasons', () => {
   const base: ForecastReasonInput = {
     winPct: 50, sims: 40, stalemates: 0, medianMs: null, killEtaMs: null, partyLevel: 10, humanPlayers: 1,
@@ -455,10 +495,12 @@ describe('forecast reasons', () => {
 
   it('names a much worse common encounter', () => {
     expect(forecastReasons({ ...base, winPct: 70, worst: { label: 'Bandits', winPct: 41, sharePct: 33.3 } })[0]).toEqual({
-      code: 'worst_encounter', tone: 'bad', text: '1 in 3 fights here are Bandits: wins 41 %',
+      code: 'worst_encounter', tone: 'bad', text: '1 in 3 fights here are Bandits: wins 41%',
     });
     expect(forecastReasons({ ...base, winPct: 70, worst: { label: 'Wolves', winPct: 20, sharePct: 60 } })[0].text)
-      .toBe('1 in 2 fights here are Wolves: wins 20 %');
+      .toBe('3 in 5 fights here are Wolves: wins 20%');
+    expect(forecastReasons({ ...base, winPct: 70, worst: { label: 'Forgotten Vale Pack', winPct: 23, sharePct: 40 } })[0].text)
+      .toBe('2 in 5 fights here are Forgotten Vale Pack: wins 23%');
     expect(codes({ winPct: 45, worst: { label: 'Bandits', winPct: 41, sharePct: 33.3 } })).toEqual([]);
     expect(codes({ winPct: 90, worst: { label: 'Bandits', winPct: 75, sharePct: 33.3 } })).toEqual([]);
   });

@@ -3,7 +3,7 @@ import type { DungeonDefinition, DungeonForecastInput, ServerForecastMessage, Pa
 import { FORECAST_REQUESTS_PER_WINDOW } from '../src/game/ForecastService.js';
 import { LIVE_FORECAST_DEBOUNCE_MS } from '../src/game/PartyBattleManager.js';
 import type { CombatFlush } from '../src/game/ServerBattleTimer.js';
-import { START, forecastMessages, forecastWorld, tileId } from './forecastFixture.js';
+import { START, createWs, forecastMessages, forecastWorld, joinAlice, tileId } from './forecastFixture.js';
 
 const PIT: DungeonDefinition = {
   id: 'pit',
@@ -96,6 +96,28 @@ describe('request_forecast', () => {
     expect(resumed.sent[1]).toMatchObject({ status: 'ok', target: { kind: 'dungeon', dungeonId: 'pit' } });
   });
 
+  it("starts a member's dungeon forecast from the owner's progress, since the owner or a leader takes the party in", async () => {
+    const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
+    w.pm.partyBattles.setForecaster(w.svc);
+    await joinAlice(w, 'bob', 'Priest');
+    const bob = w.pm.getSessionByUsername('bob')!;
+    bob.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 2, wipes: 1, rewardedPhases: [], at: Date.now() });
+    const ask = (username: string): string => {
+      const { sent, reply } = replies();
+      w.pm.handleForecastRequest(username, { kind: 'dungeon', dungeonId: 'pit' }, reply);
+      return sent[0].key;
+    };
+
+    expect(ask('bob').endsWith('|dungeon:pit:0:0:0')).toBe(true);
+    w.session.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
+    expect(ask('bob').endsWith('|dungeon:pit:0:1:0')).toBe(true);
+    expect(ask('alice').endsWith('|dungeon:pit:0:1:0')).toBe(true);
+
+    const getPartyId = (u: string) => w.pm.getSessionByUsername(u)?.getPartyId() ?? null;
+    expect(w.pm.parties.promoteLeader('alice', 'bob', getPartyId)).toBe(true);
+    expect(ask('bob').endsWith('|dungeon:pit:0:2:1')).toBe(true);
+  });
+
   it('allows 20 requests a minute per player, then answers unavailable', async () => {
     const w = await forecastWorld();
     w.pm.partyBattles.setForecaster(w.svc);
@@ -147,6 +169,24 @@ describe('live battle forecasts', () => {
     expect(live.every(m => m.target.battleId === battleId)).toBe(true);
     expect(live[1].key).toBe(`battle:${battleId}:0`);
     expect(w.svc.get(live[1].key)).toBeNull();
+  });
+
+  it('sends live forecasts only to sockets showing the battle', async () => {
+    const w = await forecastWorld({ defaultEncounter: 'brutes' });
+    w.pm.partyBattles.setForecaster(w.svc);
+    const mapTab = createWs();
+    await w.pm.login(mapTab as never, 'alice');
+    w.pm.setCombatView(mapTab as never, false);
+    const bobWs = await joinAlice(w, 'bob', 'Priest');
+    w.pm.setCombatView(bobWs as never, false);
+
+    w.entry().battleTimer.restartBattle();
+    const battleId = w.entry().battleTimer.battleId;
+    vi.advanceTimersByTime(50);
+    const forThisFight = (ws: typeof w.ws) => forecastMessages(ws).filter(m => m.target.battleId === battleId).map(m => m.status);
+    expect(forThisFight(w.ws)).toEqual(['pending', 'ok']);
+    expect(forThisFight(mapTab)).toEqual([]);
+    expect(forThisFight(bobWs)).toEqual([]);
   });
 
   it('skips trash fights and fights nobody is watching', async () => {
@@ -218,5 +258,116 @@ describe('live battle forecasts', () => {
     const at = Number(liveJobs()[1].split(':')[2]);
     expect(at).toBeGreaterThan(2000 + LIVE_FORECAST_DEBOUNCE_MS);
     expect(at).toBeLessThanOrEqual(combat.elapsedMs);
+  });
+});
+
+describe('live forecasts for viewers who arrive mid-fight', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('re-sends the latest result to a socket that connects or opens the battle view', async () => {
+    const w = await forecastWorld({ defaultEncounter: 'brutes' });
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.entry().battleTimer.restartBattle();
+    const battleId = w.entry().battleTimer.battleId;
+    vi.advanceTimersByTime(50);
+    const delivered = forecastMessages(w.ws).find(m => m.target.battleId === battleId && m.status === 'ok')!;
+
+    const reload = createWs();
+    await w.pm.login(reload as never, 'alice');
+    w.pm.sendCombatResync(reload as never);
+    expect(forecastMessages(reload)).toEqual([{ type: 'forecast', target: { kind: 'battle', battleId }, key: delivered.key, result: delivered.result, status: 'ok' }]);
+
+    w.pm.setCombatView(reload as never, false);
+    w.pm.setCombatView(reload as never, true);
+    expect(forecastMessages(reload).map(m => m.status)).toEqual(['ok', 'ok']);
+    expect(w.stub.jobs.filter(j => j.key.startsWith(`battle:${battleId}:`))).toHaveLength(1);
+  });
+
+  it('says a re-forecast is running alongside the last result', async () => {
+    const w = await forecastWorld({ defaultEncounter: 'brutes' });
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.entry().battleTimer.restartBattle();
+    const battleId = w.entry().battleTimer.battleId;
+    vi.advanceTimersByTime(2000);
+    w.stub.gated.add('battle:');
+    const combat = w.entry().battleTimer.currentCombat as PartyCombatState;
+    (w.pm.partyBattles as unknown as { watchLiveForecastTriggers(partyId: string, flush: CombatFlush): void })
+      .watchLiveForecastTriggers(w.partyId, { battleId, combat, events: [{ id: 1, t: 0, kind: 'phase', amount: 1 }] as CombatEvent[], log: [], snapshot: null });
+    vi.advanceTimersByTime(LIVE_FORECAST_DEBOUNCE_MS + 100);
+
+    const late = createWs();
+    await w.pm.login(late as never, 'alice');
+    w.pm.sendCombatResync(late as never);
+    const got = forecastMessages(late);
+    expect(got.map(m => m.status)).toEqual(['ok', 'pending']);
+    expect(got[0].key).toBe(`battle:${battleId}:0`);
+    expect(got[1].key).not.toBe(got[0].key);
+  });
+
+  it('queues a forecast when nobody was watching as the fight began', async () => {
+    const w = await forecastWorld({ defaultEncounter: 'brutes' });
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.pm.setCombatView(w.ws as never, false);
+    w.entry().battleTimer.restartBattle();
+    const battleId = w.entry().battleTimer.battleId;
+    vi.advanceTimersByTime(1500);
+    expect(w.stub.jobs.filter(j => j.key.startsWith('battle:'))).toEqual([]);
+
+    w.pm.setCombatView(w.ws as never, true);
+    vi.advanceTimersByTime(50);
+    const live = forecastMessages(w.ws).filter(m => m.target.battleId === battleId);
+    expect(live.map(m => m.status)).toEqual(['pending', 'ok']);
+    expect(Number(live[1].key.split(':')[2])).toBeGreaterThan(0);
+  });
+
+  it('sends nothing for trash fights or between fights', async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.entry().battleTimer.restartBattle();
+    const late = createWs();
+    await w.pm.login(late as never, 'alice');
+    w.pm.sendCombatResync(late as never);
+    expect(forecastMessages(late)).toEqual([]);
+    expect(w.pm.partyBattles.liveForecastResync('no-such-party')).toEqual([]);
+  });
+
+  it('forecasts a boss fight entered from a saved checkpoint', async () => {
+    const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.session.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
+    expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit', 'alice').success).toBe(true);
+    const battleId = w.entry().battleTimer.battleId;
+    expect(w.entry().battleTimer.currentCombat?.bossPhases?.phase).toBe(1);
+    vi.advanceTimersByTime(50);
+    expect(forecastMessages(w.ws).filter(m => m.target.battleId === battleId).map(m => m.status)).toEqual(['pending', 'ok']);
+  });
+
+  it('forecasts a resumed boss fight entered from the map once the player opens the battle', async () => {
+    const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.session.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
+    w.pm.setCombatView(w.ws as never, false);
+    expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit', 'alice').success).toBe(true);
+    const battleId = w.entry().battleTimer.battleId;
+    vi.advanceTimersByTime(500);
+    expect(forecastMessages(w.ws)).toEqual([]);
+
+    w.pm.setCombatView(w.ws as never, true);
+    vi.advanceTimersByTime(50);
+    expect(forecastMessages(w.ws).filter(m => m.target.battleId === battleId).map(m => m.status)).toEqual(['pending', 'ok']);
+  });
+});
+
+describe('state after a build change', () => {
+  it('reaches every socket of the player and of their party', async () => {
+    const w = await forecastWorld();
+    const secondTab = createWs();
+    await w.pm.login(secondTab as never, 'alice');
+    const bobWs = await joinAlice(w, 'bob', 'Priest');
+    for (const ws of [w.ws, secondTab, bobWs]) ws.send.mockClear();
+    w.pm.sendStateToParty('bob');
+    const states = (ws: typeof w.ws) => ws.send.mock.calls.map(([p]) => JSON.parse(String(p))).filter((m: { type: string }) => m.type === 'state');
+    for (const ws of [w.ws, secondTab, bobWs]) expect(states(ws)).toHaveLength(1);
   });
 });

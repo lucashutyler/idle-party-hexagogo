@@ -136,7 +136,8 @@ describe('secondary lines', () => {
 
   it('describes the worst encounter by share', () => {
     expect(worstStratumLine({ label: 'Bandits', winPct: 41, sharePct: 33 })).toBe(`1 in 3 fights here are Bandits: wins 41${P}`);
-    expect(worstStratumLine({ label: 'Wolves', winPct: 10, sharePct: 70 })).toBe(`Most fights here are Wolves: wins 10${P}`);
+    expect(worstStratumLine({ label: 'Pack', winPct: 23, sharePct: 40 })).toBe(`2 in 5 fights here are Pack: wins 23${P}`);
+    expect(worstStratumLine({ label: 'Wolves', winPct: 10, sharePct: 70 })).toBe(`7 in 10 fights here are Wolves: wins 10${P}`);
     expect(worstStratumLine({ label: 'Rats', winPct: 55, sharePct: 10 })).toBe(`1 in 10 fights here are Rats: wins 55${P}`);
   });
 
@@ -157,7 +158,6 @@ describe('secondary lines', () => {
   it('shows enemy levels only when authored', () => {
     expect(formatEnemyLevels({ enemyLevels: [8, 10] })).toBe('L8–10');
     expect(formatEnemyLevels({ enemyLevels: [5, 5] })).toBe('L5');
-    expect(formatEnemyLevels({ enemyLevels: [40, 51], enemyLevelsDerived: true })).toBeNull();
     expect(formatEnemyLevels({})).toBeNull();
   });
 

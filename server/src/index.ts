@@ -489,7 +489,7 @@ wss.on('connection', (ws) => {
         if (!session.handleEquipSkill(msg.skillId, msg.slotIndex)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip skill' }));
         }
-        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -500,7 +500,7 @@ wss.on('connection', (ws) => {
           return;
         }
         session.handleUnequipSkill(msg.slotIndex);
-        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -557,7 +557,9 @@ wss.on('connection', (ws) => {
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
           }
+          return;
         }
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -570,7 +572,9 @@ wss.on('connection', (ws) => {
 
         if (!session.handleEquipItemForceDestroy(msg.itemId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
+          return;
         }
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -597,7 +601,9 @@ wss.on('connection', (ws) => {
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Cannot unequip item' }));
           }
+          return;
         }
+        playerManager.sendStateToParty(username);
         return;
       }
 

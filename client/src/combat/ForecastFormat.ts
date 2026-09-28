@@ -1,3 +1,4 @@
+import { fightsShareText } from '@idle-party-rpg/shared';
 import type { ForecastResult, ForecastStats } from '@idle-party-rpg/shared';
 
 export type ForecastKind = 'room' | 'dungeon' | 'battle';
@@ -146,13 +147,9 @@ export function forecastSampleLine(result: Pick<ForecastStats, 'sims'>, kind: Fo
   return `Estimate from ${result.sims} simulated ${noun}${result.sims === 1 ? '' : 's'}`;
 }
 
-/** "1 in 3 fights here are Bandits: wins 41 %". */
+/** "2 in 5 fights here are Bandits: wins 41 %". */
 export function worstStratumLine(worst: NonNullable<ForecastResult['worst']>): string {
-  const share = Math.max(0, worst.sharePct);
-  const lead = share >= 67
-    ? 'Most fights here are'
-    : `1 in ${Math.max(2, Math.round(100 / Math.max(1, share)))} fights here are`;
-  return `${lead} ${worst.label}: wins ${formatPct(worst.winPct)}`;
+  return `${fightsShareText(worst.sharePct)} here are ${worst.label}: wins ${formatPct(worst.winPct)}`;
 }
 
 /** Mirrors the server's relocate rule: the whole room's upper confidence bound sits below the threshold. */
@@ -169,9 +166,9 @@ export function isForecastStale(result: Pick<ForecastResult, 'partyKey'>, foreca
   return !!forecastKey && result.partyKey !== forecastKey;
 }
 
-/** Enemy level range, only for authored levels ("L8–10"); derived levels are never shown. */
-export function formatEnemyLevels(result: Pick<ForecastResult, 'enemyLevels' | 'enemyLevelsDerived'>): string | null {
-  if (!result.enemyLevels || result.enemyLevelsDerived) return null;
+/** Level range of the enemies with an authored level ("L8–10"); derived levels are never shown. */
+export function formatEnemyLevels(result: Pick<ForecastResult, 'enemyLevels'>): string | null {
+  if (!result.enemyLevels) return null;
   const [lo, hi] = result.enemyLevels;
   return lo === hi ? `L${lo}` : `L${lo}–${hi}`;
 }
