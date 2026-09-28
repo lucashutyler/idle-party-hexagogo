@@ -3995,6 +3995,8 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   gap: 6px;
 }
 
+.bestiary-card-rows[hidden] { display: none; }
+
 .bestiary-view-all {
   align-self: flex-end;
 }

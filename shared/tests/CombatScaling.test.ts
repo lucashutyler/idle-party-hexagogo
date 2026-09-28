@@ -122,11 +122,24 @@ describe('level gap multiplier', () => {
     expect(levelGapMultiplier(NaN, 1)).toBe(1);
   });
 
-  it('turns off when either side is derived; a derived attacker is judged at the defender level', () => {
+  it('turns off when either side is derived; an estimated attacker is judged at the defender level', () => {
     expect(pairScaling({ level: 20, derived: false }, { level: 10, derived: false }))
       .toEqual({ gap: levelGapMultiplier(20, 10), mitigationLevel: 20 });
-    expect(pairScaling({ level: 90, derived: true }, { level: 10, derived: false })).toEqual({ gap: 1, mitigationLevel: 10 });
-    expect(pairScaling({ level: 10, derived: false }, { level: 90, derived: true })).toEqual({ gap: 1, mitigationLevel: 10 });
+    expect(pairScaling({ level: 90, derived: true, estimated: true }, { level: 10, derived: false }))
+      .toEqual({ gap: 1, mitigationLevel: 10 });
+    expect(pairScaling({ level: 10, derived: false }, { level: 90, derived: true, estimated: true }))
+      .toEqual({ gap: 1, mitigationLevel: 10 });
+  });
+
+  it('judges a derived but not estimated attacker (henchman) at its own level, even against an estimate', () => {
+    expect(pairScaling({ level: 20, derived: true }, { level: 4, derived: true, estimated: true }))
+      .toEqual({ gap: 1, mitigationLevel: 20 });
+    expect(pairScaling({ level: 20, derived: true }, { level: 200, derived: true, estimated: true }))
+      .toEqual({ gap: 1, mitigationLevel: 20 });
+    expect(pairScaling({ level: 20, derived: true }, { level: 35, derived: false }))
+      .toEqual({ gap: 1, mitigationLevel: 20 });
+    expect(pairScaling({ level: 90, derived: true, estimated: true }, { level: 20, derived: true }))
+      .toEqual({ gap: 1, mitigationLevel: 20 });
   });
 });
 
@@ -358,6 +371,81 @@ describe('henchmen levels', () => {
     expect(firstHitOnMonster(human(), { level: 10 })).toBe(scaleDamage(100, levelGapMultiplier(30, 10)));
     expect(firstHitOnPlayer(hench(), { level: 10, damage: 20 })).toBe(20);
     expect(firstHitOnPlayer(human(), { level: 10, damage: 20 })).toBe(scaleDamage(20, levelGapMultiplier(10, 30)));
+  });
+
+  it('judge a resistant unauthored monster at their own level, like an equal player, whatever its damage', () => {
+    pinRandom();
+    const resist = [{ damageType: 'physical' as DamageType, flatReduction: 60, percentReduction: 0 }];
+    const knight = (isHenchman: boolean) => makePlayer('K', 2, { className: 'Knight', level: 20, baseDamage: 100, isHenchman });
+    for (const damage of [1, 30]) {
+      const monster = { damage, resistances: resist };
+      expect(firstHitOnMonster(knight(true), monster)).toBe(mitigated(100, 60, 20));
+      expect(firstHitOnMonster(knight(true), monster)).toBe(firstHitOnMonster(knight(false), monster));
+    }
+  });
+
+  it('judge their own hits on an authored monster at their own level', () => {
+    pinRandom();
+    const resist = [{ damageType: 'physical' as DamageType, flatReduction: 60, percentReduction: 0 }];
+    const hench = makePlayer('H', 2, { className: 'Knight', level: 20, baseDamage: 100, isHenchman: true });
+    expect(firstHitOnMonster(hench, { level: 50, resistances: resist })).toBe(mitigated(100, 60, 20));
+  });
+
+  it('are the defender level an unauthored monster is judged at', () => {
+    pinRandom();
+    const def = monsterDef({ damage: 20 });
+    expect(deriveMonsterLevel(def)).not.toBe(10);
+    const hench = makePlayer('H', 2, { level: 10, equipBonuses: ARMOR_40, isHenchman: true });
+    expect(firstHitOnPlayer(hench, def)).toBe(mitigated(20, 40, 10));
+  });
+});
+
+describe('DoT pulses', () => {
+  function pulseOnce(state: PartyCombatState): void {
+    for (const p of state.players) p.actionRemainingMs = 1e9;
+    for (const m of state.monsters) m.actionRemainingMs = 1e9;
+    runTo(state, 4000);
+  }
+
+  it('scale each source\'s stacks of a same-named DoT by that source, whatever the apply order', () => {
+    pinRandom();
+    const expected = scaleDamage(100, levelGapMultiplier(10, 30))
+      + scaleDamage(100, levelGapMultiplier(30, 30) * masteryFactor(5, 'dealt'));
+    for (const order of [['lo', 'hi'], ['hi', 'lo']]) {
+      const state = createPartyCombatState(
+        [makePlayer('lo', 2, { level: 10 }), makePlayer('hi', 5, { level: 30, mastery: { ogre: 5 } })],
+        [makeMonster(4, { id: 'ogre', hp: 1e6, level: 30 })],
+      );
+      const monster = state.monsters[0];
+      for (const who of order) {
+        const src = player(state, who);
+        monster.dots.push({
+          sourceUsername: who, name: 'bleed', label: 'Bleed', source: { side: 'player', pos: src.gridPosition },
+          damagePerTick: 100, ticksRemaining: 1, damageType: 'physical',
+        });
+      }
+      const before = monster.currentHp;
+      pulseOnce(state);
+      expect(before - monster.currentHp).toBe(expected);
+    }
+  });
+
+  it('scale a player\'s same-named DoTs by each monster source\'s own level', () => {
+    pinRandom();
+    const state = createPartyCombatState(
+      [makePlayer('P', 4, { level: 20 })],
+      [makeMonster(0, { id: 'weak', hp: 1e6, level: 5 }), makeMonster(1, { id: 'strong', hp: 1e6, level: 35 })],
+    );
+    const target = state.players[0];
+    for (const m of state.monsters) {
+      target.dots.push({
+        sourceUsername: m.name, name: 'poison', label: 'Poison', source: { side: 'monster', pos: m.gridPosition },
+        damagePerTick: 50, ticksRemaining: 1, damageType: 'physical',
+      });
+    }
+    const before = target.currentHp;
+    pulseOnce(state);
+    expect(before - target.currentHp).toBe(scaleDamage(50, levelGapMultiplier(5, 20)) + scaleDamage(50, levelGapMultiplier(35, 20)));
   });
 });
 

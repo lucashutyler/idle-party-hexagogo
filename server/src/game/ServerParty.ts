@@ -76,6 +76,11 @@ export class ServerParty {
     return this.lastRoom;
   }
 
+  /** Whether the whole route is the single step a retreat queued. */
+  get isRetreatStepQueued(): boolean {
+    return this.retreatTarget !== null && this.movementQueue.length === 1 && this.movementQueue[0] === this.retreatTarget;
+  }
+
   setDestination(destinationTile: HexTile): boolean {
     if (!destinationTile.isTraversable) {
       return false;

@@ -764,6 +764,9 @@ export {
   clampCheckpointPhase,
   checkpointPhaseKey,
   isDungeonCheckpointFresh,
+  isBossMonster,
+  encounterCanFieldBoss,
+  floorCanFieldBoss,
 } from './systems/DungeonTypes.js';
 export type { DungeonRunState, DungeonCheckpoint } from './systems/DungeonTypes.js';
 export type {
@@ -779,6 +782,7 @@ export type {
 // Forecasting (Monte Carlo over the real engine)
 export {
   FORECAST_MIN_SIMS,
+  FORECAST_MIN_SIMS_PER_STRATUM,
   FORECAST_TARGET_HALF_WIDTH_PCT,
   FORECAST_SIM_BUDGET,
   FORECAST_HORIZON_AFTER_ENRAGE_MS,

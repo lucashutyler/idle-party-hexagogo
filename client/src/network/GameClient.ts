@@ -80,7 +80,10 @@ export class GameClient {
   private forecastCache = new Map<string, CachedForecast>();
   /** Latest message per target regardless of party key, for late mounts. */
   private latestForecast = new Map<string, ServerForecastMessage>();
-  private forecastPending = new Map<string, { target: ForecastRequestTarget; sentAt: number }>();
+  /** `inFlight`: requests sent for this target and not yet answered. */
+  private forecastPending = new Map<string, { target: ForecastRequestTarget; sentAt: number; inFlight: number }>();
+  /** The server keeps one explicit forecast per player: a request for another target drops this one. */
+  private lastForecastSent: string | null = null;
   /** `targetKey|forecastKey` pairs already re-requested after a stale reply. */
   private staleRetried = new Set<string>();
   private bestiaryRequestedAt: number | null = null;
@@ -378,10 +381,18 @@ export class GameClient {
     if (!msg.target) return;
     const targetKey = forecastTargetKey(msg.target);
     if (msg.status !== 'pending') {
+      const pending = this.forecastPending.get(targetKey);
+      if (msg.status === 'unavailable' && pending && pending.inFlight > 1) {
+        pending.inFlight--;
+        return;
+      }
       this.forecastPending.delete(targetKey);
-      const partyKey = msg.result?.partyKey ?? this.currentForecastKey();
-      setBounded(this.forecastCache, `${targetKey}|${partyKey}`, { message: msg, at: Date.now() });
-      setBounded(this.latestForecast, targetKey, msg);
+      const superseded = msg.status === 'unavailable' && targetKey !== this.lastForecastSent;
+      if (!superseded) {
+        const partyKey = msg.result?.partyKey ?? this.currentForecastKey();
+        setBounded(this.forecastCache, `${targetKey}|${partyKey}`, { message: msg, at: Date.now() });
+      }
+      if (msg.status === 'ok' && msg.result) setBounded(this.latestForecast, targetKey, msg);
     }
     for (const listener of this.forecastListeners) {
       try {
@@ -436,8 +447,10 @@ export class GameClient {
 
   private resendPending(): void {
     const now = Date.now();
-    for (const pending of this.forecastPending.values()) {
+    for (const [targetKey, pending] of this.forecastPending) {
       pending.sentAt = now;
+      pending.inFlight = 1;
+      this.lastForecastSent = targetKey;
       this.sendRaw({ type: 'request_forecast', target: pending.target });
     }
     if (this.bestiaryRequestedAt !== null) {
@@ -501,7 +514,7 @@ export class GameClient {
 
   /**
    * The cached reply for `target` when fresh for the party's current forecast inputs; otherwise
-   * asks the server (at most once while a request is outstanding) and returns null.
+   * asks the server (once while it is the latest outstanding request) and returns null.
    */
   requestForecast(target: ForecastRequestTarget): ServerForecastMessage | null {
     const targetKey = forecastTargetKey(target);
@@ -512,13 +525,14 @@ export class GameClient {
       if (now - cached.at <= ttl) return cached.message;
     }
     const pending = this.forecastPending.get(targetKey);
-    if (pending && now - pending.sentAt < FORECAST_RETRY_MS) return null;
-    this.forecastPending.set(targetKey, { target, sentAt: now });
+    if (pending && now - pending.sentAt < FORECAST_RETRY_MS && this.lastForecastSent === targetKey) return null;
+    this.forecastPending.set(targetKey, { target, sentAt: now, inFlight: (pending?.inFlight ?? 0) + 1 });
+    this.lastForecastSent = targetKey;
     this.sendRaw({ type: 'request_forecast', target });
     return null;
   }
 
-  /** Latest reply for `target` whatever the party key or age (null when none). */
+  /** Latest successful reply for `target` whatever the party key or age (null when none). */
   peekForecast(target: ForecastTarget): ServerForecastMessage | null {
     return this.latestForecast.get(forecastTargetKey(target)) ?? null;
   }

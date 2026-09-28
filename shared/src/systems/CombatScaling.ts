@@ -31,6 +31,8 @@ export const ENRAGE_TIER_DEFAULTS: Partial<Record<MonsterTier, MonsterEnrage>> =
 export interface CombatLevel {
   level: number;
   derived: boolean;
+  /** Estimated from damage output (unauthored monster); never used to judge mitigation. */
+  estimated?: boolean;
 }
 
 /** Enrage config resolved to engine units. */
@@ -69,11 +71,11 @@ export function levelGapMultiplier(attackerLevel: number, defenderLevel: number)
 
 /**
  * Gap multiplier and the level mitigation is judged against. A derived level on either side disables the gap;
- * a derived attacker is judged at the defender's level.
+ * mitigation uses the attacker's level unless it is an estimate, then the defender's.
  */
 export function pairScaling(attacker: CombatLevel, defender: CombatLevel): { gap: number; mitigationLevel: number } {
   const gap = attacker.derived || defender.derived ? 1 : levelGapMultiplier(attacker.level, defender.level);
-  return { gap, mitigationLevel: attacker.derived ? defender.level : attacker.level };
+  return { gap, mitigationLevel: attacker.estimated ? defender.level : attacker.level };
 }
 
 /** A percent resist (0–100 scale) as a damage factor, clamped to [minPercent, MAX_PERCENT_RESIST]. */

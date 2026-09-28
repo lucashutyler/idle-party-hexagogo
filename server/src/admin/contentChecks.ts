@@ -1,4 +1,4 @@
-import { MONSTER_TIERS, isBossTier } from '@idle-party-rpg/shared';
+import { MONSTER_TIERS, encounterCanFieldBoss, floorCanFieldBoss, isBossMonster } from '@idle-party-rpg/shared';
 import type { DungeonFloor, EncounterDefinition, MonsterDefinition } from '@idle-party-rpg/shared';
 
 /** Range checks for level/tier/enrage and dungeon checkpoint fields, shared by the admin routes and validate_draft. */
@@ -50,32 +50,45 @@ export function floorCheckpointProblems(floor: DungeonFloor, label: string): str
   return problems;
 }
 
-/** A checkpoint floor must only roll explicit encounters that place a boss- or raid-tier monster. */
+/** Checkpoints need some encounter on the floor's table that can field a boss (the engine and re-entry rule). */
 export function checkpointEncounterProblems(
   floor: DungeonFloor,
   label: string,
   encounters: ReadonlyMap<string, EncounterDefinition>,
   monsters: ReadonlyMap<string, MonsterDefinition>,
 ): string[] {
-  if (!Array.isArray(floor.checkpoints) || floor.checkpoints.length === 0) return [];
-  const table = Array.isArray(floor.encounterTable) ? floor.encounterTable : [];
-  if (table.length === 0) {
-    return [`${label} has checkpoints but no encounter table — checkpoint floors need an explicit encounter with a boss- or raid-tier monster.`];
-  }
-  const problems: string[] = [];
-  for (const entry of table) {
+  if (!floorHasCheckpoints(floor)) return [];
+  if (floorCanFieldBoss(floor, id => encounters.get(id), id => monsters.get(id))) return [];
+  return [`${label} has checkpoints, but no encounter on its table can field a non-passive boss- or raid-tier monster — they are never reached, and a checkpoint saved on leaving is dropped on re-entry.`];
+}
+
+/** Advisory: fights on a checkpoint floor that can come without a boss, and so without checkpoints. */
+export function checkpointEncounterWarnings(
+  floor: DungeonFloor,
+  label: string,
+  encounters: ReadonlyMap<string, EncounterDefinition>,
+  monsters: ReadonlyMap<string, MonsterDefinition>,
+): string[] {
+  if (!floorHasCheckpoints(floor)) return [];
+  const getMonster = (id: string): MonsterDefinition | undefined => monsters.get(id);
+  if (!floorCanFieldBoss(floor, id => encounters.get(id), getMonster)) return [];
+  const warnings: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of floor.encounterTable) {
     const encounter = encounters.get(entry.encounterId);
-    if (!encounter) continue;
-    if (encounter.type !== 'explicit') {
-      problems.push(`${label} has checkpoints, so its encounter '${encounter.id}' must be 'explicit' (random pools can roll zero or several bosses).`);
-      continue;
-    }
-    const hasBoss = (encounter.placements ?? []).some(p => isBossTier(monsters.get(p.monsterId)?.tier));
-    if (!hasBoss) {
-      problems.push(`${label} has checkpoints, but its encounter '${encounter.id}' places no boss- or raid-tier monster.`);
+    if (!encounter || seen.has(encounter.id)) continue;
+    seen.add(encounter.id);
+    if (!encounterCanFieldBoss(encounter, getMonster)) {
+      warnings.push(`${label}: encounter '${encounter.id}' has no boss- or raid-tier monster, so its fights get no checkpoints (a wipe there still uses up a retry).`);
+    } else if (encounter.type !== 'explicit' && !(encounter.monsterPool ?? []).some(p => p.min >= 1 && isBossMonster(getMonster(p.monsterId)))) {
+      warnings.push(`${label}: random encounter '${encounter.id}' doesn't always roll a boss; fights without one get no checkpoints.`);
     }
   }
-  return problems;
+  return warnings;
+}
+
+function floorHasCheckpoints(floor: DungeonFloor): boolean {
+  return Array.isArray(floor.checkpoints) && floor.checkpoints.length > 0;
 }
 
 function enrageProblems(enrage: unknown, label: string): string[] {

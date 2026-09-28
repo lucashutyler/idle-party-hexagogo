@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { HexGrid, HexTile, offsetToCube, cubeToOffset, DEFAULT_MAP_ID, RESULT_PAUSE, MOVE_DURATION, RUN_AVAILABLE_MS } from '@idle-party-rpg/shared';
 import type { DungeonDefinition, ForecastResult, ForecastStratum } from '@idle-party-rpg/shared';
+import type WebSocket from 'ws';
 import { ServerParty } from '../src/game/ServerParty.js';
 import { PlayerSession } from '../src/game/PlayerSession.js';
 import {
@@ -23,9 +24,9 @@ const RETREAT_CYCLE_MS = RUN_AVAILABLE_MS + RESULT_PAUSE + MOVE_DURATION + 200;
 describe('auto-retreat decisions', () => {
   it('relocates only when the whole room is clearly below the threshold', () => {
     expect(decideAutoRetreat(room(10, [5, 20]), null, 25, 0)).toEqual({ kind: 'relocate', winPct: 10, cause: 'room' });
-    expect(decideAutoRetreat(room(10, [2, 30]), null, 25, 0)).toEqual({ kind: 'none' });
+    expect(decideAutoRetreat(room(10, [2, 30]), null, 25, 0)).toEqual({ kind: 'unknown' });
     expect(decideAutoRetreat(room(10, [5, 20]), null, 0, 0)).toEqual({ kind: 'none' });
-    expect(decideAutoRetreat(room(0, [0, 100], undefined, 0), null, 25, 0)).toEqual({ kind: 'none' });
+    expect(decideAutoRetreat(room(0, [0, 100], undefined, 0), null, 25, 0)).toEqual({ kind: 'unknown' });
   });
 
   it('skips a pack only when its own interval is clearly below the threshold', () => {
@@ -35,10 +36,16 @@ describe('auto-retreat decisions', () => {
     ];
     expect(decideAutoRetreat(room(70, [63, 76], strata), 'bandits', 25, 0)).toEqual({ kind: 'skip', winPct: 0 });
     expect(decideAutoRetreat(room(70, [63, 76], strata), 'wolves', 25, 0)).toEqual({ kind: 'none' });
-    expect(decideAutoRetreat(room(70, [63, 76], strata), 'unknown', 25, 0)).toEqual({ kind: 'none' });
     expect(decideAutoRetreat(room(70, [40, 90], strata, 10), 'bandits', 25, 0)).toEqual({ kind: 'none' });
     expect(stratumUpperPct(strata[0], 10)).toBeGreaterThan(25);
     expect(stratumUpperPct(strata[0], 200)).toBeLessThan(25);
+  });
+
+  it('treats a pack the forecast never sampled as unknown, never as safe or skippable', () => {
+    const strata = [{ entryId: 'wolves', label: 'Wolves', winPct: 100, sharePct: 70 }];
+    expect(decideAutoRetreat(room(70, [40, 100], strata), 'bandits', 25, 0)).toEqual({ kind: 'unknown' });
+    expect(decideAutoRetreat(room(70, [40, 100], strata), 'bandits', 25, AUTO_RETREAT_SKIPS_TO_RELOCATE - 1)).toEqual({ kind: 'unknown' });
+    expect(decideAutoRetreat(room(70, [40, 100], []), 'wolves', 25, 0)).toEqual({ kind: 'unknown' });
   });
 
   it('turns the third skip within ten battles into a relocation', () => {
@@ -294,6 +301,71 @@ describe('auto-retreat in the overworld', () => {
     expect(w.entry().serverParty.remainingPath).toEqual([]);
   });
 
+  it("a player's move calls off a retreat already scheduled for the fight", async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    const start = w.tileAt(START.col, START.row);
+    const next = w.grid.getAllNeighbors(start.coord)[0];
+    w.stub.verdicts.set(start.id, DEADLY);
+    w.stub.verdicts.set(next.id, SAFE);
+    w.prefill([start.id, next.id]);
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(1000);
+    expect(w.entry().pendingRetreat).toBeDefined();
+
+    expect(w.pm.partyBattles.handleMove(w.partyId, 3, 2)).toEqual({ success: true });
+    const route = w.entry().serverParty.remainingPath.map(t => t.id);
+    vi.advanceTimersByTime(RETREAT_CYCLE_MS);
+
+    expect(w.entry().pendingRetreat).toBeUndefined();
+    expect(w.entry().serverParty.remainingPath.map(t => t.id)).toEqual(route);
+    expect(w.journal().some(l => l.startsWith('Auto-retreat moved'))).toBe(false);
+  });
+
+  it('turning auto-retreat off calls off a retreat already scheduled for the fight', async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    const start = w.tileAt(START.col, START.row);
+    const next = w.grid.getAllNeighbors(start.coord)[0];
+    w.stub.verdicts.set(start.id, DEADLY);
+    w.stub.verdicts.set(next.id, SAFE);
+    w.prefill([start.id, next.id]);
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(1000);
+    expect(w.entry().pendingRetreat).toBeDefined();
+
+    w.pm.handleSetCombatPrefs('alice', 0);
+    vi.advanceTimersByTime(RETREAT_CYCLE_MS);
+
+    expect(w.entry().serverParty.tile.id).toBe(start.id);
+    expect(w.journal().some(l => l.startsWith('Auto-retreat moved'))).toBe(false);
+  });
+
+  it('a restart in the pause after a relocation walks on instead of retreating again', async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.pm.setPresence(w.ws as unknown as WebSocket, false);
+    const start = w.tileAt(START.col, START.row);
+    const next = w.grid.getAllNeighbors(start.coord)[0];
+    w.stub.verdicts.set(start.id, DEADLY);
+    w.stub.verdicts.set(next.id, SAFE);
+    w.prefill([start.id, next.id]);
+    w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(RUN_AVAILABLE_MS + 100);
+    expect(w.entry().serverParty.remainingPath.map(t => t.id)).toEqual([next.id]);
+
+    w.pm.partyBattles.restartBattle(w.partyId);
+    vi.advanceTimersByTime(RUN_AVAILABLE_MS + 100);
+
+    expect(w.journal().filter(l => l.startsWith('Auto-retreat moved'))).toHaveLength(1);
+    const ledger = w.session.getAwayLedger()!;
+    expect(ledger.retreats).toBe(1);
+    expect(ledger.routeStopped).toBeUndefined();
+    expect(w.pm.partyBattles.escapeBattle(w.partyId)).toBe(true);
+    vi.advanceTimersByTime(RESULT_PAUSE + MOVE_DURATION);
+    expect(w.entry().serverParty.tile.id).toBe(next.id);
+  });
+
   it('a forced relocation forgets the previous room', async () => {
     const w = await forecastWorld();
     const party = w.entry().serverParty;
@@ -339,6 +411,29 @@ describe('auto-retreat in the overworld', () => {
     w.stub.gated.clear();
     vi.advanceTimersByTime(RETREAT_CYCLE_MS);
     expect(w.journal().some(l => l.includes('retreat') || l.startsWith('Avoided') || l.startsWith('Nowhere'))).toBe(false);
+  });
+
+  it('a fight from a pack the forecast never sampled neither skips nor pushes earlier skips out', async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    const here = tileId(START.col, START.row);
+    const skips = w.entry() as unknown as { recentSkips: boolean[] };
+    const fightWith = (strata: ForecastStratum[]): void => {
+      w.contentState.contentEpoch++;
+      w.stub.verdicts.set(here, { winPct: 60, ci: [53, 67], sims: 200, strata });
+      w.prefill([here]);
+      skips.recentSkips = [true, true];
+      w.entry().battleTimer.restartBattle();
+      vi.advanceTimersByTime(100);
+    };
+
+    fightWith([{ entryId: 'gnats', label: 'Gnats', winPct: 100, sharePct: 100 }]);
+    expect(skips.recentSkips).toEqual([true, true]);
+    expect(w.entry().pendingRetreat).toBeUndefined();
+
+    fightWith([{ entryId: 'ogres', label: 'Ogres', winPct: 100, sharePct: 100 }]);
+    expect(skips.recentSkips).toEqual([true, true, false]);
+    expect(w.journal().some(l => l.startsWith('Avoided') || l.startsWith('Auto-retreat'))).toBe(false);
   });
 
   it('does nothing when auto-retreat is off', async () => {

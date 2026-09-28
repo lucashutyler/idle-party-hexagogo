@@ -43,6 +43,7 @@ export interface ForecastStats {
 }
 
 export interface ForecastFloor {
+  /** 1-based position in the dungeon's floor list (not the authored floorNumber). */
   floor: number;
   winPct: number;
   boss?: boolean;

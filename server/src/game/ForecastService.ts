@@ -13,7 +13,7 @@ export const FORECAST_CACHE_SIZE = 5000;
 export const FORECAST_CACHE_TTL_MS = 10 * 60 * 1000;
 /** Combat steps between clock checks inside a slice, to start with; adapts to how heavy the fights are. */
 export const FORECAST_STEPS_PER_CHECK = 64;
-const MAX_STEPS_PER_CHECK = 4096;
+const MAX_STEPS_PER_CHECK = 512;
 export const FORECAST_REQUESTS_PER_WINDOW = 20;
 export const FORECAST_REQUEST_WINDOW_MS = 60_000;
 
@@ -61,7 +61,10 @@ export interface ForecastRequest {
   build: () => ForecastWork | null;
   /** Live forecasts pass false: they are never cached. */
   cache?: boolean;
-  /** One queued job per group: a newer job drops the older one, or demotes it to pre-check priority. */
+  /**
+   * One queued job per group: a newer job drops the older one (only this group's listeners when others
+   * still want it), or demotes it to pre-check priority.
+   */
   supersede?: { group: string; previous: 'drop' | 'demote' };
   /** Called once the job settles; null when it was dropped or failed. Never called for a cached answer. */
   onDone?: (result: ForecastResult | null) => void;
@@ -100,7 +103,10 @@ export interface ForecastServiceStats {
   cached: number;
 }
 
-type Listener = (result: ForecastResult | null) => void;
+interface Listener {
+  fn: (result: ForecastResult | null) => void;
+  group?: string;
+}
 
 interface QueuedJob {
   key: string;
@@ -109,12 +115,16 @@ interface QueuedJob {
   cache: boolean;
   listeners: Listener[];
   groups: string[];
+  stepsPerCheck: number;
 }
 
 interface CachedResult {
   result: ForecastResult;
   at: number;
 }
+
+/** Stands in for an ungrouped request without `onDone`, so a group letting go of the job doesn't drop it. */
+const NO_LISTENER = (): void => {};
 
 const DEFAULT_CLOCK: ForecastClock = {
   now: () => performance.now(),
@@ -133,7 +143,7 @@ export class ForecastService {
   private readonly maxQueued: number;
   private readonly cacheSize: number;
   private readonly cacheTtlMs: number;
-  private stepsPerCheck: number;
+  private readonly stepsPerCheck: number;
   private readonly requestsPerWindow: number;
   private readonly requestWindowMs: number;
   private readonly createJob: (input: ForecastInput, opts: ForecastJobOptions) => ForecastJob;
@@ -198,14 +208,22 @@ export class ForecastService {
       if (!this.makeRoom(req.priority)) return { status: 'unavailable' };
       const job = this.buildJob(req);
       if (!job) return { status: 'unavailable' };
-      queued = { key: req.key, priority: req.priority, job, cache: req.cache !== false, listeners: [], groups: [] };
+      queued = {
+        key: req.key, priority: req.priority, job, cache: req.cache !== false, listeners: [], groups: [], stepsPerCheck: this.stepsPerCheck,
+      };
       this.lanes[req.priority].push(queued);
       this.byKey.set(req.key, queued);
     }
-    if (req.onDone) queued.listeners.push(req.onDone);
+    if (req.onDone || !req.supersede) queued.listeners.push({ fn: req.onDone ?? NO_LISTENER, group: req.supersede?.group });
     if (req.supersede) this.supersede(queued, req.supersede.group, req.supersede.previous);
     this.schedule();
     return { status: 'pending' };
+  }
+
+  /** Withdraw the job queued under `group`: its listeners hear null, and it is dropped unless someone else still wants it. */
+  cancelGroup(group: string): void {
+    const job = this.groups.get(group);
+    if (job) this.release(job, group);
   }
 
   /** Sliding-window rate limit per requester. Counts the request when allowed. */
@@ -268,9 +286,22 @@ export class ForecastService {
     this.groups.set(group, job);
     if (!job.groups.includes(group)) job.groups.push(group);
     if (!older || older === job || !this.byKey.has(older.key)) return;
-    older.groups = older.groups.filter(g => g !== group);
-    if (previous === 'drop') this.drop(older);
-    else if (rank(older.priority) < rank('precheck')) this.moveTo(older, 'precheck');
+    if (previous === 'drop') this.release(older, group);
+    else {
+      older.groups = older.groups.filter(g => g !== group);
+      if (rank(older.priority) < rank('precheck')) this.moveTo(older, 'precheck');
+    }
+  }
+
+  /** Detach `group` from `job`; drop the job when nothing else wants it, else demote it if no group is left. */
+  private release(job: QueuedJob, group: string): void {
+    job.groups = job.groups.filter(g => g !== group);
+    if (this.groups.get(group) === job) this.groups.delete(group);
+    const detached = job.listeners.filter(l => l.group === group);
+    job.listeners = job.listeners.filter(l => l.group !== group);
+    if (job.groups.length === 0 && job.listeners.length === 0) this.drop(job);
+    else if (job.groups.length === 0 && rank(job.priority) < rank('precheck')) this.moveTo(job, 'precheck');
+    this.notify(job.key, detached, null);
   }
 
   private moveTo(job: QueuedJob, priority: ForecastPriority): void {
@@ -325,11 +356,15 @@ export class ForecastService {
   }
 
   private settle(job: QueuedJob, result: ForecastResult | null): void {
-    for (const listener of job.listeners) {
+    this.notify(job.key, job.listeners, result);
+  }
+
+  private notify(key: string, listeners: readonly Listener[], result: ForecastResult | null): void {
+    for (const listener of listeners) {
       try {
-        listener(result);
+        listener.fn(result);
       } catch (err) {
-        console.error(`[Forecast] listener for ${job.key} failed:`, err);
+        console.error(`[Forecast] listener for ${key} failed:`, err);
       }
     }
   }
@@ -376,8 +411,8 @@ export class ForecastService {
       unfinished = job;
       try {
         const before = this.clock.now();
-        job.job.advance(this.stepsPerCheck);
-        this.tuneChunk(this.clock.now() - before);
+        const steps = job.job.advance(job.stepsPerCheck);
+        this.tuneChunk(job, this.clock.now() - before, steps);
         if (job.job.done) {
           unfinished = null;
           this.finish(job);
@@ -393,10 +428,11 @@ export class ForecastService {
     if (unfinished && this.byKey.get(unfinished.key) === unfinished) this.moveTo(unfinished, unfinished.priority);
   }
 
-  /** Keep one chunk near an eighth of a slice, so a slice overruns its budget by little. */
-  private tuneChunk(tookMs: number): void {
-    if (tookMs > this.sliceMs / 8) this.stepsPerCheck = Math.max(1, Math.floor(this.stepsPerCheck / 2));
-    else if (tookMs < this.sliceMs / 32) this.stepsPerCheck = Math.min(MAX_STEPS_PER_CHECK, this.stepsPerCheck * 2);
+  /** Size the job's next chunk to about an eighth of a slice at its measured cost per step. */
+  private tuneChunk(job: QueuedJob, tookMs: number, steps: number): void {
+    if (!(steps > 0) || !Number.isFinite(tookMs)) return;
+    const perStep = Math.max(tookMs / steps, 1e-4);
+    job.stepsPerCheck = Math.min(MAX_STEPS_PER_CHECK, Math.max(1, Math.floor(this.sliceMs / 8 / perStep)));
   }
 
   private maybeLog(now: number): void {

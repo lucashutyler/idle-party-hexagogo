@@ -6,6 +6,7 @@ import { suggestMonsterStats } from '@idle-party-rpg/shared';
 import type { DungeonFloor, EncounterDefinition, MonsterDefinition } from '@idle-party-rpg/shared';
 import {
   checkpointEncounterProblems,
+  checkpointEncounterWarnings,
   floorCheckpointProblems,
   monsterScalingProblems,
 } from '../src/admin/contentChecks.js';
@@ -142,32 +143,53 @@ describe('floorCheckpointProblems', () => {
   });
 });
 
-describe('checkpointEncounterProblems', () => {
+describe('checkpoint floor encounters', () => {
   const boss = monster({ id: 'boss', tier: 'boss' });
+  const wall = monster({ id: 'wall', tier: 'boss', passive: true });
   const add = monster({ id: 'add' });
-  const monsters = new Map([[boss.id, boss], [add.id, add]]);
+  const monsters = new Map([[boss.id, boss], [wall.id, wall], [add.id, add]]);
   const court: EncounterDefinition = {
     id: 'court', name: 'Court', type: 'explicit',
     placements: [{ monsterId: 'boss', gridPosition: 4 }, { monsterId: 'add', gridPosition: 1 }],
   };
+  const adds: EncounterDefinition = { id: 'adds', name: 'Adds', type: 'explicit', placements: [{ monsterId: 'add', gridPosition: 4 }] };
+  const table = (...ids: string[]) => ids.map(encounterId => ({ encounterId, weight: 1 }));
+  const check = (f: DungeonFloor, encounters: EncounterDefinition[]) => {
+    const byId = new Map(encounters.map(e => [e.id, e]));
+    return { problems: checkpointEncounterProblems(f, 'F', byId, monsters), warnings: checkpointEncounterWarnings(f, 'F', byId, monsters) };
+  };
 
-  it('is silent without checkpoints and when the explicit encounter places a boss', () => {
-    const encounters = new Map([[court.id, court]]);
-    expect(checkpointEncounterProblems(floor(), 'F', encounters, monsters)).toEqual([]);
-    expect(checkpointEncounterProblems(floor({ checkpoints: [0.5] }), 'F', encounters, monsters)).toEqual([]);
+  it('is silent without checkpoints and when every encounter places a boss', () => {
+    expect(check(floor({ encounterTable: table('adds') }), [adds])).toEqual({ problems: [], warnings: [] });
+    expect(check(floor({ checkpoints: [0.5], encounterTable: table('court') }), [court])).toEqual({ problems: [], warnings: [] });
   });
 
-  it('flags random encounters, encounters without a boss and empty tables', () => {
-    const random: EncounterDefinition = { id: 'court', name: 'Court', type: 'random', monsterPool: [{ monsterId: 'boss', min: 1, max: 1 }] };
-    expect(checkpointEncounterProblems(floor({ checkpoints: [0.5] }), 'F', new Map([['court', random]]), monsters)[0])
-      .toContain("must be 'explicit'");
+  it('accepts a random pool that always rolls its boss, as the engine does', () => {
+    const random: EncounterDefinition = { id: 'court', name: 'Court', type: 'random', monsterPool: [{ monsterId: 'boss', min: 1, max: 2 }] };
+    expect(check(floor({ checkpoints: [0.5], encounterTable: table('court') }), [random])).toEqual({ problems: [], warnings: [] });
+  });
 
-    const noBoss: EncounterDefinition = { ...court, placements: [{ monsterId: 'add', gridPosition: 4 }] };
-    expect(checkpointEncounterProblems(floor({ checkpoints: [0.5] }), 'F', new Map([['court', noBoss]]), monsters)[0])
-      .toContain('places no boss- or raid-tier monster');
+  it('only warns about encounters that can come without a boss when another one can field it', () => {
+    const maybe: EncounterDefinition = { id: 'maybe', name: 'Maybe', type: 'random', monsterPool: [{ monsterId: 'boss', min: 0, max: 1 }] };
+    const { problems, warnings } = check(floor({ checkpoints: [0.5], encounterTable: table('court', 'adds', 'maybe') }), [court, adds, maybe]);
+    expect(problems).toEqual([]);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain("encounter 'adds' has no boss- or raid-tier monster");
+    expect(warnings[1]).toContain("random encounter 'maybe' doesn't always roll a boss");
+  });
 
-    expect(checkpointEncounterProblems(floor({ checkpoints: [0.5], encounterTable: [] }), 'F', new Map(), monsters)[0])
-      .toContain('no encounter table');
+  it('reports a problem when nothing on the floor can field a boss, counting passive walls out', () => {
+    const walled: EncounterDefinition = { id: 'walled', name: 'Walled', type: 'explicit', placements: [{ monsterId: 'wall', gridPosition: 4 }] };
+    for (const [f, encounters] of [
+      [floor({ checkpoints: [0.5], encounterTable: table('adds') }), [adds]],
+      [floor({ checkpoints: [0.5], encounterTable: table('walled') }), [walled]],
+      [floor({ checkpoints: [0.5], encounterTable: [] }), []],
+    ] as [DungeonFloor, EncounterDefinition[]][]) {
+      const { problems, warnings } = check(f, encounters);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('no encounter on its table can field a non-passive boss- or raid-tier monster');
+      expect(warnings).toEqual([]);
+    }
   });
 });
 
@@ -207,7 +229,7 @@ describe('validateDraft — levels, tiers and checkpoints', () => {
     expect(info.some(i => i.includes("'big_one'") && i.includes("'boss'"))).toBe(true);
   });
 
-  it('flags checkpoint floors whose encounter has no boss, and inert wipe settings', async () => {
+  it('flags checkpoint floors that can never field a boss, and inert wipe settings', async () => {
     const { problems, info } = await validate(snapshot => {
       snapshot.monsters.push(monster({ id: 'plain' }));
       snapshot.encounters!.push({ id: 'plain_court', name: 'Plain Court', type: 'explicit', placements: [{ monsterId: 'plain', gridPosition: 4 }] });
@@ -221,8 +243,28 @@ describe('validateDraft — levels, tiers and checkpoints', () => {
       });
     });
     expect(problems.some(p => p.includes("'test_dungeon' floor 0") && p.includes('descending order'))).toBe(true);
-    expect(problems.some(p => p.includes("'test_dungeon' floor 0") && p.includes('places no boss- or raid-tier monster'))).toBe(true);
+    expect(problems.some(p => p.includes("'test_dungeon' floor 0") && p.includes('no encounter on its table can field'))).toBe(true);
     expect(info.some(i => i.includes("'test_dungeon' floor 1") && i.includes('maxWipes'))).toBe(true);
+  });
+
+  it('reports boss-optional encounters on a checkpoint floor as info, not problems', async () => {
+    const { problems, info } = await validate(snapshot => {
+      snapshot.monsters.push(monster({ id: 'plain' }), monster({ id: 'warden', tier: 'boss' }));
+      snapshot.encounters!.push(
+        { id: 'warden_pack', name: 'Warden Pack', type: 'random', monsterPool: [{ monsterId: 'warden', min: 0, max: 1 }, { monsterId: 'plain', min: 1, max: 2 }] },
+        { id: 'plain_court', name: 'Plain Court', type: 'explicit', placements: [{ monsterId: 'plain', gridPosition: 4 }] },
+      );
+      snapshot.dungeons!.push({
+        id: 'test_dungeon',
+        name: 'Test Dungeon',
+        floors: [floor({ encounterTable: [{ encounterId: 'warden_pack', weight: 2 }, { encounterId: 'plain_court', weight: 1 }], checkpoints: [0.5] })],
+      });
+    });
+    expect(problems.filter(p => p.includes("'test_dungeon'"))).toEqual([]);
+    expect(info.filter(i => i.includes("'test_dungeon' floor 0"))).toEqual([
+      "Dungeon 'test_dungeon' floor 0 (floorNumber 1): random encounter 'warden_pack' doesn't always roll a boss; fights without one get no checkpoints.",
+      "Dungeon 'test_dungeon' floor 0 (floorNumber 1): encounter 'plain_court' has no boss- or raid-tier monster, so its fights get no checkpoints (a wipe there still uses up a retry).",
+    ]);
   });
 });
 

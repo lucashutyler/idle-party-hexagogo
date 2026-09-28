@@ -15,9 +15,9 @@ import {
   ALL_CLASS_NAMES,
   DEFAULT_CHECKPOINT_REWARD_FRACTION,
   DEFAULT_MAX_WIPES,
-  isBossTier,
+  isBossMonster,
 } from '@idle-party-rpg/shared';
-import { escapeHtml, putAdmin, deleteAdmin } from '../api';
+import { escapeHtml, escapeValue, putAdmin, deleteAdmin } from '../api';
 import { openModal, type ModalHandle } from '../components/Modal';
 
 const MAX_WIPES_LIMIT = 20;
@@ -44,10 +44,10 @@ export class DungeonsTab implements Tab {
     const rows = dungeons.map(d => {
       const reqs = this.summarizeEntry(d.entryRequirements);
       const actions = readOnly
-        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm dungeon-view-btn" data-id="${d.id}">View</button></td>`
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm dungeon-view-btn" data-id="${escapeValue(d.id)}">View</button></td>`
         : `<td class="admin-actions-cell">
-            <button class="admin-btn admin-btn-sm dungeon-edit-btn" data-id="${d.id}">Edit</button>
-            <button class="admin-btn admin-btn-sm admin-btn-danger dungeon-delete-btn" data-id="${d.id}">Del</button>
+            <button class="admin-btn admin-btn-sm dungeon-edit-btn" data-id="${escapeValue(d.id)}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger dungeon-delete-btn" data-id="${escapeValue(d.id)}">Del</button>
           </td>`;
       const checkpointFloors = d.floors.filter(f => (f.checkpoints?.length ?? 0) > 0).length;
       const checkpointNote = checkpointFloors > 0
@@ -133,7 +133,7 @@ export class DungeonsTab implements Tab {
     `).join('');
 
     const itemOptions = `<option value="">— none —</option>` + items.map(i =>
-      `<option value="${i.id}" ${i.id === reqs.requiredItemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
+      `<option value="${escapeValue(i.id)}" ${i.id === reqs.requiredItemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
     ).join('');
 
     const floorRows = d.floors.map((f, i) => this.floorRowHtml(i, f, encounters, items, i)).join('');
@@ -154,10 +154,10 @@ export class DungeonsTab implements Tab {
       <fieldset class="admin-form-fieldset">
         <legend>Entry Requirements</legend>
         <div class="admin-form-grid">
-          <label>Min Level<input type="number" id="df-req-min-level" value="${reqs.minLevel ?? ''}" min="1"></label>
-          <label>Max Level<input type="number" id="df-req-max-level" value="${reqs.maxLevel ?? ''}" min="1"></label>
-          <label>Min Party Size<input type="number" id="df-req-min-party" value="${reqs.minPartySize ?? ''}" min="1"></label>
-          <label>Max Party Size<input type="number" id="df-req-max-party" value="${reqs.maxPartySize ?? ''}" min="1"></label>
+          <label>Min Level<input type="number" id="df-req-min-level" value="${escapeValue(reqs.minLevel)}" min="1"></label>
+          <label>Max Level<input type="number" id="df-req-max-level" value="${escapeValue(reqs.maxLevel)}" min="1"></label>
+          <label>Min Party Size<input type="number" id="df-req-min-party" value="${escapeValue(reqs.minPartySize)}" min="1"></label>
+          <label>Max Party Size<input type="number" id="df-req-max-party" value="${escapeValue(reqs.maxPartySize)}" min="1"></label>
         </div>
         <div class="admin-form-grid">
           <label>Required Item
@@ -178,8 +178,8 @@ export class DungeonsTab implements Tab {
         <legend>First-Clear Rewards ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="df-add-first-clear" type="button">+ Reward</button>'}</legend>
         <div class="admin-form-hint">Granted once per player on the first ever clear. XP and Gold are flat bonuses; item rewards roll by chance.</div>
         <div class="admin-form-grid">
-          <label>Bonus XP<input type="number" id="df-first-clear-xp" value="${d.firstClearXp ?? ''}" min="0"></label>
-          <label>Bonus Gold<input type="number" id="df-first-clear-gold" value="${d.firstClearGold ?? ''}" min="0"></label>
+          <label>Bonus XP<input type="number" id="df-first-clear-xp" value="${escapeValue(d.firstClearXp)}" min="0"></label>
+          <label>Bonus Gold<input type="number" id="df-first-clear-gold" value="${escapeValue(d.firstClearGold)}" min="0"></label>
         </div>
         <div id="df-first-clear-list">${firstClearRows}</div>
       </fieldset>
@@ -253,9 +253,9 @@ export class DungeonsTab implements Tab {
           <button class="admin-btn admin-btn-sm admin-btn-danger df-floor-remove" type="button" data-floor-index="${index}">×</button>
         </legend>
         <div class="admin-form-grid">
-          <label>Floor Number<input type="number" class="df-floor-number" value="${floor.floorNumber}" min="1"></label>
-          <label>Grid Cols<input type="number" class="df-floor-cols" value="${floor.gridShape.cols}" min="1" max="9"></label>
-          <label>Grid Rows<input type="number" class="df-floor-rows" value="${floor.gridShape.rows}" min="1" max="9"></label>
+          <label>Floor Number<input type="number" class="df-floor-number" value="${escapeValue(floor.floorNumber)}" min="1"></label>
+          <label>Grid Cols<input type="number" class="df-floor-cols" value="${escapeValue(floor.gridShape.cols)}" min="1" max="9"></label>
+          <label>Grid Rows<input type="number" class="df-floor-rows" value="${escapeValue(floor.gridShape.rows)}" min="1" max="9"></label>
           <label class="admin-checkbox">
             <input type="checkbox" class="df-floor-boss" ${floor.isBoss ? 'checked' : ''}>
             Boss floor
@@ -288,13 +288,13 @@ export class DungeonsTab implements Tab {
             <input type="text" class="df-floor-checkpoints" value="${escapeHtml(checkpoints)}" placeholder="none — e.g. 0.66, 0.33">
           </label>
           <label>Max wipes
-            <input type="number" class="df-floor-max-wipes" value="${floor.maxWipes ?? ''}" min="0" max="${MAX_WIPES_LIMIT}" step="1" placeholder="${DEFAULT_MAX_WIPES} (default)">
+            <input type="number" class="df-floor-max-wipes" value="${escapeValue(floor.maxWipes)}" min="0" max="${MAX_WIPES_LIMIT}" step="1" placeholder="${DEFAULT_MAX_WIPES} (default)">
           </label>
           <label>Checkpoint reward
-            <input type="number" class="df-floor-checkpoint-reward" value="${floor.checkpointRewardFraction ?? ''}" min="0" max="1" step="0.01" placeholder="${DEFAULT_CHECKPOINT_REWARD_FRACTION} (default)">
+            <input type="number" class="df-floor-checkpoint-reward" value="${escapeValue(floor.checkpointRewardFraction)}" min="0" max="1" step="0.01" placeholder="${DEFAULT_CHECKPOINT_REWARD_FRACTION} (default)">
           </label>
         </div>
-        <div class="admin-form-hint">Boss-HP fractions, highest first. Only works when every encounter on this floor is explicit and places a boss- or raid-tier monster. A wipe on this floor regroups the party at its last checkpoint (the boss restarts at that HP) up to Max wipes times; one more ejects the party. Each checkpoint reached pays every member the reward share of the boss's XP and gold, once per run.</div>
+        <div class="admin-form-hint">Boss-HP fractions, highest first. They apply to every fight on this floor that includes a boss- or raid-tier monster, whether an explicit encounter places it or a random pool rolls it. A wipe anywhere on this floor, boss fight or not, regroups the party at its last checkpoint (the boss restarts at that HP) up to Max wipes times; one more ejects the party. Each checkpoint reached pays every member the reward share of the boss's XP and gold, once per run.</div>
       </fieldset>
     `;
   }
@@ -318,12 +318,12 @@ export class DungeonsTab implements Tab {
 
   private encounterRowHtml(prefix: string, index: number, entry: EncounterTableEntry, encounters: EncounterDefinition[]): string {
     const options = `<option value="">—</option>` + encounters.map(e =>
-      `<option value="${e.id}" ${e.id === entry.encounterId ? 'selected' : ''}>${escapeHtml(e.name)}</option>`
+      `<option value="${escapeValue(e.id)}" ${e.id === entry.encounterId ? 'selected' : ''}>${escapeHtml(e.name)}</option>`
     ).join('');
     return `
       <div class="admin-form-row df-enc-row" data-prefix="${prefix}" data-row-index="${index}">
         <select class="df-enc-id">${options}</select>
-        <label>Weight<input type="number" class="df-enc-weight" value="${entry.weight}" min="1"></label>
+        <label>Weight<input type="number" class="df-enc-weight" value="${escapeValue(entry.weight)}" min="1"></label>
         <button class="admin-btn admin-btn-sm admin-btn-danger df-enc-remove" type="button">×</button>
       </div>
     `;
@@ -331,7 +331,7 @@ export class DungeonsTab implements Tab {
 
   private rewardRowHtml(prefix: string, index: number, reward: DungeonReward, items: ItemDefinition[]): string {
     const options = `<option value="">—</option>` + items.map(i =>
-      `<option value="${i.id}" ${i.id === reward.itemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
+      `<option value="${escapeValue(i.id)}" ${i.id === reward.itemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
     ).join('');
     const classChecks = ALL_CLASS_NAMES.map(cn => `
       <label class="admin-checkbox">
@@ -342,9 +342,9 @@ export class DungeonsTab implements Tab {
     return `
       <div class="admin-form-row df-reward-row" data-prefix="${prefix}" data-row-index="${index}">
         <select class="df-reward-item">${options}</select>
-        <label>Chance<input type="number" class="df-reward-chance" value="${reward.chance}" min="0" max="1" step="0.01"></label>
-        <label>Min<input type="number" class="df-reward-min" value="${reward.minQty ?? 1}" min="1"></label>
-        <label>Max<input type="number" class="df-reward-max" value="${reward.maxQty ?? 1}" min="1"></label>
+        <label>Chance<input type="number" class="df-reward-chance" value="${escapeValue(reward.chance)}" min="0" max="1" step="0.01"></label>
+        <label>Min<input type="number" class="df-reward-min" value="${escapeValue(reward.minQty ?? 1)}" min="1"></label>
+        <label>Max<input type="number" class="df-reward-max" value="${escapeValue(reward.maxQty ?? 1)}" min="1"></label>
         <button class="admin-btn admin-btn-sm admin-btn-danger df-reward-remove" type="button">×</button>
         <div class="df-reward-classes"><span class="admin-form-hint">Classes (none = any):</span>${classChecks}</div>
       </div>
@@ -486,7 +486,7 @@ export class DungeonsTab implements Tab {
     });
     if (floorErrors.length > 0) { alert(floorErrors.join('\n')); return; }
     const bossWarnings = this.checkpointEncounterWarnings(floors, ctx);
-    if (bossWarnings.length > 0 && !confirm(`${bossWarnings.join('\n')}\n\nCheckpoints on these floors will do nothing. Save anyway?`)) return;
+    if (bossWarnings.length > 0 && !confirm(`${bossWarnings.join('\n')}\n\nA wipe anywhere on these floors still regroups the party, up to Max wipes times. Save anyway?`)) return;
 
     const reqs: DungeonEntryRequirements = { ...original?.entryRequirements };
     for (const key of ENTRY_REQUIREMENT_KEYS) delete reqs[key];
@@ -589,13 +589,21 @@ export class DungeonsTab implements Tab {
         warnings.push(`${label} has checkpoints but no encounters.`);
         return;
       }
+      const isBoss = (monsterId: string): boolean => isBossMonster(monsters[monsterId]);
       for (const entry of floor.encounterTable) {
         const encounter = encounters[entry.encounterId];
         if (!encounter) continue;
-        const hasBoss = encounter.type === 'explicit'
-          && (encounter.placements ?? []).some(p => isBossTier(monsters[p.monsterId]?.tier));
-        if (!hasBoss) {
-          warnings.push(`${label} has checkpoints, but encounter "${encounter.name}" is not an explicit encounter with a boss- or raid-tier monster.`);
+        if (encounter.type === 'explicit') {
+          if (!(encounter.placements ?? []).some(p => isBoss(p.monsterId))) {
+            warnings.push(`${label}: encounter "${encounter.name}" places no boss- or raid-tier monster, so its fights get no boss checkpoints.`);
+          }
+          continue;
+        }
+        const bosses = (encounter.monsterPool ?? []).filter(p => isBoss(p.monsterId));
+        if (bosses.length === 0) {
+          warnings.push(`${label}: encounter "${encounter.name}" can't roll a boss- or raid-tier monster, so its fights get no boss checkpoints.`);
+        } else if (!bosses.some(p => p.min >= 1)) {
+          warnings.push(`${label}: encounter "${encounter.name}" doesn't always roll its boss; fights without one get no boss checkpoints.`);
         }
       }
     });

@@ -210,6 +210,22 @@ describe('RecapModal', () => {
     modal.destroy();
   });
 
+  it('still takes Escape while a toast sits above the recap', () => {
+    const client = fakeClient();
+    const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW });
+    client.recapListener!(ledger({ battles: 120, wins: 82, losses: 38 }));
+    const overlay = document.querySelector('.recap-overlay') as HTMLElement;
+    const toast = document.createElement('button');
+    toast.className = 'recap-toast mastery-toast';
+    toast.setAttribute('role', 'status');
+    toast.style.zIndex = String(parseInt(overlay.style.zIndex, 10) + 1);
+    document.body.appendChild(toast);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
+    toast.remove();
+    modal.destroy();
+  });
+
   it('shows a toast for a short quiet absence, which expands into the modal', () => {
     const client = fakeClient();
     const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW });

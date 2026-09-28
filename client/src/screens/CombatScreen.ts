@@ -42,6 +42,7 @@ import {
   hasToughTier,
   interruptStampText,
   isBossOrRaid,
+  leaveDungeonWarning,
   masteryLine,
   monsterLevelBadge,
   pipsKey,
@@ -154,6 +155,7 @@ export class CombatScreen implements Screen {
   private snapping = false;
   private syncingShown = false;
   private monsterPopup: { overlay: HTMLElement; key: string; battleId: number | null; lastKey: string } | null = null;
+  private leaveConfirm: HTMLElement | null = null;
   private bossStructureKey = '';
   private bossHpShown = -1;
   private bossTextKey = '';
@@ -219,6 +221,7 @@ export class CombatScreen implements Screen {
     this.stopLoop();
     this.closePopover();
     this.closeForecastPopover();
+    this.closeLeaveConfirm();
     this.fx.clearAll();
   }
 
@@ -314,7 +317,9 @@ export class CombatScreen implements Screen {
         this.showRunHint();
         return;
       }
-      this.gameClient.sendLeaveDungeon();
+      const warning = leaveDungeonWarning(this.lastState?.dungeon, this.fightUnderWay());
+      if (warning) this.confirmLeaveDungeon(warning);
+      else this.gameClient.sendLeaveDungeon();
     });
     this.forecastBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1241,6 +1246,50 @@ export class CombatScreen implements Screen {
     this.runBtn.style.setProperty('--run', progress.toFixed(2));
     this.runLabel.textContent = available ? 'Run' : '🔒 Run';
     this.runHint.textContent = hint;
+  }
+
+  /** The server's mid-attempt rule: an undecided fight that has started. */
+  private fightUnderWay(): boolean {
+    return this.lastState?.battle.visual === 'fighting'
+      && this.playback.battleId !== null
+      && !this.playback.finished
+      && this.playback.elapsedMs > 0;
+  }
+
+  private confirmLeaveDungeon(message: string): void {
+    this.closeLeaveConfirm();
+    const overlay = document.createElement('div');
+    overlay.className = 'item-popup-overlay combat-leave-confirm';
+    overlay.innerHTML = `
+      <div class="item-popup" role="alertdialog" aria-modal="true" aria-labelledby="combat-leave-confirm-title">
+        <div class="item-popup-name" id="combat-leave-confirm-title">Leave the dungeon?</div>
+        <div class="item-popup-stats">${escapeHtml(message)}</div>
+        <div class="item-popup-actions">
+          <button type="button" class="item-popup-btn item-popup-btn-danger combat-leave-confirm-yes">Leave</button>
+          <button type="button" class="item-popup-btn item-popup-btn-secondary combat-leave-confirm-no">Stay</button>
+        </div>
+      </div>
+    `;
+    overlay.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('.combat-leave-confirm-yes')) {
+        this.closeLeaveConfirm();
+        this.gameClient.sendLeaveDungeon();
+      } else if (target === overlay || target.closest('.combat-leave-confirm-no')) {
+        this.closeLeaveConfirm();
+      }
+    });
+    document.body.appendChild(overlay);
+    bringToFront(overlay);
+    wireFocusOnInteract(overlay);
+    this.leaveConfirm = overlay;
+  }
+
+  private closeLeaveConfirm(): void {
+    if (!this.leaveConfirm) return;
+    release(this.leaveConfirm);
+    this.leaveConfirm.remove();
+    this.leaveConfirm = null;
   }
 
   private showRunHint(): void {

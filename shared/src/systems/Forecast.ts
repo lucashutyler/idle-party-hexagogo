@@ -22,6 +22,8 @@ import type {
 } from './ForecastTypes.js';
 
 export const FORECAST_MIN_SIMS = 30;
+/** A room forecast never converges before every table entry has this many sims. */
+export const FORECAST_MIN_SIMS_PER_STRATUM = 3;
 /** Early stop once the Wilson 95 % half-width is at most this many percentage points. */
 export const FORECAST_TARGET_HALF_WIDTH_PCT = 5;
 export const FORECAST_SIM_BUDGET: Record<MonsterTier, number> = { trash: 200, elite: 200, boss: 40, raid: 20 };
@@ -85,6 +87,8 @@ export interface BattleForecastInput {
   kind: 'battle';
   /** A fight in progress; the job clones it up front and never mutates it. */
   state: PartyCombatState;
+  /** False for a fight inside a dungeon. */
+  henchmenAllowed?: boolean;
 }
 
 export type ForecastInput = RoomForecastInput | DungeonForecastInput | BattleForecastInput;
@@ -135,6 +139,8 @@ export interface ForecastReasonInput {
   hasInterrupt?: boolean;
   hasCleanse?: boolean;
   hasHealer?: boolean;
+  /** False for dungeons, which henchmen cannot enter. */
+  henchmenAllowed?: boolean;
 }
 
 interface Budget {
@@ -426,7 +432,9 @@ export function forecastReasons(input: ForecastReasonInput): ForecastReason[] {
   const gap = input.enemyLevel !== undefined ? Math.round(input.enemyLevel - input.partyLevel) : 0;
 
   if (input.bossFight && input.humanPlayers < FORECAST_NEEDS_GROUP_HUMANS && input.winPct < FORECAST_NEEDS_GROUP_WIN_PCT) {
-    add('needs_group', 'bad', 'Bosses are built for groups. Invite friends or hire a henchman.');
+    add('needs_group', 'bad', input.henchmenAllowed === false
+      ? 'Bosses are built for groups. Invite friends.'
+      : 'Bosses are built for groups. Invite friends or hire a henchman.');
   }
   if (input.killEtaMs !== null && typeof input.enrageAtMs === 'number' && input.killEtaMs > input.enrageAtMs) {
     add('enrage', 'bad',
@@ -676,11 +684,16 @@ class RoomSampler implements Sampler {
   }
 
   converged(minSims: number, halfWidthPct: number): boolean {
+    if (this.tallies.some(t => t.n < FORECAST_MIN_SIMS_PER_STRATUM)) return false;
     return converged(this.winRate(), this.outcomes.length, allAgree(this.outcomes), minSims, halfWidthPct);
   }
 
   result(): Omit<ForecastResult, 'key' | 'partyKey'> {
     const stats = summarize(this.outcomes, { winRate: this.winRate() });
+    const unsampled = this.strata.reduce((sum, s, i) => sum + (this.tallies[i].n === 0 ? s.share : 0), 0);
+    if (unsampled > 0 && stats.sims > 0) {
+      stats.ci = [round1(stats.ci[0] * (1 - unsampled)), round1(stats.ci[1] * (1 - unsampled) + unsampled * 100)];
+    }
     const strata: ForecastStratum[] = [];
     this.strata.forEach((s, i) => {
       const t = this.tallies[i];
@@ -705,6 +718,13 @@ class RoomSampler implements Sampler {
   }
 
   private nextStratum(): number {
+    let under = -1;
+    this.strata.forEach((s, i) => {
+      const n = this.tallies[i].n;
+      if (n >= FORECAST_MIN_SIMS_PER_STRATUM) return;
+      if (under < 0 || n < this.tallies[under].n || (n === this.tallies[under].n && s.share > this.strata[under].share)) under = i;
+    });
+    if (under >= 0) return under;
     const total = this.outcomes.length + 1;
     let best = 0;
     let bestDeficit = -Infinity;
@@ -747,7 +767,12 @@ class BattleSampler implements Sampler {
   private readonly enemies: EnemySummary;
   private readonly horizonMs: number;
 
-  constructor(state: PartyCombatState, private readonly rng: () => number, horizonMs: number | undefined) {
+  constructor(
+    state: PartyCombatState,
+    private readonly rng: () => number,
+    horizonMs: number | undefined,
+    private readonly henchmenAllowed: boolean | undefined,
+  ) {
     this.base = cloneCombatState(state);
     this.party = partyProfile(this.base.players);
     const profiles = stateProfiles(this.base);
@@ -769,7 +794,8 @@ class BattleSampler implements Sampler {
 
   result(): Omit<ForecastResult, 'key' | 'partyKey'> {
     const stats = summarize(this.outcomes, { atMs: this.base.elapsedMs });
-    const out: Omit<ForecastResult, 'key' | 'partyKey'> = { ...stats, reasons: reasonsFor(stats, this.party, this.enemies) };
+    const reasons = reasonsFor(stats, this.party, this.enemies, { henchmenAllowed: this.henchmenAllowed });
+    const out: Omit<ForecastResult, 'key' | 'partyKey'> = { ...stats, reasons };
     applyEnemyLevels(out, this.enemies);
     return out;
   }
@@ -793,6 +819,7 @@ interface FloorTally {
   wins: number;
   firstTryWins: number;
   attempts: number[];
+  winMs: number[];
 }
 
 class DungeonSampler implements Sampler {
@@ -814,7 +841,7 @@ class DungeonSampler implements Sampler {
       const thresholds = floorCheckpoints(floor);
       const isStart = i === 0;
       return {
-        number: typeof floor.floorNumber === 'number' ? floor.floorNumber : startIndex + i + 1,
+        number: startIndex + i + 1,
         strata,
         table,
         thresholds,
@@ -824,7 +851,7 @@ class DungeonSampler implements Sampler {
         boss: !!floor.isBoss || thresholds.length > 0 || strata.some(s => s.enemies.some(e => !e.passive && isBossTier(e.tier))),
       };
     });
-    this.tallies = this.plans.map(() => ({ n: 0, wins: 0, firstTryWins: 0, attempts: [] }));
+    this.tallies = this.plans.map(() => ({ n: 0, wins: 0, firstTryWins: 0, attempts: [], winMs: [] }));
     this.party = partyProfile(input.players);
     const allStrata = this.plans.flatMap(p => p.strata);
     this.enemies = summarizeEnemies(allStrata.flatMap(s => s.enemies), commonEnemies(allStrata));
@@ -869,6 +896,7 @@ class DungeonSampler implements Sampler {
       tally.attempts.push(attempts);
       if (last.result === 'victory') {
         tally.wins++;
+        tally.winMs.push(last.elapsedMs);
         if (attempts === 1) tally.firstTryWins++;
       } else if (cleared) {
         cleared = false;
@@ -896,7 +924,11 @@ class DungeonSampler implements Sampler {
     const out: Omit<ForecastResult, 'key' | 'partyKey'> = {
       ...stats,
       floors,
-      reasons: reasonsFor(stats, this.party, this.enemies, { enrageAtMs: this.enrageAtMs ?? this.enemies.enrageAtMs }),
+      reasons: reasonsFor(stats, this.party, this.enemies, {
+        enrageAtMs: this.enrageAtMs ?? this.enemies.enrageAtMs,
+        medianMs: this.longestFloorMedianMs(),
+        henchmenAllowed: false,
+      }),
     };
     applyEnemyLevels(out, this.enemies);
     const checkpointFloors = this.plans.map((p, i) => ({ p, t: this.tallies[i] })).filter(x => x.p.thresholds.length > 0);
@@ -905,6 +937,17 @@ class DungeonSampler implements Sampler {
       out.firstTryPct = round1(firstTry * 100);
     }
     return out;
+  }
+
+  /** Median winning fight on the slowest floor; null until some floor has 3 wins. */
+  private longestFloorMedianMs(): number | null {
+    let longest: number | null = null;
+    for (const t of this.tallies) {
+      if (t.winMs.length < 3) continue;
+      const median = quantile([...t.winMs].sort((a, b) => a - b), 0.5);
+      longest = Math.max(longest ?? 0, Math.round(median));
+    }
+    return longest;
   }
 
   private winRate(): number {
@@ -995,7 +1038,7 @@ export function createForecastJob(input: ForecastInput, opts: ForecastJobOptions
       if (!input.dungeon.floors?.length) return new Job(sampler, opts.key, key, { ...opts, maxSims: 0 });
       break;
     case 'battle':
-      sampler = new BattleSampler(input.state, rng, opts.horizonMs);
+      sampler = new BattleSampler(input.state, rng, opts.horizonMs, input.henchmenAllowed);
       key = opts.partyKey ?? partyKey(input.state.players);
       break;
   }

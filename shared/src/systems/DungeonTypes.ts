@@ -1,5 +1,8 @@
 import type { EncounterTableEntry } from './ZoneTypes.js';
 import type { ClassName } from './CharacterStats.js';
+import type { EncounterDefinition } from './EncounterTypes.js';
+import type { MonsterDefinition } from './MonsterTypes.js';
+import { isBossTier } from './CombatScaling.js';
 
 // --- Types ---
 
@@ -294,4 +297,28 @@ export function checkpointPhaseKey(floorIndex: number, phase: number): string {
 
 export function isDungeonCheckpointFresh(checkpoint: DungeonCheckpoint, now: number): boolean {
   return Number.isFinite(checkpoint.at) && now - checkpoint.at < DUNGEON_CHECKPOINT_TTL_MS;
+}
+
+/** A non-passive boss- or raid-tier monster: what the engine tracks for boss phases. */
+export function isBossMonster(def: MonsterDefinition | undefined): boolean {
+  return !!def && !def.passive && isBossTier(def.tier);
+}
+
+export function encounterCanFieldBoss(
+  encounter: EncounterDefinition | undefined,
+  getMonster: (id: string) => MonsterDefinition | undefined,
+): boolean {
+  if (!encounter) return false;
+  const entries = encounter.type === 'explicit' ? encounter.placements : encounter.monsterPool;
+  return (entries ?? []).some(({ monsterId }) => isBossMonster(getMonster(monsterId)));
+}
+
+/** Whether any encounter on the floor's table can field a boss: what a checkpoint needs to be reached or resumed. */
+export function floorCanFieldBoss(
+  floor: DungeonFloor,
+  getEncounter: (id: string) => EncounterDefinition | undefined,
+  getMonster: (id: string) => MonsterDefinition | undefined,
+): boolean {
+  const table = Array.isArray(floor.encounterTable) ? floor.encounterTable : [];
+  return table.some(entry => encounterCanFieldBoss(getEncounter(entry.encounterId), getMonster));
 }

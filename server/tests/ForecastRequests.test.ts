@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { DungeonDefinition, DungeonForecastInput, ServerForecastMessage, PartyCombatState, CombatEvent } from '@idle-party-rpg/shared';
+import { DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import type { DungeonDefinition, DungeonForecastInput, HenchmanDefinition, HiredHenchman, ServerForecastMessage, PartyCombatState, CombatEvent } from '@idle-party-rpg/shared';
 import { FORECAST_REQUESTS_PER_WINDOW } from '../src/game/ForecastService.js';
 import { LIVE_FORECAST_DEBOUNCE_MS } from '../src/game/PartyBattleManager.js';
 import type { CombatFlush } from '../src/game/ServerBattleTimer.js';
@@ -118,6 +119,40 @@ describe('request_forecast', () => {
     expect(ask('bob').endsWith('|dungeon:pit:0:2:1')).toBe(true);
   });
 
+  it('forecasts a dungeon without hired henchmen, since they cannot go in', async () => {
+    const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
+    w.pm.partyBattles.setForecaster(w.svc);
+    const sellsword: HenchmanDefinition = {
+      id: 'sellsword', name: 'Grim', className: 'Knight', level: 3, maxHp: 80, baseDamage: 6, skillIds: [], emoji: 'x',
+    };
+    (w.content as unknown as { getHenchman: (id: string) => HenchmanDefinition | undefined }).getHenchman = id => (id === sellsword.id ? sellsword : undefined);
+    const hired: HiredHenchman = { instanceId: 'h1', henchmanId: sellsword.id, gridPosition: 1, mapId: DEFAULT_MAP_ID };
+    w.pm.partyBattles.setHenchmenCallbacks(() => [hired], () => []);
+    expect(w.pm.partyBattles.buildPartyCombatants(w.partyId).some(p => p.isHenchman)).toBe(true);
+
+    const { sent, reply } = replies();
+    w.pm.handleForecastRequest('alice', { kind: 'dungeon', dungeonId: 'pit' }, reply);
+    const input = w.stub.jobs.find(j => j.key === sent[0].key)!.input as DungeonForecastInput;
+    expect(input.players.map(p => p.username)).toEqual(['alice']);
+    expect(input.players.some(p => p.isHenchman)).toBe(false);
+  });
+
+  it("drops a player's older request when they ask for something else", async () => {
+    const w = await forecastWorld();
+    w.pm.partyBattles.setForecaster(w.svc);
+    const a = { kind: 'room' as const, tileId: tileId(START.col, START.row) };
+    const b = { kind: 'room' as const, tileId: tileId(2, 1) };
+    const first = replies();
+    const second = replies();
+    w.pm.handleForecastRequest('alice', a, first.reply);
+    w.pm.handleForecastRequest('alice', b, second.reply);
+    expect(first.sent.map(m => m.status)).toEqual(['pending', 'unavailable']);
+    expect(w.svc.queued).toBe(1);
+    vi.advanceTimersByTime(50);
+    expect(second.sent.map(m => m.status)).toEqual(['pending', 'ok']);
+    expect(w.svc.get(w.roomKey(a.tileId))).toBeNull();
+  });
+
   it('allows 20 requests a minute per player, then answers unavailable', async () => {
     const w = await forecastWorld();
     w.pm.partyBattles.setForecaster(w.svc);
@@ -169,6 +204,7 @@ describe('live battle forecasts', () => {
     expect(live.every(m => m.target.battleId === battleId)).toBe(true);
     expect(live[1].key).toBe(`battle:${battleId}:0`);
     expect(w.svc.get(live[1].key)).toBeNull();
+    expect(w.stub.jobs.find(j => j.key === live[1].key)?.input).toMatchObject({ kind: 'battle', henchmenAllowed: true });
   });
 
   it('sends live forecasts only to sockets showing the battle', async () => {
@@ -216,6 +252,32 @@ describe('live battle forecasts', () => {
     vi.advanceTimersByTime(30);
     const mine = forecastMessages(w.ws).filter(m => m.target.battleId === battleId);
     expect(mine.map(m => m.status)).toEqual(['pending']);
+  });
+
+  it('withdraws a live forecast once its fight ends, a calmer fight starts or the party is gone', async () => {
+    const w = await forecastWorld({ defaultEncounter: 'frail_brutes' });
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.pm.handleSetCombatPrefs('alice', 0);
+    w.stub.gated.add('battle:');
+    w.entry().battleTimer.restartBattle();
+    const battleId = w.entry().battleTimer.battleId;
+    expect(w.svc.queued).toBe(1);
+    for (let i = 0; i < 100 && w.entry().battleTimer.isFighting(battleId); i++) vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(1000);
+    expect(w.svc.queued).toBe(0);
+
+    for (const t of w.tiles) t.encounterTable = [{ encounterId: 'brutes', weight: 1 }];
+    w.entry().battleTimer.restartBattle();
+    expect(w.svc.queued).toBe(1);
+    for (const t of w.tiles) t.encounterTable = [{ encounterId: 'ogres', weight: 1 }];
+    w.entry().battleTimer.restartBattle();
+    expect(w.svc.queued).toBe(0);
+
+    for (const t of w.tiles) t.encounterTable = [{ encounterId: 'brutes', weight: 1 }];
+    w.entry().battleTimer.restartBattle();
+    expect(w.svc.queued).toBe(1);
+    w.pm.partyBattles.destroyEntry(w.partyId);
+    expect(w.svc.queued).toBe(0);
   });
 
   it('a newer fight replaces the older one\'s queued forecast', async () => {
@@ -341,6 +403,7 @@ describe('live forecasts for viewers who arrive mid-fight', () => {
     expect(w.entry().battleTimer.currentCombat?.bossPhases?.phase).toBe(1);
     vi.advanceTimersByTime(50);
     expect(forecastMessages(w.ws).filter(m => m.target.battleId === battleId).map(m => m.status)).toEqual(['pending', 'ok']);
+    expect(w.stub.jobs.find(j => j.key.startsWith(`battle:${battleId}:`))?.input).toMatchObject({ kind: 'battle', henchmenAllowed: false });
   });
 
   it('forecasts a resumed boss fight entered from the map once the player opens the battle', async () => {

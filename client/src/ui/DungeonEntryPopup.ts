@@ -119,6 +119,10 @@ export class DungeonEntryPopup {
 
   private toView(message: ServerForecastMessage, forceStale = false): ForecastView {
     if (message.status === 'pending') return 'loading';
+    if (message.status === 'unavailable') {
+      const previous = this.gameClient.peekForecast(message.target);
+      return previous ? this.toView(previous, true) : null;
+    }
     if (message.status !== 'ok' || !message.result) return null;
     const forecastKey = this.gameClient.lastState?.social?.party?.forecastKey;
     return { message, stale: forceStale || isForecastStale(message.result, forecastKey) };

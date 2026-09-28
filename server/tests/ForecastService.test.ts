@@ -396,3 +396,99 @@ describe('ForecastService with the real engine', () => {
     expect(done).toHaveBeenCalledWith(expected);
   });
 });
+
+/** Jobs of `steps` combat steps at `msPerStep` each, honouring the chunk size they are handed. */
+function steppedJobs(clock: ManualClock, spec: (key: string) => { steps: number; msPerStep: number }) {
+  const chunks: { key: string; steps: number }[] = [];
+  const createJob = (_input: ForecastInput, jobOpts: ForecastJobOptions): ForecastJob => {
+    const { steps, msPerStep } = spec(jobOpts.key);
+    let used = 0;
+    return {
+      get done() { return used >= steps; },
+      get sims() { return used >= steps ? 1 : 0; },
+      maxSims: 1,
+      runSims: () => 0,
+      advance: (max: number) => {
+        const n = Math.min(max, steps - used);
+        used += n;
+        clock.t += n * msPerStep;
+        chunks.push({ key: jobOpts.key, steps: n });
+        return n;
+      },
+      result: () => fakeResult(jobOpts.key),
+    };
+  };
+  return { chunks, createJob };
+}
+
+describe('ForecastService chunk sizing', () => {
+  it('sizes chunks by cost per step, so cheap jobs finishing early do not blow up the next heavy one', () => {
+    const clock = new ManualClock();
+    const jobs = steppedJobs(clock, key => (key === 'raid' ? { steps: 200_000, msPerStep: 0.006 } : { steps: 3, msPerStep: 0.0001 }));
+    const svc = new ForecastService({ clock, createJob: jobs.createJob });
+    for (let i = 0; i < 20; i++) svc.request(req(`room-${i}`, 'explicit'));
+    svc.request(req('raid', 'explicit'));
+    clock.advance(60_000);
+
+    expect(svc.stats().jobsDone).toBe(21);
+    expect(Math.max(...jobs.chunks.filter(c => c.key === 'raid').map(c => c.steps))).toBeLessThanOrEqual(512);
+    expect(svc.stats().longestSliceMs).toBeLessThan(5 + 5 / 8 + 0.5);
+  });
+});
+
+describe('ForecastService dropping superseded and cancelled work', () => {
+  const drop = (group: string) => ({ supersede: { group, previous: 'drop' as const } });
+
+  it("drops a player's older explicit job when they ask for something else", () => {
+    const clock = new ManualClock();
+    const jobs = fakeJobs(clock, { costMs: 5 });
+    const svc = service(clock, jobs);
+    const first = vi.fn();
+    svc.request(req('room-a', 'explicit', { ...drop('explicit:alice'), onDone: first }));
+    svc.request(req('room-b', 'explicit', { ...drop('explicit:alice') }));
+    expect(first).toHaveBeenCalledWith(null);
+    expect(svc.queued).toBe(1);
+    clock.advance(1000);
+    expect(jobs.order).toEqual(['room-b']);
+  });
+
+  it('keeps the older job running for anyone else still waiting on it', () => {
+    const clock = new ManualClock();
+    const jobs = fakeJobs(clock, { costMs: 5 });
+    const svc = service(clock, jobs);
+    const alice = vi.fn();
+    const bob = vi.fn();
+    const precheck = vi.fn();
+    svc.request(req('shared', 'explicit', { ...drop('explicit:alice'), onDone: alice }));
+    svc.request(req('shared', 'explicit', { ...drop('explicit:bob'), onDone: bob }));
+    svc.request(req('pre', 'precheck', { onDone: precheck }));
+    svc.request(req('pre', 'explicit', { ...drop('explicit:carol') }));
+    svc.request(req('neighbour', 'precheck'));
+    svc.request(req('neighbour', 'explicit', { ...drop('explicit:dave') }));
+    svc.request(req('room-b', 'explicit', { ...drop('explicit:alice') }));
+    svc.request(req('room-c', 'explicit', { ...drop('explicit:carol') }));
+    svc.request(req('room-d', 'explicit', { ...drop('explicit:dave') }));
+
+    expect(alice).toHaveBeenCalledWith(null);
+    clock.advance(1000);
+    expect(bob).toHaveBeenCalledWith(expect.objectContaining({ key: 'shared' }));
+    expect(precheck).toHaveBeenCalledWith(expect.objectContaining({ key: 'pre' }));
+    expect(jobs.order).toEqual(['shared', 'room-b', 'room-c', 'room-d', 'pre', 'neighbour']);
+    expect(svc.get('neighbour')).not.toBeNull();
+  });
+
+  it('cancels a live job by its group', () => {
+    const clock = new ManualClock();
+    const jobs = fakeJobs(clock, { advancesNeeded: () => 100 });
+    const svc = service(clock, jobs);
+    const live = vi.fn();
+    svc.request(req(liveForecastKey(7, 0), 'live', { cache: false, ...drop('live:p'), onDone: live }));
+    svc.request(req('room', 'explicit'));
+    svc.cancelGroup('live:p');
+    svc.cancelGroup('live:nobody');
+    expect(live).toHaveBeenCalledWith(null);
+    expect(svc.queued).toBe(1);
+    clock.advance(10_000);
+    expect(jobs.order.every(k => k === 'room')).toBe(true);
+  });
+});

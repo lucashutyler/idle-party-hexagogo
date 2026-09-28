@@ -93,4 +93,13 @@ describe('masteryRanks', () => {
     const tiers: Record<string, 'trash' | 'boss'> = { chief: 'boss' };
     expect(masteryRanks({ goblin: 55, wolf: 3, chief: 3 }, id => tiers[id])).toEqual({ goblin: 2, chief: 2 });
   });
+
+  it('keeps monster ids that are built-in object keys as plain keys', () => {
+    const kills = JSON.parse('{"__proto__": 55, "constructor": 10}') as Record<string, number>;
+    const ranks = masteryRanks(kills, () => 'trash');
+    expect(Object.entries(ranks).sort()).toEqual([['__proto__', 2], ['constructor', 1]]);
+    expect(ranks['__proto__']).toBe(2);
+    expect(ranks.toString).toBeUndefined();
+    expect(Object.getPrototypeOf(ranks)).toBeNull();
+  });
 });

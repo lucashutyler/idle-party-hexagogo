@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PlayerManager } from '../src/game/PlayerManager.js';
+import { PlayerManager, PRESENCE_GRACE_MS } from '../src/game/PlayerManager.js';
 import { PlayerSession } from '../src/game/PlayerSession.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
@@ -16,6 +16,7 @@ import {
   createMonsterInstance,
   createPartyCombatState,
   xpForNextLevel,
+  recordAwayBattle,
 } from '@idle-party-rpg/shared';
 import type { MonsterDefinition, PartyCombatState, PartyGridPosition, ServerStateMessage, WorldTileDefinition } from '@idle-party-rpg/shared';
 import WebSocket from 'ws';
@@ -249,10 +250,11 @@ describe('While you were away', () => {
     expect(session.getPendingRecap()).toBeNull();
   });
 
-  it('counts sockets without presence as visible and begins when the last socket closes', async () => {
+  it('counts sockets without presence as visible after a grace and begins when the last socket closes', async () => {
     const { pm, ws, session } = await setup();
     const second = createFakeWs();
     await pm.login(second, 'alice');
+    vi.advanceTimersByTime(PRESENCE_GRACE_MS);
     pm.setPresence(ws, false);
     expect(session.isAway()).toBe(false);
 
@@ -262,7 +264,32 @@ describe('While you were away', () => {
     expect(session.isAway()).toBe(true);
 
     await pm.login(createFakeWs(), 'alice');
+    expect(session.isAway()).toBe(true);
+    vi.advanceTimersByTime(PRESENCE_GRACE_MS);
     expect(session.isAway()).toBe(false);
+  });
+
+  it('keeps the absence going when a hidden tab reconnects, until the page says it is shown', async () => {
+    const { pm, ws, session, win } = await setup();
+    pm.setPresence(ws, false);
+    win(['goblin']);
+    pm.removeConnection(ws);
+    vi.setSystemTime(Date.now() + 20 * 60_000);
+
+    const hidden = createFakeWs();
+    await pm.login(hidden, 'alice');
+    expect(session.getPendingRecap()).toBeNull();
+    expect(session.isAway()).toBe(true);
+    pm.setPresence(hidden, false);
+    vi.advanceTimersByTime(PRESENCE_GRACE_MS);
+    expect(session.getPendingRecap()).toBeNull();
+    const battles = session.getAwayLedger()!.battles;
+    expect(battles).toBeGreaterThanOrEqual(1);
+
+    hidden.send.mockClear();
+    pm.setPresence(hidden, true);
+    expect(session.getPendingRecap()).toMatchObject({ battles });
+    expect(lastState(hidden)?.awayRecap).toMatchObject({ battles });
   });
 
   it('folds a later absence into an unacknowledged recap under a new id', async () => {
@@ -372,6 +399,58 @@ describe('Persistence of the new player state', () => {
     expect(restored.getPendingRecap()).toBeNull();
   });
 
+  it('rebuilds a partial or malformed saved ledger with safe defaults', async () => {
+    const { session, grids, content } = await setup();
+    const saved = session.toSaveData();
+    const restored = PlayerSession.fromSaveData({
+      ...saved,
+      awayLedger: { id: 'x', since: 1 } as never,
+      pendingRecap: {
+        id: 'y', since: 1, battles: 'many', wins: -2, xp: Number.NaN, items: { rare: 2, bogus: 5, epic: 'x' },
+        notableItems: [{ itemId: 'blade', count: 1, rarity: 'rare' }, { itemId: 7 }, null],
+        masteryUps: 'nope', dungeons: [{ dungeonId: 'd', name: 'D', outcome: 'exploded', wipes: 1 }],
+        retreatLog: [{ at: 5, kind: 'skip', from: 'Here', winPct: 250 }], moments: [{ at: 1, kind: 'party', text: 'x' }],
+        routeStopped: { at: 'soon' }, closestCall: { hpPct: 3, vs: 'Ogre', where: 'Den' },
+      } as never,
+    }, grids, content);
+
+    const ledger = restored.getAwayLedger()!;
+    expect(ledger).toMatchObject({ id: 'x', since: 1, battles: 0, levelFrom: 1, levelTo: 1, items: {}, masteryUps: [], moments: [] });
+    expect(() => restored.recordKills([{ id: 'chief', name: 'Chief', tier: 'boss' }])).not.toThrow();
+    restored.recordAway(l => recordAwayBattle(l, { won: true, xp: 3, kills: 1 }));
+    expect(restored.getAwayLedger()).toMatchObject({ battles: 1, wins: 1, xp: 3, kills: 1 });
+    expect(restored.getAwayLedger()!.masteryUps.map(m => m.monsterId)).toEqual(['chief']);
+
+    expect(restored.getPendingRecap()).toEqual({
+      id: 'y', since: 1, battles: 0, wins: 0, losses: 0, retreats: 0, skips: 0, xp: 0, gold: 0,
+      levelFrom: 1, levelTo: 1, xpFracFrom: 0, xpFracTo: 0, items: { rare: 2 },
+      notableItems: [{ itemId: 'blade', count: 1, rarity: 'rare' }], itemsLost: 0, kills: 0, masteryUps: [], dungeons: [],
+      retreatLog: [{ at: 5, kind: 'skip', from: 'Here', winPct: 100 }], moments: [],
+      closestCall: { hpPct: 3, vs: 'Ogre', where: 'Den' },
+    });
+  });
+
+  it('counts kills of monsters whose ids are built-in object keys', async () => {
+    const { session, grids, content } = await setup();
+    session.recordKills([{ id: 'constructor', name: 'Odd', tier: 'trash' }, { id: '__proto__', name: 'Odder', tier: 'trash' }]);
+    session.recordKills([{ id: 'constructor', name: 'Odd', tier: 'trash' }]);
+    expect(Object.entries(session.getMonsterKills()).sort()).toEqual([['__proto__', 1], ['constructor', 2]]);
+    expect(session.getMasterySummary().version).toBe(3);
+
+    const restored = PlayerSession.fromSaveData(JSON.parse(JSON.stringify(session.toSaveData())), grids, content);
+    expect(Object.entries(restored.getMonsterKills()).sort()).toEqual([['__proto__', 1], ['constructor', 2]]);
+    restored.recordKills([{ id: 'toString', name: 'Odd', tier: 'trash' }]);
+    expect(restored.getMonsterKills().toString).toBe(1);
+  });
+
+  it('gives the mastery bonus against monsters whose ids are built-in object keys', async () => {
+    const { session } = await setup();
+    for (let i = 0; i < 10; i++) session.recordKills([{ id: '__proto__', name: 'Odder', tier: 'trash' }]);
+    const mastery = session.getCombatInfo().mastery!;
+    expect(Object.entries(mastery)).toEqual([['__proto__', 1]]);
+    expect(mastery.constructor).toBeUndefined();
+  });
+
   it('defaults auto-retreat to 25 % and sends the owner\'s change in state', async () => {
     const { pm, ws, session } = await setup();
     expect(session.getCombatPrefs()).toEqual({ autoRetreatBelowPct: 25 });
@@ -400,5 +479,24 @@ describe('Persistence of the new player state', () => {
     expect(session.getPendingRecap()).toBeNull();
     expect(session.getAwayLedger()?.battles ?? 0).toBe(0);
     expect(session.getCombatPrefs()).toEqual({ autoRetreatBelowPct: 0 });
+  });
+
+  it('master reset reopens the ledger of a player who is offline', async () => {
+    const { pm, ws, session } = await setup();
+    pm.removeConnection(ws);
+    expect(session.isAway()).toBe(true);
+
+    pm.masterReset();
+
+    expect(session.isAway()).toBe(true);
+    expect(session.getAwayLedger()!.battles).toBe(0);
+  });
+
+  it('opens a ledger at boot for a restored character with none saved', async () => {
+    const { session, grids, content } = await setup();
+    const saved = { ...session.toSaveData(), awayLedger: null, pendingRecap: null };
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    pm.restoreFromSaveData([saved]);
+    expect(pm.getSessionByUsername('alice')!.isAway()).toBe(true);
   });
 });

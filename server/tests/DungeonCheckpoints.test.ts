@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PlayerManager } from '../src/game/PlayerManager.js';
+import { PlayerSession } from '../src/game/PlayerSession.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
@@ -23,11 +24,13 @@ const ENTRANCE_TILE_ID = 'tile-start';
 const MONSTERS: Record<string, MonsterDefinition> = {
   chief: { id: 'chief', name: 'Chief', hp: 30, damage: 1, damageType: 'physical', xp: 100, goldMin: 40, goldMax: 60, tier: 'boss' },
   goblin: { id: 'goblin', name: 'Goblin', hp: 10, damage: 1, damageType: 'physical', xp: 5, goldMin: 0, goldMax: 0 },
+  idol: { id: 'idol', name: 'Idol', hp: 10, damage: 0, damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0, tier: 'boss', passive: true },
 };
 
 const ENCOUNTERS: Record<string, EncounterDefinition> = {
   court: { id: 'court', name: 'Court', type: 'explicit', placements: [{ monsterId: 'chief', gridPosition: 4 }] },
   goblins: { id: 'goblins', name: 'Goblins', type: 'random', monsterPool: [{ monsterId: 'goblin', min: 1, max: 1 }], roomMax: 9 },
+  shrine: { id: 'shrine', name: 'Shrine', type: 'explicit', placements: [{ monsterId: 'idol', gridPosition: 4 }, { monsterId: 'goblin', gridPosition: 1 }] },
 };
 
 function makeDungeon(over: Partial<DungeonDefinition> = {}): DungeonDefinition {
@@ -248,7 +251,7 @@ describe('Dungeon boss checkpoints', () => {
     session.setDungeonCheckpoint(DUNGEON_ID, { floorIndex: 0, phase: 2, wipes: 1, rewardedPhases: [], at: Date.now() - DUNGEON_CHECKPOINT_TTL_MS - 1 });
     pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
     expect(pm.partyBattles.getDungeonRunInfo(partyId)).toMatchObject({ floor: 1, checkpointPhase: 0, wipes: 0 });
-    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toBeUndefined();
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 0, wipes: 0 });
     pm.partyBattles.leaveDungeon(partyId);
 
     holder.current = makeDungeon();
@@ -256,7 +259,13 @@ describe('Dungeon boss checkpoints', () => {
     session.setDungeonCheckpoint(DUNGEON_ID, { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
     pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
     expect(pm.partyBattles.getDungeonRunInfo(partyId)).toMatchObject({ checkpointPhase: 0 });
-    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toBeUndefined();
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 0 });
+    pm.partyBattles.leaveDungeon(partyId);
+
+    holder.current.floors[0].encounterTable = [{ encounterId: 'shrine', weight: 1 }];
+    session.setDungeonCheckpoint(DUNGEON_ID, { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
+    pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
+    expect(pm.partyBattles.getDungeonRunInfo(partyId)).toMatchObject({ checkpointPhase: 0 });
   });
 
   it('only resumes from the checkpoint of the player who enters', async () => {
@@ -304,6 +313,25 @@ describe('Dungeon boss checkpoints', () => {
     expect(pm.partyBattles.getDungeonRunInfo(partyId)).toBeNull();
   });
 
+  it('stores checkpoints for dungeons whose ids are built-in object keys', async () => {
+    const { session, grid, holder } = await setup();
+    const at = Date.now();
+    expect(session.getDungeonCheckpoint('constructor')).toBeUndefined();
+    session.setDungeonCheckpoint('__proto__', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at });
+    session.setDungeonCheckpoint('constructor', { floorIndex: 1, phase: 0, wipes: 2, rewardedPhases: [], at });
+    expect(session.getDungeonCheckpoint('__proto__')).toMatchObject({ phase: 1 });
+    expect(Object.keys(session.getDungeonCheckpoints()).sort()).toEqual(['__proto__', 'constructor']);
+
+    const saved = JSON.parse(JSON.stringify(session.toSaveData())) as { dungeonCheckpoints: Record<string, unknown> };
+    expect(Object.keys(saved.dungeonCheckpoints).sort()).toEqual(['__proto__', 'constructor']);
+    const restored = PlayerSession.fromSaveData(saved as never, wrapGrids(grid), createFakeContentStore(holder));
+    expect(restored.getDungeonCheckpoint('__proto__')).toMatchObject({ floorIndex: 0, phase: 1 });
+    expect(restored.getDungeonCheckpoint('constructor')).toMatchObject({ floorIndex: 1, wipes: 2 });
+    expect(restored.getDungeonCheckpoint('toString')).toBeUndefined();
+    restored.clearDungeonCheckpoint('__proto__');
+    expect(Object.keys(restored.getDungeonCheckpoints())).toEqual(['constructor']);
+  });
+
   it('round-trips checkpoint progress through the saved run', async () => {
     const { pm, pbm, partyId, entry, reachPhase } = await setup();
     pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
@@ -325,5 +353,51 @@ describe('Dungeon boss checkpoints', () => {
     expect(session.getDungeonCheckpoint(DUNGEON_ID)).toBeUndefined();
     expect(pm.partyBattles.getDungeonRunInfo(partyId)).toMatchObject({ floor: 2 });
     expect(pm.partyBattles.getDungeonRunInfo(partyId)!.checkpointPhase).toBeUndefined();
+  });
+  it('counts walking out of an undecided boss attempt as a wipe, and loses the checkpoint past the budget', async () => {
+    const { pm, partyId, session, log, reachPhase } = await setup();
+    const leaveMidFight = () => {
+      expect(pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice').success).toBe(true);
+      vi.advanceTimersByTime(100);
+      pm.partyBattles.leaveDungeon(partyId);
+    };
+    pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
+    reachPhase(1);
+    vi.advanceTimersByTime(100);
+    pm.partyBattles.leaveDungeon(partyId);
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 1, wipes: 1 });
+    expect(log()).toContain('Leaving mid-fight counts as a wipe.');
+
+    leaveMidFight();
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 1, wipes: 2 });
+    leaveMidFight();
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toBeUndefined();
+    expect(log()).toContain('The boss recovers — your checkpoint is lost.');
+    expect(pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice').success).toBe(true);
+    expect(pm.partyBattles.getDungeonRunInfo(partyId)).toMatchObject({ checkpointPhase: 0, wipes: 0 });
+  });
+
+  it('keeps every member\'s stored checkpoint in step with the live run', async () => {
+    const { pm, pbm, partyId, session, entry, reachPhase } = await setup();
+    pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
+    reachPhase(1);
+    pm.partyBattles.leaveDungeon(partyId);
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 1, wipes: 0, rewardedPhases: ['0:1'] });
+
+    pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
+    reachPhase(2);
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 2, wipes: 0, rewardedPhases: ['0:1', '0:2'] });
+    pbm.handleDungeonDefeat(entry());
+    pbm.handleDungeonDefeat(entry());
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 2, wipes: 2, rewardedPhases: ['0:1', '0:2'] });
+  });
+
+  it('stores the run for a member who drops out of the party, charging a wipe mid-attempt', async () => {
+    const { pm, partyId, session, reachPhase } = await setup();
+    pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
+    reachPhase(1);
+    vi.advanceTimersByTime(100);
+    pm.partyBattles.destroyEntry(partyId);
+    expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 1, wipes: 1, rewardedPhases: ['0:1'] });
   });
 });

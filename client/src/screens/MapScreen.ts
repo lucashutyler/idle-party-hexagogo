@@ -84,6 +84,10 @@ export class MapScreen implements Screen {
 
   private toRoomForecastState(msg: ServerForecastMessage, forceStale: boolean): RoomForecastState {
     if (msg.status === 'pending') return 'loading';
+    if (msg.status === 'unavailable') {
+      const previous = this.gameClient.peekForecast(msg.target);
+      return previous ? this.toRoomForecastState(previous, true) : null;
+    }
     if (msg.status !== 'ok' || !msg.result) return null;
     const state = this.gameClient.lastState;
     const party = state?.social?.party;

@@ -26,13 +26,7 @@ import { renderItemPopupContent } from '../ui/ItemPopup';
 import { renderAssetImg } from '../ui/assets';
 import { bringToFront, release } from '../ui/ModalStack';
 import { renderSkillCardMeta } from '../ui/SkillCardChip';
-import {
-  BestiaryModal,
-  bestiarySummaryText,
-  closestToNextRank,
-  mergeBestiaryEntries,
-  renderBestiaryRow,
-} from '../ui/BestiaryModal';
+import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
 
 /** Left column slots (top to bottom). Mainhand sits at the bottom of the
  *  left column with a small visual gap (no separate row anymore). */
@@ -81,7 +75,7 @@ export class CharItemsScreen implements Screen {
   private xpRateEl!: HTMLElement;
   private xpRateFromEl!: HTMLElement;
   private classPassiveEl!: HTMLElement;
-  private bestiaryEl!: HTMLElement;
+  private bestiaryCard!: BestiaryCard;
   private bestiaryModal: BestiaryModal;
 
   // Inventory refs
@@ -116,7 +110,6 @@ export class CharItemsScreen implements Screen {
   private lastTradesKey = '';
   private lastHeroKey = '';
   private lastStatKey = '';
-  private lastBestiaryKey = '';
 
   /** Search/sort filter state. */
   private searchFilter = '';
@@ -245,8 +238,9 @@ export class CharItemsScreen implements Screen {
     this.xpRateEl = this.container.querySelector('.charitems-xp-rate-value')!;
     this.xpRateFromEl = this.container.querySelector('.charitems-xp-rate-from')!;
     this.classPassiveEl = this.container.querySelector('.charitems-passive-info')!;
-    this.bestiaryEl = this.container.querySelector('.charitems-bestiary')!;
-    this.bestiaryEl.addEventListener('click', (e) => {
+    const bestiaryEl = this.container.querySelector<HTMLElement>('.charitems-bestiary')!;
+    this.bestiaryCard = new BestiaryCard(bestiaryEl);
+    bestiaryEl.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('.bestiary-view-all')) this.bestiaryModal.open();
     });
 
@@ -418,14 +412,7 @@ export class CharItemsScreen implements Screen {
     // XP rate — every tick (cheap)
     this.renderXpRate(char.xpRate);
 
-    const mastery = char.mastery;
-    const bestiaryKey = mastery
-      ? `${mastery.version}|${mastery.discovered}|${mastery.mastered}|${char.level}|${this.gameClient.lastBestiary?.version ?? ''}`
-      : '';
-    if (bestiaryKey !== this.lastBestiaryKey) {
-      this.lastBestiaryKey = bestiaryKey;
-      this.renderBestiaryCard(state);
-    }
+    this.bestiaryCard.update(char.mastery, this.gameClient.lastBestiary?.entries ?? [], char.level);
 
     // Mailbox & trades — re-render on change
     const mailboxKey = JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false]));
@@ -869,30 +856,6 @@ export class CharItemsScreen implements Screen {
     }
     if (key === 'material') return 'Materials';
     return SLOT_LABELS[key] ?? (key.charAt(0).toUpperCase() + key.slice(1));
-  }
-
-  // ── Bestiary ───────────────────────────────────────────────
-
-  private renderBestiaryCard(state: ServerStateMessage): void {
-    const mastery = state.character?.mastery;
-    if (!mastery) {
-      this.bestiaryEl.innerHTML = '';
-      return;
-    }
-    const label = `<div class="items-section-label">Bestiary <span class="items-section-count">(${mastery.discovered})</span></div>`;
-    if (mastery.discovered === 0) {
-      this.bestiaryEl.innerHTML = `${label}<div class="bestiary-card"><div class="bestiary-card-empty">`
-        + 'Defeat monsters to fill your bestiary. Each rank makes you a little stronger against them.</div></div>';
-      return;
-    }
-    const entries = mergeBestiaryEntries(this.gameClient.lastBestiary?.entries ?? [], mastery.recent);
-    const rows = closestToNextRank(entries, 3)
-      .map(e => renderBestiaryRow(e, state.character?.level, { compact: true })).join('');
-    this.bestiaryEl.innerHTML = `${label}<div class="bestiary-card">`
-      + `<div class="bestiary-card-summary">${bestiarySummaryText(mastery)}</div>`
-      + (rows ? `<div class="bestiary-card-rows" role="list" aria-label="Closest to the next rank">${rows}</div>` : '')
-      + '<button type="button" class="pixel-btn bestiary-view-all">View all ›</button>'
-      + '</div>';
   }
 
   // ── Mailbox / trades ───────────────────────────────────────

@@ -194,6 +194,52 @@ describe('GameClient forecasts', () => {
     expect(socket.ofType('request_forecast')).toHaveLength(1);
   });
 
+  it('keeps the last good reply to peek at when the server cannot compute a new one', () => {
+    const socket = connect();
+    socket.receive(state());
+    client!.requestForecast({ kind: 'room', tileId: 't1' });
+    socket.receive(forecastMsg());
+    socket.receive(state({ social: { party: { id: 'p', members: [], forecastKey: 'pk2' } } }));
+    client!.requestForecast({ kind: 'room', tileId: 't1' });
+    socket.receive(forecastMsg('pk2', 'unavailable'));
+    expect(client!.requestForecast({ kind: 'room', tileId: 't1' })?.status).toBe('unavailable');
+    expect(client!.peekForecast({ kind: 'room', tileId: 't1' })?.result?.partyKey).toBe('pk1');
+  });
+
+  it('does not cache an unavailable reply for a request another target superseded', () => {
+    const socket = connect();
+    socket.receive(state());
+    const listener = vi.fn();
+    client!.onForecast(listener);
+    client!.requestForecast({ kind: 'room', tileId: 't1' });
+    client!.requestForecast({ kind: 'room', tileId: 't2' });
+    socket.receive(forecastMsg('pk1', 'unavailable'));
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    expect(client!.requestForecast({ kind: 'room', tileId: 't1' })).toBeNull();
+    expect(socket.ofType('request_forecast').map(m => (m.target as { tileId: string }).tileId)).toEqual(['t1', 't2', 't1']);
+  });
+
+  it('asks again for a target whose request a later one superseded, and ignores the dropped reply', () => {
+    const socket = connect();
+    socket.receive(state());
+    const listener = vi.fn();
+    client!.onForecast(listener);
+    client!.requestForecast({ kind: 'room', tileId: 't1' });
+    client!.requestForecast({ kind: 'room', tileId: 't2' });
+    client!.requestForecast({ kind: 'room', tileId: 't1' });
+    expect(socket.ofType('request_forecast')).toHaveLength(3);
+
+    socket.receive(forecastMsg('pk1', 'unavailable'));
+    expect(listener).not.toHaveBeenCalled();
+    expect(client!.requestForecast({ kind: 'room', tileId: 't1' })).toBeNull();
+    expect(socket.ofType('request_forecast')).toHaveLength(3);
+
+    socket.receive(forecastMsg());
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(client!.requestForecast({ kind: 'room', tileId: 't1' })?.status).toBe('ok');
+  });
+
   it('re-sends outstanding requests after a reconnect', () => {
     const socket = connect();
     socket.receive(state());

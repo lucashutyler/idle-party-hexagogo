@@ -24,14 +24,18 @@ import type { AccountStore } from '../auth/AccountStore.js';
 
 /** A socket buffering more than this skips droppable combat messages. */
 export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
+/** How long a new socket's visibility stays unknown before it counts as visible without a `presence` message. */
+export const PRESENCE_GRACE_MS = 5000;
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
   private combatViewHidden = new WeakSet<WebSocket>();
-  /** Sockets whose page reported itself hidden; a socket that never sent `presence` counts as visible. */
+  /** Sockets whose page reported itself hidden. */
   private pageHidden = new WeakSet<WebSocket>();
+  /** New sockets that have not sent `presence` yet: they neither start nor end an absence until the grace runs out. */
+  private presencePending = new WeakSet<WebSocket>();
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -113,6 +117,8 @@ export class PlayerManager {
   async login(ws: WebSocket, username: string): Promise<PlayerSession> {
     // Associate this connection with the username
     this.connections.set(ws, username);
+    this.presencePending.add(ws);
+    setTimeout(() => this.endPresenceGrace(ws), PRESENCE_GRACE_MS);
 
     let wsSet = this.playerConnections.get(username);
     if (!wsSet) {
@@ -427,30 +433,43 @@ export class PlayerManager {
   setPresence(ws: WebSocket, visible: boolean, now: number = Date.now()): void {
     const username = this.connections.get(ws);
     if (!username) return;
+    this.presencePending.delete(ws);
     if (visible) this.pageHidden.delete(ws);
     else this.pageHidden.add(ws);
     if (this.refreshPresence(username, now)) this.sendStateToPlayer(username);
   }
 
-  /** Whether any of this player's sockets shows the game (sockets that never sent `presence` count). */
+  /** Whether any of this player's sockets shows the game (a socket that never sent `presence` counts once its grace is over). */
   hasVisibleSocket(username: string): boolean {
     const wsSet = this.playerConnections.get(username);
     if (!wsSet) return false;
     for (const ws of wsSet) {
-      if (!this.pageHidden.has(ws)) return true;
+      if (!this.pageHidden.has(ws) && !this.presencePending.has(ws)) return true;
     }
     return false;
   }
 
+  private hasPresencePending(username: string): boolean {
+    const wsSet = this.playerConnections.get(username);
+    return !!wsSet && [...wsSet].some(ws => this.presencePending.has(ws));
+  }
+
+  private endPresenceGrace(ws: WebSocket): void {
+    if (!this.presencePending.delete(ws)) return;
+    const username = this.connections.get(ws);
+    if (username && this.refreshPresence(username)) this.sendStateToPlayer(username);
+  }
+
   /**
    * Away begins the moment no socket shows the game (all hidden or all closed) and ends when one does;
-   * the session decides whether the finished ledger is worth a recap. Returns whether the pending
-   * recap changed.
+   * a socket whose visibility is still unknown changes neither. The session decides whether the
+   * finished ledger is worth a recap. Returns whether the pending recap changed.
    */
   private refreshPresence(username: string, now: number = Date.now()): boolean {
     const session = this.sessions.get(username);
     if (!session) return false;
     if (this.hasVisibleSocket(username)) return session.endAway(now);
+    if (this.hasPresencePending(username)) return false;
     session.beginAway(now);
     return false;
   }
@@ -933,6 +952,7 @@ export class PlayerManager {
         const initialNotifications = session.consumeInitialNotifications();
         if (initialNotifications.length > 0) this.notifications.setInbox(data.username, initialNotifications);
         this.wireCallbacks(session);
+        session.beginAway();
         validSaves.push(data);
         console.log(`[PlayerManager] Restored session for "${data.username}"`);
       } catch (err) {
@@ -1252,7 +1272,7 @@ export class PlayerManager {
       }
       count++;
     }
-    for (const username of this.playerConnections.keys()) this.refreshPresence(username);
+    for (const username of this.sessions.keys()) this.refreshPresence(username);
 
     console.log(`[PlayerManager] Master reset: ${count} players reset to start`);
     return count;

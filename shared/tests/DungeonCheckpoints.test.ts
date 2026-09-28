@@ -6,11 +6,15 @@ import {
   clampCheckpointPhase,
   checkpointPhaseKey,
   isDungeonCheckpointFresh,
+  encounterCanFieldBoss,
+  floorCanFieldBoss,
   DEFAULT_MAX_WIPES,
   DEFAULT_CHECKPOINT_REWARD_FRACTION,
   DUNGEON_CHECKPOINT_TTL_MS,
 } from '../src/systems/DungeonTypes';
 import type { DungeonFloor } from '../src/systems/DungeonTypes';
+import type { EncounterDefinition } from '../src/systems/EncounterTypes';
+import type { MonsterDefinition } from '../src/systems/MonsterTypes';
 import { sanitizeCombatPrefs, DEFAULT_COMBAT_PREFS } from '../src/systems/ForecastTypes';
 
 function floor(extra: Partial<DungeonFloor> = {}): DungeonFloor {
@@ -47,6 +51,38 @@ describe('dungeon checkpoint helpers', () => {
     const cp = { floorIndex: 2, phase: 1, wipes: 1, rewardedPhases: ['2:1'], at: 0 };
     expect(isDungeonCheckpointFresh(cp, DUNGEON_CHECKPOINT_TTL_MS - 1)).toBe(true);
     expect(isDungeonCheckpointFresh(cp, DUNGEON_CHECKPOINT_TTL_MS)).toBe(false);
+  });
+});
+
+describe('floorCanFieldBoss', () => {
+  const def = (id: string, extra: Partial<MonsterDefinition> = {}): MonsterDefinition =>
+    ({ id, name: id, hp: 10, damage: 1, damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0, ...extra });
+  const monsters: Record<string, MonsterDefinition> = {
+    boss: def('boss', { tier: 'raid' }),
+    idol: def('idol', { tier: 'boss', passive: true }),
+    grunt: def('grunt'),
+  };
+  const encounters: Record<string, EncounterDefinition> = {
+    court: { id: 'court', name: 'Court', type: 'explicit', placements: [{ monsterId: 'boss', gridPosition: 4 }] },
+    pool: { id: 'pool', name: 'Pool', type: 'random', monsterPool: [{ monsterId: 'grunt', min: 1, max: 2 }, { monsterId: 'boss', min: 0, max: 1 }] },
+    shrine: { id: 'shrine', name: 'Shrine', type: 'explicit', placements: [{ monsterId: 'idol', gridPosition: 4 }] },
+    grunts: { id: 'grunts', name: 'Grunts', type: 'random', monsterPool: [{ monsterId: 'grunt', min: 1, max: 3 }] },
+  };
+  const can = (...ids: string[]) =>
+    floorCanFieldBoss(floor({ encounterTable: ids.map(encounterId => ({ encounterId, weight: 1 })) }), id => encounters[id], id => monsters[id]);
+
+  it('counts a placed or pooled non-passive boss or raid monster', () => {
+    expect(can('court')).toBe(true);
+    expect(can('pool')).toBe(true);
+    expect(can('grunts', 'court')).toBe(true);
+  });
+
+  it('ignores passive boss walls, trash, unknown encounters and empty tables', () => {
+    expect(can('shrine')).toBe(false);
+    expect(can('grunts')).toBe(false);
+    expect(can('missing')).toBe(false);
+    expect(can()).toBe(false);
+    expect(encounterCanFieldBoss(undefined, id => monsters[id])).toBe(false);
   });
 });
 

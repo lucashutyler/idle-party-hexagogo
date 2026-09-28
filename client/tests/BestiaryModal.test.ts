@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MasteryEntry } from '@idle-party-rpg/shared';
 import {
+  BESTIARY_REFRESH_MS,
+  BestiaryCard,
   BestiaryModal,
   closestToNextRank,
   filterBestiary,
@@ -13,6 +15,7 @@ import {
   nextRankText,
   renderBestiaryRow,
   sortBestiary,
+  syncBestiaryRows,
 } from '../src/ui/BestiaryModal';
 import type { GameClient } from '../src/network/GameClient';
 
@@ -79,23 +82,62 @@ describe('BestiaryModal', () => {
     document.body.innerHTML = '';
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function fakeClient(bestiary: MasteryEntry[] | null) {
     let listener: (() => void) | null = null;
+    let stateListener: ((s: unknown) => void) | null = null;
     const client = {
-      lastState: { character: { level: 3, mastery: { discovered: 4, mastered: 1, version: 1, recent: [] } } },
+      lastState: { character: { level: 3, mastery: { discovered: 4, mastered: 1, version: 1, recent: [] as MasteryEntry[] } } },
       lastBestiary: bestiary ? { type: 'bestiary', version: 1, entries: bestiary } : null,
       requestBestiary: vi.fn(),
       onBestiary(cb: () => void) {
         listener = cb;
         return () => { listener = null; };
       },
+      subscribe(cb: (s: unknown) => void) {
+        stateListener = cb;
+        return () => { stateListener = null; };
+      },
       deliver(entries: MasteryEntry[]) {
         client.lastBestiary = { type: 'bestiary', version: 1, entries };
         listener?.();
       },
+      kill(recent: MasteryEntry[], version: number) {
+        client.lastState = { character: { level: 3, mastery: { discovered: 4, mastered: 1, version, recent } } };
+        stateListener?.(client.lastState);
+      },
+      get subscribed() {
+        return stateListener !== null;
+      },
     };
     return client;
   }
+
+  function killsShown(id: string): string {
+    return document.querySelector(`.bestiary-row[data-monster-id="${id}"] .bestiary-kills`)!.textContent!;
+  }
+
+  it('refreshes open rows as the party keeps killing, at most once a second', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const client = fakeClient([goblin, wolf]);
+    const modal = new BestiaryModal(client as unknown as GameClient);
+    modal.open();
+    const art = document.querySelector('.bestiary-row[data-monster-id="goblin"] img');
+    vi.setSystemTime(1_000_000 + BESTIARY_REFRESH_MS);
+    client.kill([{ ...goblin, kills: 213 }], 2);
+    expect(killsShown('goblin')).toBe('213 defeated');
+    client.kill([{ ...goblin, kills: 214 }], 3);
+    expect(killsShown('goblin')).toBe('213 defeated');
+    vi.advanceTimersByTime(BESTIARY_REFRESH_MS);
+    expect(killsShown('goblin')).toBe('214 defeated');
+    expect(document.querySelector('.bestiary-row[data-monster-id="goblin"] img')).toBe(art);
+    modal.close();
+    expect(client.subscribed).toBe(false);
+  });
 
   it('opens on the modal stack, requests the list and renders it when it arrives', () => {
     const client = fakeClient(null);
@@ -137,6 +179,52 @@ describe('BestiaryModal', () => {
   });
 });
 
+describe('bestiary rows and card', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('patches rows in place, keeping portraits, and reorders, adds and drops rows', () => {
+    const list = document.createElement('div');
+    list.innerHTML = '<div class="bestiary-empty">Loading…</div>';
+    syncBestiaryRows(list, [goblin, wolf], 3);
+    const [goblinRow, wolfRow] = [...list.children];
+    const goblinArt = goblinRow.querySelector('img');
+    syncBestiaryRows(list, [{ ...wolf, kills: 10, rank: 1, prevAt: 10, nextAt: 50 }, { ...goblin, kills: 213 }, chief], 3);
+    expect([...list.children].map(r => r.getAttribute('data-monster-id'))).toEqual(['wolf', 'goblin', 'chief']);
+    expect(list.children[0]).toBe(wolfRow);
+    expect(wolfRow.getAttribute('data-rank')).toBe('1');
+    expect(list.children[1]).toBe(goblinRow);
+    expect(goblinRow.querySelector('img')).toBe(goblinArt);
+    expect(goblinRow.querySelector('.bestiary-kills')!.textContent).toBe('213 defeated');
+    syncBestiaryRows(list, [chief], 3);
+    expect([...list.children].map(r => r.getAttribute('data-monster-id'))).toEqual(['chief']);
+  });
+
+  it('only touches the card when what it shows changes, keeping the View all button', () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const card = new BestiaryCard(el);
+    const summary = { discovered: 5, mastered: 1, version: 300, recent: [goblin] };
+    card.update(summary, [goblin, wolf, chief, bandit, entry({ monsterId: 'rat', name: 'Rat', kills: 1, nextAt: 10 })], 3);
+    expect([...el.querySelectorAll('.bestiary-row')].map(r => r.getAttribute('data-monster-id'))).toEqual(['wolf', 'goblin', 'bandit']);
+    const button = el.querySelector<HTMLButtonElement>('.bestiary-view-all')!;
+    button.focus();
+    const rowsBefore = [...el.querySelectorAll('.bestiary-row')];
+    const rat = entry({ monsterId: 'rat', name: 'Rat', kills: 2, nextAt: 10 });
+    card.update({ ...summary, version: 301, recent: [rat, goblin] }, [goblin, wolf, chief, bandit], 3);
+    expect([...el.querySelectorAll('.bestiary-row')]).toEqual(rowsBefore);
+    card.update({ ...summary, version: 302, recent: [{ ...goblin, kills: 240 }] }, [goblin, wolf, chief, bandit], 3);
+    expect(el.querySelector('.bestiary-row[data-monster-id="goblin"] .bestiary-kills')!.textContent).toBe('240 defeated');
+    expect(el.querySelector('.bestiary-view-all')).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(el.querySelector('.bestiary-card-summary')!.textContent).toBe('5 discovered · 1 mastered');
+    card.update({ discovered: 0, mastered: 0, version: 0, recent: [] }, [], 3);
+    expect(el.querySelector('.bestiary-card-empty')).toBeTruthy();
+    expect(el.querySelector('.items-section-count')!.textContent).toBe('(0)');
+  });
+});
+
 describe('mastery rank-up toasts', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -154,6 +242,13 @@ describe('mastery rank-up toasts', () => {
     expect(masteryToastText(goblin)).toBe('Mastery rank 2: Goblin · +4 % against them');
   });
 
+  it('counts a monster missing from the known set as rank 0 only when it was just discovered', () => {
+    const firstBoss = entry({ monsterId: 'king', name: 'Goblin King', kills: 1, rank: 1, tier: 'boss', bonusPct: 2 });
+    expect(masteryRankUps(new Map(), [firstBoss], 1).map(e => e.monsterId)).toEqual(['king']);
+    expect(masteryRankUps(new Map(), [firstBoss], 0)).toEqual([]);
+    expect(masteryRankUps(new Map(), [firstBoss, { ...chief, rank: 2 }], 1)).toEqual([]);
+  });
+
   function fakeToastClient() {
     const c = {
       isInitialState: true,
@@ -163,9 +258,9 @@ describe('mastery rank-up toasts', () => {
       lastBestiary: null,
       requestBestiary: vi.fn(),
       onBestiary() { return () => {}; },
-      push(recent: MasteryEntry[], initial = false) {
+      push(recent: MasteryEntry[], initial = false, discovered = recent.length) {
         c.isInitialState = initial;
-        c.stateListener!({ character: { mastery: { discovered: recent.length, mastered: 0, version: 1, recent } } });
+        c.stateListener!({ character: { mastery: { discovered, mastered: 0, version: 1, recent } } });
       },
     };
     return c;
@@ -199,5 +294,26 @@ describe('mastery rank-up toasts', () => {
     expect(document.querySelector('.mastery-toast')).toBeNull();
     toasts.destroy();
     expect(client.stateListener).toBeNull();
+  });
+
+  it('toasts the first kill of a boss, which ranks it up straight away', () => {
+    const client = fakeToastClient();
+    const toasts = new MasteryToasts(client as unknown as GameClient, () => {});
+    client.push([goblin], true, 1);
+    client.push([{ ...goblin, kills: 213 }], false, 1);
+    expect(document.querySelector('.mastery-toast')).toBeNull();
+    const king = entry({ monsterId: 'king', name: 'Goblin King', kills: 1, rank: 1, tier: 'boss', bonusPct: 2 });
+    client.push([king, goblin], false, 2);
+    expect(document.querySelector('.mastery-toast')!.textContent).toContain('Mastery rank 1: Goblin King');
+    toasts.destroy();
+  });
+
+  it('does not toast a previously killed boss the client had not seen yet', () => {
+    const client = fakeToastClient();
+    const toasts = new MasteryToasts(client as unknown as GameClient, () => {});
+    client.push([goblin], true, 2);
+    client.push([{ ...chief, rank: 2, nextAt: 10, kills: 5 }, goblin], false, 2);
+    expect(document.querySelector('.mastery-toast')).toBeNull();
+    toasts.destroy();
   });
 });

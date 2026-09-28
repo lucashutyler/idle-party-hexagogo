@@ -13,16 +13,16 @@ Saved state per player (`PlayerSaveData`):
 - `mailbox` (pending gift entries)
 - `activeQuests`, `completedQuests`, `weeklyCompletions` — quest state (see `docs/architecture/content.md` Quest system)
 - `dungeonRun` (`DungeonRunState`: `{ dungeonId, currentFloorIndex, entrance, checkpointPhase?, wipes?, rewardedPhases? }`) — active dungeon run, so an in-progress dive (and its boss checkpoint and wipe budget) continues offline and across restarts; `clearedDungeons` (string[]) — dungeons this player has cleared at least once, gating one-time first-clear rewards (see `docs/architecture/content.md` Dungeon system). `dungeonRun` is sourced from the `PartyBattleManager` entry at save time (spread copy) and re-applied via `restoreDungeonRun` (floor index validated, phase clamped) after the party's battle entry is rebuilt on restore.
-- `dungeonCheckpoints` (`Record<dungeonId, DungeonCheckpoint { floorIndex, phase, wipes, rewardedPhases, at }>`) — resume points stored when a party leaves a checkpoint floor; expire after 7 days (see `combat.md` → Boss checkpoints)
-- `monsterKills` (`Record<monsterDefId, number>`) — lifetime kills for kill mastery
+- `dungeonCheckpoints` (`Record<dungeonId, DungeonCheckpoint { floorIndex, phase, wipes, rewardedPhases, at }>`) — resume points; kept equal to the live run while the party is on a checkpoint floor and stored when a party or member leaves one; expire after 7 days (see `combat.md` → Boss checkpoints and `content.md` → Dungeon system)
+- `monsterKills` (`Record<monsterDefId, number>`) — lifetime kills for kill mastery; held in a null-prototype object so monster ids such as `constructor` or `__proto__` count like any other
 - `combatPrefs` (`{ autoRetreatBelowPct: 0 | 25 | 40 | 60 }`) — sanitised on load; absent → `DEFAULT_COMBAT_PREFS` (25)
 - `autoRetreatNotified` — the one-time auto-retreat notification was sent
-- `awayLedger` (the "while you were away" ledger still recording) and `pendingRecap` (a finished recap not yet acknowledged) — `AwayLedger | null`, sanitised on load (see `combat.md` → While you were away)
+- `awayLedger` (the "while you were away" ledger still recording) and `pendingRecap` (a finished recap not yet acknowledged) — `AwayLedger | null`, rebuilt field by field on load (counters finite and ≥ 0, levels default to the character's, lists filtered to valid entries and capped, unknown rarities and moment kinds dropped; no `id`/`since` → `null`). Every restored character with no saved ledger gets one opened at boot, since nobody is connected yet (see `combat.md` → While you were away)
 - `notifications` (capped notification inbox, last 50 entries), `notificationPreferences` (per-category/channel opt-ins), `pushSubscriptions` (registered Web Push endpoints) — see `docs/architecture/notifications.md`
 
 The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment.
 
-All of the fields above are optional. `PlayerSession.fromSaveData` bypasses the constructor, so every new field is assigned explicitly there (and cleaned — malformed values fall back to their defaults). **Master reset** (`resetForMasterReset`) clears `monsterKills`, `dungeonCheckpoints`, `awayLedger` and `pendingRecap` along with the character, but keeps `combatPrefs` and `autoRetreatNotified`.
+All of the fields above are optional. `PlayerSession.fromSaveData` bypasses the constructor, so every new field is assigned explicitly there (and cleaned — malformed values fall back to their defaults). **Master reset** (`resetForMasterReset`) clears `monsterKills`, `dungeonCheckpoints`, `awayLedger` and `pendingRecap` along with the character, but keeps `combatPrefs` and `autoRetreatNotified`; presence is then re-evaluated for every session, so offline players get a fresh ledger.
 
 Guild data is saved separately in `data/guilds.json`. Active async trades are saved separately in `data/trades.json` via `TradeStore`. Game content is saved separately via `ContentStore`.
 

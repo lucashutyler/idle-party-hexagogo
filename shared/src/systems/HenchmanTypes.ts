@@ -10,7 +10,7 @@ export interface HenchmanDefinition {
   description?: string;
   /** Combat archetype — drives engine class checks; never shown to players. */
   className: ClassName;
-  /** Feeds per-level passives and heals only; combat treats it as a derived level (no level-gap scaling). */
+  /** Combat treats it as a derived level: no level-gap scaling, but it judges mitigation like a player level. */
   level: number;
   maxHp: number;
   baseDamage: number;

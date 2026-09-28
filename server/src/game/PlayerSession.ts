@@ -70,15 +70,26 @@ import {
   addAwayMoment,
   awayRarityRank,
   AWAY_NOTABLE_MIN_RARITY,
+  AWAY_MAX_MOMENTS,
+  AWAY_MAX_NOTABLE_ITEMS,
+  AWAY_MAX_DUNGEONS,
+  AWAY_MAX_RETREATS,
+  AWAY_MOMENT_PRIORITY,
 } from '@idle-party-rpg/shared';
 import type {
   CombatPrefs,
   DungeonCheckpoint,
   DungeonRunState,
   AwayLedger,
+  AwayMoment,
   AwayMomentKind,
   AwayRetreatEntry,
   AwayCloseCall,
+  AwayDungeonEntry,
+  AwayDungeonOutcome,
+  AwayMasteryUp,
+  AwayNotableItem,
+  ItemRarity,
   MasteryEntry,
   MasteryMonsterInfo,
   MasterySummary,
@@ -154,8 +165,8 @@ export class PlayerSession {
   private partyId: string | null = null;
   /** Dungeon IDs this player has cleared at least once (for one-time first-clear rewards). */
   private clearedDungeons = new Set<string>();
-  private dungeonCheckpoints: Record<string, DungeonCheckpoint> = {};
-  private monsterKills: Record<string, number> = {};
+  private dungeonCheckpoints: Record<string, DungeonCheckpoint> = emptyCheckpoints();
+  private monsterKills: Record<string, number> = emptyKillCounts();
   /** Monster ids by most recent kill, newest first. In memory only. */
   private recentKills: string[] = [];
   private combatPrefs: CombatPrefs = { ...DEFAULT_COMBAT_PREFS };
@@ -1029,12 +1040,11 @@ export class PlayerSession {
   getClearedDungeons(): string[] { return [...this.clearedDungeons]; }
 
   getDungeonCheckpoint(dungeonId: string): DungeonCheckpoint | undefined {
-    const checkpoint = this.dungeonCheckpoints[dungeonId];
-    return checkpoint ? copyCheckpoint(checkpoint) : undefined;
+    return hasOwn(this.dungeonCheckpoints, dungeonId) ? copyCheckpoint(this.dungeonCheckpoints[dungeonId]) : undefined;
   }
 
   getDungeonCheckpoints(): Record<string, DungeonCheckpoint> {
-    const copy: Record<string, DungeonCheckpoint> = {};
+    const copy = emptyCheckpoints();
     for (const [id, checkpoint] of Object.entries(this.dungeonCheckpoints)) copy[id] = copyCheckpoint(checkpoint);
     return copy;
   }
@@ -1060,7 +1070,7 @@ export class PlayerSession {
       else tally.set(monster.id, { monster, count: 1 });
     }
     for (const { monster, count } of tally.values()) {
-      const before = this.monsterKills[monster.id] ?? 0;
+      const before = killCount(this.monsterKills, monster.id);
       const after = before + count;
       this.monsterKills[monster.id] = after;
       this.recentKills = [monster.id, ...this.recentKills.filter(id => id !== monster.id)].slice(0, MASTERY_RECENT_COUNT);
@@ -1107,7 +1117,7 @@ export class PlayerSession {
 
   /** Levels shown are authored only; a monster without one has no level scaling and shows none. */
   private masteryEntry(monsterId: string): MasteryEntry | null {
-    const kills = this.monsterKills[monsterId] ?? 0;
+    const kills = killCount(this.monsterKills, monsterId);
     const def = this.content.getMonster(monsterId);
     if (!def || kills <= 0) return null;
     const info: MasteryMonsterInfo = { name: def.name, tier: effectiveMonsterTier(def) };
@@ -1364,8 +1374,8 @@ export class PlayerSession {
     this.unlockSystem = new UnlockSystem(this.defaultGrid(), startTile);
     this.partyId = null;
     this.clearedDungeons.clear();
-    this.dungeonCheckpoints = {};
-    this.monsterKills = {};
+    this.dungeonCheckpoints = emptyCheckpoints();
+    this.monsterKills = emptyKillCounts();
     this.recentKills = [];
     this.awayLedger = null;
     this.pendingRecap = null;
@@ -1545,8 +1555,9 @@ export class PlayerSession {
     session['recentKills'] = [];
     session['combatPrefs'] = sanitizeCombatPrefs(data.combatPrefs);
     session['autoRetreatNotified'] = data.autoRetreatNotified === true;
-    session['awayLedger'] = sanitizeLedger(data.awayLedger);
-    session['pendingRecap'] = sanitizeLedger(data.pendingRecap);
+    const level = data.character?.level ?? 0;
+    session['awayLedger'] = sanitizeLedger(data.awayLedger, level);
+    session['pendingRecap'] = sanitizeLedger(data.pendingRecap, level);
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
@@ -1710,8 +1721,17 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
+/** Keyed by free-form monster ids, so it must not inherit keys such as `constructor`. */
+function emptyKillCounts(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
+}
+
+function killCount(kills: Record<string, number>, monsterId: string): number {
+  return hasOwn(kills, monsterId) ? kills[monsterId] : 0;
+}
+
 function sanitizeKillCounts(raw: unknown): Record<string, number> {
-  const kills: Record<string, number> = {};
+  const kills = emptyKillCounts();
   if (!isRecord(raw)) return kills;
   for (const [id, count] of Object.entries(raw)) {
     if (isNonNegativeInteger(count) && count > 0) kills[id] = count;
@@ -1719,8 +1739,13 @@ function sanitizeKillCounts(raw: unknown): Record<string, number> {
   return kills;
 }
 
+/** Keyed by free-form dungeon ids, like the kill counts. */
+function emptyCheckpoints(): Record<string, DungeonCheckpoint> {
+  return Object.create(null) as Record<string, DungeonCheckpoint>;
+}
+
 function sanitizeCheckpoints(raw: unknown): Record<string, DungeonCheckpoint> {
-  const checkpoints: Record<string, DungeonCheckpoint> = {};
+  const checkpoints = emptyCheckpoints();
   if (!isRecord(raw)) return checkpoints;
   for (const [dungeonId, value] of Object.entries(raw)) {
     if (!isRecord(value) || !isNonNegativeInteger(value.floorIndex) || typeof value.at !== 'number' || !Number.isFinite(value.at)) continue;
@@ -1735,7 +1760,121 @@ function sanitizeCheckpoints(raw: unknown): Record<string, DungeonCheckpoint> {
   return checkpoints;
 }
 
-function sanitizeLedger(raw: unknown): AwayLedger | null {
-  if (!isRecord(raw) || typeof raw.id !== 'string' || typeof raw.since !== 'number' || !Number.isFinite(raw.since)) return null;
-  return raw as unknown as AwayLedger;
+const AWAY_DUNGEON_OUTCOMES: readonly AwayDungeonOutcome[] = ['cleared', 'ejected', 'left', 'in_progress'];
+
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function count(value: unknown): number {
+  return isFiniteNumber(value) && value > 0 ? value : 0;
+}
+
+function clamp(value: unknown, max: number): number {
+  return isFiniteNumber(value) ? Math.min(max, Math.max(0, value)) : 0;
+}
+
+function recordsOf<T>(raw: unknown, parse: (value: Record<string, unknown>) => T | null): T[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap(value => {
+    const parsed = isRecord(value) ? parse(value) : null;
+    return parsed ? [parsed] : [];
+  });
+}
+
+function sanitizeRarity(value: unknown): ItemRarity | undefined {
+  return typeof value === 'string' && awayRarityRank(value as ItemRarity) >= 0 ? value as ItemRarity : undefined;
+}
+
+function sanitizeNotable(v: Record<string, unknown>): AwayNotableItem | null {
+  if (typeof v.itemId !== 'string' || count(v.count) <= 0) return null;
+  const item: AwayNotableItem = { itemId: v.itemId, count: count(v.count) };
+  const rarity = sanitizeRarity(v.rarity);
+  if (rarity) item.rarity = rarity;
+  return item;
+}
+
+function sanitizeMasteryUp(v: Record<string, unknown>): AwayMasteryUp | null {
+  if (typeof v.monsterId !== 'string' || typeof v.name !== 'string') return null;
+  return { monsterId: v.monsterId, name: v.name, rankFrom: count(v.rankFrom), rankTo: count(v.rankTo) };
+}
+
+function sanitizeDungeonEntry(v: Record<string, unknown>): AwayDungeonEntry | null {
+  const outcome = AWAY_DUNGEON_OUTCOMES.find(o => o === v.outcome);
+  if (typeof v.dungeonId !== 'string' || typeof v.name !== 'string' || !outcome) return null;
+  const entry: AwayDungeonEntry = { dungeonId: v.dungeonId, name: v.name, outcome, wipes: count(v.wipes) };
+  if (count(v.checkpoint) > 0) entry.checkpoint = count(v.checkpoint);
+  return entry;
+}
+
+function sanitizeRetreatEntry(v: Record<string, unknown>): AwayRetreatEntry | null {
+  const kind = v.kind === 'skip' || v.kind === 'relocate' ? v.kind : null;
+  if (!isFiniteNumber(v.at) || !kind || typeof v.from !== 'string') return null;
+  const entry: AwayRetreatEntry = { at: v.at, kind, from: v.from, winPct: clamp(v.winPct, 100) };
+  if (typeof v.to === 'string') entry.to = v.to;
+  return entry;
+}
+
+function sanitizeMoment(v: Record<string, unknown>): AwayMoment | null {
+  const kind = typeof v.kind === 'string' && hasOwn(AWAY_MOMENT_PRIORITY, v.kind) ? v.kind as AwayMomentKind : null;
+  if (!isFiniteNumber(v.at) || !kind || typeof v.text !== 'string') return null;
+  const moment: AwayMoment = { at: v.at, kind, text: v.text };
+  if (typeof v.monsterId === 'string') moment.monsterId = v.monsterId;
+  if (typeof v.itemId === 'string') moment.itemId = v.itemId;
+  return moment;
+}
+
+/** Rebuilt field by field: a malformed save must not reach the recap code, which trusts every field. */
+function sanitizeLedger(raw: unknown, level: number): AwayLedger | null {
+  if (!isRecord(raw) || typeof raw.id !== 'string' || !isFiniteNumber(raw.since)) return null;
+  const items: Partial<Record<ItemRarity, number>> = {};
+  if (isRecord(raw.items)) {
+    for (const [key, n] of Object.entries(raw.items)) {
+      const rarity = sanitizeRarity(key);
+      if (rarity && count(n) > 0) items[rarity] = count(n);
+    }
+  }
+  const notableItems = recordsOf(raw.notableItems, sanitizeNotable).slice(0, AWAY_MAX_NOTABLE_ITEMS);
+  const masteryUps = recordsOf(raw.masteryUps, sanitizeMasteryUp);
+  const dungeons = recordsOf(raw.dungeons, sanitizeDungeonEntry).slice(-AWAY_MAX_DUNGEONS);
+  const retreatLog = recordsOf(raw.retreatLog, sanitizeRetreatEntry).slice(-AWAY_MAX_RETREATS);
+  const moments = recordsOf(raw.moments, sanitizeMoment).slice(-AWAY_MAX_MOMENTS);
+
+  const ledger: AwayLedger = {
+    id: raw.id,
+    since: raw.since,
+    battles: count(raw.battles),
+    wins: count(raw.wins),
+    losses: count(raw.losses),
+    retreats: count(raw.retreats),
+    skips: count(raw.skips),
+    xp: count(raw.xp),
+    gold: count(raw.gold),
+    levelFrom: isFiniteNumber(raw.levelFrom) && raw.levelFrom >= 0 ? raw.levelFrom : level,
+    levelTo: isFiniteNumber(raw.levelTo) && raw.levelTo >= 0 ? raw.levelTo : level,
+    xpFracFrom: clamp(raw.xpFracFrom, 1),
+    xpFracTo: clamp(raw.xpFracTo, 1),
+    items,
+    notableItems,
+    itemsLost: count(raw.itemsLost),
+    kills: count(raw.kills),
+    masteryUps,
+    dungeons,
+    retreatLog,
+    moments,
+  };
+  if (isFiniteNumber(raw.until)) ledger.until = raw.until;
+  const stopped = raw.routeStopped;
+  if (isRecord(stopped) && isFiniteNumber(stopped.at) && typeof stopped.where === 'string') {
+    ledger.routeStopped = { at: stopped.at, where: stopped.where };
+  }
+  const call = raw.closestCall;
+  if (isRecord(call) && isFiniteNumber(call.hpPct) && typeof call.vs === 'string' && typeof call.where === 'string') {
+    ledger.closestCall = { hpPct: call.hpPct, vs: call.vs, where: call.where };
+  }
+  return ledger;
 }

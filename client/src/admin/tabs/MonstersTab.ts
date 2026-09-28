@@ -23,7 +23,7 @@ import type {
   MonsterSkillEntry,
   DamageType,
 } from '@idle-party-rpg/shared';
-import { escapeHtml, putAdmin, deleteAdmin } from '../api';
+import { escapeHtml, escapeValue, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
 import { renderArtworkSection, wireArtworkSection } from '../components/ArtworkSection';
 
@@ -64,14 +64,14 @@ export class MonstersTab implements Tab {
     const rows = monsters.map(m => {
       const drops = m.drops?.map(d => {
         const item = items[d.itemId];
-        return `${item?.name ?? d.itemId} (${(d.chance * 100).toFixed(3)}%)`;
+        return `${item?.name ?? d.itemId} (${(Number(d.chance) * 100).toFixed(3)}%)`;
       }).join(', ') ?? 'None';
 
       const actions = readOnly
-        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm monster-view-btn" data-id="${m.id}">View</button></td>`
+        ? `<td class="admin-actions-cell"><button class="admin-btn admin-btn-sm monster-view-btn" data-id="${escapeValue(m.id)}">View</button></td>`
         : `<td class="admin-actions-cell">
-            <button class="admin-btn admin-btn-sm monster-edit-btn" data-id="${m.id}">Edit</button>
-            <button class="admin-btn admin-btn-sm admin-btn-danger monster-delete-btn" data-id="${m.id}">Del</button>
+            <button class="admin-btn admin-btn-sm monster-edit-btn" data-id="${escapeValue(m.id)}">Edit</button>
+            <button class="admin-btn admin-btn-sm admin-btn-danger monster-delete-btn" data-id="${escapeValue(m.id)}">Del</button>
           </td>`;
 
       const level = isAuthoredMonsterLevel(m.level)
@@ -85,11 +85,11 @@ export class MonstersTab implements Tab {
           <td>${escapeHtml(m.name)}${m.passive ? ' <span class="admin-pill">passive</span>' : ''}</td>
           <td class="monster-level-cell">${level}</td>
           <td class="monster-tier-cell">${tier}</td>
-          <td>${m.hp}</td>
-          <td>${m.damage}${m.attackInterval != null && m.attackInterval !== 1 ? ` <span class="admin-muted">/ ${m.attackInterval}s</span>` : ''}</td>
-          <td>${m.damageType}</td>
-          <td>${m.xp}</td>
-          <td>${m.goldMin}-${m.goldMax}</td>
+          <td>${escapeValue(m.hp)}</td>
+          <td>${escapeValue(m.damage)}${m.attackInterval != null && m.attackInterval !== 1 ? ` <span class="admin-muted">/ ${escapeValue(m.attackInterval)}s</span>` : ''}</td>
+          <td>${escapeValue(m.damageType)}</td>
+          <td>${escapeValue(m.xp)}</td>
+          <td>${escapeValue(m.goldMin)}-${escapeValue(m.goldMax)}</td>
           <td>${escapeHtml(drops)}</td>
           <td>${m.resistances?.length ?? 0} res, ${m.skills?.length ?? 0} skills</td>
           ${actions}
@@ -167,8 +167,8 @@ export class MonstersTab implements Tab {
       <input type="hidden" id="mf-id" value="${escapeHtml(m.id)}">
       <div class="admin-form-grid">
         <label>Name<input type="text" id="mf-name" value="${escapeHtml(m.name)}"></label>
-        <label>HP<input type="number" id="mf-hp" value="${m.hp}" min="1"></label>
-        <label>Damage<input type="number" id="mf-damage" value="${m.damage}" min="0"></label>
+        <label>HP<input type="number" id="mf-hp" value="${escapeValue(m.hp)}" min="1"></label>
+        <label>Damage<input type="number" id="mf-damage" value="${escapeValue(m.damage)}" min="0"></label>
         <label>Type
           <select id="mf-damageType">
             <option value="physical" ${m.damageType === 'physical' ? 'selected' : ''}>Physical</option>
@@ -177,11 +177,11 @@ export class MonstersTab implements Tab {
           </select>
         </label>
         <label>Attack interval (s)
-          <input type="number" id="mf-attackInterval" value="${m.attackInterval ?? ''}" min="${MIN_ATTACK_INTERVAL_SECONDS}" step="0.05" placeholder="1 (default)">
+          <input type="number" id="mf-attackInterval" value="${escapeValue(m.attackInterval)}" min="${MIN_ATTACK_INTERVAL_SECONDS}" step="0.05" placeholder="1 (default)">
         </label>
-        <label>XP<input type="number" id="mf-xp" value="${m.xp}" min="0"></label>
-        <label>Gold Min<input type="number" id="mf-goldMin" value="${m.goldMin}" min="0"></label>
-        <label>Gold Max<input type="number" id="mf-goldMax" value="${m.goldMax}" min="0"></label>
+        <label>XP<input type="number" id="mf-xp" value="${escapeValue(m.xp)}" min="0"></label>
+        <label>Gold Min<input type="number" id="mf-goldMin" value="${escapeValue(m.goldMin)}" min="0"></label>
+        <label>Gold Max<input type="number" id="mf-goldMax" value="${escapeValue(m.goldMax)}" min="0"></label>
         <label class="admin-form-checkbox">
           <input type="checkbox" id="mf-passive" ${m.passive ? 'checked' : ''}>
           Passive (wall — never attacks, doesn't count toward victory)
@@ -294,14 +294,14 @@ export class MonstersTab implements Tab {
     ).join('');
     const enrageInputs = ENRAGE_FIELDS.map(f => {
       const value = m.enrage?.[f.key];
-      return `<label>${f.label}<input type="number" id="${f.id}" value="${value ?? ''}" min="${f.min}" max="${f.max}" step="${f.step}"></label>`;
+      return `<label>${f.label}<input type="number" id="${f.id}" value="${escapeValue(value)}" min="${f.min}" max="${f.max}" step="${f.step}"></label>`;
     }).join('');
     return `
       <fieldset class="admin-form-fieldset">
         <legend>Level &amp; tier</legend>
         <div class="admin-form-grid">
           <label>Level
-            <input type="number" id="mf-level" value="${m.level ?? ''}" min="${MONSTER_LEVEL_MIN}" max="${MONSTER_LEVEL_MAX}" step="1" placeholder="${LEVEL_NOT_SET}">
+            <input type="number" id="mf-level" value="${escapeValue(m.level)}" min="${MONSTER_LEVEL_MIN}" max="${MONSTER_LEVEL_MAX}" step="1" placeholder="${LEVEL_NOT_SET}">
           </label>
           <label>Tier
             <select id="mf-tier">${unknownTier}${tierOptions}</select>
@@ -433,13 +433,13 @@ export class MonstersTab implements Tab {
 
   private dropRowHtml(index: number, itemId: string, chance: number, items: ItemDefinition[]): string {
     const options = items.map(i =>
-      `<option value="${i.id}" ${i.id === itemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
+      `<option value="${escapeValue(i.id)}" ${i.id === itemId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`
     ).join('');
     const rateHint = chance > 0 ? `<span class="admin-form-hint">~${Math.round(1 / chance)} per kill</span>` : '';
     return `
       <div class="monster-drop-row admin-form-row" data-index="${index}">
         <select class="mf-drop-item">${options}</select>
-        <input type="number" class="mf-drop-chance" value="${(chance * 100).toFixed(3)}" min="0.001" max="100" step="0.001">
+        <input type="number" class="mf-drop-chance" value="${(Number(chance) * 100).toFixed(3)}" min="0.001" max="100" step="0.001">
         <span>%</span>
         ${rateHint}
         <button class="admin-btn admin-btn-sm admin-btn-danger mf-drop-remove" type="button">×</button>
@@ -455,8 +455,8 @@ export class MonstersTab implements Tab {
           <option value="magical" ${resistance.damageType === 'magical' ? 'selected' : ''}>Magical</option>
           <option value="holy" ${resistance.damageType === 'holy' ? 'selected' : ''}>Holy</option>
         </select>
-        <label>Flat<input type="number" class="mf-res-flat" value="${resistance.flatReduction}" step="1"></label>
-        <label>%<input type="number" class="mf-res-percent" value="${resistance.percentReduction}" step="1"></label>
+        <label>Flat<input type="number" class="mf-res-flat" value="${escapeValue(resistance.flatReduction)}" step="1"></label>
+        <label>%<input type="number" class="mf-res-percent" value="${escapeValue(resistance.percentReduction)}" step="1"></label>
         <button class="admin-btn admin-btn-sm admin-btn-danger mf-res-remove" type="button">×</button>
       </div>
     `;
@@ -464,7 +464,7 @@ export class MonstersTab implements Tab {
 
   private skillRowHtml(index: number, entry: MonsterSkillEntry): string {
     const options = Object.values(MONSTER_SKILL_CATALOG).map(s =>
-      `<option value="${s.id}" ${s.id === entry.skillId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
+      `<option value="${escapeValue(s.id)}" ${s.id === entry.skillId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
     ).join('');
     const unknown = MONSTER_SKILL_CATALOG[entry.skillId]
       ? ''
@@ -473,9 +473,9 @@ export class MonstersTab implements Tab {
     return `
       <div class="monster-skill-row admin-form-row" data-index="${index}">
         <select class="mf-skill-id">${unknown}${options}</select>
-        <label>Value<input type="number" class="mf-skill-value" value="${entry.value}" min="1"></label>
-        <label>CD (s)<input type="number" class="mf-skill-cd" value="${entry.cooldown}" min="0" step="0.1"></label>
-        <label>Cast (s)<input type="number" class="mf-skill-cast" value="${entry.castTime ?? ''}" min="0" max="10" step="0.1" placeholder="${skillDef?.castTime ?? 0}"></label>
+        <label>Value<input type="number" class="mf-skill-value" value="${escapeValue(entry.value)}" min="1"></label>
+        <label>CD (s)<input type="number" class="mf-skill-cd" value="${escapeValue(entry.cooldown)}" min="0" step="0.1"></label>
+        <label>Cast (s)<input type="number" class="mf-skill-cast" value="${escapeValue(entry.castTime)}" min="0" max="10" step="0.1" placeholder="${escapeValue(skillDef?.castTime ?? 0)}"></label>
         <span class="admin-form-hint mf-skill-info">${escapeHtml(this.skillInfo(entry.skillId))}</span>
         <button class="admin-btn admin-btn-sm admin-btn-danger mf-skill-remove" type="button">×</button>
       </div>

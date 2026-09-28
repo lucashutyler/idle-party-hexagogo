@@ -93,12 +93,15 @@ export function buildMasteryEntry(monsterId: string, kills: number, info: Master
   return entry;
 }
 
-/** Monster id → rank, keeping only ranks ≥ 1 (the engine's `PartyCombatantInit.mastery` input). */
+/**
+ * Monster id → rank, keeping only ranks ≥ 1 (the engine's `PartyCombatantInit.mastery` input).
+ * Prototype-free, so ids such as `__proto__` or `constructor` are plain keys.
+ */
 export function masteryRanks(
   kills: Record<string, number>,
   tierOf: (monsterId: string) => MonsterTier | undefined,
 ): Record<string, number> {
-  const ranks: Record<string, number> = {};
+  const ranks = Object.create(null) as Record<string, number>;
   for (const [id, count] of Object.entries(kills)) {
     const rank = masteryRank(count, tierOf(id));
     if (rank > 0) ranks[id] = rank;

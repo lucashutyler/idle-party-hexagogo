@@ -192,6 +192,16 @@ describe('DungeonsTab', () => {
     expect(vi.mocked(alert).mock.calls[0][0]).toContain('Floor 2');
   });
 
+  it('escapes non-numeric authored floor values instead of injecting markup', () => {
+    const payload = '"><img id="pwn" src="x">';
+    const hostile = structuredClone(DUNGEON) as unknown as Record<string, unknown> & { floors: Record<string, unknown>[] };
+    Object.assign(hostile.floors[1], { maxWipes: payload, checkpointRewardFraction: payload, floorNumber: payload });
+    hostile.firstClearXp = payload;
+    new DungeonsTab().render(container, makeCtx(hostile as unknown as DungeonDefinition));
+    openEdit(container);
+    expect(document.getElementById('pwn')).toBeNull();
+  });
+
   it('asks before saving checkpoints on a floor without a boss encounter', async () => {
     const put = stubPut();
     vi.stubGlobal('confirm', vi.fn(() => false));
@@ -202,6 +212,54 @@ describe('DungeonsTab', () => {
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(vi.mocked(confirm).mock.calls[0][0]).toContain('Floor 1');
     expect(put.bodies).toHaveLength(0);
+  });
+
+  it('says what checkpoints do on floors whose fights may lack a boss', async () => {
+    const put = stubPut();
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    const ctx = makeCtx();
+    const content = ctx.getDisplayContent()!;
+    content.encounters.ambush = {
+      id: 'ambush', name: 'Ambush', type: 'random',
+      monsterPool: [{ monsterId: 'chief', min: 0, max: 1 }, { monsterId: 'grunt', min: 0, max: 2 }],
+    };
+    content.encounters.throne = {
+      id: 'throne', name: 'Throne', type: 'random', monsterPool: [{ monsterId: 'chief', min: 1, max: 1 }],
+    };
+    new DungeonsTab().render(container, ctx);
+    const modal = openEdit(container);
+    expect(modal.querySelector('.df-floor-checkpoints-fieldset .admin-form-hint')!.textContent)
+      .toContain('whether an explicit encounter places it or a random pool rolls it');
+    const boss = floorEl(modal, 1);
+    boss.querySelector<HTMLButtonElement>('.df-floor-add-enc')!.click();
+    boss.querySelector<HTMLButtonElement>('.df-floor-add-enc')!.click();
+    const rows = boss.querySelectorAll<HTMLElement>('.df-enc-row');
+    rows[1].querySelector<HTMLSelectElement>('.df-enc-id')!.value = 'ambush';
+    rows[1].querySelector<HTMLInputElement>('.df-enc-weight')!.value = '1';
+    rows[2].querySelector<HTMLSelectElement>('.df-enc-id')!.value = 'throne';
+    rows[2].querySelector<HTMLInputElement>('.df-enc-weight')!.value = '1';
+    setInput(floorEl(modal, 0), '.df-floor-checkpoints', '0.5');
+    await save(modal);
+    const message = vi.mocked(confirm).mock.calls[0][0] as string;
+    expect(message).toContain('Floor 1: encounter "Pack" can\'t roll a boss- or raid-tier monster');
+    expect(message).toContain('Floor 2: encounter "Ambush" doesn\'t always roll its boss');
+    expect(message).not.toContain('Throne');
+    expect(message).not.toContain('Court');
+    expect(message).toContain('A wipe anywhere on these floors still regroups the party');
+    expect(message).not.toContain('will do nothing');
+    expect(put.bodies).toHaveLength(0);
+  });
+
+  it('does not count a passive boss-tier wall as the boss', async () => {
+    stubPut();
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    const ctx = makeCtx();
+    const content = ctx.getDisplayContent()!;
+    content.monsters.idol = { ...BOSS, id: 'idol', name: 'Idol', passive: true };
+    content.encounters.court = { ...COURT, placements: [{ monsterId: 'idol', gridPosition: 4 }] };
+    new DungeonsTab().render(container, ctx);
+    await save(openEdit(container));
+    expect(vi.mocked(confirm).mock.calls[0][0]).toContain('Floor 2: encounter "Court" places no boss- or raid-tier monster');
   });
 
   it('gives a floor added after a removal its own encounter list', async () => {

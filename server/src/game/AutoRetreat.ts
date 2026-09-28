@@ -10,6 +10,8 @@ export type RelocateCause = 'room' | 'skips';
 
 export type AutoRetreatDecision =
   | { kind: 'none' }
+  /** The forecast has no rate for the rolled entry: neither skippable nor known to be safe. */
+  | { kind: 'unknown' }
   | { kind: 'skip'; winPct: number }
   | { kind: 'relocate'; winPct: number; cause: RelocateCause };
 
@@ -43,10 +45,12 @@ export function decideAutoRetreat(
   belowPct: number,
   recentSkips: number,
 ): AutoRetreatDecision {
-  if (!(belowPct > 0) || !(room.sims > 0)) return { kind: 'none' };
+  if (!(belowPct > 0)) return { kind: 'none' };
+  if (!(room.sims > 0)) return { kind: 'unknown' };
   if (room.ci[1] < belowPct) return { kind: 'relocate', winPct: room.winPct, cause: 'room' };
   const stratum = rolledEntryId === null ? undefined : room.strata?.find(s => s.entryId === rolledEntryId);
-  if (!stratum || stratumUpperPct(stratum, room.sims) >= belowPct) return { kind: 'none' };
+  if (!stratum) return { kind: 'unknown' };
+  if (stratumUpperPct(stratum, room.sims) >= belowPct) return { kind: 'none' };
   if (recentSkips + 1 >= AUTO_RETREAT_SKIPS_TO_RELOCATE) return { kind: 'relocate', winPct: stratum.winPct, cause: 'skips' };
   return { kind: 'skip', winPct: stratum.winPct };
 }

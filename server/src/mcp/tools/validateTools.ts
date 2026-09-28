@@ -13,6 +13,7 @@ import {
 import type { RoomEntryRequirements } from '@idle-party-rpg/shared';
 import {
   checkpointEncounterProblems,
+  checkpointEncounterWarnings,
   floorCheckpointProblems,
   monsterScalingProblems,
 } from '../../admin/contentChecks.js';
@@ -340,7 +341,7 @@ function collectProblems(snapshot: ContentSnapshot): string[] {
 
 const MAX_LISTED_IDS = 20;
 
-/** Advisory findings that don't block publishing (unauthored levels, tier hints, inert dungeon fields). */
+/** Advisory findings that don't block publishing (unauthored levels, tier hints, dungeon checkpoint caveats). */
 function collectInfo(snapshot: ContentSnapshot): string[] {
   const info: string[] = [];
   const unleveled = snapshot.monsters.filter(m => !m.passive && !isAuthoredMonsterLevel(m.level)).map(m => m.id);
@@ -356,13 +357,17 @@ function collectInfo(snapshot: ContentSnapshot): string[] {
       info.push(`Monster '${monster.id}' has no tier, but its HP is in the '${suggested}' range for its damage — consider tier '${suggested}' (tiers are never set automatically).`);
     }
   }
+  const encountersById = new Map((snapshot.encounters ?? []).map(e => [e.id, e]));
+  const monstersById = new Map(snapshot.monsters.map(m => [m.id, m]));
   for (const dungeon of snapshot.dungeons ?? []) {
     dungeon.floors.forEach((floor, floorIndex) => {
+      const floorLabel = `Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber})`;
+      info.push(...checkpointEncounterWarnings(floor, floorLabel, encountersById, monstersById));
       const hasCheckpoints = Array.isArray(floor.checkpoints) && floor.checkpoints.length > 0;
       if (hasCheckpoints) return;
       const inert = (['maxWipes', 'checkpointRewardFraction'] as const).filter(key => floor[key] !== undefined);
       if (inert.length > 0) {
-        info.push(`Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber}) sets ${inert.join(' and ')} without checkpoints — they have no effect.`);
+        info.push(`${floorLabel} sets ${inert.join(' and ')} without checkpoints — they have no effect.`);
       }
     });
   }
@@ -426,7 +431,7 @@ export function registerValidateTools(server: McpServer, deps: McpToolDeps): voi
   server.registerTool(
     'validate_draft',
     {
-      description: "Run referential-integrity and range checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc, unknown monster skills, monster attackInterval/cooldown/castTime ranges, monster level (whole number 1-200)/tier/enrage ranges, dungeon checkpoints (descending fractions in (0,1)), maxWipes and checkpointRewardFraction ranges, checkpoint floors that don't roll an explicit encounter with a boss/raid monster, invalid skill definitions). Returns `problems` (human-readable, empty if the draft is clean) and `info` (advisory, never blocking: monsters with no level set and therefore no level scaling, tier hints from HP, dungeon fields that have no effect).",
+      description: "Run referential-integrity and range checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc, unknown monster skills, monster attackInterval/cooldown/castTime ranges, monster level (whole number 1-200)/tier/enrage ranges, dungeon checkpoints (descending fractions in (0,1)), maxWipes and checkpointRewardFraction ranges, checkpoint floors where no encounter on the table can field a non-passive boss/raid monster, invalid skill definitions). Returns `problems` (human-readable, empty if the draft is clean) and `info` (advisory, never blocking: monsters with no level set and therefore no level scaling, tier hints from HP, checkpoint-floor encounters that can come without a boss and so get no checkpoints, dungeon fields that have no effect).",
       inputSchema: {
         versionId: z.string(),
       },

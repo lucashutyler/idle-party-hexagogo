@@ -4,6 +4,7 @@ import {
   FORECAST_HORIZON_WITHOUT_ENRAGE_MS,
   FORECAST_MAX_REASONS,
   FORECAST_MIN_SIMS,
+  FORECAST_MIN_SIMS_PER_STRATUM,
   FORECAST_SIM_BUDGET,
   createForecastJob,
   defaultHorizonMs,
@@ -301,6 +302,28 @@ describe('room forecasts', () => {
     expect(r).toMatchObject({ winPct: 100, ci: [88.6, 100], stalemates: 0 });
   });
 
+  it('samples every table entry before stopping, so a rare deadly tail is never left out', () => {
+    const encounters: Record<string, EncounterDefinition> = { ...ENCOUNTERS };
+    const table = [entry('easy', 50)];
+    for (let i = 0; i < 25; i++) {
+      const id = `tail${i}`;
+      encounters[id] = { ...explicit(id, i >= 15 ? 'killer' : 'weakling'), name: `Tail ${i}` };
+      table.push(entry(id, 2));
+    }
+    const r = runForecast({ ...room(table), encounters }, { key: 'k' });
+    expect(r.strata).toHaveLength(26);
+    expect(r.sims).toBeGreaterThanOrEqual(26 * FORECAST_MIN_SIMS_PER_STRATUM);
+    expect(r.winPct).toBe(80);
+    expect(r.ci[0]).toBeLessThan(80);
+  });
+
+  it('widens the interval by the share of entries the budget never reached', () => {
+    const r = runForecast(room([entry('deadly', 9), entry('easy', 1)]), { key: 'k', maxSims: 1 });
+    expect(r.strata?.map(s => s.entryId)).toEqual(['deadly']);
+    const hi = Math.round(wilsonInterval(0, 1)[1] * 1000) / 10;
+    expect(r.ci).toEqual([0, Math.round((hi * 0.9 + 10) * 10) / 10]);
+  });
+
   it('caps sims by the strongest tier and honours overrides', () => {
     expect(runForecast(room([entry('easy'), entry('boss_deadly')]), { key: 'k' }).sims).toBe(FORECAST_SIM_BUDGET.boss);
     expect(runForecast(room([entry('easy'), entry('raid_deadly')]), { key: 'k' }).sims).toBe(FORECAST_SIM_BUDGET.raid);
@@ -373,7 +396,7 @@ describe('dungeon forecasts', () => {
     expect(r.winPct).toBe(0);
     expect(r.losses).toBe(r.sims);
     expect(r.floors?.[1]).toEqual({ floor: 2, winPct: 0, boss: true, attempts: 2 });
-    expect(r.reasons[0].code).toBe('needs_group');
+    expect(r.reasons[0]).toEqual({ code: 'needs_group', tone: 'bad', text: 'Bosses are built for groups. Invite friends.' });
   });
 
   it('start from the requester\'s resume point', () => {
@@ -392,6 +415,32 @@ describe('dungeon forecasts', () => {
 
     const clamped = runForecast(dungeon(floors, { start: { floorIndex: 9, phase: 99 } }), { key: 'd' });
     expect(clamped.floors).toEqual([{ floor: 2, winPct: 100, boss: true, attempts: 1 }]);
+  });
+
+  it('number floors by position, whatever the authored floor numbers', () => {
+    const floors = [floor(1, [entry('easy')]), floor(3, [entry('easy')]), floor(7, [entry('easy')])];
+    expect(runForecast(dungeon(floors), { key: 'd' }).floors?.map(f => f.floor)).toEqual([1, 2, 3]);
+    expect(runForecast(dungeon(floors, { start: { floorIndex: 1 } }), { key: 'd' }).floors?.map(f => f.floor)).toEqual([2, 3]);
+  });
+
+  it('judge fight length by the slowest floor\'s fights, not the whole run', () => {
+    const monsters = {
+      ...MONSTERS,
+      brute: monsterDef({ id: 'brute', name: 'Brute', hp: 2000, damage: 1 }),
+      ogre: monsterDef({ id: 'ogre', name: 'Ogre', hp: 7000, damage: 1 }),
+    };
+    const encounters = { ...ENCOUNTERS, brutes: explicit('brutes', 'weakling'), ogres: explicit('ogres', 'weakling') };
+    encounters.brutes.placements = [{ monsterId: 'brute', gridPosition: 4 }];
+    encounters.ogres.placements = [{ monsterId: 'ogre', gridPosition: 4 }];
+    const run = (floors: DungeonFloor[]) => runForecast({ ...dungeon(floors), monsters, encounters }, { key: 'd' });
+
+    const short = run([1, 2, 3, 4].map(n => floor(n, [entry('brutes')])));
+    expect(short.winPct).toBe(100);
+    expect(short.medianMs).toBeGreaterThan(60000);
+    expect(short.reasons.map(x => x.code)).not.toContain('no_healer');
+
+    const long = run([floor(1, [entry('brutes')]), floor(2, [entry('ogres')])]);
+    expect(long.reasons.map(x => x.code)).toContain('no_healer');
   });
 
   it('multiply per-floor clear chances', () => {
@@ -435,6 +484,14 @@ describe('live battle forecasts', () => {
     const fromClone = runForecast({ kind: 'battle', state: cloneCombatState(live) }, { key: 'battle:1:5000', partyKey: 'pk-live' });
     expect(fromClone).toEqual(r);
   });
+
+  it('only suggest a henchman for a lost boss fight outside a dungeon', () => {
+    const doomed = createPartyCombatState([hero()], [makeMonster(4, { hp: 1e9, damage: 100000, tier: 'boss' })]);
+    const needsGroup = (henchmenAllowed?: boolean) => runForecast({ kind: 'battle', state: doomed, henchmenAllowed }, { key: 'b' })
+      .reasons.find(x => x.code === 'needs_group')?.text;
+    expect(needsGroup()).toBe('Bosses are built for groups. Invite friends or hire a henchman.');
+    expect(needsGroup(false)).toBe('Bosses are built for groups. Invite friends.');
+  });
 });
 
 describe('forecast horizon', () => {
@@ -476,6 +533,8 @@ describe('forecast reasons', () => {
     }]);
     expect(codes({ bossFight: true, humanPlayers: 3, winPct: 30 })).toEqual([]);
     expect(codes({ bossFight: true, humanPlayers: 1, winPct: 40 })).toEqual([]);
+    expect(forecastReasons({ ...base, bossFight: true, winPct: 30, henchmenAllowed: false })[0].text)
+      .toBe('Bosses are built for groups. Invite friends.');
   });
 
   it('warns when the kill takes longer than the enrage allows', () => {

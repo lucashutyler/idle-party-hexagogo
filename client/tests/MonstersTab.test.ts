@@ -314,4 +314,17 @@ describe('MonstersTab', () => {
     setValue(modal, '#mf-tier', 'boss');
     expect(hint.textContent).toBe('');
   });
+
+  it('escapes non-numeric authored values instead of injecting markup', () => {
+    const payload = '"><img id="pwn" src="x">';
+    const hostile = {
+      ...structuredClone(SHAMAN), tier: 'boss', level: payload, hp: payload, damage: payload, damageType: payload,
+      xp: payload, goldMin: payload, goldMax: payload, attackInterval: payload,
+      enrage: { afterSeconds: payload, stepSeconds: payload, stepPercent: payload, maxStacks: payload },
+    } as unknown as MonsterDefinition;
+    new MonstersTab().render(container, makeCtx([hostile]));
+    expect(document.getElementById('pwn')).toBeNull();
+    openEdit(container, 'test_shaman');
+    expect(document.getElementById('pwn')).toBeNull();
+  });
 });

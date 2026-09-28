@@ -684,7 +684,7 @@ function checkStalemate(step: Step): void {
     state.lastProgressMs = state.elapsedMs;
     return;
   }
-  const bossAlive = state.monsters.some(m => isAlive(m) && isBossTier(m.tier));
+  const bossAlive = state.monsters.some(m => isAlive(m) && !m.passive && isBossTier(m.tier));
   if (state.elapsedMs - state.lastProgressMs >= (bossAlive ? BOSS_STALEMATE_WINDOW_MS : STALEMATE_WINDOW_MS)) {
     step.log.push('The fight drags on — the party withdraws.');
     finish(step, 'defeat');
@@ -742,7 +742,7 @@ function playerLevel(player: PartyCombatant): CombatLevel {
 
 function monsterLevel(monster: CombatMonster): CombatLevel {
   const derived = monster.levelSource ? monster.levelSource !== 'authored' : monster.level === undefined;
-  return { level: sanitizeLevel(monster.level), derived };
+  return { level: sanitizeLevel(monster.level), derived, estimated: derived };
 }
 
 /** A monster's damage to a player: gap × mastery × rating mitigation × set resist %, floor 1. */
@@ -854,12 +854,13 @@ function pulseDotGroups(dots: DotEffect[]): DotGroup[] {
   const grouped = new Map<string, DotGroup>();
   for (let i = dots.length - 1; i >= 0; i--) {
     const dot = dots[i];
-    const group = grouped.get(dot.name);
+    const key = `${dot.name}|${dot.source ? `${dot.source.side}:${dot.source.pos}` : ''}`;
+    const group = grouped.get(key);
     if (group) {
       group.total += dot.damagePerTick;
       group.count++;
     } else {
-      grouped.set(dot.name, {
+      grouped.set(key, {
         name: dot.name,
         label: dot.label ?? dot.name,
         total: dot.damagePerTick,

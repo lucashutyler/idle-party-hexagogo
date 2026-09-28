@@ -25,12 +25,12 @@ function result(overrides: Partial<ForecastResult> = {}): ForecastResult {
   };
 }
 
-function fakeClient(cached: ServerForecastMessage | null = null) {
+function fakeClient(cached: ServerForecastMessage | null = null, previous: ServerForecastMessage | null = null) {
   let listener: ((msg: ServerForecastMessage) => void) | null = null;
   return {
     lastState: { social: { party: { forecastKey: 'pk1' } }, itemDefinitions: {} },
     requestForecast: vi.fn(() => cached),
-    peekForecast: vi.fn(() => null),
+    peekForecast: vi.fn(() => previous),
     sendEnterDungeon: vi.fn(),
     onForecast(cb: (msg: ServerForecastMessage) => void) {
       listener = cb;
@@ -150,6 +150,27 @@ describe('DungeonEntryPopup', () => {
     expect(document.querySelector('.dungeon-entry-note')).toBeNull();
     (document.querySelector('.dungeon-entry-enter') as HTMLButtonElement).click();
     expect(client.sendEnterDungeon).toHaveBeenCalledWith(1, 2, 'trial');
+  });
+
+  it('keeps showing the last estimate, dimmed, when the server cannot compute a new one', () => {
+    const client = fakeClient(message(null, 'unavailable'), message(result()));
+    const popup = new DungeonEntryPopup(client as unknown as GameClient);
+    popup.show(dungeon, 1, 2);
+    const card = document.querySelector('.dungeon-entry-forecast') as HTMLElement;
+    expect(card.dataset.state).toBe('stale');
+    expect(card.querySelector('.forecast-foot')!.textContent).toContain('updating…');
+    client.emit(message(null, 'unavailable'));
+    expect(card.dataset.state).toBe('stale');
+    popup.hide();
+  });
+
+  it('hides the forecast when unavailable and nothing was estimated before', () => {
+    const client = fakeClient();
+    const popup = new DungeonEntryPopup(client as unknown as GameClient);
+    popup.show(dungeon, 1, 2);
+    client.emit(message(null, 'unavailable'));
+    expect((document.querySelector('.dungeon-entry-forecast') as HTMLElement).dataset.state).toBe('none');
+    popup.hide();
   });
 
   it('marks results for another party as stale and hides denied forecasts', () => {

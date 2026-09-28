@@ -90,6 +90,17 @@ describe('stalemate window', () => {
     const trash = run(undefined);
     expect(trash.elapsedMs).toBe(trash.lastProgressMs + STALEMATE_WINDOW_MS);
   });
+
+  it('ignores a passive boss-tier wall', () => {
+    pinRandom();
+    const state = createPartyCombatState([makePlayer('A', 7, { hp: 1e6 })], [
+      makeMonster(1, { id: 'gate', name: 'Gate', hp: 1e9, passive: true, tier: 'boss' }),
+      makeMonster(7, { skills: HEALER_SKILLS }),
+    ]);
+    runTo(state, 400000);
+    expect(state.result).toBe('defeat');
+    expect(state.elapsedMs).toBe(state.lastProgressMs + STALEMATE_WINDOW_MS);
+  });
 });
 
 describe('boss checkpoints', () => {

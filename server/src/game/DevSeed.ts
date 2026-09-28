@@ -5,10 +5,10 @@
  * Two seed passes, both idempotent:
  *   1. seedDevContent — merges 20 generated zones + ~1000 tiles (plus the
  *      zone-scaled monsters, encounters and the raid dungeon) into
- *      ContentStore. A world that has the marker zone but no raid predates
- *      v3 and is upgraded once without clobbering edits; a world with the
- *      raid is left alone. Tiles that collide with existing coords are
- *      skipped too.
+ *      ContentStore. A world that has the marker zone, no v3 definition at
+ *      all and a zone still on its untouched v2 table predates v3 and is
+ *      upgraded once without clobbering edits; any other seeded world is left
+ *      alone. Tiles that collide with existing coords are skipped too.
  *   2. seedDevPlayers — creates 100 verified accounts (bot_001..100),
  *      assigns each a class/level/position/party, and persists their
  *      saves to disk. Skipped if even one bot's save already exists,
@@ -23,11 +23,13 @@
 
 import {
   generateDevWorld,
+  DEV_ZONE_PREFIX,
   DEV_SEED_MARKER_ZONE_ID,
   DEV_MIXED_ENCOUNTER_ID,
   DEV_RAID_DUNGEON_ID,
   ALL_CLASS_NAMES,
   type ClassName,
+  type DevWorldOutput,
   type EncounterTableEntry,
   type WorldTileDefinition,
 } from '@idle-party-rpg/shared';
@@ -38,6 +40,8 @@ import type { AccountStore } from '../auth/AccountStore.js';
 const DEV_BOT_COUNT = 100;
 const DEV_PARTY_SEED = 7919;
 const DEV_PLAYER_SEED = 1337;
+/** What the v2 generator (seed 1) put where the v3 raid entrance now goes. */
+const V2_RAID_ENTRANCE = { name: 'Misted Holt', type: 'plains' };
 
 /**
  * Mirror of the shared mulberry32 PRNG so server-side seeding is
@@ -57,7 +61,7 @@ function mulberry32(seed: number): () => number {
 
 /**
  * Merge the procedurally-generated dev world (zones, rooms, zone-scaled monsters,
- * encounters, raid) into the content store, or upgrade a pre-raid dev world once.
+ * encounters, raid) into the content store, or upgrade a v2 dev world once.
  * True when content changed.
  */
 export async function seedDevContent(content: ContentStore): Promise<boolean> {
@@ -66,8 +70,13 @@ export async function seedDevContent(content: ContentStore): Promise<boolean> {
     console.log('[DevSeed] Dev world already seeded — skipping.');
     return false;
   }
-  const { zones, tiles, encounters, monsters, dungeons } = generateDevWorld({ seed: 1 });
+  const generated = generateDevWorld({ seed: 1 });
+  const { zones, tiles, encounters, monsters, dungeons } = generated;
   if (content.getZone(DEV_SEED_MARKER_ZONE_ID)) {
+    if (!isUntouchedV2World(content, generated)) {
+      console.log('[DevSeed] Dev world already seeded — skipping.');
+      return false;
+    }
     const zoneTables = zones
       .filter(z => isUntouchedLegacyTable(content.getZone(z.id)?.encounterTable))
       .map(z => ({ zoneId: z.id, encounterTable: z.encounterTable }));
@@ -165,14 +174,21 @@ export async function seedDevPlayers(
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
+/** Still v2: a zone keeps its v2 table (the upgrade replaces every one) and no v3 dungeon or encounter exists. */
+function isUntouchedV2World(content: ContentStore, generated: DevWorldOutput): boolean {
+  const hasV3 = generated.dungeons.some(d => content.getDungeon(d.id))
+    || generated.encounters.some(e => e.id.startsWith(DEV_ZONE_PREFIX) && content.getEncounter(e.id));
+  return !hasV3 && generated.zones.some(z => isUntouchedLegacyTable(content.getZone(z.id)?.encounterTable));
+}
+
 /** A v2 dev zone table nobody edited: exactly the shared mixed encounter at weight 1. */
 function isUntouchedLegacyTable(table: EncounterTableEntry[] | undefined): boolean {
   return table?.length === 1 && table[0].encounterId === DEV_MIXED_ENCOUNTER_ID && table[0].weight === 1;
 }
 
 /**
- * The generated raid entrance, when the live room at its position is still the plain generated room
- * (same GUID and zone, walkable, nothing linked or gated). Null when it was edited or already links.
+ * The generated raid entrance, when the live room at its position is still the plain v2 room
+ * (same GUID, zone, name and type, nothing linked or gated). Null when it was edited or already links.
  */
 function raidEntranceUpgrade(content: ContentStore, generatedTiles: WorldTileDefinition[]): WorldTileDefinition | null {
   const generated = generatedTiles.find(t => t.dungeonId === DEV_RAID_DUNGEON_ID);
@@ -181,7 +197,8 @@ function raidEntranceUpgrade(content: ContentStore, generatedTiles: WorldTileDef
   const untouched = !!live
     && live.id === generated.id
     && live.zone === generated.zone
-    && isLikelyTraversable(live.type)
+    && live.name === V2_RAID_ENTRANCE.name
+    && live.type === V2_RAID_ENTRANCE.type
     && !live.dungeonId && !live.shopId && !live.npcId && !live.requiredItemId
     && !live.encounterTable && !live.entryRequirements && !live.transitions?.length;
   return untouched ? generated : null;

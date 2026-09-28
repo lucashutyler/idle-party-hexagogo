@@ -31,7 +31,7 @@ async function v2DevWorld(store: ContentStore, editEntrance: (tile: WorldTileDef
   const legacyZones = zones.map(z => ({ ...z, encounterTable: z.encounterTable.length > 0 ? LEGACY_TABLE.map(e => ({ ...e })) : [] }));
   const legacyTiles = tiles.map(t => {
     if (t.dungeonId !== DEV_RAID_DUNGEON_ID) return t;
-    const plain: WorldTileDefinition = { ...t, type: 'plains', name: 'Vale Hollow' };
+    const plain: WorldTileDefinition = { ...t, type: 'plains', name: 'Misted Holt' };
     delete plain.dungeonId;
     editEntrance(plain);
     return plain;
@@ -138,6 +138,33 @@ describe('Dev seed content merge', () => {
     expect(store.getZone(DEV_SEED_MARKER_ZONE_ID)!.encounterTable).toEqual([]);
     expect(store.getMonster(firstMonster)).toBeUndefined();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('does not upgrade again after the raid is deleted', async () => {
+    const store = new ContentStore();
+    await v2DevWorld(store);
+    expect(await seedDevContent(store)).toBe(true);
+    const firstMonster = generateDevWorld({ seed: 1 }).monsters[0].id;
+    expect((await store.deleteMonster(firstMonster)).success).toBe(true);
+    expect((await store.deleteDungeon(DEV_RAID_DUNGEON_ID)).success).toBe(true);
+    save.mockClear();
+
+    expect(await seedDevContent(store)).toBe(false);
+    expect(store.getDungeon(DEV_RAID_DUNGEON_ID)).toBeUndefined();
+    expect(store.getMonster(firstMonster)).toBeUndefined();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('keeps a renamed entrance room as the author left it', async () => {
+    const store = new ContentStore();
+    await v2DevWorld(store, tile => { tile.name = 'Author Room'; });
+
+    expect(await seedDevContent(store)).toBe(true);
+
+    const entrance = liveTileAt(store, generatedEntrance())!;
+    expect(entrance.name).toBe('Author Room');
+    expect(entrance.dungeonId).toBeUndefined();
+    expect(store.getDungeon(DEV_RAID_DUNGEON_ID)).toBeDefined();
   });
 
   it('drops loot entries for items the live world does not have', async () => {

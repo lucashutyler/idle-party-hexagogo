@@ -395,11 +395,12 @@ export class RecapModal {
     requestAnimationFrame(step);
   }
 
-  /** Escape belongs to whatever sits above the recap (Player Options opened from a warning). */
+  /** Escape belongs to whatever window sits above the recap (Player Options opened from a warning), not to toasts. */
   private isTopmost(): boolean {
     const z = Number(this.overlay?.style.zIndex || 0);
     return ![...document.querySelectorAll<HTMLElement>('body > *')]
-      .some(el => el !== this.overlay && el !== this.toast && Number(el.style.zIndex || 0) > z);
+      .some(el => el !== this.overlay && el !== this.toast && el.getAttribute('role') !== 'status'
+        && Number(el.style.zIndex || 0) > z);
   }
 
   private acknowledge(): void {

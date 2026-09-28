@@ -12,6 +12,7 @@ import {
   initials,
   interruptStampText,
   isBossOrRaid,
+  leaveDungeonWarning,
   masteryLine,
   monsterLevelBadge,
   pipsKey,
@@ -192,6 +193,18 @@ describe('boss bar text', () => {
     expect(retriesText(2)).toBe('2 retries left');
     expect(retriesText(1)).toBe('1 retry left');
     expect(retriesText(0)).toBe('No retries left');
+  });
+
+  it('asks before Leave walks out of a fight under way on a checkpoint floor', () => {
+    const floor = { checkpoints: [0.66, 0.33], wipes: 1, maxWipes: 3 };
+    expect(leaveDungeonWarning(floor, true)).toBe('Leaving now counts as a defeat and uses up one retry. Leave anyway?');
+    expect(leaveDungeonWarning({ ...floor, wipes: 3 }, true)).toContain('your checkpoint will be lost');
+    expect(leaveDungeonWarning({ checkpoints: [0.5], wipes: 0, maxWipes: 0 }, true)).toContain('your checkpoint will be lost');
+    expect(leaveDungeonWarning({ checkpoints: [0.5] }, true)).toBe('Leaving now counts as a defeat and uses up one retry. Leave anyway?');
+    expect(leaveDungeonWarning(floor, false)).toBeNull();
+    expect(leaveDungeonWarning({ checkpoints: [] }, true)).toBeNull();
+    expect(leaveDungeonWarning({}, true)).toBeNull();
+    expect(leaveDungeonWarning(null, true)).toBeNull();
   });
 
   it('tells a regroup from a fresh or resumed boss fight', () => {

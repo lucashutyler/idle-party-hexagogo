@@ -230,6 +230,12 @@ export class ServerBattleTimer {
     }), Math.max(0, delayMs));
   }
 
+  /** Call off a retreat scheduled with {@link scheduleRetreat}; the fight goes on. */
+  cancelRetreat(): void {
+    if (this.retreatTimeout) clearTimeout(this.retreatTimeout);
+    this.retreatTimeout = undefined;
+  }
+
   /** After a fight ends early: walk on if the next room is open (after the result pause), else fight again here at once. */
   private moveOnOrFightHere(): void {
     const canMove = this.party.hasDestination && (this.canMoveToNextTile?.() ?? false);

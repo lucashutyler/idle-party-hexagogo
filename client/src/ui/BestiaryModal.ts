@@ -21,6 +21,8 @@ const TIER_BADGES: Partial<Record<MonsterTier, { glyph: string; label: string }>
 
 const PCT = ' %';
 const MASTERY_TOAST_MS = 5000;
+const BESTIARY_CARD_ROWS = 3;
+export const BESTIARY_REFRESH_MS = 1000;
 
 /** Progress from the current rank's threshold to the next (1 when mastered). */
 export function masteryProgress(entry: Pick<MasteryEntry, 'kills' | 'prevAt' | 'nextAt'>): number {
@@ -117,6 +119,80 @@ export function renderBestiaryRow(entry: MasteryEntry, viewerLevel: number | und
     + '</div></div>';
 }
 
+/** Shows `entries` as rows in `container`, patching rows in place so their portraits and position survive. */
+export function syncBestiaryRows(
+  container: HTMLElement,
+  entries: readonly MasteryEntry[],
+  viewerLevel: number | undefined,
+  opts?: { compact?: boolean },
+): void {
+  const existing = new Map<string, HTMLElement>();
+  for (const row of Array.from(container.children) as HTMLElement[]) {
+    if (row.classList.contains('bestiary-row')) existing.set(row.dataset.monsterId ?? '', row);
+  }
+  const template = document.createElement('template');
+  const rows = entries.map(entry => {
+    template.innerHTML = renderBestiaryRow(entry, viewerLevel, opts);
+    const fresh = template.content.firstElementChild as HTMLElement;
+    const row = existing.get(entry.monsterId);
+    if (!row) return fresh;
+    for (const name of row.getAttributeNames()) if (!fresh.hasAttribute(name)) row.removeAttribute(name);
+    for (const name of fresh.getAttributeNames()) row.setAttribute(name, fresh.getAttribute(name)!);
+    const main = row.querySelector('.bestiary-main');
+    const freshMain = fresh.querySelector('.bestiary-main');
+    if (main && freshMain && main.innerHTML !== freshMain.innerHTML) main.replaceWith(freshMain);
+    return row;
+  });
+  rows.forEach((row, i) => {
+    const at = container.children[i] ?? null;
+    if (at !== row) container.insertBefore(row, at);
+  });
+  while (container.children.length > rows.length) container.lastElementChild!.remove();
+}
+
+/** The Char screen's bestiary card; re-renders only when what it shows changes. */
+export class BestiaryCard {
+  private key = '';
+
+  constructor(private el: HTMLElement) {}
+
+  update(summary: MasterySummary | undefined, full: readonly MasteryEntry[], viewerLevel: number | undefined): void {
+    if (!summary) {
+      this.key = '';
+      delete this.el.dataset.mode;
+      this.el.innerHTML = '';
+      return;
+    }
+    const rows = closestToNextRank(mergeBestiaryEntries(full, summary.recent), BESTIARY_CARD_ROWS);
+    const key = JSON.stringify([summary.discovered, summary.mastered, viewerLevel, rows]);
+    if (key === this.key) return;
+    this.key = key;
+    this.render(summary, rows, viewerLevel);
+  }
+
+  private render(summary: MasterySummary, rows: readonly MasteryEntry[], viewerLevel: number | undefined): void {
+    const mode = summary.discovered === 0 ? 'empty' : 'list';
+    if (this.el.dataset.mode !== mode) {
+      this.el.dataset.mode = mode;
+      const label = '<div class="items-section-label">Bestiary <span class="items-section-count"></span></div>';
+      this.el.innerHTML = mode === 'empty'
+        ? `${label}<div class="bestiary-card"><div class="bestiary-card-empty">`
+          + 'Defeat monsters to fill your bestiary. Each rank makes you a little stronger against them.</div></div>'
+        : `${label}<div class="bestiary-card">`
+          + '<div class="bestiary-card-summary"></div>'
+          + '<div class="bestiary-card-rows" role="list" aria-label="Closest to the next rank"></div>'
+          + '<button type="button" class="pixel-btn bestiary-view-all">View all ›</button>'
+          + '</div>';
+    }
+    this.el.querySelector('.items-section-count')!.textContent = `(${summary.discovered})`;
+    if (mode === 'empty') return;
+    this.el.querySelector('.bestiary-card-summary')!.textContent = bestiarySummaryText(summary);
+    const rowsEl = this.el.querySelector<HTMLElement>('.bestiary-card-rows')!;
+    rowsEl.hidden = rows.length === 0;
+    syncBestiaryRows(rowsEl, rows, viewerLevel, { compact: true });
+  }
+}
+
 function levelBadge(level: number, viewerLevel: number | undefined): string {
   const con = levelCon(level, viewerLevel ?? level);
   const info = LEVEL_CON_INFO[con];
@@ -132,6 +208,10 @@ export class BestiaryModal {
   private query = '';
   private sort: BestiarySort = 'closest';
   private unsubBestiary?: () => void;
+  private unsubState?: () => void;
+  private shownVersion: number | undefined;
+  private renderedAt = 0;
+  private refreshTimer?: ReturnType<typeof setTimeout>;
   private keyHandler = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') this.close();
   };
@@ -188,6 +268,7 @@ export class BestiaryModal {
     document.addEventListener('keydown', this.keyHandler);
 
     this.unsubBestiary = this.gameClient.onBestiary(() => this.renderList());
+    this.unsubState = this.gameClient.subscribe(state => this.onMasteryVersion(state.character?.mastery?.version));
     this.gameClient.requestBestiary();
     this.renderList();
 
@@ -199,6 +280,10 @@ export class BestiaryModal {
     if (!this.overlay) return;
     this.unsubBestiary?.();
     this.unsubBestiary = undefined;
+    this.unsubState?.();
+    this.unsubState = undefined;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
     document.removeEventListener('keydown', this.keyHandler);
     release(this.overlay);
     this.overlay.remove();
@@ -207,10 +292,25 @@ export class BestiaryModal {
     this.summaryEl = null;
   }
 
+  private onMasteryVersion(version: number | undefined): void {
+    if (version === this.shownVersion || this.refreshTimer) return;
+    const wait = this.renderedAt + BESTIARY_REFRESH_MS - Date.now();
+    if (wait <= 0) {
+      this.renderList();
+      return;
+    }
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      this.renderList();
+    }, wait);
+  }
+
   private renderList(): void {
     if (!this.listEl || !this.summaryEl) return;
     const state = this.gameClient.lastState;
     const summary = state?.character?.mastery;
+    this.shownVersion = summary?.version;
+    this.renderedAt = Date.now();
     const bestiary = this.gameClient.lastBestiary;
     if (summary) this.summaryEl.textContent = bestiarySummaryText(summary);
     if (!bestiary) {
@@ -223,17 +323,23 @@ export class BestiaryModal {
       return;
     }
     const shown = sortBestiary(filterBestiary(entries, this.query), this.sort);
-    const viewerLevel = state?.character?.level;
-    this.listEl.innerHTML = shown.length > 0
-      ? shown.map(e => renderBestiaryRow(e, viewerLevel)).join('')
-      : '<div class="bestiary-empty">No monsters match your search.</div>';
+    if (shown.length === 0) {
+      this.listEl.innerHTML = '<div class="bestiary-empty">No monsters match your search.</div>';
+      return;
+    }
+    syncBestiaryRows(this.listEl, shown, state?.character?.level);
   }
 }
 
-/** Rank-ups of monsters whose earlier rank is known, filtered to the ones worth a toast. */
-export function masteryRankUps(known: ReadonlyMap<string, number>, entries: readonly MasteryEntry[]): MasteryEntry[] {
+/**
+ * Rank-ups worth a toast. Unknown monsters count as rank 0 only when the discovered count grew
+ * by at least as many, so a first boss kill toasts but a known-but-unseeded monster does not.
+ */
+export function masteryRankUps(known: ReadonlyMap<string, number>, entries: readonly MasteryEntry[], newlyDiscovered = 0): MasteryEntry[] {
+  const unknown = entries.filter(e => !known.has(e.monsterId)).length;
+  const unknownAreNew = unknown > 0 && unknown <= newlyDiscovered;
   return entries.filter(e => {
-    const before = known.get(e.monsterId);
+    const before = known.get(e.monsterId) ?? (unknownAreNew ? 0 : undefined);
     return before !== undefined && e.rank > before && isMasteryMoment(e.rank, e.tier);
   });
 }
@@ -245,6 +351,7 @@ export function masteryToastText(entry: Pick<MasteryEntry, 'name' | 'rank' | 'bo
 /** Toasts live mastery rank-ups; ranks gained while away are left to the recap. */
 export class MasteryToasts {
   private known = new Map<string, number>();
+  private discovered: number | null = null;
   private toast: HTMLElement | null = null;
   private timer?: ReturnType<typeof setTimeout>;
   private unsubscribers: (() => void)[] = [];
@@ -252,9 +359,9 @@ export class MasteryToasts {
   constructor(private gameClient: GameClient, private onOpen: () => void) {
     this.unsubscribers.push(
       gameClient.onBestiary(msg => this.seed(msg.entries)),
-      gameClient.subscribe(state => this.update(state.character?.mastery?.recent ?? [], gameClient.isInitialState)),
+      gameClient.subscribe(state => this.update(state.character?.mastery, gameClient.isInitialState)),
     );
-    if (gameClient.lastState) this.update(gameClient.lastState.character?.mastery?.recent ?? [], true);
+    if (gameClient.lastState) this.update(gameClient.lastState.character?.mastery, true);
   }
 
   destroy(): void {
@@ -267,9 +374,12 @@ export class MasteryToasts {
     for (const e of entries) if (!this.known.has(e.monsterId)) this.known.set(e.monsterId, e.rank);
   }
 
-  private update(recent: readonly MasteryEntry[], snapshot: boolean): void {
+  private update(summary: MasterySummary | undefined, snapshot: boolean): void {
+    const recent = summary?.recent ?? [];
     if (snapshot && recent.length > 0 && !this.gameClient.lastBestiary) this.gameClient.requestBestiary();
-    const ups = snapshot ? [] : masteryRankUps(this.known, recent);
+    const newlyDiscovered = summary && this.discovered !== null ? summary.discovered - this.discovered : 0;
+    if (summary) this.discovered = summary.discovered;
+    const ups = snapshot ? [] : masteryRankUps(this.known, recent, newlyDiscovered);
     for (const e of recent) this.known.set(e.monsterId, e.rank);
     const best = ups.sort((a, b) => b.rank - a.rank)[0];
     if (best) this.show(best);
