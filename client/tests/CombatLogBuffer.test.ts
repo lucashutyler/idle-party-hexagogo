@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CombatLogEntry } from '@idle-party-rpg/shared';
-import { CombatLogBuffer } from '../src/combat/CombatLogBuffer';
+import { CombatLogBuffer, isJournalLine, liveLineType } from '../src/combat/CombatLogBuffer';
 
 function journal(...ids: number[]): CombatLogEntry[] {
   return ids.map(id => ({ id, text: `entry ${id}`, type: 'victory' as const }));
@@ -141,5 +141,24 @@ describe('CombatLogBuffer live release', () => {
     expect(texts(buffer)).toEqual(['entry 1', 'older battle', 'a', 'b', 'c', 'd']);
     expect(buffer.pendingCount).toBe(0);
     expect(buffer.generation).toBeGreaterThan(gen);
+  });
+});
+
+describe('live line types', () => {
+  it('styles the engine checkpoint line as a checkpoint and everything else as combat', () => {
+    expect(liveLineType('Checkpoint 2 reached!')).toBe('checkpoint');
+    expect(liveLineType('Goblin hits you for Checkpoint 2 reached!')).toBe('damage');
+    expect(liveLineType('Goblin Chieftain is enraged! (×1.3)')).toBe('damage');
+    const buffer = new CombatLogBuffer();
+    buffer.pushLive(1, ['You hit Goblin for 3 physical damage', 'Checkpoint 1 reached!']);
+    buffer.replaceLive(2, ['Checkpoint 2 reached!']);
+    expect(buffer.entries.map(e => e.type)).toEqual(['damage', 'checkpoint', 'checkpoint']);
+  });
+
+  it('tells journal lines from live lines', () => {
+    const buffer = new CombatLogBuffer();
+    buffer.ingestJournal(journal(1));
+    buffer.pushLive(1, ['hit']);
+    expect(buffer.entries.map(isJournalLine)).toEqual([true, false]);
   });
 });

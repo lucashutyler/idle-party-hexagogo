@@ -24,6 +24,7 @@ import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, unit
 import type { PlaybackUnit, UnitStatics } from '../combat/CombatPlayback';
 import { CombatFx } from '../combat/CombatFx';
 import type { BannerTone, FloaterVariant, FxPoint } from '../combat/CombatFx';
+import { isJournalLine } from '../combat/CombatLogBuffer';
 import { CombatLogFormatter } from '../combat/CombatLogFormatter';
 import { CombatLogView } from '../combat/CombatLogView';
 import { CombatSkillBar } from '../combat/CombatSkillBar';
@@ -31,6 +32,7 @@ import type { SkillBarLayout, SkillBarState } from '../combat/CombatSkillBar';
 import { UnitCard } from '../combat/CombatUnitCard';
 import type { CardIdentity } from '../combat/CombatUnitCard';
 import {
+  bossOpening,
   enrageSlotText,
   escapeHtml,
   formatAmount,
@@ -61,14 +63,31 @@ const BOSS_HP_EPSILON = 0.005;
 const ANNOUNCE_DELAY_MS = 60;
 const LIVE_FORECASTS_KEPT = 4;
 const ANNOUNCED_LOG_TYPES = new Set(['retreat', 'checkpoint']);
+const BOSS_STARTS_KEPT = 3;
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
 }
 
+function bossRunKey(dungeon: { dungeonId: string; floor: number }): string {
+  return `${dungeon.dungeonId}:${dungeon.floor}`;
+}
+
 /** The header stands in for the log ticker only on short screens, where the ticker is hidden; the chat sheet hides the log too. */
 export function headerOpensLog(shortScreen: boolean, chatOpen: boolean): boolean {
   return shortScreen && !chatOpen;
+}
+
+export interface LiveForecast {
+  result: ForecastResult | null;
+  pending: boolean;
+}
+
+/** A re-forecast keeps the last estimate on screen, marked as updating, until the new one lands. */
+export function mergeLiveForecast(prev: LiveForecast | undefined, msg: ServerForecastMessage): LiveForecast {
+  if (msg.status === 'ok' && msg.result) return { result: msg.result, pending: false };
+  if (msg.status === 'pending') return { result: prev?.result ?? null, pending: true };
+  return { result: null, pending: false };
 }
 
 function variantFor(dmgType: string | undefined): FloaterVariant {
@@ -139,12 +158,14 @@ export class CombatScreen implements Screen {
   private bossHpShown = -1;
   private bossTextKey = '';
   private toughFight = false;
-  private liveForecasts = new Map<number, ServerForecastMessage>();
+  private liveForecasts = new Map<number, LiveForecast>();
   private forecastChipKey = '';
   private forecastPopover: HTMLElement | null = null;
   private announceQueue: string[] = [];
   private announceTimer?: ReturnType<typeof setTimeout>;
   private lastJournalSeq = 0;
+  private bossStarts: { battleId: number; run: string; wipes: number }[] = [];
+  private headerLatch: { battleId: number; state: ServerStateMessage } | null = null;
 
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
@@ -400,7 +421,8 @@ export class CombatScreen implements Screen {
     if (writeText) {
       this.updateClock();
       this.updateBossText();
-      if (this.lastState) this.updateRunButton(this.lastState);
+      const header = this.headerLatch?.state ?? this.lastState;
+      if (header) this.updateRunButton(header);
       this.refreshMonsterPopup();
     }
     this.gameClient.combatLog.release(this.playback.battleId, this.playback.renderTime);
@@ -445,6 +467,7 @@ export class CombatScreen implements Screen {
     if (battleChanged) {
       this.closeForecastPopover();
       this.adoptCachedForecast();
+      if (this.lastState) this.updateHeader(this.lastState);
     }
     this.renderForecastChip();
   }
@@ -723,14 +746,30 @@ export class CombatScreen implements Screen {
       return;
     }
     const resumed = boss.resumedFromPhase ?? 0;
-    if (resumed > 0) {
-      const d = this.lastState?.dungeon;
-      const left = retriesLeft(d?.wipes, d?.maxWipes);
-      const sub = `Checkpoint ${resumed}${left !== null ? ` · ${retriesText(left)}` : ''}`;
-      this.showBanner('REGROUP', 'regroup', 1400, sub);
-      return;
+    const d = this.lastState?.dungeon;
+    const battleId = this.playback.battleId;
+    const run = d ? bossRunKey(d) : '';
+    const wipes = d?.wipes ?? 0;
+    const previous = [...this.bossStarts].reverse().find(s => s.battleId !== battleId && s.run === run);
+    if (d && battleId !== null) this.rememberBossStart(battleId, run, wipes);
+    const left = retriesLeft(d?.wipes, d?.maxWipes);
+    const retries = left !== null ? ` · ${retriesText(left)}` : '';
+    switch (bossOpening(resumed, wipes, previous?.wipes ?? null)) {
+      case 'regroup':
+        this.showBanner('REGROUP', 'regroup', 1400, `${resumed > 0 ? `Checkpoint ${resumed}` : 'Another attempt'}${retries}`);
+        break;
+      case 'resume':
+        this.showBanner('BOSS FIGHT!', 'boss', 1300, `From checkpoint ${resumed}${retries}`);
+        break;
+      default:
+        this.showBanner('BOSS FIGHT!', 'boss', 1300);
     }
-    this.showBanner('BOSS FIGHT!', 'boss', 1300);
+  }
+
+  private rememberBossStart(battleId: number, run: string, wipes: number): void {
+    this.bossStarts = this.bossStarts.filter(s => s.battleId !== battleId);
+    this.bossStarts.push({ battleId, run, wipes });
+    if (this.bossStarts.length > BOSS_STARTS_KEPT) this.bossStarts.shift();
   }
 
   private showBanner(text: string, tone: BannerTone, holdMs: number, sub?: string): void {
@@ -760,7 +799,7 @@ export class CombatScreen implements Screen {
     if (this.isActive) {
       const fresh: string[] = [];
       for (let i = entries.length - 1; i >= 0 && entries[i].seq > this.lastJournalSeq; i--) {
-        if (ANNOUNCED_LOG_TYPES.has(entries[i].type)) fresh.push(entries[i].text);
+        if (ANNOUNCED_LOG_TYPES.has(entries[i].type) && isJournalLine(entries[i])) fresh.push(entries[i].text);
       }
       for (const text of fresh.reverse()) this.announce(text);
     }
@@ -785,6 +824,11 @@ export class CombatScreen implements Screen {
       return;
     }
     this.bossBar.style.display = '';
+    const d = this.lastState?.dungeon;
+    const battleId = this.playback.battleId;
+    if (d && battleId !== null && !this.bossStarts.some(s => s.battleId === battleId)) {
+      this.rememberBossStart(battleId, bossRunKey(d), d.wipes ?? 0);
+    }
     const tier = bossUnits.find(s => isBossOrRaid(s.tier))?.tier;
     if (tier) this.bossBar.dataset.tier = tier;
     else delete this.bossBar.dataset.tier;
@@ -853,8 +897,9 @@ export class CombatScreen implements Screen {
   private handleForecast(msg: ServerForecastMessage): void {
     if (msg.target?.kind !== 'battle') return;
     const battleId = msg.target.battleId;
+    const merged = mergeLiveForecast(this.liveForecasts.get(battleId), msg);
     this.liveForecasts.delete(battleId);
-    this.liveForecasts.set(battleId, msg);
+    this.liveForecasts.set(battleId, merged);
     while (this.liveForecasts.size > LIVE_FORECASTS_KEPT) {
       const oldest = this.liveForecasts.keys().next().value;
       if (oldest === undefined) break;
@@ -869,22 +914,24 @@ export class CombatScreen implements Screen {
     const battleId = this.playback.battleId;
     if (battleId === null || this.liveForecasts.has(battleId)) return;
     const cached = this.gameClient.peekForecast({ kind: 'battle', battleId });
-    if (cached) this.liveForecasts.set(battleId, cached);
+    if (cached) this.liveForecasts.set(battleId, mergeLiveForecast(undefined, cached));
   }
 
-  /** The live forecast to show: a result, 'loading' while the server works, or null to hide the chip. */
-  private liveForecast(): ForecastResult | 'loading' | null {
+  /** The live forecast to show: a result (stale while a newer one is computed), 'loading', or null to hide the chip. */
+  private liveForecast(): { view: ForecastResult | 'loading'; stale: boolean } | null {
     const battleId = this.playback.battleId;
     if (!this.toughFight || battleId === null) return null;
-    const msg = this.liveForecasts.get(battleId);
-    if (!msg) return null;
-    if (msg.status === 'pending') return 'loading';
-    return msg.status === 'ok' ? msg.result : null;
+    const entry = this.liveForecasts.get(battleId);
+    if (!entry) return null;
+    if (entry.result) return { view: entry.result, stale: entry.pending };
+    return entry.pending ? { view: 'loading', stale: false } : null;
   }
 
   private renderForecastChip(): void {
-    const forecast = this.liveForecast();
-    const key = forecast === null ? '' : forecast === 'loading' ? 'loading' : `${forecast.key}|${forecast.winPct}|${forecast.ci.join(',')}|${forecast.sims}`;
+    const live = this.liveForecast();
+    const forecast = live?.view ?? null;
+    const stale = !!live?.stale;
+    const key = forecast === null ? '' : forecast === 'loading' ? 'loading' : `${forecast.key}|${forecast.winPct}|${forecast.ci.join(',')}|${forecast.sims}|${stale}`;
     if (key === this.forecastChipKey) return;
     this.forecastChipKey = key;
     if (forecast === null) {
@@ -894,8 +941,8 @@ export class CombatScreen implements Screen {
       return;
     }
     this.forecastBtn.style.display = '';
-    this.forecastBtn.innerHTML = renderForecastRing(forecast, { kind: 'battle', compact: true });
-    this.forecastBtn.dataset.state = forecast === 'loading' ? 'loading' : 'ready';
+    this.forecastBtn.innerHTML = renderForecastRing(forecast, { kind: 'battle', compact: true, stale });
+    this.forecastBtn.dataset.state = forecast === 'loading' ? 'loading' : stale ? 'stale' : 'ready';
     this.forecastBtn.setAttribute('aria-label', forecast === 'loading'
       ? 'Estimating your chances'
       : `${this.forecastBtn.querySelector('.forecast-chip')?.getAttribute('aria-label') ?? 'Win chance'}. Show details`);
@@ -907,7 +954,7 @@ export class CombatScreen implements Screen {
       this.closeForecastPopover();
       return;
     }
-    const forecast = this.liveForecast();
+    const forecast = this.liveForecast()?.view;
     if (!forecast || forecast === 'loading') return;
     this.closePopover();
     const pop = document.createElement('div');
@@ -920,7 +967,7 @@ export class CombatScreen implements Screen {
 
   private renderForecastPopoverContent(): void {
     const pop = this.forecastPopover;
-    const forecast = this.liveForecast();
+    const forecast = this.liveForecast()?.view;
     if (!pop) return;
     if (!forecast || forecast === 'loading') {
       this.closeForecastPopover();
@@ -1119,7 +1166,18 @@ export class CombatScreen implements Screen {
     this.popoverSkillId = '';
   }
 
-  private updateHeader(state: ServerStateMessage): void {
+  /** The server moves on to the next floor or room while the fight's result is still on screen; the header waits for the stage. */
+  private headerSource(state: ServerStateMessage): ServerStateMessage {
+    const battleId = this.playback.battleId;
+    if (battleId === null || state.battle.visual === 'fighting' || this.headerLatch?.battleId !== battleId) {
+      this.headerLatch = battleId === null ? null : { battleId, state };
+      return state;
+    }
+    return this.headerLatch.state;
+  }
+
+  private updateHeader(latest: ServerStateMessage): void {
+    const state = this.headerSource(latest);
     const d = state.dungeon;
     if (d) {
       this.locationLabel.textContent = d.name;

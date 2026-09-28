@@ -100,6 +100,17 @@ describe('DungeonEntryPopup', () => {
     popup.hide();
   });
 
+  it('keeps cleared floors plain when a resumed forecast only lists the boss floor', () => {
+    const client = fakeClient(message(result({ floors: [{ floor: 3, winPct: 0, boss: true, attempts: 3 }] })));
+    const popup = new DungeonEntryPopup(client as unknown as GameClient);
+    popup.show(dungeon, 1, 2);
+    const pips = [...document.querySelectorAll<HTMLElement>('.dungeon-floor-pip')];
+    expect(pips.map(p => p.dataset.boss ?? '')).toEqual(['', '', 'true']);
+    expect(pips.map(p => p.dataset.band ?? '')).toEqual(['', '', '3']);
+    expect(pips.map(p => p.querySelector('.dungeon-floor-glyph')!.textContent)).toEqual(['1', '2', '♛']);
+    popup.hide();
+  });
+
   it('shows no resume marker for a fresh start', () => {
     const client = fakeClient(message(result({ key: 'v|1|pk1|dungeon:trial:0:0:0' })));
     const popup = new DungeonEntryPopup(client as unknown as GameClient);

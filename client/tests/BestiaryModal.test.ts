@@ -4,8 +4,11 @@ import {
   BestiaryModal,
   closestToNextRank,
   filterBestiary,
+  MasteryToasts,
   masteryProgress,
+  masteryRankUps,
   masteryStars,
+  masteryToastText,
   mergeBestiaryEntries,
   nextRankText,
   renderBestiaryRow,
@@ -131,5 +134,70 @@ describe('BestiaryModal', () => {
     modal.open();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(modal.isOpen).toBe(false);
+  });
+});
+
+describe('mastery rank-up toasts', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('keeps only rank-ups of known monsters that are worth a toast', () => {
+    const known = new Map([['goblin', 1], ['wolf', 0], ['chief', 0]]);
+    const ups = masteryRankUps(known, [
+      goblin,
+      entry({ monsterId: 'wolf', name: 'Wolf', rank: 1 }),
+      entry({ monsterId: 'chief', name: 'Goblin Chieftain', rank: 1, tier: 'boss' }),
+      entry({ monsterId: 'rat', name: 'Rat', rank: 3 }),
+    ]);
+    expect(ups.map(e => e.monsterId)).toEqual(['goblin', 'chief']);
+    expect(masteryToastText(goblin)).toBe('Mastery rank 2: Goblin · +4 % against them');
+  });
+
+  function fakeToastClient() {
+    const c = {
+      isInitialState: true,
+      lastState: null,
+      stateListener: null as ((s: unknown) => void) | null,
+      subscribe(cb: (s: unknown) => void) { c.stateListener = cb; return () => { c.stateListener = null; }; },
+      lastBestiary: null,
+      requestBestiary: vi.fn(),
+      onBestiary() { return () => {}; },
+      push(recent: MasteryEntry[], initial = false) {
+        c.isInitialState = initial;
+        c.stateListener!({ character: { mastery: { discovered: recent.length, mastered: 0, version: 1, recent } } });
+      },
+    };
+    return c;
+  }
+
+  it('treats the state already cached at construction as a snapshot', () => {
+    const client = fakeToastClient();
+    (client as { lastState: unknown }).lastState = { character: { mastery: { discovered: 1, mastered: 0, version: 1, recent: [goblin] } } };
+    client.isInitialState = false;
+    const toasts = new MasteryToasts(client as unknown as GameClient, () => {});
+    expect(document.querySelector('.mastery-toast')).toBeNull();
+    expect(client.requestBestiary).toHaveBeenCalled();
+    client.push([{ ...goblin, rank: 3, bonusPct: 6 }]);
+    expect(document.querySelector('.mastery-toast')).toBeTruthy();
+    toasts.destroy();
+  });
+
+  it('toasts a live rank-up, not ranks seen on (re)connect, and opens the bestiary when tapped', () => {
+    const client = fakeToastClient();
+    const onOpen = vi.fn();
+    const toasts = new MasteryToasts(client as unknown as GameClient, onOpen);
+    client.push([entry({ monsterId: 'goblin', name: 'Goblin', rank: 1 })], true);
+    client.push([{ ...goblin, rank: 2 }], true);
+    expect(document.querySelector('.mastery-toast')).toBeNull();
+    expect(client.requestBestiary).toHaveBeenCalled();
+    client.push([{ ...goblin, rank: 3, bonusPct: 6 }]);
+    const toast = document.querySelector('.mastery-toast') as HTMLButtonElement;
+    expect(toast.textContent).toBe('⭐ Mastery rank 3: Goblin · +6 % against them');
+    toast.click();
+    expect(onOpen).toHaveBeenCalled();
+    expect(document.querySelector('.mastery-toast')).toBeNull();
+    toasts.destroy();
+    expect(client.stateListener).toBeNull();
   });
 });

@@ -164,6 +164,7 @@ export type NotificationNavigationTarget =
   | { kind: 'party' }
   | { kind: 'friend_requests' }
   | { kind: 'dm_reply'; username: string }
+  | { kind: 'options' }
   | { kind: 'none' };
 
 /**
@@ -184,6 +185,8 @@ export function resolveNotificationNavigation(
       const from = entry.payload?.fromUsername;
       return typeof from === 'string' ? { kind: 'dm_reply', username: from } : { kind: 'none' };
     }
+    case 'auto_retreat':
+      return { kind: 'options' };
     default:
       return { kind: 'none' };
   }

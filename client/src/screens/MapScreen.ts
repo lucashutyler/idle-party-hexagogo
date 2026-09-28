@@ -25,6 +25,7 @@ export class MapScreen implements Screen {
   private dungeonEntryPopup?: DungeonEntryPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private moveToastTimeout?: ReturnType<typeof setTimeout>;
+  private shownForecastKey: string | null = null;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
@@ -70,6 +71,15 @@ export class MapScreen implements Screen {
     if (fresh) return this.toRoomForecastState(fresh, false);
     const previous = this.gameClient.peekForecast(target);
     return previous?.result ? this.toRoomForecastState(previous, true) : 'loading';
+  }
+
+  /** Re-asks for the open room's forecast once the party's forecast inputs change (gear, formation, members). */
+  private refreshOpenRoomForecast(): void {
+    const forecastKey = this.gameClient.lastState?.social?.party?.forecastKey ?? null;
+    if (forecastKey === this.shownForecastKey) return;
+    this.shownForecastKey = forecastKey;
+    const tileId = this.roomView?.visibleForecastTileId;
+    if (tileId) this.roomView!.updateForecast(tileId, this.roomForecastState(tileId));
   }
 
   private toRoomForecastState(msg: ServerForecastMessage, forceStale: boolean): RoomForecastState {
@@ -212,6 +222,7 @@ export class MapScreen implements Screen {
       this.roomView!.forecastTileId = (tileDef?.id && explored && tileInfo.isTraversable && !(playerOnTile && state?.dungeon))
         ? tileDef.id
         : null;
+      this.shownForecastKey = state?.social?.party?.forecastKey ?? null;
       this.roomView!.show(tileInfo);
     });
 
@@ -254,6 +265,8 @@ export class MapScreen implements Screen {
         const snap = this.gameClient.isInitialState;
         this.map.applyServerState(state, snap);
       }
+      this.refreshOpenRoomForecast();
     });
+    this.refreshOpenRoomForecast();
   }
 }

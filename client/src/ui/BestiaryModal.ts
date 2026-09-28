@@ -1,5 +1,5 @@
 import type { MasteryEntry, MasterySummary, MonsterTier } from '@idle-party-rpg/shared';
-import { LEVEL_CON_INFO, levelCon } from '@idle-party-rpg/shared';
+import { LEVEL_CON_INFO, isMasteryMoment, levelCon } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderAssetImg } from './assets';
@@ -20,6 +20,7 @@ const TIER_BADGES: Partial<Record<MonsterTier, { glyph: string; label: string }>
 };
 
 const PCT = ' %';
+const MASTERY_TOAST_MS = 5000;
 
 /** Progress from the current rank's threshold to the next (1 when mastered). */
 export function masteryProgress(entry: Pick<MasteryEntry, 'kills' | 'prevAt' | 'nextAt'>): number {
@@ -226,6 +227,78 @@ export class BestiaryModal {
     this.listEl.innerHTML = shown.length > 0
       ? shown.map(e => renderBestiaryRow(e, viewerLevel)).join('')
       : '<div class="bestiary-empty">No monsters match your search.</div>';
+  }
+}
+
+/** Rank-ups of monsters whose earlier rank is known, filtered to the ones worth a toast. */
+export function masteryRankUps(known: ReadonlyMap<string, number>, entries: readonly MasteryEntry[]): MasteryEntry[] {
+  return entries.filter(e => {
+    const before = known.get(e.monsterId);
+    return before !== undefined && e.rank > before && isMasteryMoment(e.rank, e.tier);
+  });
+}
+
+export function masteryToastText(entry: Pick<MasteryEntry, 'name' | 'rank' | 'bonusPct'>): string {
+  return `Mastery rank ${entry.rank}: ${entry.name} · +${entry.bonusPct}${PCT} against them`;
+}
+
+/** Toasts live mastery rank-ups; ranks gained while away are left to the recap. */
+export class MasteryToasts {
+  private known = new Map<string, number>();
+  private toast: HTMLElement | null = null;
+  private timer?: ReturnType<typeof setTimeout>;
+  private unsubscribers: (() => void)[] = [];
+
+  constructor(private gameClient: GameClient, private onOpen: () => void) {
+    this.unsubscribers.push(
+      gameClient.onBestiary(msg => this.seed(msg.entries)),
+      gameClient.subscribe(state => this.update(state.character?.mastery?.recent ?? [], gameClient.isInitialState)),
+    );
+    if (gameClient.lastState) this.update(gameClient.lastState.character?.mastery?.recent ?? [], true);
+  }
+
+  destroy(): void {
+    for (const unsubscribe of this.unsubscribers) unsubscribe();
+    this.unsubscribers = [];
+    this.remove();
+  }
+
+  private seed(entries: readonly MasteryEntry[]): void {
+    for (const e of entries) if (!this.known.has(e.monsterId)) this.known.set(e.monsterId, e.rank);
+  }
+
+  private update(recent: readonly MasteryEntry[], snapshot: boolean): void {
+    if (snapshot && recent.length > 0 && !this.gameClient.lastBestiary) this.gameClient.requestBestiary();
+    const ups = snapshot ? [] : masteryRankUps(this.known, recent);
+    for (const e of recent) this.known.set(e.monsterId, e.rank);
+    const best = ups.sort((a, b) => b.rank - a.rank)[0];
+    if (best) this.show(best);
+  }
+
+  private show(entry: MasteryEntry): void {
+    this.remove();
+    const toast = document.createElement('button');
+    toast.type = 'button';
+    toast.className = 'recap-toast mastery-toast';
+    toast.setAttribute('role', 'status');
+    toast.textContent = `⭐ ${masteryToastText(entry)}`;
+    toast.addEventListener('click', () => {
+      this.remove();
+      this.onOpen();
+    });
+    document.body.appendChild(toast);
+    bringToFront(toast);
+    this.toast = toast;
+    this.timer = setTimeout(() => this.remove(), MASTERY_TOAST_MS);
+  }
+
+  private remove(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+    if (!this.toast) return;
+    release(this.toast);
+    this.toast.remove();
+    this.toast = null;
   }
 }
 

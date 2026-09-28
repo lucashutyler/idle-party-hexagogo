@@ -43,7 +43,9 @@ describe('recap helpers', () => {
     expect(p).toMatchObject({ label: 'Level 3', gainText: `+42${P} of a level`, levelledUp: false });
     expect(p.baseFrac).toBeCloseTo(0.2);
     expect(p.fillFrac).toBeCloseTo(0.62);
-    expect(recapLevelProgress(ledger({ xpFracTo: 0.201 })).gainText).toBe(`+<1${P} of a level`);
+    expect(recapLevelProgress(ledger({ xpFracTo: 0.204 })).gainText).toBe(`+0.4${P} of a level`);
+    expect(recapLevelProgress(ledger({ xpFracTo: 0.2003 })).gainText).toBe(`+<0.1${P} of a level`);
+    expect(recapLevelProgress(ledger({ xpFracTo: 0.2 })).gainText).toBe(`+0${P} of a level`);
   });
 
   it('describes level-ups in levels gained', () => {
@@ -72,6 +74,19 @@ describe('recap helpers', () => {
       .toBe('Your party found Ember Blade.');
   });
 
+  it('names the rarest find even when a lesser one happened later', () => {
+    const l = ledger({
+      notableItems: [{ itemId: 'blade', count: 1, rarity: 'heirloom' }, { itemId: 'boots', count: 1, rarity: 'rare' }],
+      moments: [
+        moment('rare_item', NOW - 5 * MIN, 'Found Ancestral Blade', { itemId: 'blade' }),
+        moment('rare_item', NOW - MIN, 'Found Magma Boots', { itemId: 'boots' }),
+      ],
+    });
+    const names: Record<string, string> = { blade: 'Ancestral Blade', boots: 'Magma Boots' };
+    expect(recapHeadline(l, undefined, id => (names[id] ? { name: names[id] } as never : undefined)))
+      .toBe('Your party found Ancestral Blade.');
+  });
+
   it('falls back to where the party kept fighting', () => {
     expect(recapHeadline(ledger(), 'Old Mill')).toBe('Your party kept fighting in Old Mill.');
     expect(recapHeadline(ledger(), undefined)).toBe('Your party kept fighting.');
@@ -97,6 +112,16 @@ describe('recap helpers', () => {
     expect(warnings[0]).toMatchObject({ kind: 'losses', action: 'options' });
     expect(warnings[0].text).toBe('You lost 38 of 120 fights. Auto-retreat can keep your party out of losing fights.');
     expect(recapWarnings(ledger({ battles: 120, wins: 100, losses: 20 }))).toEqual([]);
+  });
+
+  it('words the loss nudge for the auto-retreat setting in effect', () => {
+    const l = ledger({ battles: 7, wins: 5, losses: 2 });
+    expect(recapWarnings(l, () => '', 40)[0]).toEqual({
+      kind: 'losses', action: 'options', text: `You lost 2 of 7 fights with auto-retreat below 40${P}. A higher setting leaves more of them.`,
+    });
+    expect(recapWarnings(l, () => '', 60)[0]).toEqual({
+      kind: 'losses', action: 'map', text: 'You lost 2 of 7 fights. An easier room may suit your party better.',
+    });
   });
 
   it('warns about a stopped route, dungeon exits and lost items', () => {
@@ -166,6 +191,22 @@ describe('RecapModal', () => {
     (overlay.querySelector('.recap-continue') as HTMLButtonElement).click();
     expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
     expect(document.querySelector('.recap-overlay')).toBeNull();
+    modal.destroy();
+  });
+
+  it('leaves Escape to a window opened above the recap', () => {
+    const client = fakeClient();
+    const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW });
+    client.recapListener!(ledger({ battles: 120, wins: 82, losses: 38 }));
+    const overlay = document.querySelector('.recap-overlay') as HTMLElement;
+    const options = document.createElement('div');
+    options.style.zIndex = String(parseInt(overlay.style.zIndex, 10) + 1);
+    document.body.appendChild(options);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(client.sendAckRecap).not.toHaveBeenCalled();
+    options.remove();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
     modal.destroy();
   });
 

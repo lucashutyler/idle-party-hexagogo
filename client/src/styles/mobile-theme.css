@@ -3662,6 +3662,12 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   color: var(--text-3);
 }
 
+.forecast-retreat-warn {
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  color: var(--orange);
+}
+
 .forecast-retreat {
   display: flex;
   flex-wrap: wrap;
@@ -3714,6 +3720,7 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 :is(.forecast-lvl, .bestiary-lvl)[data-con="deadly"] { --con: var(--con-deadly); }
 
 .room-view-forecast {
+  flex: none;
   width: 100%;
   margin: 8px 0 4px;
 }
@@ -3766,6 +3773,17 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 .room-view-forecast-details { margin-top: 6px; }
 .room-view-forecast-details .forecast-pop-head { display: none; }
 .room-view-forecast-details[hidden] { display: none; }
+
+.room-view-forecast-details {
+  max-height: min(46dvh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+  .room-view-forecast-details { max-height: 26dvh; }
+}
 
 .dungeon-entry-modal {
   max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom));
@@ -4363,6 +4381,28 @@ button.recap-warning-action {
   transform: translateX(-50%);
   cursor: pointer;
   animation: mt-fade-in 200ms ease-out;
+}
+
+.recap-toast.mastery-toast {
+  top: calc(var(--hud-total) + 64px);
+  border-color: var(--gold);
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+  .recap-modal {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    max-width: min(640px, 92vw);
+    max-height: 94dvh;
+  }
+
+  .recap-header,
+  .recap-body { grid-column: 1 / -1; }
+  .recap-header { padding: 8px 16px 6px; }
+  .recap-title { font-size: var(--fs-lg); }
+  .recap-footer { align-self: center; padding: 8px 0 8px 16px; }
+  .recap-actions { align-self: center; padding: 8px 16px 8px 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

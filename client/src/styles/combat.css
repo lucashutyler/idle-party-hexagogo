@@ -961,6 +961,8 @@
   line-clamp: var(--name-lines);
   overflow: hidden;
   overflow-wrap: break-word;
+  -webkit-hyphens: auto;
+  hyphens: auto;
   white-space: var(--name-wrap);
   text-overflow: ellipsis;
   color: var(--text-1);

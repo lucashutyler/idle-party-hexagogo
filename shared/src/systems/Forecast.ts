@@ -127,9 +127,8 @@ export interface ForecastReasonInput {
   worst?: { label: string; winPct: number; sharePct: number };
   partyLevel: number;
   humanPlayers: number;
-  /** Level of the strongest common enemy. */
+  /** Level of the strongest common enemy with an authored level. */
   enemyLevel?: number;
-  enemyLevelDerived?: boolean;
   bossFight?: boolean;
   casterEnemies?: boolean;
   afflictingEnemies?: boolean;
@@ -418,7 +417,6 @@ export function forecastReasons(input: ForecastReasonInput): ForecastReason[] {
   };
   const quiet = input.winPct >= FORECAST_QUIET_WIN_PCT;
   const gap = input.enemyLevel !== undefined ? Math.round(input.enemyLevel - input.partyLevel) : 0;
-  const look = input.enemyLevelDerived ? 'look about' : 'are';
 
   if (input.bossFight && input.humanPlayers < FORECAST_NEEDS_GROUP_HUMANS && input.winPct < FORECAST_NEEDS_GROUP_WIN_PCT) {
     add('needs_group', 'bad', 'Bosses are built for groups. Invite friends or hire a henchman.');
@@ -435,7 +433,7 @@ export function forecastReasons(input: ForecastReasonInput): ForecastReason[] {
     add('worst_encounter', 'bad', `${fightsShare(worst.sharePct)} here are ${worst.label}: wins ${Math.round(worst.winPct)} %`);
   }
   if (!quiet && gap >= FORECAST_LEVEL_GAP_REASON) {
-    add('level_gap', 'bad', `Enemies here ${look} ${gap} levels above your party.`);
+    add('level_gap', 'bad', `Enemies here are ${gap} levels above your party.`);
   }
   if (!input.hasHealer && input.medianMs !== null && input.medianMs > FORECAST_NO_HEALER_MEDIAN_MS) {
     add('no_healer', 'info', 'Fights here run over a minute and nobody in your party can heal.');
@@ -447,9 +445,7 @@ export function forecastReasons(input: ForecastReasonInput): ForecastReason[] {
     add('no_cleanse', 'info', 'Enemies here stun or poison and nobody in your party can cleanse it.');
   }
   if (quiet && -gap >= FORECAST_OUTLEVEL_REASON) {
-    add('outlevel', 'good', input.enemyLevelDerived
-      ? `Enemies here look about ${-gap} levels below your party.`
-      : `Your party outlevels the enemies here by ${-gap}.`);
+    add('outlevel', 'good', `Your party outlevels the enemies here by ${-gap}.`);
   }
   return reasons.slice(0, FORECAST_MAX_REASONS);
 }

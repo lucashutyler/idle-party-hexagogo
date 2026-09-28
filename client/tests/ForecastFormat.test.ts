@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  autoRetreatLikely,
   autoRetreatLine,
   forecastAriaLabel,
   forecastBand,
@@ -143,6 +144,14 @@ describe('secondary lines', () => {
     expect(autoRetreatLine(25)).toBe(`Auto-retreat: below 25${P}`);
     expect(autoRetreatLine(0)).toBe('Auto-retreat: off');
     expect(autoRetreatLine(undefined)).toBe('Auto-retreat: off');
+  });
+
+  it('predicts a relocation only when the whole upper bound is under the threshold', () => {
+    expect(autoRetreatLikely({ ci: [40, 54], sims: 200 }, 60)).toBe(true);
+    expect(autoRetreatLikely({ ci: [40, 54], sims: 200 }, 40)).toBe(false);
+    expect(autoRetreatLikely({ ci: [15, 26.1], sims: 200 }, 25)).toBe(false);
+    expect(autoRetreatLikely({ ci: [0, 10], sims: 30 }, 0)).toBe(false);
+    expect(autoRetreatLikely({ ci: [0, 0], sims: 0 }, 60)).toBe(false);
   });
 
   it('shows enemy levels only when authored', () => {

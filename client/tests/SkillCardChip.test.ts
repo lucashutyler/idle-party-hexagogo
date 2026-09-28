@@ -103,9 +103,9 @@ describe('skillComputedLine', () => {
   });
 
   it('computes Guard/Bless-style mitigation against same-level enemies', () => {
-    expect(skillComputedLine(guard)).toBe('≈50\u202f% vs same-level enemies');
+    expect(skillComputedLine(guard)).toBe('≈50\u202f% vs enemies of your level');
     const weak = skill({ type: 'passive', activeEffects: undefined, passiveEffects: [{ kind: 'magical_reduction_party', valuePerLevel: 1 }] });
-    expect(skillComputedLine(weak)).toBe('≈33\u202f% vs same-level enemies');
+    expect(skillComputedLine(weak)).toBe('≈33\u202f% vs enemies of your level');
   });
 
   it('labels each rating when a skill has both', () => {
@@ -114,7 +114,7 @@ describe('skillComputedLine', () => {
       activeEffects: undefined,
       passiveEffects: [{ kind: 'physical_reduction', valuePerLevel: 2 }, { kind: 'magical_reduction_party', valuePerLevel: 1 }],
     });
-    expect(skillComputedLine(both)).toBe('Physical ≈50\u202f% · Magical & holy ≈33\u202f% vs same-level enemies');
+    expect(skillComputedLine(both)).toBe('Physical ≈50\u202f% · Magical & holy ≈33\u202f% vs enemies of your level');
   });
 
   it('has no line for other skills', () => {
@@ -125,6 +125,6 @@ describe('skillComputedLine', () => {
   it('appends the line to the meta row', () => {
     const el = document.createElement('div');
     el.innerHTML = renderSkillCardMeta(guard);
-    expect(el.querySelector('.skill-card-meta-computed')!.textContent).toBe('≈50\u202f% vs same-level enemies');
+    expect(el.querySelector('.skill-card-meta-computed')!.textContent).toBe('≈50\u202f% vs enemies of your level');
   });
 });

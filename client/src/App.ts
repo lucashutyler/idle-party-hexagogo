@@ -22,6 +22,7 @@ import { PersistentXpBar } from './ui/PersistentXpBar';
 import { TopHud } from './ui/TopHud';
 import { NotificationCenter } from './ui/NotificationCenter';
 import { RecapModal } from './ui/RecapModal';
+import { BestiaryModal, MasteryToasts } from './ui/BestiaryModal';
 import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 
@@ -44,6 +45,7 @@ export class App {
   private chatPopout?: ChatPopout;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private recapModal?: RecapModal;
+  private masteryToasts?: MasteryToasts;
   private openOptionsDelegate?: (e: MouseEvent) => void;
 
   constructor() {
@@ -513,6 +515,9 @@ export class App {
         case 'dm_reply':
           socialScreen.startDm(target.username);
           break;
+        case 'options':
+          settingsScreen.openPlayerOptions();
+          break;
         case 'none':
           break;
       }
@@ -533,6 +538,10 @@ export class App {
       if (target?.closest?.(`[${OPEN_OPTIONS_ATTR}]`)) settingsScreen.openPlayerOptions();
     };
     document.addEventListener('click', this.openOptionsDelegate, true);
+
+    this.masteryToasts?.destroy();
+    const bestiaryModal = new BestiaryModal(this.gameClient);
+    this.masteryToasts = new MasteryToasts(this.gameClient, () => bestiaryModal.open());
 
     this.recapModal?.destroy();
     this.recapModal = new RecapModal(this.gameClient, {

@@ -155,6 +155,11 @@ export function worstStratumLine(worst: NonNullable<ForecastResult['worst']>): s
   return `${lead} ${worst.label}: wins ${formatPct(worst.winPct)}`;
 }
 
+/** Mirrors the server's relocate rule: the whole room's upper confidence bound sits below the threshold. */
+export function autoRetreatLikely(result: Pick<ForecastStats, 'ci' | 'sims'>, belowPct: number | null | undefined): boolean {
+  return !!belowPct && result.sims > 0 && result.ci[1] < belowPct;
+}
+
 export function autoRetreatLine(belowPct: number | null | undefined): string {
   return belowPct ? `Auto-retreat: below ${formatPct(belowPct)}` : 'Auto-retreat: off';
 }

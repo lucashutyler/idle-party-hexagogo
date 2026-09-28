@@ -1,6 +1,7 @@
 import type { AutoRetreatPct, ForecastResult, PartyAutoRetreatInfo } from '@idle-party-rpg/shared';
 import { LEVEL_CON_INFO, levelCon } from '@idle-party-rpg/shared';
 import {
+  autoRetreatLikely,
   autoRetreatLine,
   forecastAriaLabel,
   forecastHeadline,
@@ -99,6 +100,9 @@ export function renderForecastPopover(result: ForecastResult, opts: ForecastPopo
     const pct = typeof opts.autoRetreat === 'object' && opts.autoRetreat !== null
       ? opts.autoRetreat.belowPct
       : opts.autoRetreat;
+    if (opts.kind === 'room' && autoRetreatLikely(result, pct)) {
+      parts.push('<div class="forecast-retreat-warn">Auto-retreat will likely move your party out of this room.</div>');
+    }
     parts.push(`<div class="forecast-retreat">${autoRetreatLine(pct)} · `
       + `<button type="button" class="forecast-retreat-change" ${OPEN_OPTIONS_ATTR}>Change</button></div>`);
   }

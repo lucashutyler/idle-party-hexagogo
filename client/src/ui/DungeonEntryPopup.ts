@@ -171,7 +171,7 @@ export class DungeonEntryPopup {
 
   private renderFloorStrip(dungeon: DungeonDefinition, result: ForecastResult | null, resume: DungeonResumePoint | null): string {
     const pips = dungeon.floors.map((floor, index) => {
-      const info = result?.floors?.find(f => f.floor === index + 1) ?? result?.floors?.[index];
+      const info = result?.floors?.find(f => f.floor === index + 1);
       const boss = floor.isBoss || info?.boss;
       const checkpoints = floorCheckpoints(floor).length > 0;
       const isResume = !!resume && resume.floorIndex === index && (resume.floorIndex > 0 || resume.phase > 0);

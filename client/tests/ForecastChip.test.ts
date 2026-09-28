@@ -83,6 +83,17 @@ describe('renderForecastPopover', () => {
     expect(root.querySelector('.forecast-retreat')).toBeNull();
   });
 
+  it('warns when the whole room is below the auto-retreat setting', () => {
+    const losing = result({ winPct: 47, ci: [40, 54] });
+    const warn = (belowPct: number, kind: 'room' | 'battle' = 'room') => mount(renderForecastPopover(losing, {
+      kind, autoRetreat: { belowPct: belowPct as 0 | 25 | 40 | 60, setBy: 'alice' },
+    })).querySelector('.forecast-retreat-warn');
+    expect(warn(60)!.textContent).toBe('Auto-retreat will likely move your party out of this room.');
+    expect(warn(40)).toBeNull();
+    expect(warn(0)).toBeNull();
+    expect(warn(60, 'battle')).toBeNull();
+  });
+
   it('says auto-retreat is off for a 0 policy', () => {
     const root = mount(renderForecastPopover(result(), { kind: 'room', autoRetreat: 0 }));
     expect(root.querySelector('.forecast-retreat')!.textContent).toContain('Auto-retreat: off');

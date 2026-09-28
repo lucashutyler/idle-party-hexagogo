@@ -105,5 +105,6 @@ describe('RoomView forecast slot', () => {
     view.show(makeInfo());
     expect((parent.querySelector('.room-view-forecast') as HTMLElement).dataset.state).toBe('stale');
     expect(parent.querySelector('.forecast-chip')!.getAttribute('data-state')).toBe('stale');
+    expect(parent.querySelector('.room-view-forecast-text')!.textContent).toBe('Wins ~9 in 10 fights · ~0:12 each · updating…');
   });
 });

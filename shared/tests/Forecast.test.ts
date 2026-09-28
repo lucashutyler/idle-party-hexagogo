@@ -463,12 +463,10 @@ describe('forecast reasons', () => {
     expect(codes({ winPct: 90, worst: { label: 'Bandits', winPct: 75, sharePct: 33.3 } })).toEqual([]);
   });
 
-  it('words the level gap by level source and stays quiet when winning', () => {
+  it('names the level gap and stays quiet when winning', () => {
     expect(forecastReasons({ ...base, enemyLevel: 14 })[0]).toEqual({
       code: 'level_gap', tone: 'bad', text: 'Enemies here are 4 levels above your party.',
     });
-    expect(forecastReasons({ ...base, enemyLevel: 14, enemyLevelDerived: true })[0].text)
-      .toBe('Enemies here look about 4 levels above your party.');
     expect(codes({ enemyLevel: 12 })).toEqual([]);
     expect(codes({ enemyLevel: 14, winPct: 95 })).toEqual([]);
   });
@@ -488,8 +486,6 @@ describe('forecast reasons', () => {
     expect(forecastReasons({ ...base, winPct: 100, enemyLevel: 3 })).toEqual([{
       code: 'outlevel', tone: 'good', text: 'Your party outlevels the enemies here by 7.',
     }]);
-    expect(forecastReasons({ ...base, winPct: 100, enemyLevel: 3, enemyLevelDerived: true })[0].text)
-      .toBe('Enemies here look about 7 levels below your party.');
     expect(codes({ winPct: 60, enemyLevel: 3 })).toEqual([]);
   });
 

@@ -15,6 +15,11 @@ function fakeClient(opts: { pct?: number; role?: 'owner' | 'leader' | 'member'; 
       },
     },
     sendSetCombatPrefs: vi.fn(),
+    listeners: [] as (() => void)[],
+    subscribe(cb: () => void) {
+      this.listeners.push(cb);
+      return () => { this.listeners = this.listeners.filter(l => l !== cb); };
+    },
   };
 }
 
@@ -74,6 +79,20 @@ describe('Player Options auto-retreat', () => {
     document.body.innerHTML = '';
     const owner = open(fakeClient({ role: 'owner' }));
     expect(owner.querySelector('.settings-option-note')).toBeNull();
+  });
+
+  it('keeps the owner note current while the window is open and stops listening once closed', () => {
+    const client = fakeClient({ role: 'member', policy: 40 });
+    const overlay = open(client);
+    const party = client.lastState.social.party as { members: { username: string; role: string }[]; autoRetreat?: { belowPct: number; setBy: string } };
+    party.autoRetreat = { belowPct: 60, setBy: 'boss' };
+    client.listeners.forEach(l => l());
+    expect(overlay.querySelector('.settings-option-note')!.textContent).toBe('Your party owner\'s setting is used (below 60 %).');
+    party.members[0].role = 'owner';
+    client.listeners.forEach(l => l());
+    expect(overlay.querySelector('.settings-option-note')).toBeNull();
+    (overlay.querySelector('.player-options-close') as HTMLButtonElement).click();
+    expect(client.listeners).toHaveLength(0);
   });
 
   it('brings an already open Player Options to the front instead of opening a second one', () => {

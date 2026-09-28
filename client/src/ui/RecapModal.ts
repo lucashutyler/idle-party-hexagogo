@@ -1,5 +1,5 @@
 import type { AwayLedger, AwayMoment, AwayMomentKind, ItemDefinition, ItemRarity } from '@idle-party-rpg/shared';
-import { AWAY_NOTABLE_MIN_RARITY, awayRarityRank, awayRecapStyle, topAwayMoments } from '@idle-party-rpg/shared';
+import { AUTO_RETREAT_OPTIONS, AWAY_NOTABLE_MIN_RARITY, awayRarityRank, awayRecapStyle, topAwayMoments } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderItemIcon } from './ItemIcon';
@@ -11,6 +11,7 @@ export const RECAP_LOSS_NUDGE_FRACTION = 0.25;
 const TOAST_LIFETIME_MS = 8000;
 const COUNT_UP_MS = 700;
 const PCT = ' %';
+const MAX_AUTO_RETREAT_PCT = Math.max(...AUTO_RETREAT_OPTIONS);
 
 const MOMENT_ICONS: Record<AwayMomentKind, string> = {
   level_up: '⬆️',
@@ -73,8 +74,7 @@ export function recapLevelProgress(ledger: Pick<AwayLedger, 'levelFrom' | 'level
     const levels = ledger.levelTo - ledger.levelFrom;
     gainText = `+${levels} ${levels === 1 ? 'level' : 'levels'}`;
   } else {
-    const pct = Math.round(gained * 100);
-    gainText = pct === 0 && gained > 0 ? `+<1${PCT} of a level` : `+${pct}${PCT} of a level`;
+    gainText = `+${formatLevelPct(gained * 100)}${PCT} of a level`;
   }
   return {
     label: levelledUp ? `Level ${ledger.levelFrom} → ${ledger.levelTo}` : `Level ${ledger.levelTo}`,
@@ -83,6 +83,13 @@ export function recapLevelProgress(ledger: Pick<AwayLedger, 'levelFrom' | 'level
     baseFrac: levelledUp ? 0 : from,
     fillFrac: to,
   };
+}
+
+/** Whole percent from 1 up; one decimal below that so small gains don't read as "+<1 %". */
+function formatLevelPct(pct: number): string {
+  if (pct <= 0) return '0';
+  if (pct >= 0.95) return String(Math.round(pct));
+  return pct < 0.05 ? '<0.1' : pct.toFixed(1);
 }
 
 function lowerFirst(s: string): string {
@@ -98,12 +105,13 @@ function momentPhrase(moment: AwayMoment, ledger: AwayLedger, item: RecapItemLoo
       return cleared ? `cleared ${cleared.name}` : lowerFirst(moment.text);
     }
     case 'rare_item': {
-      const def = moment.itemId ? item(moment.itemId) : undefined;
+      const rarest = ledger.notableItems.find(n => item(n.itemId));
+      const def = rarest ? item(rarest.itemId) : moment.itemId ? item(moment.itemId) : undefined;
       return def ? `found ${def.name}` : lowerFirst(moment.text);
     }
     case 'checkpoint': {
       const run = [...ledger.dungeons].reverse().find(d => (d.checkpoint ?? 0) > 0);
-      return run ? `reached Checkpoint ${run.checkpoint} in ${run.name}` : lowerFirst(moment.text);
+      return run ? `hit Checkpoint ${run.checkpoint} in ${run.name}` : lowerFirst(moment.text);
     }
     case 'eject': {
       const run = [...ledger.dungeons].reverse().find(d => d.outcome === 'ejected');
@@ -113,7 +121,7 @@ function momentPhrase(moment: AwayMoment, ledger: AwayLedger, item: RecapItemLoo
       return 'retreated to a safer room';
     case 'mastery': {
       const up = moment.monsterId ? ledger.masteryUps.find(m => m.monsterId === moment.monsterId) : undefined;
-      return up ? `reached mastery rank ${up.rankTo} against ${up.name}` : lowerFirst(moment.text);
+      return up ? `earned mastery rank ${up.rankTo} against ${up.name}` : lowerFirst(moment.text);
     }
     case 'closest_call':
       return ledger.closestCall ? `survived a close call against ${ledger.closestCall.vs}` : lowerFirst(moment.text);
@@ -148,14 +156,15 @@ export function commonItemCount(ledger: Pick<AwayLedger, 'items'>): number {
   return total;
 }
 
-export function recapWarnings(ledger: AwayLedger, formatTime: (at: number) => string = formatMomentTime): RecapWarning[] {
+/** `autoRetreatPct` is the setting in effect now; the nudge only suggests raising it while it can go higher. */
+export function recapWarnings(
+  ledger: AwayLedger,
+  formatTime: (at: number) => string = formatMomentTime,
+  autoRetreatPct = 0,
+): RecapWarning[] {
   const warnings: RecapWarning[] = [];
   if (ledger.battles > 0 && ledger.losses / ledger.battles >= RECAP_LOSS_NUDGE_FRACTION) {
-    warnings.push({
-      kind: 'losses',
-      text: `You lost ${fmt(ledger.losses)} of ${fmt(ledger.battles)} fights. Auto-retreat can keep your party out of losing fights.`,
-      action: 'options',
-    });
+    warnings.push(lossWarning(ledger, autoRetreatPct));
   }
   if (ledger.routeStopped) {
     warnings.push({
@@ -178,6 +187,21 @@ export function recapWarnings(ledger: AwayLedger, formatTime: (at: number) => st
     });
   }
   return warnings;
+}
+
+function lossWarning(ledger: AwayLedger, autoRetreatPct: number): RecapWarning {
+  const lost = `You lost ${fmt(ledger.losses)} of ${fmt(ledger.battles)} fights`;
+  if (!(autoRetreatPct > 0)) {
+    return { kind: 'losses', text: `${lost}. Auto-retreat can keep your party out of losing fights.`, action: 'options' };
+  }
+  if (autoRetreatPct < MAX_AUTO_RETREAT_PCT) {
+    return {
+      kind: 'losses',
+      text: `${lost} with auto-retreat below ${autoRetreatPct}${PCT}. A higher setting leaves more of them.`,
+      action: 'options',
+    };
+  }
+  return { kind: 'losses', text: `${lost}. An easier room may suit your party better.`, action: 'map' };
 }
 
 /** "Won 1,204 of 1,240 fights · +310 gold · 2,480 foes defeated", with count-up spans. */
@@ -224,7 +248,7 @@ export class RecapModal {
   private shownId: string | null = null;
   private unsubscribe: () => void;
   private keyHandler = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') this.acknowledge();
+    if (e.key === 'Escape' && this.isTopmost()) this.acknowledge();
   };
 
   constructor(private gameClient: GameClient, private opts: RecapModalOptions = {}) {
@@ -279,7 +303,9 @@ export class RecapModal {
     const where = this.gameClient.lastState?.zoneName;
     const level = recapLevelProgress(recap);
     const timeline = recapTimeline(recap);
-    const warnings = recapWarnings(recap);
+    const state = this.gameClient.lastState;
+    const warnings = recapWarnings(recap, formatMomentTime, state?.social?.party?.autoRetreat?.belowPct
+      ?? state?.character?.combatPrefs?.autoRetreatBelowPct ?? 0);
     const loot = recap.notableItems
       .map(n => ({ n, def: item(n.itemId) }))
       .filter((x): x is { n: typeof x.n; def: ItemDefinition } => !!x.def);
@@ -367,6 +393,13 @@ export class RecapModal {
       if (k < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+  }
+
+  /** Escape belongs to whatever sits above the recap (Player Options opened from a warning). */
+  private isTopmost(): boolean {
+    const z = Number(this.overlay?.style.zIndex || 0);
+    return ![...document.querySelectorAll<HTMLElement>('body > *')]
+      .some(el => el !== this.overlay && el !== this.toast && Number(el.style.zIndex || 0) > z);
   }
 
   private acknowledge(): void {

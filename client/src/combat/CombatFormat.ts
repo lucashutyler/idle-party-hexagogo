@@ -134,6 +134,14 @@ export function retriesText(left: number): string {
   return `${left} ${left === 1 ? 'retry' : 'retries'} left`;
 }
 
+export type BossOpening = 'boss' | 'regroup' | 'resume';
+
+/** A boss fight after a wipe on the same floor regroups; one that starts at a checkpoint without a new wipe resumes a saved run. */
+export function bossOpening(resumedFromPhase: number, wipes: number, previousWipes: number | null): BossOpening {
+  if (previousWipes !== null && wipes > previousWipes) return 'regroup';
+  return resumedFromPhase > 0 ? 'resume' : 'boss';
+}
+
 export interface MonsterLevelBadge {
   level: number;
   con: LevelCon;

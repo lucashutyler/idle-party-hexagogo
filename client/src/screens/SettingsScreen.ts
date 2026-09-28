@@ -15,6 +15,7 @@ const SETTINGS_NAV_PLACEHOLDER = placeholderUrl('Settings', { w: 96, h: 96, glyp
 export class SettingsScreen implements Screen {
   private container: HTMLElement;
   private optionsOverlay: HTMLElement | null = null;
+  private optionsUnsubscribe?: () => void;
   private notifPrefsOverlay: HTMLElement | null = null;
 
   constructor(containerId: string, private gameClient: GameClient) {
@@ -121,17 +122,14 @@ export class SettingsScreen implements Screen {
     document.body.appendChild(overlay);
     this.optionsOverlay = overlay;
 
-    const close = () => {
-      release(overlay);
-      overlay.remove();
-      this.optionsOverlay = null;
-    };
+    const close = () => this.closePlayerOptions();
 
     // Click outside the modal closes; click on the X closes.
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) close();
     });
     overlay.querySelector('.player-options-close')!.addEventListener('click', close);
+    this.optionsUnsubscribe = this.gameClient.subscribe(() => this.refreshAutoRetreatNote(overlay));
 
     const questHintsToggle = overlay.querySelector('#po-quest-hints') as HTMLInputElement;
     questHintsToggle.addEventListener('change', () => {
@@ -142,6 +140,26 @@ export class SettingsScreen implements Screen {
 
     bringToFront(overlay);
     wireFocusOnInteract(overlay);
+  }
+
+  private closePlayerOptions(): void {
+    this.optionsUnsubscribe?.();
+    this.optionsUnsubscribe = undefined;
+    if (!this.optionsOverlay) return;
+    release(this.optionsOverlay);
+    this.optionsOverlay.remove();
+    this.optionsOverlay = null;
+  }
+
+  /** The owner's policy and this player's role can change while the window is open. */
+  private refreshAutoRetreatNote(overlay: HTMLElement): void {
+    const row = overlay.querySelector('.settings-option-row-retreat');
+    if (!row) return;
+    const current = row.querySelector('.settings-option-note');
+    const next = this.autoRetreatNote();
+    if ((current?.outerHTML ?? '') === next) return;
+    current?.remove();
+    if (next) row.insertAdjacentHTML('beforeend', next);
   }
 
   private renderAutoRetreatRow(): string {
@@ -252,11 +270,6 @@ export class SettingsScreen implements Screen {
       this.notifPrefsOverlay.remove();
       this.notifPrefsOverlay = null;
     }
-    // Close any open player-options popup so it doesn't survive a tab switch.
-    if (this.optionsOverlay) {
-      release(this.optionsOverlay);
-      this.optionsOverlay.remove();
-      this.optionsOverlay = null;
-    }
+    this.closePlayerOptions();
   }
 }

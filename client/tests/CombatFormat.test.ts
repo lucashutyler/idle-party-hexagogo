@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bossOpening,
   enrageSlotText,
   formatAmount,
   formatClock,
@@ -191,6 +192,15 @@ describe('boss bar text', () => {
     expect(retriesText(2)).toBe('2 retries left');
     expect(retriesText(1)).toBe('1 retry left');
     expect(retriesText(0)).toBe('No retries left');
+  });
+
+  it('tells a regroup from a fresh or resumed boss fight', () => {
+    expect(bossOpening(0, 0, null)).toBe('boss');
+    expect(bossOpening(1, 1, null)).toBe('resume');
+    expect(bossOpening(1, 1, 1)).toBe('resume');
+    expect(bossOpening(1, 2, 1)).toBe('regroup');
+    expect(bossOpening(0, 1, 0)).toBe('regroup');
+    expect(bossOpening(0, 0, 3)).toBe('boss');
   });
 
   it('marks enrage as a bad status', () => {

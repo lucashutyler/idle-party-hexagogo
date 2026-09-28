@@ -46,14 +46,14 @@ export function skillMetaParts(skill: SkillDefinition): string[] {
     .filter((p): p is string => p !== null);
 }
 
-/** Mitigation of Guard/Bless-style rating options against enemies of the owner's level: "≈50 % vs same-level enemies". */
+/** Mitigation of Guard/Bless-style rating options against enemies of the owner's level: "≈50 % vs enemies of your level". */
 export function skillComputedLine(skill: SkillDefinition): string | null {
   const parts = (skill.passiveEffects ?? [])
     .filter(e => RATING_KIND_LABELS[e.kind] && (e.valuePerLevel ?? 0) > 0)
     .map(e => ({ label: RATING_KIND_LABELS[e.kind]!, pct: Math.round(skillRatingMitigation(e.valuePerLevel ?? 0) * 100) }));
   if (parts.length === 0) return null;
-  if (parts.length === 1) return `≈${parts[0].pct}\u202f% vs same-level enemies`;
-  return `${parts.map(p => `${p.label} ≈${p.pct}\u202f%`).join(' · ')} vs same-level enemies`;
+  if (parts.length === 1) return `≈${parts[0].pct}\u202f% vs enemies of your level`;
+  return `${parts.map(p => `${p.label} ≈${p.pct}\u202f%`).join(' · ')} vs enemies of your level`;
 }
 
 export function renderSkillCardChip(skill: SkillDefinition): string {

@@ -103,6 +103,11 @@ export class RoomView {
     return classIconHtml(className);
   }
 
+  /** Room whose forecast is on screen right now (null when hidden or without a forecast). */
+  get visibleForecastTileId(): string | null {
+    return this.overlay.style.display === 'none' ? null : this.shownForecastTileId;
+  }
+
   /** Patches the forecast slot when `tileId` is the room on screen. */
   updateForecast(tileId: string, state: RoomForecastState): void {
     if (this.overlay.style.display === 'none' || this.shownForecastTileId !== tileId) return;
@@ -327,7 +332,7 @@ export class RoomView {
       return;
     }
     slot.dataset.state = state.stale ? 'stale' : 'ready';
-    const headline = forecastHeadline(state.result, 'room');
+    const headline = forecastHeadline(state.result, 'room') + (state.stale ? ' · updating…' : '');
     const detailsId = `room-forecast-details-${this.shownForecastTileId ?? ''}`;
     slot.innerHTML = `<button type="button" class="room-view-forecast-btn" aria-expanded="${this.forecastExpanded}" aria-controls="${this.escapeHtml(detailsId)}">`
       + renderForecastRing(state.result, { kind: 'room', stale: state.stale })

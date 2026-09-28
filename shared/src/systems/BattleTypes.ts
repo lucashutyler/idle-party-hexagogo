@@ -29,7 +29,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.09.26.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.09.27.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 

@@ -185,6 +185,13 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Class-based combat (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong in party)
 - [x] Difficulty scaling (zone-based encounters with per-zone difficulty)
 - [x] Loot/rewards system (item drops, inventory, equipment with combat bonuses)
+- [x] Level-relative scaling (armour/resist ratings against the attacker's level, level-gap multiplier, every hit ≥ 1, ramp caps) — only for monsters with an authored level
+- [x] Monster levels and tiers (trash / elite / boss / raid), boss enrage, level-difference XP, stat templates (`suggestMonsterStats`)
+- [x] Win forecasts (Monte Carlo sims on the server, time-sliced; rooms, dungeons and live boss fights, with reasons)
+- [x] Overworld auto-retreat (skip or leave rooms the forecast says you'll lose; off / 25 / 40 / 60 %, default 25 %)
+- [x] Kill mastery + bestiary (per-monster ranks, up to +10 % against that monster)
+- [x] "While you were away" recap (toast or story modal of what happened while the game was hidden)
+- [ ] Class-relative difficulty (level scaling does not equalise the classes — glass cannons fall off sooner above their level)
 
 ### Characters & Parties
 - [x] Party entity with movement
@@ -193,7 +200,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] XP and leveling system (`floor(18000 * L^1.2 * 1.06^L)` XP to next level)
 - [x] Inventory tab (merged Char + Items — hero card, equipped gear, skill loadout, stat card, inventory grid)
 - [x] Class system (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong together)
-- [x] Damage types (physical/magical on monsters, Knight reduces physical, Priest reduces magical)
+- [x] Damage types (physical/magical/holy; Knight Guard rates against physical, Priest Bless against magical and holy)
 - [x] Henchmen (hireable NPCs for solo players)
 - [x] Party formation and management (always in a party, join, leave, kick, 3x3 grid, max 5 members)
 - [x] Party roles (owner > leader > member, promote/demote, transfer ownership)
@@ -255,7 +262,8 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Entry requirements enforcement (level, required/consumable item, classes, party size — clear rejection messages)
 - [x] Dungeon-specific loot (per-floor bonus rewards + one-time first-clear rewards per player)
 - [ ] Non-3×3 grid shapes (arbitrary combat rectangles)
-- [ ] Dungeon boss rooms, time limits, lockouts/cooldowns
+- [x] Boss checkpoints (regroup at the last checkpoint up to a wipe budget, checkpoint rewards, resume after leaving for 7 days) + a seed boss (Goblin Chieftain) and a dev raid (The Sunken Throne)
+- [ ] Dungeon time limits, lockouts/cooldowns
 - [ ] Dungeon tokens + rotating vendor, leaderboards, roguelike variant
 
 ### Server
@@ -287,7 +295,9 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Desktop font scaling (token font scale, larger on desktop via media query)
 - [x] Mobile zoom controls (+/- buttons on map) + 2-finger pinch zoom
 - [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, shop/talk/dungeon affordances), remote discovered (small popup with Go button), undiscovered (minimal)
-- [x] Dungeon entry popup + in-combat dungeon header (floor / BOSS badge + Leave)
+- [x] Dungeon entry popup + in-combat dungeon header (floor / BOSS badge + Leave); entry popup shows the run forecast, per-floor strip and resume point
+- [x] Boss fight UI (pooled boss HP bar with checkpoint flags, retry pips, enrage timer; banner queue with a screen-reader live region; level badges and tier frames on cards)
+- [x] Forecast chips (rooms, dungeons, live elite/boss fights) with verdict, likely range and reasons
 - [x] Global chat pop-out (floating/draggable/resizable on desktop, docked bottom-sheet on mobile)
 - [x] Persistent XP bar above the bottom nav, visible on every screen
 - [x] ModalStack click-order z-index across all overlays
@@ -295,7 +305,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 ### World Manager
 - [x] Separate admin client (World Manager dashboard at /admin)
 - [x] Content versioning (draft→publish→deploy pipeline with immutable snapshots)
-- [x] Monster editor (with optional flavor description shown in combat popup)
+- [x] Monster editor (with optional flavor description shown in combat popup; level, tier, enrage and a "Suggest stats" template button)
 - [x] Area/zone editor
 - [x] Quest editor (Quests tab; NPCs tab links quests to NPCs)
 - [x] Recipe editor (Recipes tab — author/edit crafting recipes without touching JSON)
