@@ -48,27 +48,6 @@ export class App {
     this.xpBarEl = document.getElementById('persistent-xp-bar')!;
     this.xpBarEl.style.display = 'none';
 
-    // Splash overlay: minimum 2-second hold, then fade once the window has
-    // finished loading. Whichever takes longer wins — fast loads still see
-    // a full 2 seconds of brand frame; slow loads get held until ready.
-    const startedAt = Date.now();
-    const MIN_HOLD_MS = 2000;
-    const dismissWhenReady = () => {
-      const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, MIN_HOLD_MS - elapsed);
-      setTimeout(() => {
-        const splash = document.getElementById('splash');
-        if (!splash || splash.classList.contains('hidden')) return;
-        splash.classList.add('hidden');
-        setTimeout(() => splash.remove(), 600);
-      }, remaining);
-    };
-    if (document.readyState === 'complete') {
-      dismissWhenReady();
-    } else {
-      window.addEventListener('load', dismissWhenReady, { once: true });
-    }
-
     // Offline screen
     this.offlineScreen = new OfflineScreen('screen-offline', () => {
       this.retryConnection();

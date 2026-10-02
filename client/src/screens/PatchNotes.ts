@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.10.02.1',
+    notes: [
+      'The game now opens straight into play — the loading screen is gone.',
+      'Text throughout the game has a new look. The old pixel lettering has been replaced with a fantasy typeface for headings and a cleaner one for everything else, so smaller text is much easier to read.',
+      'The sign-in screen has been redesigned to match, with a larger title and a bigger, easier-to-tap email field.',
+    ],
+  },
+  {
     version: '2026.09.30.3',
     notes: [
       'Your party can now hire more than one henchman, as long as each is someone different. They fill any seats your party has free.',
