@@ -138,6 +138,7 @@ function fromContent(record: Record<string, unknown>): RequiredId[] {
 function requiredIdsFor(kind: AssetKind, info: AssetKindInfo, content: ContentStore): RequiredId[] {
   switch (info.idSource) {
     case 'items': return fromContent(content.getAllItems());
+    case 'skills': return fromContent(content.getAllSkills());
     case 'monsters': return fromContent(content.getAllMonsters());
     case 'sets': return fromContent(content.getAllSets());
     case 'tileTypes': return fromContent(content.getAllTileTypes());

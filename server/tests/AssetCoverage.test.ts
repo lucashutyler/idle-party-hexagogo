@@ -125,6 +125,23 @@ describe('computeAssetCoverage counts', () => {
     expect(monsters.mount).toBe('/monster-artwork');
   });
 
+  it('enumerates skills so the skill kind reports real gaps rather than an empty set', async () => {
+    // Skills were the last content type with no asset kind, so this pins the
+    // enumeration: a required count of zero here would silently report full
+    // coverage no matter how much art was missing.
+    const { content, assets } = await setup();
+    const skillIds = Object.keys(content.getAllSkills());
+    expect(skillIds.length).toBeGreaterThan(0);
+    await assets.write('skill', skillIds[0], SQUARE);
+
+    const skills = kindOf(await computeAssetCoverage(content, assets, { kind: 'skill' }), 'skill');
+    expect(skills.required).toBe(skillIds.length);
+    expect(skills.present).toBe(1);
+    expect(skills.missing).toBe(skillIds.length - 1);
+    expect(skills.orphans).toEqual([]);
+    expect(skills.mount).toBe('/skill-artwork');
+  });
+
   it('reports zero required ids for the room-override kind, which only ever holds optional art', async () => {
     const { content, assets } = await setup();
     const report = await computeAssetCoverage(content, assets, { kind: 'tile' });
