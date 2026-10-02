@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.10.02.2',
+    notes: [
+      'Skills now have artwork. Your equipped skills show their icon, and the skill picker shows one for every skill you can slot, so you can pick at a glance instead of reading every name.',
+    ],
+  },
+  {
     version: '2026.09.30.3',
     notes: [
       'Your party can now hire more than one henchman, as long as each is someone different. They fill any seats your party has free.',

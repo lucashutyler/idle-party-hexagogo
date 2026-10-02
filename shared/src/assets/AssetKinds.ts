@@ -32,6 +32,7 @@ export const ASSET_KINDS = [
   'class-icon',
   'slot-icon',
   'nav-icon',
+  'skill',
 ] as const;
 
 export type AssetKind = (typeof ASSET_KINDS)[number];
@@ -43,6 +44,7 @@ export type AssetKind = (typeof ASSET_KINDS)[number];
  */
 export type AssetIdSource =
   | 'items'
+  | 'skills'
   | 'monsters'
   | 'sets'
   | 'shops'
@@ -284,6 +286,15 @@ export const ASSET_KIND_INFO: Record<AssetKind, AssetKindInfo> = {
     idFormat: 'Nav destination id',
     shape: 'square',
   },
+  skill: {
+    label: 'Skill',
+    description: 'Skill icons shown on the equipped-skill slots and in the skill picker.',
+    dir: 'data/skill-artwork',
+    mount: '/skill-artwork',
+    idSource: 'skills',
+    idFormat: 'SkillDefinition.id',
+    shape: 'square',
+  },
 };
 
 /**
@@ -311,6 +322,7 @@ export const MANAGED_ASSET_KINDS = [
   'class-icon',
   'slot-icon',
   'nav-icon',
+  'skill',
 ] as const;
 
 export type ManagedAssetKind = (typeof MANAGED_ASSET_KINDS)[number];
