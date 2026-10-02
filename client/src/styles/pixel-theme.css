@@ -118,6 +118,79 @@ html, body {
   flex-direction: column;
 }
 
+/* ── Screen Header (drill-down back bar) ─────────────────── */
+
+/*
+ * One shared header owned by ScreenManager, shown only at nav depth > 1.
+ * Root screens are already identified by the bottom nav, so they get no
+ * title bar — vertical space is the scarce resource on a phone.
+ */
+#screen-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 8px;
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--border-pixel);
+  /* Notched phones: this is the topmost chrome once a screen is pushed. */
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+#screen-header[hidden] {
+  display: none;
+}
+
+.screen-header-back {
+  /* 44px minimum target — see WCAG 2.5.8. */
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--pixel-font);
+  font-size: 32px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.screen-header-back:active {
+  color: var(--accent-gold);
+}
+
+.screen-header-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--display-font);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Designated scroll region. `.screen` is already overflow:hidden, so screens
+ * never scroll as a whole — content that must scroll opts in explicitly by
+ * wrapping in this class. That is the mechanism behind "limited scrolling":
+ * a list scrolls, a screen does not.
+ */
+.screen-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* ── Pixel Panel (reusable) ──────────────────────────────── */
 
 .pixel-panel {
@@ -865,25 +938,22 @@ html, body {
   border-color: var(--color-danger, #c0392b);
 }
 
-.patch-notes-panel {
-  width: 100%;
-  max-width: 500px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.patch-notes-back {
-  align-self: flex-start;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-family: var(--pixel-font);
-}
-
+/*
+ * Patch notes is its own pushed screen — the back affordance comes from
+ * ScreenManager's shared header, so the old `.patch-notes-panel` wrapper
+ * and `.patch-notes-back` button are gone.
+ *
+ * The list is the screen's single scroll region (`.screen-scroll`); the
+ * screen itself does not scroll.
+ */
 .patch-notes-list {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
+  max-width: 500px;
+  margin-inline: auto;
+  padding: 16px;
 }
 
 .patch-note-entry {

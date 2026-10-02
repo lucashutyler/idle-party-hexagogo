@@ -10,6 +10,7 @@ import { OfflineScreen } from './screens/OfflineScreen';
 import { CombatScreen } from './screens/CombatScreen';
 import { MapScreen } from './screens/MapScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { PatchNotesScreen } from './screens/PatchNotesScreen';
 import { CharItemsScreen } from './screens/CharItemsScreen';
 import { SocialScreen } from './screens/SocialScreen';
 import { CraftingScreen } from './screens/CraftingScreen';
@@ -362,7 +363,10 @@ export class App {
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient, this.worldCache);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore, this.worldCache);
     const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
-    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient);
+    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient, (id) =>
+      this.screenManager.push(id),
+    );
+    const patchNotesScreen = new PatchNotesScreen('screen-patch-notes');
 
     // Wire map username click to social screen popup
     mapScreen.setOnUserClick((username, anchor, tileCol, tileRow) => {
@@ -392,6 +396,8 @@ export class App {
     this.screenManager.register('social', document.getElementById('screen-social')!, socialScreen);
     this.screenManager.register('craft', document.getElementById('screen-craft')!, craftingScreen);
     this.screenManager.register('settings', document.getElementById('screen-settings')!, settingsScreen);
+    // Title is supplied here because it is only ever shown as a pushed screen.
+    this.screenManager.register('patch-notes', document.getElementById('screen-patch-notes')!, patchNotesScreen, 'Patch Notes');
 
     // Show bottom nav + persistent XP bar
     this.navEl.style.display = '';
