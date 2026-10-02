@@ -106,6 +106,15 @@ Per-turn animations (`updateCombatAnimations`) toggle `.attacking` / `.hit` / `.
 
 The kinds themselves live in `ASSET_KIND_INFO` (`shared/src/assets/AssetKinds.ts`) — the single source of truth that the client `AssetKind` union, the server's Express static mounts, the vite dev proxy, the admin upload API, and the MCP asset tools all derive from, so adding a kind is one row there rather than five hand-kept lists that drift. (A static mount still needs a matching dev-proxy entry or the request silently falls through to the SPA index in dev; both lists are now generated from the registry, so they can't disagree.) `artworkUrl` just delegates to the shared `assetPublicPath(kind, id)` rather than spelling `/${kind}-artwork/`, because the three **icon sets** — `class-icon` → `/class-icons`, `slot-icon` → `/slot-icons`, `nav-icon` → `/nav-icons` — predate that convention and serve from their own mounts (a few older call sites in `App.ts`/`ItemIcon.ts` still hard-code those icon paths). All 16 kinds and their id formats are tabled in [`content.md`](content.md) → "Artwork & imagery".
 
+**Shipped defaults vs operator art.** Two sources serve the same URLs, and `express.static` chains so the first mount holding the file wins:
+
+1. `data/<kind>/` — operator-supplied, uploaded through the admin dashboard. Mounted **first**, so it always overrides.
+2. `assets/<kind>/` — defaults committed to the repo. Mounted **second**.
+
+`assets/` ships `nav-icons`, `slot-icons`, `class-artwork`, `item-artwork`, and `skill-artwork`, so a fresh clone looks finished instead of falling through to `placehold.co`. `data/` stays gitignored — it holds game-state saves, which are runtime data and never belong in the repo. Before adding third-party art to `assets/`, confirm its licence permits redistribution: a public repo redistributes everything in it. The `assets/` mounts in `server/src/index.ts` reuse the registry's URL paths, so the generated dev proxy already covers them.
+
+**Skill icons** follow the same convention keyed on the skill id (`/skill-artwork/{skillId}.png`), so no field was added to `SkillDefinition`. They render in the equipped-skill slots and the skill-picker rows on `CharItemsScreen`. Unlike `renderAssetImg` there is deliberately **no `placehold.co` fallback** — the picker can list a dozen skills at once, and a placeholder per row would be both visually noisy and a pile of third-party requests. The `<img>` starts at `opacity: 0`, reveals on load, and removes itself on error, so skills without art fall back cleanly to the text-only layout.
+
 **Fade-in on fallback**: every fallback-capable `<img>` (renderAssetImg, item-square art, slot dogear, item popup, nav icon) renders with inline `opacity:0` and an `onload` handler that flips it to `1`. The browser never paints its broken-image glyph during the swap from a 404 real source to the placehold.co fallback — the surrounding slot's background / initials stand in until either the real or placeholder load resolves. A 120 ms `transition: opacity` is set on the affected image classes so the reveal feels smooth rather than snapping.
 
 ## Browser tab resume
