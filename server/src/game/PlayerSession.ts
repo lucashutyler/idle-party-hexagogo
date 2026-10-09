@@ -122,7 +122,7 @@ export class PlayerSession {
   private pushSubscriptions: WebPushSubscription[] = [];
   /** Which chat thread the player is actively looking at right now, if any — ephemeral, not persisted. */
   private chatFocus: { channelType: string; channelId: string } | null = null;
-  private availableQuests: { key: string; ids: string[]; staleAt: number } | null = null;
+  private availableQuests: { key: string; ids: string[]; computedAt: number; staleAt: number } | null = null;
   /** Per-player quest tracking. */
   quests: QuestSystem;
 
@@ -461,7 +461,7 @@ export class PlayerSession {
     const key = `${this.content.getQuestRevision()}:${this.quests.getRevision()}:${this.character.level}`;
     const now = Date.now();
     const cached = this.availableQuests;
-    if (cached && cached.key === key && now < cached.staleAt) return cached.ids;
+    if (cached && cached.key === key && now >= cached.computedAt && now < cached.staleAt) return cached.ids;
 
     const ids = acceptableQuestIds(this.content.getNpcQuestIds(), allQuests, {
       playerLevel: this.character.level,
@@ -470,7 +470,7 @@ export class PlayerSession {
       weeklyCompletions,
       now: new Date(now),
     });
-    this.availableQuests = { key, ids, staleAt: nextWeeklyReopening(weeklyCompletions, now) };
+    this.availableQuests = { key, ids, computedAt: now, staleAt: nextWeeklyReopening(weeklyCompletions, now) };
     return ids;
   }
 

@@ -217,6 +217,16 @@ describe('Quest availability in the state push', () => {
     expect(session.getState([]).availableQuestIds).toContain('q_weekly');
   });
 
+  it('recomputes when the clock steps back before a cooldown that had ended', async () => {
+    const { session } = await setup();
+    const completedAt = new Date(NOW.getTime() - 7 * DAY_MS).toISOString();
+    session.quests.loadFromSaveData({ active: [], completed: [{ questId: 'q_weekly', completedAt }], weeklyCompletions: { q_weekly: completedAt } });
+    expect(session.getState([]).availableQuestIds).toContain('q_weekly');
+
+    vi.setSystemTime(NOW.getTime() - 500);
+    expect(session.getState([]).availableQuestIds).not.toContain('q_weekly');
+  });
+
   it('recomputes when quest content changes', async () => {
     const { session, content } = await setup();
     expect(session.getState([]).availableQuestIds).toContain('q_far');
