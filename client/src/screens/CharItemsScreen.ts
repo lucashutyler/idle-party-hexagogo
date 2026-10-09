@@ -17,13 +17,16 @@ import {
   getSkillsForClass,
   getOwnedItemIds,
   getEquippedItemIds,
+  canClassEquipItem,
 } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
 import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon, RARITY_COLORS } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
+import { renderEquipCompareBlock } from '../ui/EquipCompare';
 import { renderAssetImg } from '../ui/assets';
 import { bringToFront, release } from '../ui/ModalStack';
+import { deferWhilePressed } from '../ui/render';
 
 /** Left column slots (top to bottom). Mainhand sits at the bottom of the
  *  left column with a small visual gap (no separate row anymore). */
@@ -352,96 +355,6 @@ function injectItemsStyles(): void {
   const style = document.createElement('style');
   style.id = 'items-screen-styles';
   style.textContent = `
-    .item-square {
-      position: relative;
-      aspect-ratio: 1;
-      border-radius: 4px;
-      cursor: pointer;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 2px solid rgba(180,180,180,0.25);
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
-      box-sizing: border-box;
-      min-width: 0;
-    }
-    .item-square-img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      position: absolute;
-      top: 0;
-      left: 0;
-    }
-    /* isolation: isolate on the parent square keeps the inner z-indexed
-       overlays (initials, qty, dogear, set indicator) inside their own
-       stacking context so they cannot bleed up over the chat popout. */
-    .item-square { isolation: isolate; }
-    .item-square-initials {
-      font-size: 17px;
-      color: rgba(255,255,255,0.85);
-      text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-      z-index: 1;
-      pointer-events: none;
-      text-align: center;
-      line-height: 1;
-    }
-    .item-dogear {
-      position: absolute;
-      bottom: 0;
-      right: 0;
-      width: 18px;
-      height: 18px;
-      background: rgba(240,240,240,0.85);
-      border-top-left-radius: 4px;
-      border-top: 1px solid rgba(0,0,0,0.2);
-      border-left: 1px solid rgba(0,0,0,0.2);
-      pointer-events: none;
-      z-index: 3;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .item-dogear-icon {
-      font-size: 14px;
-      line-height: 1;
-      pointer-events: none;
-    }
-    .item-square-empty {
-      cursor: default;
-    }
-    .item-square-empty .item-dogear {
-      width: 16px;
-      height: 16px;
-    }
-    .item-square-empty .item-dogear-icon {
-      font-size: 13px;
-    }
-    .item-square-qty {
-      position: absolute;
-      top: 1px;
-      right: 2px;
-      font-size: 11px;
-      color: #fff;
-      background: rgba(0,0,0,0.6);
-      padding: 0 2px;
-      border-radius: 2px;
-      pointer-events: none;
-      z-index: 2;
-      line-height: 1.2;
-    }
-    .item-square-set {
-      position: absolute;
-      top: 1px;
-      left: 2px;
-      font-size: 11px;
-      color: #e9bc18;
-      pointer-events: none;
-      z-index: 2;
-      line-height: 1;
-    }
-
     @keyframes item-border-epic {
       0%, 100% { border-color: rgba(180,180,180,0.4); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 4px rgba(238,102,227,0.3); }
       50% { border-color: rgba(200,200,200,0.5); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 0 8px rgba(238,102,227,0.6), inset 0 0 4px rgba(238,102,227,0.15); }
@@ -458,79 +371,6 @@ function injectItemsStyles(): void {
     .item-rarity-epic { animation: item-border-epic 2s ease-in-out infinite; }
     .item-rarity-legendary { animation: item-border-legendary 3s ease-in-out infinite; }
     .item-rarity-heirloom { animation: item-border-heirloom 2.5s ease-in-out infinite; }
-
-    .item-popup-overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-    .item-popup {
-      background: #1a1a2e;
-      border: 2px solid #444;
-      border-radius: 8px;
-      padding: 16px;
-      max-width: 320px;
-      width: 90%;
-      max-height: 80vh;
-      overflow-y: auto;
-      color: #e8e8e8;
-    }
-    .item-popup-artwork {
-      width: 80px;
-      height: 80px;
-      margin: 0 auto 12px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      position: relative;
-    }
-    .item-popup-artwork img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    .item-popup-artwork .item-popup-initials {
-      font-size: 32px;
-      color: rgba(255,255,255,0.85);
-      text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
-    }
-    .item-popup-name { text-align: center; font-size: 19px; margin-bottom: 8px; }
-    .item-popup-stats { font-size: 15px; margin-bottom: 8px; line-height: 1.6; }
-    .item-popup-stats div { display: flex; justify-content: space-between; }
-    .item-popup-stats .stat-label { color: #999; }
-    .item-popup-set-section { border-top: 1px solid #333; padding-top: 8px; margin-top: 8px; font-size: 15px; }
-    .item-popup-set-name { color: #e9bc18; margin-bottom: 4px; }
-    .item-popup-set-pieces { margin-bottom: 4px; }
-    .item-popup-set-piece { color: #888; margin-left: 8px; }
-    .item-popup-set-piece.owned { color: #ccc; }
-    .item-popup-set-piece.equipped { color: #66bb6a; }
-    .item-popup-set-bonus { color: #aaa; font-style: italic; }
-    .item-popup-set-breakpoints { margin-top: 4px; }
-    .item-popup-set-bp { color: #666; font-size: 14px; line-height: 1.4; }
-    .item-popup-set-bp.unlocked { color: #aaa; }
-    .item-popup-set-bp.active { color: #66bb6a; }
-    .item-popup-actions { margin-top: 12px; display: flex; gap: 8px; justify-content: center; }
-    .item-popup-actions button {
-      padding: 6px 16px; border-radius: 4px; border: 1px solid #555;
-      background: #2a2a40; color: #e8e8e8; cursor: pointer; font-family: inherit; font-size: 15px;
-    }
-    .item-popup-actions button:hover { background: #3a3a55; }
-    .item-popup-actions button.danger { border-color: #a33; color: #f88; }
-    .item-popup-actions button.danger:hover { background: #4a2020; }
-    .item-popup-actions button[disabled],
-    .item-popup-actions button[disabled]:hover {
-      background: #1a1a28;
-      color: #555;
-      border-color: #2a2a3a;
-      cursor: not-allowed;
-      opacity: 0.7;
-    }
 
     .items-search-sort {
       display: flex; gap: 6px; margin-bottom: 8px; align-items: center;
@@ -559,11 +399,6 @@ function injectItemsStyles(): void {
         gap: 6px;
       }
       .items-equip-slot-square { width: 52px; height: 52px; }
-      .item-square-initials { font-size: 19px; }
-      .item-dogear { width: 22px; height: 22px; }
-      .item-dogear-icon { font-size: 16px; }
-      .item-square-qty { font-size: 12px; }
-      .item-popup { max-width: 380px; }
     }
 
     .items-section-count { color: #888; font-size: 13px; margin-left: 4px; }
@@ -680,8 +515,11 @@ export class CharItemsScreen implements Screen {
   onActivate(): void {
     this.isActive = true;
 
-    this.unsubscribe = this.gameClient.subscribe((state) => {
-      if (this.isActive) this.updateFromState(state);
+    this.unsubscribe = this.gameClient.subscribe(() => {
+      deferWhilePressed(this.container, () => {
+        const state = this.gameClient.lastState;
+        if (this.isActive && state) this.updateFromState(state);
+      });
     });
 
     this.unsubEquipBlocked = this.gameClient.onEquipBlocked((msg) => {
@@ -1482,7 +1320,8 @@ export class CharItemsScreen implements Screen {
         // If a copy of this exact item is already in the slot, show
         // "Equipped" disabled instead of an Equip button — clicking would be
         // a no-op and the player should know it's already on.
-        const alreadyEquipped = this.lastEquipment[def.equipSlot] === itemId;
+        const heldSlot = def.equipSlot === 'twohanded' ? 'mainhand' : def.equipSlot;
+        const alreadyEquipped = this.lastEquipment[heldSlot] === itemId;
         if (alreadyEquipped) {
           actionsHtml += `<button class="popup-action-equip" data-item="${itemId}" disabled aria-disabled="true">Equipped</button>`;
         } else {
@@ -1492,17 +1331,7 @@ export class CharItemsScreen implements Screen {
       actionsHtml += `<button class="popup-action-destroy danger" data-item="${itemId}" data-max="${count}">Destroy</button>`;
     }
 
-    // Inline equip-compare block when viewing an inventory item that would
-    // replace something already equipped — saves the player from having to
-    // click Equip just to see the swap diff.
-    let extraHtml = '';
-    if (context === 'inventory' && def.equipSlot) {
-      const currentId = this.lastEquipment[def.equipSlot];
-      if (currentId && currentId !== itemId) {
-        const oldDef = this.itemDefs[currentId];
-        if (oldDef) extraHtml = this.buildEquipCompareBlock(def, oldDef);
-      }
-    }
+    const extraHtml = context === 'inventory' ? renderEquipCompareBlock(def, this.lastEquipment, this.itemDefs) : '';
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs: this.itemDefs,
@@ -1543,10 +1372,9 @@ export class CharItemsScreen implements Screen {
         const id = equipBtn.getAttribute('data-item');
         if (!id) { this.hideModal(); return; }
         const eDef = this.itemDefs[id];
-        const restrict = eDef?.classRestriction;
         // Class-restricted item the player can't use → keep the popup open
         // and pulse-highlight the class line so they catch the red text.
-        if (restrict && restrict.length > 0 && this.lastClassName && !restrict.includes(this.lastClassName)) {
+        if (eDef && this.lastClassName && !canClassEquipItem(eDef, this.lastClassName)) {
           this.pulseClassRestriction();
           return;
         }
@@ -1694,88 +1522,6 @@ export class CharItemsScreen implements Screen {
     const key = this.sortPrefKey();
     if (!key) return;
     try { localStorage.setItem(key, this.sortMode); } catch { /* ignore */ }
-  }
-
-  /**
-   * Build the inline equip-comparison HTML block. Rendered inside the item
-   * popup whenever the viewed inventory item would replace something already
-   * equipped — players see the diff up-front instead of having to click
-   * Equip just to preview the swap.
-   *
-   * Layout: header line "Replaces: <oldName>" + a 4-col grid (label / new /
-   * arrow / current). Stats shown for both items unconditionally; arrows
-   * only appear when both items contribute to the same stat.
-   */
-  private buildEquipCompareBlock(newDef: ItemDefinition, oldDef: ItemDefinition): string {
-    type StatKey = 'atk' | 'dr' | 'mr';
-    const stats: { key: StatKey; label: string }[] = [
-      { key: 'atk', label: 'ATK' },
-      { key: 'dr', label: 'DR' },
-      { key: 'mr', label: 'MR' },
-    ];
-    const itemStat = (def: ItemDefinition, key: StatKey): string | null => {
-      if (key === 'atk') {
-        const lo = def.bonusAttackMin ?? 0;
-        const hi = def.bonusAttackMax ?? 0;
-        if (lo === 0 && hi === 0) return null;
-        return lo === hi ? `+${lo}` : `+${lo}-${hi}`;
-      }
-      if (key === 'dr') {
-        const lo = def.damageReductionMin ?? 0;
-        const hi = def.damageReductionMax ?? 0;
-        if (lo === 0 && hi === 0) return null;
-        return lo === hi ? `${lo}` : `${lo}-${hi}`;
-      }
-      const lo = def.magicReductionMin ?? 0;
-      const hi = def.magicReductionMax ?? 0;
-      if (lo === 0 && hi === 0) return null;
-      return lo === hi ? `${lo}` : `${lo}-${hi}`;
-    };
-    const mid = (def: ItemDefinition, key: StatKey): number => {
-      if (key === 'atk') return ((def.bonusAttackMin ?? 0) + (def.bonusAttackMax ?? 0)) / 2;
-      if (key === 'dr') return ((def.damageReductionMin ?? 0) + (def.damageReductionMax ?? 0)) / 2;
-      return ((def.magicReductionMin ?? 0) + (def.magicReductionMax ?? 0)) / 2;
-    };
-
-    const rows = stats.map(({ key, label }) => {
-      const newV = itemStat(newDef, key);
-      const oldV = itemStat(oldDef, key);
-      if (newV === null && oldV === null) return '';
-      let arrow = '';
-      if (newV !== null && oldV !== null) {
-        const dn = mid(newDef, key);
-        const dc = mid(oldDef, key);
-        if (dn > dc) arrow = '<span class="compare-up">↑</span>';
-        else if (dn < dc) arrow = '<span class="compare-down">↓</span>';
-        else arrow = '<span class="compare-eq">=</span>';
-      }
-      return `
-        <div class="compare-row">
-          <div class="compare-cell-label">${label}</div>
-          <div class="compare-cell-new">${newV ?? '<span class="compare-dash">—</span>'}</div>
-          <div class="compare-cell-arrow">${arrow}</div>
-          <div class="compare-cell-old">${oldV ?? '<span class="compare-dash">—</span>'}</div>
-        </div>
-      `;
-    }).join('');
-
-    const oldColor = (RARITY_COLORS[oldDef.rarity ?? 'common']) ?? '#e8e8e8';
-
-    return `
-      <div class="item-popup-compare">
-        <div class="compare-block-header">
-          <span class="compare-block-label">Replaces equipped</span>
-          <span class="compare-block-old-name" style="color:${oldColor}">${this.escapeHtml(oldDef.name)}</span>
-        </div>
-        <div class="compare-block-subhead">
-          <span class="compare-cell-label">Stat</span>
-          <span class="compare-side-label">This</span>
-          <span></span>
-          <span class="compare-side-label">Equipped</span>
-        </div>
-        <div class="compare-grid">${rows || '<div class="compare-dash" style="text-align:center;grid-column:1/-1">No combat stats</div>'}</div>
-      </div>
-    `;
   }
 
   /**

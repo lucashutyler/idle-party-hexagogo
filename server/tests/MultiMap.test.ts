@@ -82,6 +82,7 @@ function createFakeContentStore(world: WorldData, quests: Record<string, QuestDe
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
     getAllNpcs: () => ({}),
+    npcQuestIds: () => [],
     getNpc: () => undefined,
     getAllQuests: () => quests,
     getQuest: (id: string) => quests[id],

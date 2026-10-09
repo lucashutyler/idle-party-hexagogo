@@ -128,6 +128,7 @@ function createFakeContentStore(world: WorldData): ContentStore {
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
     getAllNpcs: () => ({}),
+    npcQuestIds: () => [],
     getNpc: () => undefined,
     getAllQuests: () => QUESTS,
     getQuest: (id: string) => QUESTS[id],

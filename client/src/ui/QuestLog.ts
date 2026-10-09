@@ -6,30 +6,30 @@ import { escapeHtml } from './ItemIcon';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { objectiveText, rewardsText, scopeBadgeHtml, statusLabel, type QuestResolutions } from './QuestText';
 import {
+  giverLocations,
   sortActiveQuests,
   summarizeCompletedQuests,
   turnInLocations,
   weeklyAvailableAgainAt,
   type CompletedQuestSummary,
-  type TurnInLocation,
+  type NpcLocation,
 } from './QuestLogModel';
+import { deferWhilePressed, setHtml } from './render';
 
 const UNKNOWN_QUEST = 'Unknown quest';
 
-/** Settings → Quest Log modal: active quests (ready first) above a collapsed completed history. */
+/** Settings → Quest Log modal: who has new quests, active quests (ready first), then a collapsed completed history. */
 export class QuestLog {
   private overlay: HTMLElement | null = null;
   private body: HTMLElement | null = null;
   private unsubscribe: (() => void) | null = null;
   private showCompleted = false;
-  private lastHtml = '';
 
   constructor(private gameClient: GameClient, private worldCache: WorldCache) {}
 
   open(): void {
     if (this.overlay) return;
     this.showCompleted = false;
-    this.lastHtml = '';
 
     const overlay = document.createElement('div');
     overlay.className = 'player-options-overlay';
@@ -60,7 +60,9 @@ export class QuestLog {
     wireFocusOnInteract(overlay);
 
     this.render(this.gameClient.lastState);
-    this.unsubscribe = this.gameClient.subscribe(state => this.render(state));
+    this.unsubscribe = this.gameClient.subscribe(() => {
+      if (this.body) deferWhilePressed(this.body, () => this.render(this.gameClient.lastState));
+    });
   }
 
   close(): void {
@@ -75,13 +77,8 @@ export class QuestLog {
 
   private render(state: ServerStateMessage | null): void {
     if (!this.body) return;
-    const html = this.renderHtml(state);
-    if (html === this.lastHtml) return;
-    this.lastHtml = html;
-
     const scrollTop = this.body.scrollTop;
-    this.body.innerHTML = html;
-    this.body.scrollTop = scrollTop;
+    if (setHtml(this.body, this.renderHtml(state))) this.body.scrollTop = scrollTop;
   }
 
   private renderHtml(state: ServerStateMessage | null): string {
@@ -94,7 +91,27 @@ export class QuestLog {
       ? active.map(entry => this.renderActive(entry, defs[entry.questId], resolutions, unlocked)).join('')
       : `<div class="quest-log-empty">No active quests. Talk to the people you meet to find work.</div>`;
 
-    return activeHtml + this.renderCompleted(state?.completedQuests ?? [], defs, state?.weeklyCompletions ?? {});
+    return this.renderGivers(state?.availableQuestIds ?? [], unlocked)
+      + activeHtml
+      + this.renderCompleted(state?.completedQuests ?? [], defs, state?.weeklyCompletions ?? {});
+  }
+
+  private renderGivers(availableQuestIds: readonly string[], unlocked: ReadonlySet<string>): string {
+    const locations = giverLocations(
+      availableQuestIds,
+      this.worldCache.getAllNpcs(),
+      npcId => this.worldCache.getRoomsWithNpc(npcId),
+      unlocked,
+    );
+    if (locations.length === 0) return '';
+    return `
+      <div class="quest-log-givers">
+        <div class="quest-log-givers-title">Quests available from</div>
+        <ul class="quest-log-givers-list">
+          ${locations.map(loc => `<li class="quest-log-giver">${locationText(loc)}</li>`).join('')}
+        </ul>
+      </div>
+    `;
   }
 
   private renderActive(
@@ -187,7 +204,7 @@ function completedRowHtml(
   `;
 }
 
-function locationText(loc: TurnInLocation): string {
+function locationText(loc: NpcLocation): string {
   const who = `${escapeHtml(loc.npcEmoji)} ${escapeHtml(loc.npcName)}`;
   const where = [loc.roomName, loc.zoneName].filter(Boolean).join(', ');
   return where ? `${who} — ${escapeHtml(where)}` : who;

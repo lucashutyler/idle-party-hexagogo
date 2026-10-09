@@ -2,6 +2,7 @@ import type { GameClient } from '../network/GameClient';
 import type { NotificationEntry, NotificationNavigationTarget } from '@idle-party-rpg/shared';
 import { resolveNotificationNavigation } from '@idle-party-rpg/shared';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { deferWhilePressed, setHtml } from './render';
 
 const TOAST_LIFETIME_MS = 6000;
 
@@ -60,7 +61,7 @@ export class NotificationCenter {
     this.gameClient.subscribe((state) => {
       this.notifications = state.social?.notifications ?? [];
       this.updateBadge();
-      if (this.dropdown) this.renderDropdownList();
+      if (this.dropdown) deferWhilePressed(this.dropdown, () => this.renderDropdownList());
     });
 
     this.gameClient.onNotification((notification) => {
@@ -114,6 +115,8 @@ export class NotificationCenter {
       this.gameClient.sendClearAllNotifications();
     });
 
+    panel.querySelector('.notif-dropdown-list')!.addEventListener('click', (e) => this.onListClick(e));
+
     document.body.appendChild(panel);
     this.dropdown = panel;
     this.renderDropdownList();
@@ -145,12 +148,12 @@ export class NotificationCenter {
     const list = this.dropdown.querySelector('.notif-dropdown-list') as HTMLElement;
 
     if (this.notifications.length === 0) {
-      list.innerHTML = '<div class="notif-empty">No notifications yet.</div>';
+      setHtml(list, '<div class="notif-empty">No notifications yet.</div>');
       return;
     }
 
     const sorted = [...this.notifications].sort((a, b) => b.createdAt - a.createdAt);
-    list.innerHTML = sorted.map(n => `
+    setHtml(list, sorted.map(n => `
       <div class="notif-row${n.readAt === null ? ' notif-row-unread' : ''}">
         <button class="notif-row-main" data-id="${n.id}">
           <span class="notif-row-dot"></span>
@@ -162,22 +165,22 @@ export class NotificationCenter {
         </button>
         <button class="notif-row-dismiss" data-id="${n.id}" aria-label="Dismiss notification">×</button>
       </div>
-    `).join('');
+    `).join(''));
+  }
 
-    list.querySelectorAll<HTMLButtonElement>('.notif-row-main').forEach((row) => {
-      row.addEventListener('click', () => {
-        const id = row.dataset.id!;
-        this.gameClient.sendMarkNotificationRead(id);
-        this.navigateFor(id);
-      });
-    });
-
-    list.querySelectorAll<HTMLButtonElement>('.notif-row-dismiss').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.gameClient.sendDismissNotification(btn.dataset.id!);
-      });
-    });
+  private onListClick(e: Event): void {
+    const target = e.target as Element;
+    const dismiss = target.closest<HTMLElement>('.notif-row-dismiss');
+    if (dismiss) {
+      e.stopPropagation();
+      this.gameClient.sendDismissNotification(dismiss.dataset.id!);
+      return;
+    }
+    const row = target.closest<HTMLElement>('.notif-row-main');
+    if (!row) return;
+    const id = row.dataset.id!;
+    this.gameClient.sendMarkNotificationRead(id);
+    this.navigateFor(id);
   }
 
   /** Resolves and applies the click-to-navigate target for a notification, closing the dropdown if it navigates. */

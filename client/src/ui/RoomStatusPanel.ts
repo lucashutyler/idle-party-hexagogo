@@ -1,6 +1,7 @@
 import type { DungeonRunInfo } from '@idle-party-rpg/shared';
-import { ROOM_ICONS, actionLabel } from './RoomActions';
+import { ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
+import { deferWhilePressed } from './render';
 
 export interface RoomStatus {
   zoneName: string;
@@ -17,7 +18,7 @@ interface Chip {
   /** Stands in for the label where labels are hidden (mobile). */
   badge?: string;
   detail?: string;
-  questReady?: boolean;
+  pip?: string;
   onClick?: () => void;
 }
 
@@ -48,6 +49,10 @@ export class RoomStatusPanel {
   }
 
   update(status: RoomStatus | null): void {
+    deferWhilePressed(this.el, () => this.apply(status));
+  }
+
+  private apply(status: RoomStatus | null): void {
     const key = status ? JSON.stringify(status) : null;
     if (key === this.renderedKey) return;
     this.renderedKey = key;
@@ -79,7 +84,7 @@ export class RoomStatusPanel {
       icon: action.icon,
       label: actionLabel(action),
       detail: action.detail,
-      questReady: action.questReady,
+      pip: questPipClass(action),
       onClick: () => this.onAction(action),
     }));
     if (status.othersHere > 0) {
@@ -114,7 +119,7 @@ export class RoomStatusPanel {
     el.setAttribute('aria-label', description);
 
     const icon = document.createElement('span');
-    icon.className = chip.questReady ? 'room-status-chip-icon quest-ready-pip' : 'room-status-chip-icon';
+    icon.className = chip.pip ? `room-status-chip-icon ${chip.pip}` : 'room-status-chip-icon';
     icon.textContent = chip.icon;
     icon.setAttribute('aria-hidden', 'true');
 

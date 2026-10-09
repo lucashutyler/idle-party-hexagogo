@@ -87,6 +87,7 @@ function createFakeContentStore(world: WorldData): ContentStore {
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
     getAllNpcs: () => npcs,
+    npcQuestIds: () => Object.values(npcs).flatMap(n => n.questIds ?? []),
     getNpc: (id: string) => npcs[id],
     getAllQuests: () => QUESTS,
     getQuest: (id: string) => QUESTS[id],

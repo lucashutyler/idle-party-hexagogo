@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CompletedQuestEntry, NpcDefinition, QuestProgressEntry, QuestStatus } from '@idle-party-rpg/shared';
 import {
+  giverLocations,
   sortActiveQuests,
   summarizeCompletedQuests,
   turnInLocations,
@@ -108,5 +109,34 @@ describe('turnInLocations', () => {
   it('ignores NPCs without a quest list', () => {
     const plain: NpcDefinition = { id: 'mara', name: 'Mara', emoji: '🧙', greeting: 'Hi' };
     expect(turnInLocations('q1', [plain], roomsWithNpc, new Set(['room-explored']))).toEqual([]);
+  });
+});
+
+describe('giverLocations', () => {
+  const rooms: Record<string, NpcRoom[]> = {
+    mara: [
+      { id: 'room-square', name: 'Town Square', zoneName: 'Hatchetmill' },
+      { id: 'room-dock', name: 'Old Dock', zoneName: 'Hatchetmill' },
+    ],
+    hermit: [{ id: 'room-far', name: 'Hermit Hut', zoneName: 'Far Peaks' }],
+    smith: [{ id: 'room-forge', name: 'Forge', zoneName: 'Hatchetmill' }],
+  };
+  const roomsWithNpc = (id: string) => rooms[id] ?? [];
+  const npcs = [npc('mara', ['q1', 'q2']), npc('hermit', ['q3']), npc('smith', ['q4'])];
+
+  it('lists every explored room of each npc offering an available quest', () => {
+    const locations = giverLocations(['q2', 'q3'], npcs, roomsWithNpc, new Set(['room-square', 'room-dock', 'room-forge']));
+    expect(locations).toEqual([
+      { npcName: 'NPC mara', npcEmoji: '🧙', roomName: 'Town Square', zoneName: 'Hatchetmill' },
+      { npcName: 'NPC mara', npcEmoji: '🧙', roomName: 'Old Dock', zoneName: 'Hatchetmill' },
+    ]);
+  });
+
+  it('never names an npc standing only in unexplored rooms', () => {
+    expect(giverLocations(['q3'], npcs, roomsWithNpc, new Set(['room-square']))).toEqual([]);
+  });
+
+  it('is empty when nothing is available', () => {
+    expect(giverLocations([], npcs, roomsWithNpc, new Set(['room-square', 'room-forge']))).toEqual([]);
   });
 });

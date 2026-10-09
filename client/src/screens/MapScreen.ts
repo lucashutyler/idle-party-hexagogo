@@ -5,13 +5,14 @@ import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
 import { RoomView } from '../ui/RoomView';
 import { RoomStatusPanel } from '../ui/RoomStatusPanel';
-import { getRoomActions, readyQuestIds } from '../ui/RoomActions';
+import { getRoomActions, questMarks } from '../ui/RoomActions';
 import type { RoomAction, RoomActionLookups } from '../ui/RoomActions';
 import { ShopPopup } from '../ui/ShopPopup';
 import { ThreeWorldMap } from '../ui/ThreeWorldMap';
 import type { TileClickInfo } from '../ui/ThreeWorldMap';
 import { NpcTalkPopup } from '../ui/NpcTalkPopup';
 import { DungeonEntryPopup } from '../ui/DungeonEntryPopup';
+import { showMapToast } from '../ui/MapToast';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -27,7 +28,6 @@ export class MapScreen implements Screen {
   private npcTalkPopup?: NpcTalkPopup;
   private dungeonEntryPopup?: DungeonEntryPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
-  private moveToastTimeout?: ReturnType<typeof setTimeout>;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
@@ -44,6 +44,10 @@ export class MapScreen implements Screen {
     this.gameClient.onMoveBlocked((msg) => {
       const names = msg.missingPlayers.join(', ');
       this.showMoveToast(names ? `${msg.reason} Missing: ${names}` : msg.reason);
+    });
+    // While the entry popup is open it shows the refusal itself.
+    this.gameClient.onServerError((message, code) => {
+      if (code === 'dungeon_entry_refused' && !this.dungeonEntryPopup?.isOpen) this.showMoveToast(message);
     });
   }
 
@@ -110,18 +114,7 @@ export class MapScreen implements Screen {
   }
 
   private showMoveToast(message: string): void {
-    const existing = this.container.querySelector('.map-toast');
-    if (existing) existing.remove();
-    if (this.moveToastTimeout) clearTimeout(this.moveToastTimeout);
-
-    const toast = document.createElement('div');
-    toast.className = 'map-toast';
-    toast.textContent = message;
-    this.container.appendChild(toast);
-
-    this.moveToastTimeout = setTimeout(() => {
-      toast.remove();
-    }, 2000);
+    showMapToast(this.container, message);
   }
 
   private async createMap(): Promise<void> {
@@ -169,7 +162,7 @@ export class MapScreen implements Screen {
       this.roomView.actions = state ? this.currentRoomActions(state) : [];
     } else {
       this.roomView.actions = info.isUnlocked && tileDef
-        ? getRoomActions(tileDef, this.worldCache, readyQuestIds(state?.activeQuests))
+        ? getRoomActions(tileDef, this.worldCache, questMarks(state))
         : [];
     }
     this.roomView.show(info);
@@ -194,7 +187,7 @@ export class MapScreen implements Screen {
       getMaps: () => this.worldCache.getMaps(),
     };
     const room = state.dungeon ? { npcId: tile.npcId, shopId: shop?.id } : { ...tile, shopId: shop?.id };
-    return getRoomActions(room, lookups, readyQuestIds(state.activeQuests));
+    return getRoomActions(room, lookups, questMarks(state));
   }
 
   private runAction(action: RoomAction): void {

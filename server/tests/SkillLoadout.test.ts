@@ -43,6 +43,7 @@ function makeContentStore(skills: Record<string, SkillDefinition>, items: Record
     getMonster: () => undefined,
     getNpc: () => undefined,
     getAllNpcs: () => ({}),
+    npcQuestIds: () => [],
     getShop: () => undefined,
     getAllShops: () => ({}),
     getSkill: (id: string) => skills[id],

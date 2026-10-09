@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -9,7 +9,7 @@ import { FriendsSystem } from './social/FriendsSystem.js';
 import { GuildSystem } from './social/GuildSystem.js';
 import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
-import { PartySystem } from './social/PartySystem.js';
+import { PartySystem, canMove } from './social/PartySystem.js';
 import { TradeSystem } from './social/TradeSystem.js';
 import { MailboxSystem } from './social/MailboxSystem.js';
 import { NotificationSystem } from './social/NotificationSystem.js';
@@ -407,6 +407,14 @@ export class PlayerManager {
     });
   }
 
+  private resolvePartyMembers(members: GamePartyMember[]): GamePartyMember[] {
+    return members.map(m => {
+      const session = this.sessions.get(m.username);
+      if (!session?.hasCharacter()) return { ...m };
+      return { ...m, level: session.getLevel(), className: session.getClassName() ?? undefined };
+    });
+  }
+
   /** Build ClientSocialState for a player. */
   getSocialState(username: string): ClientSocialState {
     const session = this.sessions.get(username);
@@ -421,7 +429,11 @@ export class PlayerManager {
       outgoingFriendRequests: this.friends.getOutgoingRequests(username),
       guild: guildData?.info ?? null,
       guildMembers: guildData?.members ?? [],
-      party: partyData && { ...partyData, henchmen: this.resolveHenchmen(partyData.henchmen) },
+      party: partyData && {
+        ...partyData,
+        members: this.resolvePartyMembers(partyData.members),
+        henchmen: this.resolveHenchmen(partyData.henchmen),
+      },
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: this.getOnlinePlayers(),
@@ -581,6 +593,12 @@ export class PlayerManager {
     if (!session) return 'No session.';
     const partyId = session.getPartyId();
     if (!partyId) return 'No party.';
+
+    const party = this.parties.getParty(partyId);
+    if (party) {
+      const member = party.members.find(m => m.username === username);
+      if (!member || !canMove(member.role)) return 'Only owners and leaders can enter a dungeon.';
+    }
 
     // The party must actually be standing on the requested entrance room.
     const pos = this.partyBattles.getPosition(partyId);

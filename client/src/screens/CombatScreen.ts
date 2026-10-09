@@ -5,6 +5,7 @@ import { classIconHtml, henchmanDisplayNames, RUN_AVAILABLE_ROUNDS } from '@idle
 import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
+import { deferWhilePressed, setHtml } from '../ui/render';
 
 /** Slugify a name into an artwork id (lowercase + dashes). */
 function slugify(name: string): string {
@@ -94,6 +95,7 @@ export class CombatScreen implements Screen {
     // Render current state immediately (first state may have arrived before subscription)
     const state = this.gameClient.lastState;
     if (state) {
+      this.classifyLogNames(state);
       this.updateVisuals(state);
       this.lastLog = state.combatLog;
     }
@@ -214,7 +216,11 @@ export class CombatScreen implements Screen {
 
     if (!this.isActive) return;
 
-    this.updateVisuals(state);
+    this.classifyLogNames(state);
+    deferWhilePressed(this.stage, () => {
+      const latest = this.gameClient.lastState;
+      if (this.isActive && latest) this.updateVisuals(latest);
+    });
     this.updateLog(state.combatLog);
   }
 
@@ -230,8 +236,7 @@ export class CombatScreen implements Screen {
     return classIconHtml(className);
   }
 
-  private updateVisuals(state: ServerStateMessage): void {
-    // Refresh log-name classification before any log re-render this tick.
+  private classifyLogNames(state: ServerStateMessage): void {
     this.selfUsername = state.username ?? '';
     const partyMembers = state.social?.party?.members ?? [];
     this.partyUsernames = new Set(
@@ -250,7 +255,9 @@ export class CombatScreen implements Screen {
     for (const m of state.battle.combat?.monsters ?? []) {
       this.monsterNamesSeen.add(m.name);
     }
+  }
 
+  private updateVisuals(state: ServerStateMessage): void {
     // Combat background — try tile-specific then zone default
     this.updateCombatBackground(state);
 
@@ -294,9 +301,9 @@ export class CombatScreen implements Screen {
           const henchman = p.henchman ? this.henchmenByCombatName.get(p.username) : undefined;
           const icon = card.querySelector('.combat-card-icon') as HTMLElement | null;
           if (icon) {
-            icon.innerHTML = p.henchman
+            setHtml(icon, p.henchman
               ? this.escapeHtml(henchman?.emoji ?? '❓')
-              : CombatScreen.classIcon(p.className);
+              : CombatScreen.classIcon(p.className));
           }
           const img = card.querySelector('.combat-card-img') as HTMLImageElement | null;
           if (img) {

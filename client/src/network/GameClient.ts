@@ -14,7 +14,12 @@ type ResumeListener = () => void;
 type MoveBlockedListener = (msg: ServerMoveBlockedMessage) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 type NotificationListener = (notification: NotificationEntry) => void;
-type ServerErrorListener = (message: string, code?: ServerErrorCode) => void;
+export const OFFLINE_NOTICE = "You're offline — reconnecting. Try again in a moment.";
+
+export interface ServerErrorDetail {
+  questId?: string;
+}
+type ServerErrorListener = (message: string, code?: ServerErrorCode, detail?: ServerErrorDetail) => void;
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -226,7 +231,7 @@ export class GameClient {
         console.warn('[GameClient] server error:', msg.message);
         for (const listener of this.serverErrorListeners) {
           try {
-            listener(msg.message, msg.code);
+            listener(msg.message, msg.code, { questId: msg.questId });
           } catch (err) {
             console.error('[GameClient] error in server-error listener:', err);
           }
@@ -275,10 +280,11 @@ export class GameClient {
     }, RECONNECT_DELAY);
   }
 
-  private sendRaw(msg: Record<string, unknown>): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-    }
+  /** False when the socket isn't open and the message was dropped. */
+  private sendRaw(msg: Record<string, unknown>): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(msg));
+    return true;
   }
 
   sendMove(col: number, row: number): void {
@@ -291,8 +297,8 @@ export class GameClient {
 
   // --- Dungeons ---
 
-  sendEnterDungeon(col: number, row: number, dungeonId: string): void {
-    this.sendRaw({ type: 'enter_dungeon', col, row, dungeonId });
+  sendEnterDungeon(col: number, row: number, dungeonId: string): boolean {
+    return this.sendRaw({ type: 'enter_dungeon', col, row, dungeonId });
   }
 
   sendLeaveDungeon(): void {
@@ -350,8 +356,8 @@ export class GameClient {
 
   // --- Shop ---
 
-  sendShopBuy(itemId: string): void {
-    this.sendRaw({ type: 'shop_buy', itemId });
+  sendShopBuy(itemId: string): boolean {
+    return this.sendRaw({ type: 'shop_buy', itemId });
   }
 
   sendShopSell(itemId: string, quantity: number): void {
@@ -370,12 +376,12 @@ export class GameClient {
 
   // --- Quests ---
 
-  sendAcceptQuest(questId: string): void {
-    this.sendRaw({ type: 'accept_quest', questId });
+  sendAcceptQuest(questId: string): boolean {
+    return this.sendRaw({ type: 'accept_quest', questId });
   }
 
-  sendTurnInQuest(questId: string): void {
-    this.sendRaw({ type: 'turn_in_quest', questId });
+  sendTurnInQuest(questId: string): boolean {
+    return this.sendRaw({ type: 'turn_in_quest', questId });
   }
 
   // --- View Player ---

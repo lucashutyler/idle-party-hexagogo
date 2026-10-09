@@ -1,6 +1,7 @@
 import type { ItemDefinition, SetDefinition, SkillDefinition } from '@idle-party-rpg/shared';
-import { getItemEffectText, getSetsForItem, getSetBonusText, getSetDisplayName, getActiveBreakpoint } from '@idle-party-rpg/shared';
+import { getItemEffectText, getSetsForItem, getSetBonusText, getSetDisplayName, getActiveBreakpoint, canClassEquipItem } from '@idle-party-rpg/shared';
 import { RARITY_COLORS, SLOT_LABELS, SHINY_RARITIES, getItemInitials, escapeHtml } from './ItemIcon';
+import { artworkUrl, renderTrackedImg } from './assets';
 
 export interface ItemPopupOptions {
   /** Item definitions for looking up set piece names */
@@ -19,9 +20,7 @@ export interface ItemPopupOptions {
   className?: string | null;
   /** Action buttons HTML (empty string for read-only view) */
   actionsHtml?: string;
-  /** Extra HTML rendered between the set sections and the action buttons.
-   *  Used to inject the equip-comparison block on inventory popups without
-   *  baking compare logic into this shared renderer. */
+  /** Extra HTML rendered between the set sections and the action buttons (e.g. the equip comparison). */
   extraHtml?: string;
 }
 
@@ -65,7 +64,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     // Color the class names: green if the viewing player can equip the item,
     // red if not. The wrapper has a data attribute so the equip-restricted
     // animation can target it for an in-place attention pulse.
-    const allowed = !!className && def.classRestriction.includes(className);
+    const allowed = !!className && canClassEquipItem(def, className);
     const restrictColor = allowed ? '#66bb6a' : '#ff6b6b';
     const cls = def.classRestriction.map(c => `<span style="color:${restrictColor}">${c}</span>`).join(', ');
     statLines.push(`<div data-class-restriction="1"><span class="stat-label">Class</span><span>${cls}</span></div>`);
@@ -115,8 +114,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 
   const artworkInner = def.iconEmoji
     ? `<span class="item-popup-emoji">${escapeHtml(def.iconEmoji)}</span>`
-    : `<img src="/item-artwork/${def.id}.png" style="opacity:0" onerror="this.style.display='none'" onload="this.style.opacity='1';this.nextElementSibling.style.display='none'" alt="">
-      <span class="item-popup-initials">${initials}</span>`;
+    : `${renderTrackedImg(artworkUrl('item', def.id), { className: 'item-popup-img' })}<span class="item-popup-initials">${initials}</span>`;
 
   return `
     <div class="item-popup-artwork${shinyClass}" style="background:${color}">

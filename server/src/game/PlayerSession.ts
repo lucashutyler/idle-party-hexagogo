@@ -43,6 +43,7 @@ import {
   xpForCraftLevel,
   getCraftSkillName,
   emptyNotificationPreferences,
+  acceptableQuestIds,
 } from '@idle-party-rpg/shared';
 import type {
   HiredHenchman,
@@ -456,10 +457,12 @@ export class PlayerSession {
     weeklyCompletions: Record<string, string>;
     questDefinitions: Record<string, QuestDefinition>;
     offeredQuestIds: string[];
+    questGiverNpcId: string | undefined;
+    availableQuestIds: string[];
     questResolutions: {
       monsters: Record<string, string>;
       items: Record<string, string>;
-      tiles: Record<string, { name: string; col: number; row: number }>;
+      tiles: Record<string, { name: string; zoneName: string }>;
     };
   } {
     const allQuests = this.content.getAllQuests();
@@ -469,6 +472,15 @@ export class PlayerSession {
 
     const npc = this.getCurrentNpc();
     const offeredQuestIds = npc?.questIds ?? [];
+    const weeklyCompletions = this.quests.getWeeklyCompletions();
+    const availableQuestIds = this.character
+      ? acceptableQuestIds(this.content.npcQuestIds(), allQuests, {
+        playerLevel: this.character.level,
+        activeQuestIds: this.quests.getActiveQuestIds(),
+        completedQuestIds: this.quests.getCompletedQuestIds(),
+        weeklyCompletions,
+      })
+      : [];
 
     const activeProgress = this.quests.getActiveProgress();
 
@@ -490,7 +502,7 @@ export class PlayerSession {
     // Resolve display names for every monster/item/tile referenced by these quests + reward items
     const monsterNames: Record<string, string> = {};
     const itemNames: Record<string, string> = {};
-    const tileLookups: Record<string, { name: string; col: number; row: number }> = {};
+    const tileLookups: Record<string, { name: string; zoneName: string }> = {};
     for (const def of Object.values(defs)) {
       for (const obj of def.objectives) {
         if (obj.kind === 'kill') {
@@ -501,7 +513,9 @@ export class PlayerSession {
           if (it) itemNames[obj.itemId] = it.name;
         } else if (obj.kind === 'visit') {
           const tile = this.content.getTileById(obj.tileId);
-          if (tile) tileLookups[obj.tileId] = { name: tile.name, col: tile.col, row: tile.row };
+          if (tile) {
+            tileLookups[obj.tileId] = { name: tile.name, zoneName: this.content.getZone(tile.zone)?.displayName ?? tile.zone };
+          }
         }
       }
       for (const r of def.rewards) {
@@ -515,9 +529,11 @@ export class PlayerSession {
     return {
       activeQuests: activeProgress,
       completedQuests: this.quests.getCompleted(),
-      weeklyCompletions: this.quests.getWeeklyCompletions(),
+      weeklyCompletions,
       questDefinitions: defs,
       offeredQuestIds,
+      questGiverNpcId: npc?.id,
+      availableQuestIds,
       questResolutions: { monsters: monsterNames, items: itemNames, tiles: tileLookups },
     };
   }
@@ -528,7 +544,7 @@ export class PlayerSession {
     if (!this.character) return { success: false, error: 'No character.' };
     const npc = this.getCurrentNpc();
     if (!npc || !(npc.questIds ?? []).includes(questId)) {
-      return { success: false, error: 'Quest not offered here.' };
+      return { success: false, error: "That quest isn't offered in this room." };
     }
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
@@ -543,7 +559,7 @@ export class PlayerSession {
     if (!this.character) return { success: false, error: 'No character.' };
     const npc = this.getCurrentNpc();
     if (!npc || !(npc.questIds ?? []).includes(questId)) {
-      return { success: false, error: 'Must be at the NPC who offered this quest.' };
+      return { success: false, error: 'Turn this quest in to someone who offers it.' };
     }
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
@@ -654,6 +670,8 @@ export class PlayerSession {
       weeklyCompletions: questBlock.weeklyCompletions,
       questDefinitions: questBlock.questDefinitions,
       offeredQuestIds: questBlock.offeredQuestIds,
+      questGiverNpcId: questBlock.questGiverNpcId,
+      availableQuestIds: questBlock.availableQuestIds,
       questResolutions: questBlock.questResolutions,
       dungeon: this.getDungeonState?.() ?? undefined,
     };

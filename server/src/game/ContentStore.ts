@@ -192,6 +192,13 @@ export class ContentStore {
     return result;
   }
 
+  /** Every quest id some NPC offers; repeats when several NPCs offer the same quest. */
+  *npcQuestIds(): Generator<string> {
+    for (const npc of this.npcs.values()) {
+      if (npc.questIds) yield* npc.questIds;
+    }
+  }
+
   getQuest(id: string): QuestDefinition | undefined {
     return this.quests.get(id);
   }

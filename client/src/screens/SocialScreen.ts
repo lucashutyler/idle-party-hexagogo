@@ -8,6 +8,7 @@ import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIc
 import { renderItemPopupContent } from '../ui/ItemPopup';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { renderAssetImg } from '../ui/assets';
+import { deferWhilePressed } from '../ui/render';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
 
@@ -143,14 +144,17 @@ export class SocialScreen implements Screen {
     this.gameClient.onServerError((_message, code) => {
       if (code !== 'trade_nonce_mismatch' || !this.tradeModalEl) return;
       this.tradeNotice = 'That offer changed before your confirmation went through. Review the updated offer below, then confirm again.';
-      this.updateTradeModal();
+      deferWhilePressed(this.tradeModalEl, () => this.refreshTradeModal());
     });
   }
 
   onActivate(): void {
     this.isActive = true;
-    this.unsubscribe = this.gameClient.subscribe((state) => {
-      if (this.isActive) this.updateFromState(state);
+    this.unsubscribe = this.gameClient.subscribe(() => {
+      deferWhilePressed(this.panelContainer, () => {
+        const state = this.gameClient.lastState;
+        if (this.isActive && state) this.updateFromState(state);
+      });
     });
     this.unsubChat = this.gameClient.onChat((msg) => {
       // Add to localStorage-backed store (O(1) dedup)
@@ -431,9 +435,6 @@ export class SocialScreen implements Screen {
 
     // (Tab bar is gone — sub-tabs are picked from the bottom-nav fly-out submenu;
     // its badges are driven from BottomNav's own state subscription.)
-
-    // Update trade modal if visible (track the active trade by ID)
-    if (this.tradeModalEl) this.updateTradeModal();
 
     // Skip party panel updates while grid animation or drag is in progress
     if (this.activeTab === 'party' && (this.gridAnimating || this.gridDragging)) return;
@@ -1600,17 +1601,9 @@ export class SocialScreen implements Screen {
     }
     this.unsubTradeModal?.();
 
-    // The modal outlives this screen's own subscription: it is opened from the
-    // Items screen while SocialScreen is deactivated, and the whole nonce
-    // recovery path depends on the modal seeing the server's re-synced state.
-    // Subscribing per-modal (rather than per-screen) keeps it live either way;
-    // updateTradeModal is render-key gated, so the overlap when the screen is
-    // also active costs nothing.
-    this.unsubTradeModal = this.gameClient.subscribe((state) => {
-      if (!this.tradeModalEl) return;
-      this.lastState = state;
-      this.lastSocial = state.social ?? null;
-      this.updateTradeModal();
+    // Per-modal, not per-screen: the Items screen opens this modal while SocialScreen is deactivated.
+    this.unsubTradeModal = this.gameClient.subscribe(() => {
+      if (this.tradeModalEl) deferWhilePressed(this.tradeModalEl, () => this.refreshTradeModal());
     });
 
     const overlay = document.createElement('div');
@@ -1710,6 +1703,16 @@ export class SocialScreen implements Screen {
     this.tradeModalEl = overlay;
     bringToFront(overlay);
     wireFocusOnInteract(overlay);
+    this.updateTradeModal();
+  }
+
+  private refreshTradeModal(): void {
+    if (!this.tradeModalEl) return;
+    const state = this.gameClient.lastState;
+    if (state) {
+      this.lastState = state;
+      this.lastSocial = state.social ?? null;
+    }
     this.updateTradeModal();
   }
 

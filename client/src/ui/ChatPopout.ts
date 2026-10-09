@@ -2,6 +2,7 @@ import type { GameClient } from '../network/GameClient';
 import type { ChatMessage, ChatChannelType, ServerStateMessage } from '@idle-party-rpg/shared';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { chatFocusTracker } from '../network/ChatFocusTracker';
+import { deferWhilePressed, setHtml } from './render';
 
 const STORAGE_KEY_GEOMETRY = 'chatPopoutGeometry';
 const STORAGE_KEY_FILTERS = 'chatPopoutFilters';
@@ -105,7 +106,7 @@ export class ChatPopout {
       }
       if (added) {
         this.messages.sort((a, b) => a.timestamp - b.timestamp);
-        this.renderTimeline();
+        deferWhilePressed(this.timelineEl, () => this.renderTimeline());
       }
     });
     gameClient.subscribe((_state: ServerStateMessage) => {
@@ -511,7 +512,7 @@ export class ChatPopout {
       this.messages.push(msg);
     }
     if (this.isOpen) {
-      this.renderTimeline();
+      deferWhilePressed(this.timelineEl, () => this.renderTimeline());
     } else {
       this.hasUnread = true;
       this.onUnreadChange?.(true);
@@ -534,7 +535,7 @@ export class ChatPopout {
       html += this.formatMessage(m);
       lastTimestamp = m.timestamp;
     }
-    this.timelineEl.innerHTML = html;
+    if (!setHtml(this.timelineEl, html)) return;
     requestAnimationFrame(() => {
       this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
     });

@@ -54,6 +54,7 @@ function createFakeContentStore(dungeon: DungeonDefinition): ContentStore {
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
     getAllNpcs: () => ({}),
+    npcQuestIds: () => [],
     getNpc: () => undefined,
     getAllQuests: () => ({}),
     getQuest: () => undefined,
@@ -282,6 +283,56 @@ describe('Dungeon runtime (PartyBattleManager via PlayerManager)', () => {
     aliceView = pm.getOtherPlayers('bob').find(p => p.username === 'alice');
     expect(aliceView?.inDungeon).toBe(true);
     expect(aliceView?.dungeonName).toBe('Test Dungeon');
+  });
+
+  async function setupPair() {
+    const grid = createFakeGrid();
+    const content = createFakeContentStore(makeDungeon());
+    const pm = new PlayerManager(wrapGrids(grid), content, createFakeGuildStore(), createFakeAccountStore(['alice', 'bob']), createFakeStore());
+    const alice = await pm.login(createFakeWs(), 'alice');
+    alice.setClass('Knight');
+    pm.ensureParty('alice');
+    const bob = await pm.login(createFakeWs(), 'bob');
+    bob.setClass('Mage');
+    pm.ensureParty('bob');
+    const getPartyId = (u: string) => pm.getSessionByUsername(u)?.getPartyId() ?? null;
+    const partyId = alice.getPartyId()!;
+    const bobOldParty = bob.getPartyId();
+    pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => pm.areSameTile(a, b));
+    pm.parties.acceptInvite('bob', partyId, getPartyId, (u, id) => pm.getSessionByUsername(u)?.setPartyId(id), (a, b) => pm.areSameTile(a, b));
+    pm.handlePartyJoin('bob', partyId, bobOldParty);
+    return { pm, alice, bob, partyId };
+  }
+
+  it('refuses entry to a plain member through the player handler', async () => {
+    const { pm, partyId } = await setupPair();
+
+    expect(pm.handleEnterDungeon('bob', 0, 0, DUNGEON_ID)).toBe('Only owners and leaders can enter a dungeon.');
+    expect(pm.partyBattles.getDungeonRunInfo(partyId)).toBeNull();
+    expect(pm.handleEnterDungeon('alice', 0, 0, DUNGEON_ID)).toBeNull();
+  });
+
+  it('refuses entry through the player handler away from the entrance', async () => {
+    const { pm } = await setup();
+
+    expect(pm.handleEnterDungeon('alice', 1, 0, DUNGEON_ID)).toBe('You must be at the dungeon entrance.');
+  });
+
+  it('sends each party member\'s level and class without storing them on the roster', async () => {
+    const { pm, bob, partyId } = await setupPair();
+    bob.grantXp(100_000);
+    expect(bob.getLevel()).toBeGreaterThan(1);
+
+    const sent = pm.getSocialState('alice').party!.members;
+
+    expect(sent.find(m => m.username === 'alice')).toMatchObject({ level: 1, className: 'Knight' });
+    expect(sent.find(m => m.username === 'bob')).toMatchObject({ level: bob.getLevel(), className: 'Mage' });
+    const stored = pm.parties.getParty(partyId)!.members;
+    for (const m of stored) {
+      expect(m).not.toHaveProperty('level');
+      expect(m).not.toHaveProperty('className');
+    }
+    expect(sent[0]).not.toBe(stored[0]);
   });
 
   it('round-trips an active run through save data and restore', async () => {
