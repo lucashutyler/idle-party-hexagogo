@@ -872,15 +872,13 @@ export class PartyBattleManager {
   restoreDungeonRun(partyId: string, run: DungeonRunState): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
-    const dungeon = this.content.getDungeon(run.dungeonId);
-    // Content may have changed under us — drop the run if the dungeon/floor is gone.
-    if (!dungeon || run.currentFloorIndex >= dungeon.floors.length) return;
-    entry.serverParty.clearDestination();
     entry.dungeonRun = {
       dungeonId: run.dungeonId,
       currentFloorIndex: run.currentFloorIndex,
       entrance: { ...run.entrance },
     };
+    if (!this.currentDungeonFloor(entry)) return;
+    entry.serverParty.clearDestination();
     entry.battleTimer.restartBattle();
   }
 

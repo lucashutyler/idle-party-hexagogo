@@ -246,12 +246,28 @@ describe('NpcTalkPopup', () => {
     tap(acceptButton('q1')!);
     t.serverError("That quest isn't offered in this room.", 'quest_refused', { questId: 'q1' });
 
-    expect(noticeText()).toBe("That quest isn't offered in this room.");
+    expect(card('q1')!.querySelector('.quest-card-blocked')!.textContent).toBe("That quest isn't offered in this room.");
+    expect(noticeText()).toBe('');
     expect(isBusy(acceptButton('q1'))).toBe(false);
     expect(acceptButton('q1')!.textContent).toBe('Accept');
 
     tap(acceptButton('q1')!);
     expect(t.sendAcceptQuest).toHaveBeenCalledTimes(2);
+    expect(card('q1')!.querySelector('.quest-card-blocked')).toBeNull();
+  });
+
+  it('names the refused quest at the top once its card has gone', () => {
+    const parts: StateParts = { offeredQuestIds: ['q1'], questDefinitions: { q1: quest('q1') } };
+    const t = setup(parts);
+    t.popup.show(GIVER);
+
+    tap(acceptButton('q1')!);
+    t.serverError('Requires level 10.', 'quest_refused', { questId: 'q1' });
+    t.push({ ...parts, availableQuestIds: [] });
+
+    expect(card('q1')).toBeNull();
+    expect(noticeText()).toBe('Quest q1: Requires level 10.');
+    vi.advanceTimersByTime(NPC_NOTICE_MS);
     expect(noticeText()).toBe('');
   });
 
@@ -344,7 +360,7 @@ describe('NpcTalkPopup', () => {
 
     tap(turnInButton('q3')!);
     t.serverError('Your bags are full.', 'quest_refused', { questId: 'q3' });
-    expect(noticeText()).toBe('Your bags are full.');
+    expect(card('q3')!.querySelector('.quest-card-blocked')!.textContent).toBe('Your bags are full.');
     expect(turnInButton('q3')!.textContent).toBe('Turn In');
   });
 

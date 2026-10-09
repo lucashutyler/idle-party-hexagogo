@@ -859,14 +859,14 @@ export class PlayerManager {
         this.partyBattles.addMember(party.id, members[i].username);
       }
 
-      // Resume an in-progress dungeon run (uses the owner's saved run).
-      if (ownerData.dungeonRun) {
-        this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
-      }
-
       // Every member's save mirrors the roster — read only the owner's or they duplicate.
       if (ownerData.partyHenchmen?.length) {
         this.parties.restoreHenchmen(party.id, this.validHenchmen(ownerData.partyHenchmen, partyMapId));
+      }
+
+      // After the henchmen, so a run dropped for vanished content can announce them rejoining.
+      if (ownerData.dungeonRun) {
+        this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
       }
 
       console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
@@ -899,14 +899,14 @@ export class PlayerManager {
       this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
 
       // Resume an in-progress dungeon run for this solo player.
-      if (data.dungeonRun) {
-        const partyId = this.sessions.get(data.username)?.getPartyId();
-        if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
-      }
-
       if (data.partyHenchmen?.length) {
         const partyId = this.sessions.get(data.username)?.getPartyId();
         if (partyId) this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
+      }
+
+      if (data.dungeonRun) {
+        const partyId = this.sessions.get(data.username)?.getPartyId();
+        if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
       }
     }
 

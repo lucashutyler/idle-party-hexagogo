@@ -433,6 +433,34 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       expect(saved.partyHenchmen).toHaveLength(1);
       expect(saved.dungeonRun?.dungeonId).toBe(DUNGEON_ID);
     });
+
+    async function restart(saves: ReturnType<PlayerManager['getAllSaveData']>, content: ContentStore) {
+      const pm = new PlayerManager(wrapGrids(createFakeGrid()), content, createFakeGuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+      pm.restoreFromSaveData(JSON.parse(JSON.stringify(saves)));
+      await pm.login(createFakeWs(), 'alice');
+      return { pm, partyId: pm.getSessionByUsername('alice')!.getPartyId()! };
+    }
+
+    it('resumes a saved run after a restart with the hire still waiting outside', async () => {
+      const { pm, content } = await setupInDungeon();
+
+      const restored = await restart(pm.getAllSaveData(), content);
+
+      expect(restored.pm.partyBattles.getDungeonRunInfo(restored.partyId)).not.toBeNull();
+      expect(combatPlayers(restored.pm, restored.partyId).map(p => p.username)).toEqual(['alice']);
+      expect(logLines(restored.pm)).not.toContain(REJOINS);
+    });
+
+    it('announces the hire rejoining when a restart finds the dungeon gone', async () => {
+      const { pm, content } = await setupInDungeon();
+      const withoutDungeon = { ...content, getDungeon: () => undefined } as unknown as ContentStore;
+
+      const restored = await restart(pm.getAllSaveData(), withoutDungeon);
+
+      expect(restored.pm.partyBattles.getDungeonRunInfo(restored.partyId)).toBeNull();
+      expect(combatPlayers(restored.pm, restored.partyId).some(p => p.isHenchman)).toBe(true);
+      expect(logLines(restored.pm).filter(line => line === REJOINS)).toHaveLength(1);
+    });
   });
 
   it('a henchman does not block movement into a level-gated room', async () => {

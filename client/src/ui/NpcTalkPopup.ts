@@ -46,9 +46,16 @@ interface QuestSections {
   progress: string;
   available: string;
   empty: string;
+  /** Quests whose card has an action area, where a refusal can show next to the button. */
+  actionable: ReadonlySet<string>;
 }
 
-const NO_SECTIONS: QuestSections = { ready: '', progress: '', available: '', empty: '' };
+interface Refusal {
+  questId: string;
+  text: string;
+}
+
+const NO_SECTIONS: QuestSections = { ready: '', progress: '', available: '', empty: '', actionable: new Set() };
 
 /** Talk-to-NPC modal: the NPC's quests with Accept / Turn In. See docs/architecture/client.md. */
 export class NpcTalkPopup {
@@ -63,6 +70,8 @@ export class NpcTalkPopup {
   private completionMessages: CompletionMessage[] = [];
   private notice: string | null = null;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  private refusal: Refusal | null = null;
+  private refusalTimer: ReturnType<typeof setTimeout> | null = null;
   private pressStartedOnBackdrop = false;
 
   constructor(gameClient: GameClient) {
@@ -157,8 +166,8 @@ export class NpcTalkPopup {
     this.settlePending(state);
 
     const nearby = state?.questGiverNpcId === npc.id;
-    const notice = nearby ? this.notice : `${npc.name} is no longer nearby.`;
     const sections = nearby && state ? this.questSections(state) : NO_SECTIONS;
+    const notice = nearby ? this.notice ?? this.refusalNotice(state, sections) : `${npc.name} is no longer nearby.`;
 
     const noticeChanged = setHtml(this.regions.notice, notice ? escapeHtml(notice) : '');
     setHtml(this.regions.completions, this.completionsHtml());
@@ -200,6 +209,7 @@ export class NpcTalkPopup {
       : this.gameClient.sendTurnInQuest(questId);
     if (sent) {
       this.clearNotice();
+      this.clearRefusal();
       const timer = setTimeout(() => this.handleNoReply(questId), QUEST_REPLY_TIMEOUT_MS);
       this.pending.set(questId, { kind, timer });
     } else {
@@ -234,8 +244,28 @@ export class NpcTalkPopup {
   private handleServerError(message: string, code: ServerErrorCode | undefined, questId: string | undefined): void {
     if (code !== 'quest_refused' || !questId || !this.pending.has(questId)) return;
     this.settle(questId);
-    this.showNotice(message);
+    this.clearRefusal();
+    this.refusal = { questId, text: message };
+    this.refusalTimer = setTimeout(() => {
+      this.refusalTimer = null;
+      this.refusal = null;
+      this.repaintLater();
+    }, NPC_NOTICE_MS);
     this.repaintLater();
+  }
+
+  /** A refusal shows on its quest's card; only when that card is gone does it go to the top, named. */
+  private refusalNotice(state: ServerStateMessage | null, sections: QuestSections): string | null {
+    const refusal = this.refusal;
+    if (!refusal || sections.actionable.has(refusal.questId)) return null;
+    const name = state?.questDefinitions?.[refusal.questId]?.name;
+    return name ? `${name}: ${refusal.text}` : refusal.text;
+  }
+
+  private clearRefusal(): void {
+    if (this.refusalTimer !== null) clearTimeout(this.refusalTimer);
+    this.refusalTimer = null;
+    this.refusal = null;
   }
 
   private handleNoReply(questId: string): void {
@@ -266,6 +296,7 @@ export class NpcTalkPopup {
     this.pending.clear();
     this.completionMessages = [];
     this.clearNotice();
+    this.clearRefusal();
   }
 
   private questSections(state: ServerStateMessage): QuestSections {
@@ -279,17 +310,20 @@ export class NpcTalkPopup {
     const ready: string[] = [];
     const progress: string[] = [];
     const available: string[] = [];
+    const actionable = new Set<string>();
     for (const questId of offered) {
       const def = defs[questId];
       if (!def) continue;
       const entry = activeById.get(questId);
       if (entry?.status === 'ready') {
         ready.push(this.readyCardHtml(def, resolutions));
+        actionable.add(questId);
       } else if (entry) {
         progress.push(this.progressCardHtml(def, entry, resolutions));
       } else if (acceptable.has(questId)) {
         const reason = def.scope === 'solo' && partySize > 1 ? SOLO_QUEST_IN_PARTY_REASON : null;
         available.push(this.availableCardHtml(def, resolutions, reason));
+        actionable.add(questId);
       }
     }
 
@@ -299,13 +333,14 @@ export class NpcTalkPopup {
       progress: sectionHtml('In Progress', progress),
       available: sectionHtml('Available', available),
       empty: offered.length > 0 && nothingShown ? 'Nothing for you right now.' : '',
+      actionable,
     };
   }
 
   private headerHtml(npc: NpcDefinition): string {
     const art = npc.artworkUrl ? renderTrackedImg(npc.artworkUrl, { className: 'npc-talk-portrait-img' }) : '';
-    const portrait = art || `<div class="npc-talk-portrait-emoji">${escapeHtml(npc.emoji)}</div>`;
-    return `${portrait}<div class="npc-talk-name">${escapeHtml(npc.name)}</div>`;
+    const emoji = `<div class="npc-talk-portrait-emoji">${escapeHtml(npc.emoji)}</div>`;
+    return `<div class="npc-talk-portrait">${art}${emoji}</div><div class="npc-talk-name">${escapeHtml(npc.name)}</div>`;
   }
 
   private completionsHtml(): string {
@@ -321,7 +356,7 @@ export class NpcTalkPopup {
   private availableCardHtml(def: QuestDefinition, resolutions: QuestResolutions, blockedReason: string | null): string {
     const action = blockedReason
       ? `<span class="quest-card-blocked">${escapeHtml(blockedReason)}</span>`
-      : this.requestButtonHtml('accept', def.id);
+      : this.refusalHtml(def.id) + this.requestButtonHtml('accept', def.id);
     return `
       <div class="quest-card" data-quest-id="${escapeHtml(def.id)}">
         <div class="quest-card-header">
@@ -360,9 +395,14 @@ export class NpcTalkPopup {
           <span class="quest-pill quest-status-ready">Ready</span>
         </div>
         <div class="quest-card-rewards">Rewards: ${rewardsText(def.rewards, resolutions)}</div>
-        <div class="quest-card-actions">${this.requestButtonHtml('turnin', def.id)}</div>
+        <div class="quest-card-actions">${this.refusalHtml(def.id)}${this.requestButtonHtml('turnin', def.id)}</div>
       </div>
     `;
+  }
+
+  private refusalHtml(questId: string): string {
+    if (this.refusal?.questId !== questId) return '';
+    return `<span class="quest-card-blocked" role="status">${escapeHtml(this.refusal.text)}</span>`;
   }
 
   private requestButtonHtml(kind: QuestRequestKind, questId: string): string {
