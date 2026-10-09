@@ -95,12 +95,9 @@ export class QuestSystem {
       activeQuestIds: this.getActiveQuestIds(),
       completedQuestIds: this.getCompletedQuestIds(),
       weeklyCompletions: this.weeklyCompletions,
+      partySize: ctx.partySize,
     });
     if (reason) return reason;
-
-    if (quest.scope === 'solo' && ctx.partySize > 1) {
-      return 'Solo quest — leave your party first.';
-    }
 
     this.active.set(quest.id, {
       questId: quest.id,

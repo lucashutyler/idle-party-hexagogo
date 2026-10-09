@@ -94,20 +94,23 @@ export function computeStatus(quest: QuestDefinition, progress: number[]): Quest
   return anyProgress ? 'in_progress' : 'accepted';
 }
 
+export const SOLO_QUEST_IN_PARTY_REASON = 'Solo quest — leave your party first.';
+
+export interface QuestAcceptContext {
+  playerLevel: number;
+  activeQuestIds: ReadonlySet<string>;
+  completedQuestIds: ReadonlySet<string>;
+  weeklyCompletions: Readonly<Record<string, string>>;
+  now?: Date;
+  /** Player members only (henchmen don't count). Omit to skip the solo-scope check. */
+  partySize?: number;
+}
+
 /**
  * Check whether a player can accept a quest right now.
  * Returns null if acceptable, or a string reason if blocked.
  */
-export function canAcceptQuest(
-  quest: QuestDefinition,
-  ctx: {
-    playerLevel: number;
-    activeQuestIds: ReadonlySet<string>;
-    completedQuestIds: ReadonlySet<string>;
-    weeklyCompletions: Readonly<Record<string, string>>;
-    now?: Date;
-  },
-): string | null {
+export function canAcceptQuest(quest: QuestDefinition, ctx: QuestAcceptContext): string | null {
   if (ctx.activeQuestIds.has(quest.id)) return 'Already accepted.';
 
   if (quest.requiredLevel != null && ctx.playerLevel < quest.requiredLevel) {
@@ -134,7 +137,28 @@ export function canAcceptQuest(
     }
   }
 
+  if (quest.scope === 'solo' && ctx.partySize !== undefined && ctx.partySize > 1) {
+    return SOLO_QUEST_IN_PARTY_REASON;
+  }
+
   return null;
+}
+
+/**
+ * The ids among `questIds` this player can accept now, deduped and sorted.
+ * Unknown ids are skipped. Party size is ignored, so a solo quest still counts while partied.
+ */
+export function acceptableQuestIds(
+  questIds: Iterable<string>,
+  quests: Readonly<Record<string, QuestDefinition>>,
+  ctx: Omit<QuestAcceptContext, 'partySize'>,
+): string[] {
+  const acceptable = new Set<string>();
+  for (const id of questIds) {
+    const quest = quests[id];
+    if (quest && canAcceptQuest(quest, ctx) === null) acceptable.add(id);
+  }
+  return [...acceptable].sort();
 }
 
 /** Initialize a fresh progress array for a quest (all zeros). */

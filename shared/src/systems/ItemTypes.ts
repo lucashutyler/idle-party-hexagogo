@@ -301,6 +301,26 @@ export function removeItemFromInventory(inventory: Record<string, number>, itemI
   return true;
 }
 
+/** Whether `className` may equip `def`. Items with no class restriction suit everyone. */
+export function canClassEquipItem(def: ItemDefinition, className: string): boolean {
+  return !def.classRestriction?.length || def.classRestriction.includes(className);
+}
+
+/**
+ * Item ids that equipping `def` would move out of `equipment`, mirroring `equipItem`:
+ * a two-handed weapon displaces both hand items, a one-handed one displaces an equipped two-hander.
+ */
+export function getItemsDisplacedByEquip(def: ItemDefinition, equipment: Record<string, string | null>): string[] {
+  if (!def.equipSlot) return [];
+  const slots = def.equipSlot === 'twohanded' ? ['mainhand', 'offhand'] : [def.equipSlot];
+  const displaced = new Set<string>();
+  for (const slot of slots) {
+    const id = equipment[slot];
+    if (id && id !== def.id) displaced.add(id);
+  }
+  return [...displaced];
+}
+
 /** Check if an equipped item is a two-handed weapon (fills both mainhand and offhand). */
 export function isTwoHandedEquipped(
   equipment: Record<string, string | null>,
@@ -328,7 +348,7 @@ export function equipItem(
 ): { success: boolean; unequippedItemId?: string } {
   const def = items[itemId];
   if (!def || !def.equipSlot) return { success: false };
-  if (def.classRestriction && def.classRestriction.length > 0 && className && !def.classRestriction.includes(className)) return { success: false };
+  if (className && !canClassEquipItem(def, className)) return { success: false };
 
   // Must have the item in inventory
   if ((inventory[itemId] ?? 0) <= 0) return { success: false };
@@ -551,7 +571,7 @@ export function equipItemForceDestroy(
 ): { success: boolean; destroyedItemId?: string } {
   const def = items[itemId];
   if (!def || !def.equipSlot) return { success: false };
-  if (def.classRestriction && def.classRestriction.length > 0 && className && !def.classRestriction.includes(className)) return { success: false };
+  if (className && !canClassEquipItem(def, className)) return { success: false };
   if ((inventory[itemId] ?? 0) <= 0) return { success: false };
 
   const slot = def.equipSlot;

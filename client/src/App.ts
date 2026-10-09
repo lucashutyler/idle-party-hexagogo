@@ -21,6 +21,7 @@ import { ChatPopout } from './ui/ChatPopout';
 import { PersistentXpBar } from './ui/PersistentXpBar';
 import { NotificationCenter } from './ui/NotificationCenter';
 import { chatFocusTracker } from './network/ChatFocusTracker';
+import { forgetMissingAssets } from './ui/assets';
 
 const CONNECTION_ERROR = 'Could not connect to server';
 
@@ -379,9 +380,12 @@ export class App {
       socialScreen.openExistingTrade(tradeId);
     });
 
+    this.gameClient.onResume(() => forgetMissingAssets());
+
     // Listen for world content updates (admin deployed a new version)
     this.gameClient.onWorldUpdate(async () => {
       console.log('[App] World updated — reloading world data');
+      forgetMissingAssets();
       await this.worldCache.loadWorld();
       mapScreen.refreshWorld();
     });

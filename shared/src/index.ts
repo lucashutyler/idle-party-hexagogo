@@ -135,6 +135,8 @@ export {
   equipItemForceDestroy,
   computeEquipmentBonuses,
   isTwoHandedEquipped,
+  canClassEquipItem,
+  getItemsDisplacedByEquip,
   getItemEffectText,
   rollDrops,
 } from './systems/ItemTypes.js';
@@ -273,6 +275,7 @@ export type {
   PlayerProfileMessage,
   ServerMessage,
   ServerErrorCode,
+  ServerErrorMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';
 export {
@@ -358,9 +361,12 @@ export {
   objectivesComplete,
   computeStatus,
   canAcceptQuest,
+  acceptableQuestIds,
   initialProgress,
+  SOLO_QUEST_IN_PARTY_REASON,
 } from './systems/QuestTypes.js';
 export type {
+  QuestAcceptContext,
   QuestStatus,
   QuestScope,
   QuestRepeat,

@@ -41,6 +41,9 @@ export interface GamePartyMember {
   username: string;
   role: PartyRole;
   gridPosition: PartyGridPosition;
+  /** Resolved at send time, never persisted. */
+  level?: number;
+  className?: string;
 }
 
 export interface GamePartyInfo {

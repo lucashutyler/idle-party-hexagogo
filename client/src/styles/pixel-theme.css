@@ -5259,11 +5259,13 @@ button.room-status-chip:active {
   object-fit: contain;
   image-rendering: pixelated;
 }
-/* Fade-in for fallback-capable images. Inline `opacity:0` on render → `opacity:1`
- * once a load resolves (real artwork or placehold fallback). The transition
- * keeps the reveal from snapping, and the initial 0 hides the browser's
- * broken-image glyph during the swap. Affects every image that participates
- * in the assets.ts / ItemIcon fallback dance. */
+/* renderTrackedImg (assets.ts): hidden until a load resolves, so a missing image never flashes a broken glyph. */
+.asset-img {
+  opacity: 0;
+  transition: opacity 0.12s linear;
+}
+.asset-img.asset-loaded { opacity: 1; }
+.asset-img.asset-failed { display: none; }
 .item-square-img,
 .item-popup-artwork img,
 .item-dogear-img,
