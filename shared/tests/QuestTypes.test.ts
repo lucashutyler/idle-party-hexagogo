@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   acceptableQuestIds,
   canAcceptQuest,
+  nextWeeklyReopening,
   SOLO_QUEST_IN_PARTY_REASON,
+  WEEKLY_COOLDOWN_MS,
   type QuestAcceptContext,
   type QuestDefinition,
 } from '../src/systems/QuestTypes';
@@ -69,5 +71,27 @@ describe('acceptableQuestIds', () => {
   it('unlocks a follow-up once its prerequisite is completed', () => {
     const result = acceptableQuestIds(Object.keys(quests), quests, ctx({ completedQuestIds: new Set(['open']) }));
     expect(result).toEqual(['locked', 'solo']);
+  });
+});
+
+describe('nextWeeklyReopening', () => {
+  const now = Date.parse('2026-10-09T12:00:00Z');
+
+  it('is the soonest cooldown still running', () => {
+    const weekly = { a: '2026-10-05T12:00:00Z', b: '2026-10-08T12:00:00Z', done: '2026-09-01T00:00:00Z' };
+    expect(nextWeeklyReopening(weekly, now)).toBe(Date.parse('2026-10-05T12:00:00Z') + WEEKLY_COOLDOWN_MS);
+  });
+
+  it('is Infinity when nothing is cooling down', () => {
+    expect(nextWeeklyReopening({}, now)).toBe(Infinity);
+    expect(nextWeeklyReopening({ old: '2026-09-01T00:00:00Z', bad: 'not a date' }, now)).toBe(Infinity);
+  });
+
+  it('matches when canAcceptQuest starts offering the quest again', () => {
+    const weekly = { w: '2026-10-05T12:00:00Z' };
+    const reopensAt = nextWeeklyReopening(weekly, now);
+    const w = quest('w', { repeat: 'weekly' });
+    expect(canAcceptQuest(w, ctx({ weeklyCompletions: weekly, now: new Date(reopensAt - 1) }))).not.toBeNull();
+    expect(canAcceptQuest(w, ctx({ weeklyCompletions: weekly, now: new Date(reopensAt) }))).toBeNull();
   });
 });

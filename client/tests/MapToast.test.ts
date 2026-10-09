@@ -1,24 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerErrorCode } from '@idle-party-rpg/shared';
-import { dismissMapToast, mapToastDurationMs, showMapToast } from '../src/ui/MapToast';
+import { dismissMapToast, MAP_TOAST_MS, showMapToast } from '../src/ui/MapToast';
 import { MapScreen } from '../src/screens/MapScreen';
 import type { GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
-
-describe('mapToastDurationMs', () => {
-  it('gives short messages at least five seconds', () => {
-    expect(mapToastDurationMs('')).toBe(5000);
-    expect(mapToastDurationMs('Already in a dungeon')).toBe(5000);
-  });
-
-  it('adds reading time for longer messages', () => {
-    expect(mapToastDurationMs('x'.repeat(60))).toBe(5600);
-  });
-
-  it('caps at nine seconds', () => {
-    expect(mapToastDurationMs('x'.repeat(500))).toBe(9000);
-  });
-});
 
 describe('showMapToast', () => {
   let container: HTMLElement;
@@ -40,11 +25,10 @@ describe('showMapToast', () => {
   it('shows the message and removes it when its time is up', () => {
     const message = 'You need the Rusty Key to enter. Missing: alice, bob';
     const toast = showMapToast(container, message);
-    const duration = mapToastDurationMs(message);
 
     expect(toast.textContent).toBe(message);
-    expect(toast.style.getPropertyValue('--toast-ms')).toBe(`${duration}ms`);
-    vi.advanceTimersByTime(duration - 1);
+    expect(toast.style.getPropertyValue('--toast-ms')).toBe(`${MAP_TOAST_MS}ms`);
+    vi.advanceTimersByTime(MAP_TOAST_MS - 1);
     expect(toast.isConnected).toBe(true);
     vi.advanceTimersByTime(1);
     expect(toast.isConnected).toBe(false);
@@ -57,9 +41,9 @@ describe('showMapToast', () => {
 
     expect(first.isConnected).toBe(false);
     expect([...toasts()]).toEqual([second]);
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(MAP_TOAST_MS - 1);
     expect(second.isConnected).toBe(true);
-    vi.advanceTimersByTime(3500);
+    vi.advanceTimersByTime(1);
     expect(second.isConnected).toBe(false);
   });
 

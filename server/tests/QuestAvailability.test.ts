@@ -69,9 +69,15 @@ function makeWorld(): WorldData {
   };
 }
 
-function createFakeContentStore(world: WorldData): ContentStore {
+interface QuestContentEditor {
+  replaceNpc(npc: NpcDefinition): void;
+}
+
+function createFakeContentStore(world: WorldData): ContentStore & QuestContentEditor {
   const npcs: Record<string, NpcDefinition> = { [SMITH.id]: SMITH, [FENCE.id]: FENCE, [HERMIT.id]: HERMIT };
+  let questRevision = 0;
   return {
+    replaceNpc: (npc: NpcDefinition) => { npcs[npc.id] = npc; questRevision++; },
     getStartTile: () => world.startTile,
     getWorld: () => world,
     getTileType: () => undefined,
@@ -91,14 +97,16 @@ function createFakeContentStore(world: WorldData): ContentStore {
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
     getAllNpcs: () => npcs,
-    npcQuestIds: () => Object.values(npcs).flatMap(n => n.questIds ?? []),
+    getNpcQuestIds: () => [...new Set(Object.values(npcs).flatMap(n => n.questIds ?? []))],
+    getQuestRevision: () => questRevision,
+    getQuestCatalog() { return this.getAllQuests(); },
     getNpc: (id: string) => npcs[id],
     getAllQuests: () => QUESTS,
     getQuest: (id: string) => QUESTS[id],
     getDungeon: () => undefined,
     getAllDungeons: () => ({}),
     ...fakeSkillContent(),
-  } as unknown as ContentStore;
+  } as unknown as ContentStore & QuestContentEditor;
 }
 
 function createFakeAccountStore(usernames: string[]): AccountStore {
@@ -134,7 +142,7 @@ async function setup() {
   const session = await pm.login(createFakeWs(), 'alice');
   session.setClass('Knight');
   pm.ensureParty('alice');
-  return { pm, session, grids, partyId: session.getPartyId()! };
+  return { pm, session, grids, content, partyId: session.getPartyId()! };
 }
 
 describe('Quest availability in the state push', () => {
@@ -182,6 +190,38 @@ describe('Quest availability in the state push', () => {
 
     save(8);
     expect(session.getState([]).availableQuestIds).toContain('q_weekly');
+  });
+
+  it('reuses the answer across pushes while nothing it depends on changes', async () => {
+    const { session } = await setup();
+    const first = session.getState([]).availableQuestIds;
+    expect(session.getState([]).availableQuestIds).toBe(first);
+  });
+
+  it('recomputes once the player levels up', async () => {
+    const { session } = await setup();
+    expect(session.getState([]).availableQuestIds).not.toContain('q_high');
+    session.grantXp(10_000_000);
+    expect(session.getState([]).availableQuestIds).toContain('q_high');
+  });
+
+  it('recomputes when a weekly cooldown runs out, with nothing else changing', async () => {
+    const { session } = await setup();
+    const completedAt = new Date(NOW.getTime() - 2 * DAY_MS).toISOString();
+    session.quests.loadFromSaveData({ active: [], completed: [{ questId: 'q_weekly', completedAt }], weeklyCompletions: { q_weekly: completedAt } });
+    expect(session.getState([]).availableQuestIds).not.toContain('q_weekly');
+
+    vi.setSystemTime(NOW.getTime() + 5 * DAY_MS - 1);
+    expect(session.getState([]).availableQuestIds).not.toContain('q_weekly');
+    vi.setSystemTime(NOW.getTime() + 5 * DAY_MS);
+    expect(session.getState([]).availableQuestIds).toContain('q_weekly');
+  });
+
+  it('recomputes when quest content changes', async () => {
+    const { session, content } = await setup();
+    expect(session.getState([]).availableQuestIds).toContain('q_far');
+    content.replaceNpc({ ...FENCE, questIds: [] });
+    expect(session.getState([]).availableQuestIds).not.toContain('q_far');
   });
 
   it('offers a follow-up once its prerequisite is turned in', async () => {

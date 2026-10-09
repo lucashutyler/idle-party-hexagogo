@@ -95,6 +95,7 @@ export function computeStatus(quest: QuestDefinition, progress: number[]): Quest
 }
 
 export const SOLO_QUEST_IN_PARTY_REASON = 'Solo quest — leave your party first.';
+export const WEEKLY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface QuestAcceptContext {
   playerLevel: number;
@@ -132,8 +133,7 @@ export function canAcceptQuest(quest: QuestDefinition, ctx: QuestAcceptContext):
       const lastDate = new Date(lastIso);
       const now = ctx.now ?? new Date();
       const diffMs = now.getTime() - lastDate.getTime();
-      const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
-      if (diffMs < oneWeekMs) return 'Available again next week.';
+      if (diffMs < WEEKLY_COOLDOWN_MS) return 'Available again next week.';
     }
   }
 
@@ -159,6 +159,16 @@ export function acceptableQuestIds(
     if (quest && canAcceptQuest(quest, ctx) === null) acceptable.add(id);
   }
   return [...acceptable].sort();
+}
+
+/** The earliest time after `nowMs` that a weekly cooldown in `weeklyCompletions` ends, or Infinity. */
+export function nextWeeklyReopening(weeklyCompletions: Readonly<Record<string, string>>, nowMs: number): number {
+  let next = Infinity;
+  for (const iso of Object.values(weeklyCompletions)) {
+    const reopensAt = new Date(iso).getTime() + WEEKLY_COOLDOWN_MS;
+    if (reopensAt > nowMs && reopensAt < next) next = reopensAt;
+  }
+  return next;
 }
 
 /** Initialize a fresh progress array for a quest (all zeros). */

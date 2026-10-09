@@ -131,7 +131,7 @@ export class PartyBattleManager {
           this.handleBattleEnd(partyId, result);
         },
         onMove: () => {
-          const allQuests = this.content.getAllQuests();
+          const allQuests = this.content.getQuestCatalog();
           const tileId = serverParty.tile.id;
           for (const m of members) {
             const s = this.getSession(m);
@@ -710,7 +710,7 @@ export class PartyBattleManager {
 
       // Quest hooks: credit every dead monster to every party member with active kill objectives.
       if (combat) {
-        const allQuests = this.content.getAllQuests();
+        const allQuests = this.content.getQuestCatalog();
         for (const m of combat.monsters) {
           for (const username of members) {
             const session = this.getSession(username);

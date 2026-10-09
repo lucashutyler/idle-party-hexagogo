@@ -113,17 +113,17 @@ describe('ThreeWorldMap overlays', () => {
     expect(container.querySelector('.quest-available-pip')).toBeNull();
   });
 
-  it('outlines quest destinations on this map, explored or not, and drops them once visited', async () => {
+  it('outlines explored quest destinations on this map, and drops them once visited', async () => {
     const map = new ThreeWorldMap(container, await makeCache());
-    const questDefinitions = { q9: visitQuest('q9', 'Find the Secret', ['t-fog', 't-cellar']) };
+    const questDefinitions = { q9: visitQuest('q9', 'Shop Run', ['t-shop', 't-cellar']) };
     const state = makeState({ activeQuests: [activeQuest('q9', 'in_progress', [0, 0])], questDefinitions });
     map.applyServerState(state);
 
     const outlines = [...container.querySelectorAll<HTMLElement>('.three-map-quest-targets .three-map-quest-target')];
     expect(outlines).toHaveLength(1);
-    const fog = cubeToPixel(offsetToCube({ col: 2, row: 0 }));
-    expect(outlines[0].style.left).toBe(`${fog.x}px`);
-    expect(outlines[0].style.top).toBe(`${fog.y}px`);
+    const shop = cubeToPixel(offsetToCube({ col: 1, row: 0 }));
+    expect(parseFloat(outlines[0].style.left)).toBeCloseTo(shop.x, 4);
+    expect(parseFloat(outlines[0].style.top)).toBeCloseTo(shop.y, 4);
 
     map.applyServerState(makeState({ activeQuests: [activeQuest('q9', 'in_progress', [0, 0])], questDefinitions }));
     expect(container.querySelector('.three-map-quest-target')).toBe(outlines[0]);
@@ -135,7 +135,20 @@ describe('ThreeWorldMap overlays', () => {
     expect(container.querySelector('.three-map-quest-target')).toBeNull();
   });
 
-  it('tooltip names the quests sending you to a room, even an unexplored one', async () => {
+  it('leaves an unexplored destination unmarked until the room is explored', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    const questDefinitions = { q9: visitQuest('q9', 'Find the Secret', ['t-fog']) };
+    const activeQuests = [activeQuest('q9', 'accepted', [0])];
+    map.applyServerState(makeState({ activeQuests, questDefinitions }));
+    expect(container.querySelector('.three-map-quest-target')).toBeNull();
+    expect(hoverRoom(container, 2, 0)).toEqual(['Zone: Unexplored Room']);
+
+    map.applyServerState(makeState({ activeQuests, questDefinitions, unlocked: ['t-home', 't-shop', 't-fog'] }));
+    const fog = cubeToPixel(offsetToCube({ col: 2, row: 0 }));
+    expect(parseFloat(container.querySelector<HTMLElement>('.three-map-quest-target')!.style.left)).toBeCloseTo(fog.x, 4);
+  });
+
+  it('tooltip names the quests sending you to an explored room', async () => {
     const map = new ThreeWorldMap(container, await makeCache());
     map.applyServerState(makeState({
       activeQuests: [activeQuest('q9', 'accepted', [0]), activeQuest('q8', 'accepted', [0])],
@@ -144,7 +157,7 @@ describe('ThreeWorldMap overlays', () => {
         q8: visitQuest('q8', 'Shop Run', ['t-shop']),
       },
     }));
-    expect(hoverRoom(container, 2, 0)).toEqual(['Zone: Unexplored Room', '📜 Find the Secret']);
+    expect(hoverRoom(container, 2, 0)).toEqual(['Zone: Unexplored Room']);
     expect(hoverRoom(container, 1, 0)).toEqual(['Zone: Market', '🪙 General Store', '📜 Shop Run', '👥 2 players here']);
   });
 

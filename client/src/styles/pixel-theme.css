@@ -2052,7 +2052,7 @@ html, body {
   pointer-events: auto;
   cursor: pointer;
   /* --toast-ms is set per toast by MapToast.ts to match its removal timer. */
-  animation: toast-fade var(--toast-ms, 5s) ease-out forwards;
+  animation: toast-fade var(--toast-ms, 6s) ease-out forwards;
 }
 
 @keyframes toast-fade {

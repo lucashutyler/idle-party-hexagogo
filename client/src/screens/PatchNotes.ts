@@ -7,7 +7,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'Solo quests now ask you to leave your party first, instead of showing an Accept button that did nothing.',
       'If your party moves on while you are talking to someone, the window now says they are no longer nearby.',
       'People with a new quest for you are marked with a green "!" on the map and in the room panel. A gold "?" still means a quest is ready to hand in.',
-      'Rooms your quests send you to are outlined on the map, even ones you haven\'t explored yet. Hover over one to see which quest sends you there.',
+      'Rooms you have explored that your quests send you to are outlined on the map. Hover over one to see which quest sends you there.',
       'The Quest Log now lists who has new quests for you and where to find them.',
       'Quests now name the room and area to visit instead of showing map numbers.',
       'Bigger, easier-to-read text in quest windows and the Quest Log, and the quest window now scrolls when someone has a lot to offer.',

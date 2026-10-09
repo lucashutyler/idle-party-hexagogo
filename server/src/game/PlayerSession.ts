@@ -44,6 +44,7 @@ import {
   getCraftSkillName,
   emptyNotificationPreferences,
   acceptableQuestIds,
+  nextWeeklyReopening,
 } from '@idle-party-rpg/shared';
 import type {
   HiredHenchman,
@@ -121,6 +122,7 @@ export class PlayerSession {
   private pushSubscriptions: WebPushSubscription[] = [];
   /** Which chat thread the player is actively looking at right now, if any — ephemeral, not persisted. */
   private chatFocus: { channelType: string; channelId: string } | null = null;
+  private availableQuests: { key: string; ids: string[]; staleAt: number } | null = null;
   /** Per-player quest tracking. */
   quests: QuestSystem;
 
@@ -450,6 +452,28 @@ export class PlayerSession {
     return this.content.getNpc(tileDef.npcId);
   }
 
+  /** Quests some NPC offers that this player can accept now; recomputed only when an input to that answer changes. */
+  private getAvailableQuestIds(
+    allQuests: Readonly<Record<string, QuestDefinition>>,
+    weeklyCompletions: Record<string, string>,
+  ): string[] {
+    if (!this.character) return [];
+    const key = `${this.content.getQuestRevision()}:${this.quests.getRevision()}:${this.character.level}`;
+    const now = Date.now();
+    const cached = this.availableQuests;
+    if (cached && cached.key === key && now < cached.staleAt) return cached.ids;
+
+    const ids = acceptableQuestIds(this.content.getNpcQuestIds(), allQuests, {
+      playerLevel: this.character.level,
+      activeQuestIds: this.quests.getActiveQuestIds(),
+      completedQuestIds: this.quests.getCompletedQuestIds(),
+      weeklyCompletions,
+      now: new Date(now),
+    });
+    this.availableQuests = { key, ids, staleAt: nextWeeklyReopening(weeklyCompletions, now) };
+    return ids;
+  }
+
   /** Quest data block for the state message: active progress, completed history, defs, offered IDs. */
   private buildQuestState(): {
     activeQuests: QuestProgressEntry[];
@@ -465,7 +489,7 @@ export class PlayerSession {
       tiles: Record<string, { name: string; zoneName: string }>;
     };
   } {
-    const allQuests = this.content.getAllQuests();
+    const allQuests = this.content.getQuestCatalog();
 
     // Recompute collect progress before exposing state
     this.quests.recomputeCollect(allQuests, (itemId) => this.getInventoryCount(itemId));
@@ -473,14 +497,7 @@ export class PlayerSession {
     const npc = this.getCurrentNpc();
     const offeredQuestIds = npc?.questIds ?? [];
     const weeklyCompletions = this.quests.getWeeklyCompletions();
-    const availableQuestIds = this.character
-      ? acceptableQuestIds(this.content.npcQuestIds(), allQuests, {
-        playerLevel: this.character.level,
-        activeQuestIds: this.quests.getActiveQuestIds(),
-        completedQuestIds: this.quests.getCompletedQuestIds(),
-        weeklyCompletions,
-      })
-      : [];
+    const availableQuestIds = this.getAvailableQuestIds(allQuests, weeklyCompletions);
 
     const activeProgress = this.quests.getActiveProgress();
 

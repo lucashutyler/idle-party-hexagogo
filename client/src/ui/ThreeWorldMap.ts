@@ -972,9 +972,9 @@ export class ThreeWorldMap {
     const key = `${off.col},${off.row}`;
     const def = this.worldTileDefs.get(key);
     const zoneName = def?.zoneName ?? def?.zone ?? tile.zone;
-    const questLines = (this.questTargetsByRoom.get(key) ?? []).map(name => `${QUEST_TARGET_ICON} ${name}`);
-    if (!this.worldCache.isUnlocked(off.col, off.row)) return [`${zoneName}: Unexplored Room`, ...questLines];
+    if (!this.worldCache.isUnlocked(off.col, off.row)) return [`${zoneName}: Unexplored Room`];
 
+    const questLines = (this.questTargetsByRoom.get(key) ?? []).map(name => `${QUEST_TARGET_ICON} ${name}`);
     const lines = [`${zoneName}: ${def?.name || 'Unexplored Room'}`];
     for (const action of this.roomActions.get(key) ?? []) {
       lines.push(`${action.icon} ${action.name}${action.detail ? ` · ${action.detail}` : ''}`);
@@ -1691,14 +1691,14 @@ export class ThreeWorldMap {
     this.updateQuestTargetsOverlay();
   }
 
-  /** Outlines every room an active quest still sends the party to on this map, explored or not. */
+  /** Outlines every explored room on this map that an active quest still sends the party to. */
   private updateQuestTargetsOverlay(): void {
     this.questTargetsByRoom.clear();
     const outlines = document.createDocumentFragment();
     const mapId = this.worldCache.getCurrentMapId();
     for (const [tileId, questNames] of this.questTargets) {
       const def = this.worldCache.getTileByGuid(tileId);
-      if (!def || def.mapId !== mapId) continue;
+      if (!def || def.mapId !== mapId || !this.worldCache.isUnlocked(def.col, def.row)) continue;
       this.questTargetsByRoom.set(`${def.col},${def.row}`, questNames);
       outlines.appendChild(this.buildQuestTarget(def.col, def.row));
     }

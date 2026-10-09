@@ -362,8 +362,10 @@ export {
   computeStatus,
   canAcceptQuest,
   acceptableQuestIds,
+  nextWeeklyReopening,
   initialProgress,
   SOLO_QUEST_IN_PARTY_REASON,
+  WEEKLY_COOLDOWN_MS,
 } from './systems/QuestTypes.js';
 export type {
   QuestAcceptContext,

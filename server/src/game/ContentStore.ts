@@ -50,6 +50,9 @@ export class ContentStore {
   private recipes = new Map<string, RecipeDefinition>();
   private npcs = new Map<string, NpcDefinition>();
   private quests = new Map<string, QuestDefinition>();
+  private questRevision = 0;
+  private questCatalog: Readonly<Record<string, QuestDefinition>> | null = null;
+  private npcQuestIdList: readonly string[] | null = null;
   private dungeons = new Map<string, DungeonDefinition>();
   private skills = new Map<string, SkillDefinition>();
   private skillSlotSchedules = new Map<string, SkillSlot[]>();
@@ -68,6 +71,7 @@ export class ContentStore {
       this.seedDefaults();
       await this.save();
     }
+    this.questContentChanged();
   }
 
   async save(): Promise<void> {
@@ -192,11 +196,21 @@ export class ContentStore {
     return result;
   }
 
-  /** Every quest id some NPC offers; repeats when several NPCs offer the same quest. */
-  *npcQuestIds(): Generator<string> {
-    for (const npc of this.npcs.values()) {
-      if (npc.questIds) yield* npc.questIds;
-    }
+  /** Every quest id some NPC offers, deduped. Cached until an NPC or quest changes. */
+  getNpcQuestIds(): readonly string[] {
+    this.npcQuestIdList ??= [...new Set([...this.npcs.values()].flatMap(npc => npc.questIds ?? []))];
+    return this.npcQuestIdList;
+  }
+
+  /** Bumped on every NPC or quest change, so per-player quest caches know when to recompute. */
+  getQuestRevision(): number {
+    return this.questRevision;
+  }
+
+  /** The quest catalog without the per-call copy `getAllQuests` makes. Cached until a quest changes. */
+  getQuestCatalog(): Readonly<Record<string, QuestDefinition>> {
+    this.questCatalog ??= Object.freeze(this.getAllQuests());
+    return this.questCatalog;
   }
 
   getQuest(id: string): QuestDefinition | undefined {
@@ -552,6 +566,7 @@ export class ContentStore {
 
   async addOrUpdateNpc(npc: NpcDefinition): Promise<void> {
     this.npcs.set(npc.id, npc);
+    this.questContentChanged();
     await this.save();
   }
 
@@ -564,6 +579,7 @@ export class ContentStore {
       return { success: false, error: `Cannot delete: NPC is placed in room "${referencingTile.name}" at (${referencingTile.col}, ${referencingTile.row}).` };
     }
     this.npcs.delete(id);
+    this.questContentChanged();
     await this.save();
     return { success: true };
   }
@@ -572,6 +588,7 @@ export class ContentStore {
 
   async addOrUpdateQuest(quest: QuestDefinition): Promise<void> {
     this.quests.set(quest.id, quest);
+    this.questContentChanged();
     await this.save();
   }
 
@@ -592,6 +609,7 @@ export class ContentStore {
       }
     }
     this.quests.delete(id);
+    this.questContentChanged();
     await this.save();
     return { success: true };
   }
@@ -775,6 +793,7 @@ export class ContentStore {
     if (snapshot.quests) {
       for (const q of snapshot.quests) this.quests.set(q.id, q);
     }
+    this.questContentChanged();
 
     this.dungeons.clear();
     if (snapshot.dungeons) {
@@ -1113,6 +1132,12 @@ export class ContentStore {
     }
 
     return migrated;
+  }
+
+  private questContentChanged(): void {
+    this.questRevision++;
+    this.questCatalog = null;
+    this.npcQuestIdList = null;
   }
 
   private seedDefaults(): void {
