@@ -43,6 +43,8 @@ import {
   xpForCraftLevel,
   getCraftSkillName,
   emptyNotificationPreferences,
+  acceptableQuestIds,
+  nextWeeklyReopening,
 } from '@idle-party-rpg/shared';
 import type {
   HiredHenchman,
@@ -120,6 +122,7 @@ export class PlayerSession {
   private pushSubscriptions: WebPushSubscription[] = [];
   /** Which chat thread the player is actively looking at right now, if any — ephemeral, not persisted. */
   private chatFocus: { channelType: string; channelId: string } | null = null;
+  private availableQuests: { key: string; ids: string[]; computedAt: number; staleAt: number } | null = null;
   /** Per-player quest tracking. */
   quests: QuestSystem;
 
@@ -449,6 +452,28 @@ export class PlayerSession {
     return this.content.getNpc(tileDef.npcId);
   }
 
+  /** Quests some NPC offers that this player can accept now; recomputed only when an input to that answer changes. */
+  private getAvailableQuestIds(
+    allQuests: Readonly<Record<string, QuestDefinition>>,
+    weeklyCompletions: Record<string, string>,
+  ): string[] {
+    if (!this.character) return [];
+    const key = `${this.content.getQuestRevision()}:${this.quests.getRevision()}:${this.character.level}`;
+    const now = Date.now();
+    const cached = this.availableQuests;
+    if (cached && cached.key === key && now >= cached.computedAt && now < cached.staleAt) return cached.ids;
+
+    const ids = acceptableQuestIds(this.content.getNpcQuestIds(), allQuests, {
+      playerLevel: this.character.level,
+      activeQuestIds: this.quests.getActiveQuestIds(),
+      completedQuestIds: this.quests.getCompletedQuestIds(),
+      weeklyCompletions,
+      now: new Date(now),
+    });
+    this.availableQuests = { key, ids, computedAt: now, staleAt: nextWeeklyReopening(weeklyCompletions, now) };
+    return ids;
+  }
+
   /** Quest data block for the state message: active progress, completed history, defs, offered IDs. */
   private buildQuestState(): {
     activeQuests: QuestProgressEntry[];
@@ -456,19 +481,23 @@ export class PlayerSession {
     weeklyCompletions: Record<string, string>;
     questDefinitions: Record<string, QuestDefinition>;
     offeredQuestIds: string[];
+    questGiverNpcId: string | undefined;
+    availableQuestIds: string[];
     questResolutions: {
       monsters: Record<string, string>;
       items: Record<string, string>;
-      tiles: Record<string, { name: string; col: number; row: number }>;
+      tiles: Record<string, { name: string; zoneName: string }>;
     };
   } {
-    const allQuests = this.content.getAllQuests();
+    const allQuests = this.content.getQuestCatalog();
 
     // Recompute collect progress before exposing state
     this.quests.recomputeCollect(allQuests, (itemId) => this.getInventoryCount(itemId));
 
     const npc = this.getCurrentNpc();
     const offeredQuestIds = npc?.questIds ?? [];
+    const weeklyCompletions = this.quests.getWeeklyCompletions();
+    const availableQuestIds = this.getAvailableQuestIds(allQuests, weeklyCompletions);
 
     const activeProgress = this.quests.getActiveProgress();
 
@@ -490,7 +519,7 @@ export class PlayerSession {
     // Resolve display names for every monster/item/tile referenced by these quests + reward items
     const monsterNames: Record<string, string> = {};
     const itemNames: Record<string, string> = {};
-    const tileLookups: Record<string, { name: string; col: number; row: number }> = {};
+    const tileLookups: Record<string, { name: string; zoneName: string }> = {};
     for (const def of Object.values(defs)) {
       for (const obj of def.objectives) {
         if (obj.kind === 'kill') {
@@ -501,7 +530,9 @@ export class PlayerSession {
           if (it) itemNames[obj.itemId] = it.name;
         } else if (obj.kind === 'visit') {
           const tile = this.content.getTileById(obj.tileId);
-          if (tile) tileLookups[obj.tileId] = { name: tile.name, col: tile.col, row: tile.row };
+          if (tile) {
+            tileLookups[obj.tileId] = { name: tile.name, zoneName: this.content.getZone(tile.zone)?.displayName ?? tile.zone };
+          }
         }
       }
       for (const r of def.rewards) {
@@ -515,9 +546,11 @@ export class PlayerSession {
     return {
       activeQuests: activeProgress,
       completedQuests: this.quests.getCompleted(),
-      weeklyCompletions: this.quests.getWeeklyCompletions(),
+      weeklyCompletions,
       questDefinitions: defs,
       offeredQuestIds,
+      questGiverNpcId: npc?.id,
+      availableQuestIds,
       questResolutions: { monsters: monsterNames, items: itemNames, tiles: tileLookups },
     };
   }
@@ -528,7 +561,7 @@ export class PlayerSession {
     if (!this.character) return { success: false, error: 'No character.' };
     const npc = this.getCurrentNpc();
     if (!npc || !(npc.questIds ?? []).includes(questId)) {
-      return { success: false, error: 'Quest not offered here.' };
+      return { success: false, error: "That quest isn't offered in this room." };
     }
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
@@ -543,7 +576,7 @@ export class PlayerSession {
     if (!this.character) return { success: false, error: 'No character.' };
     const npc = this.getCurrentNpc();
     if (!npc || !(npc.questIds ?? []).includes(questId)) {
-      return { success: false, error: 'Must be at the NPC who offered this quest.' };
+      return { success: false, error: 'Turn this quest in to someone who offers it.' };
     }
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
@@ -654,6 +687,8 @@ export class PlayerSession {
       weeklyCompletions: questBlock.weeklyCompletions,
       questDefinitions: questBlock.questDefinitions,
       offeredQuestIds: questBlock.offeredQuestIds,
+      questGiverNpcId: questBlock.questGiverNpcId,
+      availableQuestIds: questBlock.availableQuestIds,
       questResolutions: questBlock.questResolutions,
       dungeon: this.getDungeonState?.() ?? undefined,
     };

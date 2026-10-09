@@ -12,7 +12,7 @@ export interface CompletedQuestSummary {
   timesCompleted: number;
 }
 
-export interface TurnInLocation {
+export interface NpcLocation {
   npcName: string;
   npcEmoji: string;
   roomName?: string;
@@ -67,8 +67,8 @@ export function turnInLocations(
   npcs: readonly NpcDefinition[],
   roomsWithNpc: (npcId: string) => readonly NpcRoom[],
   unlockedIds: ReadonlySet<string>,
-): TurnInLocation[] {
-  const locations: TurnInLocation[] = [];
+): NpcLocation[] {
+  const locations: NpcLocation[] = [];
   for (const npc of npcs) {
     if (!npc.questIds?.includes(questId)) continue;
     const rooms = roomsWithNpc(npc.id);
@@ -79,6 +79,26 @@ export function turnInLocations(
       continue;
     }
     for (const room of explored) {
+      locations.push({ npcName: npc.name, npcEmoji: npc.emoji, roomName: room.name, zoneName: room.zoneName });
+    }
+  }
+  return locations;
+}
+
+/** Every explored room where an NPC who can hand out one of `availableQuestIds` stands. */
+export function giverLocations(
+  availableQuestIds: Iterable<string>,
+  npcs: readonly NpcDefinition[],
+  roomsWithNpc: (npcId: string) => readonly NpcRoom[],
+  unlockedIds: ReadonlySet<string>,
+): NpcLocation[] {
+  const available = new Set(availableQuestIds);
+  if (available.size === 0) return [];
+  const locations: NpcLocation[] = [];
+  for (const npc of npcs) {
+    if (!npc.questIds?.some(id => available.has(id))) continue;
+    for (const room of roomsWithNpc(npc.id)) {
+      if (!unlockedIds.has(room.id)) continue;
       locations.push({ npcName: npc.name, npcEmoji: npc.emoji, roomName: room.name, zoneName: room.zoneName });
     }
   }

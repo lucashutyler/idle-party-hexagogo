@@ -27,7 +27,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.10.08.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.10.09.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -187,11 +187,15 @@ export interface ServerStateMessage {
   questDefinitions?: Record<string, import('./QuestTypes.js').QuestDefinition>;
   /** Quest IDs offered by an NPC at the player's current room (for popup display). */
   offeredQuestIds?: string[];
-  /** Display-name lookups for IDs referenced by the player's active/offered quests. */
+  /** The NPC whose quests `offeredQuestIds` lists, if the current room has one. */
+  questGiverNpcId?: string;
+  /** Quests some NPC offers that this player can accept now (solo scope ignored). Sorted. */
+  availableQuestIds?: string[];
+  /** Display-name lookups for IDs referenced by the player's active/offered quests. Tiles are keyed by room GUID. */
   questResolutions?: {
     monsters: Record<string, string>;
     items: Record<string, string>;
-    tiles: Record<string, { name: string; col: number; row: number }>;
+    tiles: Record<string, { name: string; zoneName: string }>;
   };
   /** Active dungeon run state (floor progress) — present only while the party is inside a dungeon. */
   dungeon?: DungeonRunInfo;
@@ -291,7 +295,7 @@ export interface ClientUnequipSkillMessage {
  * Machine-readable tag on an `error` message, for the cases a screen needs to react
  * to rather than just log. Most errors carry no code.
  */
-export type ServerErrorCode = 'trade_nonce_mismatch';
+export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused';
 
 export type ServerMessage =
   | ServerStateMessage
@@ -305,7 +309,15 @@ export type ServerMessage =
   | ServerTradeCompletedMessage
   | ServerNotificationMessage
   | PlayerProfileMessage
-  | { type: 'error'; message: string; code?: ServerErrorCode };
+  | ServerErrorMessage;
+
+export interface ServerErrorMessage {
+  type: 'error';
+  message: string;
+  code?: ServerErrorCode;
+  /** Set on `quest_refused`: the quest the refused accept/turn-in named. */
+  questId?: string;
+}
 
 export interface ClientViewPlayerMessage {
   type: 'view_player';

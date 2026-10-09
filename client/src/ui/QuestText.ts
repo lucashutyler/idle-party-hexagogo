@@ -46,5 +46,7 @@ function rewardText(reward: QuestReward, resolutions: QuestResolutions): string 
 
 function roomText(tileId: string, resolutions: QuestResolutions): string {
   const tile = resolutions?.tiles[tileId];
-  return tile ? `${tile.name} (${tile.col},${tile.row})` : 'a specific room';
+  if (!tile) return 'a specific room';
+  if (!tile.name) return tile.zoneName ? `a room in ${tile.zoneName}` : 'a specific room';
+  return tile.zoneName ? `${tile.name}, ${tile.zoneName}` : tile.name;
 }

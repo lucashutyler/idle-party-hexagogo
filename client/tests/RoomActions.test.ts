@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import type { DungeonDefinition, NpcDefinition, ShopSummary, WorldMapMeta, WorldTileDefinition } from '@idle-party-rpg/shared';
+import type {
+  DungeonDefinition,
+  NpcDefinition,
+  ServerStateMessage,
+  ShopSummary,
+  WorldMapMeta,
+  WorldTileDefinition,
+} from '@idle-party-rpg/shared';
 import {
   HIRE_DETAIL,
+  QUEST_AVAILABLE_DETAIL,
   QUEST_READY_DETAIL,
   ROOM_ICONS,
   actionLabel,
   getRoomActions,
-  readyQuestIds,
+  questMarks,
+  questPipClass,
 } from '../src/ui/RoomActions';
-import type { RoomActionLookups } from '../src/ui/RoomActions';
+import type { QuestMarks, RoomActionLookups } from '../src/ui/RoomActions';
 
 const NPCS: Record<string, NpcDefinition> = {
   mira: { id: 'mira', name: 'Mira', emoji: '🧙', greeting: 'Hi', questIds: ['q1', 'q2'] },
@@ -29,6 +38,10 @@ const MAPS: WorldMapMeta[] = [
   { id: 'forest', name: 'Darkwood', startTile: { col: 0, row: 0 } },
   { id: 'sewers', name: 'The Sewers', startTile: { col: 0, row: 0 } },
 ];
+
+function marks(ready: string[] = [], available: string[] = []): QuestMarks {
+  return { ready: new Set(ready), available: new Set(available) };
+}
 
 const lookups: RoomActionLookups = {
   getNpc: id => NPCS[id],
@@ -65,15 +78,34 @@ describe('getRoomActions', () => {
   });
 
   it('flags an npc whose quest is ready to turn in', () => {
-    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, new Set(['q2']));
+    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, marks(['q2']));
     expect(npc.detail).toBe(QUEST_READY_DETAIL);
     expect(npc.questReady).toBe(true);
+    expect(questPipClass(npc)).toBe('quest-ready-pip');
   });
 
-  it('ignores ready quests the npc does not offer', () => {
-    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, new Set(['other']));
+  it('flags an npc with a quest the player can take now', () => {
+    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, marks([], ['q1']));
+    expect(npc.detail).toBe(QUEST_AVAILABLE_DETAIL);
+    expect(npc.questAvailable).toBe(true);
+    expect(npc.questReady).toBeUndefined();
+    expect(questPipClass(npc)).toBe('quest-available-pip');
+  });
+
+  it('shows a ready turn-in over a new quest at the same npc', () => {
+    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, marks(['q2'], ['q1']));
+    expect(npc.detail).toBe(QUEST_READY_DETAIL);
+    expect(npc.questReady).toBe(true);
+    expect(npc.questAvailable).toBeUndefined();
+    expect(questPipClass(npc)).toBe('quest-ready-pip');
+  });
+
+  it('ignores ready and available quests the npc does not offer', () => {
+    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, marks(['other'], ['elsewhere']));
     expect(npc.detail).toBeUndefined();
     expect(npc.questReady).toBeUndefined();
+    expect(npc.questAvailable).toBeUndefined();
+    expect(questPipClass(npc)).toBe('');
   });
 
   it('marks a shop that sells items with a coin', () => {
@@ -128,17 +160,30 @@ describe('actionLabel', () => {
   });
 });
 
-describe('readyQuestIds', () => {
-  it('collects only quests ready to turn in', () => {
-    const ids = readyQuestIds([
-      { questId: 'a', status: 'ready', progress: [], acceptedAt: '' },
-      { questId: 'b', status: 'in_progress', progress: [], acceptedAt: '' },
-      { questId: 'c', status: 'ready', progress: [], acceptedAt: '' },
-    ]);
-    expect([...ids].sort()).toEqual(['a', 'c']);
+describe('questMarks', () => {
+  it('collects quests ready to turn in and quests available to accept', () => {
+    const state = {
+      activeQuests: [
+        { questId: 'a', status: 'ready', progress: [], acceptedAt: '' },
+        { questId: 'b', status: 'in_progress', progress: [], acceptedAt: '' },
+        { questId: 'c', status: 'ready', progress: [], acceptedAt: '' },
+      ],
+      availableQuestIds: ['d', 'e'],
+    } as unknown as ServerStateMessage;
+    const { ready, available } = questMarks(state);
+    expect([...ready].sort()).toEqual(['a', 'c']);
+    expect([...available]).toEqual(['d', 'e']);
   });
 
-  it('is empty when there are no active quests', () => {
-    expect(readyQuestIds().size).toBe(0);
+  it('is empty without a state or quest fields', () => {
+    expect(questMarks().ready.size).toBe(0);
+    expect(questMarks(null).available.size).toBe(0);
+    expect(questMarks({} as ServerStateMessage).available.size).toBe(0);
+  });
+});
+
+describe('questPipClass', () => {
+  it('marks only npcs with quest news', () => {
+    expect(questPipClass({ kind: 'shop', icon: '🪙', name: 'Store', targetId: 's' })).toBe('');
   });
 });

@@ -21,6 +21,7 @@ import type {
   ServerBattleState,
   ClientCombatState,
   DungeonRunInfo,
+  DungeonFloor,
   DungeonEntryMemberInfo,
   DungeonReward,
   RoomEntryMemberInfo,
@@ -130,7 +131,7 @@ export class PartyBattleManager {
           this.handleBattleEnd(partyId, result);
         },
         onMove: () => {
-          const allQuests = this.content.getAllQuests();
+          const allQuests = this.content.getQuestCatalog();
           const tileId = serverParty.tile.id;
           for (const m of members) {
             const s = this.getSession(m);
@@ -209,6 +210,20 @@ export class PartyBattleManager {
   restartBattle(partyId: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
+    entry.battleTimer.restartBattle();
+  }
+
+  /**
+   * Call after hiring or dismissing henchmen. Overworld combat restarts around the new
+   * roster; inside a dungeon the fight carries on and any `joined` hire waits at the entrance.
+   */
+  henchmenChanged(partyId: string, joined: readonly HiredHenchman[] = []): void {
+    const entry = this.entries.get(partyId);
+    if (!entry) return;
+    if (entry.dungeonRun) {
+      this.logHenchmen(entry, joined, name => `${name} waits at the dungeon entrance.`);
+      return;
+    }
     entry.battleTimer.restartBattle();
   }
 
@@ -323,11 +338,15 @@ export class PartyBattleManager {
   }
 
   private announceHenchmenLeft(entry: PartyBattleEntry, dismissed: HiredHenchman[]): void {
-    if (dismissed.length === 0) return;
-    for (const hired of dismissed) {
-      const name = this.content.getHenchman(hired.henchmanId)?.name ?? 'Your henchman';
+    this.logHenchmen(entry, dismissed, name => `${name} parts ways with the party.`);
+  }
+
+  /** One combat-log line per hire, sent to every member. */
+  private logHenchmen(entry: PartyBattleEntry, hires: readonly HiredHenchman[], line: (name: string) => string): void {
+    for (const hired of hires) {
+      const text = line(this.content.getHenchman(hired.henchmanId)?.name ?? 'Your henchman');
       for (const username of entry.members) {
-        this.getSession(username)?.addLogEntry(`${name} parts ways with the party.`, 'move');
+        this.getSession(username)?.addLogEntry(text, 'move');
       }
     }
   }
@@ -530,10 +549,6 @@ export class PartyBattleManager {
   relocateParty(partyId: string, newTile: HexTile, mapId: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
-    // A forced relocation (e.g. content deploy) ends any active dungeon run —
-    // otherwise the party stays movement-locked on a fresh tile fighting stale
-    // dungeon-floor encounters.
-    entry.dungeonRun = undefined;
     if (entry.serverParty.currentMapId !== mapId) {
       // Relocation crosses to a different map (e.g. the party's map was deleted).
       entry.serverParty.switchMap(this.grids.getOrThrow(mapId), newTile, mapId);
@@ -541,6 +556,8 @@ export class PartyBattleManager {
     } else {
       entry.serverParty.relocateTo(newTile);
     }
+    // Keeping the run would leave the party movement-locked on the new room.
+    this.endDungeonRun(entry);
     entry.battleTimer.restartBattle();
   }
 
@@ -576,6 +593,8 @@ export class PartyBattleManager {
       return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones, allEncounters));
     }
 
+    const floor = this.currentDungeonFloor(entry);
+
     const players: PartyCombatant[] = [];
     for (const username of entry.members) {
       const session = this.getSession(username);
@@ -584,7 +603,7 @@ export class PartyBattleManager {
       players.push(info);
     }
 
-    const hires = this.getPartyHenchmen(partyId)
+    const hires = this.fightingHenchmen(entry)
       .map(hired => ({ hired, def: this.content.getHenchman(hired.henchmanId) }))
       .filter((h): h is { hired: HiredHenchman; def: HenchmanDefinition } => !!h.def);
     const names = henchmanDisplayNames(hires.map(h => h.def.name), players.map(p => p.username));
@@ -594,18 +613,9 @@ export class PartyBattleManager {
 
     const zone = entry.serverParty.tile.zone;
 
-    // Inside a dungeon: encounters come from the current floor's table, not the tile.
-    if (entry.dungeonRun) {
-      const dungeon = this.content.getDungeon(entry.dungeonRun.dungeonId);
-      const floor = dungeon?.floors[entry.dungeonRun.currentFloorIndex];
-      if (floor) {
-        const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, floor.encounterTable);
-        return createPartyCombatState(players, monsters);
-      }
-      // Dungeon/floor vanished (e.g. content deploy) — abandon the run so the
-      // party isn't stuck (movement stays blocked while dungeonRun is set) and
-      // fall through to a normal tile encounter at their current position.
-      entry.dungeonRun = undefined;
+    if (floor) {
+      const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, floor.encounterTable);
+      return createPartyCombatState(players, monsters);
     }
 
     const tileId = entry.serverParty.tile.id;
@@ -623,7 +633,7 @@ export class PartyBattleManager {
       const combat = entry.battleTimer.currentCombat;
       const members = Array.from(entry.members);
       // Hired henchmen take a share of XP, gold and drops, and that share is lost.
-      const hires = this.getPartyHenchmen(partyId).flatMap(h => {
+      const hires = this.fightingHenchmen(entry).flatMap(h => {
         const def = this.content.getHenchman(h.henchmanId);
         return def ? [def] : [];
       });
@@ -700,7 +710,7 @@ export class PartyBattleManager {
 
       // Quest hooks: credit every dead monster to every party member with active kill objectives.
       if (combat) {
-        const allQuests = this.content.getAllQuests();
+        const allQuests = this.content.getQuestCatalog();
         for (const m of combat.monsters) {
           for (const username of members) {
             const session = this.getSession(username);
@@ -743,9 +753,6 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false, error: 'No party.' };
     if (entry.dungeonRun) return { success: false, error: 'Already in a dungeon.' };
-    if (this.getPartyHenchmen(partyId).length > 0) {
-      return { success: false, error: 'Dismiss your henchmen before entering.' };
-    }
 
     const dungeon = this.content.getDungeon(dungeonId);
     if (!dungeon) return { success: false, error: 'Dungeon not found.' };
@@ -804,6 +811,7 @@ export class PartyBattleManager {
       if (!session) continue;
       session.addLogEntry(`Entered ${dungeon.name} — floor 1 of ${totalFloors}!`, 'battle');
     }
+    this.logHenchmen(entry, this.getPartyHenchmen(partyId), name => `${name} waits at the dungeon entrance.`);
 
     // Rebuild combat from floor 1.
     entry.battleTimer.restartBattle();
@@ -864,15 +872,13 @@ export class PartyBattleManager {
   restoreDungeonRun(partyId: string, run: DungeonRunState): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
-    const dungeon = this.content.getDungeon(run.dungeonId);
-    // Content may have changed under us — drop the run if the dungeon/floor is gone.
-    if (!dungeon || run.currentFloorIndex >= dungeon.floors.length) return;
-    entry.serverParty.clearDestination();
     entry.dungeonRun = {
       dungeonId: run.dungeonId,
       currentFloorIndex: run.currentFloorIndex,
       entrance: { ...run.entrance },
     };
+    if (!this.currentDungeonFloor(entry)) return;
+    entry.serverParty.clearDestination();
     entry.battleTimer.restartBattle();
   }
 
@@ -895,8 +901,29 @@ export class PartyBattleManager {
    * or let the in-flight result→next-battle cycle pick up overworld combat.
    */
   private exitDungeon(entry: PartyBattleEntry, toTile: HexTile): void {
-    entry.dungeonRun = undefined;
+    this.endDungeonRun(entry);
     entry.serverParty.relocateTo(toTile);
+  }
+
+  /** Clear the run state. Every path out of a dungeon goes through here so parked hires rejoin. */
+  private endDungeonRun(entry: PartyBattleEntry): void {
+    if (!entry.dungeonRun) return;
+    entry.dungeonRun = undefined;
+    this.logHenchmen(entry, this.getPartyHenchmen(entry.partyId), name => `${name} rejoins the party.`);
+  }
+
+  /** Hires wait at the entrance during a dungeon run, out of combat and reward shares. */
+  private fightingHenchmen(entry: PartyBattleEntry): HiredHenchman[] {
+    return entry.dungeonRun ? [] : this.getPartyHenchmen(entry.partyId);
+  }
+
+  /** The floor a dungeon run is on; ends the run when its dungeon or floor no longer exists. */
+  private currentDungeonFloor(entry: PartyBattleEntry): DungeonFloor | undefined {
+    const run = entry.dungeonRun;
+    if (!run) return undefined;
+    const floor = this.content.getDungeon(run.dungeonId)?.floors[run.currentFloorIndex];
+    if (!floor) this.endDungeonRun(entry);
+    return floor;
   }
 
   /** Victory inside a dungeon: grant floor rewards, then advance or complete. */

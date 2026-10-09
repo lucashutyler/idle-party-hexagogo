@@ -2,7 +2,7 @@ import type {
   DungeonDefinition,
   MapTransitionLink,
   NpcDefinition,
-  QuestProgressEntry,
+  ServerStateMessage,
   ShopSummary,
   WorldMapMeta,
   WorldTileDefinition,
@@ -18,6 +18,12 @@ export interface RoomAction {
   /** NPC, shop or dungeon id; for travel, the destination tile GUID. */
   targetId: string;
   questReady?: boolean;
+  questAvailable?: boolean;
+}
+
+export interface QuestMarks {
+  ready: ReadonlySet<string>;
+  available: ReadonlySet<string>;
 }
 
 export interface RoomActionLookups {
@@ -39,29 +45,21 @@ export const ROOM_ICONS = {
 } as const;
 
 export const QUEST_READY_DETAIL = 'Quest ready to turn in';
+export const QUEST_AVAILABLE_DETAIL = 'New quest available';
 export const HIRE_DETAIL = 'Henchmen for hire';
 
-const NO_READY_QUESTS: ReadonlySet<string> = new Set();
+const NO_QUEST_MARKS: QuestMarks = { ready: new Set(), available: new Set() };
 
 /** Everything a room offers, in display order: NPC, shop, dungeon, then one entry per exit. */
 export function getRoomActions(
   room: RoomContents,
   lookups: RoomActionLookups,
-  readyQuestIds: ReadonlySet<string> = NO_READY_QUESTS,
+  quests: QuestMarks = NO_QUEST_MARKS,
 ): RoomAction[] {
   const actions: RoomAction[] = [];
 
   const npc = room.npcId ? lookups.getNpc(room.npcId) : undefined;
-  if (npc) {
-    const questReady = (npc.questIds ?? []).some(id => readyQuestIds.has(id));
-    actions.push({
-      kind: 'npc',
-      icon: npc.emoji,
-      name: npc.name,
-      targetId: npc.id,
-      ...(questReady ? { detail: QUEST_READY_DETAIL, questReady } : {}),
-    });
-  }
+  if (npc) actions.push(npcAction(npc, quests));
 
   const shop = room.shopId ? lookups.getShop(room.shopId) : undefined;
   if (shop) actions.push(shopAction(shop));
@@ -88,8 +86,24 @@ export function actionLabel(action: RoomAction): string {
   }
 }
 
-export function readyQuestIds(activeQuests: readonly QuestProgressEntry[] = []): Set<string> {
-  return new Set(activeQuests.filter(q => q.status === 'ready').map(q => q.questId));
+/** Quests ready to turn in and quests some NPC can hand out now, from the latest state push. */
+export function questMarks(state?: ServerStateMessage | null): QuestMarks {
+  const ready = (state?.activeQuests ?? []).filter(q => q.status === 'ready').map(q => q.questId);
+  return { ready: new Set(ready), available: new Set(state?.availableQuestIds ?? []) };
+}
+
+export function questPipClass(action: RoomAction): string {
+  if (action.questReady) return 'quest-ready-pip';
+  if (action.questAvailable) return 'quest-available-pip';
+  return '';
+}
+
+function npcAction(npc: NpcDefinition, quests: QuestMarks): RoomAction {
+  const action: RoomAction = { kind: 'npc', icon: npc.emoji, name: npc.name, targetId: npc.id };
+  const questIds = npc.questIds ?? [];
+  if (questIds.some(id => quests.ready.has(id))) return { ...action, detail: QUEST_READY_DETAIL, questReady: true };
+  if (questIds.some(id => quests.available.has(id))) return { ...action, detail: QUEST_AVAILABLE_DETAIL, questAvailable: true };
+  return action;
 }
 
 function shopAction(shop: ShopSummary): RoomAction {

@@ -1,6 +1,6 @@
 import type { TileClickInfo } from './ThreeWorldMap';
 import { classIconHtml } from '@idle-party-rpg/shared';
-import { ROOM_ICONS, actionLabel } from './RoomActions';
+import { ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderAssetImg } from './assets';
@@ -121,7 +121,7 @@ export class RoomView {
       : '';
     const actionButtons = actions.map((action, i) => {
       const title = action.detail ? ` title="${this.escapeHtml(action.detail)}"` : '';
-      const pip = action.questReady ? ' quest-ready-pip' : '';
+      const pip = pipSuffix(action);
       const icon = action.kind === 'shop'
         ? renderAssetImg('shop', action.targetId, { className: 'room-view-action-icon', label: action.name })
         : `<span class="room-view-action-icon room-view-action-icon-emoji${pip}">${this.escapeHtml(action.icon)}</span>`;
@@ -273,7 +273,7 @@ export class RoomView {
   private renderContentsList(actions: RoomAction[]): string {
     if (actions.length === 0) return '';
     const items = actions.map(action => {
-      const pip = action.questReady ? ' quest-ready-pip' : '';
+      const pip = pipSuffix(action);
       const detail = action.detail
         ? `<span class="room-view-contents-detail">${this.escapeHtml(action.detail)}</span>`
         : '';
@@ -320,4 +320,9 @@ export class RoomView {
     this.overlay.style.display = 'none';
     release(this.overlay);
   }
+}
+
+function pipSuffix(action: RoomAction): string {
+  const pip = questPipClass(action);
+  return pip ? ` ${pip}` : '';
 }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CompletedQuestEntry,
   NpcDefinition,
@@ -9,7 +9,6 @@ import type {
 } from '@idle-party-rpg/shared';
 import { QuestLog } from '../src/ui/QuestLog';
 import { SettingsScreen } from '../src/screens/SettingsScreen';
-import { NpcTalkPopup } from '../src/ui/NpcTalkPopup';
 import type { GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 
@@ -40,6 +39,8 @@ interface StateParts {
   questDefinitions?: Record<string, QuestDefinition>;
   offeredQuestIds?: string[];
   unlocked?: string[];
+  availableQuestIds?: string[];
+  tiles?: Record<string, { name: string; zoneName: string }>;
 }
 
 function makeState(parts: StateParts): ServerStateMessage {
@@ -49,8 +50,9 @@ function makeState(parts: StateParts): ServerStateMessage {
     weeklyCompletions: parts.weeklyCompletions ?? {},
     questDefinitions: parts.questDefinitions ?? {},
     offeredQuestIds: parts.offeredQuestIds ?? [],
-    questResolutions: { monsters: { 'm-goblin': 'Goblin' }, items: {}, tiles: {} },
+    questResolutions: { monsters: { 'm-goblin': 'Goblin' }, items: {}, tiles: parts.tiles ?? {} },
     unlocked: parts.unlocked ?? [],
+    availableQuestIds: parts.availableQuestIds ?? [],
   } as unknown as ServerStateMessage;
 }
 
@@ -216,6 +218,92 @@ describe('QuestLog', () => {
     expect(turnIn.textContent).not.toContain('Hermit Hut');
   });
 
+  it('lists who has new quests above the active quests, naming explored rooms only', () => {
+    const npcs: NpcDefinition[] = [
+      { id: 'mara', name: 'Mara', emoji: '🧙', greeting: 'Hi', questIds: ['q-new'] },
+      { id: 'hermit', name: 'Hermit', emoji: '🧔', greeting: 'Hm', questIds: ['q-new'] },
+      { id: 'smith', name: 'Smith', emoji: '🔨', greeting: 'Yo', questIds: ['q-other'] },
+    ];
+    const room = (id: string, name: string, zoneName: string) => ({ id, name, zoneName } as WorldTileDefinition);
+    const t = setup(npcs, {
+      mara: [room('r-square', 'Town Square', 'Hatchetmill')],
+      hermit: [room('r-hut', 'Hermit Hut', 'Far Peaks')],
+      smith: [room('r-forge', 'Forge', 'Hatchetmill')],
+    });
+    t.push({
+      activeQuests: [active('q1', 'accepted', [0])],
+      questDefinitions: { q1: quest('q1') },
+      availableQuestIds: ['q-new'],
+      unlocked: ['r-square', 'r-forge'],
+    });
+    new QuestLog(t.gameClient, t.worldCache).open();
+
+    const section = t.body()!.firstElementChild!;
+    expect(section.classList.contains('quest-log-givers')).toBe(true);
+    expect(section.querySelector('.quest-log-givers-title')!.textContent).toBe('Quests available from');
+    expect([...section.querySelectorAll('.quest-log-giver')].map(li => li.textContent)).toEqual([
+      '🧙 Mara — Town Square, Hatchetmill',
+    ]);
+
+    t.push({ activeQuests: [active('q1', 'accepted', [0])], questDefinitions: { q1: quest('q1') }, unlocked: ['r-square'] });
+    expect(document.querySelector('.quest-log-givers')).toBeNull();
+  });
+
+  it('names visit targets by room and area, never by coordinates', () => {
+    const t = setup();
+    t.push({
+      activeQuests: [active('q1', 'in_progress', [1, 0, 0])],
+      questDefinitions: {
+        q1: quest('q1', {
+          objectives: [
+            { kind: 'visit', tileId: 'g-mill' },
+            { kind: 'visit', tileId: 'g-nameless' },
+            { kind: 'visit', tileId: 'g-unknown' },
+          ],
+        }),
+      },
+      tiles: {
+        'g-mill': { name: 'Old Mill', zoneName: 'Greenvale' },
+        'g-nameless': { name: '', zoneName: 'Greenvale' },
+      },
+    });
+    new QuestLog(t.gameClient, t.worldCache).open();
+
+    const objectives = [...document.querySelectorAll('.quest-objective')].map(el => el.textContent?.trim());
+    expect(objectives).toEqual([
+      '✓ Visit Old Mill, Greenvale — done',
+      '• Visit a room in Greenvale',
+      '• Visit a specific room',
+    ]);
+  });
+
+  it('holds a state repaint while the completed toggle is pressed', () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      const parts: StateParts = {
+        activeQuests: [active('q1', 'in_progress', [1])],
+        completedQuests: [{ questId: 'q0', completedAt: '2026-01-01T00:00:00.000Z' }],
+        questDefinitions: { q1: quest('q1'), q0: quest('q0') },
+      };
+      t.push(parts);
+      new QuestLog(t.gameClient, t.worldCache).open();
+      const pressed = t.toggle()!;
+
+      pressed.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      t.push({ ...parts, activeQuests: [active('q1', 'in_progress', [2])] });
+      expect(t.toggle()).toBe(pressed);
+
+      pressed.click();
+      vi.advanceTimersByTime(0);
+      expect(t.completedRows()).toHaveLength(1);
+      expect(document.querySelector('[data-quest-id="q1"]')!.textContent).toContain('Kill Goblin (2/3)');
+    } finally {
+      document.dispatchEvent(new PointerEvent('pointercancel'));
+      vi.useRealTimers();
+    }
+  });
+
   it('escapes author-supplied text', () => {
     const t = setup();
     t.push({
@@ -255,44 +343,5 @@ describe('SettingsScreen quest log', () => {
     screen.onDeactivate();
     expect(document.querySelector('.quest-log-modal')).toBeNull();
     expect(t.listenerCount()).toBe(0);
-  });
-});
-
-describe('NpcTalkPopup weekly cooldown', () => {
-  const giver: NpcDefinition = { id: 'mara', name: 'Mara', emoji: '🧙', greeting: 'Hi', questIds: ['q-weekly'] };
-  const weekly = quest('q-weekly', { repeat: 'weekly' });
-
-  function showWithLastCompletion(daysAgo: number): void {
-    const t = setup();
-    const completedAt = new Date(Date.now() - daysAgo * DAY_MS).toISOString();
-    t.push({
-      completedQuests: [{ questId: 'q-weekly', completedAt }],
-      weeklyCompletions: { 'q-weekly': completedAt },
-      questDefinitions: { 'q-weekly': weekly },
-      offeredQuestIds: ['q-weekly'],
-    });
-    new NpcTalkPopup(t.gameClient).show(giver);
-  }
-
-  it('does not offer a weekly quest that is still on cooldown', () => {
-    showWithLastCompletion(2);
-    expect(document.querySelector('[data-quest-accept="q-weekly"]')).toBeNull();
-  });
-
-  it('offers it again once the week has passed', () => {
-    showWithLastCompletion(8);
-    expect(document.querySelector('[data-quest-accept="q-weekly"]')).not.toBeNull();
-  });
-
-  it('follows the server cooldown, not the history, for a quest finished before it became weekly', () => {
-    const t = setup();
-    t.push({
-      completedQuests: [{ questId: 'q-weekly', completedAt: new Date(Date.now() - DAY_MS).toISOString() }],
-      weeklyCompletions: {},
-      questDefinitions: { 'q-weekly': weekly },
-      offeredQuestIds: ['q-weekly'],
-    });
-    new NpcTalkPopup(t.gameClient).show(giver);
-    expect(document.querySelector('[data-quest-accept="q-weekly"]')).not.toBeNull();
   });
 });

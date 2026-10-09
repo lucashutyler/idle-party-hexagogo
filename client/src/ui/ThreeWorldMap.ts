@@ -46,8 +46,9 @@ import type {
 } from '@idle-party-rpg/shared';
 import type { WorldCache } from '../network/WorldCache';
 import { artworkUrl, placeholderUrl } from './assets';
-import { ROOM_ICONS, getRoomActions, readyQuestIds } from './RoomActions';
-import type { RoomAction } from './RoomActions';
+import { ROOM_ICONS, getRoomActions, questMarks, questPipClass } from './RoomActions';
+import type { QuestMarks, RoomAction } from './RoomActions';
+import { pendingVisitTargets, questMarkerKey } from './QuestTargets';
 
 export interface TileClickInfo {
   col: number;
@@ -102,6 +103,7 @@ const PARCHMENT_PARALLAX = 0.3;
 
 const MAX_MARKER_ICONS = 3;
 const TOOLTIP_MARGIN = 4;
+const QUEST_TARGET_ICON = '📜';
 
 interface TileOccupancy {
   col: number;
@@ -156,6 +158,12 @@ function easeOutCubic(t: number): number {
   return 1 - u * u * u;
 }
 
+function hexOutlineSvg(strokeAttrs = ''): string {
+  return `<svg viewBox="-40 -35 80 70" width="80" height="70" preserveAspectRatio="xMidYMid meet">
+    <polygon points="40,0 20,34.64 -20,34.64 -40,0 -20,-34.64 20,-34.64" fill="none" stroke="currentColor" stroke-width="3"${strokeAttrs} />
+  </svg>`;
+}
+
 // ─── Main class ───────────────────────────────────────────────
 
 export class ThreeWorldMap {
@@ -168,6 +176,7 @@ export class ThreeWorldMap {
   private partyEl: HTMLDivElement;
   private hoverEl: HTMLDivElement;
   private pathEl: HTMLDivElement;
+  private questTargetsEl: HTMLDivElement;
   private markersEl: HTMLDivElement;
   private flagsEl: HTMLDivElement;
   private tooltipEl: HTMLDivElement;
@@ -231,8 +240,12 @@ export class ThreeWorldMap {
 
   // Room-action markers on explored rooms, keyed by "col,row".
   private roomActions = new Map<string, RoomAction[]>();
-  private readyQuests: ReadonlySet<string> = new Set();
-  private readyQuestKey = '';
+  private questMarks: QuestMarks = questMarks();
+  /** Quest names sending the party to each room, keyed by room GUID. */
+  private questTargets = new Map<string, string[]>();
+  /** The same, for rooms on the current map, keyed by "col,row". */
+  private questTargetsByRoom = new Map<string, string[]>();
+  private questMarkerKey = '';
   private markersDirty = true;
 
   // Party rendering. Movement is animated by a CSS transition on the
@@ -313,16 +326,17 @@ export class ThreeWorldMap {
     // white/red via the data-traversable attribute (see CSS).
     this.hoverEl = document.createElement('div');
     this.hoverEl.className = 'three-map-hover';
-    this.hoverEl.innerHTML =
-      `<svg viewBox="-40 -35 80 70" width="80" height="70" preserveAspectRatio="xMidYMid meet">
-        <polygon points="40,0 20,34.64 -20,34.64 -40,0 -20,-34.64 20,-34.64" fill="none" stroke="currentColor" stroke-width="3" />
-      </svg>`;
+    this.hoverEl.innerHTML = hexOutlineSvg();
     this.hoverEl.style.display = 'none';
     this.overlay.appendChild(this.hoverEl);
 
     this.pathEl = document.createElement('div');
     this.pathEl.className = 'three-map-path';
     this.overlay.appendChild(this.pathEl);
+
+    this.questTargetsEl = document.createElement('div');
+    this.questTargetsEl.className = 'three-map-quest-targets';
+    this.overlay.appendChild(this.questTargetsEl);
 
     this.markersEl = document.createElement('div');
     this.markersEl.className = 'three-map-markers';
@@ -453,11 +467,13 @@ export class ThreeWorldMap {
     this.othersByTile = this.groupOtherPlayers();
     this.serverPath = state.party.path ?? [];
 
-    const ready = readyQuestIds(state.activeQuests);
-    const readyKey = [...ready].sort().join(',');
-    if (readyKey !== this.readyQuestKey) {
-      this.readyQuestKey = readyKey;
-      this.readyQuests = ready;
+    const marks = questMarks(state);
+    const targets = pendingVisitTargets(state.activeQuests, state.questDefinitions);
+    const markerKey = questMarkerKey(marks, targets);
+    if (markerKey !== this.questMarkerKey) {
+      this.questMarkerKey = markerKey;
+      this.questMarks = marks;
+      this.questTargets = targets;
       this.markersDirty = true;
     }
 
@@ -958,10 +974,12 @@ export class ThreeWorldMap {
     const zoneName = def?.zoneName ?? def?.zone ?? tile.zone;
     if (!this.worldCache.isUnlocked(off.col, off.row)) return [`${zoneName}: Unexplored Room`];
 
+    const questLines = (this.questTargetsByRoom.get(key) ?? []).map(name => `${QUEST_TARGET_ICON} ${name}`);
     const lines = [`${zoneName}: ${def?.name || 'Unexplored Room'}`];
     for (const action of this.roomActions.get(key) ?? []) {
       lines.push(`${action.icon} ${action.name}${action.detail ? ` · ${action.detail}` : ''}`);
     }
+    lines.push(...questLines);
     const others = this.countOthersAt(off.col, off.row);
     if (others > 0) lines.push(`${ROOM_ICONS.players} ${others} ${others === 1 ? 'player' : 'players'} here`);
     return lines;
@@ -1664,12 +1682,37 @@ export class ThreeWorldMap {
     const markers = document.createDocumentFragment();
     for (const [key, def] of this.worldTileDefs) {
       if (!this.worldCache.isUnlocked(def.col, def.row)) continue;
-      const actions = getRoomActions(def, this.worldCache, this.readyQuests);
+      const actions = getRoomActions(def, this.worldCache, this.questMarks);
       if (actions.length === 0) continue;
       this.roomActions.set(key, actions);
       markers.appendChild(this.buildMarker(def.col, def.row, actions));
     }
     this.markersEl.replaceChildren(markers);
+    this.updateQuestTargetsOverlay();
+  }
+
+  /** Outlines every explored room on this map that an active quest still sends the party to. */
+  private updateQuestTargetsOverlay(): void {
+    this.questTargetsByRoom.clear();
+    const outlines = document.createDocumentFragment();
+    const mapId = this.worldCache.getCurrentMapId();
+    for (const [tileId, questNames] of this.questTargets) {
+      const def = this.worldCache.getTileByGuid(tileId);
+      if (!def || def.mapId !== mapId || !this.worldCache.isUnlocked(def.col, def.row)) continue;
+      this.questTargetsByRoom.set(`${def.col},${def.row}`, questNames);
+      outlines.appendChild(this.buildQuestTarget(def.col, def.row));
+    }
+    this.questTargetsEl.replaceChildren(outlines);
+  }
+
+  private buildQuestTarget(col: number, row: number): HTMLElement {
+    const p = cubeToPixel(offsetToCube({ col, row }));
+    const el = document.createElement('div');
+    el.className = 'three-map-quest-target';
+    el.style.left = `${p.x}px`;
+    el.style.top = `${p.y}px`;
+    el.innerHTML = hexOutlineSvg(' stroke-dasharray="8 6"');
+    return el;
   }
 
   private buildMarker(col: number, row: number, actions: RoomAction[]): HTMLElement {
@@ -1683,7 +1726,7 @@ export class ThreeWorldMap {
     const icons = [...actions.filter(a => a.kind !== 'travel'), ...(firstExit ? [firstExit] : [])];
     for (const action of icons.slice(0, MAX_MARKER_ICONS)) {
       const icon = document.createElement('span');
-      icon.className = action.questReady ? 'three-map-marker-icon quest-ready-pip' : 'three-map-marker-icon';
+      icon.className = ['three-map-marker-icon', questPipClass(action)].filter(Boolean).join(' ');
       icon.textContent = action.icon;
       marker.appendChild(icon);
     }

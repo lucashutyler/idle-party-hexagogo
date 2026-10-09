@@ -1836,6 +1836,7 @@ html, body {
 .three-map-party,
 .three-map-hover,
 .three-map-path > *,
+.three-map-quest-targets > *,
 .three-map-markers > *,
 .three-map-flags > * {
   position: absolute;
@@ -1896,6 +1897,20 @@ html, body {
 }
 .three-map-hover[data-traversable="0"] { color: rgba(255,102,102,0.85); }
 .three-map-hover svg { display: block; overflow: visible; }
+
+/* Quest destination — dashed green hex outline on a room an active quest sends you to. */
+.three-map-quest-target {
+  width: 80px;
+  height: 70px;
+  color: var(--accent-green);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.8));
+  animation: three-map-quest-target-pulse 1800ms ease-in-out infinite alternate;
+}
+.three-map-quest-target svg { display: block; overflow: visible; }
+@keyframes three-map-quest-target-pulse {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
 
 /* Path preview — small yellow hexes for steps, green dot for dest. */
 .three-map-path-step {
@@ -1962,12 +1977,14 @@ html, body {
   color: var(--text-primary);
 }
 
-/* Gold "?" on an NPC with a quest ready to turn in. */
-.quest-ready-pip {
+/* Gold "?" on an NPC with a quest ready to turn in; green "!" on one with a new quest. */
+.quest-ready-pip,
+.quest-available-pip {
   position: relative;
   display: inline-block;
 }
-.quest-ready-pip::after {
+.quest-ready-pip::after,
+.quest-available-pip::after {
   content: '?';
   position: absolute;
   top: -0.7em;
@@ -1982,6 +1999,10 @@ html, body {
   line-height: 1.5em;
   text-align: center;
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+}
+.quest-available-pip::after {
+  content: '!';
+  background: var(--accent-green);
 }
 
 .canvas-map-tooltip {
@@ -2028,12 +2049,14 @@ html, body {
   max-width: min(90%, 30rem);
   text-align: center;
   z-index: 200;
-  pointer-events: none;
-  animation: toast-fade 2s ease-out forwards;
+  pointer-events: auto;
+  cursor: pointer;
+  /* --toast-ms is set per toast by MapToast.ts to match its removal timer. */
+  animation: toast-fade var(--toast-ms, 6s) ease-out forwards;
 }
 
 @keyframes toast-fade {
-  0%, 70% { opacity: 1; }
+  0%, 85% { opacity: 1; }
   100% { opacity: 0; }
 }
 
@@ -2140,6 +2163,11 @@ button.room-status-chip:active {
 }
 
 @media (min-width: 768px) {
+  /* The room status card takes the top-left here, so the toast would cover its chips. */
+  .map-toast {
+    top: auto;
+    bottom: 16px;
+  }
   .room-status {
     top: 12px;
     bottom: auto;
@@ -2350,7 +2378,6 @@ button.room-status-chip:active {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.8);
-  z-index: 1000;
   align-items: center;
   justify-content: center;
 }
@@ -2362,8 +2389,49 @@ button.room-status-chip:active {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 360px;
+  max-width: 440px;
   width: 90%;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.npc-talk-completions:empty,
+.npc-quest-section:empty,
+.npc-quest-section-empty:empty {
+  display: none;
+}
+
+/* Live regions must stay in the accessibility tree while empty, or their first message isn't announced. */
+.npc-talk-notice:empty,
+.dungeon-entry-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.npc-talk-notice {
+  background: rgba(233, 188, 24, 0.18);
+  border: 1px solid #e9bc18;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: var(--pixel-font);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: #ffd700;
+  text-align: center;
+}
+
+.npc-talk-completions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .npc-talk-header {
@@ -2372,26 +2440,44 @@ button.room-status-chip:active {
   gap: 12px;
 }
 
+.npc-talk-portrait {
+  position: relative;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .npc-talk-portrait-emoji {
   font-size: 40px;
   line-height: 1;
 }
 
 .npc-talk-portrait-img {
-  width: 56px;
-  height: 56px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   image-rendering: pixelated;
+}
+
+.npc-talk-portrait-img.asset-loaded + .npc-talk-portrait-emoji {
+  display: none;
 }
 
 .npc-talk-name {
   font-family: var(--pixel-font);
-  font-size: 12px;
+  font-size: var(--fs-md);
   color: var(--accent-gold);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .npc-talk-greeting {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-sm);
   line-height: 1.6;
   color: var(--text-primary);
   font-style: italic;
@@ -2404,7 +2490,7 @@ button.room-status-chip:active {
 
 .npc-talk-btn {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-sm);
   padding: 8px 16px;
   background: var(--bg-panel-light);
   color: var(--text-primary);
@@ -2419,6 +2505,15 @@ button.room-status-chip:active {
 .npc-talk-btn-primary {
   background: var(--accent-gold);
   color: #000;
+}
+
+.npc-talk-btn-busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.npc-talk-btn-busy:active {
+  border-color: var(--border-pixel);
 }
 
 /* ── Dungeon entry confirmation popup ──────────────────────── */
@@ -2439,6 +2534,10 @@ button.room-status-chip:active {
   gap: 10px;
   max-width: 360px;
   width: 90%;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .dungeon-entry-header {
   display: flex;
@@ -2451,19 +2550,19 @@ button.room-status-chip:active {
 }
 .dungeon-entry-title {
   font-family: var(--pixel-font);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: #d3a8d3;
 }
 .dungeon-entry-desc {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
   color: var(--text-primary);
   font-style: italic;
 }
 .dungeon-entry-meta {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 .dungeon-entry-reqs {
@@ -2476,19 +2575,19 @@ button.room-status-chip:active {
 }
 .dungeon-entry-reqs-title {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   color: var(--accent-gold);
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 .dungeon-entry-req {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   color: var(--text-primary);
 }
 .dungeon-entry-warning {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -2497,9 +2596,32 @@ button.room-status-chip:active {
   justify-content: flex-end;
   gap: 8px;
 }
+.dungeon-entry-reqs-slot:empty {
+  display: none;
+}
+.dungeon-entry-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dungeon-entry-info {
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.dungeon-entry-blocked {
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--accent-orange);
+  padding: 6px 8px;
+  background: rgba(255, 170, 68, 0.1);
+  border-left: 3px solid var(--accent-orange);
+}
 .dungeon-entry-btn {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   padding: 8px 16px;
   background: var(--bg-panel-light);
   color: var(--text-primary);
@@ -2509,10 +2631,30 @@ button.room-status-chip:active {
 .dungeon-entry-btn:active {
   border-color: #d3a8d3;
 }
+.dungeon-entry-btn:focus-visible {
+  outline: 2px solid var(--accent-gold);
+  outline-offset: 2px;
+}
 .dungeon-entry-enter {
-  background: #6b4c6b;
+  background: #8b5e8b;
   color: #fff;
+  border-color: #d3a8d3;
+}
+.dungeon-entry-enter:not(:disabled):hover,
+.dungeon-entry-enter:not(:disabled):focus-visible {
+  background: #a46fa4;
+  border-color: #f0d0f0;
+}
+.dungeon-entry-enter:disabled {
+  background: #4a3a4a;
+  color: var(--text-secondary);
   border-color: #6b4c6b;
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.dungeon-entry-enter[aria-busy="true"]:disabled {
+  opacity: 0.8;
+  cursor: progress;
 }
 
 .npc-quest-section {
@@ -2523,14 +2665,15 @@ button.room-status-chip:active {
 
 .npc-quest-section-title {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-xs);
   color: var(--accent-blue);
   text-transform: uppercase;
 }
 
 .npc-quest-section-empty {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
   color: var(--text-dim);
   font-style: italic;
 }
@@ -2559,7 +2702,7 @@ button.room-status-chip:active {
 
 .quest-card-name {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-sm);
   color: var(--text-primary);
   min-width: 0;
   overflow-wrap: anywhere;
@@ -2567,7 +2710,7 @@ button.room-status-chip:active {
 
 .quest-card-desc {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   line-height: 1.5;
 }
@@ -2580,13 +2723,16 @@ button.room-status-chip:active {
 
 .quest-objective {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .quest-card-rewards {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
   color: var(--accent-gold);
 }
 
@@ -2596,9 +2742,17 @@ button.room-status-chip:active {
   gap: 6px;
 }
 
+.quest-card-blocked {
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--accent-orange);
+  text-align: right;
+}
+
 .quest-pill {
   font-family: var(--pixel-font);
-  font-size: 7px;
+  font-size: var(--fs-xs);
   padding: 2px 6px;
   border: 1px solid var(--border-color);
   text-transform: uppercase;
@@ -2622,14 +2776,15 @@ button.room-status-chip:active {
 
 .npc-talk-completion-label {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-xs);
   color: var(--accent-gold);
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .npc-talk-completion-text {
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-sm);
   line-height: 1.6;
   color: var(--text-primary);
   font-style: italic;
@@ -2638,7 +2793,7 @@ button.room-status-chip:active {
 .npc-talk-completion-dismiss {
   align-self: flex-end;
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-sm);
   padding: 4px 12px;
   background: var(--accent-gold);
   color: #000;
@@ -2664,10 +2819,6 @@ button.room-status-chip:active {
   gap: 8px;
 }
 
-.quest-log-body .quest-card-name {
-  font-size: 10px;
-}
-
 .quest-log-body .quest-objective,
 .quest-log-body .quest-card-rewards {
   line-height: 1.6;
@@ -2684,13 +2835,47 @@ button.room-status-chip:active {
 
 .quest-log-pills {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+}
+
+.quest-log-givers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-panel-light);
+  border: 1px solid var(--accent-green);
+  font-family: var(--pixel-font);
+}
+
+.quest-log-givers-title {
+  font-size: var(--fs-xs);
+  color: var(--accent-green);
+  text-transform: uppercase;
+}
+
+.quest-log-givers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quest-log-giver {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .quest-log-turnin {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
   color: var(--text-secondary);
   border-top: 1px solid var(--border-color);
@@ -2700,13 +2885,13 @@ button.room-status-chip:active {
 }
 
 .quest-log-turnin-ready {
-  font-size: 9px;
+  font-size: var(--fs-xs);
   color: var(--accent-gold);
 }
 
 .quest-log-empty {
   font-family: var(--pixel-font);
-  font-size: 8px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
   color: var(--text-dim);
   font-style: italic;
@@ -2726,7 +2911,7 @@ button.room-status-chip:active {
   border-top: 2px solid var(--border-pixel);
   color: var(--accent-blue);
   font-family: var(--pixel-font);
-  font-size: 9px;
+  font-size: var(--fs-sm);
   text-transform: uppercase;
   text-align: left;
   cursor: pointer;
@@ -2758,7 +2943,7 @@ button.room-status-chip:active {
 }
 
 .quest-log-completed-name {
-  font-size: 9px;
+  font-size: var(--fs-sm);
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -2769,7 +2954,7 @@ button.room-status-chip:active {
 }
 
 .quest-log-completed-meta {
-  font-size: 8px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -5226,12 +5411,23 @@ button.room-status-chip:active {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid rgba(255,255,255,0.15);
-  transition: transform 0.1s, border-color 0.2s;
+  border: 2px solid rgba(180,180,180,0.25);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
+  box-sizing: border-box;
+  min-width: 0;
+  isolation: isolate;
+  transition: filter 0.1s;
 }
-.item-square:hover {
-  transform: scale(1.08);
-  border-color: rgba(255,255,255,0.4);
+/* No size change on hover: a scaled square overflows its scroll container and summons scrollbars. */
+@media (hover: hover) {
+  .item-square:not(.item-square-empty):hover {
+    filter: brightness(1.15);
+    outline: 2px solid rgba(255,255,255,0.45);
+    outline-offset: -2px;
+  }
+}
+.item-square-empty {
+  cursor: default;
 }
 /* Desktop-only item name tooltip on hover */
 @media (min-width: 768px) and (hover: hover) {
@@ -5254,28 +5450,37 @@ button.room-status-chip:active {
   }
 }
 .item-square-img {
-  width: 80%;
-  height: 80%;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   image-rendering: pixelated;
 }
-/* Fade-in for fallback-capable images. Inline `opacity:0` on render → `opacity:1`
- * once a load resolves (real artwork or placehold fallback). The transition
- * keeps the reveal from snapping, and the initial 0 hides the browser's
- * broken-image glyph during the swap. Affects every image that participates
- * in the assets.ts / ItemIcon fallback dance. */
-.item-square-img,
-.item-popup-artwork img,
-.item-dogear-img,
+.item-square-img.asset-loaded + .item-square-initials,
+.item-popup-img.asset-loaded + .item-popup-initials {
+  display: none;
+}
+/* renderTrackedImg (assets.ts): hidden until a load resolves, so a missing image never flashes a broken glyph. */
+.asset-img {
+  opacity: 0;
+  transition: opacity 0.12s linear;
+}
+.asset-img.asset-loaded { opacity: 1; }
+.asset-img.asset-failed { display: none; }
 .nav-icon-img {
   transition: opacity 0.12s linear;
 }
 .item-square-initials {
   font-size: 17px;
-  color: #fff;
+  color: rgba(255,255,255,0.85);
   text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
   text-transform: uppercase;
   user-select: none;
+  z-index: 1;
+  pointer-events: none;
+  text-align: center;
+  line-height: 1;
 }
 .item-square-slot-icon {
   position: absolute;
@@ -5290,30 +5495,50 @@ button.room-status-chip:active {
   position: absolute;
   top: 1px;
   right: 2px;
-  font-size: 12px;
+  font-size: 11px;
   color: #fff;
-  background: rgba(0,0,0,0.7);
-  padding: 0 3px;
-  border-radius: 3px;
+  background: rgba(0,0,0,0.6);
+  padding: 0 2px;
+  border-radius: 2px;
   pointer-events: none;
+  z-index: 2;
+  line-height: 1.2;
 }
 .item-square-set {
   position: absolute;
   top: 1px;
   left: 2px;
-  font-size: 12px;
-  color: #ffd700;
+  font-size: 11px;
+  color: #e9bc18;
   text-shadow: 1px 1px 1px rgba(0,0,0,0.8);
   pointer-events: none;
+  z-index: 2;
+  line-height: 1;
 }
-.item-square.empty {
-  background: #333 !important;
-  border-color: rgba(255,255,255,0.08);
-  cursor: default;
+.item-dogear {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  background: rgba(240,240,240,0.85);
+  border-top-left-radius: 4px;
+  border-top: 1px solid rgba(0,0,0,0.2);
+  border-left: 1px solid rgba(0,0,0,0.2);
+  pointer-events: none;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.item-square.empty:hover {
-  transform: none;
-  border-color: rgba(255,255,255,0.08);
+.item-square-empty .item-dogear {
+  width: 16px;
+  height: 16px;
+}
+@media (min-width: 768px) {
+  .item-square-initials { font-size: 19px; }
+  .item-square-qty { font-size: 12px; }
+  .item-dogear { width: 22px; height: 22px; }
 }
 
 /* Rarity animated borders */
@@ -5350,6 +5575,7 @@ button.room-status-chip:active {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1000;
 }
 .item-popup {
   background: var(--bg-secondary, #1a1a2e);
@@ -5361,24 +5587,34 @@ button.room-status-chip:active {
   max-height: 80vh;
   overflow-y: auto;
   text-align: center;
+  color: #e8e8e8;
+}
+@media (min-width: 768px) {
+  .item-popup { max-width: 380px; }
 }
 .item-popup-artwork {
-  width: 96px;
-  height: 96px;
+  position: relative;
+  width: 80px;
+  height: 80px;
   margin: 0 auto 12px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 .item-popup-artwork img {
-  width: 80%;
-  height: 80%;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   image-rendering: pixelated;
 }
-.item-popup-artwork .item-square-initials {
+.item-popup-artwork .item-popup-initials {
   font-size: 32px;
+  color: rgba(255,255,255,0.85);
+  text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
 }
 .item-popup-emoji {
   font-size: 56px;
@@ -5386,46 +5622,82 @@ button.room-status-chip:active {
   text-shadow: 0 2px 4px rgba(0,0,0,0.5);
 }
 .item-popup-name {
+  text-align: center;
   font-size: 19px;
   margin-bottom: 8px;
 }
 .item-popup-stats {
-  font-size: 14px;
+  font-size: 15px;
   color: #ccc;
   margin-bottom: 8px;
   line-height: 1.6;
 }
 .item-popup-stats div {
+  display: flex;
+  justify-content: space-between;
   margin-bottom: 2px;
 }
+.item-popup-stats .stat-label { color: #999; }
 .item-popup-set {
   border-top: 1px solid rgba(255,255,255,0.1);
   padding-top: 8px;
   margin-top: 8px;
   font-size: 14px;
 }
+.item-popup-set-section {
+  border-top: 1px solid #333;
+  padding-top: 8px;
+  margin-top: 8px;
+  font-size: 15px;
+}
 .item-popup-set-name {
-  color: #ffd700;
+  color: #e9bc18;
   margin-bottom: 4px;
 }
 .item-popup-set-pieces {
   color: #aaa;
   text-align: left;
   padding-left: 8px;
+  margin-bottom: 4px;
 }
-.item-popup-set-pieces .owned { color: #66bb6a; }
-.item-popup-set-pieces .equipped { color: #ffd700; }
-.item-popup-set-pieces .missing { color: #666; }
+.item-popup-set-piece { color: #888; margin-left: 8px; }
+.item-popup-set-piece.owned { color: #ccc; }
+.item-popup-set-piece.equipped { color: #66bb6a; }
 .item-popup-set-bonus {
-  color: #4fc3f7;
+  color: #aaa;
   margin-top: 4px;
   font-style: italic;
 }
+.item-popup-set-breakpoints { margin-top: 4px; }
+.item-popup-set-bp { color: #666; font-size: 14px; line-height: 1.4; }
+.item-popup-set-bp.unlocked { color: #aaa; }
+.item-popup-set-bp.active { color: #66bb6a; }
 .item-popup-actions {
   margin-top: 12px;
   display: flex;
   gap: 8px;
   justify-content: center;
+}
+.item-popup-actions button {
+  padding: 6px 16px;
+  border-radius: 4px;
+  border: 1px solid #555;
+  background: #2a2a40;
+  color: #e8e8e8;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 15px;
+}
+.item-popup-actions button:hover { background: #3a3a55; }
+.item-popup-actions button.danger { border-color: #a33; color: #f88; }
+.item-popup-actions button.danger:hover { background: #4a2020; }
+.item-popup-actions button[disabled],
+.item-popup-actions button[disabled]:hover {
+  background: #1a1a28;
+  color: #555;
+  border-color: #2a2a3a;
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 .item-popup-btn {
   padding: 6px 16px;
@@ -5606,6 +5878,7 @@ button.room-status-chip:active {
   gap: 4px;
   max-height: 45vh;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 .shop-item-price {
   position: absolute;
@@ -5618,6 +5891,49 @@ button.room-status-chip:active {
   background: rgba(0,0,0,0.7);
   pointer-events: none;
 }
+.shop-item-price.unaffordable {
+  color: var(--accent-red);
+}
+.shop-item-unusable {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--accent-red);
+  border-radius: 50%;
+  background: rgba(0,0,0,0.75);
+  pointer-events: none;
+  z-index: 2;
+}
+.shop-item-unusable::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 10px;
+  background: var(--accent-red);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.shop-unusable-note {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(255,107,107,0.5);
+  border-radius: 4px;
+  background: rgba(255,107,107,0.1);
+  color: #ff9b9b;
+  font-size: 13px;
+}
+.shop-hire-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: pixelated;
+}
 .shop-detail-view {
   text-align: center;
 }
@@ -5625,24 +5941,7 @@ button.room-status-chip:active {
   margin-bottom: 12px;
 }
 .shop-detail-content .item-popup-artwork {
-  width: 80px;
-  height: 80px;
   margin: 0 auto 8px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-.shop-detail-content .item-popup-artwork img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-.shop-detail-content .item-popup-artwork .item-popup-initials {
-  font-size: 32px;
-  color: rgba(255,255,255,0.85);
-  text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
 }
 .shop-detail-content .item-popup-name {
   font-size: 17px;
@@ -5653,13 +5952,6 @@ button.room-status-chip:active {
   color: #ccc;
   margin-bottom: 6px;
   line-height: 1.5;
-}
-.shop-detail-content .item-popup-stats div {
-  display: flex;
-  justify-content: space-between;
-}
-.shop-detail-content .item-popup-stats .stat-label {
-  color: #999;
 }
 .shop-detail-controls {
   border-top: 1px solid rgba(255,255,255,0.1);
@@ -5680,6 +5972,11 @@ button.room-status-chip:active {
   font-size: 14px;
   background: transparent;
   color: #ccc;
+}
+.shop-qty-btn:disabled,
+.shop-action-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .shop-qty-value {
   min-width: 30px;
@@ -7284,9 +7581,8 @@ body, button, input, select, textarea {
   font-family: var(--display-font);
   font-size: 15px;
   text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   min-width: 0;
 }
 .compare-block-subhead {

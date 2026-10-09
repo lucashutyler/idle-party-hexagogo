@@ -2,6 +2,7 @@ import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, RecipeDefinition, ItemDefinition, ClientCraftingState } from '@idle-party-rpg/shared';
 import { canQueueRecipe, MAX_CRAFT_QUEUE } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
+import { deferWhilePressed, setHtml } from '../ui/render';
 
 function injectCraftingStyles(): void {
   if (document.getElementById('crafting-screen-styles')) return;
@@ -110,7 +111,6 @@ export class CraftingScreen implements Screen {
   private lastItemDefs: Record<string, ItemDefinition> = {};
   private lastClassName: string | null = null;
   private lastLevel = 0;
-  private lastHtml = '';
 
   constructor(containerId: string, gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -121,12 +121,16 @@ export class CraftingScreen implements Screen {
     this.scroller = document.createElement('div');
     this.scroller.className = 'craft-screen';
     this.container.replaceChildren(this.scroller);
+    this.scroller.addEventListener('click', (e) => this.onClick(e));
   }
 
   onActivate(): void {
     this.isActive = true;
-    this.unsubscribe = this.gameClient.subscribe(state => {
-      if (this.isActive) this.updateFromState(state);
+    this.unsubscribe = this.gameClient.subscribe(() => {
+      deferWhilePressed(this.scroller, () => {
+        const state = this.gameClient.lastState;
+        if (this.isActive && state) this.updateFromState(state);
+      });
     });
     const state = this.gameClient.lastState;
     if (state) this.updateFromState(state);
@@ -175,25 +179,21 @@ export class CraftingScreen implements Screen {
   }
 
   private render(): void {
-    const html = this.renderHtml();
-    if (html === this.lastHtml) return;
-    this.lastHtml = html;
+    if (setHtml(this.scroller, this.renderHtml())) this.updateProgressBar();
+  }
 
-    this.scroller.innerHTML = html;
-    this.updateProgressBar();
-
-    this.scroller.querySelectorAll<HTMLButtonElement>('.craft-queue-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.recipeId;
-        if (id) this.gameClient.sendCraftQueue(id);
-      });
-    });
-    this.scroller.querySelectorAll<HTMLButtonElement>('.craft-cancel-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = Number(btn.dataset.index);
-        if (Number.isFinite(idx)) this.gameClient.sendCraftCancel(idx);
-      });
-    });
+  private onClick(e: Event): void {
+    const btn = (e.target as Element).closest<HTMLButtonElement>('button');
+    if (!btn || btn.disabled) return;
+    if (btn.matches('.craft-queue-btn')) {
+      const id = btn.dataset.recipeId;
+      if (id) this.gameClient.sendCraftQueue(id);
+      return;
+    }
+    if (btn.matches('.craft-cancel-btn')) {
+      const idx = Number(btn.dataset.index);
+      if (Number.isFinite(idx)) this.gameClient.sendCraftCancel(idx);
+    }
   }
 
   private renderHtml(): string {

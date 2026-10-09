@@ -1,5 +1,30 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.10.09.1',
+    notes: [
+      'Fixed buttons sometimes ignoring your tap or click during a fight. This was most noticeable on Accept and Turn In for quests, and also affected shops, notifications, crafting, trades, chat and the combat view.',
+      'Accepting or turning in a quest now shows that it is working, and tells you why if it can\'t go through or if you have lost your connection.',
+      'Solo quests now ask you to leave your party first, instead of showing an Accept button that did nothing.',
+      'If your party moves on while you are talking to someone, the window now says they are no longer nearby.',
+      'People with a new quest for you are marked with a green "!" on the map and in the room panel. A gold "?" still means a quest is ready to hand in.',
+      'Rooms you have explored that your quests send you to are outlined on the map. Hover over one to see which quest sends you there.',
+      'The Quest Log now lists who has new quests for you and where to find them.',
+      'Quests now name the room and area to visit instead of showing map numbers.',
+      'Bigger, easier-to-read text in quest windows and the Quest Log, and the quest window now scrolls when someone has a lot to offer.',
+      'Messages explaining why you can\'t move or enter somewhere now stay up longer, and you can tap them away.',
+      'Henchmen no longer stop you from entering a dungeon. They wait at the entrance, take no share of the dungeon\'s rewards, and rejoin you when you come out.',
+      'Hiring or dismissing a henchman while your party is in a dungeon no longer restarts the fight.',
+      'The dungeon Enter button is now clearly greyed out when your party can\'t go in, with the reason shown just above it. It turns back on as soon as the problem is fixed.',
+      'If the dungeon turns you away, the dungeon window now tells you why instead of just closing.',
+      'Shops mark gear your class can\'t equip with a small red badge. You can still buy it, and the item details say who can use it.',
+      'Tapping an item in a shop now compares it with what you have equipped, just like your inventory.',
+      'Two-handed weapons now show how they compare with the weapons they would replace, in shops and in your inventory.',
+      'Shops show prices you can\'t afford in red, and no longer say you bought something when the purchase didn\'t go through.',
+      'Item pictures no longer flicker, jump around or flash letters while loading, and hovering over an item no longer makes it grow or adds scrollbars.',
+      'The shop list no longer jumps back to the top during fights, and chat no longer jumps to the newest message when nothing new has arrived.',
+    ],
+  },
+  {
     version: '2026.10.08.1',
     notes: [
       'Explored rooms now show what you can do there. Small icons on the map mark people to talk to, shops, dungeon entrances and passages to other places.',

@@ -235,6 +235,23 @@ describe('RoomView room actions', () => {
     expect(parent.querySelector('[data-action-index]')).toBeNull();
   });
 
+  it('pins a gold "?" on a ready turn-in and a green "!" on a new quest', () => {
+    const view = new RoomView(parent, () => {});
+    const giver: RoomAction = { kind: 'npc', icon: '🧔', name: 'Hob', targetId: 'hob', detail: 'New quest available', questAvailable: true };
+    view.actions = [ACTIONS[0], giver];
+    view.show(makeInfo());
+    const icons = [...parent.querySelectorAll('.room-view-contents-icon')];
+    expect(icons.map(el => el.className)).toEqual([
+      'room-view-contents-icon quest-ready-pip',
+      'room-view-contents-icon quest-available-pip',
+    ]);
+
+    view.show(makeInfo({ isCurrentTile: true }));
+    const buttonIcons = [...parent.querySelectorAll('[data-action-index] .room-view-action-icon')];
+    expect(buttonIcons.map(el => el.classList.contains('quest-available-pip'))).toEqual([false, true]);
+    expect(buttonIcons.map(el => el.classList.contains('quest-ready-pip'))).toEqual([true, false]);
+  });
+
   it('lists nothing for an unexplored remote room', () => {
     const view = new RoomView(parent, () => {});
     view.actions = ACTIONS;

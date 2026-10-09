@@ -73,6 +73,39 @@ describe('RoomStatusPanel', () => {
     expect(chips()[0].querySelector('.quest-ready-pip')).toBeTruthy();
   });
 
+  it('marks an npc chip with a new quest with the green pip', () => {
+    const status = mount();
+    status.update(makeStatus({ actions: [{ ...TALK, detail: 'New quest available', questAvailable: true }] }));
+
+    expect(chips()[0].getAttribute('aria-label')).toBe('Talk to Mira · New quest available');
+    expect(chips()[0].querySelector('.quest-available-pip')).toBeTruthy();
+    expect(chips()[0].querySelector('.quest-ready-pip')).toBeNull();
+  });
+
+  it('holds a repaint while a chip is pressed, so the tap still lands', () => {
+    vi.useFakeTimers();
+    try {
+      const onAction = vi.fn();
+      const status = mount(onAction);
+      status.update(makeStatus());
+      const pressed = chips()[1];
+
+      pressed.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      status.update(makeStatus({ othersHere: 2 }));
+      expect(chips()[1]).toBe(pressed);
+      expect(pressed.isConnected).toBe(true);
+
+      pressed.click();
+      expect(onAction).toHaveBeenCalledWith(SHOP);
+      vi.advanceTimersByTime(0);
+      expect(chips()[1]).not.toBe(pressed);
+      expect(chips().map(c => c.getAttribute('aria-label'))).toContain('2 players here');
+    } finally {
+      document.dispatchEvent(new PointerEvent('pointercancel'));
+      vi.useRealTimers();
+    }
+  });
+
   it('flags itself empty when the room offers nothing', () => {
     const status = mount();
     status.update(makeStatus({ actions: [] }));
