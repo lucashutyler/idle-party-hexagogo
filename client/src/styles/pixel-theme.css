@@ -2163,6 +2163,11 @@ button.room-status-chip:active {
 }
 
 @media (min-width: 768px) {
+  /* The room status card takes the top-left here, so the toast would cover its chips. */
+  .map-toast {
+    top: auto;
+    bottom: 16px;
+  }
   .room-status {
     top: 12px;
     bottom: auto;
@@ -2392,11 +2397,23 @@ button.room-status-chip:active {
   overscroll-behavior: contain;
 }
 
-.npc-talk-notice:empty,
 .npc-talk-completions:empty,
 .npc-quest-section:empty,
 .npc-quest-section-empty:empty {
   display: none;
+}
+
+/* Live regions must stay in the accessibility tree while empty, or their first message isn't announced. */
+.npc-talk-notice:empty,
+.dungeon-entry-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
 .npc-talk-notice {
@@ -2559,8 +2576,7 @@ button.room-status-chip:active {
   justify-content: flex-end;
   gap: 8px;
 }
-.dungeon-entry-reqs-slot:empty,
-.dungeon-entry-status:empty {
+.dungeon-entry-reqs-slot:empty {
   display: none;
 }
 .dungeon-entry-status {
@@ -2799,8 +2815,10 @@ button.room-status-chip:active {
 
 .quest-log-pills {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
-  flex-shrink: 0;
+  flex-shrink: 1;
 }
 
 .quest-log-givers {
@@ -7543,9 +7561,8 @@ body, button, input, select, textarea {
   font-family: var(--display-font);
   font-size: 15px;
   text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   min-width: 0;
 }
 .compare-block-subhead {

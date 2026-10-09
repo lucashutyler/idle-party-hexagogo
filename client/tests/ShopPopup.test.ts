@@ -272,10 +272,15 @@ describe('ShopPopup', () => {
     });
 
     it('leaves errors from other features alone', () => {
-      const t = setup({ gold: 100 });
+      const t = setup({ gold: 100, inventory: {} });
       t.serverError('Stray error');
+      expect(t.q('.shop-notice')).toBeNull();
+      t.square('oak_staff').click();
+      t.q<HTMLButtonElement>('.shop-action-confirm')!.click();
       t.serverError('Quest refused', 'quest_refused');
       expect(t.q('.shop-notice')).toBeNull();
+      t.push({ gold: 80, inventory: { oak_staff: 1 } });
+      expect(t.q('.shop-notice')?.textContent).toContain('You bought Oak Staff');
     });
 
     it('holds a state push until a press inside the shop has clicked', () => {
@@ -307,9 +312,12 @@ describe('ShopPopup', () => {
     });
 
     it('shows set ownership context in the sell detail', () => {
-      const t = setup({ inventory: { gem: 1 } });
+      const sets = { staff_set: { id: 'staff_set', name: 'Staff Set', itemIds: ['oak_staff', 'gem'], breakpoints: [] } };
+      const t = setup({ inventory: { gem: 1 }, equipment: { mainhand: 'oak_staff', offhand: null }, sets });
       t.q<HTMLElement>('.shop-toggle-btn[data-mode="sell"]')!.click();
       t.square('gem').click();
+      expect(t.q('.item-popup-set-piece.owned')?.textContent).toContain('Gem');
+      expect(t.q('.item-popup-set-piece.equipped')?.textContent).toContain('Oak Staff');
       expect(t.q('.shop-detail-total')?.textContent).toContain('Available: 1');
       t.q<HTMLButtonElement>('.shop-action-confirm')!.click();
       expect(t.gameClient.sendShopSell).toHaveBeenCalledWith('gem', 1);

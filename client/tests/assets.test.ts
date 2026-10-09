@@ -57,9 +57,23 @@ describe('renderTrackedImg', () => {
   });
 
   it('ignores images it did not render', () => {
-    const img = mount('<img src="/a.png">');
+    const img = mount('<img src="/untracked.png">');
     img.dispatchEvent(new Event('error'));
-    expect(assets.renderTrackedImg('/a5.png')).not.toBe('');
+    expect(img.classList.contains('asset-failed')).toBe(false);
+    expect(assets.renderTrackedImg('/untracked.png')).not.toBe('');
+  });
+
+  it('drops a remembered success when the same source later fails', () => {
+    mount(assets.renderTrackedImg('/flaky.png')).dispatchEvent(new Event('load'));
+    const img = mount(assets.renderTrackedImg('/flaky.png', { fallback: '/flaky-fb.png' }));
+    expect(img.classList.contains('asset-loaded')).toBe(true);
+
+    img.dispatchEvent(new Event('error'));
+    expect(img.classList.contains('asset-loaded')).toBe(false);
+    expect(img.getAttribute('src')).toBe('/flaky-fb.png');
+
+    assets.forgetMissingAssets();
+    expect(mount(assets.renderTrackedImg('/flaky.png')).classList.contains('asset-loaded')).toBe(false);
   });
 
   it('escapes attribute values', () => {

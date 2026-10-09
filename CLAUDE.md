@@ -114,6 +114,7 @@ In all user-facing text (UI labels, error messages, combat log), refer to hex ti
 - **Imports**: client/server import shared via `@idle-party-rpg/shared`; within-package imports use relative paths.
 - **Class layout**: properties → constructor → public methods → private methods.
 - **Error handling**: defensive checks with early returns.
+- **State-driven client renders**: any repaint driven by a state push, server message or timer goes through `deferWhilePressed` / `setHtml` (`client/src/ui/render.ts`) — a plain `innerHTML` rebuild on a push swallows clicks. See `docs/architecture/client.md` → State-driven re-rendering.
 - **Tests**: aim for coverage on all non-rendering logic (systems, utils, pathfinding, server).
 - **Comments**: the code is the explanation. Comment only what the code cannot say itself.
 

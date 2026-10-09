@@ -9,7 +9,7 @@ import type {
   ServerErrorCode,
   ServerStateMessage,
 } from '@idle-party-rpg/shared';
-import { SOLO_QUEST_IN_PARTY_REASON } from '@idle-party-rpg/shared';
+import { acceptableQuestIds, SOLO_QUEST_IN_PARTY_REASON } from '@idle-party-rpg/shared';
 import {
   NO_REPLY_NOTICE,
   NPC_NOTICE_MS,
@@ -46,6 +46,8 @@ interface StateParts {
   weeklyCompletions?: Record<string, string>;
   questDefinitions?: Record<string, QuestDefinition>;
   offeredQuestIds?: string[];
+  /** Defaults to what the server would compute from the other parts. */
+  availableQuestIds?: string[];
   /** Defaults to the shown NPC; null for a room without one. */
   questGiverNpcId?: string | null;
   partyMembers?: number;
@@ -55,7 +57,14 @@ interface StateParts {
 
 function makeState(parts: StateParts): ServerStateMessage {
   const members = Array.from({ length: parts.partyMembers ?? 0 }, (_, i) => ({ username: `p${i}`, role: 'member' }));
+  const availableQuestIds = parts.availableQuestIds ?? acceptableQuestIds(parts.offeredQuestIds ?? [], parts.questDefinitions ?? {}, {
+    playerLevel: parts.level ?? 5,
+    activeQuestIds: new Set((parts.activeQuests ?? []).map(a => a.questId)),
+    completedQuestIds: new Set((parts.completedQuests ?? []).map(c => c.questId)),
+    weeklyCompletions: parts.weeklyCompletions ?? {},
+  });
   return {
+    availableQuestIds,
     character: { level: parts.level ?? 5 },
     battle: { round: parts.combatRound ?? 0 },
     activeQuests: parts.activeQuests ?? [],
@@ -289,6 +298,20 @@ describe('NpcTalkPopup', () => {
     expect(isBusy(acceptButton('q1'))).toBe(false);
   });
 
+  it('settles a reply that arrives during a long press instead of reporting no answer', () => {
+    const def = quest('q3', { completionText: 'You have my thanks.' });
+    const t = setup({ offeredQuestIds: ['q3'], activeQuests: [active('q3', 'ready', [3])], questDefinitions: { q3: def } });
+    t.popup.show(GIVER);
+
+    tap(turnInButton('q3')!);
+    document.querySelector('.npc-talk-greeting')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+    t.push({ offeredQuestIds: ['q3'], completedQuests: [{ questId: 'q3', completedAt: '2026-01-02T00:00:00.000Z' }], questDefinitions: { q3: def } });
+    vi.advanceTimersByTime(QUEST_REPLY_TIMEOUT_MS);
+
+    expect(noticeText()).not.toBe(NO_REPLY_NOTICE);
+    expect(document.querySelector('.npc-talk-completions')!.textContent).toContain('You have my thanks.');
+  });
+
   it('turns in once, then shows the completion speech until dismissed', () => {
     const def = quest('q3', { completionText: 'You have my thanks.' });
     const t = setup({ offeredQuestIds: ['q3'], activeQuests: [active('q3', 'ready', [3])], questDefinitions: { q3: def } });
@@ -453,7 +476,7 @@ describe('NpcTalkPopup', () => {
   });
 });
 
-describe('NpcTalkPopup weekly cooldown', () => {
+describe('NpcTalkPopup availability', () => {
   const giver: NpcDefinition = { id: 'mara', name: 'Mara', emoji: '🧙', greeting: 'Hi', questIds: ['q-weekly'] };
   const weekly = quest('q-weekly', { repeat: 'weekly' });
 
@@ -479,6 +502,27 @@ describe('NpcTalkPopup weekly cooldown', () => {
 
   it('offers it again once the week has passed', () => {
     showWithLastCompletion(8);
+    expect(acceptButton('q-weekly')).not.toBeNull();
+  });
+
+  it("offers only what the server's availability list holds, whatever the browser clock says", () => {
+    const completedAt = new Date(Date.now() - 8 * DAY_MS).toISOString();
+    const t = setup({
+      completedQuests: [{ questId: 'q-weekly', completedAt }],
+      weeklyCompletions: { 'q-weekly': completedAt },
+      questDefinitions: { 'q-weekly': weekly },
+      offeredQuestIds: ['q-weekly'],
+      availableQuestIds: [],
+    });
+    t.popup.show(giver);
+    expect(acceptButton('q-weekly')).toBeNull();
+
+    t.push({
+      questDefinitions: { 'q-weekly': weekly },
+      offeredQuestIds: ['q-weekly'],
+      weeklyCompletions: { 'q-weekly': new Date().toISOString() },
+      availableQuestIds: ['q-weekly'],
+    });
     expect(acceptButton('q-weekly')).not.toBeNull();
   });
 

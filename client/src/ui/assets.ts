@@ -124,7 +124,10 @@ function onAssetLoad(e: Event): void {
 function onAssetError(e: Event): void {
   const img = trackedImg(e);
   if (!img) return;
-  missingUrls.add(img.getAttribute('src') ?? '');
+  const src = img.getAttribute('src') ?? '';
+  missingUrls.add(src);
+  loadedUrls.delete(src);
+  img.classList.remove('asset-loaded');
   const fallback = img.dataset.fallback;
   if (fallback && !missingUrls.has(fallback)) {
     delete img.dataset.fallback;

@@ -6,7 +6,7 @@ import type {
   ServerErrorCode,
   ServerStateMessage,
 } from '@idle-party-rpg/shared';
-import { canAcceptQuest, SOLO_QUEST_IN_PARTY_REASON } from '@idle-party-rpg/shared';
+import { SOLO_QUEST_IN_PARTY_REASON } from '@idle-party-rpg/shared';
 import { renderTrackedImg } from './assets';
 import { escapeHtml } from './ItemIcon';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
@@ -116,7 +116,11 @@ export class NpcTalkPopup {
     bringToFront(this.overlay);
 
     if (!this.unsubscribeState) {
-      this.unsubscribeState = this.gameClient.subscribe(() => this.repaintLater());
+      this.unsubscribeState = this.gameClient.subscribe(() => {
+        // Settle on arrival, not in the held paint, or a long press outlives the reply timer.
+        this.settlePending(this.gameClient.lastState);
+        this.repaintLater();
+      });
     }
     if (!this.unsubscribeError) {
       this.unsubscribeError = this.gameClient.onServerError((message, code, detail) => {
@@ -156,12 +160,13 @@ export class NpcTalkPopup {
     const notice = nearby ? this.notice : `${npc.name} is no longer nearby.`;
     const sections = nearby && state ? this.questSections(state) : NO_SECTIONS;
 
-    setHtml(this.regions.notice, notice ? escapeHtml(notice) : '');
+    const noticeChanged = setHtml(this.regions.notice, notice ? escapeHtml(notice) : '');
     setHtml(this.regions.completions, this.completionsHtml());
     setHtml(this.regions.ready, sections.ready);
     setHtml(this.regions.progress, sections.progress);
     setHtml(this.regions.available, sections.available);
     setHtml(this.regions.empty, sections.empty);
+    if (noticeChanged && notice) this.regions.notice.scrollIntoView({ block: 'nearest' });
   }
 
   private handleClick(e: MouseEvent): void {
@@ -268,13 +273,8 @@ export class NpcTalkPopup {
     const defs = state.questDefinitions ?? {};
     const resolutions = state.questResolutions;
     const activeById = new Map((state.activeQuests ?? []).map(a => [a.questId, a]));
-    const acceptContext = {
-      playerLevel: state.character?.level ?? 1,
-      activeQuestIds: new Set(activeById.keys()),
-      completedQuestIds: new Set((state.completedQuests ?? []).map(c => c.questId)),
-      weeklyCompletions: state.weeklyCompletions ?? {},
-      partySize: state.social?.party?.members.length ?? 1,
-    };
+    const acceptable = new Set(state.availableQuestIds ?? []);
+    const partySize = state.social?.party?.members.length ?? 1;
 
     const ready: string[] = [];
     const progress: string[] = [];
@@ -287,11 +287,9 @@ export class NpcTalkPopup {
         ready.push(this.readyCardHtml(def, resolutions));
       } else if (entry) {
         progress.push(this.progressCardHtml(def, entry, resolutions));
-      } else {
-        const reason = canAcceptQuest(def, acceptContext);
-        if (reason === null || reason === SOLO_QUEST_IN_PARTY_REASON) {
-          available.push(this.availableCardHtml(def, resolutions, reason));
-        }
+      } else if (acceptable.has(questId)) {
+        const reason = def.scope === 'solo' && partySize > 1 ? SOLO_QUEST_IN_PARTY_REASON : null;
+        available.push(this.availableCardHtml(def, resolutions, reason));
       }
     }
 
