@@ -15,9 +15,9 @@
   },
   "devDependencies": {
     "@types/three": "^0.169.0",
-    "happy-dom": "^15.11.7",
+    "happy-dom": "^21.0.4",
     "typescript": "^5.3.3",
-    "vite": "^5.4.2",
-    "vitest": "^2.1.1"
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   }
 }
