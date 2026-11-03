@@ -271,6 +271,23 @@ describe('validateDraft', () => {
     );
   });
 
+  it('reports a transition whose destination room no longer exists', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('dangling transition draft', null, contentStore.toSnapshot());
+
+    const doorId = await upsertRoom(deps, version.id, {
+      col: 42,
+      row: 42,
+      name: 'Landing Stage',
+      transitions: [{ mapId: DEFAULT_MAP_ID, tileId: 'deleted-room-guid' }],
+    });
+
+    const result = await validateDraft(deps, version.id);
+    expect(result.problems).toContain(
+      `Room 'Landing Stage' (${doorId}) transition 0 targets unknown room 'deleted-room-guid' on map '${DEFAULT_MAP_ID}'.`,
+    );
+  });
+
   it('reports a tile type whose entryRequirements references an unknown item', async () => {
     const { deps, contentStore, versionStore } = await setupDeps();
     const version = await versionStore.createDraft('bad tile type gate draft', null, contentStore.toSnapshot());

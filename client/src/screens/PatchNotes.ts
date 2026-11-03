@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.03.1',
+    notes: [
+      'If your party can\'t travel to another island or area, you now see a message saying why instead of nothing happening.',
+    ],
+  },
+  {
     version: '2026.10.09.1',
     notes: [
       'Fixed buttons sometimes ignoring your tap or click during a fight. This was most noticeable on Accept and Turn In for quests, and also affected shops, notifications, crafting, trades, chat and the combat view.',

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { preserveTileGuids } from '../src/game/GameLoop.js';
-import type { WorldTileDefinition } from '@idle-party-rpg/shared';
+import type { QuestDefinition, WorldTileDefinition } from '@idle-party-rpg/shared';
 
 function tile(over: Partial<WorldTileDefinition> & { mapId: string; col: number; row: number }): WorldTileDefinition {
   return {
@@ -90,6 +90,64 @@ describe('preserveTileGuids', () => {
 
     expect(snap[0].id).toBe('dupe');
     expect(snap[1].id).not.toBe('dupe');
+  });
+
+  it('repoints a transition at a room whose id the deploy replaced', () => {
+    const live = [tile({ id: 'live-pier', mapId: 'overworld', col: 12, row: 3 })];
+    const snap = [
+      tile({ id: 'draft-pier', mapId: 'overworld', col: 12, row: 3 }),
+      tile({ id: 'landing', mapId: 'pomperly', col: 14, row: 22, transitions: [{ mapId: 'overworld', tileId: 'draft-pier' }] }),
+    ];
+
+    preserveTileGuids(live, snap);
+
+    expect(snap[0].id).toBe('live-pier');
+    expect(snap[1].transitions).toEqual([{ mapId: 'overworld', tileId: 'live-pier' }]);
+  });
+
+  it('repoints a quest visit objective at a room whose id the deploy replaced', () => {
+    const live = [tile({ id: 'live-band', mapId: 'overworld', col: 10, row: 3 })];
+    const snap = [tile({ id: 'draft-band', mapId: 'overworld', col: 10, row: 3 })];
+    const quests: QuestDefinition[] = [{
+      id: 'q', name: 'Q', description: '', scope: 'solo',
+      objectives: [{ kind: 'visit', tileId: 'draft-band' }, { kind: 'kill', monsterId: 'm', count: 1 }],
+      rewards: [],
+    }];
+
+    preserveTileGuids(live, snap, quests);
+
+    expect(quests[0].objectives[0]).toEqual({ kind: 'visit', tileId: 'live-band' });
+    expect(quests[0].objectives[1]).toEqual({ kind: 'kill', monsterId: 'm', count: 1 });
+  });
+
+  it('follows a room through a swap so a link never jumps to the room that took its old id', () => {
+    const live = [
+      tile({ id: 'X', mapId: 'overworld', col: 1, row: 0 }),
+      tile({ id: 'Y', mapId: 'overworld', col: 0, row: 0 }),
+    ];
+    const snap = [
+      tile({ id: 'X', mapId: 'overworld', col: 0, row: 0 }),
+      tile({ id: 'Z', mapId: 'overworld', col: 1, row: 0 }),
+      tile({ id: 'door', mapId: 'crypt', col: 0, row: 0, transitions: [{ mapId: 'overworld', tileId: 'X' }] }),
+    ];
+
+    preserveTileGuids(live, snap);
+
+    expect(snap[0].id).toBe('Y');
+    expect(snap[2].transitions?.[0].tileId).toBe('Y');
+  });
+
+  it('leaves a link alone when its id was kept by one room of a duplicate pair', () => {
+    const live: WorldTileDefinition[] = [];
+    const snap = [
+      tile({ id: 'dupe', mapId: 'overworld', col: 0, row: 0 }),
+      tile({ id: 'dupe', mapId: 'crypt', col: 0, row: 0 }),
+      tile({ id: 'door', mapId: 'sewers', col: 0, row: 0, transitions: [{ mapId: 'overworld', tileId: 'dupe' }] }),
+    ];
+
+    preserveTileGuids(live, snap);
+
+    expect(snap[2].transitions?.[0].tileId).toBe('dupe');
   });
 
   it('ignores live rooms that have no id yet', () => {

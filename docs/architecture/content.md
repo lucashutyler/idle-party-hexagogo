@@ -255,6 +255,10 @@ Admin content edits go through a draft→publish→deploy pipeline. `VersionStor
 
 **Room GUIDs across a deploy.** Player unlock data, quest `visit` objectives and every room-scoped lookup key off `WorldTileDefinition.id`, so a deploy must carry live GUIDs onto the incoming snapshot rather than minting new ones. `preserveTileGuids` (`GameLoop.ts`) does that, matching rooms per **(mapId, col, row)** — never per (col, row) alone. `world.tiles` is flat across every map and two maps may hold a room at the same coordinates, so a position-only key hands one GUID to two rooms; nothing downstream detects a duplicate GUID, so the result is silent, persistent corruption of room identity and of every player's saved unlocks. The function also refuses to issue any GUID twice, so a malformed snapshot cannot introduce a duplicate either.
 
+Re-IDing a room would orphan everything in the snapshot that names it by its old id, so `preserveTileGuids` also rewrites every transition `tileId` and quest `visit` objective through the old→new rename table. Without that, a world authored in a draft and deployed over an existing map leaves links into that map pointing at ids that no longer exist, and players who take them are stranded. An id that one room keeps unchanged is dropped from the table, so a duplicate-id tie-break never repoints that room's links.
+
+**Publish refuses broken references.** `POST /api/admin/versions/:id/publish` runs `findContentProblems` (`server/src/game/ContentValidation.ts`, the same checks as MCP `validate_draft`) and refuses with the problem list if there are any. The startup path that publishes the initial seed version does not run it.
+
 **Resolve a room by GUID, not by coordinates.** The same reasoning applies everywhere, not just at deploy: `content.getTileById(tile.id)` is correct, `world.tiles.find(t => t.col === … && t.row === …)` is not.
 
 ## Design notes

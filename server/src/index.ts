@@ -61,6 +61,10 @@ function dungeonEntryRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'dungeon_entry_refused' };
 }
 
+function travelRefusal(message: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'travel_refused' };
+}
+
 const app = express();
 const server = createServer(app);
 
@@ -412,19 +416,17 @@ wss.on('connection', (ws) => {
         if (party) {
           const member = party.members.find(m => m.username === username);
           if (!member || !canMove(member.role)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can travel' }));
+            ws.send(JSON.stringify(travelRefusal('Only owners and leaders can travel')));
             return;
           }
         }
 
         const transitionResult = playerManager.handleEnterTransition(username, msg.tileId);
         if (!transitionResult.success) {
-          // An unmet gate reuses move_blocked so it surfaces in the same toast
-          // as a blocked move; structural failures stay on the error channel.
           if (transitionResult.blocked) {
             ws.send(JSON.stringify(toMoveBlockedMessage(transitionResult.blocked)));
           } else {
-            ws.send(JSON.stringify({ type: 'error', message: transitionResult.error }));
+            ws.send(JSON.stringify(travelRefusal(transitionResult.error)));
           }
         }
         return;
