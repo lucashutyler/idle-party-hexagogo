@@ -273,6 +273,15 @@ Admin content edits go through a draft→publish→deploy pipeline. `VersionStor
 
 **Resolve a room by GUID, not by coordinates.** The same reasoning applies everywhere, not just at deploy: `content.getTileById(tile.id)` is correct, `world.tiles.find(t => t.col === … && t.row === …)` is not.
 
+## Reworking content for an engine change
+
+Content is authored against the combat engine it runs on, so a change to combat pacing or mitigation can leave a live world badly off even when every test passes. `tools/content-lab` handles this outside the game. It measures a content export on the old and new engines using each version's real functions, then rewrites the export to pacing targets with a repeatable transform. See `tools/content-lab/README.md`.
+
+- **Exports and everything derived from them stay in gitignored `data/`.** The repository is public, so tracked tools hold generic rules only. Per-monster overrides live in `data/content-lab/rework-config.json`.
+- **A rework is one-way.** The transform takes an export from before the rework and refuses one that has already been reworked, because its factors would compound.
+- **Code and content ship together.** New engine code with old content, or the reverse, plays very differently from either pair. Publish the reworked content in the same window as the code deploy.
+- **Default parties hide regressions.** Measure every class combination, the seats the game gives a party by default, and the builds that trial descriptions recommend, as well as the standard compositions.
+
 ## Design notes
 
 `DesignNote` (`shared/src/systems/DesignNoteTypes.ts`) is a markdown note — `{id, title, body, tags?, author, createdAt, updatedAt}` — that rides inside a content version snapshot to record the agreed-upon design context for a draft. Stored via `ContentStore` (`data/design-notes.json`, no seed) and included in `ContentSnapshot`/`toSnapshot()`/`replaceAll()` with keep-when-absent semantics on deploy, same as skills. Notes are authored only through MCP tools and are never sent to players. See `docs/architecture/mcp.md` for the full picture (the MCP server, tool catalog, and the read-only Design Notes panel on the admin Versions tab).

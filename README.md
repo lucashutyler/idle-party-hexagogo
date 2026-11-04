@@ -194,6 +194,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Overworld auto-retreat (skip or leave rooms the forecast says you'll lose; off / 25 / 40 / 60 %, default 25 %)
 - [x] Kill mastery + bestiary (per-monster ranks, up to +10 % against that monster)
 - [x] "While you were away" recap (toast or story modal of what happened while the game was hidden)
+- [x] Content lab (`tools/content-lab`): measures a content export on the old and new engines and reworks it to pacing targets
 - [ ] Class-relative difficulty (level scaling does not equalise the classes — glass cannons fall off sooner above their level)
 
 ### Characters & Parties
