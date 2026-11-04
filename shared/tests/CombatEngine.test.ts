@@ -484,16 +484,58 @@ describe('end checks', () => {
     expect(state.elapsedMs).toBeLessThanOrEqual(5000);
   });
 
-  it('a room of only walls is won on the first step', () => {
-    const state = createPartyCombatState([makePlayer('A', 0)], [
-      createMonsterInstance(SEED_MONSTERS.stone_wall, 0),
-      createMonsterInstance(SEED_MONSTERS.stone_wall, 1),
-    ]);
-    const r = processCombatStep(state);
-    expect(r.finished).toBe(true);
-    expect(r.result).toBe('victory');
-    expect(state.tickCount).toBe(1);
-    expect(r.events.map(e => e.kind)).toEqual(['battle_start', 'battle_end']);
+  describe('a room of only walls', () => {
+    const wall = (hp: number, pos: PartyGridPosition = 0) =>
+      createMonsterInstance({ ...SEED_MONSTERS.stone_wall, hp }, pos);
+
+    it('stays undecided until the party acts', () => {
+      const state = createPartyCombatState([makePlayer('A', 0)], [wall(1)]);
+      const { events } = runTo(state, FIRST_ACTION_PLAYER_MS - COMBAT_STEP_MS);
+      expect(state.finished).toBe(false);
+      expect(ofKind(events, 'battle_end')).toEqual([]);
+    });
+
+    it('shows the hit that knocks a one-hit wall down', () => {
+      const state = createPartyCombatState([makePlayer('A', 0)], [wall(1)]);
+      const { events } = runTo(state, 5000);
+      expect(state.result).toBe('victory');
+      expect(state.elapsedMs).toBe(FIRST_ACTION_PLAYER_MS);
+      expect(events.map(e => e.kind)).toEqual(expect.arrayContaining(['attack', 'damage', 'death', 'battle_end']));
+      expect(state.monsters[0].currentHp).toBe(0);
+    });
+
+    it('ends after the opening round when the walls still stand', () => {
+      const state = createPartyCombatState([makePlayer('A', 0), makePlayer('B', 3)], [wall(100_000)]);
+      const { events } = runTo(state, 5000);
+      expect(state.result).toBe('victory');
+      expect(state.elapsedMs).toBe(FIRST_ACTION_PLAYER_MS + 100);
+      expect(ofKind(events, 'attack')).toHaveLength(2);
+      expect(state.monsters[0].currentHp).toBeGreaterThan(0);
+    });
+
+    it('stops as soon as the last wall falls, even if a party member has not acted', () => {
+      const state = createPartyCombatState([makePlayer('A', 0), makePlayer('B', 3)], [wall(1)]);
+      const { events } = runTo(state, 5000);
+      expect(state.elapsedMs).toBe(FIRST_ACTION_PLAYER_MS);
+      expect(ofKind(events, 'attack')).toHaveLength(1);
+    });
+
+    it('lets an opening cast land before ending', () => {
+      const castMs = 2000;
+      const skill = activeSkill({ id: 'slow_bolt', cooldown: 5, warmup: 0, castTime: castMs / 1000 });
+      const state = createPartyCombatState([makePlayer('A', 0, { skills: [skill, null, null, null, null] })], [wall(1)]);
+      const { events } = runTo(state, 10_000);
+      expect(ofKind(events, 'cast_end')).toHaveLength(1);
+      expect(ofKind(events, 'damage').length).toBeGreaterThan(0);
+      expect(state.elapsedMs).toBe(FIRST_ACTION_PLAYER_MS + castMs);
+    });
+
+    it('still needs only the real monsters dead when a wall stands with them', () => {
+      const state = createPartyCombatState([makePlayer('A', 0, { baseDamage: 1000 })], [wall(100_000, 3), makeMonster(0, { hp: 1 })]);
+      runTo(state, 5000);
+      expect(state.result).toBe('victory');
+      expect(state.monsters.find(m => m.passive)?.currentHp).toBeGreaterThan(0);
+    });
   });
 
   it('a mutual wipe in the same phase is a victory', () => {

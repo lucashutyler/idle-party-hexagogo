@@ -652,11 +652,18 @@ function finish(step: Step, result: 'victory' | 'defeat'): void {
   emit(step, 'battle_end', { result });
 }
 
+/** Walls don't count toward victory, but a wall-only fight still gives the party its opening round. */
+function isVictory(state: PartyCombatState): boolean {
+  if (state.monsters.every(m => !isAlive(m))) return true;
+  if (state.monsters.some(m => !m.passive)) return state.monsters.every(m => m.passive || !isAlive(m));
+  return state.players.every(p => !isAlive(p) || (p.attackCount > 0 && !p.cast));
+}
+
 // Victory is tested first, so a mutual wipe is a victory.
 function checkEnd(step: Step): boolean {
   const { state } = step;
   if (state.finished) return true;
-  if (state.monsters.every(m => m.passive || !isAlive(m))) {
+  if (isVictory(state)) {
     finish(step, 'victory');
     return true;
   }

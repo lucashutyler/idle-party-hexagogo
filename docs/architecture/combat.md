@@ -59,7 +59,7 @@ Public API: `createPartyCombatState(PartyCombatantInit[], MonsterInstance[], set
 5. **Level triggers** (`ally_afflicted`, `ally_low_hp`) are evaluated once. **End check.**
 6. **Stalemate**: the HP sum of all living monsters, walls included, is tracked, so chipping through a wall counts as progress; whenever it reaches a new low `lastProgressMs` is stamped. After `STALEMATE_WINDOW_MS` (30 s) without progress — `BOSS_STALEMATE_WINDOW_MS` (180 s) while a living boss/raid-tier monster is present — the fight ends in defeat with "The fight drags on — the party withdraws." Victory still ignores walls. Reaching a boss checkpoint also resets the window.
 
-End check: all non-passive monsters dead → victory; else the boss phase is updated (checkpoints crossed this step); else all players dead → defeat. Victory is tested first everywhere, so a mutual wipe is a victory. Finishing emits `battle_end {result}`. `CombatResult` is `'victory' | 'defeat' | 'retreat'`, but the engine only ever produces the first two — `'retreat'` is set by the server timer (see [Auto-retreat](#auto-retreat)).
+End check: all non-passive monsters dead → victory (in a fight with only walls: all walls dead, or every living player has finished a first action, so the opening hits show and a tall wall doesn't become a grind); else the boss phase is updated (checkpoints crossed this step); else all players dead → defeat. Victory is tested first everywhere, so a mutual wipe is a victory. Finishing emits `battle_end {result}`. `CombatResult` is `'victory' | 'defeat' | 'retreat'`, but the engine only ever produces the first two — `'retreat'` is set by the server timer (see [Auto-retreat](#auto-retreat)).
 
 ### Actions
 
