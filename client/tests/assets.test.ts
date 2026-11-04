@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { classIconHtml } from '@idle-party-rpg/shared';
-import { placeholderInitials, placeholderUrl, renderAssetImg } from '../src/ui/assets';
+import {
+  artworkUrl,
+  forgetMissingAssets,
+  isAssetLoaded,
+  placeholderInitials,
+  placeholderUrl,
+  renderAssetImg,
+  renderTrackedImg,
+} from '../src/ui/assets';
 import { renderEmptySlotIcon } from '../src/ui/ItemIcon';
 
 const PREFIX = 'data:image/svg+xml;charset=utf-8,';
@@ -78,12 +86,6 @@ describe('placeholderInitials', () => {
 });
 
 describe('fallback wiring', () => {
-  it('renderAssetImg falls back to generated art', () => {
-    const html = renderAssetImg('class', 'Knight', { width: 120, height: 120 });
-    expect(html).toContain("this.src='data:image/svg+xml");
-    expect(html).not.toContain('placehold.co');
-  });
-
   it('classIconHtml swaps a missing icon for its class glyph', () => {
     const host = document.createElement('div');
     host.innerHTML = classIconHtml('Knight');
@@ -99,5 +101,140 @@ describe('fallback wiring', () => {
     const html = renderEmptySlotIcon('ring');
     expect(html).toContain('item-slot-ghost-glyph');
     expect(html).toContain('💍');
+  });
+});
+
+// Outcomes are module-wide and only missing ones can be forgotten, so each test uses its own URLs.
+beforeEach(() => {
+  document.body.innerHTML = '';
+});
+
+function mount(html: string): HTMLImageElement {
+  document.body.innerHTML = html;
+  return document.body.querySelector('img')!;
+}
+
+describe('renderTrackedImg', () => {
+  it('starts hidden on the real source with the fallback attached', () => {
+    const img = mount(renderTrackedImg('/item-artwork/a0.png', { fallback: '/fb0.png', className: 'x' }));
+    expect(img.getAttribute('src')).toBe('/item-artwork/a0.png');
+    expect(img.dataset.fallback).toBe('/fb0.png');
+    expect(img.classList.contains('asset-img')).toBe(true);
+    expect(img.classList.contains('x')).toBe(true);
+    expect(img.classList.contains('asset-loaded')).toBe(false);
+  });
+
+  it('remembers a loaded source and renders it already visible', () => {
+    const img = mount(renderTrackedImg('/a1.png', { lazy: true }));
+    img.dispatchEvent(new Event('load'));
+    expect(img.classList.contains('asset-loaded')).toBe(true);
+    const again = mount(renderTrackedImg('/a1.png', { lazy: true }));
+    expect(again.classList.contains('asset-loaded')).toBe(true);
+    expect(again.hasAttribute('loading')).toBe(false);
+  });
+
+  it('swaps to the fallback on error and starts there next time', () => {
+    const img = mount(renderTrackedImg('/a2.png', { fallback: '/fb2.png' }));
+    img.dispatchEvent(new Event('error'));
+    expect(img.getAttribute('src')).toBe('/fb2.png');
+    const again = mount(renderTrackedImg('/a2.png', { fallback: '/fb2.png' }));
+    expect(again.getAttribute('src')).toBe('/fb2.png');
+    expect(again.dataset.fallback).toBeUndefined();
+  });
+
+  it('marks the image failed when every source fails, then renders nothing', () => {
+    const img = mount(renderTrackedImg('/a3.png', { fallback: '/fb3.png' }));
+    img.dispatchEvent(new Event('error'));
+    img.dispatchEvent(new Event('error'));
+    expect(img.classList.contains('asset-failed')).toBe(true);
+    expect(renderTrackedImg('/a3.png', { fallback: '/fb3.png' })).toBe('');
+    expect(renderTrackedImg('/a3.png')).toBe('');
+  });
+
+  it('tries a missing source again after forgetMissingAssets', () => {
+    const img = mount(renderTrackedImg('/a4.png'));
+    img.dispatchEvent(new Event('error'));
+    expect(renderTrackedImg('/a4.png')).toBe('');
+    forgetMissingAssets();
+    expect(mount(renderTrackedImg('/a4.png')).getAttribute('src')).toBe('/a4.png');
+  });
+
+  it('ignores images it did not render', () => {
+    const img = mount('<img src="/untracked.png">');
+    img.dispatchEvent(new Event('error'));
+    expect(img.classList.contains('asset-failed')).toBe(false);
+    expect(renderTrackedImg('/untracked.png')).not.toBe('');
+  });
+
+  it('drops a remembered success when the same source later fails', () => {
+    mount(renderTrackedImg('/flaky.png')).dispatchEvent(new Event('load'));
+    const img = mount(renderTrackedImg('/flaky.png', { fallback: '/flaky-fb.png' }));
+    expect(img.classList.contains('asset-loaded')).toBe(true);
+
+    img.dispatchEvent(new Event('error'));
+    expect(img.classList.contains('asset-loaded')).toBe(false);
+    expect(img.getAttribute('src')).toBe('/flaky-fb.png');
+
+    forgetMissingAssets();
+    expect(mount(renderTrackedImg('/flaky.png')).classList.contains('asset-loaded')).toBe(false);
+  });
+
+  it('escapes attribute values', () => {
+    const img = mount(renderTrackedImg('/a6.png', { alt: 'Say "hi" <b>', style: 'width:1px;"' }));
+    expect(img.getAttribute('alt')).toBe('Say "hi" <b>');
+    expect(img.getAttribute('style')).toBe('width:1px;"');
+  });
+});
+
+describe('renderAssetImg', () => {
+  it('uses the artwork URL with a generated offline fallback', () => {
+    const img = mount(renderAssetImg('shop', 'smithy', { label: 'Smithy', className: 'icon' }));
+    expect(img.getAttribute('src')).toBe(artworkUrl('shop', 'smithy'));
+    expect(img.dataset.fallback?.startsWith(PREFIX)).toBe(true);
+    expect(img.dataset.fallback).not.toContain('placehold.co');
+    expect(img.getAttribute('alt')).toBe('Smithy');
+    expect(img.getAttribute('loading')).toBe('lazy');
+  });
+
+  it('draws the requested glyph on the fallback', () => {
+    const img = mount(renderAssetImg('shop', 'glyph_shop', { label: 'Smithy', glyph: '⚒️' }));
+    expect(decodeSvg(img.dataset.fallback!)).toContain('⚒️');
+  });
+
+  it('swaps to the generated art when the artwork is missing', () => {
+    const img = mount(renderAssetImg('shop', 'missing_shop', { label: 'Smithy' }));
+    img.dispatchEvent(new Event('error'));
+    expect(img.getAttribute('src')?.startsWith(PREFIX)).toBe(true);
+    expect(img.classList.contains('asset-failed')).toBe(false);
+    const again = mount(renderAssetImg('shop', 'missing_shop', { label: 'Smithy' }));
+    expect(again.getAttribute('src')?.startsWith(PREFIX)).toBe(true);
+  });
+});
+
+describe('art presence on the parent', () => {
+  it('marks the parent while the art is showing', () => {
+    document.body.innerHTML = `<span>${renderTrackedImg('/p1.png')}</span>`;
+    const img = document.body.querySelector('img')!;
+    expect(isAssetLoaded('/p1.png')).toBe(false);
+    img.dispatchEvent(new Event('load'));
+    expect(img.parentElement?.classList.contains('has-art')).toBe(true);
+    expect(isAssetLoaded('/p1.png')).toBe(true);
+    img.dispatchEvent(new Event('error'));
+    expect(img.parentElement?.classList.contains('has-art')).toBe(false);
+    expect(isAssetLoaded('/p1.png')).toBe(false);
+  });
+
+  it('renders loaded slot art with its glyph already hidden', () => {
+    mount(renderEmptySlotIcon('necklace')).dispatchEvent(new Event('load'));
+    document.body.innerHTML = renderEmptySlotIcon('necklace');
+    expect(document.querySelector('.item-slot-ghost')?.classList.contains('has-art')).toBe(true);
+    expect(document.querySelector('img')?.classList.contains('asset-loaded')).toBe(true);
+  });
+
+  it('renders only the glyph once slot art is known to be missing', () => {
+    mount(renderEmptySlotIcon('back')).dispatchEvent(new Event('error'));
+    document.body.innerHTML = renderEmptySlotIcon('back');
+    expect(document.querySelector('.item-slot-ghost img')).toBeNull();
+    expect(document.querySelector('.item-slot-ghost-glyph')?.textContent).toBe('🧥');
   });
 });

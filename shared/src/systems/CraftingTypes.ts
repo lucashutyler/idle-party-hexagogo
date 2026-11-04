@@ -1,6 +1,5 @@
 import { MAX_STACK } from './ItemTypes.js';
 
-export const CRAFTING_UNLOCK_LEVEL = 20;
 export const MAX_CRAFT_QUEUE = 5;
 
 export interface RecipeIngredient {
@@ -19,7 +18,7 @@ export interface RecipeDefinition {
   description?: string;
   /** If present, only these classes can craft this recipe. */
   classRestriction?: string[];
-  /** Defaults to CRAFTING_UNLOCK_LEVEL when omitted. */
+  /** Minimum character level to craft; no requirement when omitted. */
   requiredLevel?: number;
   durationSeconds: number;
   /** Craft skill XP granted on completion. Default 0 if omitted. */
@@ -61,8 +60,7 @@ export function canQueueRecipe(
   level: number,
 ): { ok: true } | { ok: false; reason: EnqueueError } {
   if (queue.jobs.length >= MAX_CRAFT_QUEUE) return { ok: false, reason: 'queue_full' };
-  const requiredLevel = recipe.requiredLevel ?? CRAFTING_UNLOCK_LEVEL;
-  if (level < requiredLevel) return { ok: false, reason: 'level_too_low' };
+  if (recipe.requiredLevel != null && level < recipe.requiredLevel) return { ok: false, reason: 'level_too_low' };
   if (recipe.classRestriction && recipe.classRestriction.length > 0) {
     if (!className || !recipe.classRestriction.includes(className)) {
       return { ok: false, reason: 'class_restricted' };
@@ -223,7 +221,6 @@ export const SEED_RECIPES: Record<string, RecipeDefinition> = {
     name: 'Reinforced Leather Vest',
     description: 'Stitch a vest from cured pelts.',
     classRestriction: ['Knight'],
-    requiredLevel: CRAFTING_UNLOCK_LEVEL,
     durationSeconds: 60,
     xpReward: 15,
     ingredients: [{ itemId: 'mangy_pelt', quantity: 5 }],
@@ -234,7 +231,6 @@ export const SEED_RECIPES: Record<string, RecipeDefinition> = {
     name: 'Shortbow Assembly',
     description: 'Carve a shortbow from sinew and bone.',
     classRestriction: ['Archer'],
-    requiredLevel: CRAFTING_UNLOCK_LEVEL,
     durationSeconds: 60,
     xpReward: 15,
     ingredients: [{ itemId: 'mangy_pelt', quantity: 3 }],
@@ -245,7 +241,6 @@ export const SEED_RECIPES: Record<string, RecipeDefinition> = {
     name: 'Blessed Prayer Beads',
     description: 'String beads with a quiet blessing.',
     classRestriction: ['Priest'],
-    requiredLevel: CRAFTING_UNLOCK_LEVEL,
     durationSeconds: 60,
     xpReward: 15,
     ingredients: [{ itemId: 'mangy_pelt', quantity: 4 }],
@@ -256,7 +251,6 @@ export const SEED_RECIPES: Record<string, RecipeDefinition> = {
     name: 'Carved Gnarled Wand',
     description: 'Whittle a focus from twisted wood.',
     classRestriction: ['Mage'],
-    requiredLevel: CRAFTING_UNLOCK_LEVEL,
     durationSeconds: 60,
     xpReward: 15,
     ingredients: [{ itemId: 'mangy_pelt', quantity: 4 }],
@@ -268,7 +262,6 @@ export const SEED_RECIPES: Record<string, RecipeDefinition> = {
     name: 'Brew Lesser Red Potion',
     description: 'Distill a basic red brew from a tattered pelt.',
     classRestriction: ['Mage'],
-    requiredLevel: CRAFTING_UNLOCK_LEVEL,
     durationSeconds: 30,
     xpReward: 10,
     ingredients: [{ itemId: 'mangy_pelt', quantity: 1 }],
@@ -279,7 +272,6 @@ export const SEED_RECIPES: Record<string, RecipeDefinition> = {
     name: 'Tin Whistle',
     description: 'Hammer a whistle from scrap tin.',
     classRestriction: ['Bard'],
-    requiredLevel: CRAFTING_UNLOCK_LEVEL,
     durationSeconds: 60,
     xpReward: 15,
     ingredients: [{ itemId: 'mangy_pelt', quantity: 4 }],
@@ -289,7 +281,6 @@ export const SEED_RECIPES: Record<string, RecipeDefinition> = {
     id: 'patched_cloak',
     name: 'Patched Cloak',
     description: 'Patch together a cloak from spare hides.',
-    requiredLevel: CRAFTING_UNLOCK_LEVEL,
     durationSeconds: 30,
     xpReward: 5,
     ingredients: [{ itemId: 'mangy_pelt', quantity: 2 }],

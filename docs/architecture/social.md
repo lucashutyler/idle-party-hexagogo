@@ -56,6 +56,8 @@ Because the Items screen opens this modal via `openExistingTrade` **without a sc
 
 A rejection is sent as an `error` message carrying `code: 'trade_nonce_mismatch'` (see `ServerErrorCode`) plus a state re-sync; `GameClient.onServerError` lets the modal surface a `.trade-notice` explaining it, so Confirm never looks like a dead button. Only confirm is nonce-gated — replaying a `counter_trade` only rewrites the sender's own (re-validated) offer, which moves no items.
 
+The trade modal repaints only from its own subscription and the nonce-error listener, both through `deferWhilePressed(tradeModalEl, …)` (see `client.md` → State-driven re-rendering), so a press on Confirm sends the nonce of the offer on screen even if a newer offer lands mid-press — the server rejects the stale nonce and the recovery above takes over. The nonce notice text is set immediately rather than in the held repaint, so a later push during the same press can't drop it.
+
 Trades persist via `TradeStore` (`data/trades.json`); `GameLoop.init` calls `tradeStore.load()` and `restoreFromSaveData`, and the periodic save serializes via `getAllTrades()`. Client trade UI is a modal overlay (item picker + side-by-side offers) opened from the user popup or from the "Proposed Trades" list on the Items screen. Badge appears on the bottom-nav Items tab when a trade is waiting on this player.
 
 ## Gift mailbox (async)
@@ -76,11 +78,13 @@ Incoming friend requests also fire a `friend_request_received` notification, and
 
 ## Henchmen in the party
 
-Hired henchmen live in `GamePartyInfo.henchmen: HiredHenchman[]`, a **sibling** of `members` — never inside it. `members` means accounts: ~70 server call sites resolve one to a `PlayerSession`, transfer ownership to one, count one toward a reward divisor, or notify one. A henchman in that array makes each of those wrong silently rather than at compile time, so ownership transfer, the XP/gold divisor, the drop lottery, room-entry gating and battle-timer teardown all stay correct by construction.
+Hired henchmen live in `GamePartyInfo.henchmen: HiredHenchman[]`, a **sibling** of `members` — never inside it. `members` means accounts: ~70 server call sites resolve one to a `PlayerSession`, transfer ownership to one, or notify one. A henchman in that array makes each of those wrong silently rather than at compile time, so ownership transfer, room-entry gating and battle-timer teardown all stay correct by construction. The one place henchmen are counted on purpose is the victory payout (below).
 
-**One henchman per party** (`MAX_HENCHMEN_PER_PARTY`), enforced in `PartySystem.hireHenchman` and again in `restoreHenchmen` so a save written before the limit cannot reintroduce more.
+**Several henchmen per party, each a different one.** `MAX_HENCHMEN_PER_PARTY` is `MAX_PARTY_SIZE - 1`, so henchmen can fill every seat a real player isn't using, and a party never holds two hires of the same `henchmanId`. Both rules are enforced in `PartySystem.hireHenchman` and again in `restoreHenchmen`, which drops duplicates and anything beyond the cap or the party's free seats from older saves. The cap is a named constant because it is a balance decision, not a structural one.
 
-Hiring while at the cap is refused; `hire_henchman` carries `replace: true` to **swap** instead. The outgoing hire is dropped *before* the party-size check and the newcomer inherits its grid square, so a party of four players and a henchman — already full — can still change who it has hired, and the formation survives the swap. `ShopPopup` reads the current henchman off `state.social.party.henchmen`, labels the button Replace rather than Hire, and confirms before sending. A party that is full of *players* has no henchman to swap, so it still gets the plain "Party is full" refusal. The cap is deliberately a named constant rather than an inlined `1` — it is a balance decision, not a structural one, and everything below it (per-hire `instanceId`, combat-name disambiguation, slot allocation across both rosters) already handles several.
+When there's no room, `hire_henchman` carries `replaceInstanceId` to **swap** a specific hire out. The outgoing hire is excluded *before* the uniqueness and seat checks and the newcomer inherits its grid square, so a full party can still change who it has hired and the formation survives the swap. Every refusal leaves the roster untouched. `ShopPopup` marks henchmen the party already has as "In party", labels the button Replace when there's no free seat ("Party full", disabled, when the seats are all players), and asks which hire should leave, showing each hire's level. A party that is full of *players* has no henchman to swap, so it still gets the plain "Party is full" refusal.
+
+**Rewards.** A henchman takes a share of a victory without receiving it: the XP and gold divisor in `PartyBattleManager.handleBattleEnd` is members plus henchmen, and each dropped item goes to one random share, counting a henchman by its hidden class for class-restricted items. A share that lands on a henchman is discarded. Hiring help fills seats; it never out-earns partying with real players. Inside a dungeon henchmen take no share at all, because they aren't in the fight (below). A henchman's fixed skills do count toward the party's XP bonus (Bard Inspiration), the same way its Rally or Nimble count in combat.
 
 The two rosters **share** the nine grid squares. `PartySystem` allocates across both through one `occupiedPositions` helper — the only place that knows it — so two occupants can never land on one square. Henchmen count toward `MAX_PARTY_SIZE` everywhere, invites included.
 
@@ -89,6 +93,10 @@ The two rosters **share** the nine grid squares. `PartySystem` allocates across 
 **Roles**: hiring and moving a henchman are gated on the invite role, dismissing on the kick role (owner or leader). The client hides those affordances for plain members rather than letting the server refuse silently.
 
 **Identity**: a henchman's combat name is its definition name, disambiguated with ` #2`/` #3` against both other henchmen and the party's real usernames (`henchmanDisplayNames`). `PartyCombatant.username` is interpolated verbatim into ~25 combat-log lines and keys DoT attribution and heal-target prose, so a henchman sharing a name with a member would corrupt combat, not just prose.
+
+**Dungeons**: henchmen wait at the entrance. They don't block entry, aren't in floor combat, take no share of dungeon rewards, and rejoin when the run ends by any path; a hire made mid-run waits too. Hire and dismiss go through `PartyBattleManager.henchmenChanged(partyId, joined?)`, which restarts overworld combat around the new roster but leaves a dungeon fight running. See `content.md` → Dungeon system.
+
+**Member details on the wire**: `GamePartyMember.level` and `className` are filled in at send time by `PlayerManager.resolvePartyMembers` inside `getSocialState` — copies, never stored on `PartySystem` members and never persisted. The dungeon popup's eligibility preview reads them.
 
 **Map scoping**: a hire is scoped to the map it was made on, dismissed immediately after either `ServerParty.switchMap` call — the transition the party chose, and the forced relocation a content deploy causes. Departures are announced in the combat log.
 

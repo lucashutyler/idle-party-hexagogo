@@ -143,6 +143,8 @@ export {
   equipItemForceDestroy,
   computeEquipmentBonuses,
   isTwoHandedEquipped,
+  canClassEquipItem,
+  getItemsDisplacedByEquip,
   getItemEffectText,
   rollDrops,
 } from './systems/ItemTypes.js';
@@ -378,6 +380,7 @@ export type {
   PlayerProfileMessage,
   ServerMessage,
   ServerErrorCode,
+  ServerErrorMessage,
   ClientMessage,
 } from './systems/BattleTypes.js';
 export {
@@ -411,7 +414,9 @@ export type {
 export type {
   ShopItem,
   ShopDefinition,
+  ShopSummary,
 } from './systems/ShopTypes.js';
+export { toShopSummary } from './systems/ShopTypes.js';
 
 export type {
   HenchmanDefinition,
@@ -426,7 +431,6 @@ export {
 
 // Crafting types
 export {
-  CRAFTING_UNLOCK_LEVEL,
   MAX_CRAFT_QUEUE,
   SEED_RECIPES,
   emptyCraftQueue,
@@ -461,9 +465,14 @@ export {
   objectivesComplete,
   computeStatus,
   canAcceptQuest,
+  acceptableQuestIds,
+  nextWeeklyReopening,
   initialProgress,
+  SOLO_QUEST_IN_PARTY_REASON,
+  WEEKLY_COOLDOWN_MS,
 } from './systems/QuestTypes.js';
 export type {
+  QuestAcceptContext,
   QuestStatus,
   QuestScope,
   QuestRepeat,

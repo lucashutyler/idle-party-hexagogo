@@ -350,10 +350,6 @@
     linear-gradient(180deg, rgba(10, 15, 36, 0.15) 0%, rgba(10, 15, 36, 0.6) 100%),
     var(--item-bg, var(--rarity));
   box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.22), 0 2px 0 rgba(0, 0, 0, 0.35);
-  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
-}
-.item-square:hover {
-  transform: scale(1.06);
 }
 @media (min-width: 768px) and (hover: hover) {
   .item-square[data-tooltip]:hover::after {
@@ -429,9 +425,6 @@
   cursor: default;
   background: rgba(6, 9, 24, 0.55);
   box-shadow: inset 0 0 0 1px var(--stroke);
-}
-.item-square-empty:hover {
-  transform: none;
 }
 .item-square-empty .item-dogear {
   width: 16px;

@@ -55,7 +55,7 @@ export interface MonsterDefinition {
   passive?: boolean;
   /** Optional flavor text shown in the monster popup. */
   description?: string;
-  /** 1..200. Absent → derived from damage output. */
+  /** 1..200. Absent → an estimate from damage output, which shows no level and applies no gap factor or XP con. */
   level?: number;
   /** Absent → 'trash'. */
   tier?: MonsterTier;

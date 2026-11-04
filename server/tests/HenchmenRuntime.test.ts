@@ -3,7 +3,7 @@ import { PlayerManager } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
-import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, COMBAT_STEP_MS, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import type { HenchmanDefinition, WorldTileDefinition, DungeonDefinition, PartyCombatant } from '@idle-party-rpg/shared';
@@ -69,6 +69,9 @@ function createFakeContentStore(henchmen: Record<string, HenchmanDefinition>): C
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
     getAllNpcs: () => ({}),
+    getNpcQuestIds: () => [],
+    getQuestRevision: () => 0,
+    getQuestCatalog() { return this.getAllQuests(); },
     getNpc: () => undefined,
     getAllQuests: () => ({}),
     getQuest: () => undefined,
@@ -154,7 +157,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     expect(henchman.baseDamage).toBe(6);
   });
 
-  it('refuses a second hire — one henchman per party', async () => {
+  it('refuses a second hire of the same henchman', async () => {
     const { pm, partyId } = await setup();
     hire(pm);
 
@@ -188,26 +191,359 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     expect(combatPlayers(pm, partyId).map(p => p.username)).toEqual(['alice']);
   });
 
-  it('refuses dungeon entry while the party holds a henchman', async () => {
+  function winBattle(pm: PlayerManager, partyId: string, drops: { itemId: string; chance: number }[] = []) {
+    const content = (pm.partyBattles as unknown as { content: ContentStore }).content;
+    (content as unknown as { getMonster: () => unknown }).getMonster = () => ({
+      id: 'goblin', name: 'Goblin', hp: 10, damage: 2, damageType: 'physical', xp: 40, goldMin: 100, goldMax: 100, drops,
+    });
+    const battles = pm.partyBattles as unknown as {
+      entries: Map<string, { battleTimer: { combatState: unknown } }>;
+      handleBattleEnd: (id: string, result: 'victory') => void;
+    };
+    battles.entries.get(partyId)!.battleTimer.combatState = {
+      players: [],
+      monsters: [{ id: 'goblin', name: 'Goblin', xp: 40, currentHp: 0, maxHp: 10, gridPosition: 4, damageType: 'physical' }],
+      finished: true,
+      result: 'victory',
+    };
+    battles.handleBattleEnd(partyId, 'victory');
+  }
+
+  it('gives the player the whole reward when no henchman is hired', async () => {
     const { pm, partyId } = await setup();
-    expect(pm.partyBattles.enterDungeon(partyId, DUNGEON_ID).success).toBe(true);
+    const before = pm.getSessionByUsername('alice')!.getGold();
 
-    const fresh = await setup();
-    hire(fresh.pm);
-    const result = fresh.pm.partyBattles.enterDungeon(fresh.partyId, DUNGEON_ID);
+    winBattle(pm, partyId);
 
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error).toMatch(/dismiss your henchmen/i);
+    expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(100);
   });
 
-  it('allows dungeon entry again once the henchman is dismissed', async () => {
+  it('splits gold with a hired henchman, whose share is lost', async () => {
     const { pm, partyId } = await setup();
-    const hired = hire(pm);
-    expect(pm.partyBattles.enterDungeon(partyId, DUNGEON_ID).success).toBe(false);
+    hire(pm);
+    const before = pm.getSessionByUsername('alice')!.getGold();
 
-    pm.parties.dismissHenchman('alice', hired.instanceId, (u) => pm.getSessionByUsername(u)?.getPartyId() ?? null);
+    winBattle(pm, partyId);
 
-    expect(pm.partyBattles.enterDungeon(partyId, DUNGEON_ID).success).toBe(true);
+    expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(50);
+  });
+
+  it('counts a henchman\'s Inspiration toward the party XP bonus', async () => {
+    const xpOf = (pm: PlayerManager) => (pm.getSessionByUsername('alice') as unknown as { character: { xp: number } }).character.xp;
+
+    const plain = await setup();
+    hire(plain.pm);
+    const plainBefore = xpOf(plain.pm);
+    winBattle(plain.pm, plain.partyId);
+
+    const bard = await setup({ [HENCH_ID]: makeHenchman({ className: 'Bard', skillIds: ['bard_inspiration'] }) });
+    hire(bard.pm);
+    const bardBefore = xpOf(bard.pm);
+    winBattle(bard.pm, bard.partyId);
+
+    expect(xpOf(plain.pm) - plainBefore).toBe(20);
+    expect(xpOf(bard.pm) - bardBefore).toBe(24);
+  });
+
+  it('discards a drop that lands on a henchman\'s share', async () => {
+    const { pm, partyId } = await setup();
+    hire(pm);
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+
+    winBattle(pm, partyId, [{ itemId: 'trinket', chance: 1 }]);
+    random.mockRestore();
+
+    expect(pm.getSessionByUsername('alice')!.getInventoryCount('trinket')).toBe(0);
+  });
+
+  it('still lets the player win a drop when the roll lands on them', async () => {
+    const { pm, partyId } = await setup();
+    hire(pm);
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    winBattle(pm, partyId, [{ itemId: 'trinket', chance: 1 }]);
+    random.mockRestore();
+
+    expect(pm.getSessionByUsername('alice')!.getInventoryCount('trinket')).toBe(1);
+  });
+
+  describe('changing the roster during the kill beat', () => {
+    // Fights here roll the two-goblin fallback pack, worth 40 XP and 100 gold in all.
+    const REWARD_MONSTER = { id: 'goblin', name: 'Goblin', hp: 1, damage: 0, damageType: 'physical', xp: 20, goldMin: 50, goldMax: 50 };
+    const BARD_ID = 'hench_bard';
+    const ROSTER = {
+      [HENCH_ID]: makeHenchman(),
+      [BARD_ID]: makeHenchman({ id: BARD_ID, name: 'Lute', className: 'Bard', skillIds: ['bard_inspiration'] }),
+    };
+
+    function xpOf(pm: PlayerManager): number {
+      return (pm.getSessionByUsername('alice') as unknown as { character: { xp: number } }).character.xp;
+    }
+
+    /** Win a real fight against a one-hit goblin, stopping inside its kill beat with nothing paid yet. */
+    function reachKillBeat(pm: PlayerManager, partyId: string) {
+      const content = (pm.partyBattles as unknown as { content: ContentStore }).content as unknown as Record<string, unknown>;
+      content.getMonster = () => REWARD_MONSTER;
+      content.getAllMonsters = () => ({ goblin: REWARD_MONSTER });
+      const timer = (pm.partyBattles as unknown as {
+        entries: Map<string, { battleTimer: { battleId: number; currentState: string; isFighting: (id: number) => boolean } }>;
+      }).entries.get(partyId)!.battleTimer;
+      pm.partyBattles.restartBattle(partyId);
+      const session = pm.getSessionByUsername('alice')!;
+      const before = { gold: session.getGold(), xp: xpOf(pm) };
+      for (let ms = 0; ms < 10_000 && timer.isFighting(timer.battleId); ms += COMBAT_STEP_MS) {
+        vi.advanceTimersByTime(COMBAT_STEP_MS);
+      }
+      expect(timer.isFighting(timer.battleId)).toBe(false);
+      expect(timer.currentState).toBe('battle');
+      expect(session.getGold()).toBe(before.gold);
+      return { before, session };
+    }
+
+    it('does not pay a new hire for a win it did not fight', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      const hired = pm.hireHenchman('alice', BARD_ID, DEFAULT_MAP_ID);
+      if (typeof hired === 'string') throw new Error(hired);
+      pm.partyBattles.henchmenChanged(partyId, [hired]);
+
+      expect(session.getGold() - before.gold).toBe(100);
+      expect(xpOf(pm) - before.xp).toBe(40);
+    });
+
+    it('still takes a dismissed hire\'s share and Inspiration for a win it fought', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const hired = hire(pm, BARD_ID);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      expect(typeof pm.dismissHenchman('alice', hired.instanceId)).not.toBe('string');
+      pm.partyBattles.henchmenChanged(partyId);
+
+      expect(session.getGold() - before.gold).toBe(50);
+      expect(xpOf(pm) - before.xp).toBe(24);
+    });
+
+    it('pays a replacement\'s win on the outgoing hire, not the incoming one', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const outgoing = hire(pm, BARD_ID);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      const incoming = pm.hireHenchman('alice', HENCH_ID, DEFAULT_MAP_ID, outgoing.instanceId);
+      if (typeof incoming === 'string') throw new Error(incoming);
+      pm.partyBattles.henchmenChanged(partyId, [incoming]);
+
+      expect(session.getGold() - before.gold).toBe(50);
+      expect(xpOf(pm) - before.xp).toBe(24);
+    });
+
+    it('pays the fighters before a joining player can dilute their win', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      pm.partyBattles.addMember(partyId, 'latecomer');
+
+      expect(session.getGold() - before.gold).toBe(100);
+      expect(xpOf(pm) - before.xp).toBe(40);
+    });
+  });
+
+  describe('in a dungeon, hires wait at the entrance', () => {
+    const WAITS = 'Grim the Sellsword waits at the dungeon entrance.';
+    const REJOINS = 'Grim the Sellsword rejoins the party.';
+
+    function logLines(pm: PlayerManager): string[] {
+      return pm.getSessionByUsername('alice')!.getState([]).combatLog.map(e => e.text);
+    }
+
+    function entryOf(pm: PlayerManager, partyId: string) {
+      return (pm.partyBattles as unknown as {
+        entries: Map<string, { battleTimer: { currentCombat: unknown } }>;
+      }).entries.get(partyId)!;
+    }
+
+    async function setupInDungeon(henchmen?: Record<string, HenchmanDefinition>) {
+      const ctx = await setup(henchmen);
+      hire(ctx.pm);
+      const result = ctx.pm.partyBattles.enterDungeon(ctx.partyId, DUNGEON_ID);
+      expect(result.success).toBe(true);
+      return ctx;
+    }
+
+    it('lets a party holding a henchman enter, logging that the hire waits outside', async () => {
+      const { pm, partyId } = await setupInDungeon();
+
+      expect(pm.partyBattles.getDungeonRunInfo(partyId)).not.toBeNull();
+      expect(logLines(pm)).toContain(WAITS);
+      expect(logLines(pm)).not.toContain(REJOINS);
+    });
+
+    it('enters through the player handler too, with no henchmen refusal', async () => {
+      const { pm, partyId } = await setup();
+      hire(pm);
+
+      expect(pm.handleEnterDungeon('alice', 0, 0, DUNGEON_ID)).toBeNull();
+      expect(pm.partyBattles.getDungeonRunInfo(partyId)).not.toBeNull();
+    });
+
+    it('keeps hires out of dungeon floor combat', async () => {
+      const { pm, partyId } = await setupInDungeon();
+
+      expect(combatPlayers(pm, partyId).map(p => p.username)).toEqual(['alice']);
+    });
+
+    it('gives hires no share of a dungeon victory', async () => {
+      const { pm, partyId } = await setupInDungeon();
+      const before = pm.getSessionByUsername('alice')!.getGold();
+
+      winBattle(pm, partyId);
+
+      expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(100);
+    });
+
+    it('drops a waiting hire\'s Inspiration from the dungeon XP bonus', async () => {
+      const xpOf = (pm: PlayerManager) => (pm.getSessionByUsername('alice') as unknown as { character: { xp: number } }).character.xp;
+      const { pm, partyId } = await setupInDungeon({ [HENCH_ID]: makeHenchman({ className: 'Bard', skillIds: ['bard_inspiration'] }) });
+      const before = xpOf(pm);
+
+      winBattle(pm, partyId);
+
+      expect(xpOf(pm) - before).toBe(40);
+    });
+
+    it('brings hires back after the final floor is cleared', async () => {
+      const { pm, partyId } = await setupInDungeon();
+
+      winBattle(pm, partyId);
+
+      expect(pm.partyBattles.getDungeonRunInfo(partyId)).toBeNull();
+      expect(logLines(pm)).toContain(REJOINS);
+      expect(combatPlayers(pm, partyId).map(p => p.username).sort()).toEqual(['Grim the Sellsword', 'alice']);
+    });
+
+    it('brings hires back after leaving the dungeon', async () => {
+      const { pm, partyId } = await setupInDungeon();
+
+      expect(pm.partyBattles.leaveDungeon(partyId)).toBe(true);
+
+      expect(logLines(pm)).toContain(REJOINS);
+      const combat = entryOf(pm, partyId).battleTimer.currentCombat as { players: PartyCombatant[] };
+      expect(combat.players.some(p => p.isHenchman)).toBe(true);
+    });
+
+    it('brings hires back after a wipe', async () => {
+      const { pm, partyId } = await setupInDungeon();
+
+      (pm.partyBattles as unknown as { handleBattleEnd: (id: string, r: 'defeat') => void }).handleBattleEnd(partyId, 'defeat');
+
+      expect(pm.partyBattles.getDungeonRunInfo(partyId)).toBeNull();
+      expect(logLines(pm)).toContain(REJOINS);
+      expect(combatPlayers(pm, partyId)).toHaveLength(2);
+    });
+
+    it('brings hires back when the party is relocated out of the dungeon', async () => {
+      const { pm, partyId, grid } = await setupInDungeon();
+
+      pm.partyBattles.relocateParty(partyId, grid.getTile(offsetToCube({ col: 1, row: 0 }))!, DEFAULT_MAP_ID);
+
+      expect(logLines(pm)).toContain(REJOINS);
+      const combat = entryOf(pm, partyId).battleTimer.currentCombat as { players: PartyCombatant[] };
+      expect(combat.players.some(p => p.isHenchman)).toBe(true);
+    });
+
+    it('brings hires into the very fight that replaces a dungeon a deploy removed', async () => {
+      const { pm, partyId, content } = await setupInDungeon();
+      (content as unknown as { getDungeon: () => undefined }).getDungeon = () => undefined;
+
+      const players = combatPlayers(pm, partyId);
+
+      expect(pm.partyBattles.getDungeonRunInfo(partyId)).toBeNull();
+      expect(players.map(p => p.username).sort()).toEqual(['Grim the Sellsword', 'alice']);
+      expect(logLines(pm)).toContain(REJOINS);
+    });
+
+    it('logs no rejoin line when the party has no hires', async () => {
+      const { pm, partyId } = await setup();
+      pm.partyBattles.enterDungeon(partyId, DUNGEON_ID);
+
+      pm.partyBattles.leaveDungeon(partyId);
+
+      expect(logLines(pm).some(l => l.includes('rejoins'))).toBe(false);
+    });
+
+    it('parks a hire made mid-run without restarting the dungeon fight', async () => {
+      const { pm, partyId } = await setup();
+      pm.partyBattles.enterDungeon(partyId, DUNGEON_ID);
+      const fight = entryOf(pm, partyId).battleTimer.currentCombat;
+
+      const hired = hire(pm);
+      pm.partyBattles.henchmenChanged(partyId, [hired]);
+
+      expect(entryOf(pm, partyId).battleTimer.currentCombat).toBe(fight);
+      expect(logLines(pm)).toContain(WAITS);
+      expect(combatPlayers(pm, partyId).map(p => p.username)).toEqual(['alice']);
+    });
+
+    it('does not restart the dungeon fight when a hire is dismissed mid-run', async () => {
+      const { pm, partyId } = await setupInDungeon();
+      const fight = entryOf(pm, partyId).battleTimer.currentCombat;
+      const hired = pm.parties.getHenchmen(partyId)[0];
+
+      pm.parties.dismissHenchman('alice', hired.instanceId, (u) => pm.getSessionByUsername(u)?.getPartyId() ?? null);
+      pm.partyBattles.henchmenChanged(partyId);
+
+      expect(entryOf(pm, partyId).battleTimer.currentCombat).toBe(fight);
+    });
+
+    it('restarts overworld combat around a new hire', async () => {
+      const { pm, partyId } = await setup();
+      const fight = entryOf(pm, partyId).battleTimer.currentCombat;
+
+      const hired = hire(pm);
+      pm.partyBattles.henchmenChanged(partyId, [hired]);
+
+      const next = entryOf(pm, partyId).battleTimer.currentCombat as { players: PartyCombatant[] };
+      expect(next).not.toBe(fight);
+      expect(next.players.some(p => p.isHenchman)).toBe(true);
+      expect(logLines(pm)).not.toContain(WAITS);
+    });
+
+    it('persists no extra state: the waiting hire and the run save as before', async () => {
+      const { pm } = await setupInDungeon();
+
+      const saved = pm.getAllSaveData()[0];
+
+      expect(saved.partyHenchmen).toHaveLength(1);
+      expect(saved.dungeonRun?.dungeonId).toBe(DUNGEON_ID);
+    });
+
+    async function restart(saves: ReturnType<PlayerManager['getAllSaveData']>, content: ContentStore) {
+      const pm = new PlayerManager(wrapGrids(createFakeGrid()), content, createFakeGuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+      pm.restoreFromSaveData(JSON.parse(JSON.stringify(saves)));
+      await pm.login(createFakeWs(), 'alice');
+      return { pm, partyId: pm.getSessionByUsername('alice')!.getPartyId()! };
+    }
+
+    it('resumes a saved run after a restart with the hire still waiting outside', async () => {
+      const { pm, content } = await setupInDungeon();
+
+      const restored = await restart(pm.getAllSaveData(), content);
+
+      expect(restored.pm.partyBattles.getDungeonRunInfo(restored.partyId)).not.toBeNull();
+      expect(combatPlayers(restored.pm, restored.partyId).map(p => p.username)).toEqual(['alice']);
+      expect(logLines(restored.pm)).not.toContain(REJOINS);
+    });
+
+    it('announces the hire rejoining when a restart finds the dungeon gone', async () => {
+      const { pm, content } = await setupInDungeon();
+      const withoutDungeon = { ...content, getDungeon: () => undefined } as unknown as ContentStore;
+
+      const restored = await restart(pm.getAllSaveData(), withoutDungeon);
+
+      expect(restored.pm.partyBattles.getDungeonRunInfo(restored.partyId)).toBeNull();
+      expect(combatPlayers(restored.pm, restored.partyId).some(p => p.isHenchman)).toBe(true);
+      expect(logLines(restored.pm).filter(line => line === REJOINS)).toHaveLength(1);
+    });
   });
 
   it('a henchman does not block movement into a level-gated room', async () => {

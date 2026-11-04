@@ -42,6 +42,7 @@ export class QuestSystem {
   private active: Map<string, QuestProgressEntry> = new Map();
   private completed: CompletedQuestEntry[] = [];
   private weeklyCompletions: Record<string, string> = {};
+  private revision = 0;
   private username: string;
   private onEvent?: (event: QuestEvent) => void;
 
@@ -72,6 +73,11 @@ export class QuestSystem {
     return { ...this.weeklyCompletions };
   }
 
+  /** Bumped whenever which quests are active, completed or cooling down changes; progress doesn't count. */
+  getRevision(): number {
+    return this.revision;
+  }
+
   hasAccepted(questId: string): boolean {
     return this.active.has(questId);
   }
@@ -95,12 +101,9 @@ export class QuestSystem {
       activeQuestIds: this.getActiveQuestIds(),
       completedQuestIds: this.getCompletedQuestIds(),
       weeklyCompletions: this.weeklyCompletions,
+      partySize: ctx.partySize,
     });
     if (reason) return reason;
-
-    if (quest.scope === 'solo' && ctx.partySize > 1) {
-      return 'Solo quest — leave your party first.';
-    }
 
     this.active.set(quest.id, {
       questId: quest.id,
@@ -108,6 +111,7 @@ export class QuestSystem {
       progress: initialProgress(quest),
       acceptedAt: new Date().toISOString(),
     });
+    this.revision++;
     this.fire({ type: 'accepted', questId: quest.id, username: this.username });
     return null;
   }
@@ -255,6 +259,7 @@ export class QuestSystem {
     if ((def.repeat ?? 'once') === 'weekly') {
       this.weeklyCompletions[questId] = completedAt;
     }
+    this.revision++;
     this.fire({ type: 'turned_in', questId, username: this.username });
 
     return { success: true, rewards: def.rewards };
@@ -287,6 +292,7 @@ export class QuestSystem {
     }
     this.completed = [...data.completed];
     this.weeklyCompletions = { ...data.weeklyCompletions };
+    this.revision++;
   }
 
   // --- Helpers (also used by tests) ---

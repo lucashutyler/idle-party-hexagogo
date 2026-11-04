@@ -1,5 +1,5 @@
 import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, getSlotSchedule } from '@idle-party-rpg/shared';
-import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, SkillDefinition, SkillSlot, SkillContent, ClassName } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, ShopSummary, SkillDefinition, SkillSlot, SkillContent, ClassName } from '@idle-party-rpg/shared';
 
 /**
  * Client-side cache for world data.
@@ -8,7 +8,7 @@ import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefiniti
  * A world holds multiple maps; the client only renders the map the party is
  * currently on (`currentMapId`, driven by the server state message). Tiles are
  * indexed by `mapId:col:row` so rooms at the same (col,row) on different maps
- * don't collide. Fog of war is determined by state.unlocked (sent every tick).
+ * don't collide. Fog of war is determined by state.unlocked (sent with every state push).
  */
 export class WorldCache {
   /** Keyed by "mapId:col:row". */
@@ -18,6 +18,8 @@ export class WorldCache {
   private tileTypeDefs = new Map<string, TileTypeDefinition>();
   private npcs = new Map<string, NpcDefinition>();
   private dungeons = new Map<string, DungeonDefinition>();
+  private shops = new Map<string, ShopSummary>();
+  private roomsByNpc = new Map<string, WorldTileDefinition[]>();
   private startTile: { col: number; row: number } = { col: 0, row: 0 };
   private maps: WorldMapMeta[] = [];
   private currentMapId: string = DEFAULT_MAP_ID;
@@ -55,6 +57,7 @@ export class WorldCache {
       maps?: WorldMapMeta[];
       tiles: WorldTileDefinition[];
       tileTypes?: Record<string, TileTypeDefinition>;
+      shops?: Record<string, ShopSummary>;
     };
 
     this.startTile = data.startTile;
@@ -64,9 +67,15 @@ export class WorldCache {
     }
     this.tiles.clear();
     this.tilesByGuid.clear();
+    this.roomsByNpc.clear();
     for (const tile of data.tiles) {
       this.tiles.set(`${tile.mapId}:${tile.col},${tile.row}`, tile);
       this.tilesByGuid.set(tile.id, tile);
+      if (tile.npcId) {
+        const rooms = this.roomsByNpc.get(tile.npcId);
+        if (rooms) rooms.push(tile);
+        else this.roomsByNpc.set(tile.npcId, [tile]);
+      }
     }
     this.lastUnlockedCount = -1; // force fog recompute against the (possibly new) tile set
 
@@ -75,6 +84,11 @@ export class WorldCache {
       for (const def of Object.values(data.tileTypes)) {
         this.tileTypeDefs.set(def.id, def);
       }
+    }
+
+    this.shops.clear();
+    for (const shop of Object.values(data.shops ?? {})) {
+      this.shops.set(shop.id, shop);
     }
 
     this.npcs.clear();
@@ -218,9 +232,24 @@ export class WorldCache {
     return this.npcs.get(id);
   }
 
+  /** Every NPC in the catalog. */
+  getAllNpcs(): NpcDefinition[] {
+    return [...this.npcs.values()];
+  }
+
+  /** Rooms (on any map) where an NPC stands. */
+  getRoomsWithNpc(npcId: string): WorldTileDefinition[] {
+    return this.roomsByNpc.get(npcId) ?? [];
+  }
+
   /** Get a dungeon definition by ID. */
   getDungeon(id: string): DungeonDefinition | undefined {
     return this.dungeons.get(id);
+  }
+
+  /** Name and offer kinds of a shop; the stock itself only arrives for the current room. */
+  getShop(id: string): ShopSummary | undefined {
+    return this.shops.get(id);
   }
 
   /** Get a skill definition by ID (cross-class catalog). */

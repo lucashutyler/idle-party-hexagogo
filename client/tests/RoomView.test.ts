@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoomView } from '../src/ui/RoomView';
-import type { TileClickInfo } from '../src/ui/CanvasWorldMap';
+import type { TileClickInfo } from '../src/ui/ThreeWorldMap';
+import type { RoomAction } from '../src/ui/RoomActions';
 
 function makeInfo(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
   return {
@@ -170,5 +171,130 @@ describe('RoomView modal pipeline', () => {
     view.show(makeInfo());
     view.show(makeInfo({ col: 5 }));
     expect(parent.querySelectorAll('.room-view-overlay').length).toBe(1);
+  });
+});
+
+const ACTIONS: RoomAction[] = [
+  { kind: 'npc', icon: '🧙', name: 'Mira', targetId: 'mira', detail: 'Quest ready to turn in', questReady: true },
+  { kind: 'shop', icon: '🪙', name: 'General Store', targetId: 'store' },
+  { kind: 'dungeon', icon: '🗝️', name: 'Crystal Caves', targetId: 'caves' },
+  { kind: 'travel', icon: '🌀', name: 'Darkwood Gate', targetId: 'gate-guid' },
+];
+
+describe('RoomView room actions', () => {
+  let parent: HTMLElement;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    parent = document.createElement('div');
+    document.body.appendChild(parent);
+  });
+
+  function overlay(): HTMLElement {
+    return parent.querySelector('.room-view-overlay') as HTMLElement;
+  }
+
+  it('offers Stop here on the current room while travelling, moving to that room and closing', () => {
+    const onMove = vi.fn();
+    const view = new RoomView(parent, onMove);
+    view.isTraveling = true;
+    view.show(makeInfo({ isCurrentTile: true }));
+
+    const stop = parent.querySelector('.room-view-action-stop') as HTMLElement;
+    expect(stop).toBeTruthy();
+    stop.click();
+    expect(onMove).toHaveBeenCalledWith(3, 4);
+    expect(overlay().style.display).toBe('none');
+  });
+
+  it('hides Stop here when the party is not travelling', () => {
+    const view = new RoomView(parent, () => {});
+    view.show(makeInfo({ isCurrentTile: true }));
+    expect(parent.querySelector('.room-view-action-stop')).toBeNull();
+  });
+
+  it('hides Stop here on a remote room even while travelling', () => {
+    const view = new RoomView(parent, () => {});
+    view.isTraveling = true;
+    view.show(makeInfo({ isCurrentTile: false }));
+    expect(parent.querySelector('.room-view-action-stop')).toBeNull();
+  });
+
+  it('lists what an explored remote room offers, without action buttons', () => {
+    const view = new RoomView(parent, () => {});
+    view.actions = ACTIONS;
+    view.show(makeInfo());
+
+    const items = [...parent.querySelectorAll('.room-view-contents-item')].map(el => el.textContent);
+    expect(items).toEqual([
+      '🧙MiraQuest ready to turn in',
+      '🪙General Store',
+      '🗝️Crystal Caves',
+      '🌀Darkwood Gate',
+    ]);
+    expect(parent.querySelector('[data-action-index]')).toBeNull();
+  });
+
+  it('pins a gold "?" on a ready turn-in and a green "!" on a new quest', () => {
+    const view = new RoomView(parent, () => {});
+    const giver: RoomAction = { kind: 'npc', icon: '🧔', name: 'Hob', targetId: 'hob', detail: 'New quest available', questAvailable: true };
+    view.actions = [ACTIONS[0], giver];
+    view.show(makeInfo());
+    const icons = [...parent.querySelectorAll('.room-view-contents-icon')];
+    expect(icons.map(el => el.className)).toEqual([
+      'room-view-contents-icon quest-ready-pip',
+      'room-view-contents-icon quest-available-pip',
+    ]);
+
+    view.show(makeInfo({ isCurrentTile: true }));
+    const buttonIcons = [...parent.querySelectorAll('[data-action-index] .room-view-action-icon')];
+    expect(buttonIcons.map(el => el.classList.contains('quest-available-pip'))).toEqual([false, true]);
+    expect(buttonIcons.map(el => el.classList.contains('quest-ready-pip'))).toEqual([true, false]);
+  });
+
+  it('lists nothing for an unexplored remote room', () => {
+    const view = new RoomView(parent, () => {});
+    view.actions = ACTIONS;
+    view.show(makeInfo({ isUnlocked: false, roomName: 'Unexplored Room' }));
+    expect(parent.querySelector('.room-view-contents')).toBeNull();
+  });
+
+  it('escapes author-supplied names in the room list', () => {
+    const view = new RoomView(parent, () => {});
+    view.actions = [{ kind: 'npc', icon: '🧙', name: '<img src=x onerror=alert(1)>', targetId: 'x' }];
+    view.show(makeInfo());
+    expect(parent.querySelector('.room-view-contents img')).toBeNull();
+    expect(parent.querySelector('.room-view-contents-name')?.textContent).toBe('<img src=x onerror=alert(1)>');
+  });
+
+  it('renders one button per action on the current room, using the shared glyphs', () => {
+    const view = new RoomView(parent, () => {});
+    view.actions = ACTIONS;
+    view.show(makeInfo({ isCurrentTile: true }));
+
+    const buttons = [...parent.querySelectorAll('[data-action-index]')].map(el => el.textContent);
+    expect(buttons).toEqual(['🧙Talk to Mira', 'General Store', '🗝️Enter Crystal Caves', '🌀Travel to Darkwood Gate']);
+    expect(parent.querySelector('.room-view-action-travel')?.textContent).toContain('🌀');
+    expect(parent.textContent).not.toContain('🕳️');
+  });
+
+  it("shows the shop's own artwork, keyed by shop id rather than zone", () => {
+    const view = new RoomView(parent, () => {});
+    view.actions = ACTIONS;
+    view.show(makeInfo({ isCurrentTile: true, zoneId: 'hatchetmill' }));
+
+    const img = parent.querySelector('.room-view-action-shop img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe(`/shop-artwork/${ACTIONS[1].targetId}.png`);
+  });
+
+  it('clicking an action button closes the popup and hands the action over', () => {
+    const onAction = vi.fn();
+    const view = new RoomView(parent, () => {}, undefined, onAction);
+    view.actions = ACTIONS;
+    view.show(makeInfo({ isCurrentTile: true }));
+
+    (parent.querySelector('.room-view-action-dungeon') as HTMLElement).click();
+    expect(onAction).toHaveBeenCalledWith(ACTIONS[2]);
+    expect(overlay().style.display).toBe('none');
   });
 });

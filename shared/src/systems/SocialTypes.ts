@@ -35,13 +35,16 @@ export interface GuildMemberEntry {
 export type PartyRole = 'owner' | 'leader' | 'member';
 export type PartyGridPosition = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export const MAX_PARTY_SIZE = 5;
-/** Henchmen one party may hold at once. Henchmen also count toward MAX_PARTY_SIZE. */
-export const MAX_HENCHMEN_PER_PARTY = 1;
+/** Henchmen one party may hold at once, each a different henchman. Henchmen also count toward MAX_PARTY_SIZE. */
+export const MAX_HENCHMEN_PER_PARTY = MAX_PARTY_SIZE - 1;
 
 export interface GamePartyMember {
   username: string;
   role: PartyRole;
   gridPosition: PartyGridPosition;
+  /** Resolved at send time, never persisted. */
+  level?: number;
+  className?: string;
 }
 
 export interface GamePartyInfo {
@@ -239,8 +242,8 @@ export interface ClientSetPartyGridPositionMessage {
 export interface ClientHireHenchmanMessage {
   type: 'hire_henchman';
   henchmanId: string;
-  /** Swap out the henchman the party already has. Refused without it. */
-  replace?: boolean;
+  /** Hired henchman (its `instanceId`) to swap out for this one. */
+  replaceInstanceId?: string;
 }
 
 export interface ClientDismissHenchmanMessage {

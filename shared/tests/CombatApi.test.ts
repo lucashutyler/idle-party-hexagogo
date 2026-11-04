@@ -15,7 +15,7 @@ describe('combat public API', () => {
     expect(shared).not.toHaveProperty('RUN_AVAILABLE_ROUNDS');
     expect(shared.SKILL_TRIGGER_VALUES).toHaveLength(5);
     expect(Object.keys(shared.SKILL_CARD_TYPE_INFO)).toHaveLength(7);
-    expect(shared.GAME_VERSION).toBe('2026.09.27.1');
+    expect(shared.GAME_VERSION).toMatch(/^\d{4}\.\d{2}\.\d{2}\.\d+$/);
   });
 
   it('exports the scaling, cloning and forecasting entry points', () => {

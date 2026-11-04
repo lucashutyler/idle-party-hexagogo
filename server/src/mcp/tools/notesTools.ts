@@ -41,7 +41,7 @@ export async function createDraft(
 export async function saveNote(
   deps: McpToolDeps,
   input: { versionId: string; note: { id?: string; title: string; body: string; tags?: string[] } }
-): Promise<DesignNote | { error: string }> {
+): Promise<Omit<DesignNote, 'body'> | { error: string }> {
   try {
     const noteId = input.note.id ?? crypto.randomUUID();
     let createdAt: string | undefined;
@@ -70,7 +70,8 @@ export async function saveNote(
 
     const result = await deps.draftEditor.upsertDesignNote(input.versionId, fullNote);
     if (!result.success) return { error: result.error };
-    return result.entries.find(n => n.id === noteId) ?? fullNote;
+    const { body: _body, ...saved } = result.entries.find(n => n.id === noteId) ?? fullNote;
+    return saved;
   } catch (err) {
     return { error: errorMessage(err) };
   }

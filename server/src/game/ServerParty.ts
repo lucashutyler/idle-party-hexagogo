@@ -87,6 +87,11 @@ export class ServerParty {
     }
 
     const startTile = this.targetTile ?? this.currentTile;
+    if (destinationTile.key === startTile.key) {
+      this.movementQueue = [];
+      return true;
+    }
+
     const path = this.pathfinder.findPath(startTile.coord, destinationTile.coord);
 
     if (!path || path.length <= 1) {

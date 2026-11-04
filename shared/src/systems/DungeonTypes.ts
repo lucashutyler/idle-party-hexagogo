@@ -38,7 +38,7 @@ export interface DungeonFloor {
   isBoss?: boolean;
   /** Optional bonus drops awarded on floor clear, in addition to monster loot. */
   rewards?: DungeonReward[];
-  /** Boss HP fractions, descending in (0,1). Only on floors whose explicit encounter has a boss/raid monster. */
+  /** Boss HP fractions, descending in (0,1). Apply to any fight here with a non-passive boss/raid monster, placed or rolled from a pool. */
   checkpoints?: number[];
   /** Regroups allowed before the party is ejected. Default DEFAULT_MAX_WIPES. */
   maxWipes?: number;

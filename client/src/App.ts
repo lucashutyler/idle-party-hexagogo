@@ -25,6 +25,7 @@ import { RecapModal } from './ui/RecapModal';
 import { BestiaryModal, MasteryToasts } from './ui/BestiaryModal';
 import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
+import { forgetMissingAssets } from './ui/assets';
 
 const CONNECTION_ERROR = 'Could not connect to server';
 
@@ -374,7 +375,7 @@ export class App {
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient, this.worldCache);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore, this.worldCache);
     const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
-    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient);
+    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient, this.worldCache);
 
     // Wire map username click to social screen popup
     mapScreen.setOnUserClick((username, anchor, tileCol, tileRow) => {
@@ -391,9 +392,12 @@ export class App {
       socialScreen.openExistingTrade(tradeId);
     });
 
+    this.gameClient.onResume(() => forgetMissingAssets());
+
     // Listen for world content updates (admin deployed a new version)
     this.gameClient.onWorldUpdate(async () => {
       console.log('[App] World updated — reloading world data');
+      forgetMissingAssets();
       await this.worldCache.loadWorld();
       mapScreen.refreshWorld();
     });

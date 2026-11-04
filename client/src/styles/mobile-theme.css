@@ -28,15 +28,14 @@
   .offline-title, .items-section-label, .charitems-stat-value, .charitems-skill-slot-name,
   .charitems-skill-popup-title, .item-popup-name, .craft-skill-name, .craft-section h3, .craft-locked h3,
   .craft-recipe-name, .social-guild-name, .trade-modal-header, .profile-name, .shop-title, .shop-gold,
-  .shop-detail-total, .shop-qty-value, .shop-item-price, .npc-talk-name, .npc-quest-card-name,
+  .shop-detail-total, .shop-qty-value, .shop-item-price, .npc-talk-name,
   .dungeon-entry-title, .room-view-name, .room-view-here-label, .notif-dropdown-title, .map-toast,
   .three-map-badge, .social-group-header, .profile-section-label, .npc-quest-section-title,
   .dungeon-entry-reqs-title, .charitems-inv-group-header, .room-party-other-label, .room-party-group-label,
   .chat-popout-title, .trade-qty-val, .items-modal-count-value, .item-square-initials, .item-square-qty,
   .item-square-set, .item-popup-initials, .social-user-level, .profile-level, .user-popup-level,
   .craft-skill-level, .compare-block-old-name, .notif-bell-badge, .offline-icon, .trade-vs,
-  .npc-talk-completion-label, .charitems-xp-numbers, .social-badge, .npc-quest-status-pill,
-  .npc-quest-scope-pill, .craft-class-tag, .user-popup-name
+  .npc-talk-completion-label, .charitems-xp-numbers, .social-badge, .craft-class-tag, .user-popup-name
 ) {
   font-family: var(--font-display);
   font-weight: 400;
@@ -215,7 +214,7 @@
   --mt-btn-fg: var(--text-1);
 }
 
-.room-view-action-transition {
+.room-view-action-travel {
   --mt-btn-bg: linear-gradient(180deg, #5fe8ff 0%, #1c9fc4 100%);
   --mt-btn-edge: #0d5a70;
   --mt-btn-fg: var(--text-1);
@@ -464,7 +463,7 @@
 
 :is(
   .social-user-row, .mailbox-row, .trade-row, .trade-picker-row, .craft-queue-row, .craft-recipe-card,
-  .charitems-skill-row, .settings-option-row, .npc-quest-card, .room-party-group, .social-chat-msg
+  .charitems-skill-row, .settings-option-row, .room-party-group, .social-chat-msg
 ) {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 100%), var(--surface-1);
   border: 2px solid var(--outline);
@@ -511,7 +510,7 @@
 }
 
 :is(
-  .social-badge, .npc-quest-status-pill, .npc-quest-scope-pill, .craft-class-tag, .patch-note-version,
+  .social-badge, .craft-class-tag, .patch-note-version,
   .profile-level, .user-popup-level, .craft-skill-level
 ) {
   padding: 3px 8px;
@@ -527,7 +526,7 @@
   white-space: nowrap;
 }
 
-:is(.social-badge.friend, .npc-quest-scope-party) {
+.social-badge.friend {
   color: var(--text-1);
   background: var(--grad-success);
 }
@@ -537,14 +536,10 @@
   background: var(--grad-danger);
 }
 
-:is(.social-badge.owner, .npc-quest-status-ready, .patch-note-version, .craft-skill-level) {
+:is(.social-badge.owner, .patch-note-version, .craft-skill-level) {
   color: #5a3300;
   background: var(--grad-primary);
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
-}
-
-.npc-quest-status-in_progress {
-  background: var(--grad-secondary);
 }
 
 .craft-class-tag {
@@ -2224,8 +2219,6 @@ button.room-view-action {
 }
 
 .npc-talk-portrait-img {
-  width: 64px;
-  height: 64px;
   object-fit: contain;
   image-rendering: var(--art-rendering);
   background: rgba(6, 9, 24, 0.5);
@@ -2235,10 +2228,11 @@ button.room-view-action {
 }
 
 .npc-talk-portrait-emoji {
-  width: 64px;
-  height: 64px;
-  line-height: 60px;
-  text-align: center;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: radial-gradient(circle at 50% 35%, var(--surface-3) 0%, var(--bg-1) 100%);
   border: 2px solid var(--outline);
   border-radius: var(--radius-md);
@@ -2276,38 +2270,10 @@ button.room-view-action {
   color: var(--text-3);
 }
 
-.npc-quest-card {
-  padding: 10px 12px;
-  gap: 6px;
-}
-
-.npc-quest-card-ready {
-  border-color: var(--gold);
-  box-shadow: inset 0 1px 0 var(--stroke), var(--glow-gold);
-}
-
-.npc-quest-card-name {
-  font-size: var(--fs-md);
-  color: var(--text-1);
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
-}
-
-.npc-quest-card-desc,
-.npc-quest-objective {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  line-height: 1.45;
-  color: var(--text-2);
-}
-
-.npc-quest-card-rewards {
-  font-size: var(--fs-xs);
-  font-weight: 800;
-  color: var(--gold);
-}
-
-.npc-quest-card-actions {
-  gap: 8px;
+.npc-talk-btn.npc-talk-btn-busy {
+  opacity: 0.8;
+  filter: none;
+  cursor: progress;
 }
 
 .npc-talk-completion {
@@ -2388,6 +2354,28 @@ button.room-view-action {
 
 .dungeon-entry-actions {
   gap: 10px;
+}
+
+.dungeon-entry-status {
+  gap: 8px;
+}
+
+.dungeon-entry-info {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.dungeon-entry-blocked {
+  padding: 8px 10px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--orange);
+  background: rgba(255, 154, 61, 0.12);
+  border: 2px solid var(--orange);
+  border-radius: var(--radius-md);
 }
 
 .map-zoom-controls {
@@ -2787,7 +2775,7 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
     .map-zoom-btn, .player-options-close, .room-view-close, .chat-popout-header-actions button,
     .shop-toggle-btn, .social-filter-btn, .social-sort-btn, .chat-filter, .chat-filter-btn,
     .class-card, .charitems-skill-slot, .charitems-skill-row, .user-popup-item,
-    .settings-option input[type="checkbox"], .charitems-xp-fill, .craft-skill-xpfill, .item-square,
+    .settings-option input[type="checkbox"], .charitems-xp-fill, .craft-skill-xpfill,
     .room-view-arrival
   ) {
     transition: none;
@@ -2795,10 +2783,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 
   .settings-option input[type="checkbox"]::before {
     transition: none;
-  }
-
-  .item-square:hover {
-    transform: none;
   }
 }
 
@@ -3061,6 +3045,18 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   color: var(--text-2);
 }
 
+.shop-replace-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.shop-replace-choices .shop-replace-confirm {
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .shop-replace-actions {
   display: flex;
   gap: 8px;
@@ -3094,11 +3090,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 
 .suspension-feedback[data-tone="success"] {
   color: var(--green);
-}
-
-.craft-locked .craft-locked-level {
-  font-size: var(--fs-xs);
-  opacity: 0.7;
 }
 
 .item-popup-coming-soon {

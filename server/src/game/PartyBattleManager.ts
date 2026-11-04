@@ -244,7 +244,7 @@ export class PartyBattleManager {
         onPhase: (battleId, phase) => this.handleBossPhase(partyId, battleId, phase),
         onRetreat: (battleId) => this.applyRetreat(partyId, battleId),
         onMove: () => {
-          const allQuests = this.content.getAllQuests();
+          const allQuests = this.content.getQuestCatalog();
           const tileId = serverParty.tile.id;
           for (const m of members) {
             const s = this.getSession(m);
@@ -312,6 +312,7 @@ export class PartyBattleManager {
   addMember(partyId: string, username: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
+    entry.battleTimer.settlePendingResult();
     entry.members.add(username);
     this.clearRetreatHold(partyId);
   }
@@ -339,6 +340,11 @@ export class PartyBattleManager {
     entry.battleTimer.restartBattle();
   }
 
+  /** Pay a fight that has ended but is still in its kill beat, now rather than when the beat is over. */
+  settlePendingResult(partyId: string): void {
+    this.entries.get(partyId)?.battleTimer.settlePendingResult();
+  }
+
   /**
    * Let auto-retreat act again: a player moved the party, its roster changed, or the owner changed the
    * setting. A retreat already scheduled for this fight is called off.
@@ -357,6 +363,20 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry || entry.dungeonRun) return false;
     return entry.battleTimer.canEscape();
+  }
+
+  /**
+   * Call after hiring or dismissing henchmen. Overworld combat restarts around the new
+   * roster; inside a dungeon the fight carries on and any `joined` hire waits at the entrance.
+   */
+  henchmenChanged(partyId: string, joined: readonly HiredHenchman[] = []): void {
+    const entry = this.entries.get(partyId);
+    if (!entry) return;
+    if (entry.dungeonRun) {
+      this.logHenchmen(entry, joined, name => `${name} waits at the dungeon entrance.`);
+      return;
+    }
+    this.restartBattle(partyId);
   }
 
   /** Escape the current battle for a party. No rewards given. */
@@ -491,11 +511,15 @@ export class PartyBattleManager {
   }
 
   private announceHenchmenLeft(entry: PartyBattleEntry, dismissed: HiredHenchman[]): void {
-    if (dismissed.length === 0) return;
-    for (const hired of dismissed) {
-      const name = this.content.getHenchman(hired.henchmanId)?.name ?? 'Your henchman';
+    this.logHenchmen(entry, dismissed, name => `${name} parts ways with the party.`);
+  }
+
+  /** One combat-log line per hire, sent to every member. */
+  private logHenchmen(entry: PartyBattleEntry, hires: readonly HiredHenchman[], line: (name: string) => string): void {
+    for (const hired of hires) {
+      const text = line(this.content.getHenchman(hired.henchmanId)?.name ?? 'Your henchman');
       for (const username of entry.members) {
-        this.getSession(username)?.addLogEntry(`${name} parts ways with the party.`, 'move');
+        this.getSession(username)?.addLogEntry(text, 'move');
       }
     }
   }
@@ -666,11 +690,7 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return;
     entry.battleTimer.settlePendingResult();
-    // A forced relocation (e.g. content deploy) ends any active dungeon run —
-    // otherwise the party stays movement-locked on a fresh tile fighting stale
-    // dungeon-floor encounters.
     if (entry.dungeonRun) this.endRunByLeaving(entry, entry.dungeonRun);
-    entry.dungeonRun = undefined;
     if (entry.serverParty.currentMapId !== mapId) {
       // Relocation crosses to a different map (e.g. the party's map was deleted).
       entry.serverParty.switchMap(this.grids.getOrThrow(mapId), newTile, mapId);
@@ -678,6 +698,8 @@ export class PartyBattleManager {
     } else {
       entry.serverParty.relocateTo(newTile);
     }
+    // Keeping the run would leave the party movement-locked on the new room.
+    this.endDungeonRun(entry);
     entry.battleTimer.restartBattle();
   }
 
@@ -807,22 +829,16 @@ export class PartyBattleManager {
       return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones, allEncounters));
     }
 
-    const players = this.buildPartyCombatants(partyId);
+    const floor = this.currentDungeonFloor(entry);
+    const roster = this.buildPartyCombatants(partyId);
+    const players = entry.dungeonRun ? roster.filter(p => !p.isHenchman) : roster;
     const zone = entry.serverParty.tile.zone;
     entry.battle = undefined;
 
-    // Inside a dungeon: encounters come from the current floor's table, not the tile.
-    if (entry.dungeonRun) {
-      const run = entry.dungeonRun;
-      const floor = this.content.getDungeon(run.dungeonId)?.floors[run.currentFloorIndex];
-      if (floor) {
-        const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, floor.encounterTable);
-        return createPartyCombatState(players, monsters, this.checkpointSetup(run, floor));
-      }
-      // Dungeon/floor vanished (e.g. content deploy) — abandon the run so the
-      // party isn't stuck (movement stays blocked while dungeonRun is set) and
-      // fall through to a normal tile encounter at their current position.
-      entry.dungeonRun = undefined;
+    const run = entry.dungeonRun;
+    if (run && floor) {
+      const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, floor.encounterTable);
+      return createPartyCombatState(players, monsters, this.checkpointSetup(run, floor));
     }
 
     const tileId = entry.serverParty.tile.id;
@@ -867,7 +883,9 @@ export class PartyBattleManager {
   private payVictory(entry: PartyBattleEntry): void {
     const combat = entry.battleTimer.currentCombat;
     const members = Array.from(entry.members);
-    const partySize = members.length;
+    // Hired henchmen take a share of XP, gold and drops, and that share is lost.
+    const hires = this.fightingHireDefs(entry);
+    const shareCount = members.length + hires.length;
 
     let totalGold = 0;
     if (combat) {
@@ -878,12 +896,16 @@ export class PartyBattleManager {
         }
       }
     }
-    const xpMultiplier = this.partyXpMultiplier(members);
-    const splitGold = Math.ceil(totalGold / partySize);
+    const xpMultiplier = this.partyXpMultiplier(entry);
+    const splitGold = Math.ceil(totalGold / shareCount);
 
-    // Roll item drops once, randomly assign each to a party member
+    // Roll item drops once and give each to one random share; a henchman's share is discarded.
     const memberItems: Map<string, string[]> = new Map();
     for (const u of members) memberItems.set(u, []);
+    const shares: { username: string | null; className: string | undefined }[] = [
+      ...members.map(u => ({ username: u, className: this.getSession(u)?.getClassName() ?? undefined })),
+      ...hires.map(def => ({ username: null, className: def.className })),
+    ];
 
     if (combat) {
       for (const m of combat.monsters) {
@@ -892,17 +914,13 @@ export class PartyBattleManager {
           const dropped = rollDrops(def.drops);
           for (const itemId of dropped) {
             const itemDef = this.content.getItem(itemId);
-            let eligible = members;
+            let eligible = shares;
             if (itemDef?.classRestriction && itemDef.classRestriction.length > 0) {
-              const matching = members.filter(u => {
-                const s = this.getSession(u);
-                const cn = s?.getClassName();
-                return cn && itemDef.classRestriction!.includes(cn);
-              });
+              const matching = shares.filter(sh => sh.className && itemDef.classRestriction!.includes(sh.className));
               if (matching.length > 0) eligible = matching;
             }
             const recipient = eligible[Math.floor(Math.random() * eligible.length)];
-            memberItems.get(recipient)!.push(itemId);
+            if (recipient.username) memberItems.get(recipient.username)!.push(itemId);
           }
         }
       }
@@ -918,7 +936,7 @@ export class PartyBattleManager {
       if (!session) continue;
       const baseXp = combat ? this.memberXp(combat.monsters, session.getLevel()) : FALLBACK_VICTORY_XP;
       session.handleVictory(
-        { xp: Math.ceil((baseXp * xpMultiplier) / partySize), gold: splitGold, items: memberItems.get(username)! },
+        { xp: Math.ceil((baseXp * xpMultiplier) / shareCount), gold: splitGold, items: memberItems.get(username)! },
         entry.serverParty.tile,
         // Dungeon floors aren't overworld tiles — don't unlock neighbours mid-run.
         { unlockTiles: !entry.dungeonRun, kills: killed.length },
@@ -929,7 +947,7 @@ export class PartyBattleManager {
 
     // Quest hooks: credit every monster to every party member with active kill objectives.
     if (combat) {
-      const allQuests = this.content.getAllQuests();
+      const allQuests = this.content.getQuestCatalog();
       for (const m of combat.monsters) {
         for (const username of members) {
           const session = this.getSession(username);
@@ -957,18 +975,17 @@ export class PartyBattleManager {
     return xp;
   }
 
-  /** 1 + every equipped `xp_bonus` passive's flat value across the party (e.g. Bard Inspiration). */
-  private partyXpMultiplier(members: readonly string[]): number {
+  /** 1 + every equipped `xp_bonus` passive's flat value across the party, fighting henchmen included (e.g. Bard Inspiration). */
+  private partyXpMultiplier(entry: PartyBattleEntry): number {
+    const partySkillIds = [
+      ...[...entry.members].flatMap(u => this.getSession(u)?.getSkillLoadout()?.equippedSkills ?? []),
+      ...this.fightingHireDefs(entry).flatMap(def => def.skillIds),
+    ];
     let xpMultiplier = 1;
-    for (const username of members) {
-      const loadout = this.getSession(username)?.getSkillLoadout();
-      if (!loadout) continue;
-      for (const skillId of loadout.equippedSkills) {
-        if (!skillId) continue;
-        const skill = this.content.getSkill(skillId);
-        for (const effect of skill?.passiveEffects ?? []) {
-          if (effect.kind === 'xp_bonus') xpMultiplier += effect.flatValue ?? 0;
-        }
+    for (const skillId of partySkillIds) {
+      if (!skillId) continue;
+      for (const effect of this.content.getSkill(skillId)?.passiveEffects ?? []) {
+        if (effect.kind === 'xp_bonus') xpMultiplier += effect.flatValue ?? 0;
       }
     }
     return xpMultiplier;
@@ -1045,9 +1062,11 @@ export class PartyBattleManager {
     const dungeon = this.content.getDungeon(dungeonId);
     const entrance = this.content.getWorld().tiles.find(t => t.dungeonId === dungeonId && session.isTileIdUnlocked(t.id));
     if (!dungeon || !entrance) return 'denied';
-    const players = this.buildPartyCombatants(entry.partyId).filter(p => !p.isHenchman);
+    const roster = this.buildPartyCombatants(entry.partyId);
+    const players = roster.filter(p => !p.isHenchman);
     if (players.length === 0) return 'unavailable';
-    const pk = partyKeyOf(players);
+    // Keyed on the whole roster, hires included: clients compare it against forecastKey().
+    const pk = partyKeyOf(roster);
     const start = this.dungeonForecastStart(entry, entrant, dungeon);
     const fallbackTable = this.content.getAllZones()[entrance.zone]?.encounterTable ?? [];
     return {
@@ -1377,9 +1396,6 @@ export class PartyBattleManager {
     if (!entry) return { success: false, error: 'No party.' };
     entry.battleTimer.settlePendingResult();
     if (entry.dungeonRun) return { success: false, error: 'Already in a dungeon.' };
-    if (this.getPartyHenchmen(partyId).length > 0) {
-      return { success: false, error: 'Dismiss your henchmen before entering.' };
-    }
 
     const dungeon = this.content.getDungeon(dungeonId);
     if (!dungeon) return { success: false, error: 'Dungeon not found.' };
@@ -1451,6 +1467,7 @@ export class PartyBattleManager {
     }
     this.recordDungeonOutcome(entry, dungeon, 'in_progress');
     this.syncCheckpoints(entry);
+    this.logHenchmen(entry, this.getPartyHenchmen(partyId), name => `${name} waits at the dungeon entrance.`);
 
     // Rebuild combat from the starting floor.
     entry.battleTimer.restartBattle();
@@ -1527,12 +1544,11 @@ export class PartyBattleManager {
   restoreDungeonRun(partyId: string, run: DungeonRunState): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
-    const dungeon = this.content.getDungeon(run.dungeonId);
-    // Content may have changed under us — drop the run if the dungeon/floor is gone.
-    const floorIndex = run.currentFloorIndex;
-    if (!dungeon || !Number.isInteger(floorIndex) || floorIndex < 0 || floorIndex >= dungeon.floors.length) return;
+    entry.dungeonRun = copyRun(run);
+    const floor = this.currentDungeonFloor(entry);
+    if (!floor) return;
     entry.serverParty.clearDestination();
-    entry.dungeonRun = sanitizeRun(run, dungeon.floors[floorIndex]);
+    entry.dungeonRun = sanitizeRun(run, floor);
     if (entry.battleTimer.isStarted) entry.battleTimer.restartBattle();
   }
 
@@ -1555,10 +1571,39 @@ export class PartyBattleManager {
    * or let the in-flight result→next-battle cycle pick up overworld combat.
    */
   private exitDungeon(entry: PartyBattleEntry, toTile: HexTile): void {
-    entry.dungeonRun = undefined;
+    this.endDungeonRun(entry);
     entry.serverParty.relocateTo(toTile);
   }
 
+  /** Clear the run state. Every path out of a dungeon goes through here so parked hires rejoin. */
+  private endDungeonRun(entry: PartyBattleEntry): void {
+    if (!entry.dungeonRun) return;
+    entry.dungeonRun = undefined;
+    this.logHenchmen(entry, this.getPartyHenchmen(entry.partyId), name => `${name} rejoins the party.`);
+  }
+
+  /** Hires wait at the entrance during a dungeon run, out of combat and reward shares. */
+  private fightingHenchmen(entry: PartyBattleEntry): HiredHenchman[] {
+    return entry.dungeonRun ? [] : this.getPartyHenchmen(entry.partyId);
+  }
+
+  private fightingHireDefs(entry: PartyBattleEntry): HenchmanDefinition[] {
+    return this.fightingHenchmen(entry).flatMap(h => {
+      const def = this.content.getHenchman(h.henchmanId);
+      return def ? [def] : [];
+    });
+  }
+
+  /** The floor a dungeon run is on; ends the run when its dungeon or floor no longer exists. */
+  private currentDungeonFloor(entry: PartyBattleEntry): DungeonFloor | undefined {
+    const run = entry.dungeonRun;
+    if (!run) return undefined;
+    const floor = Number.isInteger(run.currentFloorIndex)
+      ? this.content.getDungeon(run.dungeonId)?.floors[run.currentFloorIndex]
+      : undefined;
+    if (!floor) this.endDungeonRun(entry);
+    return floor;
+  }
 
   /** Victory inside a dungeon: grant floor rewards, then advance or complete. */
   private handleDungeonFloorCleared(entry: PartyBattleEntry): void {
@@ -1711,7 +1756,7 @@ export class PartyBattleManager {
 
     const fraction = floorCheckpointRewardFraction(floor);
     const members = [...entry.members];
-    const xpMultiplier = this.partyXpMultiplier(members);
+    const xpMultiplier = this.partyXpMultiplier(entry);
     let averageGold = 0;
     for (const boss of bosses) {
       const def = this.content.getMonster(boss.id);

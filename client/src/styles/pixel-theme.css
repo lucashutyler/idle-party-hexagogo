@@ -290,23 +290,6 @@ button, input, select, textarea {
   margin-top: 16px;
 }
 
-.settings-section {
-  width: 100%;
-  max-width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.settings-section-title {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--accent-blue);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
 .settings-options-list {
   list-style: none;
   margin: 0;
@@ -353,10 +336,6 @@ button, input, select, textarea {
   padding-left: 26px;
 }
 
-/* Player Options popup — fixed-overlay modal opened from the Settings screen.
-   Same visual treatment as the in-screen Player options section it replaced
-   (toggle rows on a panel background); presented as a centered modal so the
-   underlying screen stays focused. */
 .player-options-overlay {
   position: fixed;
   inset: 0;
@@ -412,9 +391,6 @@ button, input, select, textarea {
 .player-options-close:hover {
   background: rgba(245, 200, 66, 0.15);
   color: var(--accent-gold);
-}
-.player-options-modal .settings-options-list {
-  padding: 12px;
 }
 
 .settings-btn {
@@ -1470,10 +1446,21 @@ button, input, select, textarea {
 .three-map-party,
 .three-map-hover,
 .three-map-path > *,
+.three-map-quest-targets > *,
+.three-map-markers > *,
 .three-map-flags > * {
   position: absolute;
   transform: translate(-50%, -50%);
   pointer-events: none;
+}
+
+/* --map-zoom is set on the overlay by ThreeWorldMap. */
+.three-map-marker {
+  transform: translate(-50%, -50%) scale(clamp(1, calc(0.75 / var(--map-zoom, 1)), 1.8));
+}
+.three-map-badge {
+  transform: translate(0, -50%) scale(clamp(1, calc(0.75 / var(--map-zoom, 1)), 1.8));
+  transform-origin: left center;
 }
 
 /* Party sprite — pulse via CSS, position via JS. Movement between tiles
@@ -1481,8 +1468,8 @@ button, input, select, textarea {
  * data-snap="1" disables the transition for snap renders (first paint,
  * zone change). */
 .three-map-party {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   transition: left 400ms ease-in-out, top 400ms ease-in-out;
 }
 .three-map-party[data-snap="1"] { transition: none; }
@@ -1490,17 +1477,17 @@ button, input, select, textarea {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: #44ff88;
+  background: rgba(68, 255, 136, 0.5);
   border: 3px solid #fff;
   box-shadow: 0 0 8px rgba(0,0,0,0.5);
   animation: three-map-party-pulse 1600ms ease-in-out infinite alternate;
 }
 .three-map-party[data-visual="fighting"] .three-map-party-inner {
-  background: #ffaa44;
+  background: rgba(255, 170, 68, 0.55);
   animation: three-map-party-throb 300ms ease-in-out infinite alternate;
 }
 .three-map-party[data-visual="defeat"] .three-map-party-inner {
-  background: #ff6b6b;
+  background: rgba(255, 107, 107, 0.55);
   animation: none;
 }
 @keyframes three-map-party-pulse {
@@ -1520,6 +1507,20 @@ button, input, select, textarea {
 }
 .three-map-hover[data-traversable="0"] { color: rgba(255,102,102,0.85); }
 .three-map-hover svg { display: block; overflow: visible; }
+
+/* Quest destination — dashed green hex outline on a room an active quest sends you to. */
+.three-map-quest-target {
+  width: 80px;
+  height: 70px;
+  color: var(--accent-green);
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.8));
+  animation: three-map-quest-target-pulse 1800ms ease-in-out infinite alternate;
+}
+.three-map-quest-target svg { display: block; overflow: visible; }
+@keyframes three-map-quest-target-pulse {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
 
 /* Path preview — small yellow hexes for steps, green dot for dest. */
 .three-map-path-step {
@@ -1545,14 +1546,17 @@ button, input, select, textarea {
 }
 .three-map-flag svg { display: block; overflow: visible; }
 
-/* Count badge — small text bubble for "+N" or "×N" on flag stacks. */
+/* Count badge — "+N" others on your room, "×N" on a flag stack. */
 .three-map-badge {
   background: #4a90d9;
   color: #fff;
   font-family: var(--font-body);
   font-size: var(--fs-2xs);
+  line-height: 1;
   padding: 2px 4px;
-  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   white-space: nowrap;
 }
 
@@ -1561,6 +1565,54 @@ button, input, select, textarea {
   font-size: var(--fs-sm);
   line-height: 1;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.8));
+}
+
+/* Room-action marker on explored rooms. */
+.three-map-marker {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  background: rgba(10, 15, 36, 0.85);
+  border: 1px solid rgba(255, 203, 61, 0.5);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+.three-map-marker-more {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  color: var(--text-primary);
+}
+
+/* Gold "?" on an NPC with a quest ready to turn in; green "!" on one with a new quest. */
+.quest-ready-pip,
+.quest-available-pip {
+  position: relative;
+  display: inline-block;
+}
+.quest-ready-pip::after,
+.quest-available-pip::after {
+  content: '?';
+  position: absolute;
+  top: -0.7em;
+  right: -0.9em;
+  width: 1.5em;
+  height: 1.5em;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  color: var(--outline);
+  font-family: var(--font-display);
+  font-size: 0.6em;
+  line-height: 1.5em;
+  text-align: center;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+}
+.quest-available-pip::after {
+  content: '!';
+  background: var(--accent-green);
 }
 
 .canvas-map-tooltip {
@@ -1574,8 +1626,13 @@ button, input, select, textarea {
   white-space: pre-line;
   border: 1px solid rgba(255, 200, 69, 0.4);
   z-index: 150;
+  /* max-content keeps the measured width stable near the map's right edge. */
+  width: max-content;
   max-width: 220px;
   line-height: 1.4;
+}
+.canvas-map-tooltip-title {
+  color: var(--accent-gold);
 }
 
 @media (min-width: 768px) {
@@ -1602,12 +1659,14 @@ button, input, select, textarea {
   max-width: min(90%, 30rem);
   text-align: center;
   z-index: 200;
-  pointer-events: none;
-  animation: toast-fade 2s ease-out forwards;
+  pointer-events: auto;
+  cursor: pointer;
+  /* --toast-ms is set per toast by MapToast.ts to match its removal timer. */
+  animation: toast-fade var(--toast-ms, 6s) ease-out forwards;
 }
 
 @keyframes toast-fade {
-  0%, 70% { opacity: 1; }
+  0%, 85% { opacity: 1; }
   100% { opacity: 0; }
 }
 
@@ -1641,6 +1700,128 @@ button, input, select, textarea {
   background: var(--bg-panel-light);
   border-color: var(--accent-gold);
   opacity: 1;
+}
+
+/* Room status — mobile chips here, desktop card in the media query below. */
+.room-status {
+  position: absolute;
+  left: 12px;
+  bottom: 16px;
+  z-index: 100;
+  max-width: calc(100% - 88px);
+  font-family: var(--pixel-font);
+}
+.room-status[data-empty="1"] {
+  display: none;
+}
+.room-status-header {
+  display: none;
+}
+.room-status-chips {
+  display: flex;
+  flex-wrap: wrap-reverse;
+  gap: 6px;
+}
+.room-status-chip {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--grad-panel);
+  border: 2px solid var(--outline);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-1);
+  color: var(--text-primary);
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+button.room-status-chip:hover,
+button.room-status-chip:active {
+  border-color: var(--accent-gold);
+}
+.room-status-chip-static {
+  cursor: default;
+  color: var(--text-1);
+  border-color: var(--purple);
+}
+.room-status-chip-icon {
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+.room-status-chip-label {
+  display: none;
+}
+.room-status-chip-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-blue);
+  color: var(--text-1);
+  font-size: var(--fs-2xs);
+  line-height: 16px;
+  text-align: center;
+}
+
+@media (min-width: 768px) {
+  /* The room status card takes the top-left here, so the toast would cover its chips. */
+  .map-toast {
+    top: auto;
+    bottom: 16px;
+  }
+  .room-status {
+    top: 12px;
+    bottom: auto;
+    max-width: 320px;
+    padding: 8px 10px;
+    background: var(--grad-panel);
+    border: 2px solid var(--outline);
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-2);
+  }
+  .room-status[data-empty="1"] {
+    display: block;
+  }
+  .room-status-header {
+    display: block;
+    color: var(--accent-gold);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .room-status[data-empty="0"] .room-status-header {
+    margin-bottom: 6px;
+  }
+  .room-status-chips {
+    flex-wrap: wrap;
+  }
+  .room-status-chip {
+    width: auto;
+    height: auto;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    box-shadow: none;
+    background: var(--bg-panel-light);
+  }
+  .room-status-chip-icon {
+    font-size: var(--fs-md);
+  }
+  .room-status-chip-label {
+    display: inline;
+  }
+  .room-status-chip-badge {
+    display: none;
+  }
 }
 
 /* ── Tile Info Modal ─────────────────────────────────────── */
@@ -1807,7 +1988,6 @@ button, input, select, textarea {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.8);
-  z-index: 1000;
   align-items: center;
   justify-content: center;
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
@@ -1820,8 +2000,49 @@ button, input, select, textarea {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 360px;
+  max-width: 440px;
   width: 90%;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.npc-talk-completions:empty,
+.npc-quest-section:empty,
+.npc-quest-section-empty:empty {
+  display: none;
+}
+
+/* Live regions must stay in the accessibility tree while empty, or their first message isn't announced. */
+.npc-talk-notice:empty,
+.dungeon-entry-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.npc-talk-notice {
+  background: rgba(233, 188, 24, 0.18);
+  border: 1px solid #e9bc18;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: var(--pixel-font);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: #ffd700;
+  text-align: center;
+}
+
+.npc-talk-completions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .npc-talk-header {
@@ -1830,21 +2051,39 @@ button, input, select, textarea {
   gap: 12px;
 }
 
+.npc-talk-portrait {
+  position: relative;
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .npc-talk-portrait-emoji {
   font-size: var(--fs-3xl);
   line-height: 1;
 }
 
 .npc-talk-portrait-img {
-  width: 56px;
-  height: 56px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   image-rendering: var(--art-rendering);
+}
+
+.npc-talk-portrait-img.asset-loaded + .npc-talk-portrait-emoji {
+  display: none;
 }
 
 .npc-talk-name {
   font-family: var(--pixel-font);
   font-size: var(--fs-xs);
   color: var(--accent-gold);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .npc-talk-greeting {
@@ -1879,6 +2118,15 @@ button, input, select, textarea {
   color: #000;
 }
 
+.npc-talk-btn-busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.npc-talk-btn-busy:active {
+  border-color: var(--border-pixel);
+}
+
 /* ── Dungeon entry confirmation popup ──────────────────────── */
 .dungeon-entry-overlay {
   position: fixed;
@@ -1898,6 +2146,10 @@ button, input, select, textarea {
   gap: 10px;
   max-width: 360px;
   width: 90%;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .dungeon-entry-header {
   display: flex;
@@ -1956,6 +2208,29 @@ button, input, select, textarea {
   justify-content: flex-end;
   gap: 8px;
 }
+.dungeon-entry-reqs-slot:empty {
+  display: none;
+}
+.dungeon-entry-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dungeon-entry-info {
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.dungeon-entry-blocked {
+  font-family: var(--pixel-font);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--accent-orange);
+  padding: 6px 8px;
+  background: rgba(255, 170, 68, 0.1);
+  border-left: 3px solid var(--accent-orange);
+}
 .dungeon-entry-btn {
   font-family: var(--pixel-font);
   font-size: var(--fs-2xs);
@@ -1968,10 +2243,22 @@ button, input, select, textarea {
 .dungeon-entry-btn:active {
   border-color: #d3a8d3;
 }
-.dungeon-entry-enter {
-  background: #6b4c6b;
-  color: #fff;
-  border-color: #6b4c6b;
+.dungeon-entry-btn:focus-visible {
+  outline: 2px solid var(--accent-gold);
+  outline-offset: 2px;
+}
+.dungeon-entry-enter:not(:disabled):hover,
+.dungeon-entry-enter:not(:disabled):focus-visible {
+  filter: brightness(1.12);
+}
+.dungeon-entry-enter:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.dungeon-entry-enter[aria-busy="true"]:disabled {
+  opacity: 0.8;
+  filter: none;
+  cursor: progress;
 }
 
 .npc-quest-section {
@@ -1990,89 +2277,122 @@ button, input, select, textarea {
 .npc-quest-section-empty {
   font-family: var(--pixel-font);
   font-size: var(--fs-2xs);
+  line-height: 1.5;
   color: var(--text-dim);
   font-style: italic;
 }
 
-.npc-quest-card {
-  background: var(--bg-panel-light);
-  border: 2px solid var(--border-pixel);
-  padding: 8px;
+/* ── Quest cards (NPC talk popup + Quest Log) ────────────── */
+
+.quest-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 100%), var(--surface-1);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--stroke);
+  color: var(--text-1);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-.npc-quest-card-ready {
-  border-color: var(--accent-gold);
+.quest-card-ready {
+  border-color: var(--gold);
+  box-shadow: inset 0 1px 0 var(--stroke), var(--glow-gold);
 }
 
-.npc-quest-card-header {
+.quest-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
 }
 
-.npc-quest-card-name {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-primary);
+.quest-card-name {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: 0.02em;
+  font-size: var(--fs-md);
+  color: var(--text-1);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.npc-quest-card-desc {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-secondary);
-  line-height: 1.5;
+.quest-card-desc {
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-2);
 }
 
-.npc-quest-card-objectives {
+.quest-card-objectives {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.npc-quest-objective {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-secondary);
+.quest-objective {
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 
-.npc-quest-card-rewards {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--accent-gold);
+.quest-card-rewards {
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  line-height: 1.5;
+  color: var(--gold);
 }
 
-.npc-quest-card-actions {
+.quest-card-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
 }
 
-.npc-quest-status-pill {
-  font-family: var(--pixel-font);
+.quest-card-blocked {
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--accent-orange);
+  text-align: right;
+}
+
+.quest-pill {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: 0.02em;
   font-size: var(--fs-2xs);
-  padding: 2px 6px;
-  border: 1px solid var(--border-color);
+  line-height: 1.2;
+  padding: 3px 8px;
+  color: var(--text-1);
+  background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.npc-quest-status-accepted { color: var(--text-secondary); }
-.npc-quest-status-in_progress { color: var(--accent-blue); }
-.npc-quest-status-ready { color: var(--accent-gold); border-color: var(--accent-gold); }
-
-.npc-quest-scope-pill {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  padding: 2px 6px;
-  border: 1px solid var(--border-color);
-  text-transform: uppercase;
+.quest-status-accepted { color: var(--text-secondary); }
+.quest-status-in_progress { background: var(--grad-secondary); }
+.quest-status-ready {
+  color: #5a3300;
+  background: var(--grad-primary);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
 }
-
-.npc-quest-scope-solo { color: var(--text-secondary); }
-.npc-quest-scope-party { color: var(--accent-green); }
+.quest-scope-solo { color: var(--text-secondary); }
+.quest-scope-party { background: var(--grad-success); }
 
 .npc-talk-completion {
   background: var(--bg-panel);
@@ -2088,6 +2408,7 @@ button, input, select, textarea {
   font-size: var(--fs-2xs);
   color: var(--accent-gold);
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .npc-talk-completion-text {
@@ -2109,141 +2430,169 @@ button, input, select, textarea {
   cursor: pointer;
 }
 
-/* ── Quest Log card on Character screen ──────────────────── */
+/* ── Quest Log modal (Settings) ──────────────────────────── */
 
-.quest-log-card {
-  background: var(--bg-panel-light);
-  border: 2px solid var(--border-pixel);
-  padding: 8px;
+.player-options-modal.quest-log-modal {
+  max-width: 440px;
+  overflow: hidden;
+}
+
+.quest-log-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
 }
 
-.quest-log-header {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--accent-blue);
-  text-transform: uppercase;
+.quest-log-body .quest-objective,
+.quest-log-body .quest-card-rewards {
+  line-height: 1.6;
 }
 
-.quest-log-empty {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-dim);
-  font-style: italic;
+.quest-objective-done {
+  color: var(--accent-green);
 }
 
-.quest-log-entry {
-  background: var(--bg-panel);
-  padding: 6px;
-  border: 1px solid var(--border-color);
+.quest-log-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 1;
+}
+
+.quest-log-givers {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-panel-light);
+  border: 2px solid var(--accent-green);
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
 }
 
-.quest-log-entry-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 6px;
-}
-
-.quest-log-entry-name {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-primary);
-}
-
-.quest-log-status {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  padding: 2px 6px;
-  border: 1px solid var(--border-color);
+.quest-log-givers-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-xs);
+  color: var(--accent-green);
   text-transform: uppercase;
 }
 
-.quest-log-status-accepted { color: var(--text-secondary); }
-.quest-log-status-in_progress { color: var(--accent-blue); }
-.quest-log-status-ready { color: var(--accent-gold); border-color: var(--accent-gold); }
-
-.quest-log-objective {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-secondary);
-}
-
-.quest-log-completed {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-dim);
-  text-align: right;
-}
-
-.quest-log-count {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-dim);
-  margin-left: 6px;
-}
-
-.completed-quests-toggle {
+.quest-log-givers-list {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
   padding: 0;
-  width: 100%;
-  text-align: left;
-  font-family: var(--pixel-font);
+  list-style: none;
 }
 
-.completed-quests-toggle:hover .quest-log-header {
+.quest-log-giver {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.quest-log-turnin {
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border-color);
+  padding-top: 4px;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.quest-log-turnin-ready {
+  font-size: var(--fs-xs);
   color: var(--accent-gold);
 }
 
-.completed-quests-chevron {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-secondary);
-  width: 10px;
-  display: inline-block;
+.quest-log-empty {
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: center;
+  padding: 12px 0;
 }
 
-.completed-quests-toolbar {
+.quest-log-completed-toggle {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
   align-items: center;
-}
-
-.completed-quests-search,
-.completed-quests-filter,
-.completed-quests-sort {
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  background: var(--bg-panel);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  padding: 4px 6px;
-  flex: 1 1 auto;
-  min-width: 80px;
-}
-
-.completed-quests-search { flex: 2 1 100px; }
-
-.completed-quests-pager {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-family: var(--pixel-font);
-  font-size: var(--fs-2xs);
-  color: var(--text-secondary);
+  gap: 6px;
+  width: 100%;
   margin-top: 4px;
+  padding: 10px 0 6px;
+  background: transparent;
+  border: none;
+  border-top: 2px solid var(--border-pixel);
+  color: var(--accent-blue);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quest-log-completed-toggle:hover {
+  color: var(--accent-gold);
+}
+
+.quest-log-chevron {
+  display: inline-block;
+  width: 10px;
+}
+
+.quest-log-completed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quest-log-completed-row {
+  background: var(--bg-panel-light);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-body);
+}
+
+.quest-log-completed-name {
+  font-size: var(--fs-sm);
+  font-weight: 800;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.quest-log-repeat {
+  margin-left: 4px;
+  color: var(--accent-gold);
+}
+
+.quest-log-completed-meta {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.quest-log-available {
+  color: var(--accent-blue);
 }
 
 /* ── Login Screen ────────────────────────────────────────── */
@@ -3799,6 +4148,30 @@ button, input, select, textarea {
   background: var(--bg-panel);
 }
 
+.item-square-img.asset-loaded + .item-square-initials,
+.item-popup-img.asset-loaded + .item-popup-initials {
+  display: none;
+}
+.item-popup-artwork img {
+  position: absolute;
+  inset: 0;
+}
+/* renderTrackedImg (assets.ts): hidden until a load resolves, so a missing image never flashes a broken glyph. */
+.asset-img {
+  opacity: 0;
+  transition: opacity 0.12s linear;
+}
+.asset-img.asset-loaded { opacity: 1; }
+.asset-img.asset-failed { display: none; }
+/* No size change on hover: a scaled square overflows its scroll container and summons scrollbars. */
+@media (hover: hover) {
+  .item-square:not(.item-square-empty):hover {
+    filter: brightness(1.15);
+    outline: 2px solid rgba(255, 255, 255, 0.45);
+    outline-offset: -2px;
+  }
+}
+
 /* Inventory grid */
 .items-inventory-grid {
   display: grid;
@@ -3958,6 +4331,7 @@ button, input, select, textarea {
   gap: 4px;
   max-height: 45vh;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 .shop-item-price {
   position: absolute;
@@ -3970,6 +4344,49 @@ button, input, select, textarea {
   background: rgba(0,0,0,0.7);
   pointer-events: none;
 }
+.shop-item-price.unaffordable {
+  color: var(--accent-red);
+}
+.shop-item-unusable {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--accent-red);
+  border-radius: 50%;
+  background: rgba(0,0,0,0.75);
+  pointer-events: none;
+  z-index: 2;
+}
+.shop-item-unusable::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 10px;
+  background: var(--accent-red);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.shop-unusable-note {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 2px solid var(--accent-red);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 77, 109, 0.14);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+.shop-hire-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: var(--art-rendering);
+}
 .shop-detail-view {
   text-align: center;
 }
@@ -3977,24 +4394,7 @@ button, input, select, textarea {
   margin-bottom: 12px;
 }
 .shop-detail-content .item-popup-artwork {
-  width: 80px;
-  height: 80px;
   margin: 0 auto 8px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-.shop-detail-content .item-popup-artwork img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-.shop-detail-content .item-popup-artwork .item-popup-initials {
-  font-size: var(--fs-3xl);
-  color: rgba(255,255,255,0.85);
-  text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
 }
 .shop-detail-content .item-popup-name {
   font-size: var(--fs-lg);
@@ -4005,13 +4405,6 @@ button, input, select, textarea {
   color: #ccc;
   margin-bottom: 6px;
   line-height: 1.5;
-}
-.shop-detail-content .item-popup-stats div {
-  display: flex;
-  justify-content: space-between;
-}
-.shop-detail-content .item-popup-stats .stat-label {
-  color: #999;
 }
 .shop-detail-controls {
   border-top: 1px solid rgba(255,255,255,0.1);
@@ -4032,6 +4425,11 @@ button, input, select, textarea {
   font-size: var(--fs-sm);
   background: transparent;
   color: #ccc;
+}
+.shop-qty-btn:disabled,
+.shop-action-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .shop-qty-value {
   min-width: 30px;
@@ -5053,6 +5451,44 @@ button, input, select, textarea {
   color: var(--text-dim);
   font-style: italic;
 }
+.room-view-contents {
+  flex-shrink: 0;
+  margin: 8px 0 4px;
+  text-align: left;
+}
+.room-view-contents-label {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+  text-align: center;
+}
+.room-view-contents-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.room-view-contents-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(6, 9, 24, 0.42);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+.room-view-contents-icon {
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.room-view-contents-detail {
+  font-size: var(--fs-2xs);
+  color: var(--accent-gold);
+}
 .room-view-here-label {
   font-family: var(--display-font);
   font-weight: 400;
@@ -5135,6 +5571,7 @@ button, input, select, textarea {
 }
 .room-view-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
   justify-content: center;
@@ -5176,15 +5613,6 @@ button, input, select, textarea {
   background: #6b4c6b;
   color: #fff;
   box-shadow: 0 0 10px rgba(107, 76, 107, 0.6);
-}
-.room-view-action-transition {
-  color: #a8c8d3;
-  border-color: #4c5e6b;
-}
-.room-view-action-transition:hover {
-  background: #4c5e6b;
-  color: #fff;
-  box-shadow: 0 0 10px rgba(76, 94, 107, 0.6);
 }
 .room-view-action-icon {
   width: 18px;
@@ -5656,9 +6084,8 @@ button, input, select, textarea {
   font-synthesis: none;
   font-size: var(--fs-md);
   text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   min-width: 0;
 }
 .compare-block-subhead {

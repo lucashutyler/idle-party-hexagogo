@@ -21,7 +21,12 @@ type ResumeListener = () => void;
 type MoveBlockedListener = (msg: ServerMoveBlockedMessage) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 type NotificationListener = (notification: NotificationEntry) => void;
-type ServerErrorListener = (message: string, code?: ServerErrorCode) => void;
+export const OFFLINE_NOTICE = "You're offline — reconnecting. Try again in a moment.";
+
+export interface ServerErrorDetail {
+  questId?: string;
+}
+type ServerErrorListener = (message: string, code?: ServerErrorCode, detail?: ServerErrorDetail) => void;
 type CombatListener = (message: ServerCombatMessage, receivedAt: number) => void;
 type ForecastListener = (message: ServerForecastMessage) => void;
 type BestiaryListener = (message: ServerBestiaryMessage) => void;
@@ -318,7 +323,7 @@ export class GameClient {
         console.warn('[GameClient] server error:', msg.message);
         for (const listener of this.serverErrorListeners) {
           try {
-            listener(msg.message, msg.code);
+            listener(msg.message, msg.code, { questId: msg.questId });
           } catch (err) {
             console.error('[GameClient] error in server-error listener:', err);
           }
@@ -470,10 +475,11 @@ export class GameClient {
     }, RECONNECT_DELAY);
   }
 
-  private sendRaw(msg: Record<string, unknown>): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-    }
+  /** False when the socket isn't open and the message was dropped. */
+  private sendRaw(msg: Record<string, unknown>): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(msg));
+    return true;
   }
 
   sendMove(col: number, row: number): void {
@@ -582,8 +588,8 @@ export class GameClient {
 
   // --- Dungeons ---
 
-  sendEnterDungeon(col: number, row: number, dungeonId: string): void {
-    this.sendRaw({ type: 'enter_dungeon', col, row, dungeonId });
+  sendEnterDungeon(col: number, row: number, dungeonId: string): boolean {
+    return this.sendRaw({ type: 'enter_dungeon', col, row, dungeonId });
   }
 
   sendLeaveDungeon(): void {
@@ -641,8 +647,8 @@ export class GameClient {
 
   // --- Shop ---
 
-  sendShopBuy(itemId: string): void {
-    this.sendRaw({ type: 'shop_buy', itemId });
+  sendShopBuy(itemId: string): boolean {
+    return this.sendRaw({ type: 'shop_buy', itemId });
   }
 
   sendShopSell(itemId: string, quantity: number): void {
@@ -661,12 +667,12 @@ export class GameClient {
 
   // --- Quests ---
 
-  sendAcceptQuest(questId: string): void {
-    this.sendRaw({ type: 'accept_quest', questId });
+  sendAcceptQuest(questId: string): boolean {
+    return this.sendRaw({ type: 'accept_quest', questId });
   }
 
-  sendTurnInQuest(questId: string): void {
-    this.sendRaw({ type: 'turn_in_quest', questId });
+  sendTurnInQuest(questId: string): boolean {
+    return this.sendRaw({ type: 'turn_in_quest', questId });
   }
 
   // --- View Player ---
@@ -819,8 +825,8 @@ export class GameClient {
   // --- Henchmen ---
 
   /** Hire a henchman from the current room's shop; a refusal comes back as an `error` message. */
-  sendHireHenchman(henchmanId: string, replace = false): void {
-    this.sendRaw({ type: 'hire_henchman', henchmanId, ...(replace ? { replace: true } : {}) });
+  sendHireHenchman(henchmanId: string, replaceInstanceId?: string): void {
+    this.sendRaw({ type: 'hire_henchman', henchmanId, ...(replaceInstanceId ? { replaceInstanceId } : {}) });
   }
 
   sendDismissHenchman(instanceId: string): void {

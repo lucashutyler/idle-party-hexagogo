@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { WorldData } from '@idle-party-rpg/shared';
+import type { SkillSlot, WorldData, WorldTileDefinition } from '@idle-party-rpg/shared';
 import {
   ARMOR_K,
   BOSS_TARGET_SECONDS,
@@ -51,19 +51,19 @@ const CONTENT_TYPES = DRAFT_CONTENT_TYPES;
 
 /** Per-type field-shape cheat sheet, verbatim — used by `get_content_schema` so the calling AI doesn't have to guess field names. */
 const CONTENT_TYPE_DESCRIPTIONS: Record<DraftContentType, string> = {
-  monsters: "MonsterDefinition — id, name, hp, damage, damageType ('physical'|'magical'|'holy'), xp, goldMin, goldMax, optional attackInterval (seconds between the monster's actions; default 1, minimum 0.3 — lower = faster attacks; combat is real-time and every unit acts on its own timer), optional description (combat-popup flavor text), optional drops (ItemDrop[]: {itemId, chance, quantity?}), optional resistances (Resistance[]: {damageType, flatReduction, percentReduction} — reduce incoming player damage of that type), optional skills (MonsterSkillEntry[]: {skillId, value, cooldown, castTime?} — skillId must be a key of monsterSkillCatalog (returned alongside this description); value is the damage/heal/DoT amount per the catalog effect; cooldown is SECONDS after use (0 = usable on every action); castTime overrides the catalog's default wind-up in seconds (a cast is telegraphed to players and can be interrupted/countered). On each action a monster uses the first listed skill that is off cooldown and would have an effect, else it auto-attacks; unknown skillIds are skipped), optional passive:true (makes it a \"wall\": never acts, doesn't count toward victory — use for tactical obstacles, not real enemies), optional level (whole number 1-200), optional tier ('trash'|'elite'|'boss'|'raid', absent = 'trash'), optional enrage ({afterSeconds, stepSeconds?, stepPercent?, maxStacks?}). LEVEL: an authored level turns on level-relative scaling against players — damage between a player and the monster is multiplied by a level-gap factor (0.5-1.5, steeper at higher levels), armor/resistance ratings are judged against the attacker's level, players see a level badge with a difficulty colour, and players far above it earn less XP (trivial x0.25, easy x0.75). NO LEVEL = NO LEVEL SCALING: the monster fights exactly on its raw stats against every player, with no gap factor and no XP reduction, and players see no level number. Nothing is inferred for an unset level; set one deliberately (suggestMonsterStats in levelScaling.statTemplates gives on-level stats). TIER: never inferred from HP or from a dungeon floor's isBoss flag. Elite/boss/raid fights get a live win forecast; boss/raid monsters get a boss bar, can carry dungeon checkpoints, stall out only after 180 s without progress (30 s otherwise), and enrage by default. ENRAGE: outgoing damage (autos, skills, DoTs) x (1 + stacks x stepPercent); the first stack lands at afterSeconds, then one every stepSeconds (default 30) up to maxStacks (default 30); stepPercent is a FRACTION (default 0.10 = +10 % per stack). Absent = the tier default (boss 480 s, raid 3600 s, trash/elite never); an explicit enrage applies on any tier. See levelScaling (returned alongside this description) for templates, con bands, mastery thresholds and defaults.",
-  items: "ItemDefinition — id, name, rarity ('janky'|'common'|'uncommon'|'rare'|'epic'|'legendary'|'heirloom'), optional slot (EquipSlot union: head/shoulders/chest/bracers/gloves/mainhand/offhand/twohanded/foot/ring/necklace/back/relic — omit entirely for non-equippable items), optional bonusAttackMin/Max, damageReductionMin/Max, magicReductionMin/Max, optional classRestriction (string[] of class names that can equip), optional value (gold sell price), optional grantedSkillIds (skills equippable ONLY while this item is equipped).",
-  sets: 'SetDefinition — id, name, itemIds (string[]), optional classRestriction, breakpoints (SetBreakpoint[]: {piecesRequired, bonuses: SetBonuses}). Bonuses do NOT stack across tiers within one set (highest unlocked tier wins) but DO stack across different sets. SetBonuses: cooldownReduction (SECONDS off every active skill cooldown; fractions allowed; effective cooldown never drops below 1 s and never shortens Enemy-casts interrupts), damagePercent, damageResistancePercent, damageReductionMin/Max, magicReductionMin/Max, bonusAttackMin/Max, flatHp, percentHp, optional grantedSkillIds.',
-  shops: 'ShopDefinition — id, name, inventory (ShopItem[]: {itemId, stock, price}), optional henchmanIds (string[] of HenchmanDefinition ids this shop offers for hire — hires are free, so there is no price to pair with them).',
-  henchmen: "HenchmanDefinition — id, name, optional description (flavour line shown in the hire list), className ('Knight'|'Archer'|'Priest'|'Mage'|'Bard'), level, maxHp, baseDamage, optional damageType ('physical'|'magical'|'holy', overrides the archetype's damage type when set), skillIds (string[] of skill definition ids — the fixed loadout; ids the live server lacks resolve to an empty slot), emoji (REQUIRED, always renders even with no artwork), optional artworkUrl. Stats are FIXED: a henchman never levels, holds no equipment and has no inventory, so the definition is the whole of its power (level is a cosmetic display number — the stats above are authoritative, not derived from it). className is a HIDDEN combat archetype, not a player-facing label: the engine keys class checks off it (Sanctuary targeting, War Cry's targetClass, Martyr, monster all_class skill filters), but the hire UI never shows it. A shop offers henchmen for hire via its own henchmanIds array — there is no room/tile field for henchmen and no separate henchmen-shop content type.",
-  recipes: 'RecipeDefinition — id, name, durationSeconds (>0), ingredients (RecipeIngredient[]: {itemId, quantity>0}), result ({itemId, quantity>0}).',
+  monsters: "MonsterDefinition — id, name, hp, damage, damageType ('physical'|'magical'|'holy'), xp, goldMin, goldMax, optional attackInterval (seconds between the monster's actions; default 1, minimum 0.3 — lower = faster attacks; combat is real-time and every unit acts on its own timer), optional description (combat-popup flavor text), optional drops (ItemDrop[]: {itemId, chance}), optional resistances (Resistance[]: {damageType, flatReduction, percentReduction} — reduce incoming player damage of that type), optional skills (MonsterSkillEntry[]: {skillId, value, cooldown, castTime?} — skillId must be a key of monsterSkillCatalog (returned alongside this description); value is the damage/heal/DoT amount per the catalog effect; cooldown is SECONDS after use (0 = usable on every action); castTime overrides the catalog's default wind-up in seconds (a cast is telegraphed to players and can be interrupted/countered). On each action a monster uses the first listed skill that is off cooldown and would have an effect, else it auto-attacks; unknown skillIds are skipped), optional passive:true (makes it a \"wall\": never acts, doesn't count toward victory — use for tactical obstacles, not real enemies), optional level (whole number 1-200), optional tier ('trash'|'elite'|'boss'|'raid', absent = 'trash'), optional enrage ({afterSeconds, stepSeconds?, stepPercent?, maxStacks?}). LEVEL: an authored level turns on level-relative scaling against players — damage between a player and the monster is multiplied by a level-gap factor (0.5-1.5, steeper at higher levels), armor/resistance ratings are judged against the attacker's level, players see a level badge with a difficulty colour, and players far above it earn less XP (trivial x0.25, easy x0.75). NO LEVEL = NO LEVEL SCALING: the monster fights exactly on its raw stats against every player, with no gap factor and no XP reduction, and players see no level number. Nothing is inferred for an unset level; set one deliberately (suggestMonsterStats in levelScaling.statTemplates gives on-level stats). TIER: never inferred from HP or from a dungeon floor's isBoss flag. Elite/boss/raid fights get a live win forecast; boss/raid monsters get a boss bar, can carry dungeon checkpoints, stall out only after 180 s without progress (30 s otherwise), and enrage by default. ENRAGE: outgoing damage (autos, skills, DoTs) x (1 + stacks x stepPercent); the first stack lands at afterSeconds, then one every stepSeconds (default 30) up to maxStacks (default 30); stepPercent is a FRACTION (default 0.10 = +10 % per stack). Absent = the tier default (boss 480 s, raid 3600 s, trash/elite never); an explicit enrage applies on any tier. See levelScaling (returned alongside this description) for templates, con bands, mastery thresholds and defaults.",
+  items: "ItemDefinition — id, name, rarity ('janky'|'common'|'uncommon'|'rare'|'epic'|'legendary'|'heirloom'), optional equipSlot (NOT 'slot'; EquipSlot union: head/shoulders/chest/bracers/gloves/mainhand/offhand/twohanded/foot/ring/necklace/back/relic — omit entirely for non-equippable items), optional bonusAttackMin/Max, damageReductionMin/Max, magicReductionMin/Max, optional classRestriction (string[] of class names that can equip), optional value (gold sell price), optional consumable (boolean placeholder, no effect yet), optional iconEmoji (overrides the slot-based icon), optional iconColor (CSS color for the icon tint), optional grantedSkillIds (skills equippable ONLY while this item is equipped).",
+  sets: 'SetDefinition — id, name, itemIds (string[]), optional classRestriction, breakpoints (SetBreakpoint[]: {piecesRequired, bonuses: SetBonuses}). Bonuses do NOT stack across tiers within one set (highest unlocked tier wins) but DO stack across different sets. SetBonuses (every field optional): cooldownReduction (SECONDS off every active skill cooldown; fractions allowed; effective cooldown never drops below 1 s and never shortens Enemy-casts interrupts), damagePercent, damageResistancePercent, damageReductionMin/Max, magicReductionMin/Max, bonusAttackMin/Max, flatHp, percentHp, grantedSkillIds.',
+  shops: 'ShopDefinition — id, name, inventory (ShopItem[]: {itemId, price} — there is no stock field), optional henchmanIds (string[] of HenchmanDefinition ids this shop offers for hire — hires are free, so there is no price to pair with them).',
+  henchmen: "HenchmanDefinition — id, name, optional description (flavour line shown in the hire list), className ('Knight'|'Archer'|'Priest'|'Mage'|'Bard'), level, maxHp, baseDamage, optional damageType ('physical'|'magical'|'holy', overrides the archetype's damage type when set), skillIds (string[] of skill definition ids — the fixed loadout; ids the live server lacks resolve to an empty slot), emoji (REQUIRED, always renders even with no artwork), optional artworkUrl. Stats are FIXED: a henchman never levels, holds no equipment and has no inventory, so the definition is the whole of its power (maxHp and baseDamage are authoritative, not derived from level; combat treats level as derived: no level-gap scaling, but it still judges armor/resistance like a player level and drives the henchman's own per-level passives and heals). className is a HIDDEN combat archetype, not a player-facing label: the engine keys class checks off it (Sanctuary targeting, War Cry's targetClass, Martyr, monster all_class skill filters), but the hire UI never shows it. A shop offers henchmen for hire via its own henchmanIds array — there is no room/tile field for henchmen and no separate henchmen-shop content type.",
+  recipes: 'RecipeDefinition — id, name, optional description, optional classRestriction (string[] of classes that can craft), optional requiredLevel, durationSeconds (>0), optional xpReward (craft XP, default 0), ingredients (RecipeIngredient[]: {itemId, quantity>0}), result ({itemId, quantity>0}).',
   npcs: 'NpcDefinition — id, name, emoji (REQUIRED, always renders even with no artwork), greeting, optional artworkUrl, optional questIds (string[] quests this NPC offers).',
-  quests: "QuestDefinition — id, name, description, scope ('solo' — only acceptable while in a solo party — or 'party_shared'), objectives (kill:{monsterId,count} | collect:{itemId,count, consumed on turn-in} | visit:{tileId}), rewards (xp|gold|item kinds), optional prerequisiteQuestIds, optional requiredLevel, repeat ('once'|'weekly').",
-  dungeons: "DungeonDefinition — id, name, optional description, floors (DungeonFloor[]: {floorNumber, gridShape:{cols,rows}, encounterTable, optional isBoss (HUD badge only — boss behaviour comes from the monster's tier), optional rewards, optional checkpoints, optional maxWipes, optional checkpointRewardFraction}), optional entryRequirements ({minLevel?,maxLevel?,requiredItemId?,consumeRequiredItem?,requiredClasses?,minPartySize?,maxPartySize?}), optional firstClearRewards + flat firstClearXp/firstClearGold. BOSS CHECKPOINTS: checkpoints is a list of boss-HP fractions, strictly between 0 and 1 in descending order (e.g. [0.66, 0.33]); they apply to every fight on the floor that includes a non-passive boss- or raid-tier monster, whether an explicit encounter places it or a random pool rolls it (several bosses share one pooled HP fraction), so at least one encounter on the floor's table must be able to field one — fights without a boss get no checkpoints. Each checkpoint reached pays every member checkpointRewardFraction (0-1, default 0.15) of the boss's xp and average gold, once per run. A wipe anywhere on that floor, boss fight or not, regroups the party at its last checkpoint (the boss restarts at that HP fraction) up to maxWipes times (whole number 0-20, default 3); one more wipe ejects the party and the checkpoint is lost. Leaving mid-fight on that floor counts as a wipe. Leaving the dungeon keeps the checkpoint for 7 days and re-entering resumes from it (the entry requirements and entry item still apply). maxWipes/checkpointRewardFraction have no effect without checkpoints. See checkpointDefaults (returned alongside this description).",
-  zones: 'ZoneDefinition — id, displayName (NOTE: zones use displayName, NOT name), levelRange, encounterTable (EncounterTableEntry[]: {encounterId, weight}).',
-  encounters: "EncounterDefinition — id, name, type ('random'|'explicit'), monsterPool (random: {monsterId,min,max}[]), optional placements (explicit type), optional roomMax.",
+  quests: "QuestDefinition — id, name, description, scope ('solo' — only acceptable while in a solo party — or 'party_shared'), objectives ({kind:'kill', monsterId, count} | {kind:'collect', itemId, count} — consumed on turn-in | {kind:'visit', tileId}), rewards ({kind:'xp', amount} | {kind:'gold', amount} | {kind:'item', itemId, quantity}), optional prerequisiteQuestIds, optional requiredLevel, optional repeat ('once'|'weekly', default 'once'), optional completionText (NPC speech shown after the player turns the quest in).",
+  dungeons: "DungeonDefinition — id, name, optional description, floors (DungeonFloor[]: {floorNumber, gridShape:{cols,rows}, encounterTable ({encounterId, weight}[]), optional isBoss (HUD badge only — boss behaviour comes from the monster's tier), optional rewards, optional checkpoints, optional maxWipes, optional checkpointRewardFraction}), optional entryRequirements ({minLevel?,maxLevel?,requiredItemId?,consumeRequiredItem?,requiredClasses? (class names),minPartySize?,maxPartySize?}), optional firstClearRewards + flat firstClearXp/firstClearGold. Floor rewards and firstClearRewards are DungeonReward[]: {itemId, chance (0-1), minQty? (default 1), maxQty? (default 1), classRestriction? (class names)}. BOSS CHECKPOINTS: checkpoints is a list of boss-HP fractions, strictly between 0 and 1 in descending order (e.g. [0.66, 0.33]); they apply to every fight on the floor that includes a non-passive boss- or raid-tier monster, whether an explicit encounter places it or a random pool rolls it (several bosses share one pooled HP fraction), so at least one encounter on the floor's table must be able to field one — fights without a boss get no checkpoints. Each checkpoint reached pays every member checkpointRewardFraction (0-1, default 0.15) of the boss's xp and average gold, once per run. A wipe anywhere on that floor, boss fight or not, regroups the party at its last checkpoint (the boss restarts at that HP fraction) up to maxWipes times (whole number 0-20, default 3); one more wipe ejects the party and the checkpoint is lost. Leaving mid-fight on that floor counts as a wipe. Leaving the dungeon keeps the checkpoint for 7 days and re-entering resumes from it (the entry requirements and entry item still apply). maxWipes/checkpointRewardFraction have no effect without checkpoints. See checkpointDefaults (returned alongside this description).",
+  zones: 'ZoneDefinition — id, displayName (NOTE: zones use displayName, NOT name), levelRange ([min, max] tuple), encounterTable (EncounterTableEntry[]: {encounterId, weight}).',
+  encounters: "EncounterDefinition — id, name, type ('random'|'explicit'), optional monsterPool (random type: {monsterId,min,max}[]), optional placements (explicit type: {monsterId, gridPosition 0-8}[]), optional roomMax.",
   tileTypes: 'TileTypeDefinition — id, name, icon (emoji), color (hex like #ff0000), traversable (boolean), optional entryRequirements ({minLevel?,requiredItemId?,requiredQuestIds?}) — the default entry gate for every room of this type, which rooms override field by field; legacy top-level requiredItemId is still honoured and folded into the gate.',
-  skills: "SkillDefinition — id, name, description, className, type ('passive'|'active'), unlockLevel (number, or null = grant-only via item/set, never level-learned), sortOrder, passiveEffects[] and/or activeEffects[] — each effect's \"kind\" must be one from skillOptionCatalog (returned alongside this description; also import { SKILL_OPTION_CATALOG } from '@idle-party-rpg/shared' — Record<string,SkillOptionDefinition> with {kind,slotType,label,description,targeting,params}). Percent params are stored as 0-1 fractions, not 0-100. Combat is real-time (every unit acts about once per second). Active-only timing fields (passives must omit all four): cooldown (REQUIRED for actives, SECONDS after use, fractions allowed, at least 1), optional castTime (seconds of telegraphed wind-up, 0-10, default 0; triggered skills cannot have one), optional warmup (seconds before first use each battle, 0-60; omitted = cooldown minus 1 s for action skills and Enemy-casts interrupts, 0 for other triggered skills), optional trigger (one of the keys of skillTriggerInfo: 'ally_targeted'|'self_hit'|'enemy_cast'|'ally_afflicted'|'ally_low_hp' — makes the skill an off-action reaction instead of using the owner's action). Trigger inference: a skill with a redirect_hit option and no trigger is treated as 'ally_targeted', one with brace_reflect as 'self_hit' (redirect_hit REQUIRES ally_targeted, brace_reflect REQUIRES self_hit; never both in one skill). Each skill is shown to players as a card type derived from its fields (see skillCardTypeInfo): passive → 'triggered' if any passive kind is stun_on_phys_hit/martyr/resurrection/dot_on_auto/overflow/scorch/stacking_same_target/arcane_surge, else 'passive'; trigger enemy_cast (explicit) → 'interrupt'; any other trigger (explicit or inferred) → 'instant'; every active kind in heal_lowest/hot_lowest/cure_debuffs/shield_non_knight → 'support' (held until someone needs it); any party_buff_permanent/enemy_debuff_aoe/chaos → 'enchantment'; else 'attack'.",
+  skills: "SkillDefinition — id, name, description, className, type ('passive'|'active'), unlockLevel (number, or null = grant-only via item/set, never level-learned), sortOrder, optional passiveEffects[] (passive or active skills) and/or optional activeEffects[] (active skills only) — each effect's \"kind\" must be one from skillOptionCatalog (returned alongside this description; also import { SKILL_OPTION_CATALOG } from '@idle-party-rpg/shared' — Record<string,SkillOptionDefinition> with {kind,slotType,label,description,targeting,params}). Percent params are stored as 0-1 fractions, not 0-100. Combat is real-time (every unit acts about once per second). Active-only timing fields (passives must omit all four): cooldown (REQUIRED for actives, SECONDS after use, fractions allowed, at least 1), optional castTime (seconds of telegraphed wind-up, 0-10, default 0; triggered skills cannot have one), optional warmup (seconds before first use each battle, 0-60; omitted = cooldown minus 1 s for action skills and Enemy-casts interrupts, 0 for other triggered skills), optional trigger (one of the keys of skillTriggerInfo: 'ally_targeted'|'self_hit'|'enemy_cast'|'ally_afflicted'|'ally_low_hp' — makes the skill an off-action reaction instead of using the owner's action). Trigger inference: a skill with a redirect_hit option and no trigger is treated as 'ally_targeted', one with brace_reflect as 'self_hit' (redirect_hit REQUIRES ally_targeted, brace_reflect REQUIRES self_hit; never both in one skill). Each skill is shown to players as a card type derived from its fields (see skillCardTypeInfo): passive → 'triggered' if any passive kind is stun_on_phys_hit/martyr/resurrection/dot_on_auto/overflow/scorch/stacking_same_target/arcane_surge, else 'passive'; trigger enemy_cast (explicit) → 'interrupt'; any other trigger (explicit or inferred) → 'instant'; every active kind in heal_lowest/hot_lowest/cure_debuffs/shield_non_knight → 'support' (held until someone needs it); any party_buff_permanent/enemy_debuff_aoe/chaos → 'enchantment'; else 'attack'.",
   designNotes: 'DesignNote — id, title, body (markdown), optional tags (string[]), author (server fills this from the token label, do not accept from caller input), createdAt/updatedAt (server fills, ISO timestamps via new Date().toISOString()).',
 };
 
@@ -127,6 +127,14 @@ const CHECKPOINT_REFERENCE = {
   example: { checkpoints: [0.66, 0.33], maxWipes: DEFAULT_MAX_WIPES },
 };
 
+/** Points callers at the REST admin API for anything MCP doesn't surface — the MCP bearer token authenticates there too. */
+export const REST_API_FALLBACK = {
+  note: 'MCP does not expose every route or field. The bearer token this MCP client sends also authenticates the REST admin API on the same host (Authorization: Bearer <token>) — use it for anything missing here, and report the gap.',
+  fullLiveExport: 'GET /api/admin/content',
+  fullVersionExport: 'GET /api/admin/versions/{versionId}/content',
+  openApiDocs: '/api-docs/admin',
+};
+
 function versionNotFoundError(versionId: string): string {
   return `Version '${versionId}' no longer exists — it may have been deleted between calls. Stop and check with the user before proceeding.`;
 }
@@ -169,13 +177,51 @@ async function resolveContentArray(
   return { array: deps.draftEditor.getContentArray(type, snapshot) };
 }
 
-function worldResult(world: WorldData, mapId: string | undefined) {
-  return {
-    maps: world.maps,
-    defaultMapId: world.defaultMapId,
-    startTile: world.startTile,
-    tiles: mapId ? world.tiles.filter(t => t.mapId === mapId) : world.tiles,
-  };
+/** Stored room fields in the column order `format: 'table'` uses; any unlisted field is appended after these. */
+const TILE_FIELDS = [
+  'id', 'mapId', 'col', 'row', 'type', 'zone', 'name', 'encounterTable', 'shopId', 'npcId',
+  'dungeonId', 'requiredItemId', 'entryRequirements', 'transitions',
+] as const;
+
+export interface GetWorldArgs {
+  versionId?: string;
+  mapId?: string;
+  zone?: string;
+  area?: { colMin?: number; colMax?: number; rowMin?: number; rowMax?: number };
+  fields?: string[];
+  format?: 'objects' | 'table';
+}
+
+function filterTiles(tiles: WorldTileDefinition[], args: GetWorldArgs): WorldTileDefinition[] {
+  const { mapId, zone, area } = args;
+  return tiles.filter(t =>
+    (!mapId || t.mapId === mapId)
+    && (!zone || t.zone === zone)
+    && (area?.colMin === undefined || t.col >= area.colMin)
+    && (area?.colMax === undefined || t.col <= area.colMax)
+    && (area?.rowMin === undefined || t.row >= area.rowMin)
+    && (area?.rowMax === undefined || t.row <= area.rowMax));
+}
+
+function tileColumns(tiles: WorldTileDefinition[], fields: string[] | undefined): string[] {
+  if (fields && fields.length > 0) return fields;
+  const present = new Set<string>();
+  for (const tile of tiles) for (const [key, value] of Object.entries(tile)) if (value !== undefined) present.add(key);
+  const ordered: string[] = TILE_FIELDS.filter(f => present.has(f));
+  for (const key of present) if (!ordered.includes(key)) ordered.push(key);
+  return ordered;
+}
+
+function worldResult(world: WorldData, args: GetWorldArgs) {
+  const tiles = filterTiles(world.tiles, args);
+  const header = { maps: world.maps, defaultMapId: world.defaultMapId, startTile: world.startTile, tileCount: tiles.length };
+  const columns = tileColumns(tiles, args.fields);
+  const asRecords = tiles as unknown as Record<string, unknown>[];
+  if (args.format === 'table') {
+    return { ...header, columns, rows: asRecords.map(tile => columns.map(c => tile[c] ?? null)) };
+  }
+  if (!args.fields || args.fields.length === 0) return { ...header, tiles };
+  return { ...header, tiles: asRecords.map(tile => Object.fromEntries(columns.filter(c => tile[c] !== undefined).map(c => [c, tile[c]]))) };
 }
 
 export async function getOverview(deps: McpToolDeps) {
@@ -200,7 +246,7 @@ export async function getOverview(deps: McpToolDeps) {
     const versionStore = deps.versionStore();
     const versions = versionStore.getAll().map(v => ({ id: v.id, name: v.name, status: v.status, isActive: v.isActive }));
     const activeVersionId = versionStore.getActiveVersionId();
-    return { counts, versions, activeVersionId };
+    return { counts, versions, activeVersionId, restApi: REST_API_FALLBACK };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -241,15 +287,33 @@ export async function getContent(deps: McpToolDeps, args: { type: DraftContentTy
   }
 }
 
-export async function getWorld(deps: McpToolDeps, args: { versionId?: string; mapId?: string }) {
+export async function getWorld(deps: McpToolDeps, args: GetWorldArgs) {
   try {
     if (args.versionId) {
       const version = deps.versionStore().get(args.versionId);
       if (!version) return { error: versionNotFoundError(args.versionId) };
       const snapshot = await deps.versionStore().loadSnapshot(args.versionId);
-      return worldResult(snapshot.world, args.mapId);
+      return worldResult(snapshot.world, args);
     }
-    return worldResult(deps.contentStore().getWorld(), args.mapId);
+    return worldResult(deps.contentStore().getWorld(), args);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function getSkillSlots(deps: McpToolDeps, args: { versionId?: string }) {
+  try {
+    if (!args.versionId) return { versionId: null, schedules: deps.contentStore().getAllSkillSlotSchedules() };
+    const version = deps.versionStore().get(args.versionId);
+    if (!version) return { error: versionNotFoundError(args.versionId) };
+    const snapshot = await deps.versionStore().loadSnapshot(args.versionId);
+    // keep-when-absent: a snapshot predating slot schedules inherits live ones on publish
+    if (snapshot.skillSlotSchedules === undefined) {
+      return { versionId: args.versionId, schedules: deps.contentStore().getAllSkillSlotSchedules() };
+    }
+    const schedules: Record<string, SkillSlot[]> = {};
+    for (const entry of snapshot.skillSlotSchedules) schedules[entry.className] = entry.slots;
+    return { versionId: args.versionId, schedules };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -338,14 +402,37 @@ export function registerReadTools(server: McpServer, deps: McpToolDeps): void {
   server.registerTool(
     'get_world',
     {
-      description: 'Fetch world data (maps, default map, start tile, and rooms/tiles), either from live content or from a draft version snapshot. Optionally filter tiles to one map.',
+      description: "Fetch world data (maps, default map, start tile, and rooms/tiles), either from live content or from a draft version snapshot. On a big world, narrow it: filter by mapId/zone/area, pick only the fields you need, and use format 'table' to stop repeating every key on every room.",
       inputSchema: {
         versionId: z.string().optional().describe('If given, read world data from this draft/version snapshot instead of live content.'),
         mapId: z.string().optional().describe('If given, only return tiles belonging to this map.'),
+        zone: z.string().optional().describe('If given, only return tiles in this zone id.'),
+        area: z.object({
+          colMin: z.number().optional(),
+          colMax: z.number().optional(),
+          rowMin: z.number().optional(),
+          rowMax: z.number().optional(),
+        }).optional().describe('Inclusive col/row bounds; omitted bounds are open.'),
+        fields: z.array(z.string()).optional().describe(`Only return these room fields (e.g. ['col','row','zone','name']). Known fields: ${TILE_FIELDS.join(', ')}.`),
+        format: z.enum(['objects', 'table']).optional().describe("'objects' (default): tiles as an array of objects. 'table': columns (field names, once) + rows (one value array per room, null = field absent)."),
       },
     },
     async (args) => {
       const result = await getWorld(deps, args);
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'get_skill_slots',
+    {
+      description: 'Fetch every class\'s skill-slot unlock schedule (className -> slots), either from live content or from a draft version snapshot. Pair with set_skill_slots.',
+      inputSchema: {
+        versionId: z.string().optional().describe('If given, read from this draft/version snapshot instead of live content.'),
+      },
+    },
+    async (args) => {
+      const result = await getSkillSlots(deps, args);
       return toolResult(result);
     }
   );

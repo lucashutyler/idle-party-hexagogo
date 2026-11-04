@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsScreen } from '../src/screens/SettingsScreen';
 import type { GameClient } from '../src/network/GameClient';
+import type { WorldCache } from '../src/network/WorldCache';
+
+const WORLD_CACHE = {} as unknown as WorldCache;
 
 function fakeClient(opts: { pct?: number; role?: 'owner' | 'leader' | 'member'; policy?: number } = {}) {
   return {
@@ -27,7 +30,7 @@ function open(client: ReturnType<typeof fakeClient>): HTMLElement {
   const container = document.createElement('div');
   container.id = 'screen-settings';
   document.body.appendChild(container);
-  const screen = new SettingsScreen('screen-settings', client as unknown as GameClient);
+  const screen = new SettingsScreen('screen-settings', client as unknown as GameClient, WORLD_CACHE);
   screen.openPlayerOptions();
   return document.querySelector('.player-options-overlay') as HTMLElement;
 }
@@ -100,7 +103,7 @@ describe('Player Options auto-retreat', () => {
     const container = document.createElement('div');
     container.id = 'screen-settings';
     document.body.appendChild(container);
-    const screen = new SettingsScreen('screen-settings', client as unknown as GameClient);
+    const screen = new SettingsScreen('screen-settings', client as unknown as GameClient, WORLD_CACHE);
     screen.openPlayerOptions();
     const first = document.querySelector('.player-options-overlay') as HTMLElement;
     const z = parseInt(first.style.zIndex, 10);

@@ -1,8 +1,11 @@
-import type { GameClient } from '../network/GameClient';
-import type { DungeonDefinition, ForecastResult, ServerForecastMessage } from '@idle-party-rpg/shared';
+import { OFFLINE_NOTICE, type GameClient } from '../network/GameClient';
+import type { DungeonDefinition, ForecastResult, ServerForecastMessage, ServerStateMessage } from '@idle-party-rpg/shared';
 import { floorCheckpoints, floorMaxWipes } from '@idle-party-rpg/shared';
-import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { dungeonItemName, previewDungeonEntry } from './DungeonEntryCheck';
 import { renderForecastRing } from './ForecastChip';
+import { escapeHtml } from './ItemIcon';
+import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { deferWhilePressed, setHtml } from './render';
 import {
   forecastBand,
   forecastHeadline,
@@ -16,22 +19,41 @@ import {
 } from '../combat/ForecastFormat';
 import type { DungeonResumePoint } from '../combat/ForecastFormat';
 
+const ANSWER_TIMEOUT_MS = 5000;
+const NO_ANSWER_MESSAGE = 'No answer from the server. Please try again.';
+const HENCHMEN_WAIT_MESSAGE = 'Your henchmen will wait at the entrance until you return.';
+const BLOCKED_LINE_ID = 'dungeon-entry-blocked';
+
 export interface DungeonEntryOptions {
   /** False for plain members: the popup is read-only and explains whose progress counts. */
   canEnter?: boolean;
 }
 
+interface Entrance {
+  dungeon: DungeonDefinition;
+  col: number;
+  row: number;
+  canEnter: boolean;
+}
+
 type ForecastView = { message: ServerForecastMessage; stale: boolean } | 'loading' | null;
 
 /**
- * Confirmation popup for "Enter {dungeon}": flavor, requirements, a run forecast with a
- * floor strip and resume marker, then the owner/leader commits. Entry is server-authoritative.
+ * Confirmation popup for entering a dungeon: flavor, requirements, and a run forecast with a floor
+ * strip and resume marker. Enter is disabled with a visible reason when the party can't enter, and a
+ * server refusal shows inline. See docs/architecture/client.md.
  */
 export class DungeonEntryPopup {
   private overlay: HTMLElement;
   private gameClient: GameClient;
-  private dungeon: DungeonDefinition | null = null;
-  private unsubForecast?: () => void;
+  private entrance: Entrance | null = null;
+  private pending = false;
+  private refusal: string | null = null;
+  private answerTimer: ReturnType<typeof setTimeout> | null = null;
+  private forecastView: ForecastView = 'loading';
+  private unsubscribeState: (() => void) | null = null;
+  private unsubscribeError: (() => void) | null = null;
+  private unsubscribeForecast: (() => void) | null = null;
   private keyHandler = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') this.hide();
   };
@@ -44,77 +66,153 @@ export class DungeonEntryPopup {
     this.overlay.addEventListener('click', (e) => {
       if (e.target === this.overlay) this.hide();
     });
-    wireFocusOnInteract(this.overlay);
     document.body.appendChild(this.overlay);
+    wireFocusOnInteract(this.overlay);
   }
 
   get isOpen(): boolean {
-    return this.dungeon !== null;
+    return this.entrance !== null;
   }
 
   show(dungeon: DungeonDefinition, col: number, row: number, opts: DungeonEntryOptions = {}): void {
+    this.hide();
     const canEnter = opts.canEnter !== false;
-    this.dungeon = dungeon;
+    this.entrance = { dungeon, col, row, canEnter };
+    this.overlay.innerHTML = this.renderShell(dungeon, canEnter);
+    this.overlay.querySelector('.dungeon-entry-cancel')?.addEventListener('click', () => this.hide());
+    this.overlay.querySelector('.dungeon-entry-enter')?.addEventListener('click', () => this.enter());
+    this.overlay.style.display = 'flex';
+    bringToFront(this.overlay);
+    document.addEventListener('keydown', this.keyHandler);
+
+    this.unsubscribeState = this.gameClient.subscribe(() => this.repaintLater());
+    this.unsubscribeError = this.gameClient.onServerError((message, code) => {
+      if (code !== 'dungeon_entry_refused' || !this.entrance) return;
+      this.settle(message);
+      this.repaintLater();
+    });
+    this.unsubscribeForecast = this.gameClient.onForecast((msg) => {
+      if (msg.target.kind !== 'dungeon' || msg.target.dungeonId !== this.entrance?.dungeon.id) return;
+      if (msg.status === 'pending') return;
+      this.forecastView = this.toView(msg);
+      this.repaintLater();
+    });
+    const target = { kind: 'dungeon' as const, dungeonId: dungeon.id };
+    const cached = this.gameClient.requestForecast(target);
+    const view = cached ?? this.gameClient.peekForecast(target);
+    this.forecastView = view ? this.toView(view, !cached) : 'loading';
+    this.paint();
+  }
+
+  hide(): void {
+    this.entrance = null;
+    this.settle(null);
+    this.unsubscribeState?.();
+    this.unsubscribeState = null;
+    this.unsubscribeError?.();
+    this.unsubscribeError = null;
+    this.unsubscribeForecast?.();
+    this.unsubscribeForecast = null;
+    document.removeEventListener('keydown', this.keyHandler);
+    this.overlay.style.display = 'none';
+    this.overlay.innerHTML = '';
+    release(this.overlay);
+  }
+
+  private enter(): void {
+    const entrance = this.entrance;
+    const button = this.enterButton();
+    if (!entrance || this.pending || !button || button.disabled) return;
+    if (!this.gameClient.sendEnterDungeon(entrance.col, entrance.row, entrance.dungeon.id)) {
+      this.refusal = OFFLINE_NOTICE;
+      this.paint();
+      return;
+    }
+    this.pending = true;
+    this.refusal = null;
+    this.answerTimer = setTimeout(() => {
+      this.settle(NO_ANSWER_MESSAGE);
+      this.repaintLater();
+    }, ANSWER_TIMEOUT_MS);
+    this.paint();
+  }
+
+  /** Ends any pending entry; `refusal` becomes the line shown until the next attempt. */
+  private settle(refusal: string | null): void {
+    this.pending = false;
+    this.refusal = refusal;
+    if (this.answerTimer !== null) {
+      clearTimeout(this.answerTimer);
+      this.answerTimer = null;
+    }
+  }
+
+  private repaintLater(): void {
+    deferWhilePressed(this.overlay, () => this.paint());
+  }
+
+  // deferWhilePressed keeps only the latest paint per root, so every repaint must cover all regions.
+  private paint(): void {
+    const entrance = this.entrance;
+    if (!entrance) return;
+    const state = this.gameClient.lastState;
+    if (state && (state.dungeon || state.party.col !== entrance.col || state.party.row !== entrance.row)) {
+      this.hide();
+      return;
+    }
+
+    const blocked = state && !this.pending ? previewDungeonEntry(entrance.dungeon, state) : null;
+    if (blocked) this.refusal = null;
+    const reason = blocked ?? (this.pending ? null : this.refusal);
+
+    this.renderForecast(entrance.dungeon, this.forecastView);
+    const reqs = this.overlay.querySelector('.dungeon-entry-reqs-slot');
+    if (reqs) setHtml(reqs, this.renderRequirements(entrance.dungeon, state));
+    const status = this.overlay.querySelector('.dungeon-entry-status');
+    if (status) setHtml(status, this.renderStatus(state, reason));
+
+    const button = this.enterButton();
+    if (!button) return;
+    button.disabled = !entrance.canEnter || this.pending || blocked !== null;
+    const label = this.pending ? 'Entering…' : 'Enter';
+    if (button.textContent !== label) button.textContent = label;
+    button.setAttribute('aria-busy', String(this.pending));
+    if (reason) button.setAttribute('aria-describedby', BLOCKED_LINE_ID);
+    else button.removeAttribute('aria-describedby');
+  }
+
+  private enterButton(): HTMLButtonElement | null {
+    return this.overlay.querySelector<HTMLButtonElement>('.dungeon-entry-enter');
+  }
+
+  private renderShell(dungeon: DungeonDefinition, canEnter: boolean): string {
     const floors = dungeon.floors.length;
     const description = dungeon.description?.trim();
     const descHtml = description
-      ? `<div class="dungeon-entry-desc">"${this.escape(description)}"</div>`
+      ? `<div class="dungeon-entry-desc">"${escapeHtml(description)}"</div>`
       : '';
-    const reqHtml = this.renderRequirements(dungeon);
     const leaderNote = canEnter
       ? ''
       : '<div class="dungeon-entry-note">Your party leader\'s progress decides where you start.</div>';
-
-    this.overlay.innerHTML = `
-      <div class="dungeon-entry-modal" role="dialog" aria-modal="true" aria-label="${this.escape(dungeon.name)}">
+    return `
+      <div class="dungeon-entry-modal" role="dialog" aria-modal="true" aria-labelledby="dungeon-entry-title">
         <div class="dungeon-entry-header">
           <span class="dungeon-entry-icon">🗝️</span>
-          <div class="dungeon-entry-title">${this.escape(dungeon.name)}</div>
+          <div class="dungeon-entry-title" id="dungeon-entry-title">${escapeHtml(dungeon.name)}</div>
         </div>
         ${descHtml}
         <div class="dungeon-entry-meta">${floors} floor${floors === 1 ? '' : 's'} · clear the final floor to complete the run</div>
         <div class="dungeon-entry-forecast" data-state="loading" aria-live="polite"></div>
-        ${reqHtml}
+        <div class="dungeon-entry-reqs-slot"></div>
         <div class="dungeon-entry-warning">${this.warningText(dungeon)}</div>
         ${leaderNote}
+        <div class="dungeon-entry-status" aria-live="polite"></div>
         <div class="dungeon-entry-actions">
           <button class="dungeon-entry-btn dungeon-entry-enter" type="button"${canEnter ? '' : ' disabled title="Only the party owner or a leader can enter"'}>Enter</button>
           <button class="dungeon-entry-btn dungeon-entry-cancel" type="button">Cancel</button>
         </div>
       </div>
     `;
-
-    this.overlay.querySelector('.dungeon-entry-cancel')?.addEventListener('click', () => this.hide());
-    this.overlay.querySelector('.dungeon-entry-enter')?.addEventListener('click', () => {
-      if (!canEnter) return;
-      this.gameClient.sendEnterDungeon(col, row, dungeon.id);
-      this.hide();
-    });
-
-    this.overlay.style.display = 'flex';
-    bringToFront(this.overlay);
-    document.addEventListener('keydown', this.keyHandler);
-
-    this.unsubForecast?.();
-    this.unsubForecast = this.gameClient.onForecast((msg) => {
-      if (msg.target.kind !== 'dungeon' || msg.target.dungeonId !== this.dungeon?.id) return;
-      if (msg.status === 'pending') return;
-      this.renderForecast(this.toView(msg));
-    });
-    const target = { kind: 'dungeon' as const, dungeonId: dungeon.id };
-    const cached = this.gameClient.requestForecast(target);
-    const view = cached ?? this.gameClient.peekForecast(target);
-    this.renderForecast(view ? this.toView(view, !cached) : 'loading');
-  }
-
-  hide(): void {
-    this.unsubForecast?.();
-    this.unsubForecast = undefined;
-    document.removeEventListener('keydown', this.keyHandler);
-    this.dungeon = null;
-    this.overlay.style.display = 'none';
-    this.overlay.innerHTML = '';
-    release(this.overlay);
   }
 
   private toView(message: ServerForecastMessage, forceStale = false): ForecastView {
@@ -136,20 +234,19 @@ export class DungeonEntryPopup {
       + 'Falling anywhere else sends you back to this entrance.';
   }
 
-  private renderForecast(view: ForecastView): void {
+  private renderForecast(dungeon: DungeonDefinition, view: ForecastView): void {
     const slot = this.overlay.querySelector<HTMLElement>('.dungeon-entry-forecast');
-    const dungeon = this.dungeon;
-    if (!slot || !dungeon) return;
+    if (!slot) return;
     if (view === null) {
       slot.dataset.state = 'none';
-      slot.innerHTML = '';
+      setHtml(slot, '');
       return;
     }
     if (view === 'loading') {
       slot.dataset.state = 'loading';
-      slot.innerHTML = `<div class="dungeon-entry-forecast-head">${renderForecastRing('loading', { kind: 'dungeon', compact: true })}`
+      setHtml(slot, `<div class="dungeon-entry-forecast-head">${renderForecastRing('loading', { kind: 'dungeon', compact: true })}`
         + '<div class="dungeon-entry-forecast-titles"><div class="dungeon-entry-forecast-headline">Estimating your chances…</div></div></div>'
-        + this.renderFloorStrip(dungeon, null, null);
+        + this.renderFloorStrip(dungeon, null, null));
       return;
     }
     const result = view.message.result!;
@@ -158,19 +255,19 @@ export class DungeonEntryPopup {
     const range = forecastRangeLine(result);
     const reasons = (result.reasons ?? []).slice(0, 3);
     slot.dataset.state = view.stale ? 'stale' : 'ready';
-    slot.innerHTML = `<div class="dungeon-entry-forecast-head">${renderForecastRing(result, { kind: 'dungeon', compact: true, stale: view.stale })}`
+    setHtml(slot, `<div class="dungeon-entry-forecast-head">${renderForecastRing(result, { kind: 'dungeon', compact: true, stale: view.stale })}`
       + '<div class="dungeon-entry-forecast-titles">'
       + `<div class="dungeon-entry-forecast-verdict" data-band="${verdict.band}">${verdict.label}</div>`
-      + `<div class="dungeon-entry-forecast-headline">${this.escape(forecastHeadline(result, 'dungeon'))}</div>`
+      + `<div class="dungeon-entry-forecast-headline">${escapeHtml(forecastHeadline(result, 'dungeon'))}</div>`
       + '</div></div>'
       + this.renderFloorStrip(dungeon, result, resume)
       + this.renderResume(dungeon, resume)
-      + (range ? `<div class="dungeon-entry-forecast-line">${this.escape(range)}</div>` : '')
+      + (range ? `<div class="dungeon-entry-forecast-line">${escapeHtml(range)}</div>` : '')
       + (result.firstTryPct !== undefined ? `<div class="dungeon-entry-forecast-line">Boss beaten on the first try: ${formatPct(result.firstTryPct)}</div>` : '')
       + (reasons.length > 0
-        ? `<ul class="forecast-reasons">${reasons.map(r => `<li class="forecast-reason" data-tone="${r.tone}" data-code="${this.escape(r.code)}">${this.escape(r.text)}</li>`).join('')}</ul>`
+        ? `<ul class="forecast-reasons">${reasons.map(r => `<li class="forecast-reason" data-tone="${r.tone}" data-code="${escapeHtml(r.code)}">${escapeHtml(r.text)}</li>`).join('')}</ul>`
         : '')
-      + `<div class="forecast-foot">${forecastSampleLine(result, 'dungeon')}${view.stale ? ' · updating…' : ''}</div>`;
+      + `<div class="forecast-foot">${forecastSampleLine(result, 'dungeon')}${view.stale ? ' · updating…' : ''}</div>`);
   }
 
   private renderFloorStrip(dungeon: DungeonDefinition, result: ForecastResult | null, resume: DungeonResumePoint | null): string {
@@ -195,7 +292,7 @@ export class DungeonEntryPopup {
       const winText = info ? `: wins ${formatPct(info.winPct)}` : '';
       const glyph = boss ? '♛' : String(index + 1);
       const pct = info && !passed ? `<span class="dungeon-floor-pct">${formatPct(info.winPct)}</span>` : '';
-      return `<li class="dungeon-floor-pip" ${attrs} aria-label="${this.escape(labelParts.join(', ') + winText)}">`
+      return `<li class="dungeon-floor-pip" ${attrs} aria-label="${escapeHtml(labelParts.join(', ') + winText)}">`
         + `<span class="dungeon-floor-glyph" aria-hidden="true">${glyph}</span>${pct}`
         + (isResume ? '<span class="dungeon-floor-flag" aria-hidden="true">🚩</span>' : '')
         + '</li>';
@@ -210,11 +307,21 @@ export class DungeonEntryPopup {
     const hasBudget = floor && floorCheckpoints(floor).length > 0;
     const left = hasBudget ? Math.max(0, floorMaxWipes(floor) - resume.wipes) : null;
     const retries = left === null ? '' : ` · ${left === 0 ? 'no retries left' : `${left} ${left === 1 ? 'retry' : 'retries'} left`}`;
-    return `<div class="dungeon-entry-resume"><span aria-hidden="true">🚩</span> ${this.escape(marker)}${retries}</div>`;
+    return `<div class="dungeon-entry-resume"><span aria-hidden="true">🚩</span> ${escapeHtml(marker)}${retries}</div>`;
   }
 
-  /** Render a bullet list of entry requirements, or nothing if unrestricted. */
-  private renderRequirements(dungeon: DungeonDefinition): string {
+  private renderStatus(state: ServerStateMessage | null, reason: string | null): string {
+    const lines: string[] = [];
+    if ((state?.social?.party?.henchmen?.length ?? 0) > 0) {
+      lines.push(`<div class="dungeon-entry-info">${HENCHMEN_WAIT_MESSAGE}</div>`);
+    }
+    if (reason) {
+      lines.push(`<div class="dungeon-entry-blocked" id="${BLOCKED_LINE_ID}">⚠ ${escapeHtml(reason)}</div>`);
+    }
+    return lines.join('');
+  }
+
+  private renderRequirements(dungeon: DungeonDefinition, state: ServerStateMessage | null): string {
     const req = dungeon.entryRequirements;
     if (!req) return '';
     const lines: string[] = [];
@@ -239,9 +346,9 @@ export class DungeonEntryPopup {
       lines.push(`Classes: ${req.requiredClasses.join(', ')}`);
     }
 
-    if (req.requiredItemId) {
-      const itemName = this.gameClient.lastState?.itemDefinitions?.[req.requiredItemId]?.name ?? 'a key item';
-      lines.push(req.consumeRequiredItem ? `Consumes ${this.escape(itemName)} (per member)` : `Requires ${this.escape(itemName)} (per member)`);
+    const itemName = dungeonItemName(dungeon, state);
+    if (itemName) {
+      lines.push(req.consumeRequiredItem ? `Consumes ${escapeHtml(itemName)} (per member)` : `Requires ${escapeHtml(itemName)} (per member)`);
     }
 
     if (lines.length === 0) return '';
@@ -251,9 +358,5 @@ export class DungeonEntryPopup {
         ${lines.map(l => `<div class="dungeon-entry-req">• ${l}</div>`).join('')}
       </div>
     `;
-  }
-
-  private escape(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 }

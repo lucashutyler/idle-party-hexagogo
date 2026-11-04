@@ -171,6 +171,9 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Multiple regions/zones with border transitions
 - [x] Multi-map / interior maps (rooms link to a room on another map via a transition; one HexGrid per map; admin authoring) — overworld map-select still to come (#168)
 - [x] Room entry requirements (gate a room or a map transition on an equipped item, a minimum level, and/or completed quests — every party member must qualify)
+- [x] Room actions on explored rooms (map markers for NPCs, shops, dungeon entrances and travel points; hover tooltip lists them plus a player count; NPCs marked with a green `!` for a new quest or a gold `?` for one ready to hand in)
+- [x] Room status panel for the current room (desktop card / mobile chips that talk, shop, enter or travel directly)
+- [x] Stop here — tap your own room mid-route to stop (or walk back if you've already left it)
 
 ### Combat
 Real-time auto-battle on a timeline: every combatant acts on its own timer (about once a second), skills are cards with cooldowns and cast times in seconds, and the server streams the fight to clients as events plus periodic snapshots. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.
@@ -201,7 +204,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Inventory tab (merged Char + Items — hero card, equipped gear, skill loadout, stat card, inventory grid)
 - [x] Class system (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong together)
 - [x] Damage types (physical/magical/holy; Knight Guard rates against physical, Priest Bless against magical and holy)
-- [x] Henchmen (hireable NPCs for solo players)
+- [x] Henchmen (hireable NPCs for solo players; they wait at a dungeon's entrance while the party runs it)
 - [x] Party formation and management (always in a party, join, leave, kick, 3x3 grid, max 5 members)
 - [x] Party roles (owner > leader > member, promote/demote, transfer ownership)
 - [x] Party movement (owner/leader controls unified group movement)
@@ -254,12 +257,16 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Quest types (kill, collect, visit)
 - [x] Quest rewards (XP, gold, item)
 - [x] Quest scope (solo party only OR party-shared), prerequisites, weekly-repeatable
+- [x] Quest log (Settings → Quest Log: who has new quests for you, active quests with ready-to-turn-in first and where to turn them in; completed quests behind a toggle)
+- [x] Quest discovery (green `!` on NPCs with a quest you can take, quest destinations outlined on the map, objectives name rooms instead of coordinates)
+- [x] Quest popup feedback (Accept / Turn In show progress and the reason for any refusal)
 - [ ] Quest chains / storylines
 
 ### Dungeons
 - [x] Dungeon data model + admin CRUD (floors, grid shape, encounter tables, entry requirements, rewards)
 - [x] Dungeon instance runtime (one private instance per party, floor progression, exit/bail-out, eject-on-wipe, offline-persistent)
 - [x] Entry requirements enforcement (level, required/consumable item, classes, party size — clear rejection messages)
+- [x] Entry preview (the Enter button is disabled with the reason shown when the party can't go in; refusals are always shown)
 - [x] Dungeon-specific loot (per-floor bonus rewards + one-time first-clear rewards per player)
 - [ ] Non-3×3 grid shapes (arbitrary combat rectangles)
 - [x] Boss checkpoints (regroup at the last checkpoint up to a wipe budget, checkpoint rewards, resume after leaving for 7 days) + a seed boss (Goblin Chieftain) and a dev raid (The Sunken Throne)
@@ -282,7 +289,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 ### UI
 - [x] Login screen with email input + username choice screen
 - [x] Map tab with hex rendering (three.js WebGL canvas + HTML overlay, lazy-created on first Map visit)
-- [x] Other players visible on map (per-tile flags within same zone, +N badge for other-room players on your tile)
+- [x] Other players visible on map (per-tile flags within same zone, readable +N/×N counts that scale with zoom, see-through party marker)
 - [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
 - [x] Floating bottom navigation: Map, Char (merged Char+Items), Craft, raised centre Battle button, Social (submenu), Settings, Chat (overlay); emoji icon fallbacks
 - [x] Top HUD (class avatar + level, name, gold, notification bell)
@@ -294,13 +301,15 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Server unavailable / offline screen with retry
 - [x] Desktop font scaling (token font scale, larger on desktop via media query)
 - [x] Mobile zoom controls (+/- buttons on map) + 2-finger pinch zoom
-- [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, shop/talk/dungeon affordances), remote discovered (small popup with Go button), undiscovered (minimal)
+- [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, one button per room action, Stop here while travelling), remote discovered (small popup listing the room's actions, Go button), undiscovered (minimal)
 - [x] Dungeon entry popup + in-combat dungeon header (floor / BOSS badge + Leave); entry popup shows the run forecast, per-floor strip and resume point
 - [x] Boss fight UI (pooled boss HP bar with checkpoint flags, retry pips, enrage timer; banner queue with a screen-reader live region; level badges and tier frames on cards)
 - [x] Forecast chips (rooms, dungeons, live elite/boss fights) with verdict, likely range and reasons
 - [x] Global chat pop-out (floating/draggable/resizable on desktop, docked bottom-sheet on mobile)
 - [x] Persistent XP bar above the bottom nav, visible on every screen
 - [x] ModalStack click-order z-index across all overlays
+- [x] Stable rendering — state pushes never swallow a click mid-press (`deferWhilePressed` / `setHtml`), and item art remembers what loaded so it never flickers
+- [x] Shop usability (can't-use badge on gear your class can't equip, can't-afford prices, the inventory's equip comparison in the shop)
 
 ### World Manager
 - [x] Separate admin client (World Manager dashboard at /admin)

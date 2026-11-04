@@ -29,6 +29,10 @@ let AssetStore: AssetStoreCtor;
 let validateDraft: typeof import('../src/mcp/tools/validateTools.js').validateDraft;
 let getOverview: typeof import('../src/mcp/tools/readTools.js').getOverview;
 let getContentSchema: typeof import('../src/mcp/tools/readTools.js').getContentSchema;
+let getWorld: typeof import('../src/mcp/tools/readTools.js').getWorld;
+let getSkillSlots: typeof import('../src/mcp/tools/readTools.js').getSkillSlots;
+let upsertContent: typeof import('../src/mcp/tools/writeTools.js').upsertContent;
+let upsertTiles: typeof import('../src/mcp/tools/writeTools.js').upsertTiles;
 let createDraft: typeof import('../src/mcp/tools/notesTools.js').createDraft;
 let saveNote: typeof import('../src/mcp/tools/notesTools.js').saveNote;
 
@@ -50,7 +54,8 @@ beforeAll(async () => {
   ({ DraftEditor } = await import('../src/game/DraftEditor.js'));
   ({ AssetStore } = await import('../src/game/AssetStore.js'));
   ({ validateDraft } = await import('../src/mcp/tools/validateTools.js'));
-  ({ getOverview, getContentSchema } = await import('../src/mcp/tools/readTools.js'));
+  ({ getOverview, getContentSchema, getSkillSlots, getWorld } = await import('../src/mcp/tools/readTools.js'));
+  ({ upsertContent, upsertTiles } = await import('../src/mcp/tools/writeTools.js'));
   ({ createDraft, saveNote } = await import('../src/mcp/tools/notesTools.js'));
 });
 
@@ -364,6 +369,132 @@ describe('getOverview', () => {
     expect(result.counts.designNotes).toBe(Object.keys(contentStore.getAllDesignNotes()).length);
     expect(result.versions.map(v => v.id)).toContain(version.id);
     expect(result.activeVersionId).toBe(version.id);
+    expect(result.restApi.fullLiveExport).toBe('GET /api/admin/content');
+  });
+});
+
+describe('getWorld', () => {
+  it('returns every tile as objects by default', async () => {
+    const { deps, contentStore } = await setupDeps();
+    const result = await getWorld(deps, {});
+    if ('error' in result || !('tiles' in result)) throw new Error('expected tiles');
+    expect(result.tiles).toEqual(contentStore.getWorld().tiles);
+    expect(result.tileCount).toBe(contentStore.getWorld().tiles.length);
+  });
+
+  it('filters by zone and inclusive area bounds', async () => {
+    const { deps, contentStore } = await setupDeps();
+    const sample = contentStore.getWorld().tiles[0];
+    const result = await getWorld(deps, { zone: sample.zone, area: { colMin: sample.col, colMax: sample.col, rowMin: sample.row, rowMax: sample.row } });
+    if ('error' in result || !('tiles' in result)) throw new Error('expected tiles');
+    expect(result.tiles).toEqual([sample]);
+  });
+
+  it('projects objects down to the requested fields', async () => {
+    const { deps } = await setupDeps();
+    const result = await getWorld(deps, { fields: ['col', 'row'] });
+    if ('error' in result || !('tiles' in result)) throw new Error('expected tiles');
+    for (const tile of result.tiles) expect(Object.keys(tile).sort()).toEqual(['col', 'row']);
+  });
+
+  it("table format lists each key once and uses null for absent fields", async () => {
+    const { deps, contentStore } = await setupDeps();
+    const tiles = contentStore.getWorld().tiles;
+    const result = await getWorld(deps, { format: 'table', fields: ['col', 'row', 'shopId'] });
+    if ('error' in result || !('rows' in result)) throw new Error('expected rows');
+    expect(result.columns).toEqual(['col', 'row', 'shopId']);
+    expect(result.rows).toEqual(tiles.map(t => [t.col, t.row, t.shopId ?? null]));
+  });
+
+  it('table format without fields uses only columns some tile actually has', async () => {
+    const { deps, contentStore } = await setupDeps();
+    const result = await getWorld(deps, { format: 'table' });
+    if ('error' in result || !('rows' in result)) throw new Error('expected rows');
+    expect(result.columns.slice(0, 4)).toEqual(['id', 'mapId', 'col', 'row']);
+    expect(result.rows).toHaveLength(contentStore.getWorld().tiles.length);
+    for (const column of result.columns) {
+      expect(result.rows.some(row => row[result.columns.indexOf(column)] !== null)).toBe(true);
+    }
+  });
+});
+
+describe('getSkillSlots', () => {
+  it('returns live schedules when no versionId is given', async () => {
+    const { deps, contentStore } = await setupDeps();
+    const result = await getSkillSlots(deps, {});
+    if ('error' in result) throw new Error(result.error);
+    expect(result.schedules).toEqual(contentStore.getAllSkillSlotSchedules());
+  });
+
+  it('returns the draft schedule after set_skill_slots writes it', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('slots', null, contentStore.toSnapshot());
+    const slots = [{ type: 'passive' as const, unlocksAtLevel: 1 }, { type: 'active' as const, unlocksAtLevel: 3 }];
+    const write = await deps.draftEditor.setSkillSlotSchedule(version.id, 'Knight', slots);
+    expect(write.success).toBe(true);
+
+    const result = await getSkillSlots(deps, { versionId: version.id });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.schedules.Knight).toEqual(slots);
+  });
+
+  it('errors for a version that does not exist', async () => {
+    const { deps } = await setupDeps();
+    const result = await getSkillSlots(deps, { versionId: 'nope' });
+    expect('error' in result).toBe(true);
+  });
+});
+
+describe('upsertTiles (writeTools)', () => {
+  const room = { col: 40, row: 40, type: TileType.Plains, zone: 'hatchetmill', name: 'Test Room' };
+
+  it('returns only the touched rooms with their ids, not the whole world', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('tiles', null, contentStore.toSnapshot());
+    const result = await upsertTiles(deps, version.id, [room]);
+    if ('error' in result) throw new Error(result.error);
+    expect('world' in result).toBe(false);
+    expect('clearedFields' in result).toBe(false);
+    expect(result.rooms).toHaveLength(1);
+    expect(result.rooms[0]).toMatchObject({ mapId: DEFAULT_MAP_ID, col: 40, row: 40 });
+    expect(typeof result.rooms[0].id).toBe('string');
+  });
+
+  it('reports fields an overwrite dropped, with their old values', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('tiles', null, contentStore.toSnapshot());
+    const gate = { minLevel: 5 };
+    await upsertTiles(deps, version.id, [{ ...room, entryRequirements: gate, requiredItemId: 'key' }]);
+
+    const result = await upsertTiles(deps, version.id, [{ ...room, name: 'Renamed', requiredItemId: 'key' }]);
+    if ('error' in result) throw new Error(result.error);
+    if (!('clearedFields' in result)) throw new Error('expected clearedFields');
+    expect(result.clearedFields).toEqual([
+      { mapId: DEFAULT_MAP_ID, col: 40, row: 40, cleared: { entryRequirements: gate } },
+    ]);
+  });
+
+  it('reports nothing when the overwrite keeps every field', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('tiles', null, contentStore.toSnapshot());
+    await upsertTiles(deps, version.id, [{ ...room, requiredItemId: 'key' }]);
+    const result = await upsertTiles(deps, version.id, [{ ...room, name: 'Renamed', requiredItemId: 'key' }]);
+    if ('error' in result) throw new Error(result.error);
+    expect('clearedFields' in result).toBe(false);
+  });
+});
+
+describe('content write results (writeTools)', () => {
+  it('upsert_content returns the written ids and a count, not every entry of the type', async () => {
+    const { deps, contentStore, versionStore } = await setupDeps();
+    const version = await versionStore.createDraft('items', null, contentStore.toSnapshot());
+    const result = await upsertContent(deps, 'items', version.id, makeItem('probe_item') as unknown as Record<string, unknown>);
+    expect(result).toEqual({
+      success: true,
+      type: 'items',
+      upserted: ['probe_item'],
+      totalOfType: Object.keys(contentStore.getAllItems()).length + 1,
+    });
   });
 });
 
@@ -419,6 +550,7 @@ describe('saveNote (notesTools)', () => {
     expect(result.author).toBe('test-label');
     expect(result.title).toBe('Starter island plan');
     expect(result.createdAt).toBe(result.updatedAt);
+    expect('body' in result).toBe(false);
   });
 
   it('preserves createdAt and updates updatedAt when editing an existing note', async () => {

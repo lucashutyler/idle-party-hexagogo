@@ -1,5 +1,62 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.10.09.1',
+    notes: [
+      'Fixed buttons sometimes ignoring your tap or click during a fight. This was most noticeable on Accept and Turn In for quests, and also affected shops, notifications, crafting, trades, chat and the combat view.',
+      'Accepting or turning in a quest now shows that it is working, and tells you why if it can\'t go through or if you have lost your connection.',
+      'Solo quests now ask you to leave your party first, instead of showing an Accept button that did nothing.',
+      'If your party moves on while you are talking to someone, the window now says they are no longer nearby.',
+      'People with a new quest for you are marked with a green "!" on the map and in the room panel. A gold "?" still means a quest is ready to hand in.',
+      'Rooms you have explored that your quests send you to are outlined on the map. Hover over one to see which quest sends you there.',
+      'The Quest Log now lists who has new quests for you and where to find them.',
+      'Quests now name the room and area to visit instead of showing map numbers.',
+      'Bigger, easier-to-read text in quest windows and the Quest Log, and the quest window now scrolls when someone has a lot to offer.',
+      'Messages explaining why you can\'t move or enter somewhere now stay up longer, and you can tap them away.',
+      'Henchmen no longer stop you from entering a dungeon. They wait at the entrance, take no share of the dungeon\'s rewards, and rejoin you when you come out.',
+      'Hiring or dismissing a henchman while your party is in a dungeon no longer restarts the fight.',
+      'The dungeon Enter button is now clearly greyed out when your party can\'t go in, with the reason shown just above it. It turns back on as soon as the problem is fixed.',
+      'If the dungeon turns you away, the dungeon window now tells you why instead of just closing.',
+      'Shops mark gear your class can\'t equip with a small red badge. You can still buy it, and the item details say who can use it.',
+      'Tapping an item in a shop now compares it with what you have equipped, just like your inventory.',
+      'Two-handed weapons now show how they compare with the weapons they would replace, in shops and in your inventory.',
+      'Shops show prices you can\'t afford in red, and no longer say you bought something when the purchase didn\'t go through.',
+      'Item pictures no longer flicker, jump around or flash letters while loading, and hovering over an item no longer makes it grow or adds scrollbars.',
+      'The shop list no longer jumps back to the top during fights, and chat no longer jumps to the newest message when nothing new has arrived.',
+    ],
+  },
+  {
+    version: '2026.10.08.1',
+    notes: [
+      'Explored rooms now show what you can do there. Small icons on the map mark people to talk to, shops, dungeon entrances and passages to other places.',
+      'Hover over an explored room to see the people, shops, dungeons and passages there, and how many players are in it. Tapping a room you have explored lists them too.',
+      'A new room panel on the map shows what your current room offers. Tap an icon to talk, shop, enter a dungeon or travel without opening the room first.',
+      'People with a quest ready to hand in are marked on the map.',
+      'Your party marker no longer hides the room you are standing in, and the count of other players sharing your room is easier to read.',
+      'Tap your own room while traveling to stop there. If you have already moved on, your party heads back to it.',
+      'New Quest Log in Settings. It lists the quests you have taken on, puts the ones ready to hand in at the top, and tells you who to return to.',
+      'Completed quests are tucked away in the Quest Log until you choose to show them.',
+      'Weekly quests no longer show as available while they are still on cooldown.',
+      'Removed the "Quest hints" option, which did not do anything.',
+      'The Craft tab now scrolls, so you can reach every recipe.',
+    ],
+  },
+  {
+    version: '2026.09.30.3',
+    notes: [
+      'Your party can now hire more than one henchman, as long as each is someone different. They fill any seats your party has free.',
+      'Henchmen now take their share of a victory. Experience, gold and loot are split as if they were party members, but their share is lost, so friends are always the better company.',
+      'When your party has no room, the shop now asks which henchman should make way for the new one. Henchmen already with you show as "In party".',
+      'A henchman\'s own talents now count toward your party\'s experience bonus, so a bard you hire inspires the party just like a bard friend would.',
+    ],
+  },
+  {
+    version: '2026.09.30.2',
+    notes: [
+      'Crafting is now open from level 1. Head to the Craft tab as soon as you have the materials, instead of waiting for level 20.',
+      'Some recipes may still ask for a minimum level of their own, and the Craft tab shows when you are below it.',
+    ],
+  },
+  {
     version: '2026.09.27.1',
     notes: [
       'Combat is now real-time! Everyone in a fight — your party and the enemies — acts on their own timer instead of waiting for turns, so battles move faster and more happens at once.',

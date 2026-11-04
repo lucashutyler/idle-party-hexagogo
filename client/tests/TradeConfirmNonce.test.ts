@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientSocialState, ServerErrorCode, ServerStateMessage, TradeState } from '@idle-party-rpg/shared';
 import { SocialScreen } from '../src/screens/SocialScreen';
 import type { GameClient } from '../src/network/GameClient';
@@ -264,5 +264,76 @@ describe('trade confirm nonce (client)', () => {
     t.confirmBtn()!.click();
     // The frozen snapshot held nonce-1; the modal must use the live nonce-2.
     expect(t.sendConfirmTrade).toHaveBeenCalledWith('trade_1', 'nonce-2');
+  });
+});
+
+function press(target: Element): void {
+  target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+}
+
+describe('trade modal during a press', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    document.dispatchEvent(new PointerEvent('pointercancel'));
+    vi.useRealTimers();
+  });
+
+  it('holds a repaint while Confirm is pressed, so the click confirms the offer on screen', () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.openExistingTrade('trade_1');
+    const btn = t.confirmBtn()!;
+
+    press(btn);
+    t.push(makeTrade({
+      nonce: 'nonce-2',
+      target: { username: 'bob', items: [{ itemId: 'pebble', quantity: 1 }] },
+    }));
+    expect(t.confirmBtn()).toBe(btn);
+    expect(t.modal()!.textContent).toContain('Legendary Blade');
+
+    btn.click();
+    expect(t.sendConfirmTrade).toHaveBeenCalledWith('trade_1', 'nonce-1');
+
+    vi.advanceTimersByTime(0);
+    expect(t.confirmBtn()).toBeNull();
+    expect(t.reviewBtn()).not.toBeNull();
+    expect(t.modal()!.textContent).toContain('Pebble');
+  });
+
+  it('is not repainted by the screen\'s own subscription while pressed', () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.onActivate();
+    t.screen.openExistingTrade('trade_1');
+    expect(t.listenerCount()).toBe(2);
+    const btn = t.confirmBtn()!;
+
+    press(btn);
+    t.push(makeTrade({ nonce: 'nonce-2' }));
+    expect(t.confirmBtn()).toBe(btn);
+
+    btn.click();
+    expect(t.sendConfirmTrade).toHaveBeenCalledWith('trade_1', 'nonce-1');
+    t.screen.onDeactivate();
+  });
+
+  it('keeps a stale-confirm notice when a state push lands during the same press', () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.openExistingTrade('trade_1');
+
+    press(t.modal()!);
+    t.pushError('This trade changed — review the updated offer before confirming', 'trade_nonce_mismatch');
+    t.push(makeTrade());
+    expect(t.modal()!.textContent).not.toContain('changed before your confirmation went through');
+
+    document.dispatchEvent(new PointerEvent('pointercancel'));
+    expect(t.modal()!.textContent).toContain('changed before your confirmation went through');
   });
 });

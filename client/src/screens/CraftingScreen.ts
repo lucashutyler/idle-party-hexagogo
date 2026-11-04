@@ -2,6 +2,7 @@ import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, RecipeDefinition, ItemDefinition, ClientCraftingState } from '@idle-party-rpg/shared';
 import { canQueueRecipe, MAX_CRAFT_QUEUE } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
+import { deferWhilePressed, setHtml } from '../ui/render';
 
 function fmtSeconds(seconds: number): string {
   if (seconds < 60) return `${Math.ceil(seconds)}s`;
@@ -16,6 +17,7 @@ function escapeHtml(s: string): string {
 
 export class CraftingScreen implements Screen {
   private container: HTMLElement;
+  private scroller: HTMLElement;
   private gameClient: GameClient;
   private isActive = false;
   private unsubscribe?: () => void;
@@ -32,12 +34,19 @@ export class CraftingScreen implements Screen {
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
+    this.scroller = document.createElement('div');
+    this.scroller.className = 'craft-screen';
+    this.container.replaceChildren(this.scroller);
+    this.scroller.addEventListener('click', (e) => this.onClick(e));
   }
 
   onActivate(): void {
     this.isActive = true;
-    this.unsubscribe = this.gameClient.subscribe(state => {
-      if (this.isActive) this.updateFromState(state);
+    this.unsubscribe = this.gameClient.subscribe(() => {
+      deferWhilePressed(this.scroller, () => {
+        const state = this.gameClient.lastState;
+        if (this.isActive && state) this.updateFromState(state);
+      });
     });
     const state = this.gameClient.lastState;
     if (state) this.updateFromState(state);
@@ -86,50 +95,39 @@ export class CraftingScreen implements Screen {
   }
 
   private render(): void {
+    if (setHtml(this.scroller, this.renderHtml())) this.updateProgressBar();
+  }
+
+  private onClick(e: Event): void {
+    const btn = (e.target as Element).closest<HTMLButtonElement>('button');
+    if (!btn || btn.disabled) return;
+    if (btn.matches('.craft-queue-btn')) {
+      const id = btn.dataset.recipeId;
+      if (id) this.gameClient.sendCraftQueue(id);
+      return;
+    }
+    if (btn.matches('.craft-cancel-btn')) {
+      const idx = Number(btn.dataset.index);
+      if (Number.isFinite(idx)) this.gameClient.sendCraftCancel(idx);
+    }
+  }
+
+  private renderHtml(): string {
     const c = this.lastState;
     if (!c) {
-      this.container.innerHTML = `<div class="craft-screen"><div class="craft-locked"><h3>No character</h3><p>Pick a class first.</p></div></div>`;
-      return;
+      return `<div class="craft-locked"><h3>No character</h3><p>Pick a class first.</p></div>`;
     }
-    if (!c.unlocked) {
-      this.container.innerHTML = `
-        <div class="craft-screen">
-          <div class="craft-locked">
-            <h3>Crafting locked</h3>
-            <p>Reach level ${c.unlockLevel} to begin crafting.</p>
-            <p class="craft-locked-level">Current Level: ${this.lastLevel}</p>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    this.container.innerHTML = `
-      <div class="craft-screen">
-        ${this.renderSkillHeader(c)}
-        <section class="craft-section">
-          <h3>Queue (${c.queue.jobs.length} / ${MAX_CRAFT_QUEUE})</h3>
-          ${this.renderQueue(c)}
-        </section>
-        <section class="craft-section">
-          <h3>Recipes</h3>
-          ${this.renderRecipes(c)}
-        </section>
-      </div>
+    return `
+      ${this.renderSkillHeader(c)}
+      <section class="craft-section">
+        <h3>Queue (${c.queue.jobs.length} / ${MAX_CRAFT_QUEUE})</h3>
+        ${this.renderQueue(c)}
+      </section>
+      <section class="craft-section">
+        <h3>Recipes</h3>
+        ${this.renderRecipes(c)}
+      </section>
     `;
-
-    this.container.querySelectorAll<HTMLButtonElement>('.craft-queue-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.recipeId;
-        if (id) this.gameClient.sendCraftQueue(id);
-      });
-    });
-    this.container.querySelectorAll<HTMLButtonElement>('.craft-cancel-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = Number(btn.dataset.index);
-        if (Number.isFinite(idx)) this.gameClient.sendCraftCancel(idx);
-      });
-    });
   }
 
   private renderSkillHeader(c: ClientCraftingState): string {
@@ -160,14 +158,10 @@ export class CraftingScreen implements Screen {
       const isActive = idx === 0 && c.activeProgress;
       let progressBlock = '';
       let statusText = '';
-      if (isActive && c.activeProgress) {
-        const ap = c.activeProgress;
-        const pct = ap.durationMs > 0 ? Math.min(100, (ap.elapsedMs / ap.durationMs) * 100) : 0;
-        const remaining = Math.max(0, ap.remainingMs / 1000);
-        statusText = `${fmtSeconds(remaining)} remaining`;
+      if (isActive) {
         progressBlock = `
           <div class="craft-progress">
-            <div class="craft-progress-fill" data-active="1" style="width:${pct}%"></div>
+            <div class="craft-progress-fill" data-active="1"></div>
           </div>
         `;
       } else if (recipe) {

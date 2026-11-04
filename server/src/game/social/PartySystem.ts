@@ -345,13 +345,17 @@ export class PartySystem {
     return true;
   }
 
-  /** Hire a henchman into the caller's party. Returns the hire or error string. */
+  /**
+   * Hire a henchman into the caller's party, optionally swapping out the hire
+   * `replaceInstanceId`. A party never holds two of the same henchman.
+   * Returns the hire or error string; on error the roster is untouched.
+   */
   hireHenchman(
     callerUsername: string,
     henchmanId: string,
     mapId: string,
     getPlayerPartyId: (u: string) => string | null,
-    replace = false,
+    replaceInstanceId?: string,
   ): HiredHenchman | string {
     const partyId = getPlayerPartyId(callerUsername);
     if (!partyId) return 'You are not in a party';
@@ -364,21 +368,23 @@ export class PartySystem {
       return 'Only owners and leaders can hire henchmen';
     }
 
+    const roster = party.henchmen ?? [];
+    let remaining = roster;
     let vacatedPosition: PartyGridPosition | null = null;
-    if ((party.henchmen?.length ?? 0) >= MAX_HENCHMEN_PER_PARTY) {
-      if (!replace) {
-        const noun = MAX_HENCHMEN_PER_PARTY === 1 ? 'henchman' : 'henchmen';
-        return `Your party can only have ${MAX_HENCHMEN_PER_PARTY} ${noun} at a time`;
-      }
-      // Drop the outgoing hire first so the body count never rises: a party of
-      // four players and a henchman is full, yet swapping it is still legal.
-      // The newcomer inherits its square, keeping the formation as arranged.
-      const outgoing = party.henchmen![0];
+    if (replaceInstanceId !== undefined) {
+      const outgoing = roster.find(h => h.instanceId === replaceInstanceId);
+      if (!outgoing) return 'That henchman is not in your party';
+      remaining = roster.filter(h => h !== outgoing);
       vacatedPosition = outgoing.gridPosition;
-      party.henchmen = party.henchmen!.slice(1);
     }
 
-    if (partyBodyCount(party) >= MAX_PARTY_SIZE) {
+    if (remaining.some(h => h.henchmanId === henchmanId)) {
+      return 'That henchman is already in your party';
+    }
+    if (remaining.length >= MAX_HENCHMEN_PER_PARTY) {
+      return `Your party can only have ${MAX_HENCHMEN_PER_PARTY} henchmen at a time`;
+    }
+    if (party.members.length + remaining.length >= MAX_PARTY_SIZE) {
       return `Party is full (max ${MAX_PARTY_SIZE}) — dismiss someone first`;
     }
 
@@ -391,7 +397,7 @@ export class PartySystem {
       gridPosition,
       mapId,
     };
-    party.henchmen = [...(party.henchmen ?? []), hired];
+    party.henchmen = [...remaining, hired];
     return hired;
   }
 
@@ -472,8 +478,12 @@ export class PartySystem {
     // party.henchmen aliases `kept` mid-loop so each re-placement counts as taken.
     const kept: HiredHenchman[] = [];
     party.henchmen = kept;
-    // Saves written before the cap existed may hold more than it allows.
-    for (const h of henchmen.slice(0, MAX_HENCHMEN_PER_PARTY)) {
+    // Older saves may hold duplicates or more hires than the cap allows.
+    const seen = new Set<string>();
+    for (const h of henchmen) {
+      if (kept.length >= MAX_HENCHMEN_PER_PARTY || partyBodyCount(party) >= MAX_PARTY_SIZE) break;
+      if (seen.has(h.henchmanId)) continue;
+      seen.add(h.henchmanId);
       if (!occupiedPositions(party).has(h.gridPosition)) {
         kept.push(h);
         continue;

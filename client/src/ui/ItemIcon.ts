@@ -1,4 +1,5 @@
 import type { ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
+import { artworkUrl, isAssetLoaded, renderTrackedImg } from './assets';
 
 /** CSS colour values (theme tokens) per rarity; usable in inline `color`/`background`. */
 export const RARITY_COLORS: Record<string, string> = {
@@ -65,19 +66,17 @@ export function getItemSetId(itemId: string, setDefs: Record<string, SetDefiniti
   return null;
 }
 
-function slotArtHtml(slot: string, imgClass: string, glyphClass: string): string {
+function renderSlotArt(slot: string, wrapClass: string, imgClass: string, glyphClass: string): string {
   const src = SLOT_ICONS[slot];
   if (!src) return '';
   const label = SLOT_LABELS[slot] ?? slot;
   const glyph = SLOT_GLYPHS[slot] ?? '';
-  return `<span class="${glyphClass}" aria-hidden="true">${glyph}</span>`
-    + `<img class="${imgClass}" src="${src}" alt="${escapeHtml(label)}" style="opacity:0"`
-    + ` onload="this.style.opacity='1';this.parentElement.classList.add('has-art')" onerror="this.remove()" />`;
+  const hasArt = isAssetLoaded(src) ? ' has-art' : '';
+  return `<span class="${wrapClass}${hasArt}"><span class="${glyphClass}" aria-hidden="true">${glyph}</span>${renderTrackedImg(src, { className: imgClass, alt: label })}</span>`;
 }
 
 function renderSlotDogear(slot: string): string {
-  const inner = slotArtHtml(slot, 'item-dogear-img', 'item-dogear-glyph');
-  return inner ? `<span class="item-dogear">${inner}</span>` : '';
+  return renderSlotArt(slot, 'item-dogear', 'item-dogear-img', 'item-dogear-glyph');
 }
 
 export interface ItemIconOptions {
@@ -91,6 +90,8 @@ export interface ItemIconOptions {
   extraClass?: string;
   /** data attributes as key-value pairs */
   dataAttrs?: Record<string, string>;
+  /** Hover text in place of the item name. */
+  tooltip?: string;
 }
 
 /**
@@ -114,11 +115,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   if (def.iconEmoji) {
     inner = `<span class="item-square-emoji">${escapeHtml(def.iconEmoji)}</span>`;
   } else {
-    // img starts at opacity:0 so a missing PNG never flashes the browser's
-    // broken-image glyph; the initials sibling acts as the visible placeholder
-    // until onload reveals the real artwork.
-    inner = `<img class="item-square-img" src="/item-artwork/${itemId}.png" style="opacity:0" onerror="this.style.display='none'" onload="this.style.opacity='1';this.nextElementSibling.style.display='none'" alt="">
-    <span class="item-square-initials">${initials}</span>`;
+    inner = `${renderTrackedImg(artworkUrl('item', itemId), { className: 'item-square-img' })}<span class="item-square-initials">${initials}</span>`;
   }
 
   if (options?.showSetIndicator && options.setDefs && getItemSetId(itemId, options.setDefs)) {
@@ -136,7 +133,9 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
     }
   }
 
-  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${escapeHtml(def.name)}" style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
+  const tooltip = escapeHtml(options?.tooltip ?? def.name);
+  const title = options?.tooltip ? ` title="${tooltip}"` : '';
+  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${tooltip}"${title} style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
 }
 
 /** Empty equipment slot showing a faded slot icon. */
@@ -147,7 +146,6 @@ export function renderEmptySlotIcon(slot: string, options?: { extraClass?: strin
     : '';
   const label = SLOT_LABELS[slot] ?? slot;
 
-  const art = slotArtHtml(slot, 'item-slot-ghost-img', 'item-slot-ghost-glyph');
-  const ghost = art ? `<span class="item-slot-ghost">${art}</span>` : '';
+  const ghost = renderSlotArt(slot, 'item-slot-ghost', 'item-slot-ghost-img', 'item-slot-ghost-glyph');
   return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}"${dataStr}>${ghost}</div>`;
 }

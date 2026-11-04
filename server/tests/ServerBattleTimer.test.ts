@@ -68,7 +68,7 @@ interface FakeParty {
 }
 
 function fakeParty(hasDestination = false): FakeParty {
-  return { hasDestination, enterBattle: vi.fn(), exitBattle: vi.fn(), moveToNextTile: vi.fn() };
+  return { hasDestination, enterBattle: vi.fn(), exitBattle: vi.fn(), moveToNextTile: vi.fn(() => true) };
 }
 
 interface RecordedFlush extends CombatFlush {

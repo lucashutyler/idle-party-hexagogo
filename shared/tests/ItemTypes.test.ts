@@ -9,6 +9,8 @@ import {
   MAX_STACK,
   SEED_ITEMS,
   getItemEffectText,
+  canClassEquipItem,
+  getItemsDisplacedByEquip,
 } from '../src/systems/ItemTypes';
 import type { EquipSlot, ItemDefinition } from '../src/systems/ItemTypes';
 
@@ -472,5 +474,53 @@ describe('getItemEffectText — granted skills', () => {
     expect(getItemEffectText(SEED_ITEMS.old_leather_boots)).toBe('No bonus');
     expect(getItemEffectText(SEED_ITEMS.mangy_pelt)).toBe('Material');
     expect(getItemEffectText(SEED_ITEMS.rusty_dagger)).toBe('+1-3 Attack');
+  });
+});
+
+describe('canClassEquipItem', () => {
+  it('lets every class equip an unrestricted item', () => {
+    expect(canClassEquipItem(testItems.sharp_sword, 'Mage')).toBe(true);
+    expect(canClassEquipItem({ ...testItems.sharp_sword, classRestriction: [] }, 'Mage')).toBe(true);
+  });
+
+  it('checks a restriction against the class', () => {
+    expect(canClassEquipItem(testItems.knight_sword, 'Knight')).toBe(true);
+    expect(canClassEquipItem(testItems.knight_sword, 'Mage')).toBe(false);
+    expect(canClassEquipItem(testItems.hybrid_weapon, 'Archer')).toBe(true);
+    expect(canClassEquipItem(testItems.hybrid_weapon, 'Priest')).toBe(false);
+  });
+});
+
+describe('getItemsDisplacedByEquip', () => {
+  const empty = (): Record<string, string | null> => ({ mainhand: null, offhand: null, head: null, ring: null });
+
+  it('displaces nothing for an item with no slot or an empty slot', () => {
+    expect(getItemsDisplacedByEquip(SEED_ITEMS.mangy_pelt, { ...empty(), mainhand: 'sharp_sword' })).toEqual([]);
+    expect(getItemsDisplacedByEquip(testItems.sharp_sword, empty())).toEqual([]);
+  });
+
+  it('displaces the item in the same slot, but not another copy of itself', () => {
+    expect(getItemsDisplacedByEquip(testItems.knight_sword, { ...empty(), mainhand: 'sharp_sword' })).toEqual(['sharp_sword']);
+    expect(getItemsDisplacedByEquip(testItems.sharp_sword, { ...empty(), mainhand: 'sharp_sword' })).toEqual([]);
+  });
+
+  it('displaces both hand items for a two-handed weapon', () => {
+    const equip = { ...empty(), mainhand: 'sharp_sword', offhand: 'small_shield' };
+    expect(getItemsDisplacedByEquip(testItems.big_axe, equip)).toEqual(['sharp_sword', 'small_shield']);
+  });
+
+  it('displaces an equipped two-hander once, whichever hand the new item takes', () => {
+    const equip = { ...empty(), mainhand: 'big_axe', offhand: 'big_axe' };
+    expect(getItemsDisplacedByEquip(testItems.sharp_sword, equip)).toEqual(['big_axe']);
+    expect(getItemsDisplacedByEquip(testItems.small_shield, equip)).toEqual(['big_axe']);
+    expect(getItemsDisplacedByEquip({ ...testItems.big_axe, id: 'other_axe' }, equip)).toEqual(['big_axe']);
+  });
+
+  it('matches what equipItem actually returns to the inventory', () => {
+    const equip = { ...empty(), mainhand: 'sharp_sword', offhand: 'small_shield' };
+    const displaced = getItemsDisplacedByEquip(testItems.big_axe, equip);
+    const inv: Record<string, number> = { big_axe: 1 };
+    expect(equipItem(inv, equip, 'big_axe', testItems).success).toBe(true);
+    expect(Object.keys(inv).sort()).toEqual([...displaced].sort());
   });
 });

@@ -26,11 +26,12 @@ import { createAdminRoutes } from './admin/adminRoutes.js';
 import { createMcpRouter } from './mcp/McpEndpoint.js';
 import { TRADE_NONCE_MISMATCH } from './game/social/TradeSystem.js';
 import { AssetStore } from './game/AssetStore.js';
+import { mountAssetDirs } from './assetMounts.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
-import type { ClassName, ItemDefinition, RoomEntryFailure, ServerMoveBlockedMessage } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, getEquippedItemIds, setAppliesToClass, ASSET_KINDS, ASSET_KIND_INFO, isAutoRetreatPct } from '@idle-party-rpg/shared';
+import type { ClassName, ItemDefinition, RoomEntryFailure, ServerErrorMessage, ServerMoveBlockedMessage } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, getEquippedItemIds, setAppliesToClass, isAutoRetreatPct, toShopSummary } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
 import { parseForecastRequestTarget } from './game/ForecastService.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
@@ -51,6 +52,14 @@ function toMoveBlockedMessage(failure: RoomEntryFailure): ServerMoveBlockedMessa
     ...(failure.questId !== undefined ? { questId: failure.questId, questName: failure.questName } : {}),
     ...(failure.minLevel !== undefined ? { minLevel: failure.minLevel } : {}),
   };
+}
+
+function questRefusal(message: string, questId: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'quest_refused', questId };
+}
+
+function dungeonEntryRefusal(message: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'dungeon_entry_refused' };
 }
 
 const app = express();
@@ -155,7 +164,10 @@ app.get('/api/world', requireAuth, (req, res) => {
     return;
   }
   const worldData = session.getWorldData();
-  res.json({ ...worldData, tileTypes: gameLoop.contentStore.getAllTileTypes() });
+  const shops = Object.fromEntries(
+    Object.values(gameLoop.contentStore.getAllShops()).map(shop => [shop.id, toShopSummary(shop)]),
+  );
+  res.json({ ...worldData, tileTypes: gameLoop.contentStore.getAllTileTypes(), shops });
 });
 
 // NPC definitions (full catalog — small payload, sent once at login)
@@ -215,12 +227,7 @@ app.get('/health', (_req, res) => {
 });
 
 // --- Static files (drop PNGs into the matching data/<dir>/ to serve real art) ---
-// Mounts are derived from the shared asset registry so the served kinds can't
-// drift from the uploadable ones — adding a kind is one row in ASSET_KIND_INFO.
-for (const kind of ASSET_KINDS) {
-  const info = ASSET_KIND_INFO[kind];
-  app.use(info.mount, express.static(path.resolve(info.dir)));
-}
+mountAssetDirs(app);
 
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.resolve(__dirname, '../../client/dist');
@@ -394,32 +401,8 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'enter_dungeon' && typeof msg.col === 'number' && typeof msg.row === 'number' && typeof msg.dungeonId === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
-          return;
-        }
-
-        const partyId = session.getPartyId();
-        if (!partyId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No party' }));
-          return;
-        }
-
-        // Only owners and leaders can take the party into a dungeon.
-        const party = playerManager.parties.getParty(partyId);
-        if (party) {
-          const member = party.members.find(m => m.username === username);
-          if (!member || !canMove(member.role)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can enter a dungeon' }));
-            return;
-          }
-        }
-
         const error = playerManager.handleEnterDungeon(username, msg.col, msg.row, msg.dungeonId);
-        if (error) {
-          ws.send(JSON.stringify({ type: 'error', message: error }));
-        }
+        if (error) ws.send(JSON.stringify(dungeonEntryRefusal(error)));
         return;
       }
 
@@ -748,13 +731,13 @@ wss.on('connection', (ws) => {
       if (msg.type === 'accept_quest' && typeof msg.questId === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          ws.send(JSON.stringify(questRefusal('No session', msg.questId)));
           return;
         }
         const partySize = playerManager.getPartySize(username);
         const result = session.handleAcceptQuest(msg.questId, partySize);
         if (!result.success) {
-          ws.send(JSON.stringify({ type: 'error', message: result.error ?? 'Cannot accept quest' }));
+          ws.send(JSON.stringify(questRefusal(result.error ?? 'Cannot accept quest', msg.questId)));
           return;
         }
         playerManager.sendStateToPlayer(username);
@@ -764,12 +747,12 @@ wss.on('connection', (ws) => {
       if (msg.type === 'turn_in_quest' && typeof msg.questId === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          ws.send(JSON.stringify(questRefusal('No session', msg.questId)));
           return;
         }
         const result = session.handleTurnInQuest(msg.questId);
         if (!result.success) {
-          ws.send(JSON.stringify({ type: 'error', message: result.error ?? 'Cannot turn in quest' }));
+          ws.send(JSON.stringify(questRefusal(result.error ?? 'Cannot turn in quest', msg.questId)));
           return;
         }
         playerManager.sendStateToPlayer(username);
@@ -1455,19 +1438,16 @@ wss.on('connection', (ws) => {
           return;
         }
 
+        const replaceInstanceId = typeof msg.replaceInstanceId === 'string' ? msg.replaceInstanceId : undefined;
         const partyIdForHire = session.getPartyId();
-        const outgoing = partyIdForHire ? playerManager.parties.getHenchmen(partyIdForHire)[0] : undefined;
+        const outgoing = partyIdForHire && replaceInstanceId
+          ? playerManager.parties.getHenchmen(partyIdForHire).find(h => h.instanceId === replaceInstanceId)
+          : undefined;
         const outgoingName = outgoing
           ? gameLoop.contentStore.getHenchman(outgoing.henchmanId)?.name
           : undefined;
 
-        const result = playerManager.parties.hireHenchman(
-          username,
-          msg.henchmanId,
-          session.getMapId(),
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-          msg.replace === true,
-        );
+        const result = playerManager.hireHenchman(username, msg.henchmanId, session.getMapId(), replaceInstanceId);
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
@@ -1475,24 +1455,20 @@ wss.on('connection', (ws) => {
 
         const partyId = session.getPartyId();
         if (partyId) {
-          playerManager.partyBattles.restartBattle(partyId);
           const party = playerManager.parties.getParty(partyId);
           for (const m of party?.members ?? []) {
             const s = playerManager.getSessionByUsername(m.username);
             if (outgoingName) s?.addLogEntry(`${outgoingName} leaves the party.`, 'move');
             s?.addLogEntry(`${def.name} joins the party.`, 'move');
-            playerManager.sendStateToPlayer(m.username);
           }
+          playerManager.partyBattles.henchmenChanged(partyId, [result]);
+          for (const m of party?.members ?? []) playerManager.sendStateToPlayer(m.username);
         }
         return;
       }
 
       if (msg.type === 'dismiss_henchman' && typeof msg.instanceId === 'string') {
-        const result = playerManager.parties.dismissHenchman(
-          username,
-          msg.instanceId,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-        );
+        const result = playerManager.dismissHenchman(username, msg.instanceId);
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
@@ -1503,12 +1479,12 @@ wss.on('connection', (ws) => {
         const session = playerManager.getSessionByUsername(username);
         const partyId = session?.getPartyId();
         if (partyId) {
-          playerManager.partyBattles.restartBattle(partyId);
           const party = playerManager.parties.getParty(partyId);
           for (const m of party?.members ?? []) {
             playerManager.getSessionByUsername(m.username)?.addLogEntry(`${name} leaves the party.`, 'move');
-            playerManager.sendStateToPlayer(m.username);
           }
+          playerManager.partyBattles.henchmenChanged(partyId);
+          for (const m of party?.members ?? []) playerManager.sendStateToPlayer(m.username);
         }
         return;
       }

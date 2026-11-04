@@ -146,19 +146,95 @@ export interface AssetImgOpts {
 }
 
 /**
- * `<img>` HTML that loads the real artwork and swaps to generated art on error. Starts at
- * opacity:0 so a 404 never flashes the broken-image glyph; callers size the slot via CSS.
+ * `<img>` for the real artwork, falling back to generated art, then to the slot's background.
+ * Outcomes are remembered per URL, so a re-render skips straight to whatever loaded last time.
  */
 export function renderAssetImg(kind: AssetKind, id: string, opts?: AssetImgOpts): string {
-  const real = artworkUrl(kind, id);
   const label = opts?.label ?? id;
-  const fallback = placeholderUrl(label, { w: opts?.width, h: opts?.height, glyph: opts?.glyph });
-  const cls = opts?.className ? ` class="${opts.className}"` : '';
-  const inlineStyle = `opacity:0;${opts?.style ?? ''}`;
-  const alt = opts?.alt ?? label;
-  const onerror = `if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallback}';}else{this.style.display='none';}`;
-  const onload = `this.style.opacity='1'`;
-  return `<img${cls} style="${inlineStyle}" src="${real}" alt="${escapeAttr(alt)}" onload="${onload}" onerror="${onerror}" loading="lazy" decoding="async" />`;
+  return renderTrackedImg(artworkUrl(kind, id), {
+    className: opts?.className,
+    style: opts?.style,
+    alt: opts?.alt ?? label,
+    fallback: placeholderUrl(label, { w: opts?.width, h: opts?.height, glyph: opts?.glyph }),
+    lazy: true,
+  });
+}
+
+export interface TrackedImgOpts {
+  className?: string;
+  style?: string;
+  alt?: string;
+  /** Tried once when `src` fails. */
+  fallback?: string;
+  lazy?: boolean;
+}
+
+const missingUrls = new Set<string>();
+const loadedUrls = new Set<string>();
+let tracking = false;
+
+/**
+ * `<img>` that starts hidden and reveals on load (`.asset-loaded`, plus `.has-art` on its parent), or hides on failure (`.asset-failed`).
+ * Returns '' when every source is already known to be missing, so callers' own placeholders show alone.
+ */
+export function renderTrackedImg(src: string, opts: TrackedImgOpts = {}): string {
+  trackAssetImages();
+  const fallback = opts.fallback && !missingUrls.has(opts.fallback) ? opts.fallback : '';
+  const url = missingUrls.has(src) ? fallback : src;
+  if (!url) return '';
+  const loaded = loadedUrls.has(url);
+  const cls = ['asset-img', loaded ? 'asset-loaded' : '', opts.className ?? ''].filter(Boolean).join(' ');
+  const fb = url === src && fallback ? ` data-fallback="${escapeAttr(fallback)}"` : '';
+  const style = opts.style ? ` style="${escapeAttr(opts.style)}"` : '';
+  const lazy = opts.lazy && !loaded ? ' loading="lazy" decoding="async"' : '';
+  return `<img class="${escapeAttr(cls)}" src="${escapeAttr(url)}"${fb}${style} alt="${escapeAttr(opts.alt ?? '')}"${lazy} />`;
+}
+
+export function isAssetLoaded(src: string): boolean {
+  return loadedUrls.has(src);
+}
+
+/** Forget art that failed to load, so newly uploaded art is tried again. */
+export function forgetMissingAssets(): void {
+  missingUrls.clear();
+}
+
+function trackAssetImages(): void {
+  if (tracking || typeof document === 'undefined') return;
+  tracking = true;
+  // Image load/error events don't bubble, but capture-phase listeners on document still see them.
+  document.addEventListener('load', onAssetLoad, true);
+  document.addEventListener('error', onAssetError, true);
+}
+
+function trackedImg(e: Event): HTMLImageElement | null {
+  const t = e.target;
+  return t instanceof HTMLImageElement && t.classList.contains('asset-img') ? t : null;
+}
+
+function onAssetLoad(e: Event): void {
+  const img = trackedImg(e);
+  if (!img) return;
+  loadedUrls.add(img.getAttribute('src') ?? '');
+  img.classList.add('asset-loaded');
+  img.parentElement?.classList.add('has-art');
+}
+
+function onAssetError(e: Event): void {
+  const img = trackedImg(e);
+  if (!img) return;
+  const src = img.getAttribute('src') ?? '';
+  missingUrls.add(src);
+  loadedUrls.delete(src);
+  img.classList.remove('asset-loaded');
+  img.parentElement?.classList.remove('has-art');
+  const fallback = img.dataset.fallback;
+  if (fallback && !missingUrls.has(fallback)) {
+    delete img.dataset.fallback;
+    img.src = fallback;
+    return;
+  }
+  img.classList.add('asset-failed');
 }
 
 function escapeAttr(s: string): string {

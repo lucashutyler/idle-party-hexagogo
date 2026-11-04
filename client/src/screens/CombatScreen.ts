@@ -13,6 +13,7 @@ import {
   CLASS_ICONS,
   getSkillCardType,
   getSkillTrigger,
+  henchmanDisplayNames,
   RUN_AVAILABLE_MS,
   SKILL_CARD_TYPE_INFO,
   SKILL_TRIGGER_INFO,
@@ -20,6 +21,7 @@ import {
 import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
+import { deferWhilePressed, setHtml } from '../ui/render';
 import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, unitKey } from '../combat/CombatPlayback';
 import type { PlaybackUnit, UnitStatics } from '../combat/CombatPlayback';
 import { CombatFx } from '../combat/CombatFx';
@@ -97,6 +99,13 @@ function variantFor(dmgType: string | undefined): FloaterVariant {
   return 'physical';
 }
 
+interface MonsterPopupState {
+  overlay: HTMLElement;
+  key: string;
+  battleId: number | null;
+  lastKey: string;
+}
+
 export class CombatScreen implements Screen {
   private readonly container: HTMLElement;
   private readonly gameClient: GameClient;
@@ -140,6 +149,7 @@ export class CombatScreen implements Screen {
   private cards = new Map<string, UnitCard>();
   private renderedBattleId: number | null = null;
   private renderedVersion = -1;
+  private syncedUnits = new Map<string, { unit: PlaybackUnit; st: UnitStatics }>();
   private centres = new Map<string, FxPoint>();
   private centresDirty = true;
   private axis: Axis = 'y';
@@ -154,7 +164,7 @@ export class CombatScreen implements Screen {
   private runHintTimer?: ReturnType<typeof setTimeout>;
   private snapping = false;
   private syncingShown = false;
-  private monsterPopup: { overlay: HTMLElement; key: string; battleId: number | null; lastKey: string } | null = null;
+  private monsterPopup: MonsterPopupState | null = null;
   private leaveConfirm: HTMLElement | null = null;
   private bossStructureKey = '';
   private bossHpShown = -1;
@@ -207,6 +217,7 @@ export class CombatScreen implements Screen {
     this.gameClient.sendCombatView(true);
     this.logView.setActive(true);
     this.lastJournalSeq = this.newestJournalSeq();
+    this.updateRoster();
     if (this.lastState) this.applyState(this.lastState);
     this.centresDirty = true;
     if (visible) this.startLoop();
@@ -365,7 +376,10 @@ export class CombatScreen implements Screen {
     this.lastState = state;
     this.playback.ingestState(state.battle.combat, performance.now());
     if (!this.isActive) return;
-    this.applyState(state);
+    this.updateRoster();
+    deferWhilePressed(this.container, () => {
+      if (this.isActive && this.lastState) this.applyState(this.lastState);
+    });
   }
 
   private handleCombat(msg: ServerCombatMessage, receivedAt: number): void {
@@ -379,7 +393,6 @@ export class CombatScreen implements Screen {
     this.updateHeader(state);
     this.refreshIdentities();
     this.refreshSkillLayout();
-    this.updateRoster();
     this.refreshBossBar();
     this.renderForecastChip();
   }
@@ -413,10 +426,18 @@ export class CombatScreen implements Screen {
       this.syncingShown = this.playback.syncing;
       this.stage.classList.toggle('syncing', this.syncingShown);
     }
-    if (this.playback.battleId !== this.renderedBattleId || this.playback.version !== this.renderedVersion) this.syncCards();
+    if (this.playback.battleId !== this.renderedBattleId || this.playback.version !== this.renderedVersion) {
+      this.rememberMonsterNames();
+      this.updateRoster();
+      deferWhilePressed(this.stage, () => {
+        if (this.isActive) this.syncCards();
+      });
+    }
     if (this.centresDirty) this.measureCentres();
     for (const ev of tick.events) this.playEvent(ev, now);
-    for (const unit of this.playback.units) this.cards.get(unit.key)?.update(unit, now);
+    if (this.playback.battleId === this.renderedBattleId) {
+      for (const unit of this.playback.units) this.cards.get(unit.key)?.update(unit, now);
+    }
     this.updateTelegraphs();
     this.updateBossHp();
 
@@ -462,12 +483,15 @@ export class CombatScreen implements Screen {
     this.fillEmptySlots(this.enemySide);
     this.renderedBattleId = this.playback.battleId;
     this.renderedVersion = this.playback.version;
+    this.syncedUnits.clear();
+    for (const unit of this.playback.units) {
+      const st = this.playback.statics(unit.key);
+      if (st) this.syncedUnits.set(unit.key, { unit, st });
+    }
     this.centresDirty = true;
     this.stage.classList.toggle('no-combat', this.playback.battleId === null);
-    this.rememberMonsterNames();
     this.refreshIdentities();
     this.refreshSkillLayout();
-    this.updateRoster();
     this.refreshBossBar();
     if (battleChanged) {
       this.closeForecastPopover();
@@ -493,6 +517,10 @@ export class CombatScreen implements Screen {
     const state = this.lastState;
     const username = state?.username ?? '';
     const henchmen = state?.social?.party?.henchmen ?? [];
+    const henchmanNames = henchmanDisplayNames(
+      henchmen.map(h => h.name ?? ''),
+      (state?.social?.party?.members ?? []).map(m => m.username),
+    );
     const viewerLevel = state?.character?.level;
     let tough = false;
     this.selfKey = null;
@@ -504,7 +532,7 @@ export class CombatScreen implements Screen {
       let identity: CardIdentity;
       if (unit.side === 'player') {
         if (st?.henchman) {
-          const hired = henchmen.find(h => h.gridPosition === unit.pos);
+          const hired = henchmen[henchmanNames.indexOf(name)] ?? henchmen.find(h => h.gridPosition === unit.pos);
           identity = { name, isSelf: false, henchman: true, passive: false, art: hired?.artworkUrl, emoji: hired?.emoji || undefined };
         } else {
           const isSelf = !!username && name === username;
@@ -599,15 +627,23 @@ export class CombatScreen implements Screen {
     const cardEl = (e.target as HTMLElement).closest<HTMLElement>('.combat-card');
     if (!cardEl) return;
     const key = unitKey(cardEl.dataset.side === 'player' ? 'player' : 'monster', Number(cardEl.dataset.grid));
-    const unit = this.playback.unitByKey(key);
-    const st = this.playback.statics(key);
-    if (!unit || !st) return;
+    const clicked = this.clickedUnit(key);
+    if (!clicked) return;
+    const { unit, st } = clicked;
     e.stopPropagation();
     if (unit.side === 'player') {
       if (!st.henchman && st.name) this.onUserClick?.(st.name, cardEl);
       return;
     }
     this.showMonsterPopup(unit, st);
+  }
+
+  /** A card held through a press can outlive its battle, so it answers for the battle it was drawn from. */
+  private clickedUnit(key: string): { unit: PlaybackUnit; st: UnitStatics } | undefined {
+    if (this.playback.battleId !== this.renderedBattleId) return this.syncedUnits.get(key);
+    const unit = this.playback.unitByKey(key);
+    const st = this.playback.statics(key);
+    return unit && st ? { unit, st } : undefined;
   }
 
   private playEvent(ev: CombatEvent, now: number): void {
@@ -842,9 +878,9 @@ export class CombatScreen implements Screen {
     this.bossName.title = label;
     const resumedAt = (boss.resumedFromPhase ?? 0) > 0 ? boss.thresholds[(boss.resumedFromPhase ?? 0) - 1] : undefined;
     this.bossTrack.style.setProperty('--skipped', resumedAt !== undefined ? String(1 - resumedAt) : '0');
-    this.bossTicks.innerHTML = boss.thresholds
+    setHtml(this.bossTicks, boss.thresholds
       .map((t, i) => `<i class="combat-boss-tick" style="--at:${t.toFixed(4)}" data-checkpoint="${i + 1}" title="Checkpoint ${i + 1}"><b aria-hidden="true">🚩</b></i>`)
-      .join('');
+      .join(''));
     this.centresDirty = true;
   }
 
@@ -881,7 +917,7 @@ export class CombatScreen implements Screen {
       this.bossRetries.style.display = 'none';
     } else {
       this.bossRetries.style.display = '';
-      this.bossRetries.innerHTML = Array.from({ length: d.maxWipes }, (_, i) => `<i class="${i < left ? 'left' : 'used'}"></i>`).join('');
+      setHtml(this.bossRetries, Array.from({ length: d.maxWipes }, (_, i) => `<i class="${i < left ? 'left' : 'used'}"></i>`).join(''));
       this.bossRetries.title = retriesText(left);
       this.bossRetries.setAttribute('aria-label', retriesText(left));
     }
@@ -912,7 +948,7 @@ export class CombatScreen implements Screen {
     }
     if (battleId !== this.playback.battleId) return;
     this.renderForecastChip();
-    if (this.forecastPopover) this.renderForecastPopoverContent();
+    if (this.forecastPopover) deferWhilePressed(this.forecastPopover, () => this.renderForecastPopoverContent());
   }
 
   private adoptCachedForecast(): void {
@@ -933,6 +969,10 @@ export class CombatScreen implements Screen {
   }
 
   private renderForecastChip(): void {
+    deferWhilePressed(this.forecastBtn, () => this.paintForecastChip());
+  }
+
+  private paintForecastChip(): void {
     const live = this.liveForecast();
     const forecast = live?.view ?? null;
     const stale = !!live?.stale;
@@ -941,12 +981,12 @@ export class CombatScreen implements Screen {
     this.forecastChipKey = key;
     if (forecast === null) {
       this.forecastBtn.style.display = 'none';
-      this.forecastBtn.innerHTML = '';
+      setHtml(this.forecastBtn, '');
       this.closeForecastPopover();
       return;
     }
     this.forecastBtn.style.display = '';
-    this.forecastBtn.innerHTML = renderForecastRing(forecast, { kind: 'battle', compact: true, stale });
+    setHtml(this.forecastBtn, renderForecastRing(forecast, { kind: 'battle', compact: true, stale }));
     this.forecastBtn.dataset.state = forecast === 'loading' ? 'loading' : stale ? 'stale' : 'ready';
     this.forecastBtn.setAttribute('aria-label', forecast === 'loading'
       ? 'Estimating your chances'
@@ -979,12 +1019,12 @@ export class CombatScreen implements Screen {
       return;
     }
     const state = this.lastState;
-    pop.innerHTML = renderForecastPopover(forecast, {
+    setHtml(pop, renderForecastPopover(forecast, {
       kind: 'battle',
       autoRetreat: state?.dungeon ? undefined : state?.social?.party?.autoRetreat ?? null,
       elapsedMs: this.playback.elapsedMs,
       viewerLevel: state?.character?.level,
-    });
+    }));
     const host = this.container.getBoundingClientRect();
     const header = this.header.getBoundingClientRect();
     const chip = this.forecastBtn.getBoundingClientRect();
@@ -1094,7 +1134,7 @@ export class CombatScreen implements Screen {
       if (slot && state.character.level < slot.unlocksAtLevel) layout.note = `Active skill unlocks at level ${slot.unlocksAtLevel}`;
       else if (!layout.note) layout.note = 'No active skill equipped';
     }
-    this.skillBar.setLayout(layout);
+    deferWhilePressed(this.skillBarRoot, () => this.skillBar.setLayout(layout));
   }
 
   private updateSkillBar(writeText: boolean): void {
@@ -1361,8 +1401,8 @@ export class CombatScreen implements Screen {
     });
     bringToFront(overlay);
     wireFocusOnInteract(overlay);
-    this.monsterPopup = { overlay, key: unit.key, battleId: this.playback.battleId, lastKey: '' };
-    this.refreshMonsterPopup();
+    this.monsterPopup = { overlay, key: unit.key, battleId: this.renderedBattleId, lastKey: '' };
+    this.paintMonsterPopup(this.monsterPopup, unit);
   }
 
   private monsterMetaHtml(st: UnitStatics): string {
@@ -1399,7 +1439,10 @@ export class CombatScreen implements Screen {
     }
     if (pop.battleId !== this.playback.battleId) return;
     const unit = this.playback.unitByKey(pop.key);
-    if (!unit) return;
+    if (unit) this.paintMonsterPopup(pop, unit);
+  }
+
+  private paintMonsterPopup(pop: MonsterPopupState, unit: PlaybackUnit): void {
     const pips = statusPips(unit);
     const dead = unit.hp <= 0;
     const key = `${Math.round(unit.hp)}|${unit.maxHp}|${pipsKey(pips)}|${unit.cast?.skill ?? ''}`;
@@ -1411,10 +1454,10 @@ export class CombatScreen implements Screen {
     root.querySelector<HTMLElement>('.monster-popup-hp-fill')!.style.width = `${hpPct.toFixed(1)}%`;
     root.querySelector<HTMLElement>('.monster-popup-hp span')!.textContent = dead ? 'Defeated' : `${formatAmount(unit.hp)} / ${formatAmount(unit.maxHp)}`;
     const status = root.querySelector<HTMLElement>('.monster-popup-status')!;
-    status.innerHTML = pips.map(p => `<span class="combat-pip ${p.tone}">${p.icon}${p.count ? `<b>${p.count}</b>` : ''} ${escapeHtml(p.title)}</span>`).join('');
+    setHtml(status, pips.map(p => `<span class="combat-pip ${p.tone}">${p.icon}${p.count ? `<b>${p.count}</b>` : ''} ${escapeHtml(p.title)}</span>`).join(''));
     status.style.display = pips.length > 0 ? '' : 'none';
     const cast = root.querySelector<HTMLElement>('.monster-popup-cast')!;
-    cast.innerHTML = unit.cast ? `Casting <b>${escapeHtml(unit.cast.skill)}</b>` : '';
+    setHtml(cast, unit.cast ? `Casting <b>${escapeHtml(unit.cast.skill)}</b>` : '');
     cast.style.display = unit.cast ? '' : 'none';
   }
 }

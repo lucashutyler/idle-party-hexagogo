@@ -18,15 +18,18 @@ import {
   getSkillsForClass,
   getOwnedItemIds,
   getEquippedItemIds,
+  canClassEquipItem,
 } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
 import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon, RARITY_COLORS } from '../ui/ItemIcon';
 import { renderItemPopupContent } from '../ui/ItemPopup';
+import { renderEquipCompareBlock } from '../ui/EquipCompare';
 import { renderAssetImg } from '../ui/assets';
 import { bringToFront, release } from '../ui/ModalStack';
 import { renderSkillCardMeta } from '../ui/SkillCardChip';
 import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
+import { deferWhilePressed } from '../ui/render';
 
 /** Left column slots (top to bottom). Mainhand sits at the bottom of the
  *  left column with a small visual gap (no separate row anymore). */
@@ -139,8 +142,11 @@ export class CharItemsScreen implements Screen {
   onActivate(): void {
     this.isActive = true;
 
-    this.unsubscribe = this.gameClient.subscribe((state) => {
-      if (this.isActive) this.updateFromState(state);
+    this.unsubscribe = this.gameClient.subscribe(() => {
+      deferWhilePressed(this.container, () => {
+        const state = this.gameClient.lastState;
+        if (this.isActive && state) this.updateFromState(state);
+      });
     });
 
     this.unsubEquipBlocked = this.gameClient.onEquipBlocked((msg) => {
@@ -409,7 +415,6 @@ export class CharItemsScreen implements Screen {
       this.renderXpBar(char.xp, char.xpForNextLevel);
     }
 
-    // XP rate — every tick (cheap)
     this.renderXpRate(char.xpRate);
 
     this.bestiaryCard.update(char.mastery, this.gameClient.lastBestiary?.entries ?? [], char.level);
@@ -962,7 +967,8 @@ export class CharItemsScreen implements Screen {
         // If a copy of this exact item is already in the slot, show
         // "Equipped" disabled instead of an Equip button — clicking would be
         // a no-op and the player should know it's already on.
-        const alreadyEquipped = this.lastEquipment[def.equipSlot] === itemId;
+        const heldSlot = def.equipSlot === 'twohanded' ? 'mainhand' : def.equipSlot;
+        const alreadyEquipped = this.lastEquipment[heldSlot] === itemId;
         if (alreadyEquipped) {
           actionsHtml += `<button class="popup-action-equip" data-item="${itemId}" disabled aria-disabled="true">Equipped</button>`;
         } else {
@@ -972,17 +978,7 @@ export class CharItemsScreen implements Screen {
       actionsHtml += `<button class="popup-action-destroy danger" data-item="${itemId}" data-max="${count}">Destroy</button>`;
     }
 
-    // Inline equip-compare block when viewing an inventory item that would
-    // replace something already equipped — saves the player from having to
-    // click Equip just to see the swap diff.
-    let extraHtml = '';
-    if (context === 'inventory' && def.equipSlot) {
-      const currentId = this.lastEquipment[def.equipSlot];
-      if (currentId && currentId !== itemId) {
-        const oldDef = this.itemDefs[currentId];
-        if (oldDef) extraHtml = this.buildEquipCompareBlock(def, oldDef);
-      }
-    }
+    const extraHtml = context === 'inventory' ? renderEquipCompareBlock(def, this.lastEquipment, this.itemDefs) : '';
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs: this.itemDefs,
@@ -1023,10 +1019,9 @@ export class CharItemsScreen implements Screen {
         const id = equipBtn.getAttribute('data-item');
         if (!id) { this.hideModal(); return; }
         const eDef = this.itemDefs[id];
-        const restrict = eDef?.classRestriction;
         // Class-restricted item the player can't use → keep the popup open
         // and pulse-highlight the class line so they catch the red text.
-        if (restrict && restrict.length > 0 && this.lastClassName && !restrict.includes(this.lastClassName)) {
+        if (eDef && this.lastClassName && !canClassEquipItem(eDef, this.lastClassName)) {
           this.pulseClassRestriction();
           return;
         }
@@ -1173,88 +1168,6 @@ export class CharItemsScreen implements Screen {
     const key = this.sortPrefKey();
     if (!key) return;
     try { localStorage.setItem(key, this.sortMode); } catch { /* ignore */ }
-  }
-
-  /**
-   * Build the inline equip-comparison HTML block. Rendered inside the item
-   * popup whenever the viewed inventory item would replace something already
-   * equipped — players see the diff up-front instead of having to click
-   * Equip just to preview the swap.
-   *
-   * Layout: header line "Replaces: <oldName>" + a 4-col grid (label / new /
-   * arrow / current). Stats shown for both items unconditionally; arrows
-   * only appear when both items contribute to the same stat.
-   */
-  private buildEquipCompareBlock(newDef: ItemDefinition, oldDef: ItemDefinition): string {
-    type StatKey = 'atk' | 'dr' | 'mr';
-    const stats: { key: StatKey; label: string }[] = [
-      { key: 'atk', label: 'ATK' },
-      { key: 'dr', label: 'DR' },
-      { key: 'mr', label: 'MR' },
-    ];
-    const itemStat = (def: ItemDefinition, key: StatKey): string | null => {
-      if (key === 'atk') {
-        const lo = def.bonusAttackMin ?? 0;
-        const hi = def.bonusAttackMax ?? 0;
-        if (lo === 0 && hi === 0) return null;
-        return lo === hi ? `+${lo}` : `+${lo}-${hi}`;
-      }
-      if (key === 'dr') {
-        const lo = def.damageReductionMin ?? 0;
-        const hi = def.damageReductionMax ?? 0;
-        if (lo === 0 && hi === 0) return null;
-        return lo === hi ? `${lo}` : `${lo}-${hi}`;
-      }
-      const lo = def.magicReductionMin ?? 0;
-      const hi = def.magicReductionMax ?? 0;
-      if (lo === 0 && hi === 0) return null;
-      return lo === hi ? `${lo}` : `${lo}-${hi}`;
-    };
-    const mid = (def: ItemDefinition, key: StatKey): number => {
-      if (key === 'atk') return ((def.bonusAttackMin ?? 0) + (def.bonusAttackMax ?? 0)) / 2;
-      if (key === 'dr') return ((def.damageReductionMin ?? 0) + (def.damageReductionMax ?? 0)) / 2;
-      return ((def.magicReductionMin ?? 0) + (def.magicReductionMax ?? 0)) / 2;
-    };
-
-    const rows = stats.map(({ key, label }) => {
-      const newV = itemStat(newDef, key);
-      const oldV = itemStat(oldDef, key);
-      if (newV === null && oldV === null) return '';
-      let arrow = '';
-      if (newV !== null && oldV !== null) {
-        const dn = mid(newDef, key);
-        const dc = mid(oldDef, key);
-        if (dn > dc) arrow = '<span class="compare-up">↑</span>';
-        else if (dn < dc) arrow = '<span class="compare-down">↓</span>';
-        else arrow = '<span class="compare-eq">=</span>';
-      }
-      return `
-        <div class="compare-row">
-          <div class="compare-cell-label">${label}</div>
-          <div class="compare-cell-new">${newV ?? '<span class="compare-dash">—</span>'}</div>
-          <div class="compare-cell-arrow">${arrow}</div>
-          <div class="compare-cell-old">${oldV ?? '<span class="compare-dash">—</span>'}</div>
-        </div>
-      `;
-    }).join('');
-
-    const oldColor = (RARITY_COLORS[oldDef.rarity ?? 'common']) ?? 'var(--text-1)';
-
-    return `
-      <div class="item-popup-compare">
-        <div class="compare-block-header">
-          <span class="compare-block-label">Replaces equipped</span>
-          <span class="compare-block-old-name" style="color:${oldColor}">${this.escapeHtml(oldDef.name)}</span>
-        </div>
-        <div class="compare-block-subhead">
-          <span class="compare-cell-label">Stat</span>
-          <span class="compare-side-label">This</span>
-          <span></span>
-          <span class="compare-side-label">Equipped</span>
-        </div>
-        <div class="compare-grid">${rows || '<div class="compare-dash" style="text-align:center;grid-column:1/-1">No combat stats</div>'}</div>
-      </div>
-    `;
   }
 
   /**

@@ -22,7 +22,7 @@ function result(overrides: Partial<ForecastResult> = {}): ForecastResult {
 function setup(provider: RoomForecastProvider) {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
-  const view = new RoomView(parent, () => {}, undefined, undefined, undefined, undefined, undefined, provider);
+  const view = new RoomView(parent, () => {}, undefined, undefined, provider);
   return { parent, view };
 }
 

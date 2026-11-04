@@ -1,14 +1,15 @@
 import type { Screen } from './ScreenManager';
 import { PATCH_NOTES } from './PatchNotes';
 import { logout } from '../network/AuthClient';
-import { getQuestHintsEnabled, setQuestHintsEnabled } from '../settings/UserSettings';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import type { GameClient } from '../network/GameClient';
+import type { WorldCache } from '../network/WorldCache';
 import { renderNotificationPreferences } from '../ui/NotificationPreferences';
 import { placeholderUrl } from '../ui/assets';
 import type { AutoRetreatPct } from '@idle-party-rpg/shared';
 import { AUTO_RETREAT_OPTIONS, DEFAULT_COMBAT_PREFS } from '@idle-party-rpg/shared';
 import { autoRetreatLine, formatPct } from '../combat/ForecastFormat';
+import { QuestLog } from '../ui/QuestLog';
 
 const SETTINGS_NAV_PLACEHOLDER = placeholderUrl('Settings', { w: 96, h: 96, glyph: '⚙️' });
 
@@ -17,11 +18,13 @@ export class SettingsScreen implements Screen {
   private optionsOverlay: HTMLElement | null = null;
   private optionsUnsubscribe?: () => void;
   private notifPrefsOverlay: HTMLElement | null = null;
+  private questLog: QuestLog;
 
-  constructor(containerId: string, private gameClient: GameClient) {
+  constructor(containerId: string, private gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
+    this.questLog = new QuestLog(gameClient, worldCache);
 
     this.container.innerHTML = `
       <div class="settings-content">
@@ -31,6 +34,7 @@ export class SettingsScreen implements Screen {
           <h2 class="settings-title">Settings</h2>
         </div>
         <div class="settings-buttons">
+          <button class="pixel-btn settings-btn" id="btn-quest-log">Quest Log</button>
           <button class="pixel-btn settings-btn" id="btn-player-options">Player Options</button>
           <button class="pixel-btn settings-btn" id="btn-notifications">Notifications</button>
           <button class="pixel-btn settings-btn" id="btn-patch-notes">Patch Notes</button>
@@ -52,6 +56,7 @@ export class SettingsScreen implements Screen {
       </div>
     `;
 
+    const btnQuestLog = this.container.querySelector('#btn-quest-log') as HTMLButtonElement;
     const btnPlayerOptions = this.container.querySelector('#btn-player-options') as HTMLButtonElement;
     const btnNotifications = this.container.querySelector('#btn-notifications') as HTMLButtonElement;
     const btnPatchNotes = this.container.querySelector('#btn-patch-notes') as HTMLButtonElement;
@@ -60,6 +65,7 @@ export class SettingsScreen implements Screen {
     const buttonsSection = this.container.querySelector('.settings-buttons') as HTMLElement;
     const headerSection = this.container.querySelector('.settings-header') as HTMLElement;
 
+    btnQuestLog.addEventListener('click', () => this.questLog.open());
     btnPlayerOptions.addEventListener('click', () => this.openPlayerOptions());
     btnNotifications.addEventListener('click', () => this.openNotificationPreferences());
 
@@ -88,11 +94,6 @@ export class SettingsScreen implements Screen {
     });
   }
 
-  /**
-   * Player Options popup. Keeps each per-toggle setting wired here so adding
-   * a new option is one HTML block + one change listener — no plumbing
-   * through to SettingsScreen state.
-   */
   openPlayerOptions(): void {
     if (this.optionsOverlay) {
       bringToFront(this.optionsOverlay);
@@ -108,13 +109,6 @@ export class SettingsScreen implements Screen {
           <button class="player-options-close" aria-label="Close">×</button>
         </div>
         <ul class="settings-options-list">
-          <li class="settings-option-row">
-            <label class="settings-option">
-              <input type="checkbox" id="po-quest-hints" ${getQuestHintsEnabled() ? 'checked' : ''}>
-              <span class="settings-option-label">Quest hints</span>
-            </label>
-            <div class="settings-option-desc">Highlight quest-giver rooms and visit objectives on the map.</div>
-          </li>
           ${this.renderAutoRetreatRow()}
         </ul>
       </div>
@@ -124,17 +118,11 @@ export class SettingsScreen implements Screen {
 
     const close = () => this.closePlayerOptions();
 
-    // Click outside the modal closes; click on the X closes.
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) close();
     });
     overlay.querySelector('.player-options-close')!.addEventListener('click', close);
     this.optionsUnsubscribe = this.gameClient.subscribe(() => this.refreshAutoRetreatNote(overlay));
-
-    const questHintsToggle = overlay.querySelector('#po-quest-hints') as HTMLInputElement;
-    questHintsToggle.addEventListener('change', () => {
-      setQuestHintsEnabled(questHintsToggle.checked);
-    });
 
     this.wireAutoRetreat(overlay);
 
@@ -271,5 +259,6 @@ export class SettingsScreen implements Screen {
       this.notifPrefsOverlay = null;
     }
     this.closePlayerOptions();
+    this.questLog.close();
   }
 }

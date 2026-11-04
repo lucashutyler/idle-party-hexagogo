@@ -8,11 +8,16 @@ import type { AssetStore } from '../game/AssetStore.js';
 import type { AdminAuth } from '../admin/adminMiddleware.js';
 import { createMcpAuthMiddleware } from './mcpAuthMiddleware.js';
 import type { McpToolDeps } from './tools/McpToolDeps.js';
-import { registerReadTools } from './tools/readTools.js';
+import { registerReadTools, REST_API_FALLBACK } from './tools/readTools.js';
 import { registerNotesTools } from './tools/notesTools.js';
 import { registerWriteTools } from './tools/writeTools.js';
 import { registerValidateTools } from './tools/validateTools.js';
 import { registerAssetTools } from './tools/assetTools.js';
+
+const MCP_SERVER_INSTRUCTIONS = [
+  'Content-authoring tools for Idle Party RPG. Content writes go into a draft version (create_draft first); a human publishes and deploys. Artwork tools write live.',
+  `${REST_API_FALLBACK.note} Full live export: ${REST_API_FALLBACK.fullLiveExport}. Full draft/version export: ${REST_API_FALLBACK.fullVersionExport}. OpenAPI docs: ${REST_API_FALLBACK.openApiDocs}.`,
+].join('\n\n');
 
 export interface McpEndpointOptions {
   contentStore: () => ContentStore;
@@ -28,7 +33,7 @@ export function createMcpRouter(opts: McpEndpointOptions): Router {
   const mcpAuthMiddleware = createMcpAuthMiddleware(opts.adminAuth);
 
   router.post('/', mcpAuthMiddleware, async (req, res) => {
-    const server = new McpServer({ name: 'idle-party-rpg', version: '1.0.0' });
+    const server = new McpServer({ name: 'idle-party-rpg', version: '1.0.0' }, { instructions: MCP_SERVER_INSTRUCTIONS });
 
     try {
       const draftEditor = new DraftEditor(opts.versionStore(), opts.contentStore);

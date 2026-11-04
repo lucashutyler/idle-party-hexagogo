@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -587,6 +587,14 @@ export class PlayerManager {
     });
   }
 
+  private resolvePartyMembers(members: GamePartyMember[]): GamePartyMember[] {
+    return members.map(m => {
+      const session = this.sessions.get(m.username);
+      if (!session?.hasCharacter()) return { ...m };
+      return { ...m, level: session.getLevel(), className: session.getClassName() ?? undefined };
+    });
+  }
+
   /** Build ClientSocialState for a player. */
   getSocialState(username: string): ClientSocialState {
     const session = this.sessions.get(username);
@@ -603,6 +611,7 @@ export class PlayerManager {
       guildMembers: guildData?.members ?? [],
       party: partyData && {
         ...partyData,
+        members: this.resolvePartyMembers(partyData.members),
         henchmen: this.resolveHenchmen(partyData.henchmen),
         autoRetreat: this.autoRetreatPolicy(partyData.id) ?? undefined,
         forecastKey: this.partyBattles.forecastKey(partyData.id),
@@ -727,6 +736,25 @@ export class PlayerManager {
     }
   }
 
+  /** Hire into the player's party, or swap out `replaceInstanceId`. Returns the hire or an error string. */
+  hireHenchman(username: string, henchmanId: string, mapId: string, replaceInstanceId?: string): HiredHenchman | string {
+    this.settleBeforeRosterChange(username);
+    const getPartyId = (u: string) => this.sessions.get(u)?.getPartyId() ?? null;
+    return this.parties.hireHenchman(username, henchmanId, mapId, getPartyId, replaceInstanceId);
+  }
+
+  /** Dismiss a hire from the player's party. Returns the dismissed hire or an error string. */
+  dismissHenchman(username: string, instanceId: string): HiredHenchman | string {
+    this.settleBeforeRosterChange(username);
+    return this.parties.dismissHenchman(username, instanceId, u => this.sessions.get(u)?.getPartyId() ?? null);
+  }
+
+  /** A win still in its kill beat is shared among the roster that fought it. */
+  private settleBeforeRosterChange(username: string): void {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    if (partyId) this.partyBattles.settlePendingResult(partyId);
+  }
+
   /** Handle a player joining a party (after accept invite). */
   handlePartyJoin(username: string, partyId: string, oldPartyId: string | null): void {
     // Destroy old solo party battle entry
@@ -775,6 +803,12 @@ export class PlayerManager {
     if (!session) return 'No session.';
     const partyId = session.getPartyId();
     if (!partyId) return 'No party.';
+
+    const party = this.parties.getParty(partyId);
+    if (party) {
+      const member = party.members.find(m => m.username === username);
+      if (!member || !canMove(member.role)) return 'Only owners and leaders can enter a dungeon.';
+    }
 
     // The party must actually be standing on the requested entrance room.
     const pos = this.partyBattles.getPosition(partyId);
@@ -1036,14 +1070,14 @@ export class PlayerManager {
         this.partyBattles.addMember(party.id, members[i].username);
       }
 
-      // Resume an in-progress dungeon run (uses the owner's saved run).
-      if (ownerData.dungeonRun) {
-        this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
-      }
-
       // Every member's save mirrors the roster — read only the owner's or they duplicate.
       if (ownerData.partyHenchmen?.length) {
         this.parties.restoreHenchmen(party.id, this.validHenchmen(ownerData.partyHenchmen, partyMapId));
+      }
+
+      // After the henchmen, so a run dropped for vanished content can announce them rejoining.
+      if (ownerData.dungeonRun) {
+        this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
       }
 
       this.partyBattles.startEntry(party.id);
@@ -1079,10 +1113,11 @@ export class PlayerManager {
       const partyId = this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
       if (!partyId) continue;
 
-      if (data.dungeonRun) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
       if (data.partyHenchmen?.length) {
         this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
       }
+      // After the henchmen, so a run dropped for vanished content can announce them rejoining.
+      if (data.dungeonRun) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
       this.partyBattles.startEntry(partyId);
     }
 

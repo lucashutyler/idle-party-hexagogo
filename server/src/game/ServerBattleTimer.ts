@@ -396,8 +396,7 @@ export class ServerBattleTimer {
 
   private moveThenFight(): void {
     this.resultTimeout = undefined;
-    this.party.moveToNextTile();
-    this.onMove?.();
+    if (this.party.moveToNextTile()) this.onMove?.();
     this.currentVisual = 'none';
     this.onStateChange?.(this.state);
     this.moveTimeout = setTimeout(() => this.guard(() => this.triggerBattle()), MOVE_DURATION);

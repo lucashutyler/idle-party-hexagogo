@@ -1,7 +1,7 @@
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
 import type { RecipeDefinition, RecipeIngredient } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, CRAFTING_UNLOCK_LEVEL } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
 
@@ -80,7 +80,6 @@ export class RecipesTab implements Tab {
       name: '',
       description: '',
       classRestriction: [],
-      requiredLevel: CRAFTING_UNLOCK_LEVEL,
       durationSeconds: 60,
       xpReward: 10,
       ingredients: [{ itemId: '', quantity: 1 }],
@@ -115,7 +114,7 @@ export class RecipesTab implements Tab {
       <div class="admin-form-grid">
         <label>Name<input type="text" id="rcf-name" value="${escapeHtml(r.name)}"></label>
         <label>Duration (sec)<input type="number" id="rcf-duration" value="${r.durationSeconds}" min="1"></label>
-        <label>Required Level<input type="number" id="rcf-required-level" value="${r.requiredLevel ?? CRAFTING_UNLOCK_LEVEL}" min="1"></label>
+        <label>Required Level<input type="number" id="rcf-required-level" value="${r.requiredLevel ?? ''}" min="1" placeholder="None"></label>
         <label>XP Reward<input type="number" id="rcf-xp" value="${r.xpReward ?? 0}" min="0"></label>
       </div>
       <label>Description<textarea id="rcf-description" rows="2" placeholder="Flavor text shown on the recipe card.">${escapeHtml(r.description ?? '')}</textarea></label>
@@ -210,7 +209,7 @@ export class RecipesTab implements Tab {
       name,
       description: description || undefined,
       classRestriction: classRestriction.length > 0 ? classRestriction : undefined,
-      requiredLevel: Number.isFinite(requiredLevel) ? requiredLevel : CRAFTING_UNLOCK_LEVEL,
+      requiredLevel: Number.isFinite(requiredLevel) && requiredLevel > 1 ? requiredLevel : undefined,
       durationSeconds,
       xpReward,
       ingredients,

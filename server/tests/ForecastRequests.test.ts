@@ -137,6 +137,40 @@ describe('request_forecast', () => {
     expect(input.players.some(p => p.isHenchman)).toBe(false);
   });
 
+  it('keeps a dungeon forecast fresh and cached for a party with a hire waiting outside', async () => {
+    const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
+    w.pm.partyBattles.setForecaster(w.svc);
+    const sellsword: HenchmanDefinition = {
+      id: 'sellsword', name: 'Grim', className: 'Knight', level: 3, maxHp: 80, baseDamage: 6, skillIds: [], emoji: 'x',
+    };
+    (w.content as unknown as { getHenchman: (id: string) => HenchmanDefinition | undefined }).getHenchman = id => (id === sellsword.id ? sellsword : undefined);
+    const hired: HiredHenchman = { instanceId: 'h1', henchmanId: sellsword.id, gridPosition: 1, mapId: DEFAULT_MAP_ID };
+    let roster = [hired];
+    w.pm.partyBattles.setHenchmenCallbacks(() => roster, () => []);
+    const target = { kind: 'dungeon' as const, dungeonId: 'pit' };
+
+    const first = replies();
+    w.pm.handleForecastRequest('alice', target, first.reply);
+    vi.advanceTimersByTime(50);
+    const jobsAfterFirst = w.stub.jobs.length;
+    const firstKey = w.pm.partyBattles.forecastKey(w.partyId);
+    expect(first.sent.at(-1)).toMatchObject({ status: 'ok', result: { partyKey: firstKey } });
+
+    const again = replies();
+    w.pm.handleForecastRequest('alice', target, again.reply);
+    expect(again.sent.map(m => m.status)).toEqual(['ok']);
+    expect(again.sent[0].result?.partyKey).toBe(firstKey);
+    expect(w.stub.jobs).toHaveLength(jobsAfterFirst);
+
+    roster = [];
+    const secondKey = w.pm.partyBattles.forecastKey(w.partyId);
+    expect(secondKey).not.toBe(firstKey);
+    const afterDismiss = replies();
+    w.pm.handleForecastRequest('alice', target, afterDismiss.reply);
+    vi.advanceTimersByTime(50);
+    expect(afterDismiss.sent.at(-1)).toMatchObject({ status: 'ok', result: { partyKey: secondKey } });
+  });
+
   it("drops a player's older request when they ask for something else", async () => {
     const w = await forecastWorld();
     w.pm.partyBattles.setForecaster(w.svc);
