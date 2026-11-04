@@ -66,6 +66,11 @@ export class MapScreen implements Screen {
     this.map?.recenterOnPlayer();
   }
 
+  /** Stub until the map package moves the camera to a room. */
+  focusRoom(_roomId: string): void {
+    this.recenterOnPlayer();
+  }
+
   /** Refresh the map from updated WorldCache data. */
   refreshWorld(): void {
     if (this.map) {

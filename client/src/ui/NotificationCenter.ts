@@ -1,6 +1,7 @@
 import type { GameClient } from '../network/GameClient';
 import type { NotificationEntry, NotificationNavigationTarget } from '@idle-party-rpg/shared';
 import { resolveNotificationNavigation } from '@idle-party-rpg/shared';
+import { confirmDialog } from './ConfirmDialog';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { deferWhilePressed, setHtml } from './render';
 
@@ -110,10 +111,15 @@ export class NotificationCenter {
       this.gameClient.sendMarkAllNotificationsRead();
     });
 
-    panel.querySelector('.notif-clear-all-btn')!.addEventListener('click', () => {
+    panel.querySelector('.notif-clear-all-btn')!.addEventListener('click', async () => {
       if (this.notifications.length === 0) return;
-      if (!window.confirm("Clear all notifications? This can't be undone.")) return;
-      this.gameClient.sendClearAllNotifications();
+      const clear = await confirmDialog({
+        title: 'Clear all notifications?',
+        body: "This can't be undone.",
+        confirmLabel: 'Clear all',
+        danger: true,
+      });
+      if (clear) this.gameClient.sendClearAllNotifications();
     });
 
     panel.querySelector('.notif-dropdown-list')!.addEventListener('click', (e) => this.onListClick(e));
@@ -133,11 +139,11 @@ export class NotificationCenter {
       panel.classList.add('notif-dropdown-shown');
     });
 
-    bringToFront(panel);
+    bringToFront(panel, () => this.closeDropdown());
     wireFocusOnInteract(panel);
   }
 
-  private closeDropdown(): void {
+  closeDropdown(): void {
     if (!this.dropdown) return;
     release(this.dropdown);
     this.dropdown.remove();

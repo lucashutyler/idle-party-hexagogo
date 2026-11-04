@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { bringToFront, release, wireFocusOnInteract } from '../src/ui/ModalStack';
+import { bringToFront, dismissTop, registerDismiss, release, wireFocusOnInteract } from '../src/ui/ModalStack';
 
 function makeEl(): HTMLElement {
   const el = document.createElement('div');
@@ -67,5 +67,73 @@ describe('ModalStack', () => {
     a.dispatchEvent(new Event('mousedown', { bubbles: true }));
 
     expect(parseInt(a.style.zIndex, 10)).toBeGreaterThan(parseInt(b.style.zIndex, 10));
+  });
+
+  describe('dismissTop', () => {
+    it('returns false when nothing can be dismissed', () => {
+      bringToFront(makeEl());
+      expect(dismissTop()).toBe(false);
+    });
+
+    it('dismisses the most recently promoted overlay, once per call', () => {
+      const a = makeEl();
+      const b = makeEl();
+      const closed: string[] = [];
+      bringToFront(a, () => { closed.push('a'); release(a); });
+      bringToFront(b, () => { closed.push('b'); release(b); });
+
+      expect(dismissTop()).toBe(true);
+      expect(closed).toEqual(['b']);
+      expect(dismissTop()).toBe(true);
+      expect(closed).toEqual(['b', 'a']);
+      expect(dismissTop()).toBe(false);
+    });
+
+    it('keeps the dismiss when re-promoted without one, and follows the new order', () => {
+      const a = makeEl();
+      const b = makeEl();
+      const closed: string[] = [];
+      bringToFront(a, () => closed.push('a'));
+      bringToFront(b, () => closed.push('b'));
+      wireFocusOnInteract(a);
+      a.dispatchEvent(new Event('mousedown', { bubbles: true }));
+
+      dismissTop();
+      expect(closed).toEqual(['a']);
+    });
+
+    it('skips overlays with no dismiss, such as toasts', () => {
+      const modal = makeEl();
+      const toast = makeEl();
+      let closed = false;
+      bringToFront(modal, () => { closed = true; });
+      bringToFront(toast);
+
+      expect(dismissTop()).toBe(true);
+      expect(closed).toBe(true);
+    });
+
+    it('ignores overlays removed without a release', () => {
+      const a = makeEl();
+      let closed = false;
+      bringToFront(a, () => { closed = true; });
+      a.remove();
+
+      expect(dismissTop()).toBe(false);
+      expect(closed).toBe(false);
+    });
+
+    it('registerDismiss covers in-screen panels without assigning a z-index', () => {
+      const panel = makeEl();
+      let closed = false;
+      registerDismiss(panel, () => { closed = true; });
+      expect(panel.style.zIndex).toBe('');
+
+      expect(dismissTop()).toBe(true);
+      expect(closed).toBe(true);
+
+      release(panel);
+      expect(dismissTop()).toBe(false);
+    });
   });
 });

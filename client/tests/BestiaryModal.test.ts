@@ -174,8 +174,10 @@ describe('BestiaryModal', () => {
   it('closes on Escape', () => {
     const modal = new BestiaryModal(fakeClient([goblin]) as unknown as GameClient);
     modal.open();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    document.dispatchEvent(escape);
     expect(modal.isOpen).toBe(false);
+    expect(escape.defaultPrevented).toBe(true);
   });
 });
 

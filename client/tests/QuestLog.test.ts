@@ -8,7 +8,7 @@ import type {
   WorldTileDefinition,
 } from '@idle-party-rpg/shared';
 import { QuestLog } from '../src/ui/QuestLog';
-import { SettingsScreen } from '../src/screens/SettingsScreen';
+import { dismissTop } from '../src/ui/ModalStack';
 import type { GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 
@@ -57,7 +57,7 @@ function makeState(parts: StateParts): ServerStateMessage {
 }
 
 function setup(npcs: NpcDefinition[] = [], rooms: Record<string, WorldTileDefinition[]> = {}) {
-  document.body.innerHTML = '<div id="settings"></div>';
+  document.body.innerHTML = '';
   const listeners = new Set<StateListener>();
   let lastState: ServerStateMessage | null = null;
 
@@ -330,17 +330,18 @@ describe('QuestLog', () => {
   });
 });
 
-describe('SettingsScreen quest log', () => {
-  it('opens from the Quest Log button and closes when the screen is left', () => {
+describe('Quest log ownership', () => {
+  it('closes through the modal stack, and keeps the room callback for its owner', () => {
     const t = setup();
     t.push({});
-    const screen = new SettingsScreen('settings', t.gameClient, t.worldCache);
+    const onGoToRoom = vi.fn();
+    const log = new QuestLog(t.gameClient, t.worldCache, onGoToRoom);
+    expect(log.onGoToRoom).toBe(onGoToRoom);
 
-    expect(document.querySelector('#btn-player-options')).not.toBeNull();
-    (document.querySelector('#btn-quest-log') as HTMLButtonElement).click();
+    log.open();
     expect(document.querySelector('.quest-log-modal')).not.toBeNull();
 
-    screen.onDeactivate();
+    expect(dismissTop()).toBe(true);
     expect(document.querySelector('.quest-log-modal')).toBeNull();
     expect(t.listenerCount()).toBe(0);
   });

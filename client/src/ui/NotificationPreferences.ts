@@ -5,6 +5,7 @@ import {
 } from '@idle-party-rpg/shared';
 import type { NotificationChannel, NotificationPreferences } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
+import { confirmDialog } from './ConfirmDialog';
 import { subscribeToPush, unsubscribeFromPush, getPushPermission, isPushSupported, isPushConfiguredOnServer } from '../network/PushNotifications';
 
 const CHANNEL_LABELS: Record<NotificationChannel, string> = {
@@ -176,7 +177,13 @@ function renderGrid(container: HTMLElement, gameClient: GameClient, prefs: Notif
 
       if (!box.checked) {
         // Unchecking clears the channel from every event — confirm before doing something that broad.
-        if (!window.confirm(`Turn off ${CHANNEL_LABELS[channel]} for every notification type?`)) {
+        const turnOff = await confirmDialog({
+          title: `Turn off ${CHANNEL_LABELS[channel]}?`,
+          body: 'This turns it off for every notification type.',
+          confirmLabel: 'Turn off',
+          danger: true,
+        });
+        if (!turnOff) {
           box.checked = true;
           return;
         }

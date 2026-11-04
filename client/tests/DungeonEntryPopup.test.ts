@@ -441,8 +441,10 @@ describe('DungeonEntryPopup forecast and leader rules', () => {
     const client = fakeClient();
     const popup = new DungeonEntryPopup(client as unknown as GameClient);
     popup.show(trial, 1, 2);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    document.dispatchEvent(escape);
     expect(popup.isOpen).toBe(false);
+    expect(escape.defaultPrevented).toBe(true);
     expect(client.listening).toBe(false);
   });
 

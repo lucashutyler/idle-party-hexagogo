@@ -63,13 +63,15 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
-  --hud-height: 48px;
+  --hud-height: 44px;
   --hud-total: calc(var(--hud-height) + var(--safe-top));
-  --nav-height: 68px;
-  --nav-float-gap: 6px;
+  --xpbar-height: 3px;
+  --strip-height: 36px;
+  --nav-height: 56px;
+  --nav-float-gap: 0px;
   --nav-total: calc(var(--nav-height) + var(--nav-float-gap) + var(--safe-bottom));
-  --nav-raise: 12px;
-  --xpbar-height: 6px;
+  --scrim: rgba(4, 7, 20, 0.72);
+  --chat-sheet-height: clamp(200px, 36dvh, 300px);
 
   --fs-2xs: 11px;
   --fs-xs: 12px;
@@ -177,6 +179,8 @@ button, input, select, textarea {
 }
 
 #app {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100%;
   display: flex;
@@ -2897,13 +2901,8 @@ button.room-status-chip:active {
   100% { transform: scale(1); }
 }
 
-@keyframes icon-flash-green {
-  0% { color: var(--accent-green); transform: scale(1.4); }
-  100% { transform: scale(1); }
-}
-
-@keyframes icon-flash-red {
-  0% { color: var(--accent-red); transform: scale(1.4); }
+@keyframes icon-flash {
+  0% { transform: scale(1.4); }
   100% { transform: scale(1); }
 }
 
@@ -4540,502 +4539,7 @@ button.room-status-chip:active {
   50% { transform: translateY(-6px); opacity: 1; }
 }
 
-/* ── Top HUD ─────────────────────────────────────────────── */
-#top-hud:empty {
-  display: none;
-}
-#top-hud {
-  position: relative;
-  z-index: 998;
-  flex-shrink: 0;
-  height: var(--hud-total);
-  padding: var(--safe-top) calc(8px + var(--safe-right)) 0 calc(8px + var(--safe-left));
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: linear-gradient(180deg, rgba(10, 15, 36, 0.92) 0%, rgba(17, 26, 59, 0.85) 100%);
-  border-bottom: 1px solid var(--stroke);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-}
-.top-hud-player {
-  position: relative;
-  flex-shrink: 0;
-  width: 38px;
-  height: 38px;
-}
-.top-hud-avatar {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--grad-secondary);
-  border: 2px solid var(--outline);
-  box-shadow: inset 0 1px 0 var(--stroke-hi), 0 0 0 2px var(--gold-deep);
-}
-.top-hud-avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  image-rendering: var(--art-rendering);
-}
-.top-hud-avatar-icon .icon-inline {
-  width: 24px;
-  height: 24px;
-  vertical-align: middle;
-}
-.top-hud-avatar-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-}
-.top-hud-avatar-icon .icon-inline.icon-glyph {
-  width: 100%;
-  height: 100%;
-  font-size: 20px;
-  background: none;
-  box-shadow: none;
-  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.45));
-}
-.top-hud-level {
-  position: absolute;
-  right: -6px;
-  bottom: -4px;
-  min-width: 20px;
-  height: 18px;
-  padding: 0 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  background: var(--grad-primary);
-  border: 2px solid var(--outline);
-  color: #3a2200;
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-synthesis: none;
-  font-size: var(--fs-2xs);
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.top-hud-name {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-synthesis: none;
-  font-size: var(--fs-md);
-  color: var(--text-1);
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
-  padding-left: 4px;
-}
-.top-hud-spacer {
-  flex: 1;
-}
-.top-hud-gold {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px 0 4px;
-  border-radius: var(--radius-pill);
-  background: rgba(6, 9, 24, 0.65);
-  border: 2px solid var(--outline);
-  box-shadow: inset 0 1px 0 var(--stroke);
-}
-.top-hud-gold-coin {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #fff3b0 0%, var(--gold) 40%, var(--gold-deep) 100%);
-  border: 2px solid #7a4a00;
-  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.2);
-}
-.top-hud-gold-amount {
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-synthesis: none;
-  font-size: var(--fs-md);
-  line-height: 1;
-  color: var(--gold);
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
-}
-.top-hud-bell-slot {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
-/* ── Persistent XP Bar (above bottom nav) ────────────────── */
-#persistent-xp-bar {
-  position: relative;
-  height: var(--xpbar-height);
-  display: flex;
-  align-items: stretch;
-  flex-shrink: 0;
-  z-index: 999;
-  background: rgba(6, 9, 24, 0.85);
-}
-.xpbar-level {
-  display: none;
-}
-.xpbar-track {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-  background: rgba(6, 9, 24, 0.9);
-}
-.xpbar-fill.xpbar-fill-empty {
-  box-shadow: none;
-}
-.xpbar-fill {
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, var(--cyan) 0%, var(--blue) 100%);
-  box-shadow: 0 0 8px rgba(55, 227, 255, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
-  transition: width 0.4s ease-out;
-}
-
-/* ── Bottom Nav ──────────────────────────────────────────── */
-#bottom-nav {
-  position: relative;
-  z-index: 1000;
-  flex-shrink: 0;
-  height: var(--nav-height);
-  margin: 0 calc(8px + var(--safe-right)) calc(var(--nav-float-gap) + var(--safe-bottom)) calc(8px + var(--safe-left));
-  padding: 0 4px;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 72px 1fr 1fr 1fr;
-  align-items: stretch;
-  background: var(--grad-panel);
-  border: 2px solid var(--outline);
-  border-radius: var(--radius-xl);
-  box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-2);
-}
-.nav-tab {
-  position: relative;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 6px 0 5px;
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  isolation: isolate;
-  -webkit-tap-highlight-color: transparent;
-  transition: color 150ms ease-out, transform 150ms ease-out;
-}
-.nav-tab:active {
-  transform: translateY(1px);
-}
-.nav-tab.active,
-.nav-tab.overlay-active,
-.nav-tab.submenu-open {
-  color: var(--gold);
-}
-.nav-tab-bg {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 50%;
-  width: min(calc(100% - 4px), 64px);
-  translate: -50% 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  z-index: -1;
-  transition: background 150ms ease-out, box-shadow 150ms ease-out;
-}
-.nav-tab:hover .nav-tab-bg {
-  background: rgba(255, 255, 255, 0.05);
-}
-.nav-tab.active .nav-tab-bg,
-.nav-tab.overlay-active .nav-tab-bg,
-.nav-tab.submenu-open .nav-tab-bg {
-  background: linear-gradient(180deg, rgba(255, 203, 61, 0.24) 0%, rgba(255, 203, 61, 0.06) 100%);
-  box-shadow: inset 0 0 0 1px rgba(255, 203, 61, 0.45);
-}
-.nav-active-bar {
-  position: absolute;
-  bottom: 3px;
-  left: 50%;
-  width: 18px;
-  height: 3px;
-  margin-left: -9px;
-  border-radius: var(--radius-pill);
-  background: var(--gold);
-  box-shadow: 0 0 6px rgba(255, 203, 61, 0.8);
-  transform: scaleX(0);
-  transition: transform 200ms ease-out;
-}
-.nav-tab.active .nav-active-bar,
-.nav-tab.overlay-active .nav-active-bar {
-  transform: scaleX(1);
-}
-.nav-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--fs-xl);
-  line-height: 1;
-}
-.nav-icon {
-  position: relative;
-}
-.nav-icon-glyph {
-  font-size: 22px;
-  line-height: 1;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-  transition: transform 150ms ease-out;
-}
-.nav-icon.has-art .nav-icon-glyph {
-  display: none;
-}
-.nav-icon-glyph + .nav-icon-img {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-}
-.nav-tab.active .nav-icon-glyph,
-.nav-tab.overlay-active .nav-icon-glyph {
-  transform: translateY(-1px) scale(1.1);
-}
-.nav-tab[data-screen="combat"] .nav-icon-glyph {
-  font-size: 30px;
-}
-.nav-icon-img {
-  display: block;
-  width: 26px;
-  height: 26px;
-  object-fit: contain;
-  image-rendering: var(--art-rendering);
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-  transition: opacity 0.12s linear, transform 150ms ease-out;
-}
-.nav-tab.active .nav-icon-img,
-.nav-tab.overlay-active .nav-icon-img {
-  transform: translateY(-1px) scale(1.08);
-  filter: drop-shadow(0 0 5px rgba(255, 203, 61, 0.6)) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-}
-.nav-label {
-  max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-synthesis: none;
-  font-size: var(--fs-2xs);
-  line-height: 1;
-  letter-spacing: 0.02em;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
-}
-.nav-badge {
-  position: absolute;
-  top: 6px;
-  right: calc(50% - 20px);
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--red);
-  box-shadow: 0 0 0 2px var(--text-1), var(--shadow-1);
-  display: none;
-}
-.nav-badge.visible {
-  display: block;
-}
-.nav-tab.has-path .nav-icon-img {
-  filter: drop-shadow(0 0 5px rgba(62, 224, 122, 0.8)) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-}
-.nav-tab.victory-flash .nav-icon {
-  animation: icon-flash-green 0.4s ease-out;
-}
-.nav-tab.defeat-flash .nav-icon {
-  animation: icon-flash-red 0.4s ease-out;
-}
-
-/* Battle: raised circular centre button */
-.nav-tab[data-screen="combat"] {
-  z-index: 2;
-  justify-content: flex-end;
-  color: var(--text-1);
-}
-.nav-tab[data-screen="combat"] .nav-tab-bg {
-  bottom: auto;
-  translate: none;
-  top: calc(-1 * var(--nav-raise));
-  left: 50%;
-  width: 60px;
-  height: 60px;
-  margin-left: -30px;
-  border-radius: 50%;
-  background: var(--grad-danger);
-  border: 3px solid var(--outline);
-  box-shadow: 0 var(--btn-depth) 0 var(--edge-danger), inset 0 2px 0 rgba(255, 255, 255, 0.35), var(--shadow-2);
-}
-.nav-tab[data-screen="combat"] .nav-icon {
-  position: absolute;
-  top: calc(-1 * var(--nav-raise));
-  left: 50%;
-  width: 60px;
-  height: 60px;
-  margin-left: -30px;
-}
-.nav-tab[data-screen="combat"] .nav-icon-img {
-  width: 34px;
-  height: 34px;
-}
-.nav-tab[data-screen="combat"] .nav-label {
-  color: var(--text-1);
-}
-.nav-tab[data-screen="combat"] .nav-active-bar {
-  display: none;
-}
-.nav-tab[data-screen="combat"] .nav-badge {
-  top: calc(-1 * var(--nav-raise) + 2px);
-  right: calc(50% - 30px);
-}
-.nav-tab[data-screen="combat"].active .nav-tab-bg {
-  background: var(--grad-danger);
-  box-shadow: 0 var(--btn-depth) 0 var(--edge-danger), inset 0 2px 0 rgba(255, 255, 255, 0.35), 0 0 0 3px var(--gold), var(--shadow-2);
-}
-.nav-tab[data-screen="combat"].active .nav-label {
-  color: var(--gold);
-}
-.nav-tab[data-screen="combat"].fighting-pulse .nav-tab-bg {
-  box-shadow: 0 var(--btn-depth) 0 var(--edge-danger), inset 0 2px 0 rgba(255, 255, 255, 0.35), 0 0 0 3px rgba(255, 203, 61, 0.9), var(--glow-gold);
-}
-.nav-tab[data-screen="combat"]:active .nav-tab-bg {
-  transform: translateY(2px);
-  box-shadow: 0 calc(var(--btn-depth) / 2) 0 var(--edge-danger), inset 0 2px 0 rgba(255, 255, 255, 0.35), var(--shadow-1);
-}
-
-/* Chat: overlay toggle with a chevron icon */
-.nav-tab[data-mode="overlay"][data-screen="chat"] {
-  flex: initial;
-  width: auto;
-  aspect-ratio: auto;
-}
-.nav-tab[data-screen="chat"] .nav-active-bar {
-  display: none;
-}
-.nav-tab[data-screen="chat"] .nav-icon {
-  font-size: var(--fs-lg);
-}
-.nav-tab[data-screen="chat"] .nav-icon-img {
-  display: none;
-}
-.nav-chat-chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  background: var(--grad-secondary);
-  border: 2px solid var(--outline);
-  box-shadow: 0 2px 0 var(--edge-secondary), inset 0 1px 0 var(--stroke-hi);
-  color: var(--text-1);
-  font-size: var(--fs-2xs);
-  line-height: 1;
-}
-.nav-chat-chevron-up,
-.nav-chat-chevron-down {
-  display: none;
-}
-.nav-tab[data-screen="chat"]:not(.overlay-active) .nav-chat-chevron-up {
-  display: inline;
-}
-.nav-tab[data-screen="chat"].overlay-active .nav-chat-chevron-down {
-  display: inline;
-}
-.nav-tab[data-screen="chat"].overlay-active .nav-chat-chevron {
-  background: var(--grad-primary);
-  box-shadow: 0 2px 0 var(--edge-primary), inset 0 1px 0 var(--stroke-hi);
-  color: #3a2200;
-}
-
-@media (min-width: 900px) {
-  #bottom-nav {
-    align-self: center;
-    width: min(720px, calc(100% - 16px));
-  }
-  #top-hud {
-    padding-left: max(calc(12px + var(--safe-left)), calc((100% - 1100px) / 2));
-    padding-right: max(calc(12px + var(--safe-right)), calc((100% - 1100px) / 2));
-  }
-}
-
-@media (max-width: 400px) {
-  .nav-tab:not(.active):not([data-screen="combat"]) .nav-label {
-    display: none;
-  }
-}
-@media (max-width: 360px) {
-  .nav-tab:not([data-screen="combat"]) .nav-label {
-    display: none;
-  }
-}
-@media (orientation: landscape) and (max-height: 500px) {
-  :root {
-    --hud-height: 40px;
-    --nav-height: 54px;
-    --nav-raise: 6px;
-  }
-  .top-hud-player {
-    width: 32px;
-    height: 32px;
-  }
-  .top-hud-gold {
-    height: 26px;
-  }
-  .nav-tab {
-    gap: 2px;
-    padding: 4px 0 3px;
-  }
-  .nav-icon-glyph {
-    font-size: 19px;
-  }
-  .nav-tab-bg {
-    top: 4px;
-    bottom: 4px;
-  }
-  .nav-tab[data-screen="combat"] .nav-tab-bg,
-  .nav-tab[data-screen="combat"] .nav-icon {
-    width: 50px;
-    height: 50px;
-    margin-left: -25px;
-  }
-  .nav-tab[data-screen="combat"] .nav-icon-glyph {
-    font-size: 24px;
-  }
-  .nav-tab[data-screen="combat"] .nav-icon-img {
-    width: 28px;
-    height: 28px;
-  }
-  .nav-tab[data-screen="combat"] .nav-label {
-    display: none;
-  }
-}
-
 /* ── Chat Popout ─────────────────────────────────────────── */
-#chat-popout-root {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-}
 .chat-popout {
   position: absolute;
   pointer-events: auto;
@@ -5222,31 +4726,9 @@ button.room-status-chip:active {
     border-radius: 0;
     box-shadow: none;
   }
-  .chat-popout-mobile-full {
-    inset: 0 !important;
-    width: auto !important;
-    height: auto !important;
-    max-width: none !important;
-    max-height: none !important;
-    padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
-  }
-  .chat-popout-mobile-sheet {
-    left: 0 !important;
-    right: 0 !important;
-    bottom: calc(var(--nav-total) + var(--xpbar-height)) !important;
-    top: auto !important;
-    width: 100vw !important;
-    height: var(--chat-sheet-height, 50vh) !important;
-    max-width: none !important;
-    border-bottom: none !important;
-    box-shadow: none;
-  }
   .chat-popout-resize { display: none; }
   .chat-popout-header { cursor: default; }
 
-  body {
-    --chat-sheet-height: clamp(220px, 44dvh, 400px);
-  }
   .chat-popout-filters {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -5258,11 +4740,6 @@ button.room-status-chip:active {
   }
   .chat-popout-filters .chat-filter {
     flex-shrink: 0;
-  }
-  body[data-chat-open="1"][data-chat-layout="sheet"] #screen-container {
-    flex: 1 1 0;
-    min-height: 0;
-    margin-bottom: var(--chat-sheet-height, 50vh);
   }
 }
 
@@ -5812,18 +5289,10 @@ button.room-status-chip:active {
 }
 
 @media (max-width: 767px) {
-  body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] {
-    --chat-sheet-height: clamp(160px, 40dvh, 260px);
-  }
   body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] #screen-combat .combat-skillbar,
   body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] #screen-combat .combat-log-wrapper {
     display: none;
   }
-}
-
-.combat-log-wrapper.fullscreen {
-  top: var(--hud-total);
-  bottom: calc(var(--nav-total) + var(--xpbar-height));
 }
 
 /* ── Class-restriction flash ─────────────────────────────── */
@@ -5892,61 +5361,6 @@ button.room-status-chip:active {
 @keyframes class-restrict-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.08); }
-}
-
-/* ── Bottom-nav fly-out submenu ──────────────────────────── */
-.nav-submenu {
-  position: fixed;
-  background: var(--grad-panel);
-  border: 2px solid var(--outline);
-  border-radius: var(--radius-lg);
-  box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-3);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 170px;
-  z-index: 1200;
-  opacity: 0;
-  transform: translateY(6px) scale(0.96);
-  transform-origin: 50% 100%;
-  transition: opacity 180ms ease-out, transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.nav-submenu.nav-submenu-shown {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-.nav-submenu-item {
-  position: relative;
-  background: transparent;
-  border: none;
-  color: var(--text-1);
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-synthesis: none;
-  font-size: var(--fs-md);
-  text-align: left;
-  padding: 10px 12px;
-  cursor: pointer;
-  border-radius: var(--radius-md);
-  letter-spacing: 0.02em;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
-}
-.nav-submenu-item:hover {
-  background: rgba(255, 203, 61, 0.16);
-  color: var(--gold);
-}
-.nav-submenu-badge {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--red);
-  box-shadow: 0 0 0 2px var(--text-1);
-  flex-shrink: 0;
 }
 
 /* ── Equip comparison popup ──────────────────────────────── */
@@ -6102,26 +5516,6 @@ button.room-status-chip:active {
 }
 .compare-block-subhead .compare-cell-label { text-align: left; }
 
-/* Desktop maximized chat — toggled via the layout button (⇅). Fills the
-   visible viewport above the persistent XP bar + bottom nav. */
-.chat-popout-desktop-max {
-  left: 0 !important;
-  top: var(--hud-total) !important;
-  right: 0 !important;
-  bottom: calc(var(--nav-total) + var(--xpbar-height)) !important;
-  width: 100vw !important;
-  height: auto !important;
-  max-width: none !important;
-  max-height: none !important;
-  border-radius: 0 !important;
-}
-.chat-popout-desktop-max .chat-popout-header {
-  cursor: default;
-}
-.chat-popout-desktop-max .chat-popout-resize {
-  display: none;
-}
-
 /* Class portrait inside the View Player modal's equipment panel
    (replaces the old CSS-built silhouette). */
 .profile-portrait {
@@ -6174,6 +5568,11 @@ button.room-status-chip:active {
   z-index: auto;
   width: 34px;
   height: 34px;
+}
+.top-hud-bell-slot .notif-bell-btn::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
 }
 .notif-bell-btn:hover {
   border-color: var(--gold-deep);
@@ -6372,7 +5771,7 @@ button.room-status-chip:active {
 
 .notif-toast-stack {
   position: fixed;
-  top: calc(var(--hud-total) + 6px);
+  top: calc(var(--hud-total) + var(--xpbar-height) + 6px);
   right: calc(8px + var(--safe-right));
   z-index: 1002;
   display: flex;
@@ -6525,20 +5924,11 @@ button.room-status-chip:active {
   .three-map-party[data-visual="fighting"] .three-map-party-inner,
   .social-party-cell.drag-hover-green,
   .social-party-cell.drag-hover-red,
-  .nav-tab.victory-flash .nav-icon,
-  .nav-tab.defeat-flash .nav-icon,
   .splash-wordmark,
   .splash-loader span {
     animation: none;
   }
-  #splash,
-  .nav-tab,
-  .nav-tab-bg,
-  .nav-active-bar,
-  .nav-icon-img,
-  .nav-icon-glyph,
-  .xpbar-fill,
-  .nav-submenu {
+  #splash {
     transition-duration: 0s;
   }
 }
@@ -6561,13 +5951,7 @@ button.room-status-chip:active {
 }
 @media (min-width: 900px) {
   .notif-toast-stack {
-    right: max(calc(12px + var(--safe-right)), calc((100vw - 1100px) / 2));
+    right: calc(12px + var(--safe-right));
     width: 300px;
-  }
-}
-@media (orientation: landscape) and (max-height: 500px) {
-  .top-hud-bell-slot .notif-bell-btn {
-    width: 30px;
-    height: 30px;
   }
 }

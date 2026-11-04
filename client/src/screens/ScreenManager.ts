@@ -1,6 +1,8 @@
 export interface Screen {
   onActivate(): void;
   onDeactivate(): void;
+  /** Selects a sub-view, from the `sub` part of a navigation target. */
+  setSubTab?(sub: string): void;
 }
 
 interface RegisteredScreen {
@@ -14,6 +16,10 @@ export class ScreenManager {
 
   register(id: string, element: HTMLElement, screen: Screen): void {
     this.screens.set(id, { element, screen });
+  }
+
+  get(id: string): Screen | undefined {
+    return this.screens.get(id)?.screen;
   }
 
   switchTo(id: string): void {

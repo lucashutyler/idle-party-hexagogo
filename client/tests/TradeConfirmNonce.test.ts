@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientSocialState, ServerErrorCode, ServerStateMessage, TradeState } from '@idle-party-rpg/shared';
 import { SocialScreen } from '../src/screens/SocialScreen';
 import type { GameClient } from '../src/network/GameClient';
-import type { ChatLocalStore } from '../src/network/ChatLocalStore';
 import type { WorldCache } from '../src/network/WorldCache';
 
 /**
@@ -57,24 +56,15 @@ function setup() {
     subscribe: (l: StateListener) => { listeners.add(l); return () => { listeners.delete(l); }; },
     onResume: () => () => {},
     onServerError: (l: ErrorListener) => { errorListeners.add(l); return () => { errorListeners.delete(l); }; },
-    onChat: () => () => {},
-    onSyncChat: () => () => {},
-    sendSyncChat: () => {},
     sendConfirmTrade,
     sendCounterTrade: vi.fn(),
     sendProposeTrade: vi.fn(),
     sendCancelTrade: vi.fn(),
   } as unknown as GameClient;
 
-  const chatStore = {
-    getLatestId: () => null,
-    addMessage: () => {},
-    mergeSyncBatch: () => {},
-  } as unknown as ChatLocalStore;
-
   const worldCache = { getSkillContent: () => ({ skills: {} }) } as unknown as WorldCache;
 
-  const screen = new SocialScreen('social', gameClient, chatStore, worldCache);
+  const screen = new SocialScreen('social', gameClient, worldCache);
 
   /** Push a state frame the way the server would. */
   const push = (trade: TradeState) => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NotificationEntry, ServerStateMessage } from '@idle-party-rpg/shared';
 import { NotificationCenter } from '../src/ui/NotificationCenter';
+import { dismissTop } from '../src/ui/ModalStack';
 import type { GameClient } from '../src/network/GameClient';
 
 type StateListener = (state: ServerStateMessage) => void;
@@ -24,6 +25,7 @@ function setup() {
   let lastState: ServerStateMessage | null = null;
   const sendMarkNotificationRead = vi.fn();
   const sendDismissNotification = vi.fn();
+  const sendClearAllNotifications = vi.fn();
   const onNavigate = vi.fn();
 
   const gameClient = {
@@ -33,7 +35,7 @@ function setup() {
     sendMarkNotificationRead,
     sendDismissNotification,
     sendMarkAllNotificationsRead: vi.fn(),
-    sendClearAllNotifications: vi.fn(),
+    sendClearAllNotifications,
   } as unknown as GameClient;
 
   new NotificationCenter(gameClient, onNavigate);
@@ -49,7 +51,7 @@ function setup() {
   const row = (id: string) => document.querySelector(`.notif-row-main[data-id="${id}"]`) as HTMLButtonElement | null;
   const dismissBtn = (id: string) => document.querySelector(`.notif-row-dismiss[data-id="${id}"]`) as HTMLButtonElement | null;
 
-  return { push, bell, badge, dropdown, row, dismissBtn, sendMarkNotificationRead, sendDismissNotification, onNavigate };
+  return { push, bell, badge, dropdown, row, dismissBtn, sendMarkNotificationRead, sendDismissNotification, sendClearAllNotifications, onNavigate };
 }
 
 function press(target: Element): void {
@@ -146,5 +148,54 @@ describe('NotificationCenter dropdown', () => {
     t.push([]);
     t.bell().click();
     expect(document.querySelector('.notif-empty')?.textContent).toContain('No notifications yet');
+  });
+
+  it('asks before clearing everything', async () => {
+    vi.useRealTimers();
+    const t = setup();
+    t.push([entry('n1')]);
+    t.bell().click();
+
+    (document.querySelector('.notif-clear-all-btn') as HTMLButtonElement).click();
+    expect(t.sendClearAllNotifications).not.toHaveBeenCalled();
+    (document.querySelector('.confirm-cancel') as HTMLButtonElement).click();
+    await new Promise(r => setTimeout(r));
+    expect(t.sendClearAllNotifications).not.toHaveBeenCalled();
+    expect(t.dropdown()).not.toBeNull();
+
+    (document.querySelector('.notif-clear-all-btn') as HTMLButtonElement).click();
+    (document.querySelector('.confirm-ok') as HTMLButtonElement).click();
+    await new Promise(r => setTimeout(r));
+    expect(t.sendClearAllNotifications).toHaveBeenCalledOnce();
+  });
+
+  it('closes the dropdown from the modal stack', () => {
+    const t = setup();
+    t.push([]);
+    t.bell().click();
+    expect(dismissTop()).toBe(true);
+    expect(t.dropdown()).toBeNull();
+  });
+});
+
+describe('NotificationCenter bell mount', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('falls back to its own root with no HUD', () => {
+    setup();
+    expect(document.querySelector('#notification-center-root .notif-bell-btn')).not.toBeNull();
+  });
+
+  it('mounts in the HUD slot when there is one', () => {
+    const makeClient = () => ({
+      lastState: null,
+      subscribe: () => () => {},
+      onNotification: () => () => {},
+    }) as unknown as GameClient;
+    document.body.innerHTML = '<div id="top-hud"><div class="top-hud-bell-slot"></div></div><div id="notification-center-root"></div>';
+    new NotificationCenter(makeClient(), vi.fn());
+    expect(document.querySelector('.top-hud-bell-slot .notif-bell-btn')).not.toBeNull();
   });
 });

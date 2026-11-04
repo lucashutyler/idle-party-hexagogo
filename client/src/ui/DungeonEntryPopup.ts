@@ -55,7 +55,9 @@ export class DungeonEntryPopup {
   private unsubscribeError: (() => void) | null = null;
   private unsubscribeForecast: (() => void) | null = null;
   private keyHandler = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') this.hide();
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    this.hide();
   };
 
   constructor(gameClient: GameClient) {
@@ -82,7 +84,7 @@ export class DungeonEntryPopup {
     this.overlay.querySelector('.dungeon-entry-cancel')?.addEventListener('click', () => this.hide());
     this.overlay.querySelector('.dungeon-entry-enter')?.addEventListener('click', () => this.enter());
     this.overlay.style.display = 'flex';
-    bringToFront(this.overlay);
+    bringToFront(this.overlay, () => this.hide());
     document.addEventListener('keydown', this.keyHandler);
 
     this.unsubscribeState = this.gameClient.subscribe(() => this.repaintLater());

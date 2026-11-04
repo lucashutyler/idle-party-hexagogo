@@ -248,7 +248,9 @@ export class RecapModal {
   private shownId: string | null = null;
   private unsubscribe: () => void;
   private keyHandler = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && this.isTopmost()) this.acknowledge();
+    if (e.key !== 'Escape' || !this.isTopmost()) return;
+    e.preventDefault();
+    this.acknowledge();
   };
 
   constructor(private gameClient: GameClient, private opts: RecapModalOptions = {}) {
@@ -372,7 +374,7 @@ export class RecapModal {
     });
     document.addEventListener('keydown', this.keyHandler);
 
-    bringToFront(overlay);
+    bringToFront(overlay, () => this.acknowledge());
     wireFocusOnInteract(overlay);
     (overlay.querySelector('.recap-continue') as HTMLElement | null)?.focus({ preventScroll: true });
     if (!reducedMotion()) this.countUp(overlay);

@@ -3,13 +3,12 @@ import { PATCH_NOTES } from './PatchNotes';
 import { logout } from '../network/AuthClient';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import type { GameClient } from '../network/GameClient';
-import type { WorldCache } from '../network/WorldCache';
 import { renderNotificationPreferences } from '../ui/NotificationPreferences';
 import { placeholderUrl } from '../ui/assets';
 import type { AutoRetreatPct } from '@idle-party-rpg/shared';
 import { AUTO_RETREAT_OPTIONS, DEFAULT_COMBAT_PREFS } from '@idle-party-rpg/shared';
 import { autoRetreatLine, formatPct } from '../combat/ForecastFormat';
-import { QuestLog } from '../ui/QuestLog';
+import { confirmDialog } from '../ui/ConfirmDialog';
 
 const SETTINGS_NAV_PLACEHOLDER = placeholderUrl('Settings', { w: 96, h: 96, glyph: '⚙️' });
 
@@ -18,13 +17,11 @@ export class SettingsScreen implements Screen {
   private optionsOverlay: HTMLElement | null = null;
   private optionsUnsubscribe?: () => void;
   private notifPrefsOverlay: HTMLElement | null = null;
-  private questLog: QuestLog;
 
-  constructor(containerId: string, private gameClient: GameClient, worldCache: WorldCache) {
+  constructor(containerId: string, private gameClient: GameClient) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
-    this.questLog = new QuestLog(gameClient, worldCache);
 
     this.container.innerHTML = `
       <div class="settings-content">
@@ -34,7 +31,6 @@ export class SettingsScreen implements Screen {
           <h2 class="settings-title">Settings</h2>
         </div>
         <div class="settings-buttons">
-          <button class="pixel-btn settings-btn" id="btn-quest-log">Quest Log</button>
           <button class="pixel-btn settings-btn" id="btn-player-options">Player Options</button>
           <button class="pixel-btn settings-btn" id="btn-notifications">Notifications</button>
           <button class="pixel-btn settings-btn" id="btn-patch-notes">Patch Notes</button>
@@ -56,7 +52,6 @@ export class SettingsScreen implements Screen {
       </div>
     `;
 
-    const btnQuestLog = this.container.querySelector('#btn-quest-log') as HTMLButtonElement;
     const btnPlayerOptions = this.container.querySelector('#btn-player-options') as HTMLButtonElement;
     const btnNotifications = this.container.querySelector('#btn-notifications') as HTMLButtonElement;
     const btnPatchNotes = this.container.querySelector('#btn-patch-notes') as HTMLButtonElement;
@@ -65,7 +60,6 @@ export class SettingsScreen implements Screen {
     const buttonsSection = this.container.querySelector('.settings-buttons') as HTMLElement;
     const headerSection = this.container.querySelector('.settings-header') as HTMLElement;
 
-    btnQuestLog.addEventListener('click', () => this.questLog.open());
     btnPlayerOptions.addEventListener('click', () => this.openPlayerOptions());
     btnNotifications.addEventListener('click', () => this.openNotificationPreferences());
 
@@ -83,7 +77,7 @@ export class SettingsScreen implements Screen {
 
     const btnSignOut = this.container.querySelector('#btn-sign-out') as HTMLButtonElement;
     btnSignOut.addEventListener('click', async () => {
-      if (!confirm('Sign out of your account?')) return;
+      if (!await confirmDialog({ title: 'Sign out of your account?', confirmLabel: 'Sign Out', danger: true })) return;
       btnSignOut.disabled = true;
       btnSignOut.textContent = 'Signing out...';
       try {
@@ -126,7 +120,7 @@ export class SettingsScreen implements Screen {
 
     this.wireAutoRetreat(overlay);
 
-    bringToFront(overlay);
+    bringToFront(overlay, close);
     wireFocusOnInteract(overlay);
   }
 
@@ -237,7 +231,7 @@ export class SettingsScreen implements Screen {
 
     renderNotificationPreferences(overlay.querySelector('.notif-prefs-body') as HTMLElement, this.gameClient);
 
-    bringToFront(overlay);
+    bringToFront(overlay, close);
     wireFocusOnInteract(overlay);
   }
 
@@ -259,6 +253,5 @@ export class SettingsScreen implements Screen {
       this.notifPrefsOverlay = null;
     }
     this.closePlayerOptions();
-    this.questLog.close();
   }
 }

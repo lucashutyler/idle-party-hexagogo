@@ -16,8 +16,10 @@ import { CraftingScreen } from './screens/CraftingScreen';
 import { ClassSelectScreen } from './screens/ClassSelectScreen';
 import { SuspensionScreen } from './screens/SuspensionScreen';
 import { BottomNav } from './ui/BottomNav';
-import { ChatLocalStore } from './network/ChatLocalStore';
+import type { NavTabConfig } from './ui/BottomNav';
+import { UtilityStrip } from './ui/UtilityStrip';
 import { ChatPopout } from './ui/ChatPopout';
+import { QuestLog } from './ui/QuestLog';
 import { PersistentXpBar } from './ui/PersistentXpBar';
 import { TopHud } from './ui/TopHud';
 import { NotificationCenter } from './ui/NotificationCenter';
@@ -26,13 +28,34 @@ import { BestiaryModal, MasteryToasts } from './ui/BestiaryModal';
 import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 import { forgetMissingAssets } from './ui/assets';
+import {
+  ACTIVE_SCREEN_KEY,
+  DEFAULT_SCREEN,
+  initNavigation,
+  installBackHandler,
+  installEscapeHandler,
+  installNavDelegate,
+  navigate,
+} from './ui/navigate';
 
 const CONNECTION_ERROR = 'Could not connect to server';
+
+const NAV_TABS: readonly NavTabConfig[] = [
+  { id: 'map', label: 'Map', glyph: '🗺️' },
+  { id: 'items', label: 'Hero', glyph: '🎒' },
+  { id: 'combat', label: 'Battle', glyph: '⚔️' },
+  { id: 'craft', label: 'Craft', glyph: '🔨' },
+  { id: 'social', label: 'Social', glyph: '👥' },
+  { id: 'quests', label: 'Quests', glyph: '📜', railOnly: true },
+  { id: 'chat', label: 'Chat', glyph: '💬', railOnly: true },
+  { id: 'settings', label: 'Settings', glyph: '⚙️', railOnly: true },
+];
+const CHAT_COLUMN_QUERY = '(min-width: 1024px)';
+const RETIRED_STORAGE_KEYS = ['chat_messages', 'chat_filters'];
 
 export class App {
   private gameClient!: GameClient;
   private worldCache = new WorldCache();
-  private chatStore = new ChatLocalStore();
   private screenManager: ScreenManager;
   private loginScreen!: LoginScreen;
   private verifyScreen!: VerifyScreen;
@@ -41,13 +64,16 @@ export class App {
   private suspensionScreen!: SuspensionScreen;
   private navEl!: HTMLElement;
   private xpBarEl!: HTMLElement;
+  private stripEl!: HTMLElement;
   private topHudEl!: HTMLElement;
   private topHud?: TopHud;
+  private xpBar?: PersistentXpBar;
   private chatPopout?: ChatPopout;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private recapModal?: RecapModal;
   private masteryToasts?: MasteryToasts;
   private openOptionsDelegate?: (e: MouseEvent) => void;
+  private removeShellListeners?: () => void;
 
   constructor() {
     this.screenManager = new ScreenManager();
@@ -56,6 +82,8 @@ export class App {
     this.navEl.style.display = 'none';
     this.xpBarEl = document.getElementById('persistent-xp-bar')!;
     this.xpBarEl.style.display = 'none';
+    this.stripEl = document.getElementById('utility-strip')!;
+    this.stripEl.style.display = 'none';
     this.topHudEl = document.getElementById('top-hud')!;
     this.topHudEl.style.display = 'none';
 
@@ -364,18 +392,26 @@ export class App {
     }
     this.suspensionScreen.setEmail(email ?? localStorage.getItem('suspendedEmail') ?? '');
     this.navEl.style.display = 'none';
+    this.stripEl.style.display = 'none';
     this.topHudEl.style.display = 'none';
     this.topHud?.setVisible(false);
+    this.xpBar?.setVisible(false);
+    this.chatPopout?.close();
+    this.removeShellListeners?.();
+    this.removeShellListeners = undefined;
+    initNavigation(null);
     this.screenManager.switchTo('suspended');
   }
 
   private enterGame(): void {
+    RETIRED_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+
     const combatScreen = new CombatScreen('screen-combat', this.gameClient, this.worldCache);
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient, this.worldCache);
-    const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore, this.worldCache);
+    const socialScreen = new SocialScreen('screen-social', this.gameClient, this.worldCache);
     const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
-    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient, this.worldCache);
+    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient);
 
     // Wire map username click to social screen popup
     mapScreen.setOnUserClick((username, anchor, tileCol, tileRow) => {
@@ -409,112 +445,73 @@ export class App {
     this.screenManager.register('craft', document.getElementById('screen-craft')!, craftingScreen);
     this.screenManager.register('settings', document.getElementById('screen-settings')!, settingsScreen);
 
-    // Show bottom nav + persistent XP bar
     this.navEl.style.display = '';
-    this.xpBarEl.style.display = '';
+    this.stripEl.style.display = '';
 
-    new PersistentXpBar(this.gameClient);
-    this.topHud = new TopHud(this.gameClient);
+    this.xpBar = new PersistentXpBar(this.gameClient);
+    this.topHud = new TopHud(this.gameClient, this.worldCache);
 
-    // Chat popout — global overlay, toggled from the Chat nav tab
-    this.chatPopout = new ChatPopout(this.gameClient);
-    this.chatPopout.setOnUserClick((username, anchor) => {
+    const questLog = new QuestLog(this.gameClient, this.worldCache, (roomId) => {
+      navigate('map');
+      mapScreen.focusRoom(roomId);
+    });
+
+    const chatPopout = new ChatPopout(this.gameClient);
+    this.chatPopout = chatPopout;
+    chatPopout.setOnUserClick((username, anchor) => {
       socialScreen.showUserPopup(username, anchor);
     });
 
-    // Migrate any legacy 'character' saved screen to the merged 'items' tab.
-    let savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';
-    if (savedScreen === 'character') savedScreen = 'items';
+    const nav = new BottomNav(NAV_TABS, DEFAULT_SCREEN, (tabId, wasActive) => {
+      if (tabId === 'quests') {
+        questLog.open();
+      } else if (tabId === 'chat') {
+        chatPopout.toggle();
+        nav.setOverlayActive('chat', chatPopout.isVisible());
+      } else {
+        navigate(tabId);
+        if (tabId === 'map' && wasActive) mapScreen.recenterOnPlayer();
+      }
+    }, this.gameClient);
 
-    // Nav art is content (/nav-icons/{id}.png); the emoji glyph shows until/unless it loads.
-    const navImg = (id: string, label: string, glyph: string) =>
-      `<span class="nav-icon-glyph" aria-hidden="true">${glyph}</span>`
-      + `<img class="nav-icon-img" src="/nav-icons/${id}.png" alt="${label}" style="opacity:0"`
-      + ` onload="this.style.opacity='1';this.parentElement.classList.add('has-art')"`
-      + ` onerror="this.remove()" />`;
-    const nav = new BottomNav(
-      [
-        { id: 'map', label: 'Map', icon: navImg('map', 'Map', '🗺️') },
-        { id: 'items', label: 'Char', icon: navImg('items', 'Char', '🎒') },
-        { id: 'craft', label: 'Craft', icon: navImg('craft', 'Craft', '🔨') },
-        { id: 'combat', label: 'Battle', icon: navImg('combat', 'Battle', '⚔️') },
-        // Social opens a fly-out submenu with the three sub-views; the
-        // pill bar inside the screen is gone in favor of this.
-        {
-          id: 'social',
-          label: 'Social',
-          icon: navImg('social', 'Social', '👥'),
-          mode: 'submenu',
-          submenu: [
-            { id: 'party', label: 'Party', badge: 'party-invites' },
-            { id: 'guild', label: 'Guild' },
-            { id: 'users', label: 'Leaderboard', badge: 'friend-requests' },
-          ],
-        },
-        { id: 'settings', label: 'Settings', icon: navImg('settings', 'Settings', '⚙️') },
-        // Chat is pinned to the far right as a square overlay button. The
-        // icon is a chevron (▲ when closed → "open me upward", ▼ when open
-        // → "tap to close") so it visually reads as a separate widget, not
-        // another nav destination. CSS swaps the chevron via .overlay-active.
-        {
-          id: 'chat',
-          label: 'Chat',
-          icon: '<span class="nav-chat-chevron" aria-hidden="true"><span class="nav-chat-chevron-up">▲</span><span class="nav-chat-chevron-down">▼</span></span>',
-          mode: 'overlay',
-        },
-      ],
-      savedScreen,
-      (tabId, wasActive) => {
-        this.screenManager.switchTo(tabId);
-        // Re-click on Map → recenter on player (the only "tap again" gesture
-        // wired so far; other tabs ignore wasActive).
-        if (tabId === 'map' && wasActive) {
-          mapScreen.recenterOnPlayer();
-        }
+    const strip = new UtilityStrip(this.gameClient, {
+      onOpenChat: () => {
+        chatPopout.open();
+        nav.setOverlayActive('chat', true);
       },
-      this.gameClient,
-      (tabId, active) => {
-        if (tabId === 'chat') {
-          if (active) this.chatPopout?.open(); else this.chatPopout?.close();
-        }
-      },
-      (tabId, itemId) => {
-        if (tabId === 'social') {
-          socialScreen.setSubTab(itemId);
-          this.screenManager.switchTo('social');
-          nav.setActive('social');
-          sessionStorage.setItem('activeScreen', 'social');
-        }
-      },
-    );
+      onOpenQuests: () => questLog.open(),
+    });
 
-    // Wire popout → nav so closing the popout from its own button clears the
-    // overlay-active state, and unread mail lights up the Chat tab badge.
-    this.chatPopout.setOnClose(() => nav.setOverlayActive('chat', false));
-    this.chatPopout.setOnUnreadChange((hasUnread) => nav.setChatUnread(hasUnread));
+    let chatUnread = 0;
+    const showChatUnread = (): void => {
+      nav.setChatUnread(chatUnread);
+      strip.setChatUnread(chatUnread);
+    };
+    this.gameClient.onChat(() => {
+      if (chatPopout.isVisible()) return;
+      chatUnread++;
+      showChatUnread();
+    });
+    chatPopout.setOnClose(() => nav.setOverlayActive('chat', false));
+    chatPopout.setOnUnreadChange((hasUnread) => {
+      if (hasUnread) return;
+      chatUnread = 0;
+      showChatUnread();
+    });
 
-    // Wire user-popup "Chat" action → open the chat popout in DM mode and
-    // light up the Chat nav button.
     socialScreen.setOnDmRequest((username) => {
-      this.chatPopout?.openDm(username);
+      chatPopout.openDm(username);
       nav.setOverlayActive('chat', true);
     });
 
-    // Notification bell — global overlay, visible on every screen. Constructed here (after nav +
-    // socialScreen exist) since clicking a notification can navigate to either of them.
-    new NotificationCenter(this.gameClient, (target) => {
+    // TopHud must exist first: the bell looks up its slot once, on construction.
+    const notifications = new NotificationCenter(this.gameClient, (target) => {
       switch (target.kind) {
         case 'party':
-          socialScreen.setSubTab('party');
-          this.screenManager.switchTo('social');
-          nav.setActive('social');
-          sessionStorage.setItem('activeScreen', 'social');
+          navigate('social', 'party');
           break;
         case 'friend_requests':
-          socialScreen.setSubTab('users');
-          this.screenManager.switchTo('social');
-          nav.setActive('social');
-          sessionStorage.setItem('activeScreen', 'social');
+          navigate('social', 'friends');
           break;
         case 'dm_reply':
           socialScreen.startDm(target.username);
@@ -527,14 +524,35 @@ export class App {
       }
     });
 
-    // Restore chat open/closed from the previous session on this browser.
-    if (this.chatPopout.wasOpen()) {
-      this.chatPopout.open();
+    initNavigation({
+      getScreen: (id) => this.screenManager.get(id),
+      switchTo: (id) => this.screenManager.switchTo(id),
+      getActiveScreenId: () => this.screenManager.getActiveScreenId(),
+      setActiveTab: (id) => nav.setActive(id),
+      closeTransient: () => {
+        notifications.closeDropdown();
+        questLog.close();
+      },
+    });
+
+    this.removeShellListeners?.();
+    const shellListeners = [
+      installNavDelegate(),
+      installEscapeHandler(),
+      installBackHandler(() => {
+        if (!chatPopout.isVisible() || window.matchMedia(CHAT_COLUMN_QUERY).matches) return false;
+        chatPopout.close();
+        return true;
+      }),
+    ];
+    this.removeShellListeners = () => shellListeners.forEach(remove => remove());
+
+    if (chatPopout.wasOpen()) {
+      chatPopout.open();
       nav.setOverlayActive('chat', true);
     }
 
-    // Switch to saved screen (or combat by default)
-    this.screenManager.switchTo(savedScreen);
+    navigate(sessionStorage.getItem(ACTIVE_SCREEN_KEY) ?? DEFAULT_SCREEN);
 
     if (this.openOptionsDelegate) document.removeEventListener('click', this.openOptionsDelegate, true);
     this.openOptionsDelegate = (e: MouseEvent) => {
@@ -549,11 +567,7 @@ export class App {
 
     this.recapModal?.destroy();
     this.recapModal = new RecapModal(this.gameClient, {
-      onOpenMap: () => {
-        this.screenManager.switchTo('map');
-        nav.setActive('map');
-        sessionStorage.setItem('activeScreen', 'map');
-      },
+      onOpenMap: () => navigate('map'),
     });
   }
 }

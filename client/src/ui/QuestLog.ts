@@ -18,14 +18,18 @@ import { deferWhilePressed, setHtml } from './render';
 
 const UNKNOWN_QUEST = 'Unknown quest';
 
-/** Settings → Quest Log modal: who has new quests, active quests (ready first), then a collapsed completed history. */
+/** Quest Log modal, owned by App: who has new quests, active quests (ready first), then a collapsed completed history. */
 export class QuestLog {
   private overlay: HTMLElement | null = null;
   private body: HTMLElement | null = null;
   private unsubscribe: (() => void) | null = null;
   private showCompleted = false;
 
-  constructor(private gameClient: GameClient, private worldCache: WorldCache) {}
+  constructor(
+    private gameClient: GameClient,
+    private worldCache: WorldCache,
+    readonly onGoToRoom?: (roomId: string) => void,
+  ) {}
 
   open(): void {
     if (this.overlay) return;
@@ -56,7 +60,7 @@ export class QuestLog {
       this.render(this.gameClient.lastState);
     });
 
-    bringToFront(overlay);
+    bringToFront(overlay, () => this.close());
     wireFocusOnInteract(overlay);
 
     this.render(this.gameClient.lastState);

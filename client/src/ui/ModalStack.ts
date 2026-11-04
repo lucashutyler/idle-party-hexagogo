@@ -1,48 +1,62 @@
 /**
- * Tiny modal/overlay stack manager.
- *
- * Replaces hard-coded per-overlay z-index values. Each overlay calls
- * `bringToFront(el)` when it opens AND on `mousedown` (so click-to-focus
- * works like native windows). Calls `release(el)` when it closes.
- *
- * Order is purely click/open dependent — the most recently activated
- * overlay sits on top regardless of its "type". New overlays opt in by
- * calling these two functions; nothing else needed.
- *
- * Implementation notes:
- * - z-index is assigned as `BASE_Z + counter`, with counter incrementing
- *   on every `bringToFront`. We never reset the counter (Number.MAX_SAFE_INTEGER
- *   gives us ~9 quadrillion overlay activations of headroom — enough).
- * - `BASE_Z` is intentionally above the bottom nav (1000) and persistent
- *   XP bar so the overlays sit above persistent chrome.
- * - Calling `bringToFront` on an already-tracked element re-promotes it
- *   to the new top z-index (used by mousedown to refocus a window).
+ * Click-order z-index for overlays, plus the dismiss order Back and Escape follow.
+ * `bringToFront` on open and on interaction, `release` on close. See docs/architecture/client.md.
  */
 
 const BASE_Z = 1500;
 let counter = 0;
-const tracked = new WeakMap<HTMLElement, number>();
 
-/** Promote `el` to the top of the modal stack. */
-export function bringToFront(el: HTMLElement): void {
-  counter++;
-  const z = BASE_Z + counter;
-  el.style.zIndex = String(z);
-  tracked.set(el, z);
+interface StackEntry {
+  order: number;
+  dismiss?: () => void;
 }
 
-/** Remove `el` from the stack — call this when the overlay closes. */
+const tracked = new Map<HTMLElement, StackEntry>();
+
+function pruneDetached(keep?: HTMLElement): void {
+  for (const el of tracked.keys()) {
+    if (el !== keep && !el.isConnected) tracked.delete(el);
+  }
+}
+
+/** Promote `el` to the top. `dismiss` is what Back and Escape call; a re-promotion without one keeps the earlier one. */
+export function bringToFront(el: HTMLElement, dismiss?: () => void): void {
+  pruneDetached(el);
+  counter++;
+  el.style.zIndex = String(BASE_Z + counter);
+  tracked.set(el, { order: counter, dismiss: dismiss ?? tracked.get(el)?.dismiss });
+}
+
+/** Make Back and Escape close `el` without touching its z-index, for panels docked inside a screen. Undo with `release`. */
+export function registerDismiss(el: HTMLElement, dismiss: () => void): void {
+  const entry = tracked.get(el);
+  if (entry) {
+    entry.dismiss = dismiss;
+    return;
+  }
+  counter++;
+  tracked.set(el, { order: counter, dismiss });
+}
+
+/** Remove `el` from the stack when the overlay closes. */
 export function release(el: HTMLElement): void {
   el.style.removeProperty('z-index');
   tracked.delete(el);
 }
 
-/**
- * Wire an overlay so it auto-promotes on mousedown / touchstart.
- * The overlay still has to call `bringToFront(el)` itself when it opens
- * and `release(el)` when it closes — this just handles the focus-on-click
- * case while it's open.
- */
+/** Dismiss the most recently promoted overlay that can be dismissed. Returns whether there was one. */
+export function dismissTop(): boolean {
+  pruneDetached();
+  let top: StackEntry | null = null;
+  for (const entry of tracked.values()) {
+    if (entry.dismiss && (!top || entry.order > top.order)) top = entry;
+  }
+  if (!top?.dismiss) return false;
+  top.dismiss();
+  return true;
+}
+
+/** Promote `el` on every press while it is open. */
 export function wireFocusOnInteract(el: HTMLElement): void {
   const handler = () => bringToFront(el);
   el.addEventListener('mousedown', handler, true);

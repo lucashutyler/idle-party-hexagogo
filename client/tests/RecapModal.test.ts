@@ -202,11 +202,15 @@ describe('RecapModal', () => {
     const options = document.createElement('div');
     options.style.zIndex = String(parseInt(overlay.style.zIndex, 10) + 1);
     document.body.appendChild(options);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const covered = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    document.dispatchEvent(covered);
     expect(client.sendAckRecap).not.toHaveBeenCalled();
+    expect(covered.defaultPrevented).toBe(false);
     options.remove();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const top = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    document.dispatchEvent(top);
     expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
+    expect(top.defaultPrevented).toBe(true);
     modal.destroy();
   });
 

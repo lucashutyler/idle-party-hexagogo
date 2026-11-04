@@ -1,7 +1,6 @@
 import type { GameClient } from '../network/GameClient';
-import type { ChatLocalStore } from '../network/ChatLocalStore';
-import type { ServerStateMessage, ClientSocialState, ChatMessage, ChatChannelType, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_GLYPHS, classIconHtml, serverIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, CLASS_GLYPHS, classIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
 import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
@@ -10,13 +9,11 @@ import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { renderAssetImg } from '../ui/assets';
 import { renderSkillCardMeta } from '../ui/SkillCardChip';
 import { partyGridCell } from '../ui/partyGridLayout';
-import { deferWhilePressed } from '../ui/render';
+import { deferWhilePressed, setHtml } from '../ui/render';
+import { renderSegments, wireSegments } from '../ui/Segments';
 
-type SubTab = 'users' | 'guild' | 'party' | 'chat';
+type SubTab = 'users' | 'guild' | 'party';
 
-// Chat sub-tab is gone — replaced by the global pop-out chat. The 'chat' value
-// is still allowed in stored prefs for back-compat; we silently coerce it back
-// to 'party' below.
 const SUB_TABS: { id: SubTab; label: string }[] = [
   { id: 'party', label: 'Party' },
   { id: 'guild', label: 'Guild' },
@@ -26,7 +23,6 @@ const SUB_TABS: { id: SubTab; label: string }[] = [
 export class SocialScreen implements Screen {
   private container: HTMLElement;
   private gameClient: GameClient;
-  private chatStore: ChatLocalStore;
   private worldCache: WorldCache;
   private isActive = false;
   private activeTab: SubTab = (() => {
@@ -35,22 +31,14 @@ export class SocialScreen implements Screen {
     return 'party';
   })();
   private unsubscribe?: () => void;
-  private unsubChat?: () => void;
-  private unsubSyncChat?: () => void;
 
   private panelContainer!: HTMLElement;
+  private segmentsContainer!: HTMLElement;
   private lastSocial: ClientSocialState | null = null;
   private lastState: ServerStateMessage | null = null;
   private searchQuery = '';
   private sortBy: 'name' | 'status' | 'level' = 'level';
   private filterBy: 'all' | 'friends' | 'guild' | 'room' | 'zone' = 'all';
-
-  // Chat state — unified timeline backed by localStorage
-  private chatFilters: Set<ChatChannelType>;
-  private chatSendChannel: ChatChannelType = 'zone';
-  private chatDmTarget = '';
-  private chatFocusAfterRender = false;
-  private chatPrefsInitialized = false;
 
   // User popup
   private popupOverlay: HTMLElement | null = null;
@@ -115,31 +103,13 @@ export class SocialScreen implements Screen {
   private lastRenderedGuildKey = '';
   private lastRenderedPartyKey = '';
 
-  constructor(containerId: string, gameClient: GameClient, chatStore: ChatLocalStore, worldCache: WorldCache) {
+  constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
     if (!el) throw new Error(`Screen container #${containerId} not found`);
     this.container = el;
     this.gameClient = gameClient;
-    this.chatStore = chatStore;
     this.worldCache = worldCache;
     this.buildDOM();
-
-    // Load chat filters from localStorage (client-only persistence)
-    const savedFilters = localStorage.getItem('chat_filters');
-    if (savedFilters) {
-      try {
-        this.chatFilters = new Set(JSON.parse(savedFilters));
-      } catch {
-        this.chatFilters = new Set(['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'] as ChatChannelType[]);
-      }
-    } else {
-      this.chatFilters = new Set(['tile', 'zone', 'party', 'guild', 'dm', 'global', 'server'] as ChatChannelType[]);
-    }
-
-    // On tab resume, trigger incremental sync (no clearing)
-    this.gameClient.onResume(() => {
-      this.gameClient.sendSyncChat(this.chatStore.getLatestId());
-    });
 
     // A confirm rejected on a stale nonce means the partner's offer moved. The
     // re-synced state repaints the new offer; this explains why nothing happened.
@@ -158,29 +128,10 @@ export class SocialScreen implements Screen {
         if (this.isActive && state) this.updateFromState(state);
       });
     });
-    this.unsubChat = this.gameClient.onChat((msg) => {
-      // Add to localStorage-backed store (O(1) dedup)
-      this.chatStore.addMessage(msg);
-    });
-    this.unsubSyncChat = this.gameClient.onSyncChat((messages, full) => {
-      this.chatStore.mergeSyncBatch(messages, full);
-      if (this.isActive && this.activeTab === 'chat') {
-        this.renderChatMessages();
-      }
-    });
-
-    // Trigger incremental sync
-    this.gameClient.sendSyncChat(this.chatStore.getLatestId());
-
     const state = this.gameClient.lastState;
     if (state) {
       this.lastSocial = state.social ?? null;
       this.lastState = state;
-      if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
-        this.chatSendChannel = state.social.chatPreferences.sendChannel;
-        this.chatDmTarget = state.social.chatPreferences.dmTarget;
-        this.chatPrefsInitialized = true;
-      }
       this.renderPanel();
     }
   }
@@ -189,10 +140,6 @@ export class SocialScreen implements Screen {
     this.isActive = false;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
-    this.unsubChat?.();
-    this.unsubChat = undefined;
-    this.unsubSyncChat?.();
-    this.unsubSyncChat = undefined;
     this.dismissPopup();
     this.dismissTradeModal();
   }
@@ -200,19 +147,29 @@ export class SocialScreen implements Screen {
   private buildDOM(): void {
     this.container.innerHTML = `
       <div class="social-content">
+        <div class="social-segments"></div>
         <div class="social-panel"></div>
       </div>
     `;
     this.panelContainer = this.container.querySelector('.social-panel')!;
+    this.segmentsContainer = this.container.querySelector('.social-segments')!;
+    wireSegments(this.segmentsContainer, (id) => this.setSubTab(id));
+    this.renderSegmentBar();
     this.wireDelegatedClicks();
   }
 
-  /** Switch sub-view — called by the bottom nav fly-out submenu. */
-  setSubTab(tab: string): void {
+  private renderSegmentBar(): void {
+    setHtml(this.segmentsContainer, renderSegments(SUB_TABS, this.activeTab));
+  }
+
+  /** Switch sub-view, from the segments or a navigation target. Friends live on the Leaderboard view for now. */
+  setSubTab(requested: string): void {
+    const tab = requested === 'friends' ? 'users' : requested;
     if (!SUB_TABS.some(t => t.id === tab)) return;
     if (this.activeTab === tab) return;
     this.activeTab = tab as SubTab;
     sessionStorage.setItem('socialSubTab', this.activeTab);
+    this.renderSegmentBar();
     this.lastRenderedUsersKey = '';
     this.lastRenderedGuildKey = '';
     this.lastRenderedPartyKey = '';
@@ -224,17 +181,11 @@ export class SocialScreen implements Screen {
     this.panelContainer.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
 
-      // Username click → show popup (anywhere a .social-user-name or .social-chat-sender appears)
+      // Username click → show popup
       const nameEl = target.closest('.social-user-name-clickable') as HTMLElement | null;
       if (nameEl) {
         const username = nameEl.getAttribute('data-username')
           || nameEl.closest('[data-username]')?.getAttribute('data-username');
-        // Clicking your own DM line — route to the recipient instead of self.
-        const dmTarget = nameEl.getAttribute('data-dm-target');
-        if (username === this.lastState?.username && dmTarget) {
-          this.startDm(dmTarget);
-          return;
-        }
         if (username) {
           // showUserPopup routes self-clicks to the "this is you" popup.
           this.showUserPopup(username, nameEl);
@@ -309,26 +260,6 @@ export class SocialScreen implements Screen {
         return;
       }
 
-      // Chat panel — filter toggles (client-side only, persisted to localStorage)
-      if (btn.matches('.chat-filter-btn')) {
-        const type = btn.getAttribute('data-channel') as ChatChannelType;
-        if (this.chatFilters.has(type)) {
-          this.chatFilters.delete(type);
-        } else {
-          this.chatFilters.add(type);
-        }
-        btn.classList.toggle('active');
-        this.renderChatMessages();
-        localStorage.setItem('chat_filters', JSON.stringify(Array.from(this.chatFilters)));
-        return;
-      }
-
-      // Chat panel — send button
-      if (btn.matches('.social-chat-send-btn')) {
-        this.doChatSend();
-        return;
-      }
-
       // Note: trade modal buttons are handled by a delegated handler on the overlay element
       // inside renderTradeModal() — the modal lives in document.body, not panelContainer.
     });
@@ -360,59 +291,12 @@ export class SocialScreen implements Screen {
       }
     });
 
-    // Delegated input handler for search + chat inputs
+    // Delegated input handler for search
     this.panelContainer.addEventListener('input', (e) => {
       const target = e.target as HTMLElement;
-      if (target.matches('.social-search:not(.social-chat-input):not(.social-chat-dm-target):not(.social-guild-name-input)')) {
+      if (target.matches('.social-search:not(.social-guild-name-input)')) {
         this.searchQuery = (target as HTMLInputElement).value;
         this.renderUserRows();
-      }
-      if (target.matches('.social-chat-dm-target')) {
-        this.chatDmTarget = (target as HTMLInputElement).value.trim();
-        this.updateChatDmState();
-        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
-      }
-    });
-
-    // Delegated change handler for chat channel select
-    this.panelContainer.addEventListener('change', (e) => {
-      const target = e.target as HTMLElement;
-      if (target.matches('.chat-send-select')) {
-        this.chatSendChannel = (target as HTMLSelectElement).value as ChatChannelType;
-        this.updateChatDmState();
-        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
-        if (this.chatSendChannel === 'dm') {
-          const dmInput = this.panelContainer.querySelector('.social-chat-dm-target') as HTMLInputElement | null;
-          dmInput?.focus();
-        }
-      }
-    });
-
-    // Delegated keydown handler for chat input Enter
-    this.panelContainer.addEventListener('keydown', (e) => {
-      const target = e.target as HTMLElement;
-      if (target.matches('.social-chat-input') && (e as KeyboardEvent).key === 'Enter') {
-        this.doChatSend();
-      }
-    });
-
-    // Delegated click for channel tag switching in chat messages
-    this.panelContainer.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const switchChannel = target.closest('[data-switch-channel]')?.getAttribute('data-switch-channel') as ChatChannelType | null;
-      if (switchChannel) {
-        const social = this.lastSocial;
-        let disabled = false;
-        if (switchChannel === 'party') disabled = (social?.party?.members.length ?? 0) <= 1;
-        if (switchChannel === 'guild') disabled = !social?.guild;
-        if (disabled) return;
-        this.chatSendChannel = switchChannel;
-        const selectEl = this.panelContainer.querySelector('.chat-send-select') as HTMLSelectElement | null;
-        if (selectEl) selectEl.value = switchChannel;
-        this.updateChatDmState();
-        this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
-        const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
-        chatInput?.focus();
       }
     });
 
@@ -428,16 +312,6 @@ export class SocialScreen implements Screen {
   private updateFromState(state: ServerStateMessage): void {
     this.lastSocial = state.social ?? null;
     this.lastState = state;
-    // Initialize chat preferences from server on first state received
-    if (!this.chatPrefsInitialized && state.social?.chatPreferences) {
-      this.chatSendChannel = state.social.chatPreferences.sendChannel;
-      this.chatDmTarget = state.social.chatPreferences.dmTarget;
-      this.chatPrefsInitialized = true;
-    }
-
-    // (Tab bar is gone — sub-tabs are picked from the bottom-nav fly-out submenu;
-    // its badges are driven from BottomNav's own state subscription.)
-
     // Skip party panel updates while grid animation or drag is in progress
     if (this.activeTab === 'party' && (this.gridAnimating || this.gridDragging)) return;
 
@@ -446,51 +320,14 @@ export class SocialScreen implements Screen {
       case 'users': this.updateUsersPanel(); break;
       case 'guild': this.updateGuildPanel(); break;
       case 'party': this.updatePartyPanel(); break;
-      case 'chat': break; // Chat uses incremental appendChatMessage — no tick rebuild needed
     }
   }
 
   private renderPanel(): void {
-    // Chat needs overflow hidden so flex layout pins input bar to bottom
-    this.panelContainer.classList.toggle('chat-active', this.activeTab === 'chat');
     switch (this.activeTab) {
       case 'users': this.renderUsersPanel(); break;
       case 'guild': this.renderGuildPanel(); break;
       case 'party': this.renderPartyPanel(); break;
-      case 'chat': this.renderChatPanel(); break;
-    }
-  }
-
-  /** Send a chat message from the current input state. */
-  private doChatSend(): void {
-    const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
-    const sendBtn = this.panelContainer.querySelector('.social-chat-send-btn') as HTMLButtonElement | null;
-    if (!chatInput || chatInput.disabled || sendBtn?.disabled) return;
-    const text = chatInput.value.trim();
-    if (!text) return;
-    const channelId = this.resolveChatChannelId(this.chatSendChannel);
-    if (!channelId) return;
-    this.gameClient.sendChat(this.chatSendChannel, channelId, text);
-    chatInput.value = '';
-    chatInput.focus();
-  }
-
-  /** Update DM-related input state (show/hide target input, enable/disable send). */
-  private updateChatDmState(): void {
-    const dmInput = this.panelContainer.querySelector('.social-chat-dm-target') as HTMLInputElement | null;
-    const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
-    const sendBtn = this.panelContainer.querySelector('.social-chat-send-btn') as HTMLButtonElement | null;
-    if (!dmInput || !chatInput || !sendBtn) return;
-    const isDm = this.chatSendChannel === 'dm';
-    dmInput.style.display = isDm ? 'block' : 'none';
-    if (isDm && !this.chatDmTarget) {
-      chatInput.disabled = true;
-      sendBtn.disabled = true;
-      chatInput.placeholder = 'Enter a username above first';
-    } else {
-      chatInput.disabled = false;
-      sendBtn.disabled = false;
-      chatInput.placeholder = 'Type a message...';
     }
   }
 
@@ -1374,42 +1211,12 @@ export class SocialScreen implements Screen {
     this.paintGridPickedUp();
   }
 
-  // ── Chat Panel ───────────────────────────────────────────────
-
-  private static readonly CHAT_CHANNELS: { type: ChatChannelType; tag: string; label: string; sendable?: boolean }[] = [
-    { type: 'tile', tag: 'R', label: 'Room' },
-    { type: 'zone', tag: 'Z', label: 'Zone' },
-    { type: 'party', tag: 'P', label: 'Party' },
-    { type: 'guild', tag: 'G', label: 'Guild' },
-    { type: 'global', tag: 'W', label: 'World' },
-    { type: 'dm', tag: 'DM', label: 'DM' },
-    { type: 'server', tag: 'S', label: 'Server', sendable: false },
-  ];
-
-  /** Resolve the channel ID for a given channel type from current game state. */
-  private resolveChatChannelId(type: ChatChannelType): string {
-    const state = this.gameClient.lastState;
-    const social = this.lastSocial;
-    switch (type) {
-      case 'tile': return state ? `${state.party.col},${state.party.row}` : '';
-      case 'zone': return state?.zoneName ?? '';
-      case 'party': return social?.party?.id ?? '';
-      case 'guild': return social?.guild?.id ?? '';
-      case 'global': return 'global';
-      case 'dm': return this.chatDmTarget;
-      case 'server': return 'server';
-    }
-  }
-
   /**
    * Open the chat popout pre-filled for a DM to `username`. Also persists
    * the choice as the user's chat preferences for cross-device sync.
    */
   startDm(username: string): void {
-    this.chatSendChannel = 'dm';
-    this.chatDmTarget = username;
-    this.gameClient.sendSetChatPreferences(this.chatSendChannel, this.chatDmTarget);
-    this.chatFocusAfterRender = true;
+    this.gameClient.sendSetChatPreferences('dm', username);
     this.onDmRequest?.(username);
   }
 
@@ -1418,124 +1225,6 @@ export class SocialScreen implements Screen {
     this.onDmRequest = cb;
   }
 
-
-  private static formatTimestamp(ts: number): string {
-    const d = new Date(ts);
-    const h = d.getHours().toString().padStart(2, '0');
-    const m = d.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
-  }
-
-  private static formatDateFull(ts: number): string {
-    const d = new Date(ts);
-    return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  }
-
-  private renderChatMsgHtml(msg: ChatMessage): string {
-    const ch = SocialScreen.CHAT_CHANNELS.find(c => c.type === msg.channelType);
-    const tag = ch?.tag ?? '?';
-    const selfName = this.lastState?.username ?? '';
-    const isSelfDm = msg.channelType === 'dm' && msg.senderUsername === selfName;
-    const dmTo = isSelfDm
-      ? ` <span class="chat-dm-to">to ${this.escapeHtml(msg.channelId)}</span>` : '';
-    const dmTargetAttr = isSelfDm ? ` data-dm-target="${this.escapeHtml(msg.channelId)}"` : '';
-    const time = SocialScreen.formatTimestamp(msg.timestamp);
-    const dateFull = SocialScreen.formatDateFull(msg.timestamp);
-    return `<div class="social-chat-msg">
-      <span class="chat-timestamp" title="${dateFull}">${time}</span>
-      <span class="chat-tag chat-color-${msg.channelType} chat-clickable" data-switch-channel="${msg.channelType}">[${tag}]</span>
-      <span class="social-chat-sender chat-color-${msg.channelType} social-user-name-clickable" data-username="${this.escapeHtml(msg.senderUsername)}"${dmTargetAttr}>${msg.senderUsername === 'Server' ? serverIconHtml() : this.classIcon(this.getPlayerClassName(msg.senderUsername))} ${this.escapeHtml(msg.senderUsername)}${dmTo}</span>
-      <span class="social-chat-text">${this.escapeHtml(msg.text)}</span>
-    </div>`;
-  }
-
-  /** Update just the chat message list without rebuilding filters/input. */
-  private renderChatMessages(): void {
-    const msgContainer = this.panelContainer.querySelector('.social-chat-messages');
-    if (!msgContainer) return;
-
-    const wasAtBottom = msgContainer.scrollTop + msgContainer.clientHeight >= msgContainer.scrollHeight - 20;
-    const filtered = this.chatStore.getFiltered(this.chatFilters, this.lastSocial?.blockedUsers);
-
-    msgContainer.innerHTML = filtered.length === 0
-      ? '<div class="social-empty">No messages yet</div>'
-      : filtered.map(m => this.renderChatMsgHtml(m)).join('');
-
-    if (wasAtBottom) {
-      msgContainer.scrollTop = msgContainer.scrollHeight;
-    }
-  }
-
-  private renderChatPanel(): void {
-    // Filter messages by enabled channel types and blocked users
-    const filtered = this.chatStore.getFiltered(this.chatFilters, this.lastSocial?.blockedUsers);
-
-    // Build send channel options — all shown, some disabled based on context
-    const social = this.lastSocial;
-    const sendOptions = SocialScreen.CHAT_CHANNELS
-      .filter(ch => ch.sendable !== false)
-      .map(ch => {
-        let disabled = false;
-        if (ch.type === 'party') disabled = (social?.party?.members.length ?? 0) <= 1;
-        if (ch.type === 'guild') disabled = !social?.guild;
-        return { ...ch, disabled };
-      });
-
-    // Capture scroll position before re-render
-    const oldMsgContainer = this.panelContainer.querySelector('.social-chat-messages');
-    const oldScrollTop = oldMsgContainer ? oldMsgContainer.scrollTop : 0;
-    const wasAtBottom = !oldMsgContainer || (oldScrollTop + oldMsgContainer.clientHeight >= oldMsgContainer.scrollHeight - 20);
-
-    this.panelContainer.innerHTML = `
-      <div class="social-chat-container">
-        <div class="social-chat-filters">
-          ${SocialScreen.CHAT_CHANNELS.map(ch => `
-            <button class="chat-filter-btn chat-color-${ch.type}${this.chatFilters.has(ch.type) ? ' active' : ''}"
-              data-channel="${ch.type}">${ch.label}</button>
-          `).join('')}
-        </div>
-        <div class="social-chat-messages">
-          ${filtered.length === 0
-            ? '<div class="social-empty">No messages yet</div>'
-            : filtered.map(m => this.renderChatMsgHtml(m)).join('')
-          }
-        </div>
-        <div class="social-chat-input-bar">
-          <select class="chat-send-select">
-            ${sendOptions.map(ch => `<option value="${ch.type}"${ch.type === this.chatSendChannel ? ' selected' : ''}${ch.disabled ? ' disabled' : ''}>${ch.label}</option>`).join('')}
-          </select>
-          <input class="social-search social-chat-dm-target" type="text" placeholder="Username..." value="${this.escapeHtml(this.chatDmTarget)}" style="display:${this.chatSendChannel === 'dm' ? 'block' : 'none'}" />
-          <input class="social-search social-chat-input" type="text" placeholder="Type a message..." maxlength="500" />
-          <button class="social-action-btn add-friend social-chat-send-btn">Send</button>
-        </div>
-      </div>
-    `;
-
-    // Restore scroll position
-    const msgContainer = this.panelContainer.querySelector('.social-chat-messages');
-    if (msgContainer) {
-      if (wasAtBottom) {
-        msgContainer.scrollTop = msgContainer.scrollHeight;
-      } else {
-        msgContainer.scrollTop = oldScrollTop;
-      }
-    }
-
-    // Initialize DM input state
-    this.updateChatDmState();
-
-    // Restore focus to message input after re-render (e.g. after startDm)
-    if (this.chatFocusAfterRender) {
-      this.chatFocusAfterRender = false;
-      const chatInput = this.panelContainer.querySelector('.social-chat-input') as HTMLInputElement | null;
-      chatInput?.focus();
-    }
-    // All click/input/change/keydown handlers are delegated via wireDelegatedClicks() — no per-element wiring needed.
-  }
-
-  /* `appendChatMessage` and the chat sub-tab are gone — chat lives in the
-     global pop-out now. The renderer / store are kept for any code paths
-     that still want to format a chat row (tooltip previews, etc.). */
 
   // ── Trade Modal ───────────────────────────────────────────────
 

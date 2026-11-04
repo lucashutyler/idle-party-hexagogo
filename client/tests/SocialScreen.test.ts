@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import { SocialScreen } from '../src/screens/SocialScreen';
 import type { GameClient } from '../src/network/GameClient';
-import type { ChatLocalStore } from '../src/network/ChatLocalStore';
 import type { WorldCache } from '../src/network/WorldCache';
 
 type StateListener = (state: ServerStateMessage) => void;
@@ -38,15 +37,11 @@ function setup() {
     subscribe: (l: StateListener) => { listeners.add(l); return () => { listeners.delete(l); }; },
     onResume: () => () => {},
     onServerError: () => () => {},
-    onChat: () => () => {},
-    onSyncChat: () => () => {},
-    sendSyncChat: () => {},
     sendAcceptPartyInvite,
   } as unknown as GameClient;
 
-  const chatStore = { getLatestId: () => null, addMessage: () => {}, mergeSyncBatch: () => {} } as unknown as ChatLocalStore;
   const worldCache = { getSkillContent: () => ({ skills: {} }) } as unknown as WorldCache;
-  const screen = new SocialScreen('social', gameClient, chatStore, worldCache);
+  const screen = new SocialScreen('social', gameClient, worldCache);
 
   const push = (inviters: string[]) => {
     lastState = makeState(inviters);
@@ -61,6 +56,39 @@ function setup() {
 function press(target: Element): void {
   target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
 }
+
+describe('SocialScreen sub-views', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+  });
+
+  it('reaches every sub-view from its segments and saves the choice', () => {
+    const t = setup();
+    const tab = (id: string) => document.querySelector(`[data-seg="${id}"]`) as HTMLButtonElement;
+    expect(tab('party').getAttribute('aria-selected')).toBe('true');
+
+    tab('guild').click();
+    expect(tab('guild').getAttribute('aria-selected')).toBe('true');
+    expect(sessionStorage.getItem('socialSubTab')).toBe('guild');
+
+    tab('users').click();
+    expect(sessionStorage.getItem('socialSubTab')).toBe('users');
+    t.screen.onDeactivate();
+  });
+
+  it('opens friends on the leaderboard view', () => {
+    const t = setup();
+    t.screen.setSubTab('friends');
+    expect(sessionStorage.getItem('socialSubTab')).toBe('users');
+  });
+
+  it('ignores unknown sub-views', () => {
+    const t = setup();
+    t.screen.setSubTab('nonsense');
+    expect((document.querySelector('[data-seg="party"]') as HTMLElement).getAttribute('aria-selected')).toBe('true');
+  });
+});
 
 describe('SocialScreen party panel', () => {
   beforeEach(() => {

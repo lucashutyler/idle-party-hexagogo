@@ -1,4 +1,5 @@
 import type { GameClient } from '../network/GameClient';
+import { confirmDialog } from '../ui/ConfirmDialog';
 import type {
   ServerStateMessage,
   ServerEquipBlockedMessage,
@@ -258,8 +259,8 @@ export class CharItemsScreen implements Screen {
     this.sortSelect = this.container.querySelector('.items-sort-select')!;
 
     // XP rate reset
-    this.container.querySelector('.charitems-xp-rate-reset')!.addEventListener('click', () => {
-      if (!confirm('Reset XP rate counter?')) return;
+    this.container.querySelector('.charitems-xp-rate-reset')!.addEventListener('click', async () => {
+      if (!await confirmDialog({ title: 'Reset XP rate counter?', confirmLabel: 'Reset' })) return;
       this.gameClient.resetXpRate();
     });
 

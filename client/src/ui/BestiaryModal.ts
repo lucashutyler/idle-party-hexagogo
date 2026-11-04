@@ -213,7 +213,9 @@ export class BestiaryModal {
   private renderedAt = 0;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private keyHandler = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') this.close();
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    this.close();
   };
 
   constructor(private gameClient: GameClient) {}
@@ -272,7 +274,7 @@ export class BestiaryModal {
     this.gameClient.requestBestiary();
     this.renderList();
 
-    bringToFront(overlay);
+    bringToFront(overlay, () => this.close());
     wireFocusOnInteract(overlay);
   }
 
