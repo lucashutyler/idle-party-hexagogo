@@ -86,6 +86,16 @@ export function actionLabel(action: RoomAction): string {
   }
 }
 
+/** One word for where a chip has no room for the full label. */
+export function actionShortLabel(action: RoomAction): string {
+  switch (action.kind) {
+    case 'npc': return 'Talk';
+    case 'shop': return action.icon === ROOM_ICONS.hire ? 'Hire' : 'Shop';
+    case 'dungeon': return 'Dungeon';
+    case 'travel': return 'Travel';
+  }
+}
+
 /** Quests ready to turn in and quests some NPC can hand out now, from the latest state push. */
 export function questMarks(state?: ServerStateMessage | null): QuestMarks {
   const ready = (state?.activeQuests ?? []).filter(q => q.status === 'ready').map(q => q.questId);

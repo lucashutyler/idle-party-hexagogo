@@ -606,8 +606,9 @@ button.login-resend {
   overflow: hidden;
   padding: 12px 14px 14px;
 }
+/* One height for Buy, Sell and Hire, so the toggle stays under the pointer. */
 .shop-popup:not(.shop-detail-view, .shop-replace-view) {
-  min-height: min(420px, 60dvh);
+  height: min(600px, 85dvh);
 }
 .shop-replace-view {
   overflow-y: auto;
@@ -721,13 +722,54 @@ button.login-resend {
   min-height: 44px;
 }
 
+/* ── Dungeon entrance ────────────────────────────────────── */
+.dungeon-entry-modal {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.dungeon-entry-header {
+  flex: none;
+  padding: 14px 16px 10px;
+}
+.dungeon-entry-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 12px;
+}
+.dungeon-entry-body > * {
+  flex: none;
+}
+.dungeon-entry-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 2px solid var(--outline);
+}
+.dungeon-entry-modal .dungeon-entry-actions {
+  position: static;
+  margin: 0;
+  padding: 0;
+  background: none;
+}
+.dungeon-entry-actions .dungeon-entry-btn {
+  min-height: 44px;
+}
+
 /* ── Phones: every sheet docks at the bottom ─────────────── */
 @media (max-width: 767px) {
-  :is(.player-options-overlay, .shop-overlay, .npc-talk-overlay) {
+  :is(.player-options-overlay, .shop-overlay, .npc-talk-overlay, .dungeon-entry-overlay) {
     align-items: flex-end;
     padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
   }
-  :is(.player-options-modal, .shop-popup, .npc-talk-modal) {
+  :is(.player-options-modal, .shop-popup, .npc-talk-modal, .dungeon-entry-modal) {
     width: 100%;
     max-width: 560px;
     max-height: 85dvh;
@@ -735,12 +777,25 @@ button.login-resend {
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   }
   .player-options-overlay > .player-options-modal,
+  .dungeon-entry-overlay > .dungeon-entry-modal,
   .npc-talk-modal,
   .shop-opening .shop-popup {
     animation: popup-rise 180ms ease-out;
   }
   .player-options-modal {
     padding-bottom: var(--safe-bottom);
+  }
+  .dungeon-entry-forecast {
+    order: -2;
+  }
+  .dungeon-entry-reqs-slot {
+    order: -1;
+  }
+  .dungeon-entry-foot {
+    padding-bottom: calc(12px + var(--safe-bottom));
+  }
+  .dungeon-entry-actions .dungeon-entry-btn {
+    flex: 1;
   }
   .shop-popup {
     padding-bottom: calc(14px + var(--safe-bottom));
@@ -754,14 +809,14 @@ button.login-resend {
 }
 
 @media (max-height: 480px) and (orientation: landscape) {
-  :is(.player-options-modal, .shop-popup, .npc-talk-modal) {
+  :is(.player-options-modal, .shop-popup, .npc-talk-modal, .dungeon-entry-modal) {
     max-height: 92dvh;
   }
   .npc-talk-modal {
     padding: 0;
   }
   .shop-popup:not(.shop-detail-view, .shop-replace-view) {
-    min-height: 0;
+    height: 92dvh;
   }
   .login-logo {
     max-height: 30dvh;
@@ -796,6 +851,7 @@ button.login-resend {
 
 @media (prefers-reduced-motion: reduce) {
   .player-options-overlay > .player-options-modal,
+  .dungeon-entry-overlay > .dungeon-entry-modal,
   .npc-talk-modal,
   .shop-opening .shop-popup {
     animation: none;

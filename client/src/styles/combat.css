@@ -27,6 +27,7 @@
 .combat-run-location {
   flex: 1 1 auto;
   min-width: 0;
+  line-height: 1.3;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -97,7 +98,7 @@
 .combat-dungeon-leave::after {
   content: '';
   position: absolute;
-  inset: -8px -4px;
+  inset: -8px -4px -14px;
 }
 .combat-run-btn:active,
 .combat-dungeon-leave:active {
@@ -118,6 +119,7 @@
   z-index: -1;
   border-radius: inherit;
   background: linear-gradient(90deg, rgba(255, 112, 136, 0.45), rgba(255, 112, 136, 0.2));
+  opacity: calc(var(--run, 0) * 8);
   transform: scaleX(var(--run, 0));
   transform-origin: left;
   transition: transform 180ms linear;
@@ -533,8 +535,9 @@
   --combat-axis: x;
   --center-gap: 30px;
   --label-gutter: 20px;
+  --plate-gutter: 8px;
   --row-h: clamp(28px, (100cqh - 22px - var(--label-gutter)) / 3, 219px);
-  --col-w: clamp(40px, (100cqw - 54px) / 6, 224px);
+  --col-w: clamp(40px, (100cqw - 70px) / 6, 224px);
   --card-dir: column;
   --card-dir-enemy: column;
   --portrait: clamp(24px, min(var(--col-w) - 20px, var(--row-h) - 62px), 150px);
@@ -570,7 +573,7 @@
   align-items: center;
   justify-content: center;
   gap: calc(var(--center-gap) / 2);
-  padding: calc(8px + var(--label-gutter)) 6px 8px;
+  padding: calc(8px + var(--label-gutter)) 14px 8px;
 }
 .combat-block {
   position: relative;
@@ -579,7 +582,7 @@
 .combat-block::after {
   content: '';
   position: absolute;
-  inset: -5px;
+  inset: calc(-1 * var(--plate-gutter));
   z-index: -1;
   border-radius: var(--radius-lg);
   background: rgba(var(--plate-rgb), 0.06);
@@ -604,6 +607,8 @@
 }
 .combat-side {
   display: grid;
+  width: calc(3 * var(--col-w) + 6px);
+  height: calc(3 * var(--row-h) + 6px);
   grid-template-columns: repeat(3, var(--col-w));
   grid-template-rows: repeat(3, var(--row-h));
   gap: 3px;
@@ -623,22 +628,23 @@
   width: 0;
   height: 0;
 }
-/* Positioned against the grid: over the board's empty centre on portrait, under the blocks on landscape. */
+/* One line in a strip the grid keeps free: the label gutter on landscape, the centre gap on portrait. */
 .combat-status {
   --status-x: -50%;
   --status-y: 0;
   position: absolute;
   left: 50%;
-  bottom: 8px;
+  top: 1px;
   z-index: 5;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   width: max-content;
-  max-width: calc(100% - 20px);
-  padding: 5px 14px 6px;
-  border-radius: 16px;
+  max-width: calc(100% - 12px);
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
   border: 2px solid var(--outline);
   background: rgba(8, 12, 30, 0.94);
   box-shadow: inset 0 0 0 1px rgba(var(--outcome-rgb), 0.45), 0 3px 8px rgba(0, 0, 0, 0.45);
@@ -656,12 +662,15 @@
 .combat-status[data-tone="idle"] {
   box-shadow: inset 0 0 0 1px var(--stroke-hi), 0 3px 8px rgba(0, 0, 0, 0.45);
 }
+.combat-stage.status-shown .combat-boss-bar {
+  visibility: hidden;
+}
 .combat-status-head {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: center;
-  gap: 2px 8px;
+  gap: 6px;
+  white-space: nowrap;
 }
 .combat-status-title {
   color: #fff3b0;
@@ -681,7 +690,8 @@
   white-space: nowrap;
 }
 .combat-status-next {
-  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--text-2);
   font-size: var(--fs-xs);
@@ -714,14 +724,14 @@
     --art-inset: 4px;
   }
 }
-/* Horizontal, short and narrow (e.g. phone with the chat sheet open): portrait tiles. */
 @container combat-stage (aspect-ratio >= 1.1) and (height < 330px) {
   .combat-card[data-side="monster"] .combat-card-tier {
     left: auto;
     right: -4px;
   }
 }
-@container combat-stage (aspect-ratio >= 1.1) and (height < 330px) and (width < 588px) {
+/* Horizontal, very short and narrow (e.g. a small phone on its side): portrait tiles. */
+@container combat-stage (aspect-ratio >= 1.6) and (height < 330px) and (width < 588px) {
   .combat-stage-grid {
     --card-dir: column;
     --card-dir-enemy: column;
@@ -745,6 +755,17 @@
 @container combat-stage (aspect-ratio >= 1.1) and (height >= 210px) and (height < 330px) and (width >= 588px) {
   .combat-stage-grid { --name-lines: 2; --name-wrap: normal; }
 }
+/* Narrow columns with height to spare: names wrap rather than truncate. */
+@container combat-stage (aspect-ratio >= 1.1) and (height >= 330px) and (width < 900px) {
+  .combat-stage-grid {
+    --name-lines: 2;
+    --name-wrap: normal;
+    --portrait: clamp(24px, min(var(--col-w) - 20px, var(--row-h) - 82px), 150px);
+    --body-gap: 4px;
+    --body-pad: 6px 8px;
+    --enemy-body-pad: 6px 8px;
+  }
+}
 @container combat-stage (aspect-ratio >= 1.1) and (height < 174px) {
   .combat-stage-grid { --pips-display: none; }
 }
@@ -752,13 +773,14 @@
   .combat-stage-grid { --name-display: none; --lvl-display: none; --tier-display: none; }
 }
 
-/* Vertical (portrait): enemies on top, party below; displayRow = 2 − col, displayCol = row. */
-@container combat-stage (aspect-ratio < 1.1) {
+/* Vertical (portrait, and narrow stages up to 1.6:1): enemies on top, party below; displayRow = 2 − col, displayCol = row. */
+@container combat-stage ((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) {
   .combat-stage-grid {
     --combat-axis: y;
-    --row-h: clamp(28px, (100cqh - 36px - var(--label-gutter)) / 6, 92px);
-    --center-gap: clamp(20px, 100cqh - 6 * var(--row-h) - 36px, 40px);
-    --col-w: min((100cqw - 22px) / 3, 160px);
+    --plate-gutter: 5px;
+    --row-h: clamp(28px, (100cqh - 42px - var(--label-gutter)) / 6, var(--row-cap, 92px));
+    --center-gap: clamp(30px, 100cqh - 6 * var(--row-h) - 12px - var(--label-gutter), 44px);
+    --col-w: min((100cqw - 22px) / 3, var(--col-cap, 160px));
     --card-dir: row;
     --card-dir-enemy: row;
     --portrait: clamp(20px, min(var(--row-h) - 8px, var(--col-w) * 0.46), 72px);
@@ -778,6 +800,9 @@
     --hp-max: none;
     --self-hp-h: 13px;
     --art-inset: 4px;
+    --name-lines: 1;
+    --name-wrap: nowrap;
+    --body-gap: 5px;
     flex-direction: column;
     padding: var(--label-gutter) 8px 0;
   }
@@ -796,35 +821,199 @@
   .combat-status {
     --status-y: -50%;
     top: calc(50% + var(--label-gutter) / 2);
-    bottom: auto;
   }
   .combat-stage.big-result .combat-status {
-    --status-y: 44px;
+    --status-y: 0;
+    top: 1px;
+  }
+  .combat-card[data-side="monster"] .combat-card-tier {
+    left: -4px;
+    right: auto;
+  }
+}
+/* Pills tall enough for two name lines; a status pip takes the second line back. */
+@container combat-stage (((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) and (height >= 344px) and (height < 480px)) {
+  .combat-stage-grid { --name-lines: 2; --name-wrap: normal; }
+  .combat-card-info:has(.combat-pip) .combat-card-name {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
   }
 }
 /* Tall portrait: the name takes its own full-width line, so the art can grow without squeezing it. */
-@container combat-stage (aspect-ratio < 1.1) and (height >= 480px) {
+@container combat-stage (((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) and (height >= 480px)) {
   .combat-stage-grid {
     --portrait: clamp(20px, min(var(--row-h) - 24px, var(--col-w) * 0.46), 72px);
     --card-radius: 14px;
     --body-pad: 17px 7px 3px 4px;
     --enemy-body-pad: 17px 7px 3px 4px;
   }
-  .combat-card-name {
+  .combat-block:not([data-roomy]) .combat-card-name {
     position: absolute;
     top: 3px;
     left: 8px;
     right: 7px;
   }
-  .combat-card.self .combat-card-name {
+  .combat-block:not([data-roomy]) .combat-card.self .combat-card-name {
     left: 18px;
   }
 }
-@container combat-stage (aspect-ratio < 1.1) and (height < 308px) {
+/* Tablet portrait: same layout with room to breathe. */
+@container combat-stage (aspect-ratio < 1.1) and (height >= 480px) and (width >= 700px) {
+  .combat-stage-grid {
+    --row-cap: 150px;
+    --col-cap: 240px;
+    --portrait: clamp(20px, min(var(--row-h) - 32px, var(--col-w) * 0.5), 120px);
+    --name-fs: var(--fs-sm);
+    --hp-h: 14px;
+    --hp-text: flex;
+    --hp-max: inline;
+    --self-hp-h: 14px;
+    --art-inset: 5px;
+    --body-pad: 22px 8px 4px 6px;
+    --enemy-body-pad: 22px 8px 4px 6px;
+    --body-gap: 8px;
+  }
+  .combat-block:not([data-roomy]) .combat-card-name {
+    top: 4px;
+  }
+}
+@container combat-stage (((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) and (height < 308px)) {
   .combat-stage-grid { --pips-display: none; }
 }
-@container combat-stage (aspect-ratio < 1.1) and (height < 248px) {
+@container combat-stage (((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) and (height < 260px)) {
+  .combat-stage-grid { --self-hp-h: 8px; --self-hp-text: none; }
+}
+@container combat-stage (((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) and (height < 216px)) {
   .combat-stage-grid { --name-display: none; --lvl-display: none; --tier-display: none; }
+}
+
+/* Portrait: columns no unit stands in give their width to the rest, so names read. */
+@container combat-stage ((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) {
+  .combat-block:not([data-roomy]) .combat-side {
+    grid-template-columns: var(--track-row0, minmax(0, 1fr)) var(--track-row1, minmax(0, 1fr)) var(--track-row2, minmax(0, 1fr));
+  }
+  .combat-block:not([data-roomy]) .combat-card {
+    width: 100%;
+    max-width: 420px;
+    justify-self: center;
+  }
+}
+/* A side of one or two units: its empty tracks collapse (see CombatScreen) and the art takes the room. */
+.combat-block[data-roomy] .combat-side {
+  gap: 0;
+  grid-template-columns: var(--track-col0) var(--track-col1) var(--track-col2);
+  grid-template-rows: var(--track-row0) var(--track-row1) var(--track-row2);
+}
+@container combat-stage ((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) {
+  .combat-block[data-roomy] .combat-side {
+    grid-template-columns: var(--track-row0) var(--track-row1) var(--track-row2);
+    grid-template-rows: var(--track-col2) var(--track-col1) var(--track-col0);
+  }
+}
+.combat-block[data-roomy] .combat-card {
+  container: combat-card / size;
+  width: 100%;
+  height: 100%;
+  max-width: 420px;
+  max-height: 520px;
+  padding: 2px;
+  box-sizing: border-box;
+  justify-self: center;
+  align-self: center;
+}
+@container combat-stage ((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) {
+  .combat-block[data-roomy] .combat-card {
+    max-width: 560px;
+  }
+}
+.combat-block[data-roomy] .combat-card-body {
+  --card-dir: row;
+  --card-dir-enemy: row;
+  --portrait-cap: 300px;
+  --portrait: clamp(28px, min(100cqh - 18px, 52cqw), var(--portrait-cap));
+  --card-radius: 16px;
+  --body-pad: 6px 12px 6px 6px;
+  --enemy-body-pad: 6px 12px 6px 6px;
+  --body-justify: flex-start;
+  --body-gap: 12px;
+  --info-flex: 1 1 auto;
+  --name-display: -webkit-box;
+  --name-lines: 2;
+  --name-wrap: normal;
+  --name-align: left;
+  --enemy-name-align: left;
+  --name-fs: var(--fs-sm);
+  --pips-display: flex;
+  --pips-justify: flex-start;
+  --enemy-pips-justify: flex-start;
+  --hp-h: 14px;
+  --hp-text: flex;
+  --hp-max: inline;
+  --self-hp-h: 14px;
+  --self-hp-text: flex;
+  --lvl-display: inline-flex;
+  --tier-display: flex;
+  --art-inset: 5px;
+}
+/* Monster art is the star: a solo hero never outgrows what it fights. */
+.combat-block-party[data-roomy] .combat-card {
+  max-width: 320px;
+  max-height: 340px;
+}
+.combat-block-party[data-roomy] .combat-card-body {
+  --portrait-cap: 170px;
+}
+.combat-block[data-roomy] .combat-card[data-side="monster"] .combat-card-tier {
+  left: -4px;
+  right: auto;
+}
+.combat-block[data-roomy] .combat-card-cast-label {
+  max-width: 100cqw;
+}
+@container combat-card (width < 220px) {
+  .combat-block[data-roomy] .combat-card-body {
+    --portrait: clamp(28px, min(100cqh - 18px, 42cqw), var(--portrait-cap));
+    --hp-max: none;
+    --body-gap: 8px;
+    --body-pad: 5px 8px 5px 5px;
+    --enemy-body-pad: 5px 8px 5px 5px;
+  }
+}
+@container combat-card (aspect-ratio < 1.25) {
+  .combat-block[data-roomy] .combat-card-body {
+    --card-dir: column;
+    --card-dir-enemy: column;
+    --portrait: clamp(28px, min(100cqh - 100px, 100cqw - 24px), var(--portrait-cap));
+    --body-pad: 8px;
+    --enemy-body-pad: 8px;
+    --body-justify: center;
+    --body-gap: 6px;
+    --info-flex: 0 0 auto;
+    --name-align: center;
+    --enemy-name-align: center;
+    --pips-justify: center;
+    --enemy-pips-justify: center;
+  }
+}
+@container combat-card (aspect-ratio < 1.25) and (height < 200px) {
+  .combat-block[data-roomy] .combat-card-body {
+    --pips-display: none;
+    --name-lines: 1;
+    --name-wrap: nowrap;
+    --portrait: clamp(28px, min(100cqh - 66px, 100cqw - 24px), var(--portrait-cap));
+  }
+}
+@container combat-card (aspect-ratio >= 1.25) and (height < 84px) {
+  .combat-block[data-roomy] .combat-card-body {
+    --pips-display: none;
+    --name-lines: 1;
+    --name-wrap: nowrap;
+    --portrait: clamp(24px, min(100cqh - 12px, 52cqw), 72px);
+    --body-pad: 3px 8px 3px 3px;
+    --enemy-body-pad: 3px 8px 3px 3px;
+    --name-fs: var(--fs-2xs);
+    --art-inset: 4px;
+  }
 }
 
 /* ── Unit card ───────────────────────────────────────────── */
@@ -1992,13 +2181,13 @@
 .combat-skillbar.empty .combat-skillbar-track {
   align-items: center;
 }
+.combat-skillbar-track > :first-child {
+  margin-left: auto;
+}
+.combat-skillbar-track > :last-child {
+  margin-right: auto;
+}
 @container skillbar (width >= 700px) {
-  .combat-skillbar-track > :first-child {
-    margin-left: auto;
-  }
-  .combat-skillbar-track > :last-child {
-    margin-right: auto;
-  }
   .combat-skill {
     max-width: 150px;
   }
@@ -2146,7 +2335,7 @@
 .log-fullscreen-btn::before {
   content: '';
   position: absolute;
-  inset: -11px -9px;
+  inset: -11px -9px -13px;
 }
 .log-fullscreen-btn {
   position: relative;
@@ -2174,7 +2363,7 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 3px calc(40px + var(--safe-right)) 7px calc(10px + var(--safe-left));
+  padding: 1px calc(40px + var(--safe-right)) 7px calc(10px + var(--safe-left));
   overflow: hidden;
   cursor: pointer;
   font-size: 11.5px;
@@ -2189,6 +2378,9 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.combat-log-ticker .log-entry:nth-last-child(n + 4) {
+  display: none;
 }
 .combat-log {
   display: none;
@@ -2236,6 +2428,8 @@ body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] 
   font-weight: 600;
   line-height: 1.45;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
 }
 .combat-log .log-entry {
   padding: 2px 0;
@@ -2271,7 +2465,7 @@ body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] 
   cursor: pointer;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 860px) {
   .combat-log-wrapper {
     flex: 0 0 148px;
     height: 148px;
@@ -2292,6 +2486,42 @@ body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] 
     line-height: 14.5px;
     -webkit-mask: none;
     mask: none;
+  }
+  .combat-log-ticker .log-entry:nth-last-child(n + 4) {
+    display: block;
+  }
+}
+/* Very wide: skills and log share the strip under the stage instead of stretching across it. */
+@media (min-width: 1500px) {
+  #screen-combat.active {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: 36px minmax(0, 1fr) 148px;
+  }
+  .combat-header,
+  .combat-stage {
+    grid-column: 1 / -1;
+  }
+  .combat-skillbar,
+  .combat-skillbar.empty {
+    grid-column: 1;
+    grid-row: 3;
+    height: auto;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .combat-skillbar-track {
+    align-items: center;
+  }
+  .combat-skill {
+    height: 72px;
+    flex: 1 1 150px;
+    max-width: 170px;
+  }
+  .combat-log-wrapper:not(.fullscreen) {
+    grid-column: 2;
+    grid-row: 3;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
   }
 }
 

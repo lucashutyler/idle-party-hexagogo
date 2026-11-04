@@ -150,7 +150,7 @@ export function syncBestiaryRows(
   while (container.children.length > rows.length) container.lastElementChild!.remove();
 }
 
-/** The Char screen's bestiary card; re-renders only when what it shows changes. */
+/** The Hero screen's bestiary card; re-renders only when what it shows changes. */
 export class BestiaryCard {
   private key = '';
 

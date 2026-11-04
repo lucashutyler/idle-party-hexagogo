@@ -17,25 +17,33 @@ function unit(overrides: Partial<PlaybackUnit> = {}): PlaybackUnit {
 }
 
 describe('UnitCard paint targets', () => {
+  const ring = (card: UnitCard) => card.el.querySelector<HTMLElement>('.combat-card-ring')!.style.getPropertyValue('--act');
+
   it('writes the timers on the element that draws them, not the whole card', () => {
     const card = new UnitCard('monster:4', 'monster', 4);
     card.update(unit({ cast: { skill: 'Slam', skillId: 'slam', totalMs: 1000, remainingMs: 500 } }), 0);
-    expect(card.el.querySelector<HTMLElement>('.combat-card-ring')!.style.getPropertyValue('--act')).toBe('0.50');
+    expect(ring(card)).toBe('0.50');
     expect(card.el.querySelector<HTMLElement>('.combat-card-cast-fill')!.style.getPropertyValue('--cast')).toBe('0.50');
     expect(card.el.style.getPropertyValue('--act')).toBe('');
     expect(card.el.style.getPropertyValue('--cast')).toBe('');
   });
 
-  it('skips action ring writes smaller than the epsilon, but always lands on empty', () => {
+  it('moves the action ring in steps of a tenth, but always lands on empty', () => {
     const card = new UnitCard('monster:4', 'monster', 4);
-    const ring = card.el.querySelector<HTMLElement>('.combat-card-ring')!;
     card.update(unit({ actionMs: 500 }), 0);
-    card.update(unit({ actionMs: 490 }), 0);
-    expect(ring.style.getPropertyValue('--act')).toBe('0.50');
-    card.update(unit({ actionMs: 470 }), 0);
-    expect(ring.style.getPropertyValue('--act')).toBe('0.53');
+    card.update(unit({ actionMs: 420 }), 0);
+    expect(ring(card)).toBe('0.50');
+    card.update(unit({ actionMs: 390 }), 0);
+    expect(ring(card)).toBe('0.61');
     card.update(unit({ hp: 0 }), 0);
-    expect(ring.style.getPropertyValue('--act')).toBe('0.00');
+    expect(ring(card)).toBe('0.00');
+  });
+
+  it('keeps a slow action timer as smooth as a fast one', () => {
+    const card = new UnitCard('monster:4', 'monster', 4);
+    card.update(unit({ actionTotalMs: 4000, actionMs: 2000 }), 0);
+    card.update(unit({ actionTotalMs: 4000, actionMs: 1880 }), 0);
+    expect(ring(card)).toBe('0.53');
   });
 });
 

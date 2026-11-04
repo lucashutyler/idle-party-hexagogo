@@ -5,6 +5,7 @@
 }
 
 .social-panel {
+  container: social-panel / inline-size;
   display: block;
   padding-top: 0;
   padding-bottom: 16px;
@@ -43,7 +44,7 @@
   flex-wrap: wrap;
   gap: 6px 8px;
   min-height: 52px;
-  padding: 6px 10px;
+  padding: 4px 10px;
   background: none;
   border: none;
   border-bottom: 1px solid var(--stroke);
@@ -61,8 +62,8 @@
   appearance: none;
   -webkit-appearance: none;
   flex: 1 1 0;
-  min-width: 0;
-  min-height: 40px;
+  min-width: 130px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -131,11 +132,15 @@
   line-height: 1.25;
   color: var(--text-2);
 }
-.social-user-row > .social-user-name {
+.social-user-row > .social-user-name,
+.social-user-row > .social-user-text {
   flex: 1 1 0;
+  min-width: 130px;
 }
+/* Beside the name while they fit, on their own line when they don't. */
 .social-user-row .social-user-actions {
-  flex: 1 0 100%;
+  flex: 0 1 auto;
+  margin-left: auto;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
@@ -186,12 +191,12 @@
 .social-panel .social-search {
   flex: 1;
   min-width: 0;
-  min-height: 40px;
+  min-height: 44px;
   font-size: 16px;
 }
 .social-toolbar-search .social-sort-btn {
   flex: none;
-  min-height: 40px;
+  min-height: 44px;
   padding: 4px 12px;
 }
 .social-toolbar-search .social-sort-btn::before {
@@ -246,6 +251,18 @@
   flex-wrap: nowrap;
   content-visibility: auto;
   contain-intrinsic-size: auto 53px;
+}
+.social-rank-list .social-user-name-clickable {
+  min-width: 0;
+}
+.social-action-btn.social-rank-more {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+}
+.social-action-btn.social-rank-more[hidden] {
+  display: none;
 }
 .social-rank-num {
   flex: none;
@@ -321,6 +338,9 @@
 }
 .social-guild-reason {
   color: var(--text-3);
+}
+.social-guild-reason[hidden] {
+  display: none;
 }
 
 /* ── Party formation ─────────────────────────────────────── */
@@ -420,7 +440,7 @@
     margin-inline: auto;
   }
 }
-@media (min-width: 1180px) {
+@container social-panel (width >= 700px) {
   .social-party-layout {
     display: grid;
     grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);

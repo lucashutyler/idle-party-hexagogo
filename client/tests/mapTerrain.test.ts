@@ -171,8 +171,8 @@ describe('zone labels', () => {
   it('anchors each zone at the explored room nearest its centroid', () => {
     const anchors = zoneLabelAnchors(rooms);
     expect(anchors).toEqual([
-      { zone: 'a', name: 'Alpha', x: 60, y: 0, rooms: 3 },
-      { zone: 'b', name: 'Beta', x: 1000, y: 1000, rooms: 1 },
+      { zone: 'a', name: 'Alpha', x: 60, y: 0, rooms: 3, fallbacks: [{ x: 0, y: 0 }, { x: 120, y: 0 }] },
+      { zone: 'b', name: 'Beta', x: 1000, y: 1000, rooms: 1, fallbacks: [] },
     ]);
   });
 
@@ -184,11 +184,25 @@ describe('zone labels', () => {
 
   it('hides whichever overlapping label matters least, as the zoom allows', () => {
     const anchors = [
-      { zone: 'big', name: 'Big Zone', x: 0, y: 0, rooms: 30 },
-      { zone: 'small', name: 'Small Zone', x: 120, y: 0, rooms: 5 },
-      { zone: 'here', name: 'Here Zone', x: 240, y: 0, rooms: 1 },
+      { zone: 'big', name: 'Big Zone', x: 0, y: 0, rooms: 30, fallbacks: [] },
+      { zone: 'small', name: 'Small Zone', x: 120, y: 0, rooms: 5, fallbacks: [] },
+      { zone: 'here', name: 'Here Zone', x: 240, y: 0, rooms: 1, fallbacks: [] },
     ];
     expect(pickZoneLabels(anchors, 2, 'here').map(a => a.zone)).toEqual(['here', 'big', 'small']);
     expect(pickZoneLabels(anchors, 0.4, 'here').map(a => a.zone)).toEqual(['here', 'big']);
+  });
+
+  it('steps a label away from a marker, and leaves it out when no spot is free', () => {
+    const anchor = { zone: 'a', name: 'Alpha', x: 0, y: 0, rooms: 2, fallbacks: [{ x: 500, y: 0 }] };
+    const marker = { x: 10, y: 5, halfW: 20, halfH: 11 };
+    expect(pickZoneLabels([anchor], 1, 'a', [marker])[0]).toMatchObject({ x: 500, y: 0 });
+    expect(pickZoneLabels([anchor], 1, 'a', [marker, { ...marker, x: 500 }])).toEqual([]);
+  });
+
+  it('counts a stepped label where it landed when placing the next one', () => {
+    const first = { zone: 'a', name: 'Alpha', x: 0, y: 0, rooms: 9, fallbacks: [{ x: 500, y: 0 }] };
+    const second = { zone: 'b', name: 'Beta', x: 510, y: 0, rooms: 1, fallbacks: [] };
+    const marker = { x: 0, y: 0, halfW: 20, halfH: 11 };
+    expect(pickZoneLabels([first, second], 1, 'a', [marker]).map(a => a.zone)).toEqual(['a']);
   });
 });

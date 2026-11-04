@@ -39,7 +39,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 72px;
+  min-height: 72px;
   padding: 8px 10px;
   box-sizing: border-box;
   background: var(--grad-panel);
@@ -110,9 +110,10 @@
   font-variant-numeric: tabular-nums;
 }
 .charitems-stat-card {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 6px;
   padding: 0;
   background: none;
   border: none;
@@ -132,9 +133,6 @@
   cursor: help;
 }
 .charitems-stat-card .charitems-stat-value {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-size: var(--fs-md);
   line-height: 1.15;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
@@ -145,6 +143,67 @@
   letter-spacing: 0.04em;
   color: var(--text-3);
   text-decoration: none;
+}
+
+/* ── Summary under the gear grid (wide layouts only) ─────── */
+.hero-summary {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-1);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-lg);
+}
+.hero-summary-xp .character-xp-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  font-size: var(--fs-xs);
+}
+.hero-summary-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hero-summary-skill {
+  overflow: hidden;
+  padding-left: 8px;
+  border-left: 3px solid var(--gold);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.hero-summary-skill.passive {
+  border-left-color: var(--green);
+}
+.hero-summary-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+.hero-summary-links {
+  display: flex;
+  gap: 8px;
+}
+.hero-summary-link {
+  flex: 1;
+  height: 32px;
+  padding: 0 8px;
+  background: none;
+  border: 1.5px solid var(--stroke-hi);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  cursor: pointer;
+}
+.hero-summary-link:hover {
+  color: var(--text-1);
+  border-color: var(--gold);
 }
 
 /* ── Gear grid ───────────────────────────────────────────── */
@@ -210,6 +269,9 @@
   height: 36px;
   box-sizing: border-box;
 }
+.items-search-sort :is(input, select) {
+  min-height: 44px;
+}
 .items-search-sort input {
   width: 0;
 }
@@ -257,6 +319,10 @@
 .item-cell .item-square {
   width: 100%;
 }
+.items-inv-grid .item-cell {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 86px;
+}
 .item-cell:active .item-square {
   transform: translateY(1px);
 }
@@ -265,7 +331,9 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  -webkit-hyphens: auto;
+  hyphens: auto;
   font-size: var(--fs-2xs);
   font-weight: 700;
   line-height: 1.15;
@@ -453,10 +521,9 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  float: right;
   width: 36px;
   height: 36px;
-  margin: -10px -8px 0 0;
+  margin: -10px -8px -26px auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -474,6 +541,9 @@
   content: '';
   position: absolute;
   inset: -4px;
+}
+.item-popup-close + .item-popup-name {
+  padding-inline: 28px;
 }
 .item-popup > .item-popup-actions {
   position: sticky;
@@ -727,19 +797,18 @@
   .hero-banner {
     flex: 1;
     min-width: 0;
-    height: auto;
   }
   .items-equip-panel {
     flex: none;
     width: 320px;
   }
   .charitems-stat-card {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
   }
 }
 @container hero (width >= 720px) {
   .hero-pane-gear {
-    display: grid;
     grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
     align-items: start;
     gap: 12px 16px;
@@ -762,10 +831,12 @@
   }
   .hero-banner {
     flex: none;
-    height: 72px;
   }
   .charitems-stat-card {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: flex;
+  }
+  .hero-summary {
+    display: flex;
   }
   .items-equip-panel {
     width: auto;
@@ -793,11 +864,22 @@
     padding-left: 8px;
     padding-right: 8px;
   }
+  .hero-banner {
+    gap: 8px;
+    padding: 8px;
+  }
+  .hero-portrait {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+  .charitems-stat-card .charitems-stat-value {
+    font-size: var(--fs-sm);
+  }
 }
 
 @container hero (width < 300px) {
   .hero-banner {
-    height: auto;
     align-items: flex-start;
   }
   .items-equip-panel {

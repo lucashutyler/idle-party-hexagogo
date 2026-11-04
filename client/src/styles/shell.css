@@ -1,5 +1,16 @@
 /* The game frame: HUD, XP hairline, utility strip, tab bar and rail, chat docking. */
 
+/* ── Screens ─────────────────────────────────────────────── */
+/* A hidden screen keeps its boxes, so switching back doesn't rebuild style and layout from nothing. */
+@supports (content-visibility: hidden) {
+  .screen:not(.active) {
+    display: flex;
+    flex-direction: column;
+    content-visibility: hidden;
+    visibility: hidden;
+  }
+}
+
 /* ── Top HUD ─────────────────────────────────────────────── */
 #top-hud:empty {
   display: none;
@@ -135,6 +146,7 @@ body[data-active-screen="settings"] .top-hud-avatar {
 }
 .top-hud-room,
 .top-hud-detail,
+.top-hud-zone,
 .top-hud-name {
   min-width: 0;
   overflow: hidden;
@@ -150,7 +162,8 @@ body[data-active-screen="settings"] .top-hud-avatar {
   line-height: 18px;
   color: var(--text-1);
 }
-.top-hud-detail {
+.top-hud-detail,
+.top-hud-zone {
   font-weight: 700;
   font-size: var(--fs-xs);
   line-height: 15px;
@@ -158,6 +171,16 @@ body[data-active-screen="settings"] .top-hud-avatar {
 }
 #top-hud[data-offline] .top-hud-detail {
   color: var(--orange);
+}
+.top-hud-zone {
+  display: none;
+}
+/* The map's route chip already says this, so its line shows the zone instead. */
+body[data-active-screen="map"] #top-hud:not([data-offline]) .top-hud-detail[data-route] {
+  display: none;
+}
+body[data-active-screen="map"] #top-hud:not([data-offline]) .top-hud-detail[data-route] + .top-hud-zone {
+  display: block;
 }
 .top-hud-name {
   display: none;
@@ -327,9 +350,11 @@ body[data-chat-open="1"] #utility-strip {
 }
 
 /* ── Tab bar ─────────────────────────────────────────────── */
+/* First in the DOM so the rail is first in Tab order; `order` puts the phone bar back at the bottom. */
 #bottom-nav {
   position: relative;
   z-index: 1000;
+  order: 1;
   flex: none;
   height: var(--nav-total);
   padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
@@ -362,9 +387,11 @@ body[data-chat-open="1"] #utility-strip {
   outline: 2px solid var(--gold);
   outline-offset: -3px;
 }
-.nav-tab.active,
-.nav-tab.overlay-active {
+.nav-tab.active {
   color: var(--gold);
+}
+.nav-tab.overlay-active {
+  color: var(--text-1);
 }
 .nav-tab-bg {
   position: absolute;
@@ -374,9 +401,17 @@ body[data-chat-open="1"] #utility-strip {
   opacity: 0;
   transition: opacity 150ms ease-out;
 }
-.nav-tab.active .nav-tab-bg,
-.nav-tab.overlay-active .nav-tab-bg {
+.nav-tab.active .nav-tab-bg {
   opacity: 1;
+}
+.nav-tab.overlay-active .nav-icon::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px var(--stroke-hi);
 }
 .nav-active-bar {
   position: absolute;
@@ -390,8 +425,7 @@ body[data-chat-open="1"] #utility-strip {
   transform: scaleX(0);
   transition: transform 150ms ease-out;
 }
-.nav-tab.active .nav-active-bar,
-.nav-tab.overlay-active .nav-active-bar {
+.nav-tab.active .nav-active-bar {
   transform: scaleX(1);
 }
 .nav-icon {
@@ -479,19 +513,19 @@ body[data-chat-open="1"] #utility-strip {
   animation: icon-flash 200ms ease-out;
 }
 
-/* Battle: a red disc inside the bar, label overlapping its lower edge */
+/* Battle: a red disc inside the bar, label under it */
 .nav-tab[data-screen="combat"] {
   justify-content: flex-end;
-  padding-bottom: 3px;
+  padding-bottom: 1px;
   color: var(--text-1);
 }
 .nav-tab[data-screen="combat"] .nav-tab-bg {
   inset: auto;
-  top: 2px;
+  top: 3px;
   left: 50%;
-  width: 44px;
-  height: 44px;
-  margin-left: -22px;
+  width: 37px;
+  height: 37px;
+  margin-left: -18.5px;
   border-radius: 50%;
   background: var(--grad-danger);
   opacity: 1;
@@ -499,18 +533,12 @@ body[data-chat-open="1"] #utility-strip {
 }
 .nav-tab[data-screen="combat"] .nav-icon {
   position: absolute;
-  top: 9px;
+  top: 8.5px;
   left: 50%;
   margin-left: -13px;
 }
 .nav-tab[data-screen="combat"] .nav-icon-glyph {
   font-size: 20px;
-}
-.nav-tab[data-screen="combat"] .nav-label {
-  position: relative;
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  background: #151e47;
 }
 .nav-tab[data-screen="combat"].active {
   color: var(--gold);
@@ -528,8 +556,8 @@ body[data-chat-open="1"] #utility-strip {
   display: none;
 }
 .nav-tab[data-screen="combat"] .nav-badge {
-  top: 3px;
-  left: calc(50% + 13px);
+  top: 2px;
+  left: calc(50% + 11px);
 }
 
 /* ── Docked chat ─────────────────────────────────────────── */
@@ -541,19 +569,11 @@ body[data-chat-open="1"] #utility-strip {
 body[data-chat-open="1"] #chat-popout-root {
   height: var(--chat-sheet-height);
 }
-/* Static so the full layout resolves against #app and covers the HUD and nav. */
-body[data-chat-open="1"][data-chat-layout="full"] #chat-popout-root {
-  position: static;
-  height: 0;
-}
 #chat-popout-root .chat-popout {
   position: absolute;
-  left: 0 !important;
-  top: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: auto !important;
-  height: auto !important;
+  inset: 0;
+  width: auto;
+  height: auto;
   border-width: 1px 0 0;
   border-radius: 0;
   box-shadow: none;
@@ -562,24 +582,15 @@ body[data-chat-layout="full"] #chat-popout-root .chat-popout {
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   border: none;
 }
-.chat-popout-resize {
+
+/* ── Notifications ───────────────────────────────────────── */
+/* Above every ModalStack z-index: a toast must stay readable and tappable over any modal. */
+.notif-toast-stack {
+  z-index: 100000;
+}
+.notif-dropdown-actions [hidden] {
   display: none;
 }
-#chat-popout-root .chat-popout-header {
-  cursor: default;
-}
-@media (min-width: 768px) {
-  .chat-popout-layout-btn {
-    display: none;
-  }
-}
-
-.combat-log-wrapper.fullscreen {
-  position: absolute;
-  inset: 0;
-}
-
-/* ── Notifications on phones ─────────────────────────────── */
 body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropdown) {
   display: none;
 }
@@ -607,7 +618,7 @@ body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropd
 }
 
 /* ── Desktop grid and short landscape ────────────────────── */
-@media (min-width: 1024px), (orientation: landscape) and (max-height: 500px) {
+@media (min-width: 860px), (orientation: landscape) and (max-height: 500px) {
   #app {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -640,9 +651,6 @@ body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropd
   body[data-chat-open="1"] #chat-popout-root {
     width: calc(var(--chat-column-width) + var(--safe-right));
     height: auto;
-  }
-  body[data-chat-open="1"][data-chat-layout="full"] #chat-popout-root {
-    width: 0;
   }
   #chat-popout-root .chat-popout {
     padding: 0 var(--safe-right) var(--safe-bottom) 0;
@@ -704,8 +712,7 @@ body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropd
     border-radius: 0 3px 3px 0;
     transform: scaleY(0);
   }
-  .nav-tab.active .nav-active-bar,
-  .nav-tab.overlay-active .nav-active-bar {
+  .nav-tab.active .nav-active-bar {
     transform: scaleY(1);
   }
   @media (hover: hover) {
@@ -721,12 +728,12 @@ body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropd
   }
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 860px) {
   :root {
     --hud-height: 48px;
     --rail-width: 84px;
     --rail-tab-height: 62px;
-    --chat-column-width: 340px;
+    --chat-column-width: 300px;
   }
   #top-hud {
     padding-left: calc(19px + var(--safe-left));
@@ -747,12 +754,25 @@ body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropd
   }
   .nav-tab[data-screen="combat"] .nav-tab-bg {
     top: 4px;
+    width: 44px;
+    height: 44px;
+    margin-left: -22px;
   }
   .nav-tab[data-screen="combat"] .nav-icon {
     top: 13px;
   }
   .nav-tab[data-screen="combat"] {
     padding-bottom: 4px;
+  }
+  .nav-tab[data-screen="combat"] .nav-badge {
+    top: 3px;
+    left: calc(50% + 13px);
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --chat-column-width: 340px;
   }
 }
 

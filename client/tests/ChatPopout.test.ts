@@ -4,7 +4,8 @@ import { ChatPopout } from '../src/ui/ChatPopout';
 import { ChatStrip } from '../src/ui/ChatStrip';
 import type { ChatPreview } from '../src/ui/chatModel';
 import { chatFocusTracker } from '../src/network/ChatFocusTracker';
-import { dismissTop } from '../src/ui/ModalStack';
+import { bringToFront, dismissTop, release } from '../src/ui/ModalStack';
+import { CHAT_ROW_CAP } from '../src/ui/chatModel';
 import type { GameClient } from '../src/network/GameClient';
 
 type ChatListener = (msg: ChatMessage) => void;
@@ -41,11 +42,56 @@ function stateWith(over: Record<string, unknown> = {}): ServerStateMessage {
 
 function mockMedia({ column = false, coarse = false, fine = true }: MediaOverrides): void {
   vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
-    matches: query.includes('min-width: 1024px') ? column : query.includes('coarse') ? coarse : query.includes('fine') ? fine : false,
+    matches: query.includes('min-width: 860px') ? column : query.includes('coarse') ? coarse : query.includes('fine') ? fine : false,
     addEventListener: () => {},
     removeEventListener: () => {},
   }) as unknown as MediaQueryList);
 }
+
+describe('ChatPopout over a navigation', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+    delete document.body.dataset.chatOpen;
+    delete document.body.dataset.chatLayout;
+    localStorage.clear();
+  });
+
+  it('closes a chat that covers the screen and leaves the sheet and column alone', () => {
+    mockMedia({ column: false });
+    localStorage.setItem('chatPopoutMobileLayout', 'full');
+    const full = setup();
+    full.chat.open();
+    full.chat.closeIfCovering();
+    expect(full.chat.isVisible()).toBe(false);
+
+    localStorage.setItem('chatPopoutMobileLayout', 'sheet');
+    const sheet = setup();
+    sheet.chat.open();
+    sheet.chat.closeIfCovering();
+    expect(sheet.chat.isVisible()).toBe(true);
+
+    mockMedia({ column: true });
+    localStorage.setItem('chatPopoutMobileLayout', 'full');
+    const column = setup();
+    column.chat.open();
+    column.chat.closeIfCovering();
+    expect(column.chat.isVisible()).toBe(true);
+    expect(column.chat.isLandscapeColumn()).toBe(false);
+  });
+
+  it('treats the column as a phone panel only in short landscape', () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('max-height: 500px'),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }) as unknown as MediaQueryList);
+    const t = setup();
+    expect(t.chat.isLandscapeColumn()).toBe(false);
+    t.chat.open();
+    expect(t.chat.isLandscapeColumn()).toBe(true);
+  });
+});
 
 function setup(initialState: ServerStateMessage | null = stateWith()) {
   document.body.innerHTML = '<div id="screen-container"></div><div id="chat-popout-root"></div>';
@@ -867,5 +913,152 @@ describe('ChatPopout keyboard', () => {
       if (original) Object.defineProperty(window, 'visualViewport', original);
       else delete (window as unknown as Record<string, unknown>).visualViewport;
     }
+  });
+});
+
+describe('ChatPopout and overlays opened since', () => {
+  function popup(onClose: () => void): HTMLElement {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    bringToFront(el, () => { release(el); onClose(); }, { holdFocus: false });
+    return el;
+  }
+
+  it('leaving typing keeps a popup opened meanwhile above the sheet', () => {
+    mockMedia({ coarse: true, fine: false });
+    const t = setup();
+    t.chat.open();
+    t.input().focus();
+    let popupOpen = true;
+    popup(() => { popupOpen = false; });
+    t.input().blur();
+    vi.advanceTimersByTime(200);
+    expect(document.body.dataset.chatTyping).toBeUndefined();
+
+    expect(dismissTop()).toBe(true);
+    expect(popupOpen).toBe(false);
+    expect(t.chat.isVisible()).toBe(true);
+    expect(dismissTop()).toBe(true);
+    expect(t.chat.isVisible()).toBe(false);
+  });
+
+  it('leaving typing in the full layout stays under that popup', () => {
+    mockMedia({ coarse: true, fine: false });
+    localStorage.setItem('chatPopoutMobileLayout', 'full');
+    const t = setup();
+    t.chat.open();
+    t.input().focus();
+    let popupOpen = true;
+    const el = popup(() => { popupOpen = false; });
+    t.input().blur();
+    vi.advanceTimersByTime(200);
+
+    const root = document.getElementById('chat-popout-root')!;
+    expect(parseInt(root.style.zIndex, 10)).toBeLessThan(parseInt(el.style.zIndex, 10));
+    dismissTop();
+    expect(popupOpen).toBe(false);
+    expect(t.chat.isVisible()).toBe(true);
+  });
+
+  it('crossing from the column to the sheet keeps a popup on top', () => {
+    const queries: { matches: boolean; change?: () => void }[] = [];
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
+      const entry: { matches: boolean; change?: () => void } = { matches: query.includes('860px') };
+      queries.push(entry);
+      return {
+        get matches() { return entry.matches; },
+        addEventListener: (_: string, fn: () => void) => { entry.change = fn; },
+        removeEventListener: () => {},
+      } as unknown as MediaQueryList;
+    });
+    const t = setup();
+    t.chat.open();
+    expect(document.body.dataset.chatLayout).toBe('column');
+    let popupOpen = true;
+    popup(() => { popupOpen = false; });
+
+    const column = queries.find(q => q.change)!;
+    column.matches = false;
+    column.change!();
+    expect(document.body.dataset.chatLayout).toBe('sheet');
+
+    dismissTop();
+    expect(popupOpen).toBe(false);
+    expect(t.chat.isVisible()).toBe(true);
+    dismissTop();
+    expect(t.chat.isVisible()).toBe(false);
+  });
+
+  it('expanding is the player acting on chat, so it comes up over the popup', () => {
+    mockMedia({ coarse: true, fine: false });
+    const t = setup();
+    t.chat.open();
+    const el = popup(() => {});
+    (document.querySelector('.chat-popout-layout-btn') as HTMLElement).click();
+    const root = document.getElementById('chat-popout-root')!;
+    expect(parseInt(root.style.zIndex, 10)).toBeGreaterThan(parseInt(el.style.zIndex, 10));
+  });
+});
+
+describe('ChatPopout state-driven view changes', () => {
+  it('holds the rebuild while a row is pressed when the party goes away', () => {
+    const t = setup(stateWith({ social: { ...stateWith().social, party: { id: 'p1', members: [{ username: 'me' }, { username: 'bob' }] } } }));
+    t.chat.open();
+    t.tab('party').click();
+    t.receive(message('p1', 'bob', 'party line', { channelType: 'party', channelId: 'p1' }));
+    const bob = t.senderBtn('bob')!;
+
+    press(bob);
+    t.pushState(stateWith());
+    expect(t.tab('all').classList.contains('active')).toBe(true);
+    expect(t.senderBtn('bob')).toBe(bob);
+
+    bob.click();
+    expect(t.onUserClick).toHaveBeenCalledWith('bob', bob);
+    vi.advanceTimersByTime(0);
+    expect(document.querySelector('.chat-popout-timeline')!.contains(bob)).toBe(false);
+  });
+
+  it('holds the rebuild while a row is pressed when a DM comes back rejected', () => {
+    const t = setup();
+    t.chat.openDm('Mira');
+    t.receive(message('d1', 'Mira', 'hi', { channelType: 'dm', channelId: 'me' }));
+    t.input().value = 'hello';
+    t.clickSend();
+    const mira = t.senderBtn('Mira')!;
+
+    press(mira);
+    t.serverError('User not found');
+    expect(t.senderBtn('Mira')).toBe(mira);
+    expect(t.status().hidden).toBe(false);
+
+    mira.click();
+    vi.advanceTimersByTime(0);
+    expect((document.querySelector('.chat-threads') as HTMLElement).hidden).toBe(false);
+  });
+});
+
+describe('ChatPopout rows held while scrolled up', () => {
+  function scrolledUp() {
+    const t = setup();
+    t.chat.open();
+    t.receive(message('m0', 'bob'));
+    setLayoutBox(t.timeline(), { scrollHeight: 1000, clientHeight: 200, scrollTop: 100 });
+    t.timeline().dispatchEvent(new Event('scroll'));
+    return t;
+  }
+
+  it('stops holding messages past the cap, keeps counting, and rebuilds on return', () => {
+    const t = scrolledUp();
+    for (let i = 0; i < CHAT_ROW_CAP + 5; i++) t.receive(message(`m${i + 1}`, 'carol', `line ${i}`));
+
+    expect((t.chat as unknown as { unrenderedRows: unknown[] }).unrenderedRows).toHaveLength(0);
+    expect(t.pill().textContent).toBe('↓ 99+ new');
+    expect(t.texts()).toHaveLength(1);
+
+    t.pill().click();
+    expect(t.pill().hidden).toBe(true);
+    expect(t.texts()).toHaveLength(CHAT_ROW_CAP);
+    expect(t.texts()[CHAT_ROW_CAP - 1]).toBe(`line ${CHAT_ROW_CAP + 4}`);
   });
 });

@@ -4,6 +4,10 @@
   background: #0a1128;
 }
 
+#game-container:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
 #game-container::before {
   content: 'Charting the map…';
   position: absolute;
@@ -269,10 +273,20 @@
 }
 .map-route-chip[hidden] { display: none; }
 .map-route-text {
+  display: flex;
+  gap: 0.35em;
+  min-width: 0;
+  white-space: nowrap;
+}
+.map-route-name {
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
+}
+.map-route-arrow,
+.map-route-dot,
+.map-route-count {
+  flex: none;
 }
 button.map-route-stop {
   position: relative;
@@ -435,6 +449,9 @@ button.map-status-retry {
   font-weight: 700;
   color: var(--text-2);
 }
+.room-sheet-sub-action::after {
+  content: ' · ';
+}
 .room-sheet-actions {
   position: absolute;
   top: 8px;
@@ -489,11 +506,39 @@ button.room-sheet-close::before {
 }
 .room-sheet-forecast[hidden] { display: none; }
 .room-sheet-forecast-text { display: none; }
+.room-sheet-forecast-word {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  line-height: 13px;
+  color: var(--text-2);
+}
 
 .room-status-chip::before {
   content: '';
   position: absolute;
-  inset: -2px;
+  inset: -2px -2px -16px;
+}
+.room-status-chips {
+  row-gap: 20px;
+}
+.room-status-chip-short {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 1px;
+  font-family: var(--font-body);
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  line-height: 14px;
+  white-space: nowrap;
+  color: #f8f0dc;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 3px rgba(6, 9, 24, 0.82);
+  pointer-events: none;
 }
 
 .room-sheet-buttons {
@@ -541,19 +586,29 @@ button.room-sheet-details {
 }
 button.room-sheet-details[hidden] { display: none; }
 
-#screen-map[data-sheet="bottom"] :is(.map-zoom-controls, .room-status) {
+#screen-map[data-sheet="bottom"] .map-zoom-controls {
   transform: translateY(-112px);
 }
-#screen-map[data-sheet="side"] .map-zoom-controls {
-  transform: translateX(-320px);
+#screen-map[data-controls="some"] button.map-zoom-btn:not(.map-recenter),
+#screen-map:is([data-controls="some"], [data-controls="none"]) .room-status,
+#screen-map[data-controls="none"] .map-zoom-controls {
+  display: none;
+}
+/* A taller map leaves the controls clear of the panel, which is only as tall as its content. */
+@media (max-height: 759px) {
+  #screen-map[data-sheet="side"] .map-zoom-controls {
+    transform: translateX(-320px);
+  }
 }
 #screen-map[data-sheet="side"] .room-sheet {
   top: 0;
   left: auto;
   right: 0;
-  bottom: 0;
+  bottom: auto;
   width: 320px;
   height: auto;
+  max-height: 100%;
+  border-bottom-left-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -561,6 +616,7 @@ button.room-sheet-details[hidden] { display: none; }
   overflow-y: auto;
   border-top: 0;
   border-left: 1px solid rgba(248, 240, 220, 0.24);
+  border-bottom: 1px solid rgba(248, 240, 220, 0.24);
   box-shadow: -6px 0 18px rgba(0, 0, 0, 0.45);
 }
 #screen-map[data-sheet="side"] .room-sheet[hidden] { display: none; }
@@ -668,24 +724,48 @@ button.room-sheet-player:hover { background: rgba(255, 255, 255, 0.06); }
 #screen-map[data-sheet="side"] .room-sheet[data-explored="0"] .room-sheet-buttons {
   position: static;
   flex: none;
-  margin: auto 14px 0;
+  margin: 0 14px;
+}
+#screen-map[data-sheet="side"] :is(.room-sheet-sub-action, .room-sheet-forecast-word) {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  #screen-map[data-sheet="bottom"] .room-status {
+    transform: translateY(-112px);
+  }
 }
 
 @media (min-width: 768px) {
+  .room-status-chip::before {
+    inset: -2px;
+  }
+  .room-status-chip-short {
+    display: none;
+  }
+  .room-status-chips {
+    row-gap: 6px;
+  }
+  /* The status card holds the top left here, so these two sit low, clear of the route chip. */
   .map-toast {
     top: auto;
-    bottom: 16px;
+    bottom: 64px;
   }
-  /* The status card holds the top left here; start past it. */
+  #screen-map[data-sheet="bottom"] .map-toast {
+    bottom: 176px;
+  }
   .map-route-chip {
-    top: 12px;
-    left: 344px;
+    top: auto;
+    bottom: 12px;
+    left: 12px;
     transform: none;
-    max-width: calc(100% - 356px);
+    max-width: calc(100% - 80px);
+  }
+  #screen-map[data-sheet="bottom"] .map-route-chip {
+    transform: translateY(-112px);
   }
   #screen-map[data-sheet="side"] .map-route-chip {
-    max-width: calc(100% - 676px);
-    min-width: 150px;
+    max-width: calc(100% - 400px);
   }
 }
 

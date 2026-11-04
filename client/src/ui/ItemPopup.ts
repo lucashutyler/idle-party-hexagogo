@@ -53,7 +53,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
   if (def.consumable) {
     statLines.push(`<div><span class="stat-label">Use</span><span class="item-popup-coming-soon">Not usable yet — coming soon!</span></div>`);
   }
-  statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1)}</span></div>`);
+  statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${escapeHtml(def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1))}</span></div>`);
   if (def.value != null && def.value > 0) {
     statLines.push(`<div><span class="stat-label">Value</span><span>${def.value}g</span></div>`);
   }
@@ -70,7 +70,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     // animation can target it for an in-place attention pulse.
     const allowed = !!className && canClassEquipItem(def, className);
     const restrictClass = allowed ? 'item-popup-class-allowed' : 'item-popup-class-denied';
-    const cls = def.classRestriction.map(c => `<span class="${restrictClass}">${c}</span>`).join(', ');
+    const cls = def.classRestriction.map(c => `<span class="${restrictClass}">${escapeHtml(c)}</span>`).join(', ');
     statLines.push(`<div data-class-restriction="1"><span class="stat-label">Class</span><span>${cls}</span></div>`);
   }
 
@@ -118,7 +118,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 
   const artworkInner = def.iconEmoji
     ? `<span class="item-popup-emoji">${escapeHtml(def.iconEmoji)}</span>`
-    : `${renderTrackedImg(artworkUrl('item', def.id), { className: 'item-popup-img' })}<span class="item-popup-initials">${initials}</span>`;
+    : `${renderTrackedImg(artworkUrl('item', def.id), { className: 'item-popup-img' })}<span class="item-popup-initials">${escapeHtml(initials)}</span>`;
 
   return `
     <div class="item-popup-artwork${shinyClass}" style="${artStyle}">

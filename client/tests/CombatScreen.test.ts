@@ -7,7 +7,7 @@ import type {
   ServerCombatMessage,
   ServerStateMessage,
 } from '@idle-party-rpg/shared';
-import { CombatScreen } from '../src/screens/CombatScreen';
+import { CombatScreen, usedGridTracks } from '../src/screens/CombatScreen';
 import { CombatLogBuffer } from '../src/combat/CombatLogBuffer';
 import { dismissTop } from '../src/ui/ModalStack';
 import type { GameClient } from '../src/network/GameClient';
@@ -370,6 +370,112 @@ describe('CombatScreen', () => {
     const bg = document.querySelector<HTMLElement>('.combat-stage-bg')!;
     expect(bg.dataset.bgKey).toContain('/zone-artwork/meadow.png');
     expect(bg.dataset.bgKey!.split(', ').pop()).toContain('data:image/svg+xml');
+  });
+
+  describe('board shape', () => {
+    const block = (selector: string) => document.querySelector<HTMLElement>(selector)!;
+    const fightOf = (monsters: ClientCombatUnit[]) => {
+      const base = makeState(2, GOBLIN, []);
+      const combat = { ...snapshot(2, GOBLIN), units: [ALICE, ...monsters] };
+      return withBattle(base, { combat });
+    };
+
+    it('marks a side of one or two units and collapses the tracks it does not use', () => {
+      const t = start();
+      expect(block('.combat-block-enemy').dataset.roomy).toBe('1');
+      expect(block('.combat-block-party').dataset.roomy).toBe('1');
+
+      t.push(fightOf([{ ...GOBLIN, pos: 0 }, { ...WOLF, pos: 8 }]));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      const side = block('.combat-enemy-side');
+      expect(block('.combat-block-enemy').dataset.roomy).toBe('2');
+      expect(side.style.getPropertyValue('--track-row0')).toBe('minmax(0, 1fr)');
+      expect(side.style.getPropertyValue('--track-row1')).toBe('0');
+      expect(side.style.getPropertyValue('--track-col2')).toBe('minmax(0, 1fr)');
+      expect(side.style.getPropertyValue('--track-col1')).toBe('0');
+    });
+
+    it('leaves a larger group on the full grid', () => {
+      const t = start();
+      t.push(fightOf([{ ...GOBLIN, pos: 0 }, { ...WOLF, pos: 3 }, { ...WOLF, pos: 6, name: 'Bat', id: 'bat' }]));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(block('.combat-block-enemy').dataset.roomy).toBeUndefined();
+    });
+
+    it('keeps its shape when a monster dies', () => {
+      const t = start();
+      t.push(fightOf([{ ...GOBLIN, hp: 0 }]));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(block('.combat-block-enemy').dataset.roomy).toBe('1');
+      expect(t.enemyCard(1)!.classList.contains('dead')).toBe(true);
+    });
+
+    it('works out which tracks a side uses', () => {
+      expect(usedGridTracks([1, 4])).toEqual({ rows: [true, true, false], cols: [false, true, false] });
+      expect(usedGridTracks([])).toEqual({ rows: [false, false, false], cols: [false, false, false] });
+    });
+  });
+
+  describe('frame loop', () => {
+    const noFight = () => withBattle(makeState(1, GOBLIN, []), { state: 'battle', visual: 'none', combat: undefined });
+    const framesRequested = () => vi.spyOn(globalThis, 'requestAnimationFrame');
+
+    it('stops once there is no fight to draw', () => {
+      const t = start();
+      t.push(noFight());
+      vi.advanceTimersByTime(FRAME_MS * 3);
+      const raf = framesRequested();
+      vi.advanceTimersByTime(FRAME_MS * 5);
+      expect(raf).not.toHaveBeenCalled();
+    });
+
+    it('wakes for the next fight', () => {
+      const t = start();
+      t.push(noFight());
+      vi.advanceTimersByTime(FRAME_MS * 3);
+      t.pushState(2, WOLF);
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(t.enemyCard(2)!.querySelector('.combat-card-name')!.textContent).toBe('Wolf');
+    });
+
+    it('keeps running through a fight in progress', () => {
+      start();
+      const raf = framesRequested();
+      vi.advanceTimersByTime(FRAME_MS * 5);
+      expect(raf).toHaveBeenCalled();
+    });
+  });
+
+  describe('hit motion on a crowded board', () => {
+    const crowded = () => {
+      const monsters = [0, 1, 2, 3, 5, 6, 7].map(pos => ({ ...GOBLIN, pos, name: `Goblin ${pos}`, id: `goblin${pos}` }));
+      return withBattle(makeState(1, GOBLIN, []), { combat: { ...snapshot(1, GOBLIN), units: [ALICE, ...monsters] } });
+    };
+    const spyAnimate = (el: Element) => {
+      const animate = vi.fn();
+      (el as unknown as { animate: unknown }).animate = animate;
+      return animate;
+    };
+
+    it('plays only on the player\'s own card, and the number still shows', () => {
+      const t = start();
+      t.push(crowded());
+      vi.advanceTimersByTime(PLAYBACK_DUE_MS);
+      const enemyFlash = spyAnimate(t.enemyCard(1)!.querySelector('.combat-card-flash')!);
+      const enemyBody = spyAnimate(t.enemyCard(2)!.querySelector('.combat-card-body')!);
+      const ownFlash = spyAnimate(t.playerCard().querySelector('.combat-card-flash')!);
+
+      t.playEvents([
+        { id: 1, t: 1100, kind: 'attack', src: { side: 'monster', pos: 2 } },
+        { id: 2, t: 1100, kind: 'damage', src: { side: 'player', pos: 4 }, dst: { side: 'monster', pos: 1 }, amount: 3, dmgType: 'physical' },
+        { id: 3, t: 1100, kind: 'damage', src: { side: 'monster', pos: 2 }, dst: { side: 'player', pos: 4 }, amount: 2, dmgType: 'physical' },
+      ]);
+
+      expect(enemyFlash).not.toHaveBeenCalled();
+      expect(enemyBody).not.toHaveBeenCalled();
+      expect(ownFlash).toHaveBeenCalled();
+      expect(document.querySelector('.combat-floater.live')).not.toBeNull();
+    });
   });
 
   it('opens the log from the header on a short screen unless a chat sheet covers it', () => {

@@ -1,5 +1,6 @@
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import { toShopSummary } from '@idle-party-rpg/shared';
+import { OFFLINE_NOTICE } from '../network/GameClient';
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import type { Screen } from './ScreenManager';
@@ -9,7 +10,7 @@ import { RoomView } from '../ui/RoomView';
 import type { RoomForecastState } from '../ui/RoomView';
 import { isForecastStale } from '../combat/ForecastFormat';
 import { RoomStatusPanel } from '../ui/RoomStatusPanel';
-import { getRoomActions, questMarks } from '../ui/RoomActions';
+import { actionLabel, getRoomActions, questMarks } from '../ui/RoomActions';
 import type { RoomAction, RoomActionLookups } from '../ui/RoomActions';
 import { ShopPopup } from '../ui/ShopPopup';
 import { RoomSheet } from '../ui/RoomSheet';
@@ -18,16 +19,28 @@ import type { ThreeWorldMap, TileClickInfo } from '../ui/ThreeWorldMap';
 import { NpcTalkPopup } from '../ui/NpcTalkPopup';
 import { DungeonEntryPopup } from '../ui/DungeonEntryPopup';
 import { showMapToast } from '../ui/MapToast';
+import { confirmDialog } from '../ui/ConfirmDialog';
+import { escapeHtml } from '../ui/ItemIcon';
 import { deferWhilePressed, setHtml } from '../ui/render';
+import { discoveredRoomName } from '../ui/routeSummary';
 
 const SHEET_BOTTOM_HEIGHT = 112;
 const SHEET_SIDE_WIDTH = 320;
 const SIDE_SHEET_MIN_WIDTH = 720;
+/** Map height left over the sheet that the three round controls need. Below it only the recentre button stays. */
+const CONTROLS_FULL_MIN_HEIGHT = 168;
+const CONTROLS_RECENTER_MIN_HEIGHT = 56;
+/** Where the current room's chips spell out what they do; narrower, a chip shows one word. */
+const SPELLED_OUT_CHIPS_QUERY = '(min-width: 768px)';
+const BLOCKED_ROOM_TEXT = "You can't walk there";
 const CHARTING_TEXT = 'Charting the map…';
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+const MAP_KEY_PAN_PX = 80;
+const MAP_KEY_PAN: Readonly<Record<string, readonly [number, number]>> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -52,6 +65,7 @@ export class MapScreen implements Screen {
   private dungeonEntryPopup?: DungeonEntryPopup;
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private shownForecastKey: string | null = null;
+  private sheetMapId: string | null = null;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
@@ -64,6 +78,9 @@ export class MapScreen implements Screen {
     const gc = document.getElementById('game-container');
     if (!gc) throw new Error('#game-container not found in DOM');
     this.gameContainer = gc;
+    gc.tabIndex = 0;
+    gc.setAttribute('aria-label', 'World map. Arrow keys pan, plus and minus zoom, Home returns to your party.');
+    gc.addEventListener('keydown', (e) => this.onMapKey(e));
 
     this.gameClient.onMoveBlocked((msg) => {
       const names = msg.missingPlayers.join(', ');
@@ -73,6 +90,21 @@ export class MapScreen implements Screen {
     this.gameClient.onServerError((message, code) => {
       if (code === 'dungeon_entry_refused' && !this.dungeonEntryPopup?.isOpen) this.showMoveToast(message);
     });
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => this.onScreenResize()).observe(this.container);
+    }
+    this.preloadMapCode();
+  }
+
+  private onMapKey(e: KeyboardEvent): void {
+    if (!this.map || e.target !== this.gameContainer) return;
+    const pan = MAP_KEY_PAN[e.key];
+    if (pan) this.map.panBy(pan[0] * MAP_KEY_PAN_PX, pan[1] * MAP_KEY_PAN_PX);
+    else if (e.key === '+' || e.key === '=') this.map.adjustZoom(1);
+    else if (e.key === '-') this.map.adjustZoom(-1);
+    else if (e.key === 'Home') this.map.recenterOnPlayer();
+    else return;
+    e.preventDefault();
   }
 
   setOnUserClick(cb: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void): void {
@@ -117,6 +149,7 @@ export class MapScreen implements Screen {
 
   onActivate(): void {
     this.active = true;
+    this.syncScreenLayout();
     if (!this.map) {
       void this.createMap();
     } else {
@@ -195,12 +228,22 @@ export class MapScreen implements Screen {
       this.showMoveToast('Only the party owner or a leader can move');
       return false;
     }
-    this.gameClient.sendMove(col, row);
+    if (!this.gameClient.sendMove(col, row)) {
+      this.showMoveToast(OFFLINE_NOTICE);
+      return false;
+    }
     return true;
   }
 
   private showMoveToast(message: string): void {
     showMapToast(this.container, message);
+  }
+
+  /** The first tap on Map shouldn't also pay for fetching and parsing three.js. */
+  private preloadMapCode(): void {
+    const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+    if (saveData || typeof window.requestIdleCallback !== 'function') return;
+    window.requestIdleCallback(() => { void import('../ui/ThreeWorldMap').catch(() => {}); });
   }
 
   private async createMap(): Promise<void> {
@@ -245,7 +288,10 @@ export class MapScreen implements Screen {
   private wireMap(map: ThreeWorldMap): void {
     map.setSendMove((col, row) => { this.tryMove(col, row); });
     map.setOnTileClick((info) => { this.onRoomTap(info); });
-    map.setOnBackgroundClick(() => { this.dismissSheet(); });
+    map.setOnBackgroundClick((blocked) => {
+      this.dismissSheet();
+      if (blocked) this.showMoveToast(BLOCKED_ROOM_TEXT);
+    });
 
     this.shopPopup = new ShopPopup(this.gameClient, this.worldCache);
     this.npcTalkPopup = new NpcTalkPopup(this.gameClient);
@@ -276,7 +322,7 @@ export class MapScreen implements Screen {
     });
     this.roomStatus = new RoomStatusPanel(
       this.container,
-      (action) => { this.runAction(action); },
+      (action) => { this.runStatusChip(action); },
       () => { this.openCurrentRoom(); },
     );
     this.createRouteChip();
@@ -301,13 +347,32 @@ export class MapScreen implements Screen {
     this.shownForecastKey = this.gameClient.lastState?.social?.party?.forecastKey ?? null;
     this.roomSheet?.show(this.sheetModel(info));
     this.map?.setSelectedRoom({ col: info.col, row: info.row });
-    this.container.dataset.sheet = this.sheetLayout();
+    this.sheetMapId = this.gameClient.lastState?.currentMapId ?? null;
+    this.syncScreenLayout();
     if (reveal) this.map?.revealRoom(info.col, info.row, this.sheetInsets());
   }
 
   /** Follows the map's own width rather than the viewport's, because the chat column can take half of it. */
   private sheetLayout(): 'side' | 'bottom' {
     return this.container.clientWidth >= SIDE_SHEET_MIN_WIDTH ? 'side' : 'bottom';
+  }
+
+  /** The sheet's layout and what fits around it depend on the map's size, which chat and rotation change without a state push. */
+  private syncScreenLayout(): void {
+    const open = !!this.roomSheet?.isOpen;
+    const layout = this.sheetLayout();
+    if (open) this.container.dataset.sheet = layout;
+    else delete this.container.dataset.sheet;
+    const free = this.container.clientHeight - (open && layout === 'bottom' ? SHEET_BOTTOM_HEIGHT : 0);
+    this.container.dataset.controls = free >= CONTROLS_FULL_MIN_HEIGHT ? 'full' : free >= CONTROLS_RECENTER_MIN_HEIGHT ? 'some' : 'none';
+  }
+
+  private onScreenResize(): void {
+    if (this.container.clientWidth <= 0 || this.container.clientHeight <= 0) return;
+    this.syncScreenLayout();
+    const col = this.roomSheet?.selectedCol ?? null;
+    const row = this.roomSheet?.selectedRow ?? null;
+    if (col !== null && row !== null) this.map?.revealRoom(col, row, this.sheetInsets());
   }
 
   private sheetInsets(): { right: number; bottom: number } {
@@ -323,7 +388,7 @@ export class MapScreen implements Screen {
   private dismissSheet(): void {
     this.roomSheet?.hide();
     this.map?.setSelectedRoom(null);
-    delete this.container.dataset.sheet;
+    this.syncScreenLayout();
   }
 
   private sheetModel(info: TileClickInfo): RoomSheetModel {
@@ -345,11 +410,11 @@ export class MapScreen implements Screen {
     const col = this.roomSheet.selectedCol;
     const row = this.roomSheet.selectedRow;
     const info = col === null || row === null ? null : this.map.getTileInfo(col, row);
-    if (!info || info.isCurrentTile) {
+    const mapChanged = this.gameClient.lastState?.currentMapId !== this.sheetMapId;
+    if (!info || info.isCurrentTile || mapChanged) {
       this.dismissSheet();
       return;
     }
-    this.container.dataset.sheet = this.sheetLayout();
     this.roomSheet.update(this.sheetModel(info));
   }
 
@@ -413,6 +478,24 @@ export class MapScreen implements Screen {
     return getRoomActions(room, lookups, questMarks(state));
   }
 
+  /** A round chip shows one word, so a tap that takes the party off this map says where first. */
+  private runStatusChip(action: RoomAction): void {
+    if (action.kind === 'travel' && !window.matchMedia?.(SPELLED_OUT_CHIPS_QUERY).matches) {
+      void this.confirmTravel(action);
+    } else {
+      this.runAction(action);
+    }
+  }
+
+  private async confirmTravel(action: RoomAction): Promise<void> {
+    const go = await confirmDialog({
+      title: `${actionLabel(action)}?`,
+      body: 'Your party will go there right away.',
+      confirmLabel: 'Travel',
+    });
+    if (go) this.runAction(action);
+  }
+
   private runAction(action: RoomAction): void {
     switch (action.kind) {
       case 'npc': this.talkTo(action.targetId); break;
@@ -445,7 +528,7 @@ export class MapScreen implements Screen {
     if (!state) return;
     if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
     if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can travel'); return; }
-    this.gameClient.sendEnterTransition(tileId);
+    if (!this.gameClient.sendEnterTransition(tileId)) this.showMoveToast(OFFLINE_NOTICE);
   }
 
   private updateRoomStatus(state: ServerStateMessage | null): void {
@@ -493,12 +576,12 @@ export class MapScreen implements Screen {
       return;
     }
     const last = path[path.length - 1];
-    const destination = this.worldCache.getTileOn(state.currentMapId, last.col, last.row);
-    const name = destination && state.unlocked.includes(destination.id) ? `${destination.name} · ` : '';
+    const name = discoveredRoomName(state, this.worldCache, last.col, last.row);
+    const nameHtml = name ? `<span class="map-route-name">${escapeHtml(name)}</span><span class="map-route-dot">·</span>` : '';
     const count = `${path.length} ${path.length === 1 ? 'room' : 'rooms'}`;
     chip.hidden = false;
     deferWhilePressed(chip, () => {
-      setHtml(chip, `<span class="map-route-text">→ ${escapeHtml(name)}${count}</span>`
+      setHtml(chip, `<span class="map-route-text"><span class="map-route-arrow">→</span>${nameHtml}<span class="map-route-count">${count}</span></span>`
         + '<button type="button" class="map-route-stop">Stop</button>');
     });
   }

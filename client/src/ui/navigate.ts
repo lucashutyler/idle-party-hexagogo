@@ -52,11 +52,7 @@ function goToDefaultScreen(): boolean {
   return true;
 }
 
-/**
- * Keeps one history entry above the page so Back steps through the game first:
- * top overlay, then phone chat (`closeChat` returns whether it closed), then Battle, then out of the app.
- * With no earlier entry the app is still here after that, so the next press restores the entry.
- */
+/** Makes Back step through the game before leaving it. `closeChat` returns whether it closed anything. See docs/architecture/client.md. */
 export function installBackHandler(closeChat: () => boolean): () => void {
   const isSentinel = (): boolean => (history.state as { marker?: string } | null)?.marker === BACK_SENTINEL;
   const pushSentinel = (): void => history.pushState({ marker: BACK_SENTINEL }, '');

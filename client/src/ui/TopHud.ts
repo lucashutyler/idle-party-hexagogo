@@ -4,6 +4,7 @@ import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import { artworkUrl, renderTrackedImg } from './assets';
 import { deferWhilePressed, setHtml } from './render';
+import { routeSummary } from './routeSummary';
 
 /** Gold chip text: full number below 10 000, otherwise `12.3k` / `1.2M`. */
 export function formatGoldChip(gold: number): string {
@@ -23,25 +24,16 @@ export interface HudStatus {
   detail: string;
 }
 
-function roomCountText(count: number): string {
-  return `${count} ${count === 1 ? 'room' : 'rooms'}`;
-}
-
 /** The HUD's two status lines. A walking destination is named only once it has been explored. */
 export function hudStatus(
   state: ServerStateMessage,
   worldCache: Pick<WorldCache, 'getTileOn'>,
   connected: boolean,
 ): HudStatus {
-  const { col, row, path } = state.party;
+  const { col, row } = state.party;
   const room = worldCache.getTileOn(state.currentMapId, col, row)?.name ?? state.zoneName;
   if (!connected) return { room, detail: 'Reconnecting…' };
-  if (path.length > 0) {
-    const last = path[path.length - 1];
-    const destination = worldCache.getTileOn(state.currentMapId, last.col, last.row);
-    const name = destination && state.unlocked.includes(destination.id) ? `${destination.name} · ` : '';
-    return { room, detail: `→ ${name}${roomCountText(path.length)}` };
-  }
+  if (state.party.path.length > 0) return { room, detail: `→ ${routeSummary(state, worldCache)}` };
   if (state.dungeon) {
     return { room, detail: `${state.dungeon.name} · Floor ${state.dungeon.floor}/${state.dungeon.totalFloors}` };
   }
@@ -61,6 +53,7 @@ export class TopHud {
   private levelEl: HTMLElement;
   private roomEl: HTMLElement;
   private detailEl: HTMLElement;
+  private zoneEl: HTMLElement;
   private nameEl: HTMLElement;
   private statusBtn: HTMLElement;
   private goldBtn: HTMLElement;
@@ -81,6 +74,7 @@ export class TopHud {
         <span class="top-hud-status-lines">
           <span class="top-hud-room"></span>
           <span class="top-hud-detail"></span>
+          <span class="top-hud-zone"></span>
         </span>
         <span class="top-hud-name"></span>
       </button>
@@ -94,6 +88,7 @@ export class TopHud {
     this.levelEl = this.container.querySelector('.top-hud-level')!;
     this.roomEl = this.container.querySelector('.top-hud-room')!;
     this.detailEl = this.container.querySelector('.top-hud-detail')!;
+    this.zoneEl = this.container.querySelector('.top-hud-zone')!;
     this.nameEl = this.container.querySelector('.top-hud-name')!;
     this.statusBtn = this.container.querySelector('.top-hud-status')!;
     this.goldBtn = this.container.querySelector('.top-hud-gold')!;
@@ -121,6 +116,8 @@ export class TopHud {
     const status = hudStatus(state, this.worldCache, this.connected);
     setText(this.roomEl, status.room);
     setText(this.detailEl, status.detail);
+    setText(this.zoneEl, state.zoneName);
+    this.detailEl.toggleAttribute('data-route', state.party.path.length > 0 && !state.dungeon);
     this.statusBtn.setAttribute('aria-label', `Open map, ${status.room}`);
     this.container.toggleAttribute('data-offline', !this.connected);
     setText(this.nameEl, state.username);

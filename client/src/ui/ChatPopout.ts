@@ -27,7 +27,8 @@ import {
 } from './chatModel';
 import type { ChatAudience, ChatFilters, ChatMembership, ChatPreview, ChatRowOptions, ChatTab, ChatView } from './chatModel';
 import { wireVerticalSwipe } from './ChatStrip';
-import { bringToFront, registerDismiss, release } from './ModalStack';
+import { countText } from './countText';
+import { bringToFront, registerDismiss, release, setRaised, suspendDismiss } from './ModalStack';
 import { deferWhilePressed, setHtml } from './render';
 
 const STORAGE_KEY_FILTERS = 'chatPopoutFilters';
@@ -35,7 +36,8 @@ const STORAGE_KEY_MOBILE_LAYOUT = 'chatPopoutMobileLayout';
 const STORAGE_KEY_OPEN = 'chatPopoutOpen';
 const STORAGE_KEY_LAST_SEEN = 'chatLastSeenAt';
 
-const DOCKED_COLUMN_QUERY = '(min-width: 1024px), (orientation: landscape) and (max-height: 500px)';
+const DESKTOP_COLUMN_QUERY = '(min-width: 860px)';
+const DOCKED_COLUMN_QUERY = `${DESKTOP_COLUMN_QUERY}, (orientation: landscape) and (max-height: 500px)`;
 const COARSE_POINTER_QUERY = '(pointer: coarse)';
 const FINE_POINTER_QUERY = '(pointer: fine)';
 
@@ -124,6 +126,7 @@ export class ChatPopout {
 
   private timelineStale = true;
   private unrenderedRows: ChatMessage[] = [];
+  private pendingRows = 0;
   private rowCount = 0;
   private lastRowTimestamp: number | null = null;
   private following = true;
@@ -243,6 +246,16 @@ export class ChatPopout {
 
   isVisible(): boolean { return this.isOpen; }
 
+  /** The column as a phone in landscape shows it. The sheet and full layouts are on ModalStack, and the desktop column stays. */
+  isLandscapeColumn(): boolean {
+    return this.isOpen && this.currentLayout() === 'column' && !matches(DESKTOP_COLUMN_QUERY);
+  }
+
+  /** Closes a chat that covers the whole screen, so that what a navigation brings up can be seen. */
+  closeIfCovering(): void {
+    if (this.isOpen && (this.typing || this.currentLayout() === 'full')) this.close();
+  }
+
   private buildDOM(): void {
     const tabs = TABS.map(tab => `
       <button type="button" class="chat-tab" role="tab" data-tab="${tab.id}" aria-selected="false">${tab.label}<span class="chat-tab-dot"></span></button>
@@ -327,33 +340,35 @@ export class ChatPopout {
   private setMobileLayout(layout: MobileLayout): void {
     this.mobileLayout = layout;
     writeStorage(STORAGE_KEY_MOBILE_LAYOUT, layout);
-    this.applyLayout();
+    this.applyLayout(true);
   }
 
   private currentLayout(): ChatLayout {
     return this.columnQuery?.matches ? 'column' : this.mobileLayout;
   }
 
-  private applyLayout(): void {
+  private applyLayout(promote = false): void {
     if (!this.isOpen) return;
     const layout = this.currentLayout();
     document.body.dataset.chatLayout = layout;
     const expanded = layout === 'full';
     this.layoutBtn.setAttribute('aria-label', expanded ? 'Shrink chat' : 'Expand chat');
     this.layoutBtn.title = expanded ? 'Shrink' : 'Expand';
-    this.syncStack();
+    this.syncStack(promote);
   }
 
-  /** Only `full` and typing need a z-index, and a flow item with one would trap the sheet under the nav. */
-  private syncStack(): void {
+  /**
+   * Only `full` and typing need a z-index, and a flow item with one would trap the sheet under the nav.
+   * `promote` is for when the player just acted on chat: anything else keeps its place, so a popup opened since stays on top.
+   */
+  private syncStack(promote = false): void {
     if (!this.isOpen) return;
     const layout = this.currentLayout();
-    if (this.typing || layout === 'full') {
-      bringToFront(this.root, () => this.close());
-    } else {
-      release(this.root);
-      if (layout === 'sheet') registerDismiss(this.root, () => this.close());
-    }
+    const raised = this.typing || layout === 'full';
+    if (promote && raised) bringToFront(this.root, () => this.close(), { holdFocus: false });
+    else if (layout === 'column' && !this.typing) suspendDismiss(this.root);
+    else registerDismiss(this.root, () => this.close());
+    setRaised(this.root, raised);
   }
 
   private wireFilters(): void {
@@ -412,12 +427,22 @@ export class ChatPopout {
   }
 
   private enterView(): void {
+    this.prepareView();
+    this.rebuildView();
+  }
+
+  /** For a state push or server reply, which can land while a row is held down. */
+  private enterViewDeferred(): void {
+    this.prepareView();
+    this.invalidateView();
+  }
+
+  private prepareView(): void {
     this.syncTabs();
     this.syncComposer();
     this.following = true;
     this.clearStatus();
     this.markViewSeen();
-    this.rebuildView();
     this.reportChatFocus();
   }
 
@@ -503,7 +528,7 @@ export class ChatPopout {
         </button>
       `;
     }).join('');
-    setHtml(this.threadsEl, html || '<div class="ui-empty chat-empty">No conversations yet. Tap a player\'s name to message them, or type a name below.</div>');
+    setHtml(this.threadsEl, html || '<div class="ui-empty chat-empty">No conversations yet. Choose a player\'s name to message them, or type a name below.</div>');
   }
 
   private threadSeen(key: string): number {
@@ -533,7 +558,7 @@ export class ChatPopout {
     this.timelineEl.addEventListener('scroll', () => {
       const el = this.timelineEl;
       this.following = el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_SLOP_PX;
-      if (this.following && this.unrenderedRows.length > 0) this.queueTimelinePaint();
+      if (this.following && this.pendingRows > 0) this.queueTimelinePaint();
     }, { passive: true });
     this.newPill.addEventListener('click', () => {
       this.following = true;
@@ -615,7 +640,7 @@ export class ChatPopout {
     if (!this.inputEl.value) this.inputEl.value = sent.text;
     if (this.tab === 'dm' && this.thread && sameUser(this.thread, sent.target)) {
       this.thread = null;
-      this.enterView();
+      this.enterViewDeferred();
     }
     this.showStatus(`No player is called "${sent.target}".`);
   }
@@ -710,7 +735,7 @@ export class ChatPopout {
     });
     if ((this.tab === 'party' && !next.inParty) || (this.tab === 'guild' && !next.guildId)) {
       this.tab = 'all';
-      this.enterView();
+      this.enterViewDeferred();
     } else {
       this.syncTabs();
     }
@@ -748,7 +773,7 @@ export class ChatPopout {
         const view = this.currentView();
         const rows = added.filter(m => isShownInView(m, view, audience));
         if (rows.some(m => m.senderUsername === me)) this.following = true;
-        this.unrenderedRows.push(...rows);
+        this.holdRows(rows);
       }
       this.queueTimelinePaint();
       if (this.tab === 'dm' && !this.thread && added.some(m => m.channelType === 'dm')) {
@@ -759,6 +784,13 @@ export class ChatPopout {
     }
     if (this.lastSend && added.some(m => m.senderUsername === me && m.text === this.lastSend?.text)) this.lastSend = null;
     this.schedulePreview();
+  }
+
+  /** Past the cap only a count is kept: the log still has the messages, and returning to the bottom rebuilds from it. */
+  private holdRows(rows: readonly ChatMessage[]): void {
+    this.pendingRows += rows.length;
+    if (this.pendingRows > CHAT_ROW_CAP) this.unrenderedRows = [];
+    else this.unrenderedRows.push(...rows);
   }
 
   /** First run: the server's clock, not this device's, decides what counts as already read. */
@@ -833,6 +865,7 @@ export class ChatPopout {
     this.threadBar.hidden = !(this.tab === 'dm' && this.thread);
     this.threadName.textContent = this.thread ?? '';
     this.unrenderedRows = [];
+    this.pendingRows = 0;
     this.syncNewPill();
     if (listing) {
       this.renderThreadList();
@@ -864,21 +897,18 @@ export class ChatPopout {
   }
 
   private flushRows(): void {
-    if (!this.isOpen || this.unrenderedRows.length === 0) {
+    if (!this.isOpen || this.pendingRows === 0 || !this.following) {
       this.syncNewPill();
       return;
     }
-    if (!this.following) {
-      this.syncNewPill();
+    if (this.rowCount === 0 || this.pendingRows >= CHAT_ROW_CAP) {
+      this.rebuildView();
       return;
     }
     const rows = this.unrenderedRows;
     this.unrenderedRows = [];
+    this.pendingRows = 0;
     this.syncNewPill();
-    if (this.rowCount === 0 || rows.length >= CHAT_ROW_CAP) {
-      this.rebuildView();
-      return;
-    }
     const options = this.rowOptions();
     let html = '';
     for (const message of rows) {
@@ -900,9 +930,9 @@ export class ChatPopout {
   }
 
   private syncNewPill(): void {
-    const count = this.unrenderedRows.length;
+    const count = this.pendingRows;
     this.newPill.hidden = count === 0;
-    if (count > 0) this.newPill.textContent = `↓ ${count > 99 ? '99+' : count} new`;
+    if (count > 0) this.newPill.textContent = `↓ ${countText(count)} new`;
   }
 
   private queueScrollToBottom(): void {

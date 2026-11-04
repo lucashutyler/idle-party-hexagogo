@@ -22,8 +22,9 @@ import { artworkUrl, placeholderInitials, renderTrackedImg } from './assets';
 import { COAST_OFFSET_Y, COAST_PAD, MapBaker, SEA_COLOR, createSeaFallbackCanvas } from './MapBaker';
 import type { BakeRoom } from './MapBaker';
 import { hexVariant, isLandmarkType, lodForZoom, outsideFollowFrame, pickZoneLabels, terrainMaterial, zoneLabelAnchors } from './mapTerrain';
-import type { ZoneLabelAnchor } from './mapTerrain';
+import type { LabelObstacle, ZoneLabelAnchor } from './mapTerrain';
 import { reducedMotion } from './motion';
+import { escapeHtml } from './ItemIcon';
 import { setHtml } from './render';
 import { ROOM_ICONS, getRoomActions, questMarks, questPipClass } from './RoomActions';
 import type { QuestMarks, RoomAction } from './RoomActions';
@@ -60,8 +61,11 @@ const ZOOM_TWEEN_MS = 140;
 const DRAG_THRESHOLD = 5;
 
 const BAKE_BUDGET_MS = 8;
-const ART_FLUSH_MS = 1000;
-const ART_FLUSH_RETRY_MS = 300;
+const ART_PATCH_MS = 200;
+/** Each upload is the whole terrain texture, so art waits for a lull in arrivals, up to the longest wait. */
+const ART_UPLOAD_QUIET_MS = 1500;
+const ART_UPLOAD_MAX_WAIT_MS = 5000;
+const ART_UPLOAD_RETRY_MS = 300;
 const MAX_DPR = 2;
 const FALLBACK_MAX_TEXTURE = 8192;
 
@@ -71,9 +75,18 @@ const PARCHMENT_TILE_PX = 256;
 const PARCHMENT_PARALLAX = 0.3;
 const PARCHMENT_VIEW_MARGIN = 2500;
 
+/** World units around the view that room art loads ahead of a pan. */
+const ART_VIEW_MARGIN = HEX_SIZE * 2;
+
 const LABEL_CLEAR_X_PX = 72;
 const LABEL_CLEAR_Y_PX = 30;
 const MAX_MARKER_ICONS = 3;
+const MARKER_ICON_HALF_W = 9;
+const MARKER_PAD_HALF_W = 6;
+const MARKER_HALF_H = 11;
+const MARKER_PIP_HALF = 6;
+const MARKER_GROW_ZOOM = 0.75;
+const MARKER_MAX_GROW = 1.8;
 const TOOLTIP_MARGIN = 4;
 const QUEST_TARGET_ICON = '📜';
 
@@ -100,8 +113,11 @@ function easeOutCubic(t: number): number {
   return 1 - u * u * u;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/** How far the camera must move for a screen position to clear the edges of a span; centres it when it can't fit. */
+function revealNudge(pos: number, span: number, margin: number): number {
+  if (span < margin * 2) return pos - span / 2;
+  if (pos + margin > span) return pos + margin - span;
+  return pos < margin ? pos - margin : 0;
 }
 
 function hexOutlineSvg(strokeAttrs = ''): string {
@@ -159,8 +175,12 @@ export class ThreeWorldMap {
   private terrainReady = false;
   private bakeRafId: number | null = null;
   private paused = false;
-  private artFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastArtFlush = 0;
+  private sizedWidth = 0;
+  private sizedHeight = 0;
+  private artPatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private artUploadTimer: ReturnType<typeof setTimeout> | null = null;
+  private artUploadDeadline: number | null = null;
+  private artUploadPending = false;
 
   private grid: HexGrid = new HexGrid();
   private worldTileDefs = new Map<string, WorldTileDefinition>();
@@ -195,6 +215,7 @@ export class ThreeWorldMap {
   private questMarkerKey = '';
   private markersDirty = true;
   private zoneAnchors: ZoneLabelAnchor[] = [];
+  private markerSpots: { x: number; y: number; icons: number }[] = [];
 
   private partyRendered = false;
   private partyTargetCol = 0;
@@ -227,7 +248,7 @@ export class ThreeWorldMap {
 
   private sendMoveFn?: (col: number, row: number) => void;
   private onTileClickFn?: (info: TileClickInfo) => void;
-  private onBackgroundClickFn?: () => void;
+  private onBackgroundClickFn?: (blocked: boolean) => void;
 
   private destroyed = false;
   private isFirstState = true;
@@ -304,7 +325,7 @@ export class ThreeWorldMap {
     this.terrainMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
     this.fogMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
 
-    this.baker = new MapBaker(() => this.scheduleArtFlush());
+    this.baker = new MapBaker(() => this.scheduleArtPatch());
     this.grid = this.buildGridFromCache(true);
     this.loadParchment(this.worldCache.getCurrentMapId());
 
@@ -341,8 +362,8 @@ export class ThreeWorldMap {
     this.onTileClickFn = fn;
   }
 
-  /** Taps on the sea, a blocked room, or nothing at all. */
-  setOnBackgroundClick(fn: () => void): void {
+  /** Taps on the sea or on nothing at all, and on a room that can't be walked into (`blocked`). */
+  setOnBackgroundClick(fn: (blocked: boolean) => void): void {
     this.onBackgroundClickFn = fn;
   }
 
@@ -362,6 +383,17 @@ export class ThreeWorldMap {
     this.selectedEl.style.display = '';
     this.selectedEl.style.left = `${p.x}px`;
     this.selectedEl.style.top = `${p.y}px`;
+  }
+
+  /** Moves the view by screen pixels, for keyboard panning. */
+  panBy(dx: number, dy: number): void {
+    this.setFollowing(false);
+    this.camAnim = null;
+    this.camWorldX += dx / this.zoom;
+    this.camWorldY += dy / this.zoom;
+    this.clampCamWithOverdrag();
+    this.springBackIfNeeded();
+    this.requestRender();
   }
 
   adjustZoom(delta: number): void {
@@ -403,7 +435,7 @@ export class ThreeWorldMap {
     if (unlockedChanged) {
       this.fogDirty = true;
       this.markersDirty = true;
-      if (this.terrainReady) this.baker.requestArt();
+      if (this.terrainReady) this.requestViewArt();
     }
 
     const partyMoved = this.applyPartyState(state.party, shouldSnap);
@@ -501,7 +533,8 @@ export class ThreeWorldMap {
   destroy(): void {
     this.destroyed = true;
     this.cancelFrames();
-    if (this.artFlushTimer !== null) clearTimeout(this.artFlushTimer);
+    if (this.artPatchTimer !== null) clearTimeout(this.artPatchTimer);
+    if (this.artUploadTimer !== null) clearTimeout(this.artUploadTimer);
 
     window.removeEventListener('resize', this.resizeHandler);
     window.removeEventListener('mousemove', this.windowMouseMove);
@@ -534,7 +567,8 @@ export class ThreeWorldMap {
     this.paused = false;
     this.handleResize();
     if (this.baker.isBaking) this.scheduleBakeSlice();
-    if (this.baker.hasPendingArt) this.scheduleArtFlush();
+    if (this.baker.hasPendingArt) this.scheduleArtPatch();
+    if (this.artUploadPending) this.queueTerrainUpload();
     this.requestRender();
   }
 
@@ -561,8 +595,8 @@ export class ThreeWorldMap {
     const margin = HEX_SIZE * this.zoom + 8;
     const sx = cw / 2 + (p.x - this.camWorldX) * this.zoom;
     const sy = ch / 2 + (p.y - this.camWorldY) * this.zoom;
-    const dx = Math.max(0, sx + margin - (cw - insets.right));
-    const dy = Math.max(0, sy + margin - (ch - insets.bottom));
+    const dx = revealNudge(sx, cw - insets.right, margin);
+    const dy = revealNudge(sy, ch - insets.bottom, margin);
     if (dx === 0 && dy === 0) return;
     this.animateCamera(this.camWorldX + dx / this.zoom, this.camWorldY + dy / this.zoom, this.zoom, SPRING_DURATION);
   }
@@ -756,6 +790,16 @@ export class ThreeWorldMap {
     this.ensureAnimLoop();
   }
 
+  /** Holds the camera where it was last drawn, so that a press hits what the player is looking at. */
+  private stopCameraAnim(): void {
+    if (!this.camAnim) return;
+    if (this.camAnim.startZoom !== this.camAnim.targetZoom) this.persistZoom(this.zoom);
+    this.camAnim = null;
+    this.endGesture();
+    this.settleZoom();
+    this.requestRender();
+  }
+
   private finishCameraAnim(): void {
     if (!this.camAnim) return;
     this.camWorldX = this.camAnim.targetX;
@@ -806,6 +850,10 @@ export class ThreeWorldMap {
     const w = this.canvasCssWidth();
     const h = this.canvasCssHeight();
     if (w <= 0 || h <= 0) return;
+    if (w === this.sizedWidth && h === this.sizedHeight) return;
+    const firstSize = this.sizedWidth === 0;
+    this.sizedWidth = w;
+    this.sizedHeight = h;
 
     this.renderer.setSize(w, h, false);
     this.camera.left = -w / 2;
@@ -820,7 +868,10 @@ export class ThreeWorldMap {
       this.settleZoom();
     }
 
-    this.requestRender();
+    if (this.terrainReady || this.baker.isBaking) this.requestViewArt();
+    // setSize cleared the canvas: a deferred draw would paint one empty frame first.
+    if (firstSize || this.paused) this.requestRender();
+    else this.render();
   }
 
 
@@ -951,13 +1002,13 @@ export class ThreeWorldMap {
   }
 
   private onPointerDown(clientX: number, clientY: number): void {
+    this.stopCameraAnim();
     this.isDragging = true;
     this.dragStartClientX = clientX;
     this.dragStartClientY = clientY;
     this.dragStartCamX = this.camWorldX;
     this.dragStartCamY = this.camWorldY;
     this.dragDistance = 0;
-    this.finishCameraAnim();
   }
 
   private onPointerMove(clientX: number, clientY: number): void {
@@ -999,7 +1050,18 @@ export class ThreeWorldMap {
 
   /** Lets the browser re-rasterize overlay text at the settled zoom, so it isn't left blurry. */
   private endGesture(): void {
-    if (!this.camAnim && !this.isPinching && this.overlay.style.willChange) this.overlay.style.willChange = '';
+    if (this.camAnim || this.isPinching) return;
+    if (this.overlay.style.willChange) this.overlay.style.willChange = '';
+    if (!this.isDragging && (this.terrainReady || this.baker.isBaking)) this.requestViewArt();
+  }
+
+  private requestViewArt(): void {
+    this.baker.requestArt({
+      x: this.camWorldX,
+      y: this.camWorldY,
+      halfW: this.canvasCssWidth() / 2 / this.zoom + ART_VIEW_MARGIN,
+      halfH: this.canvasCssHeight() / 2 / this.zoom + ART_VIEW_MARGIN,
+    });
   }
 
   private get gestureActive(): boolean {
@@ -1099,7 +1161,7 @@ export class ThreeWorldMap {
     const offset = tile ? cubeToOffset(tile.coord) : null;
     const info = offset ? this.getTileInfo(offset.col, offset.row) : null;
     if (!offset || !info) {
-      this.onBackgroundClickFn?.();
+      this.onBackgroundClickFn?.(!!tile && tile.type !== 'void');
       return;
     }
 
@@ -1208,14 +1270,15 @@ export class ThreeWorldMap {
 
   private startTerrainBake(): void {
     this.terrainDirty = false;
-    this.baker.requestArt();
     if (!this.terrainReady) {
       if (this.terrainMesh) this.terrainMesh.visible = false;
       if (this.fogMesh) this.fogMesh.visible = false;
     }
     const maxTexture = this.renderer.capabilities?.maxTextureSize ?? FALLBACK_MAX_TEXTURE;
     const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
-    if (!this.baker.beginTerrain(maxTexture, dpr)) {
+    const begun = this.baker.beginTerrain(maxTexture, dpr);
+    this.requestViewArt();
+    if (!begun) {
       delete this.container.dataset.charting;
       return;
     }
@@ -1243,40 +1306,50 @@ export class ThreeWorldMap {
       delete this.container.dataset.charting;
       if (this.terrainMesh) this.terrainMesh.visible = true;
       this.requestRender();
-      if (this.baker.hasPendingArt) this.scheduleArtFlush();
+      if (this.baker.hasPendingArt) this.scheduleArtPatch();
       return;
     }
     if (!this.baker.hasPendingArt) return;
-    if (!this.baker.stepArt(BAKE_BUDGET_MS)) {
-      this.scheduleBakeSlice();
-      return;
-    }
-    this.uploadTerrain();
-    this.requestRender();
+    const done = this.baker.stepArt(BAKE_BUDGET_MS);
+    this.queueTerrainUpload();
+    if (!done) this.scheduleBakeSlice();
   }
 
-  /** At most one art flush a second, and never while the map is moving: each one re-uploads the terrain. */
-  private scheduleArtFlush(): void {
-    if (this.artFlushTimer !== null || this.destroyed) return;
-    const wait = Math.max(0, this.lastArtFlush + ART_FLUSH_MS - performance.now());
-    this.artFlushTimer = setTimeout(() => {
-      this.artFlushTimer = null;
+  /** Paints arrived art into the retained canvas, never while the map is moving. Uploading it is a separate, rarer step. */
+  private scheduleArtPatch(): void {
+    if (this.artPatchTimer !== null || this.destroyed) return;
+    this.artPatchTimer = setTimeout(() => {
+      this.artPatchTimer = null;
       if (this.destroyed || this.paused || !this.baker.hasPendingArt) return;
       if (this.gestureActive || this.baker.isBaking || this.bakeRafId !== null) {
-        this.artFlushTimer = setTimeout(() => {
-          this.artFlushTimer = null;
-          this.scheduleArtFlush();
-        }, ART_FLUSH_RETRY_MS);
-        return;
-      }
-      this.lastArtFlush = performance.now();
-      if (this.baker.shouldRebakeForArt()) {
+        this.scheduleArtPatch();
+      } else if (this.baker.shouldRebakeForArt()) {
         this.terrainDirty = true;
         this.requestRender();
       } else {
         this.scheduleBakeSlice();
       }
-    }, wait);
+    }, ART_PATCH_MS);
+  }
+
+  private queueTerrainUpload(): void {
+    if (this.destroyed) return;
+    this.artUploadPending = true;
+    const now = performance.now();
+    this.artUploadDeadline ??= now + ART_UPLOAD_MAX_WAIT_MS;
+    if (this.artUploadTimer !== null) clearTimeout(this.artUploadTimer);
+    this.artUploadTimer = setTimeout(() => this.flushTerrainUpload(), Math.max(0, Math.min(ART_UPLOAD_QUIET_MS, this.artUploadDeadline - now)));
+  }
+
+  private flushTerrainUpload(): void {
+    this.artUploadTimer = null;
+    if (this.destroyed || this.paused || !this.artUploadPending) return;
+    if (this.gestureActive || this.baker.isBaking) {
+      this.artUploadTimer = setTimeout(() => this.flushTerrainUpload(), ART_UPLOAD_RETRY_MS);
+      return;
+    }
+    this.uploadTerrain();
+    this.requestRender();
   }
 
   private syncLayerMeshes(): void {
@@ -1318,6 +1391,8 @@ export class ThreeWorldMap {
   }
 
   private uploadTerrain(): void {
+    this.artUploadPending = false;
+    this.artUploadDeadline = null;
     const canvas = this.baker.terrainCanvas;
     if (!canvas) return;
     this.syncLayerMeshes();
@@ -1430,8 +1505,20 @@ export class ThreeWorldMap {
     this.updateZoneLabels();
   }
 
+  /** Where each room's markers draw, in world units: their CSS scales them up when zoomed far out. */
+  private markerBoxes(): LabelObstacle[] {
+    const far = lodForZoom(this.zoom) === 'far';
+    const grow = Math.min(MARKER_MAX_GROW, Math.max(1, MARKER_GROW_ZOOM / this.zoom));
+    return this.markerSpots.map(({ x, y, icons }) => ({
+      x,
+      y,
+      halfW: (far ? MARKER_PIP_HALF : icons * MARKER_ICON_HALF_W + MARKER_PAD_HALF_W) * grow,
+      halfH: (far ? MARKER_PIP_HALF : MARKER_HALF_H) * grow,
+    }));
+  }
+
   private updateZoneLabels(): void {
-    const html = pickZoneLabels(this.zoneAnchors, this.zoom, this.currentZone).map(anchor => {
+    const html = pickZoneLabels(this.zoneAnchors, this.zoom, this.currentZone, this.markerBoxes()).map(anchor => {
       const current = anchor.zone === this.currentZone ? ' data-current="1"' : '';
       return `<div class="three-map-zone-label"${current} style="left:${anchor.x}px;top:${anchor.y}px">${escapeHtml(anchor.name)}</div>`;
     });
@@ -1544,6 +1631,7 @@ export class ThreeWorldMap {
   private updateMarkersOverlay(): void {
     this.markersDirty = false;
     this.roomActions.clear();
+    this.markerSpots = [];
     const markers = document.createDocumentFragment();
     for (const [key, def] of this.worldTileDefs) {
       if (!this.worldCache.isUnlocked(def.col, def.row)) continue;
@@ -1589,6 +1677,7 @@ export class ThreeWorldMap {
 
     const firstExit = actions.find(a => a.kind === 'travel');
     const icons = [...actions.filter(a => a.kind !== 'travel'), ...(firstExit ? [firstExit] : [])];
+    this.markerSpots.push({ x: p.x, y: p.y + HEX_SIZE * 0.55, icons: Math.min(icons.length, MAX_MARKER_ICONS + 1) });
     for (const action of icons.slice(0, MAX_MARKER_ICONS)) {
       const icon = document.createElement('span');
       icon.className = ['three-map-marker-icon', questPipClass(action)].filter(Boolean).join(' ');

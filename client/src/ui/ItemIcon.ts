@@ -117,7 +117,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   if (def.iconEmoji) {
     inner = `<span class="item-square-emoji">${escapeHtml(def.iconEmoji)}</span>`;
   } else {
-    inner = `${renderTrackedImg(artworkUrl('item', itemId), { className: 'item-square-img' })}<span class="item-square-initials">${initials}</span>`;
+    inner = `${renderTrackedImg(artworkUrl('item', itemId), { className: 'item-square-img' })}<span class="item-square-initials">${escapeHtml(initials)}</span>`;
   }
 
   if (options?.showSetIndicator && options.setDefs && getItemSetId(itemId, options.setDefs)) {
@@ -136,7 +136,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   }
 
   const tooltip = escapeHtml(options?.tooltip ?? def.name);
-  const title = options?.tooltip ? ` title="${tooltip}"` : '';
+  const title = options?.tooltip || options?.interactive ? ` title="${tooltip}"` : '';
   const role = options?.interactive ? ` role="button" tabindex="0" aria-label="${escapeHtml(def.name)}"` : '';
   return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${tooltip}"${title}${role} style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
 }
@@ -167,6 +167,18 @@ export function renderEmptySlotIcon(slot: string, options?: { extraClass?: strin
   const ghost = renderSlotArt(slot, 'item-slot-ghost', 'item-slot-ghost-img', 'item-slot-ghost-glyph');
   const role = options?.interactive ? ` role="button" tabindex="0" aria-label="${escapeHtml(label)}, empty"` : '';
   return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" title="${escapeHtml(label)}"${role}${dataStr}>${ghost}</div>`;
+}
+
+/** Sets the stack badge on a rendered square; a single item shows none. */
+export function writeItemSquareQty(square: HTMLElement, qty: number): void {
+  const badge = square.querySelector('.item-square-qty');
+  if (qty <= 1) {
+    badge?.remove();
+  } else if (badge) {
+    badge.textContent = String(qty);
+  } else {
+    square.insertAdjacentHTML('beforeend', `<span class="item-square-qty">${qty}</span>`);
+  }
 }
 
 /** Enter and Space activate `[role="button"]` children, so div-based tiles work from the keyboard. */

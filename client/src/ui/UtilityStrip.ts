@@ -1,13 +1,10 @@
 import type { GameClient } from '../network/GameClient';
 import { navIconHtml, readyQuestCount } from './BottomNav';
+import { countText } from './countText';
 
 export interface UtilityStripActions {
   onOpenChat(): void;
   onOpenQuests(): void;
-}
-
-function countText(count: number): string {
-  return count > 99 ? '99+' : String(count);
 }
 
 /** Phone row above the nav: the chat slot and the Quests button. CSS hides it while chat is open and on the desktop grid. */

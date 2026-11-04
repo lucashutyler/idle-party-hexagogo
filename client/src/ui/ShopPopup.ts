@@ -66,6 +66,8 @@ export class ShopPopup {
   private lastRenderKey = '';
   /** Which list the current DOM shows, so a re-render of the same list keeps its scroll position. */
   private renderedPlace = '';
+  /** The last keyed control that had focus; repaints replace the DOM, and Back returns to the cell a detail came from. */
+  private focusKey: string | null = null;
 
   constructor(gameClient: GameClient, worldCache: WorldCache) {
     this.gameClient = gameClient;
@@ -133,6 +135,7 @@ export class ShopPopup {
     this.unsubscribeError = null;
     this.lastRenderKey = '';
     this.renderedPlace = '';
+    this.focusKey = null;
     this.pendingHireId = null;
     this.pendingBuy = null;
     this.pendingSell = null;
@@ -209,6 +212,7 @@ export class ShopPopup {
     }
     this.lastRenderKey = key;
 
+    const hadFocus = this.rememberFocus();
     const place = this.place();
     const scroll = place === this.renderedPlace ? this.readScroll() : null;
 
@@ -225,6 +229,21 @@ export class ShopPopup {
 
     this.renderedPlace = place;
     if (scroll) this.writeScroll(scroll);
+    if (hadFocus) this.restoreFocus();
+  }
+
+  private rememberFocus(): boolean {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active || !this.overlay.contains(active)) return active === document.body;
+    this.focusKey = active.dataset.focusKey ?? this.focusKey;
+    return true;
+  }
+
+  private restoreFocus(): void {
+    if (this.overlay.contains(document.activeElement) && document.activeElement !== this.overlay) return;
+    const controls = this.overlay.querySelectorAll<HTMLElement>('[data-focus-key]');
+    const control = [...controls].find(el => el.dataset.focusKey === this.focusKey);
+    (control ?? this.overlay).focus({ preventScroll: true });
   }
 
   /** Falls back to the grid when the open detail no longer applies to the latest state. */
@@ -385,7 +404,7 @@ export class ShopPopup {
           : this.renderSellItems(char.inventory, itemDefs)}</div>`;
 
     const hireToggle = offers.length > 0
-      ? `<button class="shop-toggle-btn${hireActive}" data-mode="hire">Hire</button>`
+      ? `<button class="shop-toggle-btn${hireActive}" data-mode="hire" data-focus-key="mode:hire">Hire</button>`
       : '';
 
     this.overlay.innerHTML = `
@@ -393,8 +412,8 @@ export class ShopPopup {
         ${this.headerHtml(shop.name, char.gold)}
         ${this.noticeHtml()}
         <div class="shop-toggle">
-          <button class="shop-toggle-btn${buyActive}" data-mode="buy">Buy</button>
-          <button class="shop-toggle-btn${sellActive}" data-mode="sell">Sell</button>
+          <button class="shop-toggle-btn${buyActive}" data-mode="buy" data-focus-key="mode:buy">Buy</button>
+          <button class="shop-toggle-btn${sellActive}" data-mode="sell" data-focus-key="mode:sell">Sell</button>
           ${hireToggle}
         </div>
         ${listHtml}
@@ -442,9 +461,9 @@ export class ShopPopup {
     }
   }
 
-  private static itemCell(square: string, name: string, rarity: string | undefined): string {
+  private static itemCell(itemId: string, square: string, name: string, rarity: string | undefined): string {
     const color = RARITY_COLORS[rarity ?? 'common'] ?? RARITY_COLORS.common;
-    return `<div class="shop-item-cell" role="button" tabindex="0">${square}<div class="shop-item-name" style="color:${color}">${escapeHtml(name)}</div></div>`;
+    return `<div class="shop-item-cell" role="button" tabindex="0" data-focus-key="item:${escapeHtml(itemId)}">${square}<div class="shop-item-name" style="color:${color}">${escapeHtml(name)}</div></div>`;
   }
 
   private renderBuyItems(shop: ShopDefinition, itemDefs: Record<string, ItemDefinition>, className: string, gold: number): string {
@@ -453,7 +472,7 @@ export class ShopPopup {
       const def = itemDefs[si.itemId];
       if (!def) {
         const name = si.itemId;
-        return ShopPopup.itemCell(`<div class="item-square shop-item-square" data-item-id="${escapeHtml(si.itemId)}" data-price="${si.price}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(name)}">
+        return ShopPopup.itemCell(si.itemId, `<div class="item-square shop-item-square" data-item-id="${escapeHtml(si.itemId)}" data-price="${si.price}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(name)}">
           <span class="item-square-initials">${escapeHtml(name.split(' ').map(w => w[0]).join('').slice(0, 2))}</span>
           ${price}
         </div>`, UNKNOWN_ITEM, undefined);
@@ -465,7 +484,7 @@ export class ShopPopup {
         tooltip: restriction ? `${def.name} (${restriction})` : undefined,
       });
       const badge = restriction ? '<span class="shop-item-unusable" aria-hidden="true"></span>' : '';
-      return ShopPopup.itemCell(html.replace(/<\/div>$/, `${badge}${price}</div>`), def.name, def.rarity);
+      return ShopPopup.itemCell(si.itemId, html.replace(/<\/div>$/, `${badge}${price}</div>`), def.name, def.rarity);
     }).join('');
   }
 
@@ -481,7 +500,7 @@ export class ShopPopup {
     return entries.map(([itemId, qty]) => {
       const def = itemDefs[itemId];
       if (!def) {
-        return ShopPopup.itemCell(`<div class="item-square shop-item-square" data-item-id="${escapeHtml(itemId)}" data-qty="${qty}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(itemId)}">
+        return ShopPopup.itemCell(itemId, `<div class="item-square shop-item-square" data-item-id="${escapeHtml(itemId)}" data-qty="${qty}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(itemId)}">
           <span class="item-square-initials">${escapeHtml(itemId.split(' ').map(w => w[0]).join('').slice(0, 2))}</span>
           <span class="shop-item-price">1g</span>
         </div>`, UNKNOWN_ITEM, undefined);
@@ -492,7 +511,7 @@ export class ShopPopup {
         extraClass: 'shop-item-square',
         dataAttrs: { 'item-id': itemId, qty: String(qty) },
       });
-      return ShopPopup.itemCell(html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`), def.name, def.rarity);
+      return ShopPopup.itemCell(itemId, html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`), def.name, def.rarity);
     }).join('');
   }
 

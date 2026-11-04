@@ -69,6 +69,25 @@ describe('NotificationCenter dropdown', () => {
     document.body.innerHTML = '';
   });
 
+  it('offers only the actions that have something to do', () => {
+    const t = setup();
+    const mark = () => document.querySelector('.notif-mark-all-btn') as HTMLButtonElement;
+    const clear = () => document.querySelector('.notif-clear-all-btn') as HTMLButtonElement;
+
+    t.push([]);
+    t.bell().click();
+    expect(mark().hidden).toBe(true);
+    expect(clear().hidden).toBe(true);
+
+    t.push([entry('n1', { readAt: 1 })]);
+    expect(mark().hidden).toBe(true);
+    expect(clear().hidden).toBe(false);
+
+    t.push([entry('n1', { readAt: null })]);
+    expect(mark().hidden).toBe(false);
+    expect(clear().hidden).toBe(false);
+  });
+
   it('keeps row nodes across an identical state push', () => {
     const t = setup();
     t.push([entry('n1'), entry('n2')]);

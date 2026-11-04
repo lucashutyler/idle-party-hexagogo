@@ -1,5 +1,4 @@
 import type { Screen } from './ScreenManager';
-import { PATCH_NOTES } from './PatchNotes';
 import { logout } from '../network/AuthClient';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import type { GameClient } from '../network/GameClient';
@@ -30,6 +29,7 @@ export class SettingsScreen implements Screen {
   private optionsUnsubscribe?: () => void;
   private notifPrefsOverlay: HTMLElement | null = null;
   private patchNotesOverlay: HTMLElement | null = null;
+  private patchNotesLoading = false;
   private rowsUnsubscribe?: () => void;
 
   constructor(containerId: string, private gameClient: GameClient) {
@@ -60,7 +60,7 @@ export class SettingsScreen implements Screen {
 
     this.container.querySelector('#btn-player-options')!.addEventListener('click', () => this.openPlayerOptions());
     this.container.querySelector('#btn-notifications')!.addEventListener('click', () => this.openNotificationPreferences());
-    this.container.querySelector('#btn-patch-notes')!.addEventListener('click', () => this.openPatchNotes());
+    this.container.querySelector('#btn-patch-notes')!.addEventListener('click', () => void this.openPatchNotes());
 
     const btnSignOut = this.container.querySelector('#btn-sign-out') as HTMLButtonElement;
     btnSignOut.addEventListener('click', async () => {
@@ -206,21 +206,35 @@ export class SettingsScreen implements Screen {
     this.notifPrefsOverlay = null;
   }
 
-  private openPatchNotes(): void {
+  private async openPatchNotes(): Promise<void> {
     if (this.patchNotesOverlay) {
       bringToFront(this.patchNotesOverlay);
       return;
     }
+    if (this.patchNotesLoading) return;
 
-    const entries = PATCH_NOTES.map(p => `
-      <div class="patch-note-entry">
-        <div class="patch-note-version">${escapeHtml(p.version)}</div>
-        <ul class="patch-note-items">
-          ${p.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}
-        </ul>
-      </div>
-    `).join('');
-    this.patchNotesOverlay = this.mountSheet('Patch Notes', 'patch-notes-modal', `<div class="patch-notes-list">${entries}</div>`, () => this.closePatchNotes());
+    this.patchNotesLoading = true;
+    const body = await this.patchNotesHtml();
+    if (!this.patchNotesLoading) return;
+    this.patchNotesLoading = false;
+    this.patchNotesOverlay = this.mountSheet('Patch Notes', 'patch-notes-modal', body, () => this.closePatchNotes());
+  }
+
+  private async patchNotesHtml(): Promise<string> {
+    try {
+      const { PATCH_NOTES } = await import('./PatchNotes');
+      const entries = PATCH_NOTES.map(p => `
+        <div class="patch-note-entry">
+          <div class="patch-note-version">${escapeHtml(p.version)}</div>
+          <ul class="patch-note-items">
+            ${p.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}
+          </ul>
+        </div>
+      `).join('');
+      return `<div class="patch-notes-list">${entries}</div>`;
+    } catch {
+      return '<div class="ui-empty">The patch notes could not be loaded. Check your connection and try again.</div>';
+    }
   }
 
   private closePatchNotes(): void {
@@ -273,6 +287,7 @@ export class SettingsScreen implements Screen {
     this.rowsUnsubscribe?.();
     this.rowsUnsubscribe = undefined;
     this.closeNotificationPreferences();
+    this.patchNotesLoading = false;
     this.closePatchNotes();
     this.closePlayerOptions();
   }

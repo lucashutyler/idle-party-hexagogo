@@ -309,6 +309,72 @@ describe('ThreeWorldMap overlays', () => {
     press(canvas, 5000, 5000);
     expect(onTile).toHaveBeenCalledOnce();
     expect(onBackground).toHaveBeenCalledOnce();
+    expect(onBackground).toHaveBeenLastCalledWith(false);
+  });
+
+  it('tells a tap on a room that cannot be walked into from a tap on the sea', async () => {
+    const cache = await makeCache();
+    const original = cache.getTileTypeDef.bind(cache);
+    vi.spyOn(cache, 'getTileTypeDef').mockImplementation(type =>
+      ({ ...original(type)!, traversable: false }));
+    const map = new ThreeWorldMap(container, cache);
+    const onBackground = vi.fn();
+    map.setOnBackgroundClick(onBackground);
+    map.applyServerState(makeState());
+
+    press(container.querySelector('canvas')!, 0, 0);
+    expect(onBackground).toHaveBeenLastCalledWith(true);
+  });
+
+  describe('a press during a camera tween', () => {
+    function sized(): HTMLElement {
+      const el = document.createElement('div');
+      Object.defineProperty(el, 'clientWidth', { value: 400 });
+      Object.defineProperty(el, 'clientHeight', { value: 400 });
+      document.body.appendChild(el);
+      return el;
+    }
+
+    it('stops the camera where it was drawn, draws again, and hits what was on screen', async () => {
+      localStorage.setItem('mapZoom2', '1');
+      const frames: FrameRequestCallback[] = [];
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
+      vi.stubGlobal('cancelAnimationFrame', () => {});
+      const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+      const runFrames = () => { for (const frame of frames.splice(0)) frame(performance.now()); };
+      try {
+        const el = sized();
+        const map = new ThreeWorldMap(el, await makeCache());
+        const onTile = vi.fn();
+        map.setOnTileClick(onTile);
+        map.applyServerState(makeState());
+        runFrames();
+        const overlay = el.querySelector<HTMLElement>('.three-map-overlay')!;
+        const home = cubeToPixel(offsetToCube({ col: 0, row: 0 }));
+        expect(overlay.style.transform).toContain(`translate(${-home.x}px, ${-home.y}px)`);
+
+        map.focusOn(2, 0);
+        runFrames();
+        now.mockReturnValue(1010);
+        runFrames();
+        const midTween = overlay.style.transform;
+        expect(midTween).not.toContain(`translate(${-home.x}px, ${-home.y}px)`);
+
+        const canvas = el.querySelector('canvas')!;
+        canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 200, bubbles: true }));
+        expect(frames.length).toBeGreaterThan(0);
+        now.mockReturnValue(5000);
+        runFrames();
+        expect(overlay.style.transform).toBe(midTween);
+
+        window.dispatchEvent(new MouseEvent('mouseup', { clientX: 200, clientY: 200, bubbles: true }));
+        expect(onTile.mock.calls[0][0].col).toBe(0);
+      } finally {
+        vi.unstubAllGlobals();
+        now.mockRestore();
+        localStorage.removeItem('mapZoom2');
+      }
+    });
   });
 
   it('does not treat a pinch release as a tap', async () => {
@@ -371,6 +437,42 @@ describe('ThreeWorldMap overlays', () => {
     expect(parseFloat(outline.style.left)).toBeCloseTo(cubeToPixel(offsetToCube({ col: 1, row: 0 })).x, 4);
     map.setSelectedRoom(null);
     expect(outline.style.display).toBe('none');
+  });
+
+  describe('resizing', () => {
+    it('redraws in the same frame, and leaves the canvas alone when the size is unchanged', async () => {
+      let width = 400;
+      Object.defineProperty(container, 'clientWidth', { get: () => width });
+      Object.defineProperty(container, 'clientHeight', { value: 600 });
+      const map = new ThreeWorldMap(container, await makeCache());
+      const { renderer } = map as unknown as { renderer: { render(): void; setSize(): void } };
+      const render = vi.spyOn(renderer, 'render');
+      const setSize = vi.spyOn(renderer, 'setSize');
+
+      width = 300;
+      window.dispatchEvent(new Event('resize'));
+      expect(setSize).toHaveBeenCalledTimes(1);
+      expect(render).toHaveBeenCalledTimes(1);
+
+      window.dispatchEvent(new Event('resize'));
+      expect(setSize).toHaveBeenCalledTimes(1);
+      map.destroy();
+    });
+
+    it('does not draw a paused map', async () => {
+      let width = 400;
+      Object.defineProperty(container, 'clientWidth', { get: () => width });
+      Object.defineProperty(container, 'clientHeight', { value: 600 });
+      const map = new ThreeWorldMap(container, await makeCache());
+      const { renderer } = map as unknown as { renderer: { render(): void } };
+      const render = vi.spyOn(renderer, 'render');
+
+      map.pause();
+      width = 300;
+      window.dispatchEvent(new Event('resize'));
+      expect(render).not.toHaveBeenCalled();
+      map.destroy();
+    });
   });
 
   describe('default zoom', () => {

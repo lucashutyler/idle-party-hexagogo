@@ -482,8 +482,8 @@ export class GameClient {
     return true;
   }
 
-  sendMove(col: number, row: number): void {
-    this.sendRaw({ type: 'move', col, row });
+  sendMove(col: number, row: number): boolean {
+    return this.sendRaw({ type: 'move', col, row });
   }
 
   sendRun(): void {
@@ -597,8 +597,8 @@ export class GameClient {
   }
 
   /** Travel through the current room's transition to the target room (by GUID). */
-  sendEnterTransition(tileId: string): void {
-    this.sendRaw({ type: 'enter_transition', tileId });
+  sendEnterTransition(tileId: string): boolean {
+    return this.sendRaw({ type: 'enter_transition', tileId });
   }
 
   sendEquipSkill(skillId: string, slotIndex: number): void {

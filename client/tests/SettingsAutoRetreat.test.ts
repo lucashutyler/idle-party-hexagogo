@@ -139,20 +139,22 @@ describe('Settings list', () => {
     expect(client.listeners).toHaveLength(0);
   });
 
-  it('builds patch notes only when opened, and closes them with Back', () => {
+  it('builds patch notes only when opened, and closes them with Back', async () => {
     mount(fakeClient());
     expect(document.querySelector('.patch-note-entry')).toBeNull();
     click('#btn-patch-notes');
-    expect(document.querySelector('.patch-notes-modal .patch-note-entry')).not.toBeNull();
+    click('#btn-patch-notes');
+    await vi.waitFor(() => expect(document.querySelector('.patch-notes-modal .patch-note-entry')).not.toBeNull());
     click('#btn-patch-notes');
     expect(document.querySelectorAll('.patch-notes-modal')).toHaveLength(1);
     expect(dismissTop()).toBe(true);
     expect(document.querySelector('.patch-notes-modal')).toBeNull();
   });
 
-  it('closes every sheet it opened when leaving the screen', () => {
+  it('closes every sheet it opened when leaving the screen', async () => {
     const screen = mount(fakeClient());
     click('#btn-patch-notes');
+    await vi.waitFor(() => expect(document.querySelector('.patch-notes-modal')).not.toBeNull());
     screen.openPlayerOptions();
     expect(document.querySelectorAll('.player-options-overlay')).toHaveLength(2);
     screen.onDeactivate();

@@ -83,6 +83,31 @@ function setup(initial: StateParts = {}) {
   return { popup, gameClient, push, serverError, square, q };
 }
 
+describe('ShopPopup keyboard focus', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('keeps focus on the toggle across a switch, and returns to the cell a detail came from', () => {
+    const t = setup();
+    const sell = document.querySelector('.shop-toggle-btn[data-mode="sell"]') as HTMLElement;
+    sell.focus();
+    sell.click();
+    expect((document.activeElement as HTMLElement).dataset.focusKey).toBe('mode:sell');
+
+    (document.querySelector('.shop-toggle-btn[data-mode="buy"]') as HTMLElement).click();
+    const cell = document.querySelector('.shop-item-cell') as HTMLElement;
+    const key = cell.dataset.focusKey;
+    cell.focus();
+    cell.click();
+    expect(document.querySelector('.shop-item-cell')).toBeNull();
+
+    dismissTop();
+    expect((document.activeElement as HTMLElement).dataset.focusKey).toBe(key);
+    t.popup.hide();
+  });
+});
+
 describe('ShopPopup', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

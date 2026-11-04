@@ -349,6 +349,163 @@ describe('SocialScreen guild creation', () => {
   });
 });
 
+describe('SocialScreen party room list', () => {
+  const owner = { id: 'p', members: [{ username: 'alice', role: 'owner', gridPosition: 4 }] };
+  const bobHere = { otherPlayers: [{ username: 'bob', col: 0, row: 0 }] };
+  const invite = () => document.querySelector('.social-nearby-invite') as HTMLButtonElement;
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+  });
+
+  it('paints an invite only from what the server says went out', () => {
+    const t = setup();
+    t.push([], { party: { ...owner, henchmen: [] } }, bobHere);
+    t.screen.onActivate();
+
+    invite().click();
+    expect(t.send('sendInviteParty')).toHaveBeenCalledWith('bob');
+    expect(invite().disabled).toBe(false);
+    expect(invite().textContent).toBe('Invite');
+
+    t.push([], { party: { ...owner, henchmen: [] }, outgoingPartyInvites: ['bob'] }, bobHere);
+    expect(invite().disabled).toBe(true);
+    expect(invite().textContent).toBe('Invited');
+  });
+
+  it('turns the invite off with a reason when the party is full', () => {
+    const t = setup();
+    const henchmen = [0, 1, 2, 3].map(i => ({ instanceId: `h${i}`, gridPosition: i }));
+    t.push([], { party: { ...owner, henchmen } }, bobHere);
+    t.screen.onActivate();
+
+    expect(invite().disabled).toBe(true);
+    expect(document.querySelector('.social-party-roster')!.textContent).toContain('Your party is full (5/5)');
+  });
+
+  it('keeps keyboard focus on the same grid cell across a repaint', () => {
+    const t = setup();
+    t.push([], { party: { ...owner, henchmen: [] } });
+    t.screen.onActivate();
+    (document.querySelector('.social-party-cell[data-pos="1"]') as HTMLElement).focus();
+
+    t.push([], { party: { id: 'p', members: [{ username: 'alice', role: 'owner', gridPosition: 1 }], henchmen: [] } });
+    const active = document.activeElement as HTMLElement;
+    expect(active.getAttribute('data-pos')).toBe('1');
+    expect(active.classList.contains('self')).toBe(true);
+  });
+});
+
+describe('SocialScreen guild creation', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+  });
+
+  const reason = () => document.querySelector('.social-guild-reason') as HTMLElement;
+  const create = () => document.querySelector('.social-guild-create-btn') as HTMLButtonElement;
+  const typeName = (name: string) => {
+    const input = document.querySelector('.social-guild-name-input') as HTMLInputElement;
+    input.value = name;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  it('asks an eligible player for a name, then gets out of the way', () => {
+    const t = setup();
+    t.push([], {}, { character: { level: 34 } });
+    t.screen.onActivate();
+    t.screen.setSubTab('guild');
+
+    expect(create().disabled).toBe(true);
+    expect(reason().textContent).toBe('Pick a name to start your guild.');
+    typeName('Hexers');
+    expect(create().disabled).toBe(false);
+    expect(reason().hidden).toBe(true);
+  });
+
+  it('gives the level reason to a player below the limit, name or not', () => {
+    const t = setup();
+    t.push([], {}, { character: { level: 7 } });
+    t.screen.onActivate();
+    t.screen.setSubTab('guild');
+
+    expect(reason().textContent).toBe('Starting a guild needs level 20. You are level 7.');
+    typeName('Hexers');
+    expect(create().disabled).toBe(true);
+    expect(reason().hidden).toBe(false);
+  });
+});
+
+describe('SocialScreen long ranks', () => {
+  const players = Array.from({ length: 250 }, (_, i) => ({
+    username: `p${String(i).padStart(3, '0')}`,
+    className: 'Knight',
+    level: 1000 - i,
+  }));
+  const open = (self: string) => {
+    const t = setup();
+    t.push([], { allPlayers: players, party: { id: 'p', members: [{ username: self, role: 'owner', gridPosition: 4 }], henchmen: [] } }, { username: self });
+    t.screen.onActivate();
+    t.screen.setSubTab('ranks');
+    return t;
+  };
+  const rows = () => [...document.querySelectorAll<HTMLElement>('.social-rank-row')];
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+  });
+
+  it('renders a first window, and the player\'s own row even when the window ends above it', () => {
+    open('p200');
+    expect(rows()).toHaveLength(101);
+    const self = rows()[100];
+    expect(self.getAttribute('data-username')).toBe('p200');
+    expect(self.classList.contains('self')).toBe(true);
+    expect(self.querySelector('.social-rank-num')!.textContent).toBe('201');
+    expect(document.querySelector('.social-user-count')!.textContent).toBe('250 players');
+    expect(document.querySelector('.social-rank-you')!.textContent).toBe('You: #201');
+  });
+
+  it('grows the window on request until everyone is listed', () => {
+    open('p000');
+    const more = document.querySelector('.social-rank-more') as HTMLButtonElement;
+    expect(more.hidden).toBe(false);
+    expect(more.textContent).toContain('150');
+
+    more.click();
+    expect(rows()).toHaveLength(200);
+    more.click();
+    expect(rows()).toHaveLength(250);
+    expect(more.hidden).toBe(true);
+  });
+
+  it('rewrites only the rows a level change touches', () => {
+    const t = open('p000');
+    const before = rows();
+    const changed = players.map(p => (p.username === 'p003' ? { ...p, level: 1 } : p));
+    t.push([], { allPlayers: changed, party: { id: 'p', members: [{ username: 'p000', role: 'owner', gridPosition: 4 }], henchmen: [] } }, { username: 'p000' });
+
+    const after = rows();
+    expect(after).toHaveLength(100);
+    expect(after[0]).toBe(before[0]);
+    expect(after[2]).toBe(before[2]);
+    expect(after[3]).not.toBe(before[3]);
+    expect(after[3].getAttribute('data-username')).toBe('p004');
+    expect(after[3].querySelector('.social-rank-num')!.textContent).toBe('4');
+  });
+
+  it('empties the list while away and rebuilds it on return', () => {
+    const t = open('p000');
+    t.screen.onDeactivate();
+    expect(rows()).toHaveLength(0);
+    t.screen.onActivate();
+    expect(rows()).toHaveLength(100);
+    expect(rows()[0].getAttribute('data-username')).toBe('p000');
+  });
+});
+
 describe('SocialScreen friends and ranks', () => {
   const allPlayers = [
     { username: 'low', className: 'Knight', level: 5 },
@@ -540,6 +697,25 @@ describe('user popup', () => {
     expect(invite?.disabled).toBe(true);
     expect(invite?.querySelector('.user-popup-note')?.textContent).toContain(reason);
     expect(invite?.getAttribute('title')).toBeNull();
+  });
+
+  it('closes the anchored menu when a rotation calls for the sheet, and re-clamps it otherwise', () => {
+    const t = setup();
+    t.push([]);
+    const media = (sheet: boolean) => vi.spyOn(window, 'matchMedia').mockImplementation(() => ({ matches: sheet }) as unknown as MediaQueryList);
+
+    media(false);
+    t.screen.showUserPopup('bob', anchor());
+    const menu = document.querySelector('.user-popup-menu') as HTMLElement;
+    menu.style.left = '9000px';
+    menu.getBoundingClientRect = () => ({ left: 9000, top: 20, width: 290, height: 300 }) as DOMRect;
+    window.dispatchEvent(new Event('resize'));
+    expect(parseInt(menu.style.left, 10)).toBeLessThan(window.innerWidth);
+
+    media(true);
+    window.dispatchEvent(new Event('resize'));
+    expect(document.querySelector('.user-popup-menu')).toBeNull();
+    vi.restoreAllMocks();
   });
 
   it('enables the invite when the player shares the room', () => {

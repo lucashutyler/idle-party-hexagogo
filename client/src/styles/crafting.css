@@ -85,6 +85,7 @@
 .craft-recipe-ing-missing { color: var(--red); }
 .craft-recipe-result { font-size: var(--fs-2xs); color: var(--text-2); }
 .craft-queue-btn {
+  min-height: 44px;
   font-family: var(--font-display); font-weight: 400; font-synthesis: none;
   font-size: var(--fs-sm); padding: 6px 12px;
   background: var(--grad-secondary); border: 2px solid var(--outline);

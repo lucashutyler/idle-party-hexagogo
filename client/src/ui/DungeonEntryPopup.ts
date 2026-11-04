@@ -202,16 +202,20 @@ export class DungeonEntryPopup {
           <span class="dungeon-entry-icon">🗝️</span>
           <div class="dungeon-entry-title" id="dungeon-entry-title">${escapeHtml(dungeon.name)}</div>
         </div>
-        ${descHtml}
-        <div class="dungeon-entry-meta">${floors} floor${floors === 1 ? '' : 's'} · clear the final floor to complete the run</div>
-        <div class="dungeon-entry-forecast" data-state="loading" aria-live="polite"></div>
-        <div class="dungeon-entry-reqs-slot"></div>
-        <div class="dungeon-entry-warning">${this.warningText(dungeon)}</div>
-        ${leaderNote}
-        <div class="dungeon-entry-status" aria-live="polite"></div>
-        <div class="dungeon-entry-actions">
-          <button class="dungeon-entry-btn dungeon-entry-enter" type="button"${canEnter ? '' : ' disabled title="Only the party owner or a leader can enter"'}>Enter</button>
-          <button class="dungeon-entry-btn dungeon-entry-cancel" type="button">Cancel</button>
+        <div class="dungeon-entry-body">
+          ${descHtml}
+          <div class="dungeon-entry-meta">${floors} floor${floors === 1 ? '' : 's'} · clear the final floor to complete the run</div>
+          <div class="dungeon-entry-forecast" data-state="loading" aria-live="polite"></div>
+          <div class="dungeon-entry-reqs-slot"></div>
+          <div class="dungeon-entry-warning">${this.warningText(dungeon)}</div>
+          ${leaderNote}
+        </div>
+        <div class="dungeon-entry-foot">
+          <div class="dungeon-entry-status" aria-live="polite"></div>
+          <div class="dungeon-entry-actions">
+            <button class="dungeon-entry-btn dungeon-entry-enter" type="button"${canEnter ? '' : ' disabled title="Only the party owner or a leader can enter"'}>Enter</button>
+            <button class="dungeon-entry-btn dungeon-entry-cancel" type="button">Cancel</button>
+          </div>
         </div>
       </div>
     `;

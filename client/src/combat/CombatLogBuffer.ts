@@ -54,6 +54,10 @@ export class CombatLogBuffer {
     return this.lines;
   }
 
+  get hasPending(): boolean {
+    return this.pending.length > 0;
+  }
+
   /** Bumped whenever lines leave from anywhere but the front — views must re-render fully. */
   get generation(): number {
     return this.gen;

@@ -23,11 +23,14 @@ export interface CardIdentity {
 
 const CHANGE_EPSILON = 0.005;
 const TIMER_EPSILON = 0.02;
+const RING_COARSEST_STEP = 0.1;
+const RING_STEP_MS = 100;
 
 /** One combatant's card. Writes to the DOM only when a value visibly changes. */
 export class UnitCard {
   readonly el: HTMLElement;
   readonly body: HTMLElement;
+  readonly portraitEl: HTMLElement;
   readonly flashEl: HTMLElement;
   readonly glowEl: HTMLElement;
   private readonly img: HTMLImageElement;
@@ -94,6 +97,7 @@ export class UnitCard {
       <div class="combat-card-cast"><div class="combat-card-cast-fill"></div><span class="combat-card-cast-label"></span></div>
     `;
     this.body = this.el.querySelector('.combat-card-body')!;
+    this.portraitEl = this.el.querySelector('.combat-card-portrait')!;
     this.flashEl = this.el.querySelector('.combat-card-flash')!;
     this.glowEl = this.el.querySelector('.combat-card-glow')!;
     this.img = this.el.querySelector('.combat-card-img')!;
@@ -159,7 +163,9 @@ export class UnitCard {
     }
 
     const act = dead || unit.actionTotalMs <= 0 ? 0 : 1 - Math.max(0, Math.min(1, unit.actionMs / unit.actionTotalMs));
-    if (Math.abs(act - this.lastAct) >= TIMER_EPSILON || (act === 0 && this.lastAct !== 0)) {
+    // The ring repaints on every write, so it moves at about 10 steps a second, however long the action takes.
+    const ringStep = Math.min(RING_COARSEST_STEP, RING_STEP_MS / Math.max(1, unit.actionTotalMs));
+    if (Math.abs(act - this.lastAct) >= ringStep || (act === 0 && this.lastAct !== 0)) {
       this.lastAct = act;
       this.ringEl.style.setProperty('--act', act.toFixed(2));
     }

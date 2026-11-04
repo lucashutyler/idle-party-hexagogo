@@ -33,6 +33,8 @@ const FRIEND_SEARCH_LIMIT = 30;
 const GRID_MOVE_MS = 200;
 const GRID_RESYNC_MS = 1500;
 const POPUP_MARGIN = 8;
+const RANK_ROWS_STEP = 100;
+const RANK_GROW_MARGIN_PX = 600;
 
 function resolveSubTab(requested: string | null): SubTab | null {
   if (!requested) return null;
@@ -76,6 +78,8 @@ export class SocialScreen implements Screen {
   private lastSocial: ClientSocialState | null = null;
   private lastState: ServerStateMessage | null = null;
   private rankSearch = '';
+  private rankRowLimit = RANK_ROWS_STEP;
+  private rankRowsHtmlShown: string[] = [];
   private friendSearch = '';
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   private guildNameDraft = '';
@@ -155,6 +159,7 @@ export class SocialScreen implements Screen {
   private readonly onDocumentDragMove = (e: MouseEvent | TouchEvent): void => this.onGridDragMove(e);
   private readonly onDocumentDragEnd = (e: MouseEvent | TouchEvent): void => this.onGridDragEnd(e);
   private readonly onDocumentDragCancel = (): void => this.cancelGridDrag();
+  private readonly onPopupViewportResize = (): void => this.fitPopupToViewport();
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
@@ -202,6 +207,10 @@ export class SocialScreen implements Screen {
     this.dismissPopup();
     this.dismissTradeModal();
     this.dismissGiftModal();
+    if (this.activeTab === 'ranks') {
+      this.rankRowLimit = RANK_ROWS_STEP;
+      setHtml(this.panelContainer, '');
+    }
   }
 
   private buildDOM(): void {
@@ -241,6 +250,7 @@ export class SocialScreen implements Screen {
     this.lastRenderedRanksKey = '';
     this.lastRenderedGuildKey = '';
     this.lastRenderedPartyKey = '';
+    this.rankRowLimit = RANK_ROWS_STEP;
     if (this.isActive) {
       this.renderPanel();
       this.panelContainer.scrollTop = 0;
@@ -252,13 +262,11 @@ export class SocialScreen implements Screen {
     this.panelContainer.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
 
-      // Username click → show popup
       const nameEl = target.closest('.social-user-name-clickable') as HTMLElement | null;
       if (nameEl) {
         const username = nameEl.getAttribute('data-username')
           || nameEl.closest('[data-username]')?.getAttribute('data-username');
         if (username) {
-          // showUserPopup routes self-clicks to the "this is you" popup.
           this.showUserPopup(username, nameEl);
           return;
         }
@@ -272,7 +280,6 @@ export class SocialScreen implements Screen {
         || null;
       const partyId = btn.getAttribute('data-party-id') || null;
 
-      // Party actions
       if (btn.matches('.social-promote-btn') && username) { this.gameClient.sendPromotePartyLeader(username); return; }
       if (btn.matches('.social-demote-btn') && username) { this.gameClient.sendDemotePartyMember(username); return; }
       if (btn.matches('.social-transfer-btn') && username) {
@@ -319,14 +326,8 @@ export class SocialScreen implements Screen {
       }
       if (btn.matches('.social-accept-invite') && partyId) { this.gameClient.sendAcceptPartyInvite(partyId); return; }
       if (btn.matches('.social-decline-invite') && partyId) { this.gameClient.sendDeclinePartyInvite(partyId); return; }
-      if (btn.matches('.social-nearby-invite') && username) {
-        this.gameClient.sendInviteParty(username);
-        btn.textContent = 'Invited';
-        btn.disabled = true;
-        return;
-      }
+      if (btn.matches('.social-nearby-invite') && username) { this.gameClient.sendInviteParty(username); return; }
 
-      // Guild actions
       if (btn.matches('.social-guild-leave-btn')) {
         this.confirmThen({
           title: `Leave ${this.lastSocial?.guild?.name ?? 'this guild'}?`,
@@ -342,9 +343,9 @@ export class SocialScreen implements Screen {
         return;
       }
 
-      // Ranks toolbar
       if (btn.matches('.social-filter-btn')) {
         this.filterBy = btn.getAttribute('data-filter') as typeof this.filterBy;
+        this.rankRowLimit = RANK_ROWS_STEP;
         for (const b of this.panelContainer.querySelectorAll('.social-filter-btn')) {
           const active = b.getAttribute('data-filter') === this.filterBy;
           b.classList.toggle('active', active);
@@ -356,6 +357,7 @@ export class SocialScreen implements Screen {
       if (btn.matches('.social-sort-btn')) {
         this.sortBy = this.sortBy === 'level' ? 'status' : this.sortBy === 'status' ? 'name' : 'level';
         btn.textContent = SocialScreen.sortLabel(this.sortBy);
+        this.rankRowLimit = RANK_ROWS_STEP;
         this.renderRankRows();
         return;
       }
@@ -363,8 +365,11 @@ export class SocialScreen implements Screen {
         this.panelContainer.querySelector('.social-rank-row.self')?.scrollIntoView({ block: 'center' });
         return;
       }
+      if (btn.matches('.social-rank-more')) {
+        this.growRankRows();
+        return;
+      }
 
-      // Friend rows
       const action = btn.getAttribute('data-action');
       if (!action || !username) return;
       switch (action) {
@@ -377,7 +382,6 @@ export class SocialScreen implements Screen {
       }
     });
 
-    // Grid cell clicks for party position
     this.panelContainer.addEventListener('click', (e) => {
       if (this.gridDragging) return;
       const target = e.target as HTMLElement;
@@ -430,14 +434,24 @@ export class SocialScreen implements Screen {
       else return;
       clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => {
-        if (kind === 'ranks') this.renderRankRows();
-        else this.renderFriendRows();
+        if (kind === 'ranks') {
+          this.rankRowLimit = RANK_ROWS_STEP;
+          this.renderRankRows();
+        } else {
+          this.renderFriendRows();
+        }
       }, SEARCH_DEBOUNCE_MS);
     });
 
     // Drag starts here; the document listeners exist only for the drag's lifetime.
     this.panelContainer.addEventListener('mousedown', (e) => this.onGridDragStart(e));
     this.panelContainer.addEventListener('touchstart', (e) => this.onGridDragStart(e), { passive: false });
+
+    this.panelContainer.addEventListener('scroll', () => {
+      if (this.activeTab !== 'ranks') return;
+      const el = this.panelContainer;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < RANK_GROW_MARGIN_PX) this.growRankRows();
+    }, { passive: true });
   }
 
   private confirmThen(opts: ConfirmDialogOptions, action: () => void): void {
@@ -813,7 +827,23 @@ export class SocialScreen implements Screen {
     bringToFront(popup, () => this.dismissPopup());
 
     if (!asSheet) this.placePopupAtAnchor(popup, anchor);
+    window.addEventListener('resize', this.onPopupViewportResize);
     return popup;
+  }
+
+  /** A rotation can leave an anchored menu off-screen, or call for the sheet instead. */
+  private fitPopupToViewport(): void {
+    const popup = this.popupEl;
+    if (!popup) return;
+    const asSheet = window.matchMedia?.(SHEET_QUERY).matches ?? false;
+    if (asSheet !== popup.classList.contains('user-popup-sheet')) {
+      this.dismissPopup();
+      return;
+    }
+    if (asSheet) return;
+    const rect = popup.getBoundingClientRect();
+    popup.style.left = `${Math.max(POPUP_MARGIN, Math.min(rect.left, window.innerWidth - rect.width - POPUP_MARGIN))}px`;
+    popup.style.top = `${Math.max(POPUP_MARGIN, Math.min(rect.top, window.innerHeight - rect.height - POPUP_MARGIN))}px`;
   }
 
   private placePopupAtAnchor(popup: HTMLElement, anchor: HTMLElement): void {
@@ -845,6 +875,7 @@ export class SocialScreen implements Screen {
   }
 
   private dismissPopup(): void {
+    window.removeEventListener('resize', this.onPopupViewportResize);
     if (this.popupEl) {
       release(this.popupEl);
       this.popupEl.remove();
@@ -943,7 +974,7 @@ export class SocialScreen implements Screen {
     if (sections.length > 0) return sections.join('');
     return query
       ? '<div class="ui-empty">No players match that name.</div>'
-      : '<div class="ui-empty">No friends yet. Find a player above, or tap any name in the game to add them.</div>';
+      : '<div class="ui-empty">No friends yet. Find a player above, or choose any name in the game to add them.</div>';
   }
 
   // ── Ranks panel ──────────────────────────────────────────────
@@ -1033,6 +1064,7 @@ export class SocialScreen implements Screen {
         </div>
       </div>
       <div class="social-user-list social-rank-list"></div>
+      <button type="button" class="social-action-btn social-rank-more" hidden></button>
     `);
     this.renderRankRows();
   }
@@ -1041,7 +1073,14 @@ export class SocialScreen implements Screen {
     const data = this.getRanksData();
     const list = this.panelContainer.querySelector('.social-rank-list');
     if (!data || !list) return;
-    setHtml(list, this.rankRowsHtml(data.players, data.ranks, data.onlineSet, data.friends));
+    this.patchRankRows(list, this.rankRowsHtml(data.players, data.ranks, data.onlineSet, data.friends));
+
+    const remaining = data.players.length - this.rankRowLimit;
+    const more = this.panelContainer.querySelector<HTMLElement>('.social-rank-more');
+    if (more) {
+      more.hidden = remaining <= 0;
+      more.textContent = remaining > 0 ? `Show more (${remaining.toLocaleString()} left)` : '';
+    }
 
     const count = this.panelContainer.querySelector('.social-user-count');
     if (count) count.textContent = plural(data.players.length, 'player');
@@ -1055,16 +1094,50 @@ export class SocialScreen implements Screen {
     }
   }
 
-  private rankRowsHtml(players: PlayerListEntry[], ranks: Map<string, number>, onlineSet: Set<string>, friends: Set<string>): string {
-    if (players.length === 0) return '<div class="ui-empty">No players found.</div>';
+  private growRankRows(): void {
+    const total = this.getRanksData()?.players.length ?? 0;
+    if (this.rankRowLimit >= total) return;
+    this.rankRowLimit += RANK_ROWS_STEP;
+    this.renderRankRows();
+  }
+
+  /** Writes only the rows whose markup changed: a level-up elsewhere in a long list must not rebuild it. Each entry is one element. */
+  private patchRankRows(list: Element, rows: string[]): void {
+    if (list.children.length !== this.rankRowsHtmlShown.length) {
+      list.innerHTML = '';
+      this.rankRowsHtmlShown = [];
+    }
+    const shown = this.rankRowsHtmlShown;
+    const changed = rows.flatMap((html, i) => (html === shown[i] ? [] : [i]));
+    const parsed = document.createElement('template');
+    parsed.innerHTML = changed.map(i => rows[i]).join('');
+    const replacements = [...parsed.content.children];
+    changed.forEach((rowIndex, i) => {
+      const current = list.children[rowIndex];
+      if (current) current.replaceWith(replacements[i]);
+      else list.appendChild(replacements[i]);
+    });
+    while (list.children.length > rows.length) list.lastElementChild!.remove();
+    this.rankRowsHtmlShown = rows;
+  }
+
+  /** The first `rankRowLimit` players, plus the player's own row if that cuts it off. */
+  private rankRowsHtml(players: PlayerListEntry[], ranks: Map<string, number>, onlineSet: Set<string>, friends: Set<string>): string[] {
+    if (players.length === 0) return ['<div class="ui-empty">No players found.</div>'];
     const row = (p: PlayerListEntry): string => this.rankRowHtml(p, ranks.get(p.username) ?? 0, onlineSet, friends);
-    if (this.sortBy !== 'status') return players.map(row).join('');
-    const online = players.filter(p => onlineSet.has(p.username));
-    const offline = players.filter(p => !onlineSet.has(p.username));
-    return [
-      online.length > 0 ? `<div class="social-rank-group">Online <span class="social-group-count">${online.length}</span></div>${online.map(row).join('')}` : '',
-      offline.length > 0 ? `<div class="social-rank-group">Offline <span class="social-group-count">${offline.length}</span></div>${offline.map(row).join('')}` : '',
-    ].join('');
+    const group = (label: string, count: number): string => `<div class="social-rank-group">${label} <span class="social-group-count">${count}</span></div>`;
+    const shown = players.slice(0, this.rankRowLimit);
+    const rows: string[] = [];
+    const onlineCount = this.sortBy === 'status' ? players.filter(p => onlineSet.has(p.username)).length : -1;
+    shown.forEach((p, i) => {
+      if (i === 0 && onlineCount > 0) rows.push(group('Online', onlineCount));
+      if (i === onlineCount) rows.push(group('Offline', players.length - onlineCount));
+      rows.push(row(p));
+    });
+    const selfUsername = this.lastState?.username;
+    const self = players.slice(this.rankRowLimit).find(p => p.username === selfUsername);
+    if (self) rows.push(row(self));
+    return rows;
   }
 
   private rankRowHtml(p: PlayerListEntry, rank: number, onlineSet: Set<string>, friends: Set<string>): string {
@@ -1143,7 +1216,7 @@ export class SocialScreen implements Screen {
   private guildCreateHtml(): string {
     const level = this.selfLevel();
     const note = level >= GUILD_MIN_LEVEL
-      ? `Starting a guild is open from level ${GUILD_MIN_LEVEL}.`
+      ? 'Pick a name to start your guild.'
       : `Starting a guild needs level ${GUILD_MIN_LEVEL}. You are level ${level}.`;
     return `
       <div class="social-guild-create">
@@ -1160,7 +1233,11 @@ export class SocialScreen implements Screen {
 
   private syncGuildCreateButton(): void {
     const btn = this.panelContainer.querySelector<HTMLButtonElement>('.social-guild-create-btn');
-    if (btn) btn.disabled = this.selfLevel() < GUILD_MIN_LEVEL || !this.guildNameDraft.trim();
+    const eligible = this.selfLevel() >= GUILD_MIN_LEVEL;
+    const named = !!this.guildNameDraft.trim();
+    if (btn) btn.disabled = !eligible || !named;
+    const reason = this.panelContainer.querySelector<HTMLElement>('.social-guild-reason');
+    if (reason) reason.hidden = eligible && named;
   }
 
   // ── Party panel ──────────────────────────────────────────────
@@ -1269,6 +1346,8 @@ export class SocialScreen implements Screen {
       .map(p => p.username)
       .sort();
     const outgoingInvites = new Set(social.outgoingPartyInvites ?? []);
+    const seatsUsed = this.partySeatsUsed(party);
+    const partyFull = seatsUsed >= MAX_PARTY_SIZE;
     const nearbyRows = sameTilePlayers.map(p => {
       const invited = outgoingInvites.has(p);
       return this.playerRowHtml({
@@ -1276,7 +1355,7 @@ export class SocialScreen implements Screen {
         online: true,
         className: this.getPlayerClassName(p),
         sub: this.playerSub(p),
-        actions: `<button type="button" class="social-action-btn add-friend social-nearby-invite" data-username="${this.escapeHtml(p)}"${invited ? ' disabled' : ''}>${invited ? 'Invited' : 'Invite'}</button>`,
+        actions: `<button type="button" class="social-action-btn add-friend social-nearby-invite" data-username="${this.escapeHtml(p)}"${invited || partyFull ? ' disabled' : ''}>${invited ? 'Invited' : 'Invite'}</button>`,
         rowClass: 'social-inline-actions',
       });
     }).join('');
@@ -1284,7 +1363,7 @@ export class SocialScreen implements Screen {
       ${this.sectionLabel('In this room', sameTilePlayers.length)}
       ${sameTilePlayers.length === 0
         ? '<div class="social-list-note">No one else is here. Walk to another player\'s room to invite them.</div>'
-        : `<div class="social-user-list">${nearbyRows}</div>`}
+        : `<div class="social-user-list">${nearbyRows}</div>${partyFull ? `<div class="social-list-note">Your party is full (${seatsUsed}/${MAX_PARTY_SIZE}). Henchmen take a seat too.</div>` : ''}`}
     ` : '';
 
     const memberRows = party.members.map(m => this.playerRowHtml({
@@ -1311,7 +1390,10 @@ export class SocialScreen implements Screen {
     `).join('');
 
     const canMoveHenchmen = isLeaderOrOwner && henchmen.length > 0;
-    const hint = `Drag yourself to an empty spot, or tap one to move there.${canMoveHenchmen ? ' Tap a henchman first to move them.' : ''}`;
+    const hint = `Drag yourself to an empty spot, or choose one to move there.${canMoveHenchmen ? ' Choose a henchman first to move them.' : ''}`;
+
+    const focusedCell = (document.activeElement as Element | null)?.closest?.('.social-party-cell');
+    const focusedPos = focusedCell && this.panelContainer.contains(focusedCell) ? focusedCell.getAttribute('data-pos') : null;
 
     if (this.gridOptimistic) {
       this.gridOptimistic = false;
@@ -1332,7 +1414,7 @@ export class SocialScreen implements Screen {
           <div class="social-list-note social-party-hint">${hint}</div>
         </div>
         <div class="social-party-roster">
-          ${this.sectionLabel(`Party ${this.partySeatsUsed(party)}/${MAX_PARTY_SIZE}`)}
+          ${this.sectionLabel(`Party ${seatsUsed}/${MAX_PARTY_SIZE}`)}
           <div class="social-user-list">${memberRows}${henchmenRows}</div>
           ${nearbyHtml}
           ${!isSolo ? `
@@ -1348,6 +1430,9 @@ export class SocialScreen implements Screen {
       this.gridPickedUpHenchmanId = null;
     }
     this.paintGridPickedUp();
+    if (focusedPos !== null) {
+      this.panelContainer.querySelector<HTMLElement>(`.social-party-cell[data-pos="${focusedPos}"]`)?.focus({ preventScroll: true });
+    }
   }
 
   /**
@@ -1402,7 +1487,7 @@ export class SocialScreen implements Screen {
 
   /**
    * Pull the latest state before opening the modal. Both entry points can fire
-   * while this screen is deactivated — the Items screen's "Proposed Trades" rows
+   * while this screen is deactivated — the Hero screen's "Proposed Trades" rows
    * call `openExistingTrade` without a screen switch — and `lastSocial` is frozen
    * at the last activation in that case. Same idiom as `showUserPopup`.
    */
@@ -1422,6 +1507,16 @@ export class SocialScreen implements Screen {
     this.lastTradeRenderKey = '';
   }
 
+  /** Steps one picker quantity, capped at what's owned; zero takes the item out. Returns whether it changed. */
+  private stepQuantity(selected: Map<string, number>, itemId: string | null, delta: 1 | -1, owned: Record<string, number>): boolean {
+    if (!itemId) return false;
+    const next = (selected.get(itemId) ?? 0) + delta;
+    if (delta > 0 && next > (owned[itemId] ?? 0)) return false;
+    if (next > 0) selected.set(itemId, next);
+    else selected.delete(itemId);
+    return true;
+  }
+
   /** Find the active trade for this modal in social state. */
   private getActiveTrade() {
     if (!this.tradeActiveId) return null;
@@ -1436,7 +1531,7 @@ export class SocialScreen implements Screen {
     }
     this.unsubTradeModal?.();
 
-    // Per-modal, not per-screen: the Items screen opens this modal while SocialScreen is deactivated.
+    // Per-modal, not per-screen: the Hero screen opens this modal while SocialScreen is deactivated.
     this.unsubTradeModal = this.gameClient.subscribe(() => {
       if (this.tradeModalEl) deferWhilePressed(this.tradeModalEl, () => this.refreshTradeModal());
     });
@@ -1499,29 +1594,11 @@ export class SocialScreen implements Screen {
         return;
       }
 
-      if (btn.matches('.trade-qty-inc')) {
-        const itemId = btn.getAttribute('data-item-id');
-        if (!itemId) return;
-        const inventory = this.tradeInventorySnapshot ?? {};
-        const maxQty = (inventory[itemId] as number) ?? 0;
-        const current = this.tradeSelectedItems.get(itemId) ?? 0;
-        if (current < maxQty) {
-          this.tradeSelectedItems.set(itemId, current + 1);
+      if (btn.matches('.trade-qty-inc, .trade-qty-dec')) {
+        const delta = btn.matches('.trade-qty-inc') ? 1 : -1;
+        if (this.stepQuantity(this.tradeSelectedItems, btn.getAttribute('data-item-id'), delta, this.tradeInventorySnapshot ?? {})) {
           this.updateTradeModal();
         }
-        return;
-      }
-
-      if (btn.matches('.trade-qty-dec')) {
-        const itemId = btn.getAttribute('data-item-id');
-        if (!itemId) return;
-        const current = this.tradeSelectedItems.get(itemId) ?? 0;
-        if (current > 1) {
-          this.tradeSelectedItems.set(itemId, current - 1);
-        } else {
-          this.tradeSelectedItems.delete(itemId);
-        }
-        this.updateTradeModal();
         return;
       }
 
@@ -1849,26 +1926,11 @@ export class SocialScreen implements Screen {
 
       if (btn.matches('.gift-close-btn')) { this.dismissGiftModal(); return; }
 
-      if (btn.matches('.gift-qty-inc')) {
-        const itemId = btn.getAttribute('data-item-id');
-        if (!itemId) return;
-        const inventory = this.lastState?.character?.inventory ?? {};
-        const maxQty = (inventory[itemId] as number) ?? 0;
-        const current = this.giftSelectedItems.get(itemId) ?? 0;
-        if (current < maxQty) {
-          this.giftSelectedItems.set(itemId, current + 1);
+      if (btn.matches('.gift-qty-inc, .gift-qty-dec')) {
+        const delta = btn.matches('.gift-qty-inc') ? 1 : -1;
+        if (this.stepQuantity(this.giftSelectedItems, btn.getAttribute('data-item-id'), delta, this.lastState?.character?.inventory ?? {})) {
           this.updateGiftModal();
         }
-        return;
-      }
-
-      if (btn.matches('.gift-qty-dec')) {
-        const itemId = btn.getAttribute('data-item-id');
-        if (!itemId) return;
-        const current = this.giftSelectedItems.get(itemId) ?? 0;
-        if (current > 1) this.giftSelectedItems.set(itemId, current - 1);
-        else this.giftSelectedItems.delete(itemId);
-        this.updateGiftModal();
         return;
       }
 
@@ -2272,7 +2334,7 @@ export class SocialScreen implements Screen {
         <button type="button" class="social-modal-close profile-close-btn" aria-label="Close">✕</button>
       </div>
       <div class="player-profile-body">
-        <div class="profile-class">${profile.className}</div>
+        <div class="profile-class">${this.escapeHtml(profile.className)}</div>
         <div class="profile-guild">${profile.guildName ? this.escapeHtml(profile.guildName) : 'No Guild'}</div>
         <div class="profile-section-label">Equipment</div>
         ${equipHtml}

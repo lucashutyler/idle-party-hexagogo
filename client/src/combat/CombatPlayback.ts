@@ -260,6 +260,13 @@ export class CombatPlayback {
     return this.queue.length;
   }
 
+  /** Nothing left to animate: no fight, or a finished fight with everything played out. */
+  get settled(): boolean {
+    if (this.syncUntil > 0 || this.pendingJump) return false;
+    if (this.currentBattleId === null) return true;
+    return this.isFinished && this.queue.length === 0 && this.pendingSnapshots.length === 0;
+  }
+
   get isActive(): boolean {
     return this.active;
   }

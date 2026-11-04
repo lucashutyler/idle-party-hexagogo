@@ -1,10 +1,11 @@
 import { classIconHtml } from '@idle-party-rpg/shared';
-import { forecastHeadline } from '../combat/ForecastFormat';
+import { forecastHeadline, forecastVerdict } from '../combat/ForecastFormat';
 import { artworkUrl, placeholderUrl } from './assets';
 import { renderForecastRing } from './ForecastChip';
 import { registerDismiss, release } from './ModalStack';
+import { escapeHtml } from './ItemIcon';
 import { deferWhilePressed, setHtml } from './render';
-import { questPipClass } from './RoomActions';
+import { actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import type { RoomForecastProvider, RoomForecastState } from './RoomView';
 import type { TileClickInfo } from './ThreeWorldMap';
@@ -29,10 +30,6 @@ export interface RoomSheetHandlers {
   onDetails: (info: TileClickInfo) => void;
   onUserClick: (username: string, anchor: HTMLElement, col: number, row: number) => void;
   onDismiss: () => void;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function isExplored(info: TileClickInfo): boolean {
@@ -118,10 +115,11 @@ export class RoomSheet {
     if (!sameRoom) this.startForecast(model.forecastTileId);
   }
 
-  /** Repaints from a state push, without restarting the forecast. */
+  /** Repaints from a state push. The forecast restarts only if the room's own forecast target changed. */
   update(model: RoomSheetModel): void {
     if (!this.model) return;
     this.model = model;
+    if (model.forecastTileId !== this.shownForecastTileId) this.startForecast(model.forecastTileId);
     deferWhilePressed(this.el, () => {
       if (this.model) this.paint(this.model);
     });
@@ -176,6 +174,7 @@ export class RoomSheet {
 
   private exploredHead({ info, actions, othersHere }: RoomSheetModel): string {
     const count = othersHere > 0 ? ` · ${othersHere} ${othersHere === 1 ? 'player' : 'players'}` : '';
+    const first = actions[0] ? `<span class="room-sheet-sub-action">${escapeHtml(actionLabel(actions[0]))}</span>` : '';
     const icons = actions.map(action => {
       const pip = questPipClass(action);
       const detail = action.detail ? ` · ${action.detail}` : '';
@@ -184,7 +183,7 @@ export class RoomSheet {
         + `<span class="room-sheet-action-name">${escapeHtml(action.name)}</span></span>`;
     }).join('');
     return `<div class="room-sheet-name">${escapeHtml(info.roomName || 'Unnamed Room')}</div>`
-      + `<div class="room-sheet-sub">${escapeHtml(info.zoneName)}${count}</div>`
+      + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span></div>`
       + (icons ? `<div class="room-sheet-actions">${icons}</div>` : '');
   }
 
@@ -242,6 +241,7 @@ export class RoomSheet {
     const headline = forecastHeadline(state.result, 'room') + (state.stale ? ' · updating…' : '');
     setHtml(this.forecastEl,
       renderForecastRing(state.result, { kind: 'room', compact: true, stale: state.stale })
+      + `<span class="room-sheet-forecast-word">${forecastVerdict(state.result, 'room').label}</span>`
       + `<span class="room-sheet-forecast-text">${escapeHtml(headline)}</span>`);
   }
 }

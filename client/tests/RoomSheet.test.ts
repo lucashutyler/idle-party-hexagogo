@@ -64,7 +64,8 @@ describe('RoomSheet', () => {
 
     expect(el().hidden).toBe(false);
     expect(q('.room-sheet-name').textContent).toBe('Town Square');
-    expect(q('.room-sheet-sub').textContent).toBe('Hatchetmill · 2 players');
+    expect(q('.room-sheet-sub-zone').textContent).toBe('Hatchetmill · 2 players');
+    expect(q('.room-sheet-sub-action').textContent).toBe('Talk to Mira');
     expect(q('.room-sheet-action-icon').textContent).toBe('🧙');
     expect(q('.room-sheet-action-icon').classList.contains('quest-ready-pip')).toBe(true);
   });
@@ -133,7 +134,24 @@ describe('RoomSheet', () => {
     sheet.show(makeModel({ othersHere: 1 }));
     sheet.update(makeModel({ othersHere: 3 }));
     expect(q('.forecast-chip').dataset.state).toBe('ready');
-    expect(q('.room-sheet-sub').textContent).toBe('Hatchetmill · 3 players');
+    expect(q('.room-sheet-sub-zone').textContent).toBe('Hatchetmill · 3 players');
+  });
+
+  it('says what the number means, in one word, beside the ring', () => {
+    sheet.show(makeModel());
+    sheet.updateForecast('room-1', { result: result() });
+    expect(q('.room-sheet-forecast-word').textContent).toBe('Safe');
+  });
+
+  it('starts a forecast on a push once the room has a different target, as when it gets explored', () => {
+    sheet.show(makeModel({ forecastTileId: null }));
+    expect(q('.room-sheet-forecast').hidden).toBe(true);
+
+    sheet.update(makeModel());
+    expect(sheet.visibleForecastTileId).toBe('room-1');
+    expect(q('.room-sheet-forecast').hidden).toBe(false);
+    vi.advanceTimersByTime(ROOM_SHEET_FORECAST_DEBOUNCE_MS);
+    expect(provider).toHaveBeenCalledWith('room-1');
   });
 
   it('lists players and passes a real anchor when one is clicked', () => {

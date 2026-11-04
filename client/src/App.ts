@@ -29,6 +29,7 @@ import { BestiaryModal, MasteryToasts } from './ui/BestiaryModal';
 import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 import { forgetMissingAssets } from './ui/assets';
+import { dismissModals } from './ui/ModalStack';
 import {
   ACTIVE_SCREEN_KEY,
   DEFAULT_SCREEN,
@@ -51,8 +52,7 @@ const NAV_TABS: readonly NavTabConfig[] = [
   { id: 'chat', label: 'Chat', glyph: '💬', railOnly: true },
   { id: 'settings', label: 'Settings', glyph: '⚙️', railOnly: true },
 ];
-const CHAT_COLUMN_QUERY = '(min-width: 1024px)';
-const RETIRED_STORAGE_KEYS = ['chat_messages', 'chat_filters', 'chatPopoutGeometry', 'chatPopoutDesktopMax'];
+const RETIRED_STORAGE_KEYS = ['chat_messages', 'chat_filters', 'chatPopoutGeometry', 'chatPopoutDesktopMax', 'mapZoom'];
 
 export class App {
   private gameClient!: GameClient;
@@ -494,6 +494,7 @@ export class App {
     });
 
     socialScreen.setOnDmRequest((username) => {
+      dismissModals();
       chatPopout.openDm(username);
       nav.setOverlayActive('chat', true);
     });
@@ -518,6 +519,7 @@ export class App {
       }
     });
 
+    let shellReady = false;
     initNavigation({
       getScreen: (id) => this.screenManager.get(id),
       switchTo: (id) => this.screenManager.switchTo(id),
@@ -526,6 +528,7 @@ export class App {
       closeTransient: () => {
         notifications.closeDropdown();
         questLog.close();
+        if (shellReady) chatPopout.closeIfCovering();
       },
     });
 
@@ -534,7 +537,7 @@ export class App {
       installNavDelegate(),
       installEscapeHandler(),
       installBackHandler(() => {
-        if (!chatPopout.isVisible() || window.matchMedia(CHAT_COLUMN_QUERY).matches) return false;
+        if (!chatPopout.isLandscapeColumn()) return false;
         chatPopout.close();
         return true;
       }),
@@ -547,6 +550,7 @@ export class App {
     }
 
     navigate(sessionStorage.getItem(ACTIVE_SCREEN_KEY) ?? DEFAULT_SCREEN);
+    shellReady = true;
 
     if (this.openOptionsDelegate) document.removeEventListener('click', this.openOptionsDelegate, true);
     this.openOptionsDelegate = (e: MouseEvent) => {

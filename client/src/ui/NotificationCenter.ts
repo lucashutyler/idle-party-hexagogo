@@ -2,7 +2,7 @@ import type { GameClient } from '../network/GameClient';
 import type { NotificationEntry, NotificationNavigationTarget } from '@idle-party-rpg/shared';
 import { resolveNotificationNavigation } from '@idle-party-rpg/shared';
 import { confirmDialog } from './ConfirmDialog';
-import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { bringToFront, dismissModals, release, wireFocusOnInteract } from './ModalStack';
 import { deferWhilePressed, setHtml } from './render';
 
 const TOAST_LIFETIME_MS = 6000;
@@ -112,7 +112,6 @@ export class NotificationCenter {
     });
 
     panel.querySelector('.notif-clear-all-btn')!.addEventListener('click', async () => {
-      if (this.notifications.length === 0) return;
       const clear = await confirmDialog({
         title: 'Clear all notifications?',
         body: "This can't be undone.",
@@ -153,6 +152,8 @@ export class NotificationCenter {
   private renderDropdownList(): void {
     if (!this.dropdown) return;
     const list = this.dropdown.querySelector('.notif-dropdown-list') as HTMLElement;
+    this.dropdown.querySelector<HTMLElement>('.notif-mark-all-btn')!.hidden = this.unreadCount() === 0;
+    this.dropdown.querySelector<HTMLElement>('.notif-clear-all-btn')!.hidden = this.notifications.length === 0;
 
     if (this.notifications.length === 0) {
       setHtml(list, '<div class="notif-empty">No notifications yet.</div>');
@@ -210,7 +211,10 @@ export class NotificationCenter {
     toast.addEventListener('click', () => {
       this.gameClient.sendMarkNotificationRead(notification.id);
       const target = resolveNotificationNavigation(notification);
-      if (target.kind !== 'none') this.onNavigate(target);
+      if (target.kind !== 'none') {
+        dismissModals();
+        this.onNavigate(target);
+      }
       dismiss();
     });
 

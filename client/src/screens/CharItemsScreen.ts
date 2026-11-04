@@ -33,11 +33,12 @@ import {
   RARITY_COLORS,
   escapeHtml,
   wireRoleButtons,
+  writeItemSquareQty,
 } from '../ui/ItemIcon';
 import { ITEM_POPUP_CLOSE_HTML, renderItemPopupContent } from '../ui/ItemPopup';
 import { renderEquipCompareBlock } from '../ui/EquipCompare';
 import { artworkUrl, renderTrackedImg } from '../ui/assets';
-import { bringToFront, release } from '../ui/ModalStack';
+import { bringToFront, registerDismiss, release } from '../ui/ModalStack';
 import { renderSkillCardMeta } from '../ui/SkillCardChip';
 import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
 import { deferWhilePressed, setHtml } from '../ui/render';
@@ -108,6 +109,9 @@ export class CharItemsScreen implements Screen {
   private xpLabelEl!: HTMLElement;
   private xpRateEl!: HTMLElement;
   private xpRateFromEl!: HTMLElement;
+  private summaryXpLabelEl!: HTMLElement;
+  private summaryXpFill!: HTMLElement;
+  private summarySkillsEl!: HTMLElement;
   private classPassiveEl!: HTMLElement;
   private bestiaryCard!: BestiaryCard;
   private bestiaryModal: BestiaryModal;
@@ -137,6 +141,9 @@ export class CharItemsScreen implements Screen {
 
   private lastEquipKey = '';
   private lastInvKey = '';
+  private renderedInvOrderKey = '';
+  private renderedInvCounts: Record<string, number> = {};
+  private invCountsPatched = false;
   private lastSkillKey = '';
   private lastMailboxKey = '';
   private lastTradesKey = '';
@@ -148,6 +155,7 @@ export class CharItemsScreen implements Screen {
   private sortPrefLoaded = false;
 
   private skillPopupOpen = false;
+  private statTooltipTeardown?: () => void;
   private onOpenTrade?: (tradeId: string) => void;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
@@ -233,6 +241,17 @@ export class CharItemsScreen implements Screen {
               <div class="items-equip-col items-equip-left"></div>
               <div class="items-equip-col items-equip-right"></div>
             </div>
+            <div class="hero-summary">
+              <div class="hero-summary-xp">
+                <div class="character-xp-label"><span>XP</span><span class="hero-summary-xp-numbers"></span></div>
+                <div class="charitems-xp-bar"><div class="charitems-xp-fill"></div></div>
+              </div>
+              <div class="hero-summary-skills"></div>
+              <div class="hero-summary-links">
+                <button type="button" class="hero-summary-link" data-nav="items:skills">All skills</button>
+                <button type="button" class="hero-summary-link" data-nav="items:stats">All stats</button>
+              </div>
+            </div>
           </div>
 
           <div class="hero-inventory">
@@ -300,7 +319,10 @@ export class CharItemsScreen implements Screen {
     this.statCardEl = this.container.querySelector('.charitems-stat-card')!;
     this.statListEl = this.container.querySelector('.hero-stat-list')!;
     this.metaRowEl = this.container.querySelector('.charitems-meta-row')!;
-    this.xpFill = this.container.querySelector('.charitems-xp-fill')!;
+    this.xpFill = this.container.querySelector('.hero-pane-stats .charitems-xp-fill')!;
+    this.summaryXpLabelEl = this.container.querySelector('.hero-summary-xp-numbers')!;
+    this.summaryXpFill = this.container.querySelector('.hero-summary .charitems-xp-fill')!;
+    this.summarySkillsEl = this.container.querySelector('.hero-summary-skills')!;
     this.xpLabelEl = this.container.querySelector('.charitems-xp-numbers')!;
     this.xpRateEl = this.container.querySelector('.charitems-xp-rate-value')!;
     this.xpRateFromEl = this.container.querySelector('.charitems-xp-rate-from')!;
@@ -601,6 +623,17 @@ export class CharItemsScreen implements Screen {
     }
     this.skillsNeedAttention = attention;
     setHtml(this.skillStripEl, html || '<div class="ui-empty">No skill slots yet.</div>');
+    this.renderSummarySkills(char.skillLoadout.equippedSkills);
+  }
+
+  private renderSummarySkills(equippedIds: readonly (string | null)[]): void {
+    const rows = equippedIds
+      .map(id => (id ? this.worldCache.getSkill(id) : null))
+      .filter((skill): skill is SkillDefinition => !!skill)
+      .map(skill => `<li class="hero-summary-skill ${skill.type}">${escapeHtml(skill.name)}</li>`);
+    setHtml(this.summarySkillsEl, rows.length > 0
+      ? `<ul class="hero-summary-skill-list">${rows.join('')}</ul>`
+      : '<div class="hero-summary-empty">No skills equipped</div>');
   }
 
   private openSkillPopup(slotIndex: number): void {
@@ -663,7 +696,9 @@ export class CharItemsScreen implements Screen {
         if (locked) classes.push('locked');
         const attrs = locked
           ? `data-locked="1"`
-          : `data-skill-id="${escapeHtml(s.id)}" ${isCurrent ? 'data-current="1"' : ''}`;
+          : isCurrent
+            ? `data-skill-id="${escapeHtml(s.id)}" data-current="1"`
+            : `data-skill-id="${escapeHtml(s.id)}" role="button" tabindex="0"`;
         const tagline = locked
           ? `<div class="charitems-skill-row-locklabel">Unlocks at Lv ${s.unlockLevel}</div>`
           : granted
@@ -715,6 +750,8 @@ export class CharItemsScreen implements Screen {
         close();
       });
     });
+    wireRoleButtons(overlay);
+    overlay.querySelector<HTMLElement>('.charitems-skill-row[role="button"]')?.focus({ preventScroll: true });
   }
 
   private closeSkillPopup(): void {
@@ -785,9 +822,12 @@ export class CharItemsScreen implements Screen {
   }
 
   private renderXpBar(xp: number, xpForNextLevel: number): void {
-    this.xpLabelEl.textContent = `${xp.toLocaleString()} / ${xpForNextLevel.toLocaleString()}`;
+    const numbers = `${xp.toLocaleString()} / ${xpForNextLevel.toLocaleString()}`;
+    this.xpLabelEl.textContent = numbers;
+    this.summaryXpLabelEl.textContent = numbers;
     const ratio = xpForNextLevel > 0 ? Math.min(1, xp / xpForNextLevel) : 0;
     this.xpFill.style.transform = `scaleX(${ratio})`;
+    this.summaryXpFill.style.transform = `scaleX(${ratio})`;
   }
 
   private renderXpRate(xpRate: { startTime: number; totalXp: number }): void {
@@ -834,15 +874,22 @@ export class CharItemsScreen implements Screen {
     tooltip.style.left = `${Math.max(8, Math.min(maxLeft, rect.left + rect.width / 2 - tooltip.offsetWidth / 2))}px`;
     tooltip.style.top = `${rect.bottom + 6}px`;
 
-    const dismiss = () => {
-      this.removeStatTooltip();
-      document.removeEventListener('click', dismiss);
+    registerDismiss(tooltip, () => this.removeStatTooltip());
+    const closeOnClick = () => this.removeStatTooltip();
+    const armTimer = setTimeout(() => document.addEventListener('click', closeOnClick), 0);
+    this.statTooltipTeardown = () => {
+      clearTimeout(armTimer);
+      document.removeEventListener('click', closeOnClick);
     };
-    setTimeout(() => document.addEventListener('click', dismiss), 0);
   }
 
   private removeStatTooltip(): void {
-    document.querySelectorAll('.charitems-stat-tooltip').forEach(el => el.remove());
+    this.statTooltipTeardown?.();
+    this.statTooltipTeardown = undefined;
+    document.querySelectorAll<HTMLElement>('.charitems-stat-tooltip').forEach(el => {
+      release(el);
+      el.remove();
+    });
   }
 
   private renderInventory(): void {
@@ -885,13 +932,41 @@ export class CharItemsScreen implements Screen {
     }
 
     const grouped = this.sortMode === 'rarity' || this.sortMode === 'type';
+    const orderKey = this.invOrderKey(grouped, filtered);
+    if (orderKey === this.renderedInvOrderKey) {
+      this.patchInventoryCounts(filtered);
+      return;
+    }
     this.setInventoryHtml(grouped, grouped
       ? this.renderGroupedInventory(filtered)
       : filtered.map(([itemId, count]) => this.renderInventoryEntry(itemId, count)).join(''));
+    this.renderedInvOrderKey = orderKey;
+    this.renderedInvCounts = Object.fromEntries(filtered);
+  }
+
+  /** Everything a bag cell's markup depends on except its count. */
+  private invOrderKey(grouped: boolean, entries: [string, number][]): string {
+    return JSON.stringify([grouped, this.sortMode, this.lastClassName, Object.keys(this.itemDefs).length, entries.map(([id]) => id)]);
+  }
+
+  /** A stack growing rewrites one badge, so looting doesn't rebuild the whole bag. */
+  private patchInventoryCounts(entries: [string, number][]): void {
+    const changed = new Map(entries.filter(([id, count]) => this.renderedInvCounts[id] !== count));
+    if (changed.size === 0) return;
+    this.inventoryGrid.querySelectorAll<HTMLElement>('.item-square[data-item]').forEach(square => {
+      const count = changed.get(square.dataset.item ?? '');
+      if (count !== undefined) writeItemSquareQty(square, count);
+    });
+    this.renderedInvCounts = Object.fromEntries(entries);
+    this.invCountsPatched = true;
   }
 
   private setInventoryHtml(grouped: boolean, html: string): void {
+    this.renderedInvOrderKey = '';
     this.inventoryGrid.classList.toggle('items-inv-grid-grouped', grouped);
+    // setHtml skips markup it wrote last, which no longer matches the DOM once a badge was patched.
+    if (this.invCountsPatched) setHtml(this.inventoryGrid, '');
+    this.invCountsPatched = false;
     setHtml(this.inventoryGrid, html);
   }
 
@@ -1183,20 +1258,22 @@ export class CharItemsScreen implements Screen {
         const id = destroyBtn.getAttribute('data-item')!;
         const max = parseInt(destroyBtn.getAttribute('data-max') ?? '1', 10);
         const dDef = this.itemDefs[id];
+        const backToItem = () => this.showItemPopup(id, 'inventory', undefined);
         if (max === 1) {
           this.showConfirmModal(
             `Destroy ${dDef?.name ?? 'item'}?`,
             'This item will be permanently lost.',
-            () => { this.gameClient.sendDestroyItems(id, 1); this.hideModal(); }
+            () => { this.gameClient.sendDestroyItems(id, 1); this.hideModal(); },
+            backToItem,
           );
         } else {
-          this.showDestroyCountModal(id, dDef?.name ?? 'item', max);
+          this.showDestroyCountModal(id, dDef?.name ?? 'item', max, backToItem);
         }
       });
     }
   }
 
-  private showConfirmModal(title: string, message: string, onConfirm: () => void): void {
+  private showConfirmModal(title: string, message: string, onConfirm: () => void, onCancel = () => this.hideModal()): void {
     this.openModal(`
       <div class="item-popup-name">${escapeHtml(title)}</div>
       <div class="item-popup-stats items-modal-prompt">${escapeHtml(message)}</div>
@@ -1206,10 +1283,10 @@ export class CharItemsScreen implements Screen {
       </div>
     `);
     this.modalOverlay.querySelector('.items-modal-confirm')!.addEventListener('click', onConfirm);
-    this.modalOverlay.querySelector('.items-modal-cancel')!.addEventListener('click', () => this.hideModal());
+    this.modalOverlay.querySelector('.items-modal-cancel')!.addEventListener('click', onCancel);
   }
 
-  private showDestroyCountModal(itemId: string, itemName: string, max: number): void {
+  private showDestroyCountModal(itemId: string, itemName: string, max: number, onCancel: () => void): void {
     this.openModal(`
       <div class="item-popup-name">Destroy ${escapeHtml(itemName)}</div>
       <div class="item-popup-stats items-modal-prompt">How many? (1-${max})</div>
@@ -1239,7 +1316,7 @@ export class CharItemsScreen implements Screen {
       this.gameClient.sendDestroyItems(itemId, count);
       this.hideModal();
     });
-    this.modalOverlay.querySelector('.items-modal-cancel')!.addEventListener('click', () => this.hideModal());
+    this.modalOverlay.querySelector('.items-modal-cancel')!.addEventListener('click', onCancel);
   }
 
   private showEquipBlockedModal(msg: ServerEquipBlockedMessage): void {

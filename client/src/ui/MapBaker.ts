@@ -31,11 +31,13 @@ export const COAST_OFFSET_Y = 14;
 /** Room the shallows glow needs beyond the map's own bounds. */
 export const COAST_PAD = 72;
 const COAST_SHADOW = 'rgba(0, 0, 0, 0.5)';
-const SHALLOWS_COLOR = 'rgba(70, 150, 196, 0.05)';
-const SHALLOWS_WIDTHS = [112, 96, 80, 64, 48, 32, 16] as const;
+const SHALLOWS_COLOR = 'rgba(70, 150, 196, 0.11)';
+const SHALLOWS_WIDTHS = [96, 40] as const;
 const EDGE_BATCH = 96;
 /** Past this share of the map, a full re-bake is cheaper than patching rooms one by one. */
 const REBAKE_SHARE = 0.3;
+/** Most room images in memory at once, loading or waiting to be painted. */
+const ROOM_ART_HELD_MAX = 12;
 const SEA_TILE_PX = 256;
 
 const CORNERS = getHexCorners(HEX_SIZE);
@@ -67,7 +69,10 @@ export interface BakeBounds { minX: number; minY: number; w: number; h: number }
 
 interface Sprite { canvas: HTMLCanvasElement; ox: number; oy: number }
 
-interface ArtEntry { img: HTMLImageElement; state: 'loading' | 'ready' | 'failed' }
+interface ArtEntry { img: HTMLImageElement | null; state: 'loading' | 'ready' | 'painted' | 'failed' }
+
+/** The world area the camera shows, plus whatever margin art should load ahead of. */
+export interface ArtView { x: number; y: number; halfW: number; halfH: number }
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -348,7 +353,9 @@ export class MapBaker {
   private rimSprite: Sprite | null = null;
   private artSprites = new Map<string, Sprite>();
   private art = new Map<string, ArtEntry>();
-  private requestedRoomArt = new Set<string>();
+  private roomArtQueue: BakeRoom[] = [];
+  private heldRoomArt = new Set<ArtEntry>();
+  private typeArtDirty = false;
 
   private ctx: Ctx | null = null;
   private bakeCursor = -1;
@@ -377,10 +384,9 @@ export class MapBaker {
     this.sprites.clear();
     this.artSprites.clear();
     this.dirtyRooms.clear();
-    if (mapChanged) {
-      this.art.clear();
-      this.requestedRoomArt.clear();
-    }
+    this.roomArtQueue = [];
+    this.typeArtDirty = false;
+    if (mapChanged) this.forgetLoadedArt();
     this.bounds = this.computeBounds();
     this.bakeCursor = -1;
     this.edgeCursor = -1;
@@ -391,20 +397,25 @@ export class MapBaker {
     for (const [url, entry] of this.art) {
       if (entry.state === 'failed') this.art.delete(url);
     }
-    this.requestedRoomArt.clear();
   }
 
-  /** Requests type art for every type and room art for explored rooms only. */
-  requestArt(): void {
+  /**
+   * Requests type art for every type, and room art for explored rooms in `view`, nearest first.
+   * No list says which rooms have art, so each request may be a 404: the failed ones are remembered for the session.
+   */
+  requestArt(view: ArtView): void {
+    const queue: { room: BakeRoom; dist: number }[] = [];
     const types = new Set<string>();
     for (const room of this.rooms) {
       types.add(room.type);
-      if (room.guid && !this.requestedRoomArt.has(room.guid) && this.isExplored(room)) {
-        this.requestedRoomArt.add(room.guid);
-        this.loadArt(artworkUrl('tile', room.guid), [room]);
-      }
+      const dx = Math.abs(room.x - view.x);
+      const dy = Math.abs(room.y - view.y);
+      if (!room.guid || dx > view.halfW || dy > view.halfH || !this.isExplored(room)) continue;
+      if (!this.art.has(artworkUrl('tile', room.guid))) queue.push({ room, dist: dx * dx + dy * dy });
     }
-    for (const type of types) this.loadArt(artworkUrl('tile-type', type), null, type);
+    for (const type of types) this.loadTypeArt(type);
+    this.roomArtQueue = queue.sort((a, b) => b.dist - a.dist).map(item => item.room);
+    this.pumpRoomArt();
   }
 
   beginTerrain(maxTextureSize: number, devicePixelRatio: number): boolean {
@@ -429,6 +440,8 @@ export class MapBaker {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, bw, bh);
     this.dirtyRooms.clear();
+    this.typeArtDirty = false;
+    this.forgetPaintedArt();
     this.bakeCursor = 0;
     this.edgeCursor = -1;
     return true;
@@ -446,7 +459,7 @@ export class MapBaker {
         break;
       }
       this.paintRoom(ctx, this.ordered[this.bakeCursor++]);
-      if ((this.bakeCursor & 15) === 0 && performance.now() >= deadline) return false;
+      if (performance.now() >= deadline) return false;
     }
     while (this.edgeCursor >= 0 && this.edgeCursor < this.rooms.length) {
       this.drawEdges(ctx, this.rooms.slice(this.edgeCursor, this.edgeCursor + EDGE_BATCH));
@@ -457,9 +470,12 @@ export class MapBaker {
     return true;
   }
 
-  /** Whether the queued art is better served by a full re-bake than room-by-room patches. */
+  /**
+   * Whether the queued art is better served by a full re-bake than room-by-room patches.
+   * Only for type art: a re-bake forgets painted room art, so doing it for room art would never settle.
+   */
   shouldRebakeForArt(): boolean {
-    return this.dirtyRooms.size > this.rooms.length * REBAKE_SHARE;
+    return this.typeArtDirty && this.dirtyRooms.size > this.rooms.length * REBAKE_SHARE;
   }
 
   /** Patches queued art rooms into the retained canvas for about `budgetMs`. Returns true when none remain. */
@@ -472,7 +488,9 @@ export class MapBaker {
       this.repaintRoom(ctx, room);
       if (performance.now() >= deadline) break;
     }
-    return this.dirtyRooms.size === 0;
+    if (this.dirtyRooms.size > 0) return false;
+    this.typeArtDirty = false;
+    return true;
   }
 
   /** The land's cast shadow, plus a shallows glow when the sea is the plain procedural one. */
@@ -579,9 +597,10 @@ export class MapBaker {
 
   private paintRoom(ctx: Ctx, room: BakeRoom): void {
     const { x, y } = this.toBake(room);
-    const roomArt = this.readyArt(artworkUrl('tile', room.guid));
-    if (room.guid && roomArt && this.isExplored(room)) {
-      this.drawRoomArt(ctx, roomArt, x, y);
+    const entry = this.roomArt(room);
+    if (entry?.state === 'ready' && entry.img && this.isExplored(room)) {
+      this.drawRoomArt(ctx, entry.img, x, y);
+      this.releaseRoomArt(entry);
       return;
     }
     const typeArt = this.typeArtSprite(room.type);
@@ -589,25 +608,88 @@ export class MapBaker {
     ctx.drawImage(sprite.canvas, x - sprite.ox, y - sprite.oy);
   }
 
-  private readyArt(url: string): HTMLImageElement | null {
-    const entry = this.art.get(url);
+  private roomArt(room: BakeRoom): ArtEntry | undefined {
+    return room.guid ? this.art.get(artworkUrl('tile', room.guid)) : undefined;
+  }
+
+  /** The terrain canvas keeps the pixels, so the image can go. A re-bake loads it again from the HTTP cache. */
+  private releaseRoomArt(entry: ArtEntry): void {
+    entry.state = 'painted';
+    entry.img = null;
+    this.heldRoomArt.delete(entry);
+    this.pumpRoomArt();
+  }
+
+  private forgetPaintedArt(): void {
+    for (const [url, entry] of this.art) {
+      if (entry.state === 'painted') this.art.delete(url);
+    }
+  }
+
+  /** Failed lookups stay, so that coming back to a map doesn't ask again for art that isn't there. */
+  private forgetLoadedArt(): void {
+    for (const [url, entry] of this.art) {
+      if (entry.state !== 'failed') this.art.delete(url);
+    }
+    this.heldRoomArt.clear();
+  }
+
+  private readyTypeArt(type: string): HTMLImageElement | null {
+    const entry = this.art.get(artworkUrl('tile-type', type));
     return entry?.state === 'ready' ? entry.img : null;
   }
 
-  private loadArt(url: string, rooms: BakeRoom[] | null, type?: string): void {
+  private loadTypeArt(type: string): void {
+    const url = artworkUrl('tile-type', type);
     if (this.art.has(url)) return;
-    const entry: ArtEntry = { img: new Image(), state: 'loading' };
+    this.loadImage(url, () => {
+      this.typeArtDirty = true;
+      for (const room of this.rooms) {
+        if (room.type === type) this.dirtyRooms.add(room);
+      }
+      this.artSprites.delete(type);
+      this.onArtReady();
+    });
+  }
+
+  private pumpRoomArt(): void {
+    while (this.heldRoomArt.size < ROOM_ART_HELD_MAX) {
+      const room = this.roomArtQueue.pop();
+      if (!room) return;
+      const url = artworkUrl('tile', room.guid);
+      if (this.art.has(url)) continue;
+      const entry = this.loadImage(url, () => {
+        this.dirtyRooms.add(room);
+        this.onArtReady();
+      }, () => {
+        this.heldRoomArt.delete(entry);
+        this.pumpRoomArt();
+      });
+      this.heldRoomArt.add(entry);
+    }
+  }
+
+  /** Decodes before reporting ready, so that the draw in a bake slice doesn't decode on the main thread. */
+  private loadImage(url: string, onReady: () => void, onFailed?: () => void): ArtEntry {
+    const img = new Image();
+    const entry: ArtEntry = { img, state: 'loading' };
     this.art.set(url, entry);
-    entry.img.onload = () => {
+    const ready = () => {
       if (this.art.get(url) !== entry) return;
       entry.state = 'ready';
-      const hit = rooms ?? this.rooms.filter(r => r.type === type);
-      for (const room of hit) this.dirtyRooms.add(room);
-      if (type) this.artSprites.delete(type);
-      this.onArtReady();
+      onReady();
     };
-    entry.img.onerror = () => { entry.state = 'failed'; };
-    entry.img.src = url;
+    img.onload = () => {
+      if (typeof img.decode === 'function') img.decode().then(ready, ready);
+      else ready();
+    };
+    img.onerror = () => {
+      entry.state = 'failed';
+      entry.img = null;
+      onFailed?.();
+    };
+    img.src = url;
+    return entry;
   }
 
   private drawCover(ctx: Ctx, img: HTMLImageElement, x: number, y: number): void {
@@ -632,7 +714,7 @@ export class MapBaker {
   private typeArtSprite(type: string): Sprite | null {
     const cached = this.artSprites.get(type);
     if (cached) return cached;
-    const img = this.readyArt(artworkUrl('tile-type', type));
+    const img = this.readyTypeArt(type);
     if (!img) return null;
     const sprite = this.newSprite();
     const ctx = sprite.canvas.getContext('2d');
@@ -706,6 +788,8 @@ export class MapBaker {
     ctx.beginPath();
     ctx.ellipse(0, 13, 16, 5, 0, 0, Math.PI * 2);
     ctx.fill();
+    // Colour emoji ignore the fill's colour but keep its alpha.
+    ctx.fillStyle = '#fff';
     ctx.font = '32px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -713,8 +797,10 @@ export class MapBaker {
   }
 
   private repaintRoom(ctx: Ctx, room: BakeRoom): void {
+    if (this.roomArt(room)?.state === 'painted') return;
     const { x, y } = this.toBake(room);
-    const near = [room, ...room.neighbors.filter((n): n is BakeRoom => n !== null)];
+    // A neighbour with its own art shows at most a hairline under this clip, and may no longer have an image to draw.
+    const near = [room, ...room.neighbors.filter((n): n is BakeRoom => n !== null && !this.hasOwnArt(n))];
     near.sort((a, b) => a.y - b.y || a.x - b.x);
     ctx.save();
     ctx.beginPath();
@@ -723,6 +809,11 @@ export class MapBaker {
     for (const each of near) this.paintRoom(ctx, each);
     this.drawEdges(ctx, near);
     ctx.restore();
+  }
+
+  private hasOwnArt(room: BakeRoom): boolean {
+    const state = this.roomArt(room)?.state;
+    return state === 'ready' || state === 'painted';
   }
 
   /** Each shared edge belongs to the lower-indexed room, so a patch redraws it exactly once. */

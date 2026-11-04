@@ -139,8 +139,12 @@
 }
 @media (min-width: 768px) {
   .ui-segments {
-    padding-left: max(calc(4px + var(--safe-left)), calc((100% - 860px) / 2));
-    padding-right: max(calc(4px + var(--safe-right)), calc((100% - 860px) / 2));
+    padding-left: max(calc(4px + var(--safe-left)), calc((100% - var(--segments-max, 860px)) / 2));
+    padding-right: max(calc(4px + var(--safe-right)), calc((100% - var(--segments-max, 860px)) / 2));
+  }
+  /* The width of these screens' content boxes, so the tabs line up with what's under them. */
+  :is(#screen-items, #screen-craft) {
+    --segments-max: 1096px;
   }
 }
 .ui-segment-badge {
@@ -163,6 +167,40 @@
   line-height: 16px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Hover: a highlight, not a transform ─────────────────── */
+@media (hover: hover) {
+  .ui-segment:not(.active):hover {
+    color: var(--text-1);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  #top-hud .top-hud-status:hover,
+  .room-sheet-close:hover,
+  .map-route-stop:hover {
+    background: rgba(255, 255, 255, 0.07);
+  }
+  .room-sheet-go:not(:disabled):hover,
+  .room-sheet-details:hover,
+  .map-zoom-btn:hover,
+  .map-recenter:hover,
+  .combat-skill:hover,
+  .combat-skill-passive:hover,
+  .combat-run-btn:hover,
+  .log-fullscreen-btn:hover,
+  .social-party-cell:hover,
+  .charitems-skill-slot:hover,
+  .top-hud-player:hover,
+  .top-hud-gold:hover,
+  .room-view-forecast-btn:hover,
+  .item-cell:hover {
+    filter: brightness(1.12);
+  }
+}
+
+/* A modal panel takes focus so Tab starts inside it; it isn't a control, so no ring. */
+[tabindex="-1"]:focus {
+  outline: none;
 }
 
 /* ── Confirm dialog ──────────────────────────────────────── */

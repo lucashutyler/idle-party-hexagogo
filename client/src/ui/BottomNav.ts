@@ -1,4 +1,5 @@
 import type { GameClient } from '../network/GameClient';
+import { countText } from './countText';
 
 export interface NavTabConfig {
   id: string;
@@ -87,7 +88,7 @@ export class BottomNav {
   private setCountBadge(id: string, count: number, noun: string): void {
     const badge = this.tabButtons.get(id)?.querySelector('.nav-badge');
     if (!badge) return;
-    const text = count > 0 ? (count > 99 ? '99+' : String(count)) : '';
+    const text = count > 0 ? countText(count) : '';
     if (badge.textContent !== text) badge.textContent = text;
     badge.classList.toggle('nav-badge-count', count > 0);
     badge.classList.toggle('visible', count > 0);

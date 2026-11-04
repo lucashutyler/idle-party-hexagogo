@@ -179,9 +179,19 @@ export interface ZoneLabelAnchor {
   x: number;
   y: number;
   rooms: number;
+  /** Other rooms the label may step to, nearest the centroid first. */
+  fallbacks: readonly { x: number; y: number }[];
 }
 
-/** One anchor per zone: the free explored room nearest that zone's explored centroid. */
+/** A box in world units that a zone label shouldn't cover. */
+export interface LabelObstacle {
+  x: number;
+  y: number;
+  halfW: number;
+  halfH: number;
+}
+
+/** One anchor per zone: the free explored room nearest that zone's explored centroid, then the next best. */
 export function zoneLabelAnchors(exploredRooms: readonly ZoneLabelRoom[]): ZoneLabelAnchor[] {
   const zones = new Map<string, ZoneLabelRoom[]>();
   for (const room of exploredRooms) {
@@ -193,35 +203,49 @@ export function zoneLabelAnchors(exploredRooms: readonly ZoneLabelRoom[]): ZoneL
   for (const [zone, rooms] of zones) {
     const cx = rooms.reduce((sum, r) => sum + r.x, 0) / rooms.length;
     const cy = rooms.reduce((sum, r) => sum + r.y, 0) / rooms.length;
-    let best = rooms[0];
-    let bestDist = Infinity;
-    for (const room of rooms) {
-      const dist = (room.x - cx) ** 2 + (room.y - cy) ** 2 + (room.busy ? BUSY_ROOM_PENALTY : 0);
-      if (dist < bestDist) { best = room; bestDist = dist; }
-    }
-    anchors.push({ zone, name: best.zoneName, x: best.x, y: best.y, rooms: rooms.length });
+    const ranked = rooms
+      .map(room => ({ room, dist: (room.x - cx) ** 2 + (room.y - cy) ** 2 + (room.busy ? BUSY_ROOM_PENALTY : 0) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, LABEL_SPOTS_PER_ZONE)
+      .map(item => item.room);
+    const best = ranked[0];
+    const fallbacks = ranked.slice(1).map(({ x, y }) => ({ x, y }));
+    anchors.push({ zone, name: best.zoneName, x: best.x, y: best.y, rooms: rooms.length, fallbacks });
   }
   return anchors;
 }
 
 const BUSY_ROOM_PENALTY = 1e9;
+const LABEL_SPOTS_PER_ZONE = 10;
 const LABEL_CHAR_PX = 7.4;
 const LABEL_PAD_PX = 14;
 const LABEL_HEIGHT_PX = 20;
 
-/** Labels that fit at this zoom without overlapping: the current zone first, then the most explored. */
-export function pickZoneLabels(anchors: readonly ZoneLabelAnchor[], zoom: number, currentZone: string): ZoneLabelAnchor[] {
+/**
+ * Labels that fit at this zoom without overlapping each other or `obstacles`: the current zone first, then the most explored.
+ * A label steps to its zone's next room when its first spot is taken, and is left out when none is free.
+ */
+export function pickZoneLabels(
+  anchors: readonly ZoneLabelAnchor[],
+  zoom: number,
+  currentZone: string,
+  obstacles: readonly LabelObstacle[] = [],
+): ZoneLabelAnchor[] {
   const ordered = [...anchors].sort((a, b) => {
     if ((a.zone === currentZone) !== (b.zone === currentZone)) return a.zone === currentZone ? -1 : 1;
     return b.rooms - a.rooms || a.zone.localeCompare(b.zone);
   });
-  const placed: { anchor: ZoneLabelAnchor; halfW: number; halfH: number }[] = [];
+  const placed: ZoneLabelAnchor[] = [];
+  const taken: LabelObstacle[] = [...obstacles];
   for (const anchor of ordered) {
     const halfW = (anchor.name.length * LABEL_CHAR_PX + LABEL_PAD_PX) / 2 / zoom;
     const halfH = LABEL_HEIGHT_PX / 2 / zoom;
-    const hits = placed.some(p =>
-      Math.abs(p.anchor.x - anchor.x) < p.halfW + halfW && Math.abs(p.anchor.y - anchor.y) < p.halfH + halfH);
-    if (!hits) placed.push({ anchor, halfW, halfH });
+    const free = (spot: { x: number; y: number }) => !taken.some(box =>
+      Math.abs(box.x - spot.x) < box.halfW + halfW && Math.abs(box.y - spot.y) < box.halfH + halfH);
+    const spot = [anchor, ...anchor.fallbacks].find(free);
+    if (!spot) continue;
+    placed.push({ ...anchor, x: spot.x, y: spot.y });
+    taken.push({ x: spot.x, y: spot.y, halfW, halfH });
   }
-  return placed.map(p => p.anchor);
+  return placed;
 }

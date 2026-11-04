@@ -22,6 +22,7 @@ import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, registerDismiss, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { deferWhilePressed, setHtml } from '../ui/render';
+import { discoveredRoomName } from '../ui/routeSummary';
 import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, unitKey } from '../combat/CombatPlayback';
 import type { PlaybackUnit, UnitStatics } from '../combat/CombatPlayback';
 import { battleStatus, battleStatusHtml, rewardLines } from '../combat/BattleStatus';
@@ -70,9 +71,22 @@ const LIVE_FORECASTS_KEPT = 4;
 const ANNOUNCED_LOG_TYPES = new Set(['retreat', 'checkpoint']);
 const BOSS_STARTS_KEPT = 3;
 const BACKGROUND_PLACEHOLDER = { w: 640, h: 360 };
+/** A side this small drops its empty tracks and scales its cards up. */
+const ROOMY_SIDE_UNITS = 2;
+/** Past this many cards on the board, per-hit motion plays only on the player's own card. */
+const FULL_FX_MAX_CARDS = 6;
+const GRID_LINES = [0, 1, 2];
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
+}
+
+/** The grid tracks a side actually uses; a seat's row is `pos / 3` and its column `pos % 3`. */
+export function usedGridTracks(positions: readonly number[]): { rows: boolean[]; cols: boolean[] } {
+  return {
+    rows: GRID_LINES.map(line => positions.some(pos => Math.floor(pos / 3) === line)),
+    cols: GRID_LINES.map(line => positions.some(pos => pos % 3 === line)),
+  };
 }
 
 function bossRunKey(dungeon: { dungeonId: string; floor: number }): string {
@@ -396,10 +410,12 @@ export class CombatScreen implements Screen {
     deferWhilePressed(this.container, () => {
       if (this.isActive && this.lastState) this.applyState(this.lastState);
     });
+    this.wakeLoop();
   }
 
   private handleCombat(msg: ServerCombatMessage, receivedAt: number): void {
     this.playback.ingestMessage(msg, receivedAt);
+    this.wakeLoop();
   }
 
   private applyState(state: ServerStateMessage): void {
@@ -425,13 +441,27 @@ export class CombatScreen implements Screen {
     this.rafId = 0;
   }
 
+  private wakeLoop(): void {
+    if (this.isActive && document.visibilityState !== 'hidden') this.startLoop();
+  }
+
   private frame(): void {
-    this.rafId = requestAnimationFrame(() => this.frame());
+    this.rafId = 0;
     try {
       this.renderFrame(performance.now());
     } catch (err) {
       console.error('[CombatScreen] frame error:', err);
     }
+    if (!this.nothingToDraw()) this.startLoop();
+  }
+
+  /** Effects run on their own timelines; the loop only drives playback, so it sleeps once that has played out. */
+  private nothingToDraw(): boolean {
+    return this.playback.settled
+      && !this.snapping
+      && !this.gameClient.combatLog.hasPending
+      && this.playback.battleId === this.renderedBattleId
+      && this.playback.version === this.renderedVersion;
   }
 
   private renderFrame(now: number): void {
@@ -487,6 +517,7 @@ export class CombatScreen implements Screen {
     } else if (this.lastState) {
       this.syncIdleBoard(this.lastState);
     }
+    this.layoutBlocks();
     this.centresDirty = true;
     this.refreshIdentities();
     this.refreshSkillLayout();
@@ -575,6 +606,28 @@ export class CombatScreen implements Screen {
       const card = this.cards.get(key) ?? this.addCard(key, 'player', Number(key.split(':')[1]));
       card.setIdentity(identity);
     }
+    this.layoutBlocks();
+  }
+
+  private layoutBlocks(): void {
+    for (const side of [this.playerSide, this.enemySide]) this.layoutBlock(side);
+  }
+
+  /** Dead units keep their cards, so a side only changes shape when its roster does. */
+  private layoutBlock(side: HTMLElement): void {
+    const positions = [...side.children].map(el => Number((el as HTMLElement).dataset.grid)).sort((a, b) => a - b);
+    const key = positions.join(',');
+    if (side.dataset.layoutKey === key) return;
+    side.dataset.layoutKey = key;
+    this.centresDirty = true;
+    const block = side.parentElement!;
+    if (positions.length > 0 && positions.length <= ROOMY_SIDE_UNITS) block.dataset.roomy = String(positions.length);
+    else delete block.dataset.roomy;
+    const { rows, cols } = usedGridTracks(positions);
+    GRID_LINES.forEach((line) => {
+      side.style.setProperty(`--track-row${line}`, rows[line] ? 'minmax(0, 1fr)' : '0');
+      side.style.setProperty(`--track-col${line}`, cols[line] ? 'minmax(0, 1fr)' : '0');
+    });
   }
 
   private progressOf(state: ServerStateMessage): CharacterProgress | null {
@@ -596,11 +649,6 @@ export class CombatScreen implements Screen {
     if (visual === 'fighting') this.rewards = [];
   }
 
-  private discoveredRoomName(state: ServerStateMessage, col: number, row: number): string | null {
-    const tile = this.worldCache.getTileOn(state.currentMapId, col, row);
-    return tile?.name && state.unlocked?.includes(tile.id) ? tile.name : null;
-  }
-
   private paintStatus(): void {
     this.statusFinished = this.playback.finished;
     this.statusBattleId = this.playback.battleId;
@@ -616,10 +664,11 @@ export class CombatScreen implements Screen {
       inDungeon: !!state.dungeon,
       walking,
       hasDestination: !!nextRoom,
-      roomName: target ? this.discoveredRoomName(state, target.col, target.row) : null,
+      roomName: target ? discoveredRoomName(state, this.worldCache, target.col, target.row) : null,
       rewards: this.rewards,
     });
     this.statusEl.classList.toggle('show', !!status);
+    this.stage.classList.toggle('status-shown', !!status);
     if (!status) return;
     this.statusEl.dataset.tone = status.tone;
     setHtml(this.statusEl, battleStatusHtml(status));
@@ -705,13 +754,14 @@ export class CombatScreen implements Screen {
     const stageRect = this.stage.getBoundingClientRect();
     if (stageRect.width === 0 && stageRect.height === 0) return;
     for (const [key, card] of this.cards) {
-      const r = card.body.getBoundingClientRect();
+      const anchor = card.el.closest('.combat-block[data-roomy]') ? card.portraitEl : card.body;
+      const r = anchor.getBoundingClientRect();
       const x = r.left + r.width / 2 - stageRect.left;
       this.centres.set(key, {
         x,
         y: r.top + r.height / 2 - stageRect.top,
-        w: card.body.offsetWidth || r.width,
-        h: card.body.offsetHeight || r.height,
+        w: anchor.offsetWidth || r.width,
+        h: anchor.offsetHeight || r.height,
       });
       card.setEdge(x < CAST_LABEL_EDGE_PX ? 'left' : x > stageRect.width - CAST_LABEL_EDGE_PX ? 'right' : '');
     }
@@ -766,6 +816,7 @@ export class CombatScreen implements Screen {
     const srcCard = srcKey ? this.cards.get(srcKey) : undefined;
     const dstCard = dstKey ? this.cards.get(dstKey) : undefined;
     const fromSelf = !!srcKey && srcKey === this.selfKey;
+    const fullFx = this.cards.size <= FULL_FX_MAX_CARDS;
 
     switch (ev.kind) {
       case 'battle_start':
@@ -797,7 +848,7 @@ export class CombatScreen implements Screen {
         break;
       }
       case 'attack':
-        if (srcCard && ev.src) {
+        if (srcCard && ev.src && (fullFx || fromSelf)) {
           const dir = this.towardEnemy(ev.src.side);
           this.fx.lunge(srcCard.body, dir.dx, dir.dy, !!ev.skill);
         }
@@ -809,9 +860,10 @@ export class CombatScreen implements Screen {
             this.fx.text(dstKey!, dstAt, 'BLOCK', 'text-info', now);
             break;
           }
-          this.fx.flash(dstCard.flashEl, ev.overTime ? 0.45 : 0.85);
+          const motion = fullFx || dstKey === this.selfKey;
+          if (motion) this.fx.flash(dstCard.flashEl, ev.overTime ? 0.45 : 0.85);
           this.fx.number(dstKey!, dstAt, ev.amount ?? 0, variantFor(ev.dmgType), { crit: ev.crit, overTime: ev.overTime, now });
-          if (!ev.overTime) {
+          if (motion && !ev.overTime) {
             const away = this.towardEnemy(ev.dst.side);
             this.fx.recoil(dstCard.body, -away.dx, -away.dy);
           }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ItemDefinition } from '@idle-party-rpg/shared';
-import { renderItemIcon, renderItemCell, renderEmptySlotIcon, wireRoleButtons } from '../src/ui/ItemIcon';
+import { renderItemIcon, renderItemCell, renderEmptySlotIcon, wireRoleButtons, writeItemSquareQty } from '../src/ui/ItemIcon';
 import { closeItemPopup, renderItemPopupContent, showItemPopup } from '../src/ui/ItemPopup';
 import { dismissTop } from '../src/ui/ModalStack';
 
@@ -44,6 +44,31 @@ describe('renderItemIcon', () => {
 
     const again = mount(renderItemIcon('icon_loaded', def('icon_loaded')));
     expect(again.querySelector('img')?.classList.contains('asset-loaded')).toBe(true);
+  });
+
+  it('names an interactive square on hover, since it shows no label of its own', () => {
+    const worn = mount(renderItemIcon('icon_worn', def('icon_worn'), { interactive: true }));
+    expect(worn.title).toBe('Iron Battleaxe');
+    const plain = mount(renderItemIcon('icon_plain', def('icon_plain')));
+    expect(plain.hasAttribute('title')).toBe(false);
+  });
+
+  it('escapes initials made from a name that starts with markup', () => {
+    const square = mount(renderItemIcon('icon_tag', def('icon_tag', { name: '<Img of doom' }), { qty: 2 }));
+    expect(square.querySelector('.item-square-initials')!.textContent).toBe('<O');
+    expect(square.querySelector('.item-square-qty')!.parentElement).toBe(square);
+  });
+
+  it('updates a rendered stack badge in place', () => {
+    const square = mount(renderItemIcon('icon_qty', def('icon_qty')));
+    writeItemSquareQty(square, 3);
+    expect(square.querySelector('.item-square-qty')!.textContent).toBe('3');
+    const badge = square.querySelector('.item-square-qty');
+    writeItemSquareQty(square, 4);
+    expect(square.querySelector('.item-square-qty')).toBe(badge);
+    expect(badge!.textContent).toBe('4');
+    writeItemSquareQty(square, 1);
+    expect(square.querySelector('.item-square-qty')).toBeNull();
   });
 
   it('uses the item name as the tooltip unless one is given', () => {

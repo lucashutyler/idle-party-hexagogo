@@ -1792,9 +1792,6 @@ button.room-status-chip:active {
     border-radius: var(--radius-md);
     box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-2);
   }
-  .room-status[data-empty="1"] {
-    display: block;
-  }
   .room-status-header {
     display: block;
     color: var(--accent-gold);

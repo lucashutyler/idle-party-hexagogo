@@ -1,3 +1,4 @@
+import { countText } from './countText';
 import { escapeHtml } from './ItemIcon';
 
 export interface SegmentItem {
@@ -9,7 +10,7 @@ export interface SegmentItem {
 
 function badgeHtml(badge: SegmentItem['badge']): string {
   if (!badge) return '';
-  const count = typeof badge === 'number' ? (badge > 99 ? '99+' : String(badge)) : '';
+  const count = typeof badge === 'number' ? countText(badge) : '';
   return `<span class="ui-segment-badge${count ? ' ui-segment-badge-count' : ''}">${count}</span>`;
 }
 

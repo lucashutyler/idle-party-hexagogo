@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ItemDefinition, ServerStateMessage } from '@idle-party-rpg/shared';
 import { CharItemsScreen } from '../src/screens/CharItemsScreen';
@@ -15,6 +17,12 @@ const ITEMS: Record<string, ItemDefinition> = {
 };
 
 type Social = { mailbox?: unknown[]; proposedTrades?: unknown[] };
+
+const SKILLS = {
+  bash: { id: 'bash', name: 'Bash', className: 'Knight', type: 'active', sortOrder: 1, unlockLevel: 1, description: 'Hit it.' },
+  cleave: { id: 'cleave', name: 'Cleave', className: 'Knight', type: 'active', sortOrder: 2, unlockLevel: 1, description: 'Hit them.' },
+  smite: { id: 'smite', name: 'Smite', className: 'Knight', type: 'active', sortOrder: 3, unlockLevel: 50, description: 'Hit hard.' },
+};
 
 function makeState(className: string, inventory: Record<string, number>, equipment: Record<string, string | null>, social: Social = {}): ServerStateMessage {
   return {
@@ -52,11 +60,14 @@ function setup(className: string, inventory: Record<string, number>, equipment: 
     sendEquipItem: vi.fn(),
     sendUnequipItem: vi.fn(),
     sendCancelTrade: vi.fn(),
+    sendDestroyItems: vi.fn(),
+    sendEquipSkill: vi.fn(),
+    sendUnequipSkill: vi.fn(),
   };
   const worldCache = {
-    getSkillContent: () => ({ skills: {} }),
-    getSlotSchedule: () => [],
-    getSkill: () => null,
+    getSkillContent: () => ({ skills: SKILLS }),
+    getSlotSchedule: () => [{ type: 'active', unlocksAtLevel: 1 }],
+    getSkill: (id: string) => SKILLS[id as keyof typeof SKILLS] ?? null,
     contentGeneration: 0,
   } as unknown as WorldCache;
 
@@ -252,7 +263,96 @@ describe('CharItemsScreen', () => {
     });
   });
 
+  describe('panes in the stylesheet', () => {
+    it('only ever shows the Gear grid while Gear is the chosen tab', () => {
+      const css = readFileSync(resolve(__dirname, '../src/styles/hero.css'), 'utf8');
+      const displayRules = [...css.matchAll(/([^{}]*\.hero-pane-gear[^{}]*)\{([^}]*)\}/g)]
+        .filter(([, selector, body]) => selector.trim().endsWith('.hero-pane-gear') && /(^|\s)display\s*:/.test(body))
+        .map(([, selector]) => selector.trim());
+      expect(displayRules.length).toBeGreaterThan(0);
+      for (const selector of displayRules) expect(selector).toContain("[data-hero-tab='gear']");
+    });
+  });
+
+  describe('skill picker', () => {
+    const openPicker = () => {
+      setup('Knight', {}, EMPTY);
+      document.querySelector<HTMLElement>('.charitems-skill-slot[data-slot-index="0"]')!.click();
+    };
+
+    it('makes selectable rows keyboard buttons, focuses the first, and leaves locked rows out', () => {
+      const state = makeState('Knight', {}, EMPTY);
+      state.character!.skillLoadout = { equippedSkills: [null], unlockedSkills: ['bash', 'cleave'] } as never;
+      const t = setup('Knight', {}, EMPTY);
+      t.push(state);
+      document.querySelector<HTMLElement>('.charitems-skill-slot[data-slot-index="0"]')!.click();
+
+      const rows = [...document.querySelectorAll<HTMLElement>('.charitems-skill-row')];
+      expect(rows.map(r => r.getAttribute('role'))).toEqual(['button', 'button', null]);
+      expect(rows[2].hasAttribute('tabindex')).toBe(false);
+      expect(document.activeElement).toBe(rows[0]);
+
+      rows[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(t.gameClient.sendEquipSkill).toHaveBeenCalledWith('cleave', 0);
+      expect(document.querySelector('.charitems-skill-popup-overlay')).toBeNull();
+    });
+
+    it('opens with nothing to choose without failing', () => {
+      openPicker();
+      expect(document.querySelector('.charitems-skill-popup')).toBeTruthy();
+      document.querySelector<HTMLElement>('.cancel-btn')!.click();
+    });
+  });
+
+  describe('stat tooltip', () => {
+    it('closes from Back or Escape through the modal stack', () => {
+      setup('Knight', {}, EMPTY);
+      document.querySelector<HTMLElement>('.charitems-stat')!.click();
+      expect(document.querySelector('.charitems-stat-tooltip')).toBeTruthy();
+      expect(dismissTop()).toBe(true);
+      expect(document.querySelector('.charitems-stat-tooltip')).toBeNull();
+      expect(dismissTop()).toBe(false);
+    });
+  });
+
+  describe('bag repaints', () => {
+    it('rewrites only the badge when a stack changes, keeping every cell', () => {
+      const t = setup('Knight', { rusty_sword: 2, old_boot: 1 }, EMPTY);
+      const cell = document.querySelector('.items-inv-grid .item-cell');
+      t.push(makeState('Knight', { rusty_sword: 3, old_boot: 2 }, EMPTY));
+      expect(document.querySelector('.items-inv-grid .item-cell')).toBe(cell);
+      const qty = (id: string) => document.querySelector(`.item-square[data-item="${id}"] .item-square-qty`)?.textContent;
+      expect(qty('rusty_sword')).toBe('3');
+      expect(qty('old_boot')).toBe('2');
+    });
+
+    it('rebuilds when an item arrives or leaves', () => {
+      const t = setup('Knight', { rusty_sword: 2 }, EMPTY);
+      const cell = document.querySelector('.items-inv-grid .item-cell');
+      t.push(makeState('Knight', { rusty_sword: 2, old_boot: 1 }, EMPTY));
+      expect(document.querySelector('.items-inv-grid .item-cell')).not.toBe(cell);
+      expect(document.querySelectorAll('.items-inv-grid .item-cell')).toHaveLength(2);
+      t.push(makeState('Knight', { old_boot: 1 }, EMPTY));
+      expect(document.querySelectorAll('.items-inv-grid .item-cell')).toHaveLength(1);
+    });
+  });
+
   describe('item popup dismissal', () => {
+    it('goes back to the item when a destroy prompt is cancelled', () => {
+      const t = setup('Knight', { rusty_sword: 1, old_boot: 3 }, EMPTY);
+      for (const id of ['rusty_sword', 'old_boot']) {
+        t.openInventoryItem(id);
+        document.querySelector<HTMLElement>('.popup-action-destroy')!.click();
+        expect(document.querySelector('.items-modal-confirm')).toBeTruthy();
+        document.querySelector<HTMLElement>('.items-modal-cancel')!.click();
+        expect(document.querySelector('.items-modal-confirm')).toBeNull();
+        expect(document.querySelector('.popup-action-destroy')).toBeTruthy();
+        expect(document.querySelector('.item-popup-name')!.textContent).toBe(ITEMS[id].name);
+        document.querySelector<HTMLElement>('.item-popup-close')!.click();
+      }
+      expect(t.gameClient.sendDestroyItems).not.toHaveBeenCalled();
+    });
+
     it('closes from Back or Escape through the modal stack', () => {
       const t = setup('Knight', { rusty_sword: 1 }, EMPTY);
       t.openInventoryItem('rusty_sword');
