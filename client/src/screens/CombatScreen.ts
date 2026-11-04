@@ -20,10 +20,12 @@ import {
 } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
-import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
+import { bringToFront, registerDismiss, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, unitKey } from '../combat/CombatPlayback';
 import type { PlaybackUnit, UnitStatics } from '../combat/CombatPlayback';
+import { battleStatus, battleStatusHtml, rewardLines } from '../combat/BattleStatus';
+import type { CharacterProgress } from '../combat/BattleStatus';
 import { CombatFx } from '../combat/CombatFx';
 import type { BannerTone, FloaterVariant, FxPoint } from '../combat/CombatFx';
 import { isJournalLine } from '../combat/CombatLogBuffer';
@@ -67,6 +69,7 @@ const ANNOUNCE_DELAY_MS = 60;
 const LIVE_FORECASTS_KEPT = 4;
 const ANNOUNCED_LOG_TYPES = new Set(['retreat', 'checkpoint']);
 const BOSS_STARTS_KEPT = 3;
+const BACKGROUND_PLACEHOLDER = { w: 640, h: 360 };
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
@@ -118,6 +121,7 @@ export class CombatScreen implements Screen {
   private stage!: HTMLElement;
   private stageGrid!: HTMLElement;
   private stageBg!: HTMLElement;
+  private statusEl!: HTMLElement;
   private playerSide!: HTMLElement;
   private enemySide!: HTMLElement;
   private telegraphSvg!: SVGSVGElement;
@@ -164,6 +168,7 @@ export class CombatScreen implements Screen {
   private runHintTimer?: ReturnType<typeof setTimeout>;
   private snapping = false;
   private syncingShown = false;
+  private cameFromIdleBoard = false;
   private monsterPopup: MonsterPopupState | null = null;
   private leaveConfirm: HTMLElement | null = null;
   private bossStructureKey = '';
@@ -178,6 +183,11 @@ export class CombatScreen implements Screen {
   private lastJournalSeq = 0;
   private bossStarts: { battleId: number; run: string; wipes: number }[] = [];
   private headerLatch: { battleId: number; state: ServerStateMessage } | null = null;
+  private statusFinished = false;
+  private statusBattleId: number | null = null;
+  private rewardBaseline: CharacterProgress | null = null;
+  private rewards: string[] = [];
+  private rewardsCounted = false;
 
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
@@ -201,6 +211,7 @@ export class CombatScreen implements Screen {
     if (state) {
       this.lastState = state;
       this.playback.ingestState(state.battle.combat);
+      this.trackRewards(state);
     }
     if (gameClient.lastCombat) this.playback.ingestMessage(gameClient.lastCombat);
   }
@@ -229,6 +240,7 @@ export class CombatScreen implements Screen {
     this.gameClient.combatLog.setHoldLive(false);
     this.gameClient.sendCombatView(false);
     this.logView.setActive(false);
+    this.logView.setOpen(false);
     this.stopLoop();
     this.closePopover();
     this.closeForecastPopover();
@@ -242,7 +254,7 @@ export class CombatScreen implements Screen {
         <span class="combat-run-location"></span>
         <span class="combat-dungeon-floor" style="display:none"></span>
         <button class="combat-forecast" type="button" style="display:none"></button>
-        <span class="combat-clock">0:00</span>
+        <span class="combat-clock">–:––</span>
         <button class="combat-run-btn combat-run-locked" type="button"><span class="combat-run-label">Run</span><span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <button class="combat-dungeon-leave" type="button" style="display:none">Leave<span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <span class="combat-run-hint" style="display:none"></span>
@@ -266,7 +278,7 @@ export class CombatScreen implements Screen {
           <div class="combat-block combat-block-enemy">
             <div class="combat-side combat-enemy-side"></div>
           </div>
-          <div class="combat-stage-divider"><span>VS</span></div>
+          <div class="combat-stage-divider"><div class="combat-status"></div></div>
           <div class="combat-block combat-block-party">
             <div class="combat-side combat-player-side"></div>
           </div>
@@ -299,6 +311,7 @@ export class CombatScreen implements Screen {
     this.stage = this.container.querySelector('.combat-stage')!;
     this.stageBg = this.container.querySelector('.combat-stage-bg')!;
     this.stageGrid = this.container.querySelector('.combat-stage-grid')!;
+    this.statusEl = this.container.querySelector('.combat-status')!;
     this.playerSide = this.container.querySelector('.combat-player-side')!;
     this.enemySide = this.container.querySelector('.combat-enemy-side')!;
     this.telegraphSvg = this.container.querySelector('.combat-telegraph')!;
@@ -312,9 +325,10 @@ export class CombatScreen implements Screen {
     );
     this.skillBar = new CombatSkillBar(this.skillBarRoot, (id, anchor) => this.toggleSkillPopover(id, anchor));
     this.logView = new CombatLogView(this.logWrapper, this.gameClient.combatLog, this.formatter);
-    this.logView.setOnOpenChange(() => this.closePopover());
-    this.fillEmptySlots(this.playerSide);
-    this.fillEmptySlots(this.enemySide);
+    this.logView.setOnOpenChange(() => {
+      this.closePopover();
+      this.closeForecastPopover();
+    });
 
     // Never set `disabled`: disabled buttons swallow taps on mobile, which kills the locked-state hint.
     this.runBtn.addEventListener('click', (e) => {
@@ -337,7 +351,8 @@ export class CombatScreen implements Screen {
       this.toggleForecastPopover();
     });
     this.header.addEventListener('click', () => {
-      if (headerOpensLog(window.matchMedia?.(SHORT_SCREEN_QUERY).matches ?? false, document.body.dataset.chatOpen === '1')) {
+      const chatOpen = document.body.dataset.chatOpen === '1' && document.body.dataset.chatLayout !== 'column';
+      if (headerOpensLog(window.matchMedia?.(SHORT_SCREEN_QUERY).matches ?? false, chatOpen)) {
         this.logView.setOpen(true);
       }
     });
@@ -375,6 +390,7 @@ export class CombatScreen implements Screen {
   private handleState(state: ServerStateMessage): void {
     this.lastState = state;
     this.playback.ingestState(state.battle.combat, performance.now());
+    this.trackRewards(state);
     if (!this.isActive) return;
     this.updateRoster();
     deferWhilePressed(this.container, () => {
@@ -391,6 +407,8 @@ export class CombatScreen implements Screen {
     if (state.battle.visual !== 'none') this.stage.classList.add(state.battle.visual);
     this.updateBackground(state);
     this.updateHeader(state);
+    this.syncIdleBoard(state);
+    this.paintStatus();
     this.refreshIdentities();
     this.refreshSkillLayout();
     this.refreshBossBar();
@@ -435,6 +453,7 @@ export class CombatScreen implements Screen {
     }
     if (this.centresDirty) this.measureCentres();
     for (const ev of tick.events) this.playEvent(ev, now);
+    if (this.playback.finished !== this.statusFinished || this.playback.battleId !== this.statusBattleId) this.paintStatus();
     if (this.playback.battleId === this.renderedBattleId) {
       for (const unit of this.playback.units) this.cards.get(unit.key)?.update(unit, now);
     }
@@ -457,39 +476,18 @@ export class CombatScreen implements Screen {
   private syncCards(): void {
     const battleChanged = this.playback.battleId !== this.renderedBattleId;
     if (battleChanged) {
-      for (const card of this.cards.values()) card.el.remove();
-      this.cards.clear();
-      this.fx.clearAll();
+      this.fx.clearAll(true);
       this.clearTelegraphs();
+      this.stage.classList.remove('big-result');
     }
-    const live = new Set<string>();
-    let order = 0;
-    for (const unit of this.playback.units) {
-      live.add(unit.key);
-      if (this.cards.has(unit.key)) continue;
-      const card = new UnitCard(unit.key, unit.side, unit.pos);
-      const side = unit.side === 'player' ? this.playerSide : this.enemySide;
-      side.querySelector(`.combat-grid-empty[data-grid="${unit.pos}"]`)?.remove();
-      side.appendChild(card.el);
-      this.cards.set(unit.key, card);
-      if (battleChanged) this.fx.popIn(card.el, (order++) * POP_IN_STAGGER_MS);
-    }
-    for (const [key, card] of this.cards) {
-      if (live.has(key)) continue;
-      card.el.remove();
-      this.cards.delete(key);
-    }
-    this.fillEmptySlots(this.playerSide);
-    this.fillEmptySlots(this.enemySide);
     this.renderedBattleId = this.playback.battleId;
     this.renderedVersion = this.playback.version;
-    this.syncedUnits.clear();
-    for (const unit of this.playback.units) {
-      const st = this.playback.statics(unit.key);
-      if (st) this.syncedUnits.set(unit.key, { unit, st });
+    if (this.playback.units.length > 0) {
+      this.syncFightCards(battleChanged);
+    } else if (this.lastState) {
+      this.syncIdleBoard(this.lastState);
     }
     this.centresDirty = true;
-    this.stage.classList.toggle('no-combat', this.playback.battleId === null);
     this.refreshIdentities();
     this.refreshSkillLayout();
     this.refreshBossBar();
@@ -501,16 +499,130 @@ export class CombatScreen implements Screen {
     this.renderForecastChip();
   }
 
-  private fillEmptySlots(side: HTMLElement): void {
-    const taken = new Set<string>();
-    for (const child of side.children) taken.add((child as HTMLElement).dataset.grid ?? '');
-    for (let pos = 0; pos < 9; pos++) {
-      if (taken.has(String(pos))) continue;
-      const empty = document.createElement('div');
-      empty.className = 'combat-grid-empty';
-      empty.dataset.grid = String(pos);
-      side.appendChild(empty);
+  private syncFightCards(battleChanged: boolean): void {
+    this.stage.classList.remove('no-combat');
+    const units = this.playback.units;
+    if (battleChanged) this.dropCardsFromLastFight();
+    const live = new Set<string>();
+    let order = 0;
+    for (const unit of units) {
+      live.add(unit.key);
+      if (this.cards.has(unit.key)) continue;
+      const card = this.addCard(unit.key, unit.side, unit.pos);
+      if (battleChanged || this.cameFromIdleBoard) this.fx.popIn(card.el, (order++) * POP_IN_STAGGER_MS);
     }
+    this.cameFromIdleBoard = false;
+    for (const [key, card] of this.cards) {
+      if (live.has(key)) continue;
+      card.el.remove();
+      this.cards.delete(key);
+    }
+    this.syncedUnits.clear();
+    for (const unit of units) {
+      const st = this.playback.statics(unit.key);
+      if (st) this.syncedUnits.set(unit.key, { unit, st });
+    }
+  }
+
+  /** A taken party seat keeps its card between fights (its identity is refreshed in place); monsters go. */
+  private dropCardsFromLastFight(): void {
+    for (const [key, card] of this.cards) {
+      if (this.playback.unitByKey(key)?.side === 'player') continue;
+      card.el.remove();
+      this.cards.delete(key);
+    }
+  }
+
+  private addCard(key: string, side: 'player' | 'monster', pos: number): UnitCard {
+    const card = new UnitCard(key, side, pos);
+    (side === 'player' ? this.playerSide : this.enemySide).appendChild(card.el);
+    this.cards.set(key, card);
+    return card;
+  }
+
+  /** With no fight to draw, the last board stays dimmed; on a first load the party comes from the roster. */
+  private syncIdleBoard(state: ServerStateMessage): void {
+    if (this.playback.units.length > 0) return;
+    this.stage.classList.toggle('no-combat', this.playback.battleId === null);
+    this.cameFromIdleBoard = true;
+    const party = state.social?.party;
+    if (!party) return;
+    const hired = party.henchmen ?? [];
+    const henchmanNames = henchmanDisplayNames(hired.map(h => h.name ?? ''), party.members.map(m => m.username));
+    const seats = new Map<string, CardIdentity>();
+    for (const member of party.members) {
+      const isSelf = member.username === state.username;
+      const className = member.className ?? (isSelf ? state.character?.className : undefined) ?? '';
+      seats.set(unitKey('player', member.gridPosition), {
+        name: member.username, isSelf, henchman: false, passive: false,
+        art: className ? artworkUrl('class', className) : undefined,
+        icon: CLASS_ICONS[className],
+      });
+    }
+    hired.forEach((henchman, i) => {
+      seats.set(unitKey('player', henchman.gridPosition), {
+        name: henchmanNames[i] ?? henchman.name ?? 'Ally', isSelf: false, henchman: true, passive: false,
+        art: henchman.artworkUrl, emoji: henchman.emoji || undefined,
+      });
+    });
+    for (const [key, card] of this.cards) {
+      if (card.el.dataset.side !== 'player' || seats.has(key)) continue;
+      card.el.remove();
+      this.cards.delete(key);
+    }
+    for (const [key, identity] of seats) {
+      if (!this.cards.has(key)) this.centresDirty = true;
+      const card = this.cards.get(key) ?? this.addCard(key, 'player', Number(key.split(':')[1]));
+      card.setIdentity(identity);
+    }
+  }
+
+  private progressOf(state: ServerStateMessage): CharacterProgress | null {
+    const c = state.character;
+    return c ? { level: c.level, xp: c.xp, xpForNextLevel: c.xpForNextLevel, gold: c.gold } : null;
+  }
+
+  /** The state push that flips the visual to victory is the one carrying the rewards. */
+  private trackRewards(state: ServerStateMessage): void {
+    const visual = state.battle.visual;
+    if (visual === 'victory') {
+      if (this.rewardsCounted) return;
+      this.rewardsCounted = true;
+      this.rewards = rewardLines(this.rewardBaseline, this.progressOf(state));
+      return;
+    }
+    this.rewardBaseline = this.progressOf(state);
+    this.rewardsCounted = false;
+    if (visual === 'fighting') this.rewards = [];
+  }
+
+  private discoveredRoomName(state: ServerStateMessage, col: number, row: number): string | null {
+    const tile = this.worldCache.getTileOn(state.currentMapId, col, row);
+    return tile?.name && state.unlocked?.includes(tile.id) ? tile.name : null;
+  }
+
+  private paintStatus(): void {
+    this.statusFinished = this.playback.finished;
+    this.statusBattleId = this.playback.battleId;
+    const state = this.lastState;
+    if (!state) return;
+    const walking = state.battle.visual === 'none' && state.battle.state === 'result';
+    const nextRoom = state.party?.path?.[0];
+    const target = walking ? state.party : nextRoom;
+    const status = battleStatus({
+      visual: state.battle.visual,
+      hasFight: this.playback.battleId !== null,
+      result: this.playback.result,
+      inDungeon: !!state.dungeon,
+      walking,
+      hasDestination: !!nextRoom,
+      roomName: target ? this.discoveredRoomName(state, target.col, target.row) : null,
+      rewards: this.rewards,
+    });
+    this.statusEl.classList.toggle('show', !!status);
+    if (!status) return;
+    this.statusEl.dataset.tone = status.tone;
+    setHtml(this.statusEl, battleStatusHtml(status));
   }
 
   private refreshIdentities(): void {
@@ -660,9 +772,10 @@ export class CombatScreen implements Screen {
         this.showStartBanner();
         break;
       case 'battle_end':
+        this.stage.classList.toggle('big-result', this.bigFight());
         if (ev.result === 'victory') {
           this.showBanner('VICTORY!', 'victory', 1400);
-          this.fx.sparkles(this.stageCentre());
+          if (this.bigFight()) this.fx.sparkles(this.stageCentre());
         } else if (ev.result === 'retreat') {
           this.showBanner('RETREAT', 'retreat', 1400);
         } else {
@@ -813,8 +926,13 @@ export class CombatScreen implements Screen {
     if (this.bossStarts.length > BOSS_STARTS_KEPT) this.bossStarts.shift();
   }
 
+  /** Routine fights loop every few seconds, so only these get the loud banners; the status chip covers the rest. */
+  private bigFight(): boolean {
+    return this.toughFight || !!this.playback.bossPhases;
+  }
+
   private showBanner(text: string, tone: BannerTone, holdMs: number, sub?: string): void {
-    this.fx.banner(text, tone, holdMs, sub);
+    if (this.bigFight()) this.fx.banner(text, tone, holdMs, sub);
     this.announce(sub ? `${text} ${sub}` : text);
   }
 
@@ -1005,6 +1123,7 @@ export class CombatScreen implements Screen {
     const pop = document.createElement('div');
     pop.className = 'combat-forecast-popover';
     this.container.appendChild(pop);
+    registerDismiss(pop, () => this.closeForecastPopover());
     this.forecastPopover = pop;
     this.renderForecastPopoverContent();
     this.forecastBtn.setAttribute('aria-expanded', 'true');
@@ -1037,6 +1156,7 @@ export class CombatScreen implements Screen {
 
   private closeForecastPopover(): void {
     if (!this.forecastPopover) return;
+    release(this.forecastPopover);
     this.forecastPopover.remove();
     this.forecastPopover = null;
     this.forecastBtn.setAttribute('aria-expanded', 'false');
@@ -1092,6 +1212,7 @@ export class CombatScreen implements Screen {
       t.ring.remove();
     }
     this.telegraphs.clear();
+    for (const key of this.targetedKeys) this.cards.get(key)?.setTargeted(false);
     this.targetedKeys.clear();
   }
 
@@ -1133,6 +1254,7 @@ export class CombatScreen implements Screen {
       const slot = this.worldCache.getSlotSchedule(state.character.className).find(s => s.type === 'active');
       if (slot && state.character.level < slot.unlocksAtLevel) layout.note = `Active skill unlocks at level ${slot.unlocksAtLevel}`;
       else if (!layout.note) layout.note = 'No active skill equipped';
+      layout.noteLinksToSkills = layout.note !== 'Joining next battle';
     }
     deferWhilePressed(this.skillBarRoot, () => this.skillBar.setLayout(layout));
   }
@@ -1191,6 +1313,7 @@ export class CombatScreen implements Screen {
       ${triggerInfo ? `<div class="combat-skill-popover-trigger"><b>⚡ ${escapeHtml(triggerInfo.label)}</b> — ${escapeHtml(triggerInfo.description)}</div>` : ''}
     `;
     this.container.appendChild(pop);
+    registerDismiss(pop, () => this.closePopover());
     this.popover = pop;
     this.popoverSkillId = skillId;
     this.positionPopover(pop, anchor);
@@ -1206,6 +1329,7 @@ export class CombatScreen implements Screen {
   }
 
   private closePopover(): void {
+    if (this.popover) release(this.popover);
     this.popover?.remove();
     this.popover = null;
     this.popoverSkillId = '';
@@ -1276,7 +1400,7 @@ export class CombatScreen implements Screen {
     const retreatNote = below > 0 ? `Auto-retreat is on (below ${below} %)` : '';
     const lockedHint = !canRun
       ? 'Only the party owner or a leader can run'
-      : fighting ? `Run becomes available ${RUN_AVAILABLE_MS / 1000} seconds into a fight` : '';
+      : fighting ? `Run becomes available ${RUN_AVAILABLE_MS / 1000} seconds into a fight` : 'The next fight is about to start';
     const hint = [lockedHint, retreatNote].filter(Boolean).join('. ');
     const key = `${available}|${progress.toFixed(2)}|${hint}`;
     if (key === this.lastRunKey) return;
@@ -1320,7 +1444,7 @@ export class CombatScreen implements Screen {
       }
     });
     document.body.appendChild(overlay);
-    bringToFront(overlay);
+    bringToFront(overlay, () => this.closeLeaveConfirm());
     wireFocusOnInteract(overlay);
     this.leaveConfirm = overlay;
   }
@@ -1358,6 +1482,7 @@ export class CombatScreen implements Screen {
     if (state.party && zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}-${state.party.col}-${state.party.row}.png`);
     if (zoneId) layers.push(`/combat-bg-artwork/${enc(zoneId)}.png`);
     if (zoneId) layers.push(`/zone-artwork/${enc(zoneId)}.png`);
+    if (state.zoneName) layers.push(placeholderUrl(state.zoneName, BACKGROUND_PLACEHOLDER));
     const layered = layers.map(u => `url('${u}')`).join(', ');
     if (this.stageBg.dataset.bgKey !== layered) {
       this.stageBg.style.backgroundImage = layered || 'none';
@@ -1399,7 +1524,7 @@ export class CombatScreen implements Screen {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay || (e.target as HTMLElement).closest('.monster-popup-close')) close();
     });
-    bringToFront(overlay);
+    bringToFront(overlay, close);
     wireFocusOnInteract(overlay);
     this.monsterPopup = { overlay, key: unit.key, battleId: this.renderedBattleId, lastKey: '' };
     this.paintMonsterPopup(this.monsterPopup, unit);

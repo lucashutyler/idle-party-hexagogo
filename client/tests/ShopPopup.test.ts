@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HenchmanOffer, ItemDefinition, ServerStateMessage, SetDefinition, ShopItem } from '@idle-party-rpg/shared';
 import { ShopPopup } from '../src/ui/ShopPopup';
+import { dismissTop } from '../src/ui/ModalStack';
 import { OFFLINE_NOTICE, type GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 
@@ -61,7 +62,7 @@ function setup(initial: StateParts = {}) {
     subscribe: (l: StateListener) => { stateListeners.add(l); return () => { stateListeners.delete(l); }; },
     onServerError: (l: ErrorListener) => { errorListeners.add(l); return () => { errorListeners.delete(l); }; },
     sendShopBuy: vi.fn(() => true),
-    sendShopSell: vi.fn(),
+    sendShopSell: vi.fn(() => true),
     sendHireHenchman: vi.fn(),
   };
   const worldCache = { getSkillContent: () => ({ skills: {} }) } as unknown as WorldCache;
@@ -106,6 +107,27 @@ describe('ShopPopup', () => {
       const t = setup({ className: 'Knight' });
       expect(t.square('potion').querySelector('.shop-item-unusable')).toBeNull();
       expect(t.square('iron_battleaxe').querySelector('.shop-item-unusable')).toBeNull();
+    });
+
+    it('names each item under its square, and tapping the name opens it', () => {
+      const t = setup({ className: 'Mage' });
+      const cell = t.square('oak_staff').closest('.shop-item-cell')!;
+      const name = cell.querySelector<HTMLElement>('.shop-item-name')!;
+      expect(name.textContent).toBe('Oak Staff');
+      name.click();
+      expect(t.q('.shop-detail-view')).toBeTruthy();
+    });
+
+    it('opens an item from the keyboard', () => {
+      const t = setup({ className: 'Mage' });
+      t.square('oak_staff').closest('.shop-item-cell')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(t.q('.shop-detail-view')).toBeTruthy();
+    });
+
+    it('never shows a raw id for an item missing from the content', () => {
+      const t = setup({ stock: [{ itemId: 'd41d8cd9-guid', price: 5 }] });
+      expect(t.q('.shop-item-name')?.textContent).toBe('Unknown item');
     });
 
     it('keeps unusable items full-strength and clickable', () => {
@@ -322,6 +344,62 @@ describe('ShopPopup', () => {
       expect(t.q('.shop-detail-total')?.textContent).toContain('Available: 1');
       t.q<HTMLButtonElement>('.shop-action-confirm')!.click();
       expect(t.gameClient.sendShopSell).toHaveBeenCalledWith('gem', 1);
+    });
+
+    function sellGems(t: ReturnType<typeof setup>, qty: number): void {
+      t.q<HTMLElement>('.shop-toggle-btn[data-mode="sell"]')!.click();
+      t.square('gem').click();
+      for (let i = 1; i < qty; i++) t.q<HTMLButtonElement>('.shop-qty-plus')!.click();
+      t.q<HTMLButtonElement>('.shop-action-confirm')!.click();
+    }
+
+    it('reports a sale only once the items have left the inventory', () => {
+      const t = setup({ inventory: { gem: 3 } });
+      sellGems(t, 2);
+      expect(t.gameClient.sendShopSell).toHaveBeenCalledWith('gem', 2);
+      expect(t.q('.shop-notice')).toBeNull();
+      t.push({ inventory: { gem: 1 } });
+      expect(t.q('.shop-notice')?.textContent).toBe('You sold 2 Gem for 2 gold.');
+    });
+
+    it('shows the server refusal instead of a sale', () => {
+      const t = setup({ inventory: { gem: 3 } });
+      sellGems(t, 1);
+      t.serverError('Not enough items');
+      expect(t.q('.shop-notice')?.textContent).toBe('Not enough items');
+    });
+
+    it('says so at once when the sale cannot be sent', () => {
+      const t = setup({ inventory: { gem: 3 } });
+      t.gameClient.sendShopSell.mockReturnValueOnce(false);
+      sellGems(t, 1);
+      expect(t.q('.shop-notice')?.textContent).toBe(OFFLINE_NOTICE);
+    });
+  });
+
+  describe('closing', () => {
+    it('closes from the header X in every view', () => {
+      const t = setup();
+      t.q<HTMLButtonElement>('.shop-close')!.click();
+      expect(t.q('.shop-overlay')!.style.display).toBe('none');
+
+      t.popup.show(t.gameClient.lastState);
+      t.square('oak_staff').click();
+      t.q<HTMLButtonElement>('.shop-close')!.click();
+      expect(t.q('.shop-overlay')!.style.display).toBe('none');
+    });
+
+    it('steps back out of a detail view before closing with Back', () => {
+      const t = setup();
+      t.square('oak_staff').click();
+      expect(dismissTop()).toBe(true);
+      expect(t.q('.shop-detail-view')).toBeNull();
+      expect(t.q('.shop-items-grid')).toBeTruthy();
+      expect(t.q('.shop-overlay')!.style.display).toBe('flex');
+
+      expect(dismissTop()).toBe(true);
+      expect(t.q('.shop-overlay')!.style.display).toBe('none');
+      expect(dismissTop()).toBe(false);
     });
   });
 

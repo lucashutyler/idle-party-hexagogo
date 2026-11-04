@@ -1,6 +1,7 @@
 import type { MonsterTier } from '@idle-party-rpg/shared';
 import type { PlaybackUnit } from './CombatPlayback';
-import { escapeHtml, hpTier, initials, MAX_VISIBLE_PIPS, pipsKey, statusPips, TIER_INFO } from './CombatFormat';
+import { deferWhilePressed, setHtml } from '../ui/render';
+import { escapeHtml, formatAmount, hpTier, initials, MAX_VISIBLE_PIPS, pipsKey, statusPips, TIER_INFO } from './CombatFormat';
 import type { MonsterLevelBadge } from './CombatFormat';
 
 export interface CardIdentity {
@@ -21,6 +22,7 @@ export interface CardIdentity {
 }
 
 const CHANGE_EPSILON = 0.005;
+const TIMER_EPSILON = 0.02;
 
 /** One combatant's card. Writes to the DOM only when a value visibly changes. */
 export class UnitCard {
@@ -36,7 +38,12 @@ export class UnitCard {
   private readonly castLabel: HTMLElement;
   private readonly levelEl: HTMLElement;
   private readonly tierEl: HTMLElement;
+  private readonly ringEl: HTMLElement;
+  private readonly castFill: HTMLElement;
+  private readonly hpNow: HTMLElement;
+  private readonly hpMax: HTMLElement;
   private identityKey = '';
+  private lastHpText = '';
   private lastAct = -1;
   private lastHp = -1;
   private lastShield = -1;
@@ -79,6 +86,7 @@ export class UnitCard {
             <div class="combat-card-hp-chip"></div>
             <div class="combat-card-hp-fill"></div>
             <div class="combat-card-hp-shield"></div>
+            <div class="combat-card-hp-text"><b></b><span></span></div>
           </div>
           <div class="combat-card-pips"></div>
         </div>
@@ -96,6 +104,10 @@ export class UnitCard {
     this.castLabel = this.el.querySelector('.combat-card-cast-label')!;
     this.levelEl = this.el.querySelector('.combat-card-level')!;
     this.tierEl = this.el.querySelector('.combat-card-tier')!;
+    this.ringEl = this.el.querySelector('.combat-card-ring')!;
+    this.castFill = this.el.querySelector('.combat-card-cast-fill')!;
+    this.hpNow = this.el.querySelector('.combat-card-hp-text b')!;
+    this.hpMax = this.el.querySelector('.combat-card-hp-text span')!;
   }
 
   setIdentity(id: CardIdentity): void {
@@ -139,6 +151,7 @@ export class UnitCard {
         this.el.dataset.hp = tier;
       }
     }
+    this.writeHpText(unit);
     const shieldFrac = unit.maxHp > 0 ? Math.min(1, unit.shield / unit.maxHp) : 0;
     if (Math.abs(shieldFrac - this.lastShield) >= CHANGE_EPSILON) {
       this.lastShield = shieldFrac;
@@ -146,9 +159,9 @@ export class UnitCard {
     }
 
     const act = dead || unit.actionTotalMs <= 0 ? 0 : 1 - Math.max(0, Math.min(1, unit.actionMs / unit.actionTotalMs));
-    if (Math.abs(act - this.lastAct) >= CHANGE_EPSILON || (act === 0 && this.lastAct !== 0)) {
+    if (Math.abs(act - this.lastAct) >= TIMER_EPSILON || (act === 0 && this.lastAct !== 0)) {
       this.lastAct = act;
-      this.el.style.setProperty('--act', act.toFixed(3));
+      this.ringEl.style.setProperty('--act', act.toFixed(2));
     }
 
     const enraged = !dead && (unit.enrage?.stacks ?? 0) > 0;
@@ -169,8 +182,9 @@ export class UnitCard {
       this.lastPips = pk;
       const shown = pips.slice(0, MAX_VISIBLE_PIPS);
       const extra = pips.length - shown.length;
-      this.pipsEl.innerHTML = shown.map(p => `<span class="combat-pip ${p.tone}" title="${escapeHtml(p.title)}">${p.icon}${p.count ? `<b>${p.count}</b>` : ''}</span>`).join('')
+      const html = shown.map(p => `<span class="combat-pip ${p.tone}" title="${escapeHtml(p.title)}">${p.icon}${p.count ? `<b>${p.count}</b>` : ''}</span>`).join('')
         + (extra > 0 ? `<span class="combat-pip more">+${extra}</span>` : '');
+      deferWhilePressed(this.el, () => setHtml(this.pipsEl, html));
     }
   }
 
@@ -191,6 +205,16 @@ export class UnitCard {
   breakCast(now: number): void {
     this.brokenUntil = now + 650;
     this.el.classList.add('cast-broken');
+  }
+
+  private writeHpText(unit: PlaybackUnit): void {
+    const now = formatAmount(Math.max(0, unit.hp));
+    const max = formatAmount(unit.maxHp);
+    const text = `${now}/${max}`;
+    if (text === this.lastHpText) return;
+    this.lastHpText = text;
+    this.hpNow.textContent = now;
+    this.hpMax.textContent = ` / ${max}`;
   }
 
   private writeTier(tier: MonsterTier | undefined): void {
@@ -246,9 +270,9 @@ export class UnitCard {
       this.el.classList.toggle('cast-paused', paused);
     }
     const progress = cast.totalMs > 0 ? 1 - Math.max(0, Math.min(1, cast.remainingMs / cast.totalMs)) : 1;
-    if (Math.abs(progress - this.lastCast) >= CHANGE_EPSILON) {
+    if (Math.abs(progress - this.lastCast) >= TIMER_EPSILON) {
       this.lastCast = progress;
-      this.el.style.setProperty('--cast', progress.toFixed(3));
+      this.castFill.style.setProperty('--cast', progress.toFixed(2));
     }
   }
 }

@@ -298,8 +298,10 @@ export class CombatFx {
     }
   }
 
-  clearAll(): void {
-    this.clearBanner();
+  /** `keepResultBanner` lets a victory, defeat or retreat banner finish when the next fight starts under it. */
+  clearAll(keepResultBanner = false): void {
+    const showsResult = this.bannerShown === 'victory' || this.bannerShown === 'defeat' || this.bannerShown === 'retreat';
+    if (!keepResultBanner || !showsResult) this.clearBanner();
     for (const f of this.floaters) this.release(f);
     for (const card of this.reactionCards) card.remove();
     this.reactionCards = [];

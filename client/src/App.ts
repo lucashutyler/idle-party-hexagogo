@@ -19,6 +19,7 @@ import { BottomNav } from './ui/BottomNav';
 import type { NavTabConfig } from './ui/BottomNav';
 import { UtilityStrip } from './ui/UtilityStrip';
 import { ChatPopout } from './ui/ChatPopout';
+import { ChatStrip } from './ui/ChatStrip';
 import { QuestLog } from './ui/QuestLog';
 import { PersistentXpBar } from './ui/PersistentXpBar';
 import { TopHud } from './ui/TopHud';
@@ -51,7 +52,7 @@ const NAV_TABS: readonly NavTabConfig[] = [
   { id: 'settings', label: 'Settings', glyph: '⚙️', railOnly: true },
 ];
 const CHAT_COLUMN_QUERY = '(min-width: 1024px)';
-const RETIRED_STORAGE_KEYS = ['chat_messages', 'chat_filters'];
+const RETIRED_STORAGE_KEYS = ['chat_messages', 'chat_filters', 'chatPopoutGeometry', 'chatPopoutDesktopMax'];
 
 export class App {
   private gameClient!: GameClient;
@@ -410,7 +411,7 @@ export class App {
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient, this.worldCache);
     const socialScreen = new SocialScreen('screen-social', this.gameClient, this.worldCache);
-    const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
+    const craftingScreen = new CraftingScreen('screen-craft', this.gameClient, this.worldCache);
     const settingsScreen = new SettingsScreen('screen-settings', this.gameClient);
 
     // Wire map username click to social screen popup
@@ -456,7 +457,7 @@ export class App {
       mapScreen.focusRoom(roomId);
     });
 
-    const chatPopout = new ChatPopout(this.gameClient);
+    const chatPopout = new ChatPopout(this.gameClient, this.worldCache);
     this.chatPopout = chatPopout;
     chatPopout.setOnUserClick((username, anchor) => {
       socialScreen.showUserPopup(username, anchor);
@@ -474,29 +475,22 @@ export class App {
       }
     }, this.gameClient);
 
+    const openChat = (): void => {
+      chatPopout.open();
+      nav.setOverlayActive('chat', true);
+    };
+
     const strip = new UtilityStrip(this.gameClient, {
-      onOpenChat: () => {
-        chatPopout.open();
-        nav.setOverlayActive('chat', true);
-      },
+      onOpenChat: openChat,
       onOpenQuests: () => questLog.open(),
     });
 
-    let chatUnread = 0;
-    const showChatUnread = (): void => {
-      nav.setChatUnread(chatUnread);
-      strip.setChatUnread(chatUnread);
-    };
-    this.gameClient.onChat(() => {
-      if (chatPopout.isVisible()) return;
-      chatUnread++;
-      showChatUnread();
-    });
+    const chatStrip = new ChatStrip(document.getElementById('chat-strip-slot')!, openChat);
     chatPopout.setOnClose(() => nav.setOverlayActive('chat', false));
-    chatPopout.setOnUnreadChange((hasUnread) => {
-      if (hasUnread) return;
-      chatUnread = 0;
-      showChatUnread();
+    chatPopout.setOnPreviewChange((preview) => chatStrip.render(preview));
+    chatPopout.setOnUnreadChange((count) => {
+      nav.setChatUnread(count);
+      strip.setChatUnread(count);
     });
 
     socialScreen.setOnDmRequest((username) => {

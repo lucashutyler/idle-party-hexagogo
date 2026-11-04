@@ -41,6 +41,7 @@ interface StateParts {
   unlocked?: string[];
   availableQuestIds?: string[];
   tiles?: Record<string, { name: string; zoneName: string }>;
+  currentMapId?: string;
 }
 
 function makeState(parts: StateParts): ServerStateMessage {
@@ -53,6 +54,7 @@ function makeState(parts: StateParts): ServerStateMessage {
     questResolutions: { monsters: { 'm-goblin': 'Goblin' }, items: {}, tiles: parts.tiles ?? {} },
     unlocked: parts.unlocked ?? [],
     availableQuestIds: parts.availableQuestIds ?? [],
+    currentMapId: parts.currentMapId,
   } as unknown as ServerStateMessage;
 }
 
@@ -327,6 +329,74 @@ describe('QuestLog', () => {
     (document.querySelector('.player-options-close') as HTMLButtonElement).click();
     expect(t.listenerCount()).toBe(0);
     expect(document.querySelector('.quest-log-modal')).toBeNull();
+  });
+});
+
+describe('Quest log room links', () => {
+  const room = (id: string, mapId: string, name: string) => ({ id, mapId, name, zoneName: 'Hatchetmill' } as WorldTileDefinition);
+  const mara: NpcDefinition = { id: 'mara', name: 'Mara', emoji: '🧙', greeting: 'Hi', questIds: ['q1', 'q-new'] };
+  const hermit: NpcDefinition = { id: 'hermit', name: 'Hermit', emoji: '🧔', greeting: 'Hm', questIds: ['q1'] };
+  const rooms = { mara: [room('r-square', 'overworld', 'Town Square')], hermit: [room('r-cave', 'cellar', 'Deep Cave')] };
+  const parts: StateParts = {
+    activeQuests: [active('q1', 'ready', [3])],
+    questDefinitions: { q1: quest('q1') },
+    availableQuestIds: ['q-new'],
+    unlocked: ['r-square', 'r-cave'],
+    currentMapId: 'overworld',
+  };
+
+  it('closes the log and goes to the room when a turn-in row is tapped', () => {
+    const t = setup([mara, hermit], rooms);
+    t.push(parts);
+    const onGoToRoom = vi.fn();
+    new QuestLog(t.gameClient, t.worldCache, onGoToRoom).open();
+
+    document.querySelector<HTMLButtonElement>('.quest-log-turnin .quest-log-go')!.click();
+    expect(onGoToRoom).toHaveBeenCalledWith('r-square');
+    expect(document.querySelector('.quest-log-modal')).toBeNull();
+  });
+
+  it('goes to the room from a quest giver row, keeping the row text', () => {
+    const t = setup([mara], rooms);
+    t.push(parts);
+    const onGoToRoom = vi.fn();
+    new QuestLog(t.gameClient, t.worldCache, onGoToRoom).open();
+
+    const go = document.querySelector<HTMLButtonElement>('.quest-log-giver .quest-log-go')!;
+    expect(go.textContent).toBe('🧙 Mara — Town Square, Hatchetmill');
+    go.click();
+    expect(onGoToRoom).toHaveBeenCalledWith('r-square');
+  });
+
+  it('leaves rooms on another map as plain text', () => {
+    const t = setup([mara, hermit], rooms);
+    t.push(parts);
+    new QuestLog(t.gameClient, t.worldCache, vi.fn()).open();
+
+    const ids = [...document.querySelectorAll<HTMLElement>('.quest-log-turnin .quest-log-go')].map(el => el.dataset.roomId);
+    expect(ids).toEqual(['r-square']);
+    expect(document.querySelector('.quest-log-turnin')!.textContent).toContain('Hermit — Deep Cave, Hatchetmill');
+  });
+
+  it('has no links without someone to take the player there', () => {
+    const t = setup([mara], rooms);
+    t.push(parts);
+    new QuestLog(t.gameClient, t.worldCache).open();
+    expect(document.querySelector('.quest-log-go')).toBeNull();
+  });
+
+  it('draws a progress bar for counted objectives only', () => {
+    const t = setup();
+    t.push({
+      activeQuests: [active('q1', 'in_progress', [1, 0])],
+      questDefinitions: {
+        q1: quest('q1', { objectives: [{ kind: 'kill', monsterId: 'm-goblin', count: 4 }, { kind: 'visit', tileId: 'g-mill' }] }),
+      },
+    });
+    new QuestLog(t.gameClient, t.worldCache).open();
+    const fills = document.querySelectorAll<HTMLElement>('.quest-progress-fill');
+    expect(fills).toHaveLength(1);
+    expect(fills[0].style.transform).toBe('scaleX(0.250)');
   });
 });
 

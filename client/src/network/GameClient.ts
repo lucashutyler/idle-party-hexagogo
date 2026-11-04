@@ -609,8 +609,8 @@ export class GameClient {
     this.sendRaw({ type: 'unequip_skill', slotIndex });
   }
 
-  sendSetClass(className: string): void {
-    this.sendRaw({ type: 'set_class', className });
+  sendSetClass(className: string): boolean {
+    return this.sendRaw({ type: 'set_class', className });
   }
 
   sendEquipItem(itemId: string): void {
@@ -651,8 +651,8 @@ export class GameClient {
     return this.sendRaw({ type: 'shop_buy', itemId });
   }
 
-  sendShopSell(itemId: string, quantity: number): void {
-    this.sendRaw({ type: 'shop_sell', itemId, quantity });
+  sendShopSell(itemId: string, quantity: number): boolean {
+    return this.sendRaw({ type: 'shop_sell', itemId, quantity });
   }
 
   // --- Crafting ---
@@ -835,8 +835,9 @@ export class GameClient {
 
   // --- Chat ---
 
-  sendChat(channelType: ChatChannelType, channelId: string, text: string): void {
-    this.sendRaw({ type: 'send_chat', channelType, channelId, text });
+  /** False when the socket isn't open and nothing was sent. */
+  sendChat(channelType: ChatChannelType, channelId: string, text: string): boolean {
+    return this.sendRaw({ type: 'send_chat', channelType, channelId, text });
   }
 
   sendSyncChat(sinceId?: string): void {

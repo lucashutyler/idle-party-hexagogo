@@ -1,135 +1,189 @@
+import type { ChatChannelType, ChatMessage, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
-import type { ChatMessage, ChatChannelType, ServerStateMessage } from '@idle-party-rpg/shared';
-import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import type { WorldCache } from '../network/WorldCache';
 import { chatFocusTracker } from '../network/ChatFocusTracker';
-import { floatingVerticalBounds } from './chatBounds';
+import { artworkUrl, placeholderInitials, renderTrackedImg } from './assets';
+import {
+  buildDmThreads,
+  CHANNEL_LABELS,
+  chatMembership,
+  chatPreview,
+  ChatLog,
+  CHAT_ROW_CAP,
+  canonicalUsername,
+  DEFAULT_CHAT_FILTERS,
+  escapeChatHtml,
+  FILTER_CHANNELS,
+  formatChatTime,
+  isBlockedMessage,
+  isSameChatDay,
+  isShownInView,
+  renderChatRow,
+  renderChatRows,
+  renderDaySeparator,
+  resolveSendTarget,
+  sameUser,
+  sendableChannels,
+} from './chatModel';
+import type { ChatAudience, ChatFilters, ChatMembership, ChatPreview, ChatRowOptions, ChatTab, ChatView } from './chatModel';
+import { wireVerticalSwipe } from './ChatStrip';
+import { bringToFront, registerDismiss, release } from './ModalStack';
 import { deferWhilePressed, setHtml } from './render';
 
-const STORAGE_KEY_GEOMETRY = 'chatPopoutGeometry';
 const STORAGE_KEY_FILTERS = 'chatPopoutFilters';
 const STORAGE_KEY_MOBILE_LAYOUT = 'chatPopoutMobileLayout';
-/** Browser-level memory of whether chat was open last time. */
 const STORAGE_KEY_OPEN = 'chatPopoutOpen';
-/** Desktop maximize toggle — true means the chat is full-screen. */
-const STORAGE_KEY_DESKTOP_MAX = 'chatPopoutDesktopMax';
+const STORAGE_KEY_LAST_SEEN = 'chatLastSeenAt';
 
-const DEFAULT_FILTERS: Record<ChatChannelType, boolean> = {
-  global: true,
-  zone: true,
-  tile: true,
-  party: true,
-  guild: true,
-  dm: true,
-  server: true,
-};
+const DOCKED_COLUMN_QUERY = '(min-width: 1024px), (orientation: landscape) and (max-height: 500px)';
+const COARSE_POINTER_QUERY = '(pointer: coarse)';
+const FINE_POINTER_QUERY = '(pointer: fine)';
 
-interface Geometry {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+const PREVIEW_MIN_INTERVAL_MS = 1000;
+const STATUS_VISIBLE_MS = 6000;
+const AT_BOTTOM_SLOP_PX = 24;
+const SEND_REJECTION_WINDOW_MS = 5000;
+const USER_NOT_FOUND = /user not found/i;
+/** Long enough for a tap on a button to land before the layout snaps back from typing. */
+const TYPING_EXIT_DELAY_MS = 150;
+const KEYBOARD_SHOWN_MIN_SHRINK_PX = 120;
+const KEYBOARD_GONE_MAX_SHRINK_PX = 60;
+
+const ICON_FILTER = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 2.5h13a.5.5 0 0 1 .4.8L10 9.2v4.3a.5.5 0 0 1-.8.4l-3-2a.5.5 0 0 1-.2-.4V9.2L1.1 3.3a.5.5 0 0 1 .4-.8z"/></svg>';
+const ICON_EXPAND = '<svg class="chat-icon-expand" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7.5 8 3l5 4.5M3 13l5-4.5 5 4.5"/></svg>';
+const ICON_COLLAPSE = '<svg class="chat-icon-collapse" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 3l5 4.5L13 3M3 8.5 8 13l5-4.5"/></svg>';
+const ICON_CLOSE = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>';
+const ICON_BACK = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M10 3 5 8l5 5"/></svg>';
 
 type MobileLayout = 'full' | 'sheet';
+type ChatLayout = MobileLayout | 'column';
 
-const CHANNEL_LABELS: Record<ChatChannelType, string> = {
-  global: 'Global',
-  zone: 'Zone',
-  tile: 'Room',
-  party: 'Party',
-  guild: 'Guild',
-  dm: 'DM',
-  server: 'Server',
-};
+const TABS: readonly { id: ChatTab; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'party', label: 'Party' },
+  { id: 'guild', label: 'Guild' },
+  { id: 'dm', label: 'DMs' },
+];
 
-const CHANNEL_COLORS: Record<ChatChannelType, string> = {
-  global: '#e8e8e8',
-  zone: '#a4d2ff',
-  tile: '#ffd58a',
-  party: '#9eff9e',
-  guild: '#d39bff',
-  dm: '#ff9eee',
-  server: '#888',
-};
+function matches(query: string): boolean {
+  return window.matchMedia?.(query).matches ?? false;
+}
+
+function readStorage(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function writeStorage(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* private mode */ }
+}
 
 /**
- * Floating, draggable, resizable chat window — overlays whichever screen is
- * active. Mobile gets a non-draggable full-screen / bottom-sheet variant
- * (toggled via a layout button).
+ * Chat, docked in the shell rather than floating: a sheet or full panel on phones, a column on desktop.
+ * See docs/architecture/client.md.
  */
 export class ChatPopout {
   private root: HTMLElement;
   private window!: HTMLElement;
+  private tabsRow!: HTMLElement;
+  private filterToggle!: HTMLElement;
+  private filterPop!: HTMLElement;
+  private layoutBtn!: HTMLElement;
+  private threadBar!: HTMLElement;
+  private threadName!: HTMLButtonElement;
+  private threadsEl!: HTMLElement;
   private timelineEl!: HTMLElement;
-  private filtersEl!: HTMLElement;
-  private inputEl!: HTMLInputElement;
+  private newPill!: HTMLElement;
+  private statusEl!: HTMLElement;
+  private composerEl!: HTMLElement;
   private channelSelect!: HTMLSelectElement;
   private dmInput!: HTMLInputElement;
+  private inputEl!: HTMLInputElement;
 
+  /** Held: a query list nothing references can be collected, and its change listener with it. */
+  private columnQuery: MediaQueryList | undefined = window.matchMedia?.(DOCKED_COLUMN_QUERY);
   private gameClient: GameClient;
+  private worldCache?: Pick<WorldCache, 'getTileOn'>;
   private isOpen = false;
-  private messages: ChatMessage[] = [];
-  private filters: Record<ChatChannelType, boolean>;
+  private log = new ChatLog();
+  private filters: ChatFilters;
   private mobileLayout: MobileLayout;
-  private desktopMaximized = false;
   private syncedOnce = false;
+  private preferencesRestored = false;
 
-  /** Toggle handler invoked when chat is closed (so the nav can clear active state). */
+  private tab: ChatTab = 'all';
+  private thread: string | null = null;
+  private allChannel: ChatChannelType = 'global';
+  private membership: ChatMembership = { inParty: false, guildId: null };
+  private blockedKey = '{}';
+
+  private lastSeenAt: number;
+  private seedLastSeenFromBacklog: boolean;
+  private threadBaseline: number;
+  private threadSeenAt = new Map<string, number>();
+  private unreadTabs = new Set<ChatTab>();
+
+  private timelineStale = true;
+  private unrenderedRows: ChatMessage[] = [];
+  private rowCount = 0;
+  private lastRowTimestamp: number | null = null;
+  private following = true;
+  private scrollQueued = false;
+
+  private previewTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastPreviewAt = 0;
+  private statusTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastSend: { text: string; target: string; at: number } | null = null;
+
+  private typing = false;
+  private typingExitTimer: ReturnType<typeof setTimeout> | undefined;
+  private typingBaseHeight = 0;
+  private keyboardSeen = false;
+
   private onClose?: () => void;
-  /** Callback the bottom nav uses to update its unread badge. */
-  private onUnreadChange?: (hasUnread: boolean) => void;
-  /** Callback to open the user popup when a sender name is clicked in the timeline. */
+  private onUnreadChange?: (count: number) => void;
+  private onPreviewChange?: (preview: ChatPreview) => void;
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
-  private hasUnread = false;
+  private unreadCount = 0;
 
-  constructor(gameClient: GameClient) {
+  constructor(gameClient: GameClient, worldCache?: Pick<WorldCache, 'getTileOn'>) {
     this.gameClient = gameClient;
+    this.worldCache = worldCache;
     this.filters = this.loadFilters();
-    this.mobileLayout = (localStorage.getItem(STORAGE_KEY_MOBILE_LAYOUT) as MobileLayout) ?? 'sheet';
-    this.desktopMaximized = localStorage.getItem(STORAGE_KEY_DESKTOP_MAX) === '1';
+    this.mobileLayout = readStorage(STORAGE_KEY_MOBILE_LAYOUT) === 'full' ? 'full' : 'sheet';
+
+    const storedSeen = Number(readStorage(STORAGE_KEY_LAST_SEEN));
+    this.seedLastSeenFromBacklog = !storedSeen;
+    this.lastSeenAt = storedSeen || Date.now();
+    if (!storedSeen) writeStorage(STORAGE_KEY_LAST_SEEN, String(this.lastSeenAt));
+    this.threadBaseline = this.lastSeenAt;
 
     this.root = document.getElementById('chat-popout-root')!;
     this.buildDOM();
 
-    gameClient.onChat((msg) => this.handleChatMessage(msg));
-    // Sync responses are *always* merged, never replaced. The server's `full`
-    // flag means "your sync is consistent" (i.e. your sinceId was honored), not
-    // "this is the entire chat history" — so a successful incremental response
-    // arrives with `full: true` and only the new messages. Replacing on
-    // `full: true` was wiping chat on tab resume.
-    gameClient.onSyncChat((messages) => {
-      let added = false;
-      for (const m of messages) {
-        if (!this.messages.find(x => x.id === m.id)) {
-          this.messages.push(m);
-          added = true;
-        }
-      }
-      if (added) {
-        this.messages.sort((a, b) => a.timestamp - b.timestamp);
-        deferWhilePressed(this.timelineEl, () => this.renderTimeline());
-      }
+    gameClient.onChat((msg) => this.ingest([msg], false));
+    gameClient.onSyncChat((messages) => this.ingest(messages, true));
+    gameClient.subscribe((state) => this.handleState(state), { replay: true });
+    gameClient.onResume(() => gameClient.sendSyncChat(this.log.latestId()));
+    gameClient.onConnection((connected) => {
+      if (connected) gameClient.sendSyncChat(this.log.latestId());
     });
-    gameClient.subscribe((_state: ServerStateMessage) => {
-      // First state: ask server for the chat backlog (no sinceId → last batch).
-      if (!this.syncedOnce) {
-        this.syncedOnce = true;
-        gameClient.sendSyncChat();
-      }
-    });
-    // On tab resume, fetch any messages we missed while the tab was hidden.
-    // Pass the latest-known message ID so the server can do an incremental sync.
-    gameClient.onResume(() => {
-      const latestId = this.getLatestId();
-      gameClient.sendSyncChat(latestId);
-    });
+    gameClient.onServerError((message) => this.handleServerError(message));
   }
 
   setOnClose(cb: () => void): void { this.onClose = cb; }
-  setOnUnreadChange(cb: (hasUnread: boolean) => void): void {
+
+  /** Replays the current count on registration. */
+  setOnUnreadChange(cb: (count: number) => void): void {
     this.onUnreadChange = cb;
-    cb(this.hasUnread);
+    cb(this.unreadCount);
   }
+
+  /** Replays the current preview on registration. Fires at most once a second. */
+  setOnPreviewChange(cb: (preview: ChatPreview) => void): void {
+    this.onPreviewChange = cb;
+    this.paintPreview();
+  }
+
   setOnUserClick(cb: (username: string, anchor: HTMLElement) => void): void {
     this.onUserClick = cb;
   }
@@ -138,73 +192,49 @@ export class ChatPopout {
     if (this.isOpen) return;
     this.isOpen = true;
     this.window.style.display = '';
-    this.applyMobileLayout();
-    this.applyDesktopMaximized();
-    this.hasUnread = false;
-    this.onUnreadChange?.(false);
-    bringToFront(this.window);
     document.body.dataset.chatOpen = '1';
-    // Re-render: messages may have been pushed into this.messages while
-    // chat was closed (handleChatMessage skips renderTimeline when !isOpen),
-    // so the DOM is stale. Always rebuild on open so the user sees them.
-    this.renderTimeline();
-    // Also pull anything that arrived server-side while we were away.
-    this.gameClient.sendSyncChat(this.getLatestId());
-    this.persistOpenState();
-    requestAnimationFrame(() => {
-      this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
-      // Mobile: don't grab focus on open — that pops the soft keyboard over
-      // the timeline, so the user can't read the messages they just opened.
-      if (!this.isMobile()) this.inputEl.focus();
-    });
+    this.applyLayout();
+    this.refreshTabDots();
+    this.markViewSeen();
+    this.markAllSeen();
+    if (this.timelineStale) this.rebuildView();
+    this.gameClient.sendSyncChat(this.log.latestId());
+    writeStorage(STORAGE_KEY_OPEN, '1');
+    this.following = true;
+    this.queueScrollToBottom();
+    if (this.currentLayout() === 'column' && matches(FINE_POINTER_QUERY)) {
+      this.inputEl.focus({ preventScroll: true });
+    }
     this.reportChatFocus();
+    this.paintPreview();
   }
 
-  /** Open the popout and pre-fill the composer for a DM to `username`. */
+  /** Open the panel on the DM thread with `username`. */
   openDm(username: string): void {
     this.open();
-    this.channelSelect.value = 'dm';
-    this.dmInput.value = username;
-    this.dmInput.style.display = '';
-    this.reportChatFocus();
+    this.showThread(username);
   }
 
   close(): void {
     if (!this.isOpen) return;
+    this.exitTyping();
+    this.setFilterPopOpen(false);
+    this.markAllSeen();
     this.isOpen = false;
     this.window.style.display = 'none';
-    release(this.window);
+    release(this.root);
     delete document.body.dataset.chatOpen;
     delete document.body.dataset.chatLayout;
-    this.persistOpenState();
+    writeStorage(STORAGE_KEY_OPEN, '0');
     this.onClose?.();
     this.reportChatFocus();
+    this.paintPreview();
   }
 
-  /**
-   * The popout shows a unified timeline, not per-thread views — so "focused
-   * on a DM thread" means the popout is open with that thread selected in
-   * the composer. Suppresses DM notifications for whoever that is.
-   */
-  private reportChatFocus(): void {
-    const target = this.dmInput.value.trim();
-    if (this.isOpen && this.channelSelect.value === 'dm' && target) {
-      chatFocusTracker.setActiveThread('dm', target);
-    } else {
-      chatFocusTracker.clearActiveThread();
-    }
-  }
-
-  /** True if chat was open last session — caller may call open() during boot. */
+  /** Whether chat should open at boot: remembered, and on the docked column open unless closed before. */
   wasOpen(): boolean {
-    try { return localStorage.getItem(STORAGE_KEY_OPEN) === '1'; } catch { return false; }
-  }
-
-  private persistOpenState(): void {
-    try {
-      if (this.isOpen) localStorage.setItem(STORAGE_KEY_OPEN, '1');
-      else localStorage.removeItem(STORAGE_KEY_OPEN);
-    } catch { /* ignore */ }
+    const stored = readStorage(STORAGE_KEY_OPEN);
+    return stored === '1' || (stored === null && !!this.columnQuery?.matches);
   }
 
   toggle(): void {
@@ -213,363 +243,281 @@ export class ChatPopout {
 
   isVisible(): boolean { return this.isOpen; }
 
-  // ── DOM construction ──────────────────────────────────────────────────
-
   private buildDOM(): void {
+    const tabs = TABS.map(tab => `
+      <button type="button" class="chat-tab" role="tab" data-tab="${tab.id}" aria-selected="false">${tab.label}<span class="chat-tab-dot"></span></button>
+    `).join('');
+    const filters = FILTER_CHANNELS.map(ch => `
+      <button type="button" class="chat-filter" data-ch="${ch}" aria-pressed="false"><span class="chat-filter-dot"></span>${CHANNEL_LABELS[ch]}</button>
+    `).join('');
+
     this.root.innerHTML = `
-      <div class="chat-popout" role="dialog" aria-label="Chat" style="display:none">
-        <div class="chat-popout-header">
-          <span class="chat-popout-title">Chat</span>
-          <div class="chat-popout-header-actions">
-            <button class="chat-popout-layout-btn" title="Toggle layout">⇅</button>
-            <button class="chat-popout-close" title="Close">×</button>
-          </div>
+      <section class="chat-popout" aria-label="Chat" style="display:none">
+        <div class="chat-tabs-row">
+          <div class="chat-tabs" role="tablist" aria-label="Chat views">${tabs}</div>
+          <button type="button" class="chat-icon-btn chat-filter-toggle" aria-label="Filter channels" aria-expanded="false" title="Filter channels">${ICON_FILTER}<span class="chat-filter-mark"></span></button>
+          <button type="button" class="chat-icon-btn chat-popout-layout-btn" aria-label="Expand chat" title="Expand">${ICON_EXPAND}${ICON_COLLAPSE}</button>
+          <button type="button" class="chat-icon-btn chat-popout-close" aria-label="Close chat" title="Close">${ICON_CLOSE}</button>
         </div>
-        <div class="chat-popout-filters"></div>
+        <div class="chat-filter-pop" hidden>${filters}</div>
         <div class="chat-popout-body">
-          <div class="chat-popout-timeline"></div>
+          <div class="chat-thread-bar" hidden>
+            <button type="button" class="chat-thread-back" aria-label="All conversations">${ICON_BACK}</button>
+            <button type="button" class="chat-thread-name"></button>
+          </div>
+          <div class="chat-threads" hidden></div>
+          <div class="chat-popout-timeline" role="log" aria-label="Chat messages"></div>
+          <button type="button" class="chat-new-pill" hidden></button>
+          <div class="chat-status" role="status" hidden></div>
         </div>
         <div class="chat-popout-composer">
-          <select class="chat-popout-channel">
-            <option value="global">Global</option>
-            <option value="zone">Zone</option>
-            <option value="tile">Room</option>
-            <option value="party">Party</option>
-            <option value="guild">Guild</option>
-            <option value="dm">DM</option>
-          </select>
-          <input class="chat-popout-dm-target" type="text" placeholder="DM to..." style="display:none" />
-          <input class="chat-popout-input" type="text" placeholder="Type a message..." maxlength="500" />
-          <button class="chat-popout-send">Send</button>
+          <select class="chat-popout-channel" aria-label="Send to"></select>
+          <input class="chat-popout-dm-target" type="text" placeholder="To…" aria-label="Who to message" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="display:none" />
+          <input class="chat-popout-input" type="text" placeholder="Message…" aria-label="Message" maxlength="500" enterkeyhint="send" autocomplete="off" />
+          <button type="button" class="chat-popout-send">Send</button>
         </div>
-        <div class="chat-popout-resize"></div>
-      </div>
+      </section>
     `;
 
     this.window = this.root.querySelector('.chat-popout')!;
+    this.tabsRow = this.window.querySelector('.chat-tabs-row')!;
+    this.filterToggle = this.window.querySelector('.chat-filter-toggle')!;
+    this.filterPop = this.window.querySelector('.chat-filter-pop')!;
+    this.layoutBtn = this.window.querySelector('.chat-popout-layout-btn')!;
+    this.threadBar = this.window.querySelector('.chat-thread-bar')!;
+    this.threadName = this.window.querySelector('.chat-thread-name')!;
+    this.threadsEl = this.window.querySelector('.chat-threads')!;
     this.timelineEl = this.window.querySelector('.chat-popout-timeline')!;
-    this.filtersEl = this.window.querySelector('.chat-popout-filters')!;
-    this.inputEl = this.window.querySelector('.chat-popout-input')! as HTMLInputElement;
-    this.channelSelect = this.window.querySelector('.chat-popout-channel')! as HTMLSelectElement;
-    this.dmInput = this.window.querySelector('.chat-popout-dm-target')! as HTMLInputElement;
+    this.newPill = this.window.querySelector('.chat-new-pill')!;
+    this.statusEl = this.window.querySelector('.chat-status')!;
+    this.composerEl = this.window.querySelector('.chat-popout-composer')!;
+    this.channelSelect = this.window.querySelector('.chat-popout-channel')!;
+    this.dmInput = this.window.querySelector('.chat-popout-dm-target')!;
+    this.inputEl = this.window.querySelector('.chat-popout-input')!;
 
-    this.renderFilters();
-    this.applyGeometry(this.loadGeometry());
+    this.syncTabs();
+    this.syncChannelOptions();
+    this.syncFilterChips();
+    this.syncComposer();
 
-    this.wireDrag();
-    this.wireResize();
-    this.wireClose();
-    this.wireSend();
-    this.wireChannelChange();
-    this.wireLayoutToggle();
-    this.wireTimelineClicks();
-
-    // Refocus to top of stack on any pointer interaction with the window.
-    wireFocusOnInteract(this.window);
-
-    window.addEventListener('resize', () => {
-      this.applyMobileLayout();
-      this.constrainToViewport();
-    });
+    this.wireHeader();
+    this.wireFilters();
+    this.wireThreads();
+    this.wireTimeline();
+    this.wireComposer();
+    this.wireKeyboard();
+    this.columnQuery?.addEventListener?.('change', () => this.applyLayout());
   }
 
-  private wireClose(): void {
+  private wireHeader(): void {
+    this.window.querySelector('.chat-tabs')!.addEventListener('click', (e) => {
+      const tab = (e.target as Element).closest<HTMLElement>('[data-tab]')?.dataset.tab as ChatTab | undefined;
+      if (tab) this.setTab(tab);
+    });
     this.window.querySelector('.chat-popout-close')!.addEventListener('click', () => this.close());
-  }
-
-  private wireLayoutToggle(): void {
-    this.window.querySelector('.chat-popout-layout-btn')!.addEventListener('click', () => {
-      if (this.isMobile()) {
-        // Mobile: cycle full <-> bottom sheet.
-        this.mobileLayout = this.mobileLayout === 'full' ? 'sheet' : 'full';
-        localStorage.setItem(STORAGE_KEY_MOBILE_LAYOUT, this.mobileLayout);
-        this.applyMobileLayout();
-        return;
-      }
-      // Desktop: toggle maximized full-screen.
-      this.desktopMaximized = !this.desktopMaximized;
-      try { localStorage.setItem(STORAGE_KEY_DESKTOP_MAX, this.desktopMaximized ? '1' : '0'); } catch { /* ignore */ }
-      this.applyDesktopMaximized();
+    this.layoutBtn.addEventListener('click', () => this.setMobileLayout(this.mobileLayout === 'full' ? 'sheet' : 'full'));
+    wireVerticalSwipe(this.tabsRow, {
+      onSwipeDown: () => this.close(),
+      onSwipeUp: () => {
+        if (this.currentLayout() === 'sheet') this.setMobileLayout('full');
+      },
     });
   }
 
-  private applyDesktopMaximized(): void {
-    if (this.isMobile()) {
-      this.window.classList.remove('chat-popout-desktop-max');
-      return;
-    }
-    this.window.classList.toggle('chat-popout-desktop-max', this.desktopMaximized);
-    if (!this.desktopMaximized) {
-      // Restore the saved geometry when un-maximizing.
-      this.applyGeometry(this.loadGeometry());
-      this.constrainToViewport();
+  private setMobileLayout(layout: MobileLayout): void {
+    this.mobileLayout = layout;
+    writeStorage(STORAGE_KEY_MOBILE_LAYOUT, layout);
+    this.applyLayout();
+  }
+
+  private currentLayout(): ChatLayout {
+    return this.columnQuery?.matches ? 'column' : this.mobileLayout;
+  }
+
+  private applyLayout(): void {
+    if (!this.isOpen) return;
+    const layout = this.currentLayout();
+    document.body.dataset.chatLayout = layout;
+    const expanded = layout === 'full';
+    this.layoutBtn.setAttribute('aria-label', expanded ? 'Shrink chat' : 'Expand chat');
+    this.layoutBtn.title = expanded ? 'Shrink' : 'Expand';
+    this.syncStack();
+  }
+
+  /** Only `full` and typing need a z-index, and a flow item with one would trap the sheet under the nav. */
+  private syncStack(): void {
+    if (!this.isOpen) return;
+    const layout = this.currentLayout();
+    if (this.typing || layout === 'full') {
+      bringToFront(this.root, () => this.close());
     } else {
-      // Clear inline geometry so the maximized CSS rule wins.
-      this.window.style.left = '';
-      this.window.style.top = '';
-      this.window.style.right = '';
-      this.window.style.bottom = '';
-      this.window.style.width = '';
-      this.window.style.height = '';
+      release(this.root);
+      if (layout === 'sheet') registerDismiss(this.root, () => this.close());
     }
   }
 
-  private wireSend(): void {
-    const send = () => {
-      const text = this.inputEl.value.trim();
-      if (!text) return;
-      const channel = this.channelSelect.value as ChatChannelType;
-      let channelId = '';
-      if (channel === 'dm') {
-        channelId = this.dmInput.value.trim();
-        if (!channelId) return;
-      }
-      this.gameClient.sendChat(channel, channelId, text);
-      this.inputEl.value = '';
-    };
-
-    this.window.querySelector('.chat-popout-send')!.addEventListener('click', send);
-    this.inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') send();
+  private wireFilters(): void {
+    this.filterToggle.addEventListener('click', () => this.setFilterPopOpen(this.filterPop.hidden));
+    this.filterPop.addEventListener('click', (e) => {
+      const chip = (e.target as Element).closest<HTMLElement>('.chat-filter');
+      const channel = chip?.dataset.ch as ChatChannelType | undefined;
+      if (!channel) return;
+      this.filters[channel] = !this.filters[channel];
+      writeStorage(STORAGE_KEY_FILTERS, JSON.stringify(this.filters));
+      this.syncFilterChips();
+      this.rebuildView();
+      this.paintPreview();
     });
+    document.addEventListener('pointerdown', (e) => {
+      if (this.filterPop.hidden) return;
+      const target = e.target as Element;
+      if (!this.filterPop.contains(target) && !this.filterToggle.contains(target)) this.setFilterPopOpen(false);
+    }, true);
   }
 
-  private wireChannelChange(): void {
-    this.channelSelect.addEventListener('change', () => {
-      const showDm = this.channelSelect.value === 'dm';
-      this.dmInput.style.display = showDm ? '' : 'none';
-      this.reportChatFocus();
-    });
-    this.dmInput.addEventListener('input', () => this.reportChatFocus());
+  private setFilterPopOpen(open: boolean): void {
+    if (open === !this.filterPop.hidden) return;
+    this.filterPop.hidden = !open;
+    this.filterToggle.setAttribute('aria-expanded', String(open));
+    if (open) registerDismiss(this.filterPop, () => this.setFilterPopOpen(false));
+    else release(this.filterPop);
   }
 
-  private wireDrag(): void {
-    const header = this.window.querySelector('.chat-popout-header')! as HTMLElement;
-    let startX = 0, startY = 0, startL = 0, startT = 0;
-    let dragging = false;
-
-    header.addEventListener('pointerdown', (e) => {
-      if (this.isMobile()) return;
-      if (this.desktopMaximized) return;
-      if ((e.target as HTMLElement).closest('button')) return;
-      dragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = this.window.getBoundingClientRect();
-      startL = rect.left;
-      startT = rect.top;
-      header.setPointerCapture(e.pointerId);
-    });
-
-    header.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      // Live-clamp during drag so the window never visually slides behind
-      // the nav / xp bar. The pointerup handler also calls constrainToViewport
-      // as a final safety net.
-      const margin = 8;
-      const vw = window.innerWidth;
-      const bounds = this.getVerticalBounds();
-      const w = this.window.offsetWidth;
-      const h = this.window.offsetHeight;
-      const maxLeft = vw - w - margin;
-      const maxTop = bounds.bottom - h - margin;
-      const left = Math.max(margin, Math.min(maxLeft, startL + dx));
-      const top = Math.max(bounds.top + margin, Math.min(maxTop, startT + dy));
-      this.window.style.left = `${left}px`;
-      this.window.style.top = `${top}px`;
-      this.window.style.right = 'auto';
-      this.window.style.bottom = 'auto';
-    });
-
-    header.addEventListener('pointerup', (e) => {
-      if (!dragging) return;
-      dragging = false;
-      try { header.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-      this.constrainToViewport();
-      this.saveGeometry();
-    });
-  }
-
-  private wireResize(): void {
-    const handle = this.window.querySelector('.chat-popout-resize')! as HTMLElement;
-    let startX = 0, startY = 0, startW = 0, startH = 0;
-    let resizing = false;
-
-    handle.addEventListener('pointerdown', (e) => {
-      if (this.isMobile()) return;
-      if (this.desktopMaximized) return;
-      resizing = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = this.window.getBoundingClientRect();
-      startW = rect.width;
-      startH = rect.height;
-      handle.setPointerCapture(e.pointerId);
-    });
-
-    handle.addEventListener('pointermove', (e) => {
-      if (!resizing) return;
-      const margin = 8;
-      const rect = this.window.getBoundingClientRect();
-      const maxW = window.innerWidth - rect.left - margin;
-      const maxH = this.getVerticalBounds().bottom - rect.top - margin;
-      const w = Math.max(280, Math.min(maxW, startW + (e.clientX - startX)));
-      const h = Math.max(200, Math.min(maxH, startH + (e.clientY - startY)));
-      this.window.style.width = `${w}px`;
-      this.window.style.height = `${h}px`;
-    });
-
-    handle.addEventListener('pointerup', (e) => {
-      if (!resizing) return;
-      resizing = false;
-      try { handle.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-      this.constrainToViewport();
-      this.saveGeometry();
-    });
-  }
-
-  /** Usable band between the top HUD and the XP bar / floating nav (incl. the raised Battle button), measured live. */
-  private getVerticalBounds(): { top: number; bottom: number } {
-    const rectOf = (el: Element | null) => el?.getBoundingClientRect() ?? null;
-    return floatingVerticalBounds(
-      window.innerHeight,
-      [rectOf(document.getElementById('top-hud'))],
-      [
-        rectOf(document.getElementById('persistent-xp-bar')),
-        rectOf(document.getElementById('bottom-nav')),
-        rectOf(document.querySelector('#bottom-nav .nav-tab[data-screen="combat"] .nav-tab-bg')),
-      ],
-    );
-  }
-
-  private constrainToViewport(): void {
-    if (this.isMobile()) return;
-    const rect = this.window.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const { top: minTop, bottom } = this.getVerticalBounds();
-    const margin = 8;
-    let left = rect.left;
-    let top = rect.top;
-    let width = Math.min(rect.width, vw - 2 * margin);
-    let height = Math.min(rect.height, bottom - minTop - 2 * margin);
-    if (left < margin) left = margin;
-    if (top < minTop + margin) top = minTop + margin;
-    if (left + width > vw - margin) left = vw - width - margin;
-    if (top + height > bottom - margin) top = bottom - height - margin;
-    this.window.style.left = `${left}px`;
-    this.window.style.top = `${top}px`;
-    this.window.style.width = `${width}px`;
-    this.window.style.height = `${height}px`;
-    this.window.style.right = 'auto';
-    this.window.style.bottom = 'auto';
-  }
-
-  private isMobile(): boolean {
-    return window.innerWidth < 768;
-  }
-
-  private applyMobileLayout(): void {
-    if (!this.isMobile()) {
-      this.window.classList.remove('chat-popout-mobile-full', 'chat-popout-mobile-sheet');
-      delete document.body.dataset.chatLayout;
-      return;
+  private syncFilterChips(): void {
+    let anyOff = false;
+    for (const chip of this.filterPop.querySelectorAll<HTMLElement>('.chat-filter')) {
+      const on = this.filters[chip.dataset.ch as ChatChannelType] !== false;
+      chip.classList.toggle('active', on);
+      chip.setAttribute('aria-pressed', String(on));
+      anyOff ||= !on;
     }
-    this.window.classList.toggle('chat-popout-mobile-full', this.mobileLayout === 'full');
-    this.window.classList.toggle('chat-popout-mobile-sheet', this.mobileLayout === 'sheet');
-    // Expose layout to CSS so the screen container can dock under the sheet
-    // instead of being overlaid by it.
-    document.body.dataset.chatLayout = this.mobileLayout;
-    this.window.style.left = '';
-    this.window.style.top = '';
-    this.window.style.right = '';
-    this.window.style.bottom = '';
-    this.window.style.width = '';
-    this.window.style.height = '';
+    this.filterToggle.classList.toggle('has-filters-off', anyOff);
   }
 
-  private renderFilters(): void {
-    const channels: ChatChannelType[] = ['global', 'zone', 'tile', 'party', 'guild', 'dm', 'server'];
-    this.filtersEl.innerHTML = channels.map(ch => `
-      <button class="chat-filter ${this.filters[ch] ? 'active' : ''}" data-ch="${ch}" style="--ch-color:${CHANNEL_COLORS[ch]}">
-        ${CHANNEL_LABELS[ch]}
-      </button>
-    `).join('');
-    for (const btn of this.filtersEl.querySelectorAll('.chat-filter')) {
-      btn.addEventListener('click', () => {
-        const ch = btn.getAttribute('data-ch') as ChatChannelType;
-        this.filters[ch] = !this.filters[ch];
-        this.saveFilters();
-        btn.classList.toggle('active', this.filters[ch]);
-        this.renderTimeline();
-      });
+  private setTab(tab: ChatTab): void {
+    if (tab === this.tab && (tab !== 'dm' || !this.thread)) return;
+    this.tab = tab;
+    this.thread = null;
+    this.setFilterPopOpen(false);
+    this.enterView();
+  }
+
+  private showThread(username: string): void {
+    const canonical = canonicalUsername(username, this.gameClient.lastState?.social?.allPlayers);
+    if (!canonical) return;
+    this.tab = 'dm';
+    this.thread = canonical;
+    this.dmInput.value = canonical;
+    this.enterView();
+  }
+
+  private enterView(): void {
+    this.syncTabs();
+    this.syncComposer();
+    this.following = true;
+    this.clearStatus();
+    this.markViewSeen();
+    this.rebuildView();
+    this.reportChatFocus();
+  }
+
+  private currentView(): ChatView {
+    return { tab: this.tab, thread: this.thread };
+  }
+
+  private audience(): ChatAudience {
+    const state = this.gameClient.lastState;
+    return { me: state?.username, blocked: state?.social?.blockedUsers ?? {}, filters: this.filters };
+  }
+
+  private syncTabs(): void {
+    for (const button of this.window.querySelectorAll<HTMLElement>('.chat-tab')) {
+      const id = button.dataset.tab as ChatTab;
+      const selected = id === this.tab;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', String(selected));
+      button.classList.toggle('has-unread', this.unreadTabs.has(id));
+      if (id === 'party') button.hidden = !this.membership.inParty;
+      if (id === 'guild') button.hidden = !this.membership.guildId;
     }
   }
 
-  // ── Messages ──────────────────────────────────────────────────────────
-
-  private handleChatMessage(msg: ChatMessage): void {
-    if (!this.messages.find(m => m.id === msg.id)) {
-      this.messages.push(msg);
-    }
-    if (this.isOpen) {
-      deferWhilePressed(this.timelineEl, () => this.renderTimeline());
-    } else {
-      this.hasUnread = true;
-      this.onUnreadChange?.(true);
-    }
+  private syncChannelOptions(): void {
+    const channels = sendableChannels(this.membership);
+    this.channelSelect.innerHTML = channels
+      .map(ch => `<option value="${ch}">${CHANNEL_LABELS[ch]}</option>`)
+      .join('');
+    if (!channels.includes(this.allChannel)) this.allChannel = 'global';
   }
 
-  private getLatestId(): string | undefined {
-    if (this.messages.length === 0) return undefined;
-    return this.messages[this.messages.length - 1].id;
+  private syncComposer(): void {
+    const onAll = this.tab === 'all';
+    const locked = this.tab === 'party' || this.tab === 'guild';
+    const channel = locked ? this.tab as ChatChannelType : onAll ? this.allChannel : 'dm';
+    this.channelSelect.style.display = this.tab === 'dm' ? 'none' : '';
+    this.channelSelect.disabled = locked;
+    this.channelSelect.value = channel;
+    this.channelSelect.dataset.ch = channel;
+    const needsTarget = (onAll && channel === 'dm') || (this.tab === 'dm' && !this.thread);
+    this.dmInput.style.display = needsTarget ? '' : 'none';
+    this.inputEl.placeholder = this.thread ? `Message ${this.thread}…` : 'Message…';
   }
 
-  private renderTimeline(): void {
-    const visible = this.messages.filter(m => this.filters[m.channelType] !== false);
-    let html = '';
-    let lastTimestamp: number | null = null;
-    for (const m of visible) {
-      if (lastTimestamp === null || !this.isSameCalendarDay(lastTimestamp, m.timestamp)) {
-        html += `<div class="chat-day-separator"><span>${this.formatDayLabel(m.timestamp)}</span></div>`;
-      }
-      html += this.formatMessage(m);
-      lastTimestamp = m.timestamp;
-    }
-    if (!setHtml(this.timelineEl, html)) return;
-    requestAnimationFrame(() => {
-      this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
+  private currentChannel(): ChatChannelType {
+    if (this.tab === 'party' || this.tab === 'guild') return this.tab;
+    return this.tab === 'dm' ? 'dm' : this.allChannel;
+  }
+
+  private wireThreads(): void {
+    this.threadsEl.addEventListener('click', (e) => {
+      const username = (e.target as Element).closest<HTMLElement>('.chat-thread')?.dataset.thread;
+      if (username) this.showThread(username);
+    });
+    this.window.querySelector('.chat-thread-back')!.addEventListener('click', () => {
+      this.thread = null;
+      this.enterView();
+    });
+    this.threadName.addEventListener('click', () => {
+      if (this.thread) this.onUserClick?.(this.thread, this.threadName);
     });
   }
 
-  private formatMessage(msg: ChatMessage): string {
-    const time = this.formatTime(msg.timestamp);
-    const color = CHANNEL_COLORS[msg.channelType] ?? '#e8e8e8';
-    const tag = CHANNEL_LABELS[msg.channelType] ?? msg.channelType;
-    const sender = this.escapeHtml(msg.senderUsername || 'Server');
-    const text = this.escapeHtml(msg.text);
-    // Server messages render as plain spans (no popup / no channel switch);
-    // everything else gets clickable tag (switch send channel) and sender
-    // (open user popup).
-    const isServer = msg.channelType === 'server';
-    const tagHtml = isServer
-      ? `<span class="chat-msg-tag">[${tag}]</span>`
-      : `<button type="button" class="chat-msg-tag chat-msg-tag-btn" data-channel="${msg.channelType}" data-channel-id="${this.escapeHtml(msg.channelId ?? '')}" data-sender="${sender}">[${tag}]</button>`;
-    const senderHtml = isServer
-      ? `<span class="chat-msg-sender">${sender}:</span>`
-      : `<button type="button" class="chat-msg-sender chat-msg-sender-btn" data-user="${sender}">${sender}:</button>`;
-    return `
-      <div class="chat-msg" style="--ch-color:${color}">
-        <span class="chat-msg-time">${time}</span>
-        ${tagHtml}
-        ${senderHtml}
-        <span class="chat-msg-text">${text}</span>
-      </div>
-    `;
+  private renderThreadList(): void {
+    const threads = buildDmThreads(this.log.messages, this.audience(), key => this.threadSeen(key));
+    const players = this.gameClient.lastState?.social?.allPlayers;
+    const me = this.gameClient.lastState?.username;
+    const html = threads.map(thread => {
+      const className = players?.find(p => p.username === thread.username)?.className;
+      const art = className ? renderTrackedImg(artworkUrl('class', className), { className: 'chat-thread-art', alt: '' }) : '';
+      const lastLine = `${thread.last.senderUsername === me ? 'You: ' : ''}${thread.last.text}`;
+      const name = escapeChatHtml(thread.username);
+      return `
+        <button type="button" class="chat-thread${thread.unread ? ' has-unread' : ''}" data-thread="${name}">
+          <span class="chat-thread-avatar">${art}<span class="chat-thread-initials">${escapeChatHtml(placeholderInitials(thread.username))}</span></span>
+          <span class="chat-thread-main">
+            <span class="chat-thread-who">${name}</span>
+            <span class="chat-thread-last">${escapeChatHtml(lastLine)}</span>
+          </span>
+          <span class="chat-thread-time">${formatChatTime(thread.last.timestamp)}</span>
+          <span class="chat-thread-dot"></span>
+        </button>
+      `;
+    }).join('');
+    setHtml(this.threadsEl, html || '<div class="ui-empty chat-empty">No conversations yet. Tap a player\'s name to message them, or type a name below.</div>');
   }
 
-  private wireTimelineClicks(): void {
+  private threadSeen(key: string): number {
+    return this.threadSeenAt.get(key) ?? this.threadBaseline;
+  }
+
+  private syncDmDot(): void {
+    const unread = buildDmThreads(this.log.messages, this.audience(), key => this.threadSeen(key)).some(t => t.unread);
+    if (unread) this.unreadTabs.add('dm');
+    else this.unreadTabs.delete('dm');
+    this.syncTabs();
+  }
+
+  private wireTimeline(): void {
     this.timelineEl.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       const senderBtn = target.closest<HTMLElement>('.chat-msg-sender-btn');
@@ -579,97 +527,430 @@ export class ChatPopout {
         return;
       }
       const tagBtn = target.closest<HTMLElement>('.chat-msg-tag-btn');
-      if (tagBtn) {
-        const channel = tagBtn.dataset.channel as ChatChannelType | undefined;
-        if (!channel) return;
-        this.selectSendChannel(channel, tagBtn.dataset.channelId ?? '', tagBtn.dataset.sender ?? '');
-      }
+      const channel = tagBtn?.dataset.channel as ChatChannelType | undefined;
+      if (channel) this.selectSendChannel(channel, tagBtn?.dataset.channelId ?? '', tagBtn?.dataset.sender ?? '');
     });
+    this.timelineEl.addEventListener('scroll', () => {
+      const el = this.timelineEl;
+      this.following = el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_SLOP_PX;
+      if (this.following && this.unrenderedRows.length > 0) this.queueTimelinePaint();
+    }, { passive: true });
+    this.newPill.addEventListener('click', () => {
+      this.following = true;
+      this.flushRows();
+    });
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => {
+        if (this.following) this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
+      }).observe(this.timelineEl);
+    }
   }
 
-  /**
-   * Switch the composer to the given channel (and for DMs, populate the
-   * target with the "other party" inferred from the clicked message).
-   */
   private selectSendChannel(channel: ChatChannelType, channelId: string, sender: string): void {
     if (channel === 'server') return;
-    this.channelSelect.value = channel;
-    // dispatch change so the DM target field shows/hides as needed
-    this.channelSelect.dispatchEvent(new Event('change'));
     if (channel === 'dm') {
       const me = this.gameClient.lastState?.username;
-      // If this DM was sent by me, the "other party" is channelId; otherwise
-      // it's the sender. Either way the DM target is the *other* participant.
-      const target = (sender && me && sender === me) ? channelId : sender;
-      if (target) this.dmInput.value = target;
+      const partner = sender && me && sender === me ? channelId : sender;
+      if (partner) this.showThread(partner);
+    } else if (sendableChannels(this.membership).includes(channel)) {
+      this.allChannel = channel;
+      this.syncComposer();
+      this.persistPreferences();
     }
     this.inputEl.focus();
   }
 
-  private formatTime(ts: number): string {
-    const d = new Date(ts);
-    const h = d.getHours().toString().padStart(2, '0');
-    const m = d.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
+  private wireComposer(): void {
+    const send = this.composerEl.querySelector('.chat-popout-send')!;
+    // Keeps the keyboard up: the tap must not take focus from the input.
+    send.addEventListener('mousedown', (e) => e.preventDefault());
+    send.addEventListener('click', () => {
+      this.send();
+      if (!matches(COARSE_POINTER_QUERY)) this.inputEl.focus();
+    });
+    this.inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) this.send();
+    });
+    this.inputEl.addEventListener('input', () => this.clearStatus());
+    this.channelSelect.addEventListener('change', () => {
+      if (this.tab !== 'all') return;
+      this.allChannel = this.channelSelect.value as ChatChannelType;
+      this.syncComposer();
+      this.persistPreferences();
+    });
+    this.dmInput.addEventListener('change', () => {
+      if (this.tab === 'all') this.persistPreferences();
+    });
   }
 
-  private isSameCalendarDay(a: number, b: number): boolean {
-    const da = new Date(a);
-    const db = new Date(b);
-    return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+  private persistPreferences(): void {
+    this.gameClient.sendSetChatPreferences(this.allChannel, this.dmInput.value.trim());
   }
 
-  /** "Today" / "Yesterday" / a short date — used for the day-separator between messages. */
-  private formatDayLabel(ts: number): string {
-    const now = Date.now();
-    if (this.isSameCalendarDay(ts, now)) return 'Today';
-    if (this.isSameCalendarDay(ts, now - 24 * 60 * 60 * 1000)) return 'Yesterday';
-    const d = new Date(ts);
-    const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-    if (d.getFullYear() !== new Date(now).getFullYear()) opts.year = 'numeric';
-    return d.toLocaleDateString(undefined, opts);
+  private send(): void {
+    const text = this.inputEl.value.trim();
+    if (!text) return;
+    const channel = this.currentChannel();
+    const dmTarget = this.thread ?? this.dmInput.value;
+    const target = resolveSendTarget(channel, dmTarget, this.gameClient.lastState, this.worldCache?.getTileOn.bind(this.worldCache));
+    if (!target.ok) {
+      this.showStatus(target.reason);
+      return;
+    }
+    if (!this.gameClient.sendChat(channel, target.channelId, text)) {
+      this.showStatus('Not connected. Your message wasn\'t sent.');
+      return;
+    }
+    this.lastSend = { text, target: channel === 'dm' ? target.channelId : '', at: Date.now() };
+    this.inputEl.value = '';
+    this.clearStatus();
+    if (this.tab === 'dm' && !this.thread) this.showThread(target.channelId);
   }
 
-  private escapeHtml(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  /** A mistyped DM name comes back as a plain error rather than an echo, so the text is put back for another try. */
+  private handleServerError(message: string): void {
+    const sent = this.lastSend;
+    if (!sent?.target || !USER_NOT_FOUND.test(message) || Date.now() - sent.at > SEND_REJECTION_WINDOW_MS) return;
+    this.lastSend = null;
+    if (!this.inputEl.value) this.inputEl.value = sent.text;
+    if (this.tab === 'dm' && this.thread && sameUser(this.thread, sent.target)) {
+      this.thread = null;
+      this.enterView();
+    }
+    this.showStatus(`No player is called "${sent.target}".`);
   }
 
-  // ── Persistence ───────────────────────────────────────────────────────
+  private showStatus(text: string): void {
+    this.statusEl.textContent = text;
+    this.statusEl.hidden = false;
+    clearTimeout(this.statusTimer);
+    this.statusTimer = setTimeout(() => this.clearStatus(), STATUS_VISIBLE_MS);
+  }
 
-  private loadGeometry(): Geometry {
+  private clearStatus(): void {
+    clearTimeout(this.statusTimer);
+    this.statusEl.hidden = true;
+  }
+
+  private wireKeyboard(): void {
+    this.composerEl.addEventListener('focusin', (e) => {
+      clearTimeout(this.typingExitTimer);
+      if (e.target instanceof HTMLInputElement) this.enterTyping();
+    });
+    this.composerEl.addEventListener('focusout', () => {
+      clearTimeout(this.typingExitTimer);
+      this.typingExitTimer = setTimeout(() => {
+        if (!this.composerEl.contains(document.activeElement)) this.exitTyping();
+      }, TYPING_EXIT_DELAY_MS);
+    });
+    window.visualViewport?.addEventListener('resize', () => this.watchKeyboard());
+    window.addEventListener('orientationchange', () => this.leaveComposer());
+  }
+
+  private enterTyping(): void {
+    if (this.typing || !this.isOpen || !matches(COARSE_POINTER_QUERY)) return;
+    this.typing = true;
+    this.keyboardSeen = false;
+    this.typingBaseHeight = window.visualViewport?.height ?? 0;
+    const screen = document.getElementById('screen-container');
+    if (screen) screen.style.height = `${screen.offsetHeight}px`;
+    document.body.dataset.chatTyping = '1';
+    this.syncStack();
+  }
+
+  private exitTyping(): void {
+    clearTimeout(this.typingExitTimer);
+    if (!this.typing) return;
+    this.typing = false;
+    delete document.body.dataset.chatTyping;
+    document.getElementById('screen-container')?.style.removeProperty('height');
+    this.syncStack();
+  }
+
+  /** Android can hide the keyboard and leave the input focused, which no focus event reports. */
+  private watchKeyboard(): void {
+    const height = window.visualViewport?.height;
+    if (!this.typing || height === undefined) return;
+    this.typingBaseHeight = Math.max(this.typingBaseHeight, height);
+    const shrink = this.typingBaseHeight - height;
+    if (shrink >= KEYBOARD_SHOWN_MIN_SHRINK_PX) this.keyboardSeen = true;
+    else if (this.keyboardSeen && shrink <= KEYBOARD_GONE_MAX_SHRINK_PX) this.leaveComposer();
+  }
+
+  private leaveComposer(): void {
+    if (!this.typing) return;
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    this.exitTyping();
+  }
+
+  private handleState(state: ServerStateMessage): void {
+    if (!this.syncedOnce) {
+      this.syncedOnce = true;
+      this.gameClient.sendSyncChat(this.log.latestId());
+    }
+    if (!state.social) return;
+    this.syncMembership(state);
+    this.restorePreferences(state);
+
+    const blockedKey = JSON.stringify(state.social.blockedUsers ?? {});
+    if (blockedKey !== this.blockedKey) {
+      this.blockedKey = blockedKey;
+      this.invalidateView();
+      this.schedulePreview();
+    }
+  }
+
+  private syncMembership(state: ServerStateMessage): void {
+    const next = chatMembership(state);
+    if (next.inParty === this.membership.inParty && next.guildId === this.membership.guildId) return;
+    this.membership = next;
+    deferWhilePressed(this.composerEl, () => {
+      this.syncChannelOptions();
+      this.syncComposer();
+    });
+    if ((this.tab === 'party' && !next.inParty) || (this.tab === 'guild' && !next.guildId)) {
+      this.tab = 'all';
+      this.enterView();
+    } else {
+      this.syncTabs();
+    }
+  }
+
+  private restorePreferences(state: ServerStateMessage): void {
+    if (this.preferencesRestored) return;
+    this.preferencesRestored = true;
+    const preferences = state.social?.chatPreferences;
+    if (!preferences) return;
+    if (preferences.dmTarget) this.dmInput.value = preferences.dmTarget;
+    if (sendableChannels(this.membership).includes(preferences.sendChannel)) {
+      this.allChannel = preferences.sendChannel;
+    }
+    this.syncComposer();
+  }
+
+  private ingest(incoming: readonly ChatMessage[], fromSync: boolean): void {
+    const { added, inOrder } = this.log.add(incoming);
+    if (fromSync && this.seedLastSeenFromBacklog) this.seedLastSeen();
+    if (added.length === 0) return;
+    const me = this.gameClient.lastState?.username;
+
+    if (this.isOpen) {
+      this.noteUnreadTabs(added);
+      this.clearViewedTabDots();
+      this.markThreadSeen();
+      this.markAllSeen();
+      if (added.some(m => m.channelType === 'dm')) this.syncDmDot();
+      else this.syncTabs();
+      if (!inOrder) {
+        this.timelineStale = true;
+      } else {
+        const audience = this.audience();
+        const view = this.currentView();
+        const rows = added.filter(m => isShownInView(m, view, audience));
+        if (rows.some(m => m.senderUsername === me)) this.following = true;
+        this.unrenderedRows.push(...rows);
+      }
+      this.queueTimelinePaint();
+      if (this.tab === 'dm' && !this.thread && added.some(m => m.channelType === 'dm')) {
+        deferWhilePressed(this.threadsEl, () => this.renderThreadList());
+      }
+    } else {
+      this.timelineStale = true;
+    }
+    if (this.lastSend && added.some(m => m.senderUsername === me && m.text === this.lastSend?.text)) this.lastSend = null;
+    this.schedulePreview();
+  }
+
+  /** First run: the server's clock, not this device's, decides what counts as already read. */
+  private seedLastSeen(): void {
+    this.seedLastSeenFromBacklog = false;
+    const newest = this.log.newestTimestamp();
+    if (!newest) return;
+    this.lastSeenAt = newest;
+    this.threadBaseline = newest;
+    writeStorage(STORAGE_KEY_LAST_SEEN, String(newest));
+  }
+
+  private markAllSeen(): void {
+    const newest = this.log.newestTimestamp();
+    if (newest <= this.lastSeenAt) return;
+    this.lastSeenAt = newest;
+    writeStorage(STORAGE_KEY_LAST_SEEN, String(newest));
+  }
+
+  private markViewSeen(): void {
+    this.clearViewedTabDots();
+    this.markThreadSeen();
+    this.syncDmDot();
+  }
+
+  /** The All tab shows party and guild lines too, but a DM stays unread until its own thread is opened. */
+  private clearViewedTabDots(): void {
+    if (this.tab === 'dm') return;
+    this.unreadTabs.delete(this.tab);
+    if (this.tab === 'all') {
+      this.unreadTabs.delete('party');
+      this.unreadTabs.delete('guild');
+    }
+  }
+
+  private markThreadSeen(): void {
+    if (this.tab === 'dm' && this.thread) this.threadSeenAt.set(this.thread.toLowerCase(), this.log.newestTimestamp());
+  }
+
+  /** Tab dots for what came in while chat was closed, before the last-seen time moves past it. */
+  private refreshTabDots(): void {
+    this.noteUnreadTabs(this.log.messages.filter(m => m.timestamp > this.lastSeenAt));
+  }
+
+  private noteUnreadTabs(messages: readonly ChatMessage[]): void {
+    const audience = this.audience();
+    for (const message of messages) {
+      if (message.senderUsername === audience.me || isBlockedMessage(message, audience.blocked)) continue;
+      if (message.channelType === 'server') continue;
+      if (message.channelType === 'party' || message.channelType === 'guild') this.unreadTabs.add(message.channelType);
+      if (this.filters[message.channelType] !== false) this.unreadTabs.add('all');
+    }
+  }
+
+  private invalidateView(): void {
+    this.timelineStale = true;
+    if (this.isOpen) this.queueTimelinePaint();
+  }
+
+  /** One paint for both cases: only the latest deferred paint per root survives a press, and a rebuild must not be lost. */
+  private queueTimelinePaint(): void {
+    deferWhilePressed(this.timelineEl, () => {
+      if (this.timelineStale) this.rebuildView();
+      else this.flushRows();
+    });
+  }
+
+  private rebuildView(): void {
+    const listing = this.tab === 'dm' && !this.thread;
+    this.threadsEl.hidden = !listing;
+    this.timelineEl.hidden = listing;
+    this.threadBar.hidden = !(this.tab === 'dm' && this.thread);
+    this.threadName.textContent = this.thread ?? '';
+    this.unrenderedRows = [];
+    this.syncNewPill();
+    if (listing) {
+      this.renderThreadList();
+      this.timelineStale = false;
+      return;
+    }
+    const audience = this.audience();
+    const view = this.currentView();
+    const visible = this.log.messages.filter(m => isShownInView(m, view, audience));
+    const { html, rows, lastTimestamp } = renderChatRows(visible, this.rowOptions());
+    this.rowCount = rows;
+    this.lastRowTimestamp = lastTimestamp;
+    // Rows are appended afterwards, so setHtml's memory of the last write would be wrong here.
+    this.timelineEl.innerHTML = rows > 0 ? html : `<div class="ui-empty chat-empty">${this.emptyText()}</div>`;
+    this.timelineStale = false;
+    if (this.following) this.queueScrollToBottom();
+  }
+
+  private rowOptions(): ChatRowOptions {
+    return { me: this.gameClient.lastState?.username, showChannel: this.tab === 'all' };
+  }
+
+  private emptyText(): string {
+    if (this.tab === 'party') return 'No party messages yet.';
+    if (this.tab === 'guild') return 'No guild messages yet.';
+    if (this.tab === 'dm') return `No messages with ${escapeChatHtml(this.thread ?? '')} yet. Say hello.`;
+    const anyOn = FILTER_CHANNELS.some(ch => this.filters[ch] !== false);
+    return anyOn ? 'No messages yet.' : 'Every channel is filtered out. Use the filter button to turn some back on.';
+  }
+
+  private flushRows(): void {
+    if (!this.isOpen || this.unrenderedRows.length === 0) {
+      this.syncNewPill();
+      return;
+    }
+    if (!this.following) {
+      this.syncNewPill();
+      return;
+    }
+    const rows = this.unrenderedRows;
+    this.unrenderedRows = [];
+    this.syncNewPill();
+    if (this.rowCount === 0 || rows.length >= CHAT_ROW_CAP) {
+      this.rebuildView();
+      return;
+    }
+    const options = this.rowOptions();
+    let html = '';
+    for (const message of rows) {
+      if (this.lastRowTimestamp === null || !isSameChatDay(this.lastRowTimestamp, message.timestamp)) {
+        html += renderDaySeparator(message.timestamp);
+      }
+      html += renderChatRow(message, options);
+      this.lastRowTimestamp = message.timestamp;
+    }
+    this.timelineEl.insertAdjacentHTML('beforeend', html);
+    this.rowCount += rows.length;
+    while (this.rowCount > CHAT_ROW_CAP) {
+      const first = this.timelineEl.firstElementChild;
+      if (!first) break;
+      if (first.classList.contains('chat-msg')) this.rowCount--;
+      first.remove();
+    }
+    this.queueScrollToBottom();
+  }
+
+  private syncNewPill(): void {
+    const count = this.unrenderedRows.length;
+    this.newPill.hidden = count === 0;
+    if (count > 0) this.newPill.textContent = `↓ ${count > 99 ? '99+' : count} new`;
+  }
+
+  private queueScrollToBottom(): void {
+    if (this.scrollQueued) return;
+    this.scrollQueued = true;
+    requestAnimationFrame(() => {
+      this.scrollQueued = false;
+      if (this.following) this.timelineEl.scrollTop = this.timelineEl.scrollHeight;
+    });
+  }
+
+  private schedulePreview(): void {
+    if (this.isOpen || this.previewTimer !== undefined) return;
+    const wait = PREVIEW_MIN_INTERVAL_MS - (Date.now() - this.lastPreviewAt);
+    if (wait <= 0) {
+      this.paintPreview();
+      return;
+    }
+    this.previewTimer = setTimeout(() => this.paintPreview(), wait);
+  }
+
+  private paintPreview(): void {
+    clearTimeout(this.previewTimer);
+    this.previewTimer = undefined;
+    this.lastPreviewAt = Date.now();
+    const preview = chatPreview(this.log.messages, this.lastSeenAt, this.audience());
+    const count = this.isOpen ? 0 : preview.count;
+    if (count !== this.unreadCount) {
+      this.unreadCount = count;
+      this.onUnreadChange?.(count);
+    }
+    this.onPreviewChange?.({ count, message: preview.message });
+  }
+
+  /** The server suppresses DM notifications for this thread, so it must be the one really on screen. */
+  private reportChatFocus(): void {
+    if (this.isOpen && this.tab === 'dm' && this.thread) {
+      chatFocusTracker.setActiveThread('dm', this.thread);
+    } else {
+      chatFocusTracker.clearActiveThread();
+    }
+  }
+
+  private loadFilters(): ChatFilters {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_GEOMETRY);
-      if (raw) return JSON.parse(raw) as Geometry;
-    } catch { /* ignore */ }
-    return { x: window.innerWidth - 380, y: 80, width: 360, height: 440 };
-  }
-
-  private saveGeometry(): void {
-    if (this.isMobile()) return;
-    const rect = this.window.getBoundingClientRect();
-    const geom: Geometry = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
-    localStorage.setItem(STORAGE_KEY_GEOMETRY, JSON.stringify(geom));
-  }
-
-  private applyGeometry(g: Geometry): void {
-    if (this.isMobile()) return;
-    this.window.style.left = `${g.x}px`;
-    this.window.style.top = `${g.y}px`;
-    this.window.style.width = `${g.width}px`;
-    this.window.style.height = `${g.height}px`;
-    this.window.style.right = 'auto';
-    this.window.style.bottom = 'auto';
-  }
-
-  private loadFilters(): Record<ChatChannelType, boolean> {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_FILTERS);
-      if (raw) return { ...DEFAULT_FILTERS, ...JSON.parse(raw) };
-    } catch { /* ignore */ }
-    return { ...DEFAULT_FILTERS };
-  }
-
-  private saveFilters(): void {
-    localStorage.setItem(STORAGE_KEY_FILTERS, JSON.stringify(this.filters));
+      const raw = readStorage(STORAGE_KEY_FILTERS);
+      if (raw) return { ...DEFAULT_CHAT_FILTERS, ...JSON.parse(raw) };
+    } catch { /* corrupt value */ }
+    return { ...DEFAULT_CHAT_FILTERS };
   }
 }

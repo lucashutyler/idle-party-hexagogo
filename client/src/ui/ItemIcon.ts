@@ -92,6 +92,8 @@ export interface ItemIconOptions {
   dataAttrs?: Record<string, string>;
   /** Hover text in place of the item name. */
   tooltip?: string;
+  /** Focusable with a button role; pair with `wireRoleButtons` on a parent. */
+  interactive?: boolean;
 }
 
 /**
@@ -135,11 +137,27 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
 
   const tooltip = escapeHtml(options?.tooltip ?? def.name);
   const title = options?.tooltip ? ` title="${tooltip}"` : '';
-  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${tooltip}"${title} style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
+  const role = options?.interactive ? ` role="button" tabindex="0" aria-label="${escapeHtml(def.name)}"` : '';
+  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${tooltip}"${title}${role} style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
+}
+
+export interface ItemCellOptions extends Omit<ItemIconOptions, 'interactive'> {
+  /** Dims the cell: this character can't use the item. */
+  unusable?: boolean;
+}
+
+/** An item square with its name beneath, for grids where a square alone doesn't identify the item. */
+export function renderItemCell(itemId: string, def: ItemDefinition, options?: ItemCellOptions): string {
+  const color = RARITY_COLORS[def.rarity ?? 'common'] ?? RARITY_COLORS.common;
+  const unusable = options?.unusable ? ' item-cell-unusable' : '';
+  const label = escapeHtml(options?.unusable ? `${def.name}, can't be used by your class` : def.name);
+  return `<div class="item-cell${unusable}" role="button" tabindex="0" aria-label="${label}">`
+    + renderItemIcon(itemId, def, options)
+    + `<span class="item-cell-name" style="color:${color}">${escapeHtml(def.name)}</span></div>`;
 }
 
 /** Empty equipment slot showing a faded slot icon. */
-export function renderEmptySlotIcon(slot: string, options?: { extraClass?: string; dataAttrs?: Record<string, string> }): string {
+export function renderEmptySlotIcon(slot: string, options?: { extraClass?: string; dataAttrs?: Record<string, string>; interactive?: boolean }): string {
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
   const dataStr = options?.dataAttrs
     ? Object.entries(options.dataAttrs).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('')
@@ -147,5 +165,17 @@ export function renderEmptySlotIcon(slot: string, options?: { extraClass?: strin
   const label = SLOT_LABELS[slot] ?? slot;
 
   const ghost = renderSlotArt(slot, 'item-slot-ghost', 'item-slot-ghost-img', 'item-slot-ghost-glyph');
-  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}"${dataStr}>${ghost}</div>`;
+  const role = options?.interactive ? ` role="button" tabindex="0" aria-label="${escapeHtml(label)}, empty"` : '';
+  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" title="${escapeHtml(label)}"${role}${dataStr}>${ghost}</div>`;
+}
+
+/** Enter and Space activate `[role="button"]` children, so div-based tiles work from the keyboard. */
+export function wireRoleButtons(root: HTMLElement): void {
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const target = e.target as HTMLElement;
+    if (target.getAttribute('role') !== 'button') return;
+    e.preventDefault();
+    target.click();
+  });
 }

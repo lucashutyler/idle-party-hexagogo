@@ -2,6 +2,9 @@ import type { ItemDefinition, SetDefinition, SkillDefinition } from '@idle-party
 import { getItemEffectText, getSetsForItem, getSetBonusText, getSetDisplayName, getActiveBreakpoint, canClassEquipItem } from '@idle-party-rpg/shared';
 import { RARITY_COLORS, SLOT_LABELS, SHINY_RARITIES, getItemInitials, escapeHtml } from './ItemIcon';
 import { artworkUrl, renderTrackedImg } from './assets';
+import { bringToFront, release } from './ModalStack';
+
+export const ITEM_POPUP_CLOSE_HTML = '<button type="button" class="item-popup-close" aria-label="Close">&times;</button>';
 
 export interface ItemPopupOptions {
   /** Item definitions for looking up set piece names */
@@ -130,18 +133,25 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 }
 
 /**
- * Show an item popup modal overlay. Returns the overlay element.
+ * Show an item popup modal overlay on the modal stack. Returns the overlay element.
  * Caller is responsible for wiring action button click handlers.
  */
 export function showItemPopup(def: ItemDefinition, options?: ItemPopupOptions): HTMLElement {
   const overlay = document.createElement('div');
   overlay.className = 'item-popup-overlay';
-  overlay.innerHTML = `<div class="item-popup">${renderItemPopupContent(def, options)}</div>`;
+  overlay.innerHTML = `<div class="item-popup" role="dialog" aria-modal="true">${ITEM_POPUP_CLOSE_HTML}${renderItemPopupContent(def, options)}</div>`;
 
+  const close = () => closeItemPopup(overlay);
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    if (e.target === overlay || (e.target as Element).closest('.item-popup-close')) close();
   });
 
   document.body.appendChild(overlay);
+  bringToFront(overlay, close);
   return overlay;
+}
+
+export function closeItemPopup(overlay: HTMLElement): void {
+  release(overlay);
+  overlay.remove();
 }

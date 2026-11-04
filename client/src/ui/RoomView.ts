@@ -22,14 +22,7 @@ export type RoomForecastState =
 /** Returns what to show for a room's forecast right now (requesting it when needed). */
 export type RoomForecastProvider = (tileId: string) => RoomForecastState;
 
-/**
- * RoomView replaces the old TileInfoModal with three states:
- *   - **Current room (you're here)** — near-full-screen, background image,
- *     parties grouped, one button per room action.
- *   - **Remote room (discovered)** — smaller centered popup, lists what's
- *     there, primary action is "Go to room".
- *   - **Undiscovered room** — the smaller popup with minimal info.
- */
+/** The full room card: your own room with its actions, or another room's contents behind the sheet's Details. */
 export class RoomView {
   private overlay: HTMLElement;
   private modal: HTMLElement;
@@ -115,7 +108,7 @@ export class RoomView {
 
     this.overlay.style.display = 'flex';
     this.overlay.classList.toggle('room-view-overlay-current', isCurrent);
-    bringToFront(this.overlay);
+    bringToFront(this.overlay, () => this.hide());
     this.initForecastSlot();
 
     // If we just transitioned from a remote popup at this same tile, animate

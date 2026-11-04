@@ -1,36 +1,8 @@
-/**
- * WebGL-backed world map renderer (replaces CanvasWorldMap).
- *
- * Rendering split:
- *   • three.js (WebGL canvas) renders the *static* layers — parchment
- *     background, drop shadow, baked tile composite (tile fills + artwork
- *     + outlines + zone overlay + zone borders). These are uploaded as
- *     textures and the per-frame work collapses to a camera-matrix update.
- *   • An HTML overlay (`.three-map-overlay`) sits on top of the canvas
- *     and hosts every *dynamic* element — party sprite, other-player
- *     flags + count badges, room-action markers, hover highlight, path
- *     preview. The overlay carries a single `transform: translate scale translate` mirroring
- *     the three.js camera, so a single style update moves all children
- *     together when the user pans/zooms.
- *   • The tooltip is a separate cursor-positioned element (no map
- *     transform).
- *
- * Why this matters: the WebGL scene is render-on-demand. Idle = zero
- * GPU/CPU. Panning re-renders the scene but the textures are already on
- * the GPU. Party pulse + tween live entirely in CSS so they don't drive
- * any JS frame work.
- *
- * Public API parity with the prior CanvasWorldMap:
- *   setSendMove, setOnTileClick, adjustZoom, applyServerState,
- *   rebuildFromCache, recenterOnPlayer, pause, resume, destroy.
- */
-
 import * as THREE from 'three';
 import {
   HexGrid,
   HexTile,
   HEX_SIZE,
-  getHexCorners,
   getNeighbors,
   pixelToCube,
   offsetToCube,
@@ -44,8 +16,15 @@ import type {
   OtherPlayerState,
   WorldTileDefinition,
 } from '@idle-party-rpg/shared';
+import { classIconHtml } from '@idle-party-rpg/shared';
 import type { WorldCache } from '../network/WorldCache';
-import { artworkUrl } from './assets';
+import { artworkUrl, placeholderInitials, renderTrackedImg } from './assets';
+import { COAST_OFFSET_Y, COAST_PAD, MapBaker, SEA_COLOR, createSeaFallbackCanvas } from './MapBaker';
+import type { BakeRoom } from './MapBaker';
+import { hexVariant, isLandmarkType, lodForZoom, outsideFollowFrame, pickZoneLabels, terrainMaterial, zoneLabelAnchors } from './mapTerrain';
+import type { ZoneLabelAnchor } from './mapTerrain';
+import { reducedMotion } from './motion';
+import { setHtml } from './render';
 import { ROOM_ICONS, getRoomActions, questMarks, questPipClass } from './RoomActions';
 import type { QuestMarks, RoomAction } from './RoomActions';
 import { pendingVisitTargets, questMarkerKey } from './QuestTargets';
@@ -66,41 +45,34 @@ export interface TileClickInfo {
   dungeonId?: string;
 }
 
-// ─── Render constants ─────────────────────────────────────────
-// Party sprite colors live in CSS — see `.three-map-party-inner` and its
-// data-visual variants (default green, fighting orange, defeat red).
-
-const PARCHMENT_FALLBACK_COLOR = '#3a2a1a';
-
-const MIN_TILES_VISIBLE = 15;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 2.5;
-const ZOOM_STEPS = [0.4, 0.7, 1.0, 1.5, 2.5] as const;
-const ZOOM_STORAGE_KEY = 'mapZoom';
+const ZOOM_STEPS = [0.4, 0.65, 1.0, 1.5, 2.5] as const;
+const ZOOM_STORAGE_KEY = 'mapZoom2';
+const PHONE_DEFAULT_ZOOM = 0.65;
+const DESKTOP_DEFAULT_ZOOM = 1;
+const PHONE_SHORT_SIDE_PX = 600;
 
 const OVERDRAG_FACTOR = 0.25;
 const SPRING_DURATION = 250;
+const FOLLOW_TWEEN_MS = 300;
+const ZOOM_TWEEN_MS = 140;
 const DRAG_THRESHOLD = 5;
 
-const DIR_TO_EDGE: [number, number][] = [
-  [0, 1],
-  [5, 0],
-  [4, 5],
-  [3, 4],
-  [2, 3],
-  [1, 2],
-];
+const BAKE_BUDGET_MS = 8;
+const ART_FLUSH_MS = 1000;
+const ART_FLUSH_RETRY_MS = 300;
+const MAX_DPR = 2;
+const FALLBACK_MAX_TEXTURE = 8192;
 
-const SHADOW_OFFSET_X_WORLD = 40;
-const SHADOW_OFFSET_Y_WORLD = 60;
-const SHADOW_ALPHA = 0.5;
-const SHADOW_BLUR_RADIUS = 10;
-const SHADOW_BLUR_PAD = 30;
-
-// Parchment plane is sized to a fixed quad and follows the camera at a
-// reduced rate so it reads as a deeper background layer (parallax).
+const PARCHMENT_MIN_SIZE = 8000;
+const PARCHMENT_TILE_PX = 256;
+/** Share of the camera's motion the sea plane absorbs, so it reads as a deeper layer. */
 const PARCHMENT_PARALLAX = 0.3;
+const PARCHMENT_VIEW_MARGIN = 2500;
 
+const LABEL_CLEAR_X_PX = 72;
+const LABEL_CLEAR_Y_PX = 30;
 const MAX_MARKER_ICONS = 3;
 const TOOLTIP_MARGIN = 4;
 const QUEST_TARGET_ICON = '📜';
@@ -112,50 +84,24 @@ interface TileOccupancy {
   inDungeon: boolean;
 }
 
-// ─── Image cache ──────────────────────────────────────────────
-
-interface CachedImage {
-  img: HTMLImageElement;
-  loaded: boolean;
-  failed: boolean;
+interface CameraAnim {
+  startX: number;
+  startY: number;
+  startZoom: number;
+  targetX: number;
+  targetY: number;
+  targetZoom: number;
+  startTime: number;
+  duration: number;
 }
-
-class ImageCache {
-  private cache = new Map<string, CachedImage>();
-
-  get(url: string, fallbackUrl: string | null, onLoad: () => void): HTMLImageElement | null {
-    const existing = this.cache.get(url);
-    if (existing) {
-      if (existing.loaded) return existing.img;
-      return null;
-    }
-    const entry: CachedImage = {
-      img: new Image(),
-      loaded: false,
-      failed: false,
-    };
-    this.cache.set(url, entry);
-    entry.img.onload = () => {
-      entry.loaded = true;
-      onLoad();
-    };
-    entry.img.onerror = () => {
-      if (fallbackUrl && entry.img.src !== fallbackUrl) {
-        entry.img.src = fallbackUrl;
-      } else {
-        entry.failed = true;
-      }
-    };
-    entry.img.src = url;
-    return null;
-  }
-}
-
-// ─── Easing ───────────────────────────────────────────────────
 
 function easeOutCubic(t: number): number {
   const u = 1 - t;
   return 1 - u * u * u;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function hexOutlineSvg(strokeAttrs = ''): string {
@@ -164,71 +110,72 @@ function hexOutlineSvg(strokeAttrs = ''): string {
   </svg>`;
 }
 
-// ─── Main class ───────────────────────────────────────────────
-
 export class ThreeWorldMap {
   private container: HTMLElement;
   private worldCache: WorldCache;
 
-  // DOM elements.
   private canvas: HTMLCanvasElement;
   private overlay: HTMLDivElement;
   private partyEl: HTMLDivElement;
+  private partyInnerEl: HTMLDivElement;
   private hoverEl: HTMLDivElement;
+  private selectedEl: HTMLDivElement;
   private pathEl: HTMLDivElement;
   private questTargetsEl: HTMLDivElement;
   private markersEl: HTMLDivElement;
   private flagsEl: HTMLDivElement;
+  private labelsEl: HTMLDivElement;
   private tooltipEl: HTMLDivElement;
   private tooltipKey = '';
 
-  // three.js core.
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.OrthographicCamera;
 
-  // Scene planes.
   private parchmentMesh: THREE.Mesh | null = null;
   private parchmentMaterial: THREE.MeshBasicMaterial;
   private parchmentTexture: THREE.Texture | null = null;
-  private shadowMesh: THREE.Mesh | null = null;
-  private shadowMaterial: THREE.MeshBasicMaterial;
-  private shadowTexture: THREE.CanvasTexture | null = null;
-  private staticMesh: THREE.Mesh | null = null;
-  private staticMaterial: THREE.MeshBasicMaterial;
-  private staticTexture: THREE.CanvasTexture | null = null;
-
-  // Bake state.
-  private staticCanvas: HTMLCanvasElement | null = null;
-  private staticBounds: { minX: number; minY: number; w: number; h: number } | null = null;
-  private staticDirty = true;
-  private shadowCanvas: HTMLCanvasElement | null = null;
-  private shadowBlurredCanvas: HTMLCanvasElement | null = null;
-  private shadowBounds: { minX: number; minY: number; w: number; h: number } | null = null;
-
-  // Image cache (shared across renders).
-  private imageCache = new ImageCache();
-  private hexSpriteCache = new Map<string, HTMLCanvasElement>();
-  /** Map id whose parchment texture is currently loaded/loading (per-map backgrounds). */
+  private parchmentSize = PARCHMENT_MIN_SIZE;
   private parchmentMapId: string | null = null;
+  private seaIsFallback = false;
 
-  // Grid + content.
+  private coastMesh: THREE.Mesh | null = null;
+  private coastMaterial: THREE.MeshBasicMaterial;
+  private coastTexture: THREE.CanvasTexture | null = null;
+  private terrainMesh: THREE.Mesh | null = null;
+  private terrainMaterial: THREE.MeshBasicMaterial;
+  private terrainTexture: THREE.CanvasTexture | null = null;
+  private terrainTextureSize = '';
+  private fogMesh: THREE.Mesh | null = null;
+  private fogMaterial: THREE.MeshBasicMaterial;
+  private fogTexture: THREE.CanvasTexture | null = null;
+  private fogTextureSize = '';
+  private meshBoundsKey = '';
+
+  private baker: MapBaker;
+  private terrainDirty = true;
+  private coastDirty = true;
+  private fogDirty = true;
+  private terrainReady = false;
+  private bakeRafId: number | null = null;
+  private paused = false;
+  private artFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastArtFlush = 0;
+
   private grid: HexGrid = new HexGrid();
   private worldTileDefs = new Map<string, WorldTileDefinition>();
 
-  // Camera state — camWorldX/Y is the world point currently centered on
-  // screen; zoom is the magnification scalar. Maps directly to
-  // `camera.position.x = camWorldX`, `camera.position.y = -camWorldY`
-  // (Y flipped so positive world-Y still reads as "down" on screen),
-  // and `camera.zoom = zoom`.
+  /** World point at screen centre. Maps to camera.position (x, -y) and camera.zoom. */
   private camWorldX = 0;
   private camWorldY = 0;
   private zoom = 1;
+  private zoomInitialized = false;
+  private lod = '';
+  private settledZoom = '';
+  private camAnim: CameraAnim | null = null;
+  private following = true;
+  private onFollowChangeFn?: (following: boolean) => void;
 
-  // Spring-back animation state for overdrag.
-  private springAnim: { startX: number; startY: number; targetX: number; targetY: number; startTime: number } | null = null;
-
-  // Party state.
   private playerCol = 0;
   private playerRow = 0;
   private currentZone = '';
@@ -238,7 +185,7 @@ export class ThreeWorldMap {
   private othersByTile = new Map<string, TileOccupancy>();
   private currentBattleVisual: BattleVisual = 'none';
 
-  // Room-action markers on explored rooms, keyed by "col,row".
+  /** Room-action markers on explored rooms, keyed by "col,row". */
   private roomActions = new Map<string, RoomAction[]>();
   private questMarks: QuestMarks = questMarks();
   /** Quest names sending the party to each room, keyed by room GUID. */
@@ -247,23 +194,18 @@ export class ThreeWorldMap {
   private questTargetsByRoom = new Map<string, string[]>();
   private questMarkerKey = '';
   private markersDirty = true;
+  private zoneAnchors: ZoneLabelAnchor[] = [];
 
-  // Party rendering. Movement is animated by a CSS transition on the
-  // `.three-map-party` element (`left`/`top`); we just push the target.
   private partyRendered = false;
   private partyTargetCol = 0;
   private partyTargetRow = 0;
-
-  // Server-provided path (col,row pairs).
   private serverPath: { col: number; row: number }[] = [];
 
-  // Hover state.
   private hoverCol: number | null = null;
   private hoverRow: number | null = null;
   private mousePixelX = 0;
   private mousePixelY = 0;
 
-  // Drag state.
   private pointerActive = false;
   private isDragging = false;
   private dragStartClientX = 0;
@@ -272,7 +214,6 @@ export class ThreeWorldMap {
   private dragStartCamY = 0;
   private dragDistance = 0;
 
-  // Pinch zoom state.
   private pinchStartDistance = 0;
   private pinchStartZoom = 1;
   private pinchStartCenterX = 0;
@@ -280,32 +221,28 @@ export class ThreeWorldMap {
   private pinchStartCamX = 0;
   private pinchStartCamY = 0;
   private isPinching = false;
+  /** A touch sequence that ever had two fingers down must never end in a tap. */
+  private pinchedThisTouch = false;
   private lastTouch: { x: number; y: number } | null = null;
 
-  // External callbacks.
   private sendMoveFn?: (col: number, row: number) => void;
   private onTileClickFn?: (info: TileClickInfo) => void;
+  private onBackgroundClickFn?: () => void;
 
-  // Lifecycle.
   private destroyed = false;
   private isFirstState = true;
-  private hasInitializedView = false;
   private resizeObserver?: ResizeObserver;
   private resizeHandler: () => void;
+  private windowMouseMove: (e: MouseEvent) => void;
+  private windowMouseUp: (e: MouseEvent) => void;
 
-  // Render-on-demand bookkeeping.
-  /** True while we have a pending RAF render queued. Coalesces multiple
-   *  state pushes into one re-render. */
   private renderQueued = false;
-  /** RAF id for the active animation loop (spring-back). When null, we're
-   *  in pure render-on-demand mode. */
   private animRafId: number | null = null;
 
   constructor(container: HTMLElement, worldCache: WorldCache) {
     this.container = container;
     this.worldCache = worldCache;
 
-    // ── DOM scaffolding ──────────────────────────────────────
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'three-world-map';
     this.container.appendChild(this.canvas);
@@ -314,84 +251,77 @@ export class ThreeWorldMap {
     this.overlay.className = 'three-map-overlay';
     this.container.appendChild(this.overlay);
 
-    this.partyEl = document.createElement('div');
-    this.partyEl.className = 'three-map-party';
-    const partyInner = document.createElement('div');
-    partyInner.className = 'three-map-party-inner';
-    this.partyEl.appendChild(partyInner);
-    this.partyEl.style.display = 'none';
-    this.overlay.appendChild(this.partyEl);
-
-    // Hover highlight — an SVG hex outline. Stroke color flips between
-    // white/red via the data-traversable attribute (see CSS).
-    this.hoverEl = document.createElement('div');
-    this.hoverEl.className = 'three-map-hover';
+    this.hoverEl = this.addOverlayLayer('three-map-hover');
     this.hoverEl.innerHTML = hexOutlineSvg();
     this.hoverEl.style.display = 'none';
-    this.overlay.appendChild(this.hoverEl);
 
-    this.pathEl = document.createElement('div');
-    this.pathEl.className = 'three-map-path';
-    this.overlay.appendChild(this.pathEl);
+    this.selectedEl = this.addOverlayLayer('three-map-selected');
+    this.selectedEl.innerHTML = hexOutlineSvg();
+    this.selectedEl.style.display = 'none';
 
-    this.questTargetsEl = document.createElement('div');
-    this.questTargetsEl.className = 'three-map-quest-targets';
-    this.overlay.appendChild(this.questTargetsEl);
+    this.pathEl = this.addOverlayLayer('three-map-path');
+    this.questTargetsEl = this.addOverlayLayer('three-map-quest-targets');
+    this.labelsEl = this.addOverlayLayer('three-map-zone-labels');
+    this.markersEl = this.addOverlayLayer('three-map-markers');
+    this.flagsEl = this.addOverlayLayer('three-map-flags');
 
-    this.markersEl = document.createElement('div');
-    this.markersEl.className = 'three-map-markers';
-    this.overlay.appendChild(this.markersEl);
-
-    this.flagsEl = document.createElement('div');
-    this.flagsEl.className = 'three-map-flags';
-    this.overlay.appendChild(this.flagsEl);
+    this.partyEl = this.addOverlayLayer('three-map-party');
+    this.partyInnerEl = document.createElement('div');
+    this.partyInnerEl.className = 'three-map-party-inner';
+    this.partyEl.appendChild(this.partyInnerEl);
+    this.partyEl.style.display = 'none';
 
     this.tooltipEl = document.createElement('div');
     this.tooltipEl.className = 'canvas-map-tooltip';
     this.tooltipEl.style.display = 'none';
     this.container.appendChild(this.tooltipEl);
 
-    // ── three.js setup ───────────────────────────────────────
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: true,
+      antialias: false,
       alpha: false,
-      premultipliedAlpha: true,
+      depth: false,
+      stencil: false,
     });
-    this.renderer.setClearColor(new THREE.Color(PARCHMENT_FALLBACK_COLOR), 1);
-    this.renderer.setPixelRatio(window.devicePixelRatio || 1);
+    this.renderer.setClearColor(new THREE.Color(SEA_COLOR), 1);
+    this.renderer.setPixelRatio(Math.min(MAX_DPR, window.devicePixelRatio || 1));
 
     this.scene = new THREE.Scene();
-
-    // OrthographicCamera frustum spans the canvas CSS pixels; we resize
-    // it on every layout pass so screen-pixel math (pan/zoom, hit-test)
-    // stays consistent with the DOM overlay.
+    // The frustum spans CSS pixels, so screen math matches the DOM overlay 1:1.
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
     this.camera.position.z = 100;
 
-    // Materials are persistent; their textures are swapped in as the
-    // various bakes complete.
     this.parchmentMaterial = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(PARCHMENT_FALLBACK_COLOR),
+      color: new THREE.Color(SEA_COLOR),
       depthWrite: false,
       transparent: false,
     });
-    this.shadowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      opacity: SHADOW_ALPHA,
-      transparent: true,
-      depthWrite: false,
-    });
-    this.staticMaterial = new THREE.MeshBasicMaterial({
+    this.coastMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
       depthWrite: false,
     });
+    this.terrainMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
+    this.fogMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
 
-    // ── Grid + content ───────────────────────────────────────
-    this.grid = this.buildGridFromCache();
+    this.baker = new MapBaker(() => this.scheduleArtFlush());
+    this.grid = this.buildGridFromCache(true);
     this.loadParchment(this.worldCache.getCurrentMapId());
+
+    this.windowMouseMove = (e) => {
+      if (this.pointerActive) this.onPointerMove(e.clientX, e.clientY);
+    };
+    this.windowMouseUp = (e) => {
+      if (!this.pointerActive) return;
+      this.pointerActive = false;
+      this.onPointerUp(e.clientX, e.clientY);
+    };
     this.attachInput();
+
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      this.coastDirty = true;
+      this.requestRender();
+    });
 
     this.resizeHandler = () => this.handleResize();
     window.addEventListener('resize', this.resizeHandler);
@@ -402,7 +332,6 @@ export class ThreeWorldMap {
     this.handleResize();
   }
 
-  // ─── Public API ─────────────────────────────────────────────
 
   setSendMove(fn: (col: number, row: number) => void): void {
     this.sendMoveFn = fn;
@@ -412,11 +341,32 @@ export class ThreeWorldMap {
     this.onTileClickFn = fn;
   }
 
+  /** Taps on the sea, a blocked room, or nothing at all. */
+  setOnBackgroundClick(fn: () => void): void {
+    this.onBackgroundClickFn = fn;
+  }
+
+  /** Told whenever the camera starts or stops following the party. */
+  setOnFollowChange(fn: (following: boolean) => void): void {
+    this.onFollowChangeFn = fn;
+    fn(this.following);
+  }
+
+  /** The room outlined as selected; null clears it. */
+  setSelectedRoom(room: { col: number; row: number } | null): void {
+    if (!room) {
+      this.selectedEl.style.display = 'none';
+      return;
+    }
+    const p = cubeToPixel(offsetToCube(room));
+    this.selectedEl.style.display = '';
+    this.selectedEl.style.left = `${p.x}px`;
+    this.selectedEl.style.top = `${p.y}px`;
+  }
+
   adjustZoom(delta: number): void {
-    const cw = this.canvasCssWidth();
-    const ch = this.canvasCssHeight();
-    const target = this.nextZoomStep(this.zoom, delta > 0 ? 1 : -1);
-    this.zoomAt(target, cw / 2, ch / 2);
+    const target = this.nextZoomStep(this.camAnim?.targetZoom ?? this.zoom, delta > 0 ? 1 : -1);
+    this.zoomAt(target, this.canvasCssWidth() / 2, this.canvasCssHeight() / 2);
   }
 
   private nextZoomStep(current: number, direction: 1 | -1): number {
@@ -440,29 +390,36 @@ export class ThreeWorldMap {
   }
 
   applyServerState(state: ServerStateMessage, snap?: boolean): void {
-    // A map switch (transition) jumps the camera + party sprite — never tween
-    // across a discontinuity between two unrelated grids.
+    // A map switch never tweens: the two grids are unrelated.
     const mapChanged = this.worldCache.setCurrentMap(state.currentMapId);
-    const shouldSnap = snap || this.isFirstState || mapChanged;
-    if (mapChanged) this.loadParchment(state.currentMapId);
-
-    const unlockedChanged = this.worldCache.updateUnlocked(state.unlocked);
-    if (unlockedChanged || shouldSnap) {
-      this.grid = this.buildGridFromCache();
+    const firstState = this.isFirstState;
+    const shouldSnap = !!snap || firstState || mapChanged;
+    if (mapChanged) {
+      this.loadParchment(state.currentMapId);
+      this.grid = this.buildGridFromCache(true);
     }
 
-    this.applyPartyState(state.party, shouldSnap);
+    const unlockedChanged = this.worldCache.updateUnlocked(state.unlocked);
+    if (unlockedChanged) {
+      this.fogDirty = true;
+      this.markersDirty = true;
+      if (this.terrainReady) this.baker.requestArt();
+    }
+
+    const partyMoved = this.applyPartyState(state.party, shouldSnap);
     this.currentBattleVisual = state.battle.visual;
+    this.partyEl.dataset.dungeon = state.dungeon ? '1' : '0';
+    this.updatePartyToken(state);
 
     this.playerCol = state.party.col;
     this.playerRow = state.party.row;
     const myTile = this.grid.getTile(offsetToCube({ col: state.party.col, row: state.party.row }));
     const prevZone = this.currentZone;
     this.currentZone = myTile?.zone ?? '';
-    if (this.currentZone !== prevZone) this.staticDirty = true;
+    const zoneChanged = this.currentZone !== prevZone;
+    if (zoneChanged) this.fogDirty = true;
 
     this.partyMemberUsernames = (state.social?.party?.members ?? []).map(m => m.username);
-    // Only show players on the same map as us.
     this.lastOtherPlayers = state.otherPlayers.filter(p => !p.mapId || p.mapId === state.currentMapId);
     this.othersByTile = this.groupOtherPlayers();
     this.serverPath = state.party.path ?? [];
@@ -477,25 +434,31 @@ export class ThreeWorldMap {
       this.markersDirty = true;
     }
 
-    if (shouldSnap || mapChanged || !this.hasInitializedView) {
+    const viewChanged = firstState || mapChanged;
+    if (viewChanged) this.setFollowing(true);
+    if (viewChanged || (shouldSnap && this.following)) {
       this.centerOnParty();
-      this.hasInitializedView = true;
+    } else if (partyMoved && this.following) {
+      this.followParty();
     }
 
     this.isFirstState = false;
 
-    // State change → update overlays + redraw.
     this.updatePartyOverlay();
     this.updatePathOverlay();
-    if (this.markersDirty) this.updateMarkersOverlay();
+    const markersRebuilt = this.markersDirty;
+    if (markersRebuilt) this.updateMarkersOverlay();
+    if (markersRebuilt || zoneChanged || partyMoved) this.refreshZoneLabels();
     this.updateFlagsOverlay();
     this.updateBattleVisualClass();
     if (this.tooltipEl.style.display !== 'none') this.updateHover();
-    this.requestRender();
+    if (this.fogDirty || viewChanged || this.terrainDirty) this.requestRender();
   }
 
   rebuildFromCache(): void {
-    this.grid = this.buildGridFromCache();
+    this.baker.forgetFailedArt();
+    this.grid = this.buildGridFromCache(false);
+    this.refreshZoneLabels();
     this.requestRender();
   }
 
@@ -537,17 +500,21 @@ export class ThreeWorldMap {
 
   destroy(): void {
     this.destroyed = true;
-    if (this.animRafId !== null) cancelAnimationFrame(this.animRafId);
-    this.animRafId = null;
+    this.cancelFrames();
+    if (this.artFlushTimer !== null) clearTimeout(this.artFlushTimer);
 
     window.removeEventListener('resize', this.resizeHandler);
+    window.removeEventListener('mousemove', this.windowMouseMove);
+    window.removeEventListener('mouseup', this.windowMouseUp);
     this.resizeObserver?.disconnect();
 
-    this.staticTexture?.dispose();
-    this.shadowTexture?.dispose();
+    this.terrainTexture?.dispose();
+    this.coastTexture?.dispose();
+    this.fogTexture?.dispose();
     this.parchmentTexture?.dispose();
-    this.staticMaterial.dispose();
-    this.shadowMaterial.dispose();
+    this.terrainMaterial.dispose();
+    this.coastMaterial.dispose();
+    this.fogMaterial.dispose();
     this.parchmentMaterial.dispose();
     this.renderer.dispose();
 
@@ -557,26 +524,51 @@ export class ThreeWorldMap {
   }
 
   pause(): void {
-    if (this.animRafId !== null) {
-      cancelAnimationFrame(this.animRafId);
-      this.animRafId = null;
-    }
+    this.paused = true;
+    this.cancelFrames();
+    this.finishCameraAnim();
   }
 
   resume(): void {
-    if (!this.destroyed) {
-      this.handleResize();
-      this.requestRender();
-    }
+    if (this.destroyed) return;
+    this.paused = false;
+    this.handleResize();
+    if (this.baker.isBaking) this.scheduleBakeSlice();
+    if (this.baker.hasPendingArt) this.scheduleArtFlush();
+    this.requestRender();
   }
 
   recenterOnPlayer(): void {
-    this.centerOnParty();
+    this.setFollowing(true);
+    if (!this.partyRendered) return;
+    const px = cubeToPixel(offsetToCube({ col: this.partyTargetCol, row: this.partyTargetRow }));
+    this.animateCamera(px.x, px.y, this.zoom, FOLLOW_TWEEN_MS);
   }
 
-  // ─── Grid building ──────────────────────────────────────────
+  /** Pans to a room and leaves the camera there, even if the party walks on. */
+  focusOn(col: number, row: number): void {
+    this.setFollowing(false);
+    const px = cubeToPixel(offsetToCube({ col, row }));
+    this.animateCamera(px.x, px.y, this.zoom, FOLLOW_TWEEN_MS);
+  }
 
-  private buildGridFromCache(): HexGrid {
+  /** Nudges the camera just enough that a room clears the panel docked at the right or bottom. */
+  revealRoom(col: number, row: number, insets: { right: number; bottom: number }): void {
+    const cw = this.canvasCssWidth();
+    const ch = this.canvasCssHeight();
+    if (cw <= 0 || ch <= 0) return;
+    const p = cubeToPixel(offsetToCube({ col, row }));
+    const margin = HEX_SIZE * this.zoom + 8;
+    const sx = cw / 2 + (p.x - this.camWorldX) * this.zoom;
+    const sy = ch / 2 + (p.y - this.camWorldY) * this.zoom;
+    const dx = Math.max(0, sx + margin - (cw - insets.right));
+    const dy = Math.max(0, sy + margin - (ch - insets.bottom));
+    if (dx === 0 && dy === 0) return;
+    this.animateCamera(this.camWorldX + dx / this.zoom, this.camWorldY + dy / this.zoom, this.zoom, SPRING_DURATION);
+  }
+
+
+  private buildGridFromCache(mapChanged: boolean): HexGrid {
     const grid = new HexGrid();
     this.worldTileDefs.clear();
 
@@ -588,32 +580,90 @@ export class ThreeWorldMap {
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }
 
-    this.shadowBounds = null;
-    this.shadowBlurredCanvas = null;
-    this.staticDirty = true;
+    const { rooms, landmarks } = this.buildBakeRooms(grid);
+    this.baker.setRooms(rooms, landmarks, room => this.worldCache.isUnlocked(room.col, room.row), mapChanged);
+    if (mapChanged) this.terrainReady = false;
+    this.terrainDirty = true;
+    this.coastDirty = true;
+    this.fogDirty = true;
     this.markersDirty = true;
 
     return grid;
   }
 
-  // ─── Camera ────────────────────────────────────────────────
+  private buildBakeRooms(grid: HexGrid): { rooms: BakeRoom[]; landmarks: Set<string> } {
+    const byTile = new Map<HexTile, BakeRoom>();
+    const typeCounts = new Map<string, number>();
+    for (const tile of grid.getAllTiles()) {
+      if (tile.type === 'void') continue;
+      const { col, row } = cubeToOffset(tile.coord);
+      const { x, y } = tile.pixelPosition;
+      const color = tile.color;
+      byTile.set(tile, {
+        index: byTile.size,
+        col, row, x, y,
+        type: tile.type,
+        zone: tile.zone,
+        guid: this.worldTileDefs.get(`${col},${row}`)?.id ?? '',
+        color,
+        traversable: tile.isTraversable,
+        material: terrainMaterial(color, tile.isTraversable),
+        icon: this.worldCache.getTileTypeDef(tile.type)?.icon ?? '',
+        variant: hexVariant(col, row),
+        neighbors: [],
+      });
+      typeCounts.set(tile.type, (typeCounts.get(tile.type) ?? 0) + 1);
+    }
+    for (const [tile, room] of byTile) {
+      room.neighbors = getNeighbors(tile.coord).map(coord => {
+        const nb = grid.getTile(coord);
+        return nb ? byTile.get(nb) ?? null : null;
+      });
+    }
+    const landmarks = new Set<string>();
+    for (const [type, count] of typeCounts) {
+      if (isLandmarkType(count, byTile.size)) landmarks.add(type);
+    }
+    return { rooms: [...byTile.values()], landmarks };
+  }
+
 
   private centerOnParty(): void {
     if (!this.partyRendered) return;
     const px = cubeToPixel(offsetToCube({ col: this.partyTargetCol, row: this.partyTargetRow }));
     this.camWorldX = px.x;
     this.camWorldY = px.y;
-    this.springAnim = null;
+    this.camAnim = null;
+    this.endGesture();
     this.requestRender();
   }
 
-  private computeInitialZoom(): number {
-    const shorter = Math.min(this.canvasCssWidth(), this.canvasCssHeight());
-    if (shorter <= 0) return 1;
-    const hexHeight = Math.sqrt(3) * HEX_SIZE;
-    const tilesAtZoom1 = shorter / hexHeight;
-    if (tilesAtZoom1 >= MIN_TILES_VISIBLE) return 1;
-    return Math.max(MIN_ZOOM, tilesAtZoom1 / MIN_TILES_VISIBLE);
+  private partyLeftFollowFrame(): boolean {
+    const cw = this.canvasCssWidth();
+    const ch = this.canvasCssHeight();
+    if (cw <= 0 || ch <= 0 || !this.partyRendered) return false;
+    const px = cubeToPixel(offsetToCube({ col: this.partyTargetCol, row: this.partyTargetRow }));
+    const sx = cw / 2 + (px.x - this.camWorldX) * this.zoom;
+    const sy = ch / 2 + (px.y - this.camWorldY) * this.zoom;
+    return outsideFollowFrame(sx, sy, cw, ch);
+  }
+
+  /** One tween, and only when the party has left the inner frame. */
+  private followParty(): void {
+    if (!this.partyLeftFollowFrame()) return;
+    const px = cubeToPixel(offsetToCube({ col: this.partyTargetCol, row: this.partyTargetRow }));
+    this.animateCamera(px.x, px.y, this.zoom, FOLLOW_TWEEN_MS);
+  }
+
+  private setFollowing(following: boolean): void {
+    if (this.following === following) return;
+    this.following = following;
+    this.onFollowChangeFn?.(following);
+  }
+
+  private defaultZoom(): number {
+    const shortSide = Math.min(window.innerWidth, window.innerHeight);
+    return shortSide < PHONE_SHORT_SIDE_PX ? PHONE_DEFAULT_ZOOM : DESKTOP_DEFAULT_ZOOM;
   }
 
   private getMapBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
@@ -630,22 +680,15 @@ export class ThreeWorldMap {
     return { minX: minX - HEX_SIZE, minY: minY - HEX_SIZE, maxX: maxX + HEX_SIZE, maxY: maxY + HEX_SIZE };
   }
 
-  /**
-   * Bounds for camera position (world units) such that at least one
-   * tile-width of map stays visible — i.e. the user can't scroll the
-   * island entirely off-screen.
-   */
+  /** Camera limits that keep two rooms' width of map on screen, so the land can't be scrolled away. */
   private getCamBounds(): { minX: number; maxX: number; minY: number; maxY: number } {
     const b = this.getMapBounds();
     const z = this.zoom;
     const cw = this.canvasCssWidth();
     const ch = this.canvasCssHeight();
-    // Half the visible world width/height at current zoom.
     const halfW = cw / 2 / z;
     const halfH = ch / 2 / z;
-    // Pixel margin equivalent to ~2 tiles must stay visible.
     const tilePx = HEX_SIZE * 2;
-    // Cam X range: keep at least tilePx of map inside the viewport.
     const minX = b.minX + tilePx - halfW;
     const maxX = b.maxX - tilePx + halfW;
     const minY = b.minY + tilePx - halfH;
@@ -680,38 +723,64 @@ export class ThreeWorldMap {
     const clampedY = Math.max(loY, Math.min(hiY, this.camWorldY));
 
     if (Math.abs(clampedX - this.camWorldX) > 0.5 || Math.abs(clampedY - this.camWorldY) > 0.5) {
-      this.springAnim = {
-        startX: this.camWorldX,
-        startY: this.camWorldY,
-        targetX: clampedX,
-        targetY: clampedY,
-        startTime: performance.now(),
-      };
-      this.ensureAnimLoop();
+      this.animateCamera(clampedX, clampedY, this.zoom, SPRING_DURATION);
     } else {
       this.camWorldX = clampedX;
       this.camWorldY = clampedY;
     }
   }
 
+  private animateCamera(targetX: number, targetY: number, targetZoom: number, duration: number): void {
+    if (this.destroyed) return;
+    if (reducedMotion() || this.paused || this.canvasCssWidth() <= 0) {
+      this.camWorldX = targetX;
+      this.camWorldY = targetY;
+      this.zoom = targetZoom;
+      this.camAnim = null;
+      this.endGesture();
+      this.settleZoom();
+      this.requestRender();
+      return;
+    }
+    this.beginGesture();
+    this.camAnim = {
+      startX: this.camWorldX,
+      startY: this.camWorldY,
+      startZoom: this.zoom,
+      targetX,
+      targetY,
+      targetZoom,
+      startTime: performance.now(),
+      duration,
+    };
+    this.ensureAnimLoop();
+  }
+
+  private finishCameraAnim(): void {
+    if (!this.camAnim) return;
+    this.camWorldX = this.camAnim.targetX;
+    this.camWorldY = this.camAnim.targetY;
+    this.zoom = this.camAnim.targetZoom;
+    this.camAnim = null;
+    this.endGesture();
+    this.settleZoom();
+  }
+
   private zoomAt(newZoom: number, screenCssX: number, screenCssY: number): void {
     const z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
-    if (z === this.zoom) return;
-    // Keep the world-point under the cursor stable.
+    if (z === (this.camAnim?.targetZoom ?? this.zoom)) return;
     const cw = this.canvasCssWidth();
     const ch = this.canvasCssHeight();
     const worldX = this.camWorldX + (screenCssX - cw / 2) / this.zoom;
     const worldY = this.camWorldY + (screenCssY - ch / 2) / this.zoom;
-    this.zoom = z;
-    this.camWorldX = worldX - (screenCssX - cw / 2) / z;
-    this.camWorldY = worldY - (screenCssY - ch / 2) / z;
-    this.springAnim = null;
-    this.persistZoom();
-    this.requestRender();
+    const targetX = worldX - (screenCssX - cw / 2) / z;
+    const targetY = worldY - (screenCssY - ch / 2) / z;
+    this.persistZoom(z);
+    this.animateCamera(targetX, targetY, z, ZOOM_TWEEN_MS);
   }
 
-  private persistZoom(): void {
-    try { localStorage.setItem(ZOOM_STORAGE_KEY, String(this.zoom)); } catch { /* ignore */ }
+  private persistZoom(zoom: number): void {
+    try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom)); } catch { /* ignore */ }
   }
 
   private loadPersistedZoom(): number | null {
@@ -724,7 +793,6 @@ export class ThreeWorldMap {
     } catch { return null; }
   }
 
-  // ─── Resize ────────────────────────────────────────────────
 
   private canvasCssWidth(): number {
     return this.container.clientWidth;
@@ -740,25 +808,21 @@ export class ThreeWorldMap {
     if (w <= 0 || h <= 0) return;
 
     this.renderer.setSize(w, h, false);
-    // Camera frustum spans the CSS pixel viewport (so screen-pixel math
-    // matches the DOM overlay 1:1).
     this.camera.left = -w / 2;
     this.camera.right = w / 2;
     this.camera.top = h / 2;
     this.camera.bottom = -h / 2;
     this.camera.updateProjectionMatrix();
 
-    if (!this.hasInitializedView) {
-      this.zoom = this.loadPersistedZoom() ?? this.computeInitialZoom();
-    }
-    if (this.partyRendered && this.hasInitializedView) {
-      this.centerOnParty();
+    if (!this.zoomInitialized) {
+      this.zoomInitialized = true;
+      this.zoom = this.loadPersistedZoom() ?? this.defaultZoom();
+      this.settleZoom();
     }
 
     this.requestRender();
   }
 
-  // ─── Input ─────────────────────────────────────────────────
 
   private attachInput(): void {
     this.canvas.addEventListener('mousedown', e => {
@@ -766,7 +830,7 @@ export class ThreeWorldMap {
       this.onPointerDown(e.clientX, e.clientY);
     });
     this.canvas.addEventListener('mousemove', e => {
-      this.onPointerMove(e.clientX, e.clientY);
+      if (!this.pointerActive) this.onPointerMove(e.clientX, e.clientY);
     });
     this.canvas.addEventListener('mouseleave', () => {
       this.hoverCol = null;
@@ -774,22 +838,15 @@ export class ThreeWorldMap {
       this.hideTooltip();
       this.updateHoverOverlay();
     });
-    window.addEventListener('mousemove', e => {
-      if (!this.pointerActive) return;
-      this.onPointerMove(e.clientX, e.clientY);
-    });
-    window.addEventListener('mouseup', e => {
-      if (!this.pointerActive) return;
-      this.pointerActive = false;
-      this.onPointerUp(e.clientX, e.clientY);
-    });
+    window.addEventListener('mousemove', this.windowMouseMove);
+    window.addEventListener('mouseup', this.windowMouseUp);
 
     this.canvas.addEventListener('wheel', e => {
       e.preventDefault();
       const rect = this.canvas.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
-      const target = this.nextZoomStep(this.zoom, e.deltaY > 0 ? -1 : 1);
+      const target = this.nextZoomStep(this.camAnim?.targetZoom ?? this.zoom, e.deltaY > 0 ? -1 : 1);
       this.zoomAt(target, cx, cy);
     }, { passive: false });
 
@@ -817,13 +874,9 @@ export class ThreeWorldMap {
     this.canvas.addEventListener('touchend', e => {
       e.preventDefault();
       if (e.touches.length === 0) {
-        if (this.lastTouch) {
-          this.onPointerUp(this.lastTouch.x, this.lastTouch.y);
-          this.lastTouch = null;
-        }
-        this.isPinching = false;
+        this.endTouch(true);
       } else if (e.touches.length === 1 && this.isPinching) {
-        this.isPinching = false;
+        this.endPinch();
         const t = e.touches[0];
         this.lastTouch = { x: t.clientX, y: t.clientY };
         this.dragStartClientX = t.clientX;
@@ -834,6 +887,31 @@ export class ThreeWorldMap {
         this.dragDistance = 0;
       }
     });
+
+    this.canvas.addEventListener('touchcancel', () => this.endTouch(false));
+  }
+
+  private endTouch(allowTap: boolean): void {
+    if (this.isPinching) this.endPinch();
+    if (this.lastTouch) {
+      if (allowTap && !this.pinchedThisTouch) {
+        this.onPointerUp(this.lastTouch.x, this.lastTouch.y);
+      } else {
+        this.isDragging = false;
+        this.endGesture();
+        this.springBackIfNeeded();
+      }
+    }
+    this.lastTouch = null;
+    this.pinchedThisTouch = false;
+  }
+
+  private endPinch(): void {
+    this.isPinching = false;
+    this.persistZoom(this.zoom);
+    this.endGesture();
+    this.settleZoom();
+    if (this.following && this.partyLeftFollowFrame()) this.setFollowing(false);
   }
 
   private beginPinch(e: TouchEvent): void {
@@ -848,7 +926,10 @@ export class ThreeWorldMap {
     this.pinchStartCamX = this.camWorldX;
     this.pinchStartCamY = this.camWorldY;
     this.isPinching = true;
+    this.pinchedThisTouch = true;
     this.isDragging = false;
+    this.camAnim = null;
+    this.beginGesture();
   }
 
   private updatePinch(e: TouchEvent): void {
@@ -866,8 +947,6 @@ export class ThreeWorldMap {
     this.zoom = newZoom;
     this.camWorldX = worldX - (this.pinchStartCenterX - cw / 2) / newZoom;
     this.camWorldY = worldY - (this.pinchStartCenterY - ch / 2) / newZoom;
-    this.springAnim = null;
-    this.persistZoom();
     this.requestRender();
   }
 
@@ -878,7 +957,7 @@ export class ThreeWorldMap {
     this.dragStartCamX = this.camWorldX;
     this.dragStartCamY = this.camWorldY;
     this.dragDistance = 0;
-    this.springAnim = null;
+    this.finishCameraAnim();
   }
 
   private onPointerMove(clientX: number, clientY: number): void {
@@ -890,9 +969,10 @@ export class ThreeWorldMap {
       const dxClient = clientX - this.dragStartClientX;
       const dyClient = clientY - this.dragStartClientY;
       this.dragDistance = Math.max(this.dragDistance, Math.abs(dxClient) + Math.abs(dyClient));
-      // Drag moves camera in WORLD units = client delta / zoom (inverted —
-      // dragging right pans the world right, which means the camera moves
-      // LEFT in world coords).
+      if (this.dragDistance > DRAG_THRESHOLD) {
+        this.setFollowing(false);
+        this.beginGesture();
+      }
       this.camWorldX = this.dragStartCamX - dxClient / this.zoom;
       this.camWorldY = this.dragStartCamY - dyClient / this.zoom;
       this.clampCamWithOverdrag();
@@ -905,6 +985,7 @@ export class ThreeWorldMap {
   private onPointerUp(clientX: number, clientY: number): void {
     const wasDragging = this.dragDistance > DRAG_THRESHOLD;
     this.isDragging = false;
+    this.endGesture();
     this.springBackIfNeeded();
 
     if (!wasDragging) {
@@ -912,7 +993,18 @@ export class ThreeWorldMap {
     }
   }
 
-  // ─── Hover / click handlers ───────────────────────────────
+  private beginGesture(): void {
+    if (this.overlay.style.willChange !== 'transform') this.overlay.style.willChange = 'transform';
+  }
+
+  /** Lets the browser re-rasterize overlay text at the settled zoom, so it isn't left blurry. */
+  private endGesture(): void {
+    if (!this.camAnim && !this.isPinching && this.overlay.style.willChange) this.overlay.style.willChange = '';
+  }
+
+  private get gestureActive(): boolean {
+    return this.isPinching || this.camAnim !== null || (this.isDragging && this.dragDistance > DRAG_THRESHOLD);
+  }
 
   /** Convert a CSS-pixel point on the canvas to a world-coord point. */
   private screenToWorld(px: number, py: number): { x: number; y: number } {
@@ -1003,14 +1095,13 @@ export class ThreeWorldMap {
 
   private handleClick(clientX: number, clientY: number): void {
     const rect = this.canvas.getBoundingClientRect();
-    const px = clientX - rect.left;
-    const py = clientY - rect.top;
-    const tile = this.getTileAtScreenPx(px, py);
-    if (!tile) return;
-
-    const offset = cubeToOffset(tile.coord);
-    const info = this.getTileInfo(offset.col, offset.row);
-    if (!info) return;
+    const tile = this.getTileAtScreenPx(clientX - rect.left, clientY - rect.top);
+    const offset = tile ? cubeToOffset(tile.coord) : null;
+    const info = offset ? this.getTileInfo(offset.col, offset.row) : null;
+    if (!offset || !info) {
+      this.onBackgroundClickFn?.();
+      return;
+    }
 
     if (this.onTileClickFn) {
       this.onTileClickFn(info);
@@ -1019,32 +1110,34 @@ export class ThreeWorldMap {
     }
   }
 
-  // ─── Party state / animation ──────────────────────────────
-
-  private applyPartyState(party: ServerPartyState, snap: boolean): void {
+  /** Returns whether the party changed rooms. */
+  private applyPartyState(party: ServerPartyState, snap: boolean): boolean {
     if (!this.partyRendered) {
       this.partyTargetCol = party.col;
       this.partyTargetRow = party.row;
       this.partyRendered = true;
-      // First-ever placement should always snap — no transition from
-      // (0,0). The data attribute below is read by CSS to disable the
-      // transition for this one render.
       this.partyEl.dataset.snap = '1';
-      return;
+      return true;
     }
     const posChanged = party.col !== this.partyTargetCol || party.row !== this.partyTargetRow;
-    if (!posChanged) return;
+    if (snap) this.partyEl.dataset.snap = '1';
+    if (!posChanged) return false;
     this.partyTargetCol = party.col;
     this.partyTargetRow = party.row;
-    this.partyEl.dataset.snap = snap ? '1' : '0';
+    if (!snap) this.partyEl.dataset.snap = '0';
+    return true;
   }
 
-  // ─── Render loop (on-demand) ──────────────────────────────
+  private updatePartyToken(state: ServerStateMessage): void {
+    const className = state.character?.className;
+    const face = className
+      ? `<span class="three-map-party-icon">${classIconHtml(className)}</span>`
+        + renderTrackedImg(artworkUrl('class', className), { className: 'three-map-party-art', alt: '' })
+      : `<span class="three-map-party-initials">${escapeHtml(placeholderInitials(state.username ?? ''))}</span>`;
+    setHtml(this.partyInnerEl, `<span class="three-map-party-face">${face}</span>`);
+  }
 
-  /**
-   * Schedule a single render for the next animation frame. Coalesces
-   * multiple requests in the same frame into one render.
-   */
+
   private requestRender(): void {
     if (this.destroyed) return;
     if (this.renderQueued) return;
@@ -1056,60 +1149,52 @@ export class ThreeWorldMap {
     });
   }
 
-  /**
-   * Continuous animation loop, used only while the spring-back is active.
-   * Party movement uses a CSS transition on the DOM party element, so it
-   * doesn't need this loop at all. Self-cancels when the spring lands.
-   */
   private ensureAnimLoop(): void {
-    if (this.destroyed) return;
-    if (this.animRafId !== null) return;
+    if (this.destroyed || this.animRafId !== null) return;
     const tick = () => {
-      if (this.destroyed) { this.animRafId = null; return; }
-      if (!this.springAnim) { this.animRafId = null; return; }
-      const now = performance.now();
-      const t = Math.min(1, (now - this.springAnim.startTime) / SPRING_DURATION);
+      this.animRafId = null;
+      if (this.destroyed || !this.camAnim) return;
+      const anim = this.camAnim;
+      const t = Math.min(1, (performance.now() - anim.startTime) / anim.duration);
       const e = easeOutCubic(t);
-      this.camWorldX = this.springAnim.startX + (this.springAnim.targetX - this.springAnim.startX) * e;
-      this.camWorldY = this.springAnim.startY + (this.springAnim.targetY - this.springAnim.startY) * e;
-      const done = t >= 1;
-      if (done) this.springAnim = null;
+      this.camWorldX = anim.startX + (anim.targetX - anim.startX) * e;
+      this.camWorldY = anim.startY + (anim.targetY - anim.startY) * e;
+      this.zoom = anim.startZoom + (anim.targetZoom - anim.startZoom) * e;
+      if (t >= 1) {
+        this.camAnim = null;
+        this.endGesture();
+        this.settleZoom();
+        if (this.following && this.partyLeftFollowFrame()) this.setFollowing(false);
+      }
       this.render();
-      this.animRafId = done ? null : requestAnimationFrame(tick);
+      if (t < 1) this.animRafId = requestAnimationFrame(tick);
     };
     this.animRafId = requestAnimationFrame(tick);
   }
 
-  /**
-   * Single render pass. Re-bakes any stale textures, updates the camera +
-   * scene-mesh positions, refreshes the DOM overlay transform, and tells
-   * three.js to draw.
-   */
+  private cancelFrames(): void {
+    if (this.animRafId !== null) cancelAnimationFrame(this.animRafId);
+    this.animRafId = null;
+    if (this.bakeRafId !== null) cancelAnimationFrame(this.bakeRafId);
+    this.bakeRafId = null;
+  }
+
   private render(): void {
     if (this.destroyed) return;
     const cw = this.canvasCssWidth();
     const ch = this.canvasCssHeight();
     if (cw <= 0 || ch <= 0) return;
 
-    if (this.staticDirty || !this.staticCanvas || !this.staticBounds) {
-      this.bakeStaticLayer();
-      this.updateStaticMesh();
-    }
-    if (!this.shadowCanvas || !this.shadowBlurredCanvas || !this.shadowBounds) {
-      this.bakeShadow();
-      this.updateShadowMesh();
-    }
+    if (this.terrainDirty) this.startTerrainBake();
+    if (this.coastDirty) this.uploadCoast();
+    if (this.fogDirty && this.terrainReady) this.uploadFog();
     this.updateParchmentMesh();
 
-    // Camera: world Y flipped so positive world-Y reads as "down" on
-    // screen, matching the canvas pixelPosition convention.
     this.camera.position.x = this.camWorldX;
     this.camera.position.y = -this.camWorldY;
     this.camera.zoom = this.zoom;
     this.camera.updateProjectionMatrix();
 
-    // Parchment parallax: it follows the camera at a reduced rate so it
-    // reads as a deeper layer behind the map.
     if (this.parchmentMesh) {
       this.parchmentMesh.position.x = this.camWorldX * (1 - PARCHMENT_PARALLAX);
       this.parchmentMesh.position.y = -this.camWorldY * (1 - PARCHMENT_PARALLAX);
@@ -1118,459 +1203,239 @@ export class ThreeWorldMap {
     this.renderer.render(this.scene, this.camera);
 
     this.updateOverlayTransform();
-    // The hover highlight is overlay-positioned; keep it pinned to the
-    // current tile as the camera moves.
     this.updateHoverOverlay();
   }
 
-  // ─── Mesh / texture management ────────────────────────────
-
-  private updateStaticMesh(): void {
-    if (!this.staticBounds || !this.staticCanvas) {
-      if (this.staticMesh) { this.scene.remove(this.staticMesh); this.staticMesh = null; }
+  private startTerrainBake(): void {
+    this.terrainDirty = false;
+    this.baker.requestArt();
+    if (!this.terrainReady) {
+      if (this.terrainMesh) this.terrainMesh.visible = false;
+      if (this.fogMesh) this.fogMesh.visible = false;
+    }
+    const maxTexture = this.renderer.capabilities?.maxTextureSize ?? FALLBACK_MAX_TEXTURE;
+    const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
+    if (!this.baker.beginTerrain(maxTexture, dpr)) {
+      delete this.container.dataset.charting;
       return;
     }
-    const b = this.staticBounds;
-
-    // (Re)build the texture; CanvasTexture wraps the offscreen canvas
-    // and uploads to the GPU. `needsUpdate = true` triggers a re-upload
-    // when the underlying canvas bytes change.
-    if (this.staticTexture) this.staticTexture.dispose();
-    this.staticTexture = new THREE.CanvasTexture(this.staticCanvas);
-    this.staticTexture.colorSpace = THREE.SRGBColorSpace;
-    this.staticTexture.minFilter = THREE.LinearFilter;
-    this.staticTexture.magFilter = THREE.LinearFilter;
-    this.staticMaterial.map = this.staticTexture;
-    this.staticMaterial.needsUpdate = true;
-
-    if (this.staticMesh) { this.scene.remove(this.staticMesh); this.staticMesh.geometry.dispose(); }
-    const geom = new THREE.PlaneGeometry(b.w, b.h);
-    this.staticMesh = new THREE.Mesh(geom, this.staticMaterial);
-    // Place the mesh centered on the bounds midpoint; Y flipped for
-    // canvas → three.js convention.
-    this.staticMesh.position.set(b.minX + b.w / 2, -(b.minY + b.h / 2), 2);
-    this.scene.add(this.staticMesh);
+    if (!this.terrainReady) this.container.dataset.charting = '1';
+    this.scheduleBakeSlice();
   }
 
-  private updateShadowMesh(): void {
-    if (!this.shadowBounds || !this.shadowBlurredCanvas) {
-      if (this.shadowMesh) { this.scene.remove(this.shadowMesh); this.shadowMesh = null; }
+  private scheduleBakeSlice(): void {
+    if (this.bakeRafId !== null || this.destroyed || this.paused) return;
+    this.bakeRafId = requestAnimationFrame(() => {
+      this.bakeRafId = null;
+      if (!this.destroyed) this.runBakeSlice();
+    });
+  }
+
+  private runBakeSlice(): void {
+    if (this.baker.isBaking) {
+      if (!this.baker.stepTerrain(BAKE_BUDGET_MS)) {
+        this.scheduleBakeSlice();
+        return;
+      }
+      this.uploadTerrain();
+      this.terrainReady = true;
+      this.fogDirty = true;
+      delete this.container.dataset.charting;
+      if (this.terrainMesh) this.terrainMesh.visible = true;
+      this.requestRender();
+      if (this.baker.hasPendingArt) this.scheduleArtFlush();
       return;
     }
-    const b = this.shadowBounds;
-    const pad = SHADOW_BLUR_PAD;
-    const padded = { w: b.w + 2 * pad, h: b.h + 2 * pad };
+    if (!this.baker.hasPendingArt) return;
+    if (!this.baker.stepArt(BAKE_BUDGET_MS)) {
+      this.scheduleBakeSlice();
+      return;
+    }
+    this.uploadTerrain();
+    this.requestRender();
+  }
 
-    if (this.shadowTexture) this.shadowTexture.dispose();
-    this.shadowTexture = new THREE.CanvasTexture(this.shadowBlurredCanvas);
-    this.shadowTexture.colorSpace = THREE.SRGBColorSpace;
-    this.shadowTexture.minFilter = THREE.LinearFilter;
-    this.shadowTexture.magFilter = THREE.LinearFilter;
-    // The shadow material is black; we use the texture as alpha so the
-    // material's `opacity` × the texture's RGB gives the final cast.
-    this.shadowMaterial.map = this.shadowTexture;
-    this.shadowMaterial.needsUpdate = true;
+  /** At most one art flush a second, and never while the map is moving: each one re-uploads the terrain. */
+  private scheduleArtFlush(): void {
+    if (this.artFlushTimer !== null || this.destroyed) return;
+    const wait = Math.max(0, this.lastArtFlush + ART_FLUSH_MS - performance.now());
+    this.artFlushTimer = setTimeout(() => {
+      this.artFlushTimer = null;
+      if (this.destroyed || this.paused || !this.baker.hasPendingArt) return;
+      if (this.gestureActive || this.baker.isBaking || this.bakeRafId !== null) {
+        this.artFlushTimer = setTimeout(() => {
+          this.artFlushTimer = null;
+          this.scheduleArtFlush();
+        }, ART_FLUSH_RETRY_MS);
+        return;
+      }
+      this.lastArtFlush = performance.now();
+      if (this.baker.shouldRebakeForArt()) {
+        this.terrainDirty = true;
+        this.requestRender();
+      } else {
+        this.scheduleBakeSlice();
+      }
+    }, wait);
+  }
 
-    if (this.shadowMesh) { this.scene.remove(this.shadowMesh); this.shadowMesh.geometry.dispose(); }
-    const geom = new THREE.PlaneGeometry(padded.w, padded.h);
-    this.shadowMesh = new THREE.Mesh(geom, this.shadowMaterial);
-    // The padded blurred canvas extends pad units around the silhouette
-    // bounds; centerpoint stays at the bounds midpoint + shadow offset.
-    this.shadowMesh.position.set(
-      b.minX + b.w / 2 + SHADOW_OFFSET_X_WORLD,
-      -(b.minY + b.h / 2 + SHADOW_OFFSET_Y_WORLD),
-      1,
-    );
-    this.scene.add(this.shadowMesh);
+  private syncLayerMeshes(): void {
+    const b = this.baker.bounds;
+    if (!b) return;
+    const key = `${b.minX},${b.minY},${b.w},${b.h}`;
+    if (key === this.meshBoundsKey && this.terrainMesh && this.fogMesh && this.coastMesh) return;
+    this.meshBoundsKey = key;
+    const cx = b.minX + b.w / 2;
+    const cy = -(b.minY + b.h / 2);
+    this.terrainMesh = this.replaceMesh(this.terrainMesh, this.terrainMaterial, b.w, b.h, cx, cy, 2);
+    this.fogMesh = this.replaceMesh(this.fogMesh, this.fogMaterial, b.w, b.h, cx, cy, 3);
+    this.coastMesh = this.replaceMesh(this.coastMesh, this.coastMaterial, b.w + COAST_PAD * 2, b.h + COAST_PAD * 2, cx, cy - COAST_OFFSET_Y, 1);
+    this.fogMesh.visible = this.terrainReady;
+    this.terrainMesh.visible = this.terrainReady;
+  }
+
+  private replaceMesh(
+    existing: THREE.Mesh | null,
+    material: THREE.MeshBasicMaterial,
+    w: number, h: number, x: number, y: number, z: number,
+  ): THREE.Mesh {
+    if (existing) {
+      this.scene.remove(existing);
+      existing.geometry.dispose();
+    }
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), material);
+    mesh.position.set(x, y, z);
+    this.scene.add(mesh);
+    return mesh;
+  }
+
+  private canvasTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
+  }
+
+  private uploadTerrain(): void {
+    const canvas = this.baker.terrainCanvas;
+    if (!canvas) return;
+    this.syncLayerMeshes();
+    const size = `${canvas.width}x${canvas.height}`;
+    if (this.terrainTexture && size === this.terrainTextureSize) {
+      this.terrainTexture.needsUpdate = true;
+      return;
+    }
+    this.terrainTexture?.dispose();
+    this.terrainTexture = this.canvasTexture(canvas);
+    this.terrainTextureSize = size;
+    this.terrainMaterial.map = this.terrainTexture;
+    this.terrainMaterial.needsUpdate = true;
+  }
+
+  private uploadFog(): void {
+    this.fogDirty = false;
+    this.baker.bakeFog(this.currentZone, zone => this.worldCache.isZoneUnlocked(zone));
+    const canvas = this.baker.fogCanvas;
+    if (!canvas) return;
+    this.syncLayerMeshes();
+    const size = `${canvas.width}x${canvas.height}`;
+    if (this.fogTexture && size === this.fogTextureSize) {
+      this.fogTexture.needsUpdate = true;
+    } else {
+      this.fogTexture?.dispose();
+      this.fogTexture = this.canvasTexture(canvas);
+      this.fogTextureSize = size;
+      this.fogMaterial.map = this.fogTexture;
+      this.fogMaterial.needsUpdate = true;
+    }
+    if (this.fogMesh) this.fogMesh.visible = true;
+  }
+
+  private uploadCoast(): void {
+    this.coastDirty = false;
+    this.baker.bakeCoast(this.seaIsFallback);
+    const canvas = this.baker.coastCanvas;
+    if (!canvas || !this.baker.bounds) return;
+    this.syncLayerMeshes();
+    this.coastTexture?.dispose();
+    this.coastTexture = this.canvasTexture(canvas);
+    this.coastMaterial.map = this.coastTexture;
+    this.coastMaterial.needsUpdate = true;
   }
 
   private updateParchmentMesh(): void {
-    if (this.parchmentMesh) return;
-    // Sized large enough to always cover the viewport at min zoom even
-    // when the camera is at the map's far corner. 8000×8000 world units
-    // is plenty for any practical map size.
-    const geom = new THREE.PlaneGeometry(8000, 8000);
-    this.parchmentMesh = new THREE.Mesh(geom, this.parchmentMaterial);
+    const b = this.baker.bounds;
+    const reach = b ? Math.max(Math.abs(b.minX), Math.abs(b.minX + b.w), Math.abs(b.minY), Math.abs(b.minY + b.h)) : 0;
+    const size = Math.max(PARCHMENT_MIN_SIZE, 2 * (reach * PARCHMENT_PARALLAX + PARCHMENT_VIEW_MARGIN));
+    if (this.parchmentMesh && size === this.parchmentSize) return;
+    this.parchmentSize = size;
+    if (this.parchmentMesh) {
+      this.scene.remove(this.parchmentMesh);
+      this.parchmentMesh.geometry.dispose();
+    }
+    this.parchmentMesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), this.parchmentMaterial);
     this.parchmentMesh.position.set(0, 0, 0);
     this.scene.add(this.parchmentMesh);
+    this.parchmentTexture?.repeat.set(size / PARCHMENT_TILE_PX, size / PARCHMENT_TILE_PX);
   }
 
-  // ─── Bakes ────────────────────────────────────────────────
 
-  /**
-   * Bake the static map composite (tile fills + artwork + outlines +
-   * zone overlay + zone borders) into an offscreen canvas at zoom=1 in
-   * world coords. Three.js then uploads this as a texture; pan/zoom is
-   * a free GPU-side matrix update.
-   */
-  /**
-   * Max bake canvas dimension in pixels. Conservatively chosen so the
-   * resulting texture fits inside the WebGL `MAX_TEXTURE_SIZE` cap of
-   * essentially every desktop GPU (and most modern mobile devices).
-   * Beyond this we scale the bake down proportionally — the static
-   * layer goes slightly blurry at high zoom but the renderer keeps
-   * working on sprawling dev maps.
-   */
-  private static readonly MAX_BAKE_DIM = 8192;
-
-  private bakeStaticLayer(): void {
-    const tiles = this.grid.getAllTiles().filter(t => t.type !== 'void');
-    if (tiles.length === 0) {
-      this.staticCanvas = null;
-      this.staticBounds = null;
-      this.staticDirty = false;
-      return;
-    }
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const t of tiles) {
-      const p = t.pixelPosition;
-      if (p.x < minX) minX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y > maxY) maxY = p.y;
-    }
-    const margin = HEX_SIZE + 8;
-    const bx = Math.floor(minX - margin);
-    const by = Math.floor(minY - margin);
-    const worldW = Math.ceil(maxX - minX + margin * 2);
-    const worldH = Math.ceil(maxY - minY + margin * 2);
-
-    // If the world bounds exceed the max bake dim, downscale the bake
-    // (and account for it when the plane mesh samples the texture).
-    // The plane mesh is sized to `worldW × worldH` in scene units, so a
-    // smaller bake just means the texture is sampled at lower density —
-    // the visual position of every tile stays correct.
-    const scale = Math.min(1, ThreeWorldMap.MAX_BAKE_DIM / Math.max(worldW, worldH));
-    const bw = Math.ceil(worldW * scale);
-    const bh = Math.ceil(worldH * scale);
-
-    if (!this.staticCanvas) this.staticCanvas = document.createElement('canvas');
-    this.staticCanvas.width = bw;
-    this.staticCanvas.height = bh;
-    const ctx = this.staticCanvas.getContext('2d');
-    if (!ctx) {
-      this.staticDirty = false;
-      return;
-    }
-    ctx.clearRect(0, 0, bw, bh);
-
-    const corners = getHexCorners(HEX_SIZE);
-    // Bake-space coords: (worldX − bx) * scale. The drawTile/overlay/
-    // borders helpers take an (ox, oy, z) trio that they apply as
-    // `worldX * z + ox`, so we can fold the bake's downscale into `z`.
-    const bakeZ = scale;
-    const bakeOx = -bx * scale;
-    const bakeOy = -by * scale;
-
-    for (const tile of tiles) {
-      this.drawTile(ctx, tile, corners, bakeOx, bakeOy, bakeZ);
-    }
-    this.drawZoneOverlay(ctx, corners, bakeOx, bakeOy, bakeZ);
-    this.drawZoneBorders(ctx, corners, bakeOx, bakeOy, bakeZ);
-
-    // Bounds stay in world units (the mesh is sized in world units).
-    this.staticBounds = { minX: bx, minY: by, w: worldW, h: worldH };
-    this.staticDirty = false;
-
-    if (scale < 1) {
-      console.log(
-        `[ThreeWorldMap] Static bake downscaled to ${(scale * 100).toFixed(1)}% ` +
-        `(${bw}×${bh} from ${worldW}×${worldH}) to stay under the ${ThreeWorldMap.MAX_BAKE_DIM}px cap.`,
-      );
-    }
+  private addOverlayLayer(className: string): HTMLDivElement {
+    const el = document.createElement('div');
+    el.className = className;
+    this.overlay.appendChild(el);
+    return el;
   }
 
-  private bakeShadow(): void {
-    const tiles = this.grid.getAllTiles().filter(t => t.type !== 'void');
-    if (tiles.length === 0) {
-      this.shadowCanvas = null;
-      this.shadowBlurredCanvas = null;
-      this.shadowBounds = null;
-      return;
-    }
-    const corners = getHexCorners(HEX_SIZE);
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const t of tiles) {
-      const p = t.pixelPosition;
-      if (p.x < minX) minX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y > maxY) maxY = p.y;
-    }
-    const margin = HEX_SIZE + 2;
-    const bx = Math.floor(minX - margin);
-    const by = Math.floor(minY - margin);
-    const worldW = Math.ceil(maxX - minX + margin * 2);
-    const worldH = Math.ceil(maxY - minY + margin * 2);
-
-    // Same downscale-to-fit story as the static layer — the shadow
-    // mesh is sized in world units, so a smaller source canvas just
-    // means slightly softer edges (which is fine for a blurred shadow
-    // silhouette anyway).
-    const scale = Math.min(1, ThreeWorldMap.MAX_BAKE_DIM / Math.max(worldW, worldH));
-    const bw = Math.ceil(worldW * scale);
-    const bh = Math.ceil(worldH * scale);
-
-    if (!this.shadowCanvas) this.shadowCanvas = document.createElement('canvas');
-    this.shadowCanvas.width = bw;
-    this.shadowCanvas.height = bh;
-    const sctx = this.shadowCanvas.getContext('2d');
-    if (!sctx) return;
-
-    sctx.clearRect(0, 0, bw, bh);
-    sctx.fillStyle = '#000';
-    sctx.beginPath();
-    for (const tile of tiles) {
-      const p = tile.pixelPosition;
-      const sx = (p.x - bx) * scale;
-      const sy = (p.y - by) * scale;
-      for (let i = 0; i < 6; i++) {
-        const cx = sx + corners[i].x * scale;
-        const cy = sy + corners[i].y * scale;
-        if (i === 0) sctx.moveTo(cx, cy); else sctx.lineTo(cx, cy);
-      }
-      sctx.closePath();
-    }
-    sctx.fill('nonzero');
-
-    // Pre-blurred copy: pad on each side so the blur halo isn't cropped.
-    // Pad scales with the bake's downscale so the halo stays a fixed
-    // visual size relative to the silhouette.
-    const pad = SHADOW_BLUR_PAD;
-    const blurred = document.createElement('canvas');
-    blurred.width = bw + pad * 2;
-    blurred.height = bh + pad * 2;
-    const bctx = blurred.getContext('2d');
-    if (bctx) {
-      bctx.filter = `blur(${SHADOW_BLUR_RADIUS}px)`;
-      bctx.drawImage(this.shadowCanvas, pad, pad);
-      bctx.filter = 'none';
-    }
-    this.shadowBlurredCanvas = blurred;
-    // Bounds stay in world units so the shadow mesh is sized in scene
-    // units (the bake canvas is scaled down but the mesh isn't).
-    this.shadowBounds = { minX: bx, minY: by, w: worldW, h: worldH };
-  }
-
-  // ─── Bake helpers (Canvas2D draws into the offscreen bake) ───
-
-  private drawTile(
-    ctx: CanvasRenderingContext2D,
-    tile: HexTile, corners: { x: number; y: number }[], ox: number, oy: number, z: number,
-  ): void {
-    const p = tile.pixelPosition;
-    const sx = p.x * z + ox;
-    const sy = p.y * z + oy;
-
-    const offset = cubeToOffset(tile.coord);
-    const isNonTraversable = !tile.isTraversable;
-    const isUnlocked = isNonTraversable ? false : this.worldCache.isUnlocked(offset.col, offset.row);
-    const isZoneUnlocked = isNonTraversable ? false : this.worldCache.isZoneUnlocked(tile.zone);
-
-    const darkenFactor = isNonTraversable ? 0.42 : isUnlocked ? 1 : isZoneUnlocked ? 0.55 : 0.32;
-    const fillColor = darkenFactor >= 0.999
-      ? this.colorToHex(tile.color)
-      : this.darkenColorHex(this.colorToHex(tile.color), darkenFactor);
-
-    ctx.save();
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const cx = sx + corners[i].x * z;
-      const cy = sy + corners[i].y * z;
-      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
-    }
-    ctx.closePath();
-    ctx.fillStyle = fillColor;
-    ctx.fill();
-
-    const drewArtwork = this.tryDrawTileArtwork(ctx, tile, sx, sy, z);
-
-    ctx.strokeStyle = isUnlocked ? 'rgba(26,26,46,0.5)' : 'rgba(10,10,30,0.3)';
-    ctx.lineWidth = Math.max(1, 2 * z);
-    ctx.stroke();
-
-    ctx.restore();
-
-    if (!drewArtwork) {
-      this.drawTileIcon(ctx, tile, sx, sy, z, darkenFactor);
-    }
-  }
-
-  private tryDrawTileArtwork(
-    ctx: CanvasRenderingContext2D,
-    tile: HexTile, sx: number, sy: number, z: number,
-  ): boolean {
-    const offset = cubeToOffset(tile.coord);
-    const def = this.worldTileDefs.get(`${offset.col},${offset.row}`);
-    const tileId = def?.id ?? '';
-
-    const candidates: string[] = [];
-    if (tileId) candidates.push(artworkUrl('tile', tileId));
-    candidates.push(artworkUrl('tile-type', tile.type));
-
-    let img: HTMLImageElement | null = null;
-    let imgUrl = '';
-    for (const url of candidates) {
-      img = this.imageCache.get(url, null, () => {
-        this.staticDirty = true;
-        this.requestRender();
-      });
-      if (img) { imgUrl = url; break; }
-    }
-    if (!img) return false;
-
-    const sprite = this.getHexSprite(imgUrl, img);
-    const w = HEX_SIZE * 2 * z;
-    const h = Math.sqrt(3) * HEX_SIZE * z;
-    ctx.drawImage(sprite, sx - w / 2, sy - h / 2, w, h);
-    return true;
-  }
-
-  private getHexSprite(url: string, img: HTMLImageElement): HTMLCanvasElement {
-    const cached = this.hexSpriteCache.get(url);
-    if (cached) return cached;
-    const SPRITE_W = HEX_SIZE * 4;
-    const SPRITE_H = Math.round(SPRITE_W * Math.sqrt(3) / 2);
-    const canvas = document.createElement('canvas');
-    canvas.width = SPRITE_W;
-    canvas.height = SPRITE_H;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      this.hexSpriteCache.set(url, canvas);
-      return canvas;
-    }
-    const s = SPRITE_W / 2;
-    const cx = SPRITE_W / 2;
-    const cy = SPRITE_H / 2;
-    const cors = getHexCorners(s);
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const x = cx + cors[i].x;
-      const y = cy + cors[i].y;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.clip();
-    ctx.drawImage(img, 0, 0, SPRITE_W, SPRITE_H);
-    this.hexSpriteCache.set(url, canvas);
-    return canvas;
-  }
-
-  private drawTileIcon(
-    ctx: CanvasRenderingContext2D,
-    tile: HexTile, sx: number, sy: number, z: number, darkenFactor: number,
-  ): void {
-    const typeDef = this.worldCache.getTileTypeDef(tile.type);
-    const icon = typeDef?.icon;
-    if (!icon) return;
-    ctx.save();
-    ctx.globalAlpha = Math.max(0.35, darkenFactor);
-    ctx.font = `${Math.round(24 * z)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(icon, sx, sy);
-    ctx.restore();
-  }
-
-  private drawZoneOverlay(
-    ctx: CanvasRenderingContext2D,
-    corners: { x: number; y: number }[], ox: number, oy: number, z: number,
-  ): void {
-    if (!this.currentZone) return;
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    for (const tile of this.grid.getAllTiles()) {
-      if (tile.type === 'void') continue;
-      if (!tile.isTraversable) continue;
-      if (tile.zone === this.currentZone) continue;
-      const p = tile.pixelPosition;
-      const sx = p.x * z + ox;
-      const sy = p.y * z + oy;
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const cx = sx + corners[i].x * z;
-        const cy = sy + corners[i].y * z;
-        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
-      }
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  private drawZoneBorders(
-    ctx: CanvasRenderingContext2D,
-    corners: { x: number; y: number }[], ox: number, oy: number, z: number,
-  ): void {
-    const processed = new Set<string>();
-    ctx.save();
-    ctx.lineCap = 'round';
-
-    ctx.strokeStyle = 'rgba(255,170,0,0.3)';
-    ctx.lineWidth = Math.max(2, 4 * z);
-    for (const tile of this.grid.getAllTiles()) {
-      if (tile.type === 'void') continue;
-      const neighbors = getNeighbors(tile.coord);
-      const p = tile.pixelPosition;
-      const sx = p.x * z + ox;
-      const sy = p.y * z + oy;
-      for (let dir = 0; dir < 6; dir++) {
-        const nb = this.grid.getTile(neighbors[dir]);
-        if (!nb || nb.zone === tile.zone) continue;
-        const key = tile.key < nb.key ? `${tile.key}|${nb.key}` : `${nb.key}|${tile.key}`;
-        if (processed.has(key)) continue;
-        processed.add(key);
-        const [ci0, ci1] = DIR_TO_EDGE[dir];
-        ctx.beginPath();
-        ctx.moveTo(sx + corners[ci0].x * z, sy + corners[ci0].y * z);
-        ctx.lineTo(sx + corners[ci1].x * z, sy + corners[ci1].y * z);
-        ctx.stroke();
-      }
-    }
-
-    processed.clear();
-    ctx.strokeStyle = 'rgba(255,204,68,0.7)';
-    ctx.lineWidth = Math.max(1.5, 2 * z);
-    for (const tile of this.grid.getAllTiles()) {
-      if (tile.type === 'void') continue;
-      const neighbors = getNeighbors(tile.coord);
-      const p = tile.pixelPosition;
-      const sx = p.x * z + ox;
-      const sy = p.y * z + oy;
-      for (let dir = 0; dir < 6; dir++) {
-        const nb = this.grid.getTile(neighbors[dir]);
-        if (!nb || nb.zone === tile.zone) continue;
-        const key = tile.key < nb.key ? `${tile.key}|${nb.key}` : `${nb.key}|${tile.key}`;
-        if (processed.has(key)) continue;
-        processed.add(key);
-        const [ci0, ci1] = DIR_TO_EDGE[dir];
-        ctx.beginPath();
-        ctx.moveTo(sx + corners[ci0].x * z, sy + corners[ci0].y * z);
-        ctx.lineTo(sx + corners[ci1].x * z, sy + corners[ci1].y * z);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
-
-  // ─── DOM overlay ───────────────────────────────────────────
-
-  /**
-   * Apply a single transform on the overlay so children positioned in
-   * world coords (left:Xpx, top:Ypx) appear at the right screen position.
-   * Formula: translate(W/2, H/2) · scale(zoom) · translate(-camX, -camY).
-   */
+  /** The overlay mirrors the camera, so one style write moves every world-positioned child. */
   private updateOverlayTransform(): void {
     const cw = this.canvasCssWidth();
     const ch = this.canvasCssHeight();
     this.overlay.style.transform =
       `translate(${cw / 2}px, ${ch / 2}px) scale(${this.zoom}) translate(${-this.camWorldX}px, ${-this.camWorldY}px)`;
-    const zoom = String(this.zoom);
-    if (this.overlay.style.getPropertyValue('--map-zoom') !== zoom) {
-      this.overlay.style.setProperty('--map-zoom', zoom);
+    this.partyInnerEl.style.setProperty('--party-scale', String(1 / this.zoom));
+    const lod = lodForZoom(this.zoom);
+    if (lod !== this.lod) {
+      this.lod = lod;
+      this.overlay.dataset.lod = lod;
     }
+  }
+
+  /** Inherited through the whole overlay, so written once a zoom settles rather than every frame. */
+  private settleZoom(): void {
+    const zoom = String(this.zoom);
+    if (zoom === this.settledZoom) return;
+    this.settledZoom = zoom;
+    this.overlay.style.setProperty('--map-zoom', zoom);
+    this.refreshZoneLabels();
+  }
+
+  /** Whether a label centred on this world point would run under the party token, at the current zoom. */
+  private nearPartyToken(x: number, y: number): boolean {
+    if (!this.partyRendered) return false;
+    const party = cubeToPixel(offsetToCube({ col: this.partyTargetCol, row: this.partyTargetRow }));
+    return Math.abs(x - party.x) * this.zoom < LABEL_CLEAR_X_PX && Math.abs(y - party.y) * this.zoom < LABEL_CLEAR_Y_PX;
+  }
+
+  private refreshZoneLabels(): void {
+    const explored = [];
+    for (const room of this.baker.rooms) {
+      if (!room.traversable || !this.worldCache.isUnlocked(room.col, room.row)) continue;
+      const def = this.worldTileDefs.get(`${room.col},${room.row}`);
+      const busy = this.roomActions.has(`${room.col},${room.row}`) || this.nearPartyToken(room.x, room.y);
+      explored.push({ zone: room.zone, zoneName: def?.zoneName ?? def?.zone ?? room.zone, x: room.x, y: room.y, busy });
+    }
+    this.zoneAnchors = zoneLabelAnchors(explored);
+    this.updateZoneLabels();
+  }
+
+  private updateZoneLabels(): void {
+    const html = pickZoneLabels(this.zoneAnchors, this.zoom, this.currentZone).map(anchor => {
+      const current = anchor.zone === this.currentZone ? ' data-current="1"' : '';
+      return `<div class="three-map-zone-label"${current} style="left:${anchor.x}px;top:${anchor.y}px">${escapeHtml(anchor.name)}</div>`;
+    });
+    setHtml(this.labelsEl, html.join(''));
   }
 
   private updatePartyOverlay(): void {
@@ -1580,10 +1445,7 @@ export class ThreeWorldMap {
     }
     const px = cubeToPixel(offsetToCube({ col: this.partyTargetCol, row: this.partyTargetRow }));
     this.partyEl.style.display = '';
-    this.partyEl.style.left = `${px.x}px`;
-    this.partyEl.style.top = `${px.y}px`;
-    // Allow the snap-to-position render to land, then re-enable the
-    // transition so the next move tweens. Reset on the following frame.
+    this.partyEl.style.transform = `translate(${px.x}px, ${px.y}px)`;
     if (this.partyEl.dataset.snap === '1') {
       requestAnimationFrame(() => { this.partyEl.dataset.snap = '0'; });
     }
@@ -1611,18 +1473,21 @@ export class ThreeWorldMap {
   }
 
   private updatePathOverlay(): void {
-    const html: string[] = [];
-    for (let i = 0; i < this.serverPath.length; i++) {
-      const step = this.serverPath[i];
-      const p = cubeToPixel(offsetToCube({ col: step.col, row: step.row }));
-      const isDest = i === this.serverPath.length - 1;
-      if (isDest) {
-        html.push(`<div class="three-map-path-dest" style="left:${p.x}px;top:${p.y}px"></div>`);
-      } else {
-        html.push(`<div class="three-map-path-step" style="left:${p.x}px;top:${p.y}px"></div>`);
-      }
+    if (this.serverPath.length === 0) {
+      setHtml(this.pathEl, '');
+      return;
     }
-    this.pathEl.innerHTML = html.join('');
+    const points = [{ col: this.partyTargetCol, row: this.partyTargetRow }, ...this.serverPath]
+      .map(step => cubeToPixel(offsetToCube(step)));
+    const line = points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const dest = points[points.length - 1];
+    setHtml(this.pathEl,
+      `<svg class="three-map-route" width="1" height="1" aria-hidden="true">`
+      + `<polyline class="three-map-route-under" points="${line}"/><polyline class="three-map-route-line" points="${line}"/></svg>`
+      + `<div class="three-map-path-dest" style="left:${dest.x}px;top:${dest.y}px">`
+      + '<svg viewBox="0 0 24 32" width="24" height="32" aria-hidden="true">'
+      + '<path d="M12 31C12 31 22 18.5 22 11A10 10 0 0 0 2 11C2 18.5 12 31 12 31Z" fill="#ffcb3d" stroke="#060918" stroke-width="2"/>'
+      + '<circle cx="12" cy="11" r="3.6" fill="#060918"/></svg></div>');
   }
 
   private groupOtherPlayers(): Map<string, TileOccupancy> {
@@ -1673,7 +1538,7 @@ export class ThreeWorldMap {
         );
       }
     }
-    this.flagsEl.innerHTML = html.join('');
+    setHtml(this.flagsEl, html.join(''));
   }
 
   private updateMarkersOverlay(): void {
@@ -1739,20 +1604,6 @@ export class ThreeWorldMap {
     return marker;
   }
 
-  // ─── Misc helpers ─────────────────────────────────────────
-
-  private colorToHex(color: number): string {
-    return '#' + color.toString(16).padStart(6, '0');
-  }
-
-  private darkenColorHex(hex: string, factor: number): string {
-    const n = parseInt(hex.replace('#', ''), 16);
-    const r = Math.floor(((n >> 16) & 0xff) * factor);
-    const g = Math.floor(((n >> 8) & 0xff) * factor);
-    const b = Math.floor((n & 0xff) * factor);
-    return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
-  }
-
   private hashHue(s: string): number {
     let h = 0;
     for (let i = 0; i < s.length; i++) {
@@ -1761,97 +1612,33 @@ export class ThreeWorldMap {
     return h % 360;
   }
 
-  /**
-   * Load the parchment background for `mapId` (each map can have its own,
-   * uploaded in the admin Maps tab → `/parchment-artwork/{mapId}.png`).
-   * Re-entrant: a no-op if that map's parchment is already loaded/loading, and
-   * reloads when the party switches maps. Stale loads (map switched again
-   * mid-fetch) are discarded.
-   */
+  /** Per-map sea art wins; a load superseded by another map switch is dropped. */
   private loadParchment(mapId: string): void {
     if (this.parchmentMapId === mapId) return;
     this.parchmentMapId = mapId;
     const loader = new THREE.TextureLoader();
     const url = artworkUrl('parchment', mapId);
-    const onLoaded = (tex: THREE.Texture) => {
-      // A later map switch already superseded this load — drop it.
+    const onLoaded = (tex: THREE.Texture, isFallback: boolean) => {
       if (this.parchmentMapId !== mapId) { tex.dispose(); return; }
+      this.seaIsFallback = isFallback;
+      this.coastDirty = true;
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       tex.colorSpace = THREE.SRGBColorSpace;
-      // Repeat across the large parchment plane so the texture tiles.
-      tex.repeat.set(8000 / 256, 8000 / 256);
+      tex.repeat.set(this.parchmentSize / PARCHMENT_TILE_PX, this.parchmentSize / PARCHMENT_TILE_PX);
       this.parchmentTexture?.dispose();
       this.parchmentTexture = tex;
       this.parchmentMaterial.map = tex;
-      // Once textured, clear the fallback solid color (otherwise it tints
-      // the texture).
+      // A leftover base colour would tint the texture.
       this.parchmentMaterial.color.setHex(0xffffff);
       this.parchmentMaterial.needsUpdate = true;
       this.requestRender();
     };
-    loader.load(url, onLoaded, undefined, () => onLoaded(createParchmentFallbackTexture()));
+    loader.load(
+      url,
+      tex => onLoaded(tex, false),
+      undefined,
+      () => onLoaded(new THREE.CanvasTexture(createSeaFallbackCanvas()), true),
+    );
   }
-}
-
-const PARCHMENT_TILE_PX = 256;
-
-/** Seamless procedural parchment (tileable value noise over the fallback colour) for maps without artwork. */
-function createParchmentFallbackTexture(): THREE.Texture {
-  const size = PARCHMENT_TILE_PX;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.Texture();
-  const hex = parseInt(PARCHMENT_FALLBACK_COLOR.slice(1), 16);
-  const base = [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
-  const rand = mulberry32(0x9a7c3e);
-  const octaves = [4, 8, 16, 32].map((cells, i) => ({
-    cells,
-    amp: [0.5, 0.26, 0.15, 0.09][i],
-    grid: Array.from({ length: cells * cells }, () => rand()),
-  }));
-  const img = ctx.createImageData(size, size);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      let n = 0;
-      for (const o of octaves) n += o.amp * periodicNoise(o.grid, o.cells, (x / size) * o.cells, (y / size) * o.cells);
-      const shade = 0.82 + n * 0.36 + (rand() - 0.5) * 0.05;
-      const i = (y * size + x) * 4;
-      img.data[i] = Math.min(255, base[0] * shade);
-      img.data[i + 1] = Math.min(255, base[1] * shade);
-      img.data[i + 2] = Math.min(255, base[2] * shade);
-      img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  return new THREE.CanvasTexture(canvas);
-}
-
-function periodicNoise(grid: number[], cells: number, x: number, y: number): number {
-  const x0 = Math.floor(x) % cells;
-  const y0 = Math.floor(y) % cells;
-  const x1 = (x0 + 1) % cells;
-  const y1 = (y0 + 1) % cells;
-  const fx = smooth(x - Math.floor(x));
-  const fy = smooth(y - Math.floor(y));
-  const top = grid[y0 * cells + x0] * (1 - fx) + grid[y0 * cells + x1] * fx;
-  const bottom = grid[y1 * cells + x0] * (1 - fx) + grid[y1 * cells + x1] * fx;
-  return top * (1 - fy) + bottom * fy;
-}
-
-function smooth(t: number): number {
-  return t * t * (3 - 2 * t);
-}
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }

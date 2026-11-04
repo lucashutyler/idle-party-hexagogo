@@ -4,19 +4,33 @@ import { logout } from '../network/AuthClient';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import type { GameClient } from '../network/GameClient';
 import { renderNotificationPreferences } from '../ui/NotificationPreferences';
-import { placeholderUrl } from '../ui/assets';
+import { escapeHtml } from '../ui/ItemIcon';
+import { deferWhilePressed, setHtml } from '../ui/render';
 import type { AutoRetreatPct } from '@idle-party-rpg/shared';
-import { AUTO_RETREAT_OPTIONS, DEFAULT_COMBAT_PREFS } from '@idle-party-rpg/shared';
+import { AUTO_RETREAT_OPTIONS, DEFAULT_COMBAT_PREFS, GAME_VERSION } from '@idle-party-rpg/shared';
 import { autoRetreatLine, formatPct } from '../combat/ForecastFormat';
 import { confirmDialog } from '../ui/ConfirmDialog';
 
-const SETTINGS_NAV_PLACEHOLDER = placeholderUrl('Settings', { w: 96, h: 96, glyph: '⚙️' });
+function settingsRow(id: string, glyph: string, title: string, sub: string, extraClass = ''): string {
+  return `
+    <button type="button" class="ui-row settings-row${extraClass}" id="${id}">
+      <span class="ui-row-media settings-row-glyph" aria-hidden="true">${glyph}</span>
+      <span class="ui-row-main">
+        <span class="ui-row-title">${title}</span>
+        <span class="ui-row-sub">${sub}</span>
+      </span>
+      <span class="settings-row-chevron" aria-hidden="true">›</span>
+    </button>
+  `;
+}
 
 export class SettingsScreen implements Screen {
   private container: HTMLElement;
   private optionsOverlay: HTMLElement | null = null;
   private optionsUnsubscribe?: () => void;
   private notifPrefsOverlay: HTMLElement | null = null;
+  private patchNotesOverlay: HTMLElement | null = null;
+  private rowsUnsubscribe?: () => void;
 
   constructor(containerId: string, private gameClient: GameClient) {
     const el = document.getElementById(containerId);
@@ -25,61 +39,34 @@ export class SettingsScreen implements Screen {
 
     this.container.innerHTML = `
       <div class="settings-content">
-        <div class="settings-header">
-          <img class="settings-icon-img" src="/nav-icons/settings.png" alt="Settings"
-               onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${SETTINGS_NAV_PLACEHOLDER}';}else{this.style.display='none';}" />
+        <div class="settings-page">
           <h2 class="settings-title">Settings</h2>
-        </div>
-        <div class="settings-buttons">
-          <button class="pixel-btn settings-btn" id="btn-player-options">Player Options</button>
-          <button class="pixel-btn settings-btn" id="btn-notifications">Notifications</button>
-          <button class="pixel-btn settings-btn" id="btn-patch-notes">Patch Notes</button>
-          <button class="pixel-btn settings-btn settings-btn-danger" id="btn-sign-out">Sign Out</button>
-        </div>
-        <div id="patch-notes-panel" class="patch-notes-panel" style="display:none;">
-          <button class="pixel-btn patch-notes-back" id="btn-patch-back">Back</button>
-          <div class="patch-notes-list">
-            ${PATCH_NOTES.map(p => `
-              <div class="patch-note-entry">
-                <div class="patch-note-version">${p.version}</div>
-                <ul class="patch-note-items">
-                  ${p.notes.map(n => `<li>${n}</li>`).join('')}
-                </ul>
-              </div>
-            `).join('')}
+          <div class="ui-section-label">Game</div>
+          <div class="settings-group">
+            ${settingsRow('btn-player-options', '⚔️', 'Player Options', '')}
+            ${settingsRow('btn-notifications', '🔔', 'Notifications', 'Choose what reaches you, and how')}
+          </div>
+          <div class="ui-section-label">About</div>
+          <div class="settings-group">
+            ${settingsRow('btn-patch-notes', '📜', 'Patch Notes', `Version ${escapeHtml(GAME_VERSION)}`)}
+          </div>
+          <div class="ui-section-label">Account</div>
+          <div class="settings-group">
+            ${settingsRow('btn-sign-out', '🚪', 'Sign Out', '', ' settings-row-danger')}
           </div>
         </div>
       </div>
     `;
 
-    const btnPlayerOptions = this.container.querySelector('#btn-player-options') as HTMLButtonElement;
-    const btnNotifications = this.container.querySelector('#btn-notifications') as HTMLButtonElement;
-    const btnPatchNotes = this.container.querySelector('#btn-patch-notes') as HTMLButtonElement;
-    const btnBack = this.container.querySelector('#btn-patch-back') as HTMLButtonElement;
-    const patchPanel = this.container.querySelector('#patch-notes-panel') as HTMLElement;
-    const buttonsSection = this.container.querySelector('.settings-buttons') as HTMLElement;
-    const headerSection = this.container.querySelector('.settings-header') as HTMLElement;
-
-    btnPlayerOptions.addEventListener('click', () => this.openPlayerOptions());
-    btnNotifications.addEventListener('click', () => this.openNotificationPreferences());
-
-    btnPatchNotes.addEventListener('click', () => {
-      buttonsSection.style.display = 'none';
-      headerSection.style.display = 'none';
-      patchPanel.style.display = '';
-    });
-
-    btnBack.addEventListener('click', () => {
-      patchPanel.style.display = 'none';
-      buttonsSection.style.display = '';
-      headerSection.style.display = '';
-    });
+    this.container.querySelector('#btn-player-options')!.addEventListener('click', () => this.openPlayerOptions());
+    this.container.querySelector('#btn-notifications')!.addEventListener('click', () => this.openNotificationPreferences());
+    this.container.querySelector('#btn-patch-notes')!.addEventListener('click', () => this.openPatchNotes());
 
     const btnSignOut = this.container.querySelector('#btn-sign-out') as HTMLButtonElement;
     btnSignOut.addEventListener('click', async () => {
       if (!await confirmDialog({ title: 'Sign out of your account?', confirmLabel: 'Sign Out', danger: true })) return;
       btnSignOut.disabled = true;
-      btnSignOut.textContent = 'Signing out...';
+      btnSignOut.querySelector('.ui-row-title')!.textContent = 'Signing out…';
       try {
         await logout();
       } finally {
@@ -202,56 +189,91 @@ export class SettingsScreen implements Screen {
   }
 
   private openNotificationPreferences(): void {
-    if (this.notifPrefsOverlay) return;
+    if (this.notifPrefsOverlay) {
+      bringToFront(this.notifPrefsOverlay);
+      return;
+    }
 
+    const overlay = this.mountSheet('Notifications', 'notif-prefs-modal', '<div class="notif-prefs-body"></div>', () => this.closeNotificationPreferences());
+    this.notifPrefsOverlay = overlay;
+    renderNotificationPreferences(overlay.querySelector('.notif-prefs-body') as HTMLElement, this.gameClient);
+  }
+
+  private closeNotificationPreferences(): void {
+    if (!this.notifPrefsOverlay) return;
+    release(this.notifPrefsOverlay);
+    this.notifPrefsOverlay.remove();
+    this.notifPrefsOverlay = null;
+  }
+
+  private openPatchNotes(): void {
+    if (this.patchNotesOverlay) {
+      bringToFront(this.patchNotesOverlay);
+      return;
+    }
+
+    const entries = PATCH_NOTES.map(p => `
+      <div class="patch-note-entry">
+        <div class="patch-note-version">${escapeHtml(p.version)}</div>
+        <ul class="patch-note-items">
+          ${p.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('');
+    this.patchNotesOverlay = this.mountSheet('Patch Notes', 'patch-notes-modal', `<div class="patch-notes-list">${entries}</div>`, () => this.closePatchNotes());
+  }
+
+  private closePatchNotes(): void {
+    if (!this.patchNotesOverlay) return;
+    release(this.patchNotesOverlay);
+    this.patchNotesOverlay.remove();
+    this.patchNotesOverlay = null;
+  }
+
+  private mountSheet(title: string, modalClass: string, bodyHtml: string, close: () => void): HTMLElement {
     const overlay = document.createElement('div');
     overlay.className = 'player-options-overlay';
     overlay.innerHTML = `
-      <div class="player-options-modal notif-prefs-modal" role="dialog" aria-label="Notification Settings">
+      <div class="player-options-modal ${modalClass}" role="dialog" aria-label="${escapeHtml(title)}">
         <div class="player-options-header">
-          <span class="player-options-title">Notifications</span>
-          <button class="player-options-close" aria-label="Close">×</button>
+          <span class="player-options-title">${escapeHtml(title)}</span>
+          <button type="button" class="player-options-close" aria-label="Close">×</button>
         </div>
-        <div class="notif-prefs-body"></div>
+        ${bodyHtml}
       </div>
     `;
     document.body.appendChild(overlay);
-    this.notifPrefsOverlay = overlay;
-
-    const close = () => {
-      release(overlay);
-      overlay.remove();
-      this.notifPrefsOverlay = null;
-    };
-
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) close();
     });
     overlay.querySelector('.player-options-close')!.addEventListener('click', close);
-
-    renderNotificationPreferences(overlay.querySelector('.notif-prefs-body') as HTMLElement, this.gameClient);
-
     bringToFront(overlay, close);
     wireFocusOnInteract(overlay);
+    return overlay;
+  }
+
+  private paintRows(): void {
+    const state = this.gameClient.lastState;
+    const pct = state?.character?.combatPrefs?.autoRetreatBelowPct ?? DEFAULT_COMBAT_PREFS.autoRetreatBelowPct;
+    const options = this.container.querySelector('#btn-player-options .ui-row-sub');
+    if (options) setHtml(options, escapeHtml(autoRetreatLine(pct)));
+    const account = this.container.querySelector('#btn-sign-out .ui-row-sub');
+    if (account) setHtml(account, state?.username ? `Signed in as ${escapeHtml(state.username)}` : 'Leave this device');
   }
 
   onActivate(): void {
-    // Reset to main settings view
-    const patchPanel = this.container.querySelector('#patch-notes-panel') as HTMLElement;
-    const buttonsSection = this.container.querySelector('.settings-buttons') as HTMLElement;
-    const headerSection = this.container.querySelector('.settings-header') as HTMLElement;
-    patchPanel.style.display = 'none';
-    buttonsSection.style.display = '';
-    headerSection.style.display = '';
+    this.paintRows();
+    this.rowsUnsubscribe?.();
+    this.rowsUnsubscribe = this.gameClient.subscribe(() => {
+      deferWhilePressed(this.container, () => this.paintRows());
+    });
   }
 
   onDeactivate(): void {
-    // Close any open notification-preferences popup so it doesn't survive a tab switch.
-    if (this.notifPrefsOverlay) {
-      release(this.notifPrefsOverlay);
-      this.notifPrefsOverlay.remove();
-      this.notifPrefsOverlay = null;
-    }
+    this.rowsUnsubscribe?.();
+    this.rowsUnsubscribe = undefined;
+    this.closeNotificationPreferences();
+    this.closePatchNotes();
     this.closePlayerOptions();
   }
 }

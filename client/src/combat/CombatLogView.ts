@@ -1,10 +1,13 @@
+import { registerDismiss, release } from '../ui/ModalStack';
+import { deferWhilePressed, setHtml } from '../ui/render';
 import type { CombatLogBuffer, CombatLogLine } from './CombatLogBuffer';
 import type { CombatLogFormatter } from './CombatLogFormatter';
 
-export const TICKER_LINES = 3;
+/** Enough for the tall desktop log; the short phone ticker clips the older lines off its top. */
+export const TICKER_LINES = 8;
 export const TICKER_MIN_INTERVAL_MS = 250;
 
-/** Three-line live ticker plus the expandable full log, both fed by the shared CombatLogBuffer. */
+/** Live ticker plus the expandable full log, both fed by the shared CombatLogBuffer. */
 export class CombatLogView {
   private readonly wrapper: HTMLElement;
   private readonly ticker: HTMLElement;
@@ -87,6 +90,8 @@ export class CombatLogView {
     if (open === this.open) return;
     this.open = open;
     this.wrapper.classList.toggle('fullscreen', open);
+    if (open) registerDismiss(this.wrapper, () => this.setOpen(false));
+    else release(this.wrapper);
     this.fullscreenBtn.textContent = open ? '✖' : '⛶';
     this.fullscreenBtn.title = open ? 'Close log' : 'Expand log';
     this.fullscreenBtn.setAttribute('aria-label', this.fullscreenBtn.title);
@@ -143,7 +148,8 @@ export class CombatLogView {
     const key = `${this.formatter.version}|${newest.map(e => e.seq).join(',')}`;
     if (key === this.lastTickerKey) return;
     this.lastTickerKey = key;
-    this.ticker.innerHTML = newest.map(line => this.lineHtml(line)).join('');
+    const html = newest.map(line => this.lineHtml(line)).join('');
+    deferWhilePressed(this.ticker, () => setHtml(this.ticker, html));
   }
 
   private renderFull(force: boolean): void {

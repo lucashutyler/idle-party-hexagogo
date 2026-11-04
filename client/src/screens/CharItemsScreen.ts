@@ -20,26 +20,50 @@ import {
   getOwnedItemIds,
   getEquippedItemIds,
   canClassEquipItem,
+  getItemEffectText,
 } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
-import { RARITY_ORDER, SLOT_LABELS, renderItemIcon, renderEmptySlotIcon, RARITY_COLORS } from '../ui/ItemIcon';
-import { renderItemPopupContent } from '../ui/ItemPopup';
+import {
+  RARITY_ORDER,
+  SLOT_LABELS,
+  renderItemIcon,
+  renderItemCell,
+  renderEmptySlotIcon,
+  RARITY_COLORS,
+  escapeHtml,
+  wireRoleButtons,
+} from '../ui/ItemIcon';
+import { ITEM_POPUP_CLOSE_HTML, renderItemPopupContent } from '../ui/ItemPopup';
 import { renderEquipCompareBlock } from '../ui/EquipCompare';
-import { renderAssetImg } from '../ui/assets';
+import { artworkUrl, renderTrackedImg } from '../ui/assets';
 import { bringToFront, release } from '../ui/ModalStack';
 import { renderSkillCardMeta } from '../ui/SkillCardChip';
 import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
-import { deferWhilePressed } from '../ui/render';
+import { deferWhilePressed, setHtml } from '../ui/render';
+import { renderSegments, wireSegments } from '../ui/Segments';
 
-/** Left column slots (top to bottom). Mainhand sits at the bottom of the
- *  left column with a small visual gap (no separate row anymore). */
+/** First row of the gear grid. */
 const LEFT_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'gloves', 'foot', 'mainhand'];
 
-/** Right column slots (top to bottom). Offhand mirrors mainhand on the right. */
+/** Second row of the gear grid. */
 const RIGHT_SLOTS: EquipSlot[] = ['back', 'necklace', 'bracers', 'ring', 'relic', 'offhand'];
 
+/** Bag items an equipment slot accepts. */
+const SLOT_ACCEPTS: Partial<Record<EquipSlot, EquipSlot[]>> = {
+  mainhand: ['mainhand', 'twohanded'],
+};
+
 type SortMode = 'rarity' | 'type' | 'newest';
+
+type HeroTab = 'gear' | 'skills' | 'stats';
+
+const HERO_TABS: readonly HeroTab[] = ['gear', 'skills', 'stats'];
+const HERO_TAB_KEY = 'heroTab';
+
+function isHeroTab(value: string | null): value is HeroTab {
+  return HERO_TABS.includes(value as HeroTab);
+}
 
 /** Display order within the inventory when sorting by type (and matching header buckets). */
 const SLOT_ORDER: Record<string, number> = {
@@ -65,14 +89,20 @@ export class CharItemsScreen implements Screen {
   private worldCache: WorldCache;
   private isActive = false;
 
-  // Hero section refs
+  private contentEl!: HTMLElement;
+  private segmentsEl!: HTMLElement;
+  private tab: HeroTab = 'gear';
+  private tabScrollTop: Record<HeroTab, number> = { gear: 0, skills: 0, stats: 0 };
+  private skillsNeedAttention = false;
+
   private portraitEl!: HTMLElement;
+  private bannerTitleEl!: HTMLElement;
   private equipLeftCol!: HTMLElement;
   private equipRightCol!: HTMLElement;
   private skillStripEl!: HTMLElement;
 
-  // Stat & meta refs
   private statCardEl!: HTMLElement;
+  private statListEl!: HTMLElement;
   private metaRowEl!: HTMLElement;
   private xpFill!: HTMLElement;
   private xpLabelEl!: HTMLElement;
@@ -82,10 +112,11 @@ export class CharItemsScreen implements Screen {
   private bestiaryCard!: BestiaryCard;
   private bestiaryModal: BestiaryModal;
 
-  // Inventory refs
   private inventoryGrid!: HTMLElement;
+  private inventoryCountEl!: HTMLElement;
   private mailboxContainer!: HTMLElement;
   private tradesContainer!: HTMLElement;
+  private sentTradesContainer!: HTMLElement;
   private modalOverlay!: HTMLElement;
   private searchInput!: HTMLInputElement;
   private sortSelect!: HTMLSelectElement;
@@ -94,11 +125,9 @@ export class CharItemsScreen implements Screen {
   private unsubEquipBlocked?: () => void;
   private unsubBestiary?: () => void;
 
-  /** Cached item definitions. */
   private itemDefs: Record<string, ItemDefinition> = {};
   private setDefs: Record<string, SetDefinition> = {};
 
-  /** Cached character state. */
   private lastEquipment: Record<string, string | null> = {};
   private lastInventory: Record<string, number> = {};
   private lastClassName = '';
@@ -106,7 +135,6 @@ export class CharItemsScreen implements Screen {
   private lastProposedTrades: TradeState[] = [];
   private lastUsername = '';
 
-  /** Change-detection keys. */
   private lastEquipKey = '';
   private lastInvKey = '';
   private lastSkillKey = '';
@@ -115,10 +143,7 @@ export class CharItemsScreen implements Screen {
   private lastHeroKey = '';
   private lastStatKey = '';
 
-  /** Search/sort filter state. */
   private searchFilter = '';
-  /** Default to type; will be overridden by the per-user persisted choice
-   *  after the first state lands (when we know the username). */
   private sortMode: SortMode = 'type';
   private sortPrefLoaded = false;
 
@@ -140,6 +165,10 @@ export class CharItemsScreen implements Screen {
     this.onOpenTrade = cb;
   }
 
+  setSubTab(sub: string): void {
+    if (isHeroTab(sub)) this.selectTab(sub);
+  }
+
   onActivate(): void {
     this.isActive = true;
 
@@ -155,8 +184,10 @@ export class CharItemsScreen implements Screen {
     });
 
     this.unsubBestiary = this.gameClient.onBestiary(() => {
-      const current = this.gameClient.lastState;
-      if (this.isActive && current) this.updateFromState(current);
+      deferWhilePressed(this.container, () => {
+        const current = this.gameClient.lastState;
+        if (this.isActive && current) this.updateFromState(current);
+      });
     });
     if (this.gameClient.lastState?.character?.mastery) this.gameClient.requestBestiary();
 
@@ -179,66 +210,95 @@ export class CharItemsScreen implements Screen {
   }
 
   private buildDOM(): void {
+    const savedTab = sessionStorage.getItem(HERO_TAB_KEY);
+    if (isHeroTab(savedTab)) this.tab = savedTab;
+
     this.container.innerHTML = `
-      <div class="charitems-content">
-        <div class="charitems-hero">
-          <div class="charitems-hero-grid">
+      <div class="charitems-content" data-hero-tab="${this.tab}">
+        <div class="hero-segments"></div>
+
+        <div class="hero-pane hero-pane-gear" data-pane="gear">
+          <div class="items-mailbox"></div>
+          <div class="items-trades"></div>
+
+          <div class="hero-loadout">
+            <div class="hero-banner">
+              <div class="charitems-portrait hero-portrait"></div>
+              <div class="hero-banner-main">
+                <div class="hero-banner-title"></div>
+                <div class="charitems-stat-card"></div>
+              </div>
+            </div>
             <div class="items-equip-panel">
               <div class="items-equip-col items-equip-left"></div>
-              <div class="items-equip-figure charitems-portrait"></div>
               <div class="items-equip-col items-equip-right"></div>
             </div>
           </div>
+
+          <div class="hero-inventory">
+            <div class="items-search-sort">
+              <div class="items-section-label">Inventory <span class="items-section-count"></span></div>
+              <input type="text" class="items-search-input" placeholder="Search..." aria-label="Search items" enterkeyhint="search" />
+              <select class="items-sort-select" aria-label="Sort items">
+                <option value="type">Type</option>
+                <option value="rarity">Rarity</option>
+                <option value="newest">Newest</option>
+              </select>
+            </div>
+            <div class="items-inv-grid"></div>
+          </div>
+
+          <div class="items-trades-sent"></div>
+        </div>
+
+        <div class="hero-pane hero-pane-skills" data-pane="skills">
           <div class="charitems-skills-strip"></div>
         </div>
 
-        <div class="charitems-stat-card"></div>
-
-        <div class="charitems-meta-row"></div>
-        <div class="charitems-xp-bar-wrap">
-          <div class="character-xp-label">
-            <span>XP</span>
-            <span class="charitems-xp-numbers">0 / 100</span>
+        <div class="hero-pane hero-pane-stats" data-pane="stats">
+          <div class="hero-stats-col">
+            <div class="charitems-meta-row"></div>
+            <div class="charitems-xp-bar-wrap">
+              <div class="character-xp-label">
+                <span>XP</span>
+                <span class="charitems-xp-numbers">0 / 100</span>
+              </div>
+              <div class="charitems-xp-bar">
+                <div class="charitems-xp-fill"></div>
+              </div>
+              <div class="charitems-xp-rate-row">
+                <span>XP Rate</span>
+                <span class="charitems-xp-rate-value">0/hr</span>
+                <span class="charitems-xp-rate-from"></span>
+                <button type="button" class="charitems-xp-rate-reset" aria-label="Reset XP rate counter">&#x21bb;</button>
+              </div>
+            </div>
+            <div class="hero-stat-list"></div>
+            <div class="charitems-passive-info"></div>
           </div>
-          <div class="charitems-xp-bar">
-            <div class="charitems-xp-fill" style="width: 0%"></div>
-          </div>
-          <div class="charitems-xp-rate-row">
-            <span>XP Rate</span>
-            <span class="charitems-xp-rate-value">0/hr</span>
-            <span class="charitems-xp-rate-reset" title="Reset XP rate counter">&#x21bb;</span>
-            <span class="charitems-xp-rate-from"></span>
-          </div>
+          <div class="charitems-bestiary"></div>
         </div>
-
-        <div class="charitems-passive-info"></div>
-
-        <div class="charitems-bestiary"></div>
-
-        <div class="items-mailbox"></div>
-        <div class="items-trades"></div>
-
-        <div class="items-section-label">Inventory</div>
-        <div class="items-search-sort">
-          <input type="text" class="items-search-input" placeholder="Search items..." />
-          <select class="items-sort-select">
-            <option value="type">Type</option>
-            <option value="rarity">Rarity</option>
-            <option value="newest">Newest</option>
-          </select>
-        </div>
-        <div class="items-inv-grid"></div>
       </div>
       <div class="items-modal-overlay" style="display:none"></div>
     `;
 
+    this.contentEl = this.container.querySelector('.charitems-content')!;
+    this.segmentsEl = this.container.querySelector('.hero-segments')!;
+    wireSegments(this.segmentsEl, (id) => {
+      if (isHeroTab(id)) this.selectTab(id);
+    });
+    this.renderSegmentBar();
+    wireRoleButtons(this.contentEl);
+
     this.portraitEl = this.container.querySelector('.charitems-portrait')!;
+    this.bannerTitleEl = this.container.querySelector('.hero-banner-title')!;
     const slotsContainer = this.container.querySelector('.items-equip-panel')!;
     this.equipLeftCol = slotsContainer.querySelector('.items-equip-left')!;
     this.equipRightCol = slotsContainer.querySelector('.items-equip-right')!;
 
     this.skillStripEl = this.container.querySelector('.charitems-skills-strip')!;
     this.statCardEl = this.container.querySelector('.charitems-stat-card')!;
+    this.statListEl = this.container.querySelector('.hero-stat-list')!;
     this.metaRowEl = this.container.querySelector('.charitems-meta-row')!;
     this.xpFill = this.container.querySelector('.charitems-xp-fill')!;
     this.xpLabelEl = this.container.querySelector('.charitems-xp-numbers')!;
@@ -252,19 +312,19 @@ export class CharItemsScreen implements Screen {
     });
 
     this.inventoryGrid = this.container.querySelector('.items-inv-grid')!;
+    this.inventoryCountEl = this.container.querySelector('.hero-inventory .items-section-count')!;
     this.mailboxContainer = this.container.querySelector('.items-mailbox')!;
     this.tradesContainer = this.container.querySelector('.items-trades')!;
+    this.sentTradesContainer = this.container.querySelector('.items-trades-sent')!;
     this.modalOverlay = this.container.querySelector('.items-modal-overlay')!;
     this.searchInput = this.container.querySelector('.items-search-input')!;
     this.sortSelect = this.container.querySelector('.items-sort-select')!;
 
-    // XP rate reset
     this.container.querySelector('.charitems-xp-rate-reset')!.addEventListener('click', async () => {
       if (!await confirmDialog({ title: 'Reset XP rate counter?', confirmLabel: 'Reset' })) return;
       this.gameClient.resetXpRate();
     });
 
-    // Mailbox / trades click delegation
     this.mailboxContainer.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('button[data-mb-action]') as HTMLButtonElement | null;
       if (!btn) return;
@@ -274,26 +334,12 @@ export class CharItemsScreen implements Screen {
       if (action === 'accept') this.gameClient.sendAcceptGift(id);
       if (action === 'deny') this.gameClient.sendDenyGift(id);
     });
-    this.tradesContainer.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const cancelBtn = target.closest('button[data-trade-cancel]') as HTMLButtonElement | null;
-      if (cancelBtn) {
-        const id = cancelBtn.getAttribute('data-trade-cancel');
-        if (id) this.gameClient.sendCancelTrade(id);
-        return;
-      }
-      const row = target.closest('[data-trade-id]') as HTMLElement | null;
-      if (row) {
-        const id = row.getAttribute('data-trade-id');
-        if (id && this.onOpenTrade) this.onOpenTrade(id);
-      }
-    });
+    this.tradesContainer.addEventListener('click', (e) => this.onTradeClick(e));
+    this.sentTradesContainer.addEventListener('click', (e) => this.onTradeClick(e));
 
-    this.modalOverlay.addEventListener('click', (e) => {
-      if (e.target === this.modalOverlay) this.hideModal();
-    });
+    this.modalOverlay.addEventListener('click', (e) => this.onModalClick(e));
+    wireRoleButtons(this.modalOverlay);
 
-    // Search/sort
     this.searchInput.addEventListener('input', () => {
       this.searchFilter = this.searchInput.value.toLowerCase();
       this.renderInventory();
@@ -304,7 +350,6 @@ export class CharItemsScreen implements Screen {
       this.renderInventory();
     });
 
-    // Equipment slot delegation
     slotsContainer.addEventListener('click', (e) => {
       const slotEl = (e.target as HTMLElement).closest('.items-equip-slot-square[data-slot]') as HTMLElement | null;
       if (!slotEl) return;
@@ -313,21 +358,16 @@ export class CharItemsScreen implements Screen {
       if (slot && itemId) {
         this.showItemPopup(itemId, 'equipped', slot);
       } else if (slot) {
-        this.showSlotTooltip(slotEl, slot);
+        this.showSlotPicker(slot);
       }
     });
 
-    // Inventory grid click delegation
     this.inventoryGrid.addEventListener('click', (e) => {
-      const square = (e.target as HTMLElement).closest('.item-square[data-item]') as HTMLElement | null;
-      if (!square) return;
-      const itemId = square.getAttribute('data-item');
-      if (itemId) {
-        this.showItemPopup(itemId, 'inventory', undefined);
-      }
+      const cell = (e.target as HTMLElement).closest('.item-cell');
+      const itemId = cell?.querySelector('.item-square[data-item]')?.getAttribute('data-item');
+      if (itemId) this.showItemPopup(itemId, 'inventory', undefined);
     });
 
-    // Skill slot click delegation
     this.skillStripEl.addEventListener('click', (e) => {
       const slot = (e.target as HTMLElement).closest('.charitems-skill-slot[data-slot-index]') as HTMLElement | null;
       if (!slot) return;
@@ -336,13 +376,59 @@ export class CharItemsScreen implements Screen {
       this.openSkillPopup(idx);
     });
 
-    // Stat card tooltip — click to show, click anywhere else to dismiss
     this.statCardEl.addEventListener('click', (e) => {
-      const labelEl = (e.target as HTMLElement).closest('.charitems-stat-label[data-tooltip]') as HTMLElement | null;
+      const stat = (e.target as HTMLElement).closest('.charitems-stat');
+      const labelEl = stat?.querySelector<HTMLElement>('.charitems-stat-label[data-tooltip]');
       if (!labelEl) return;
       e.stopPropagation();
       this.showStatTooltip(labelEl);
     });
+  }
+
+  private selectTab(tab: HeroTab): void {
+    if (tab === this.tab) return;
+    this.tabScrollTop[this.tab] = this.contentEl.scrollTop;
+    this.tab = tab;
+    this.contentEl.dataset.heroTab = tab;
+    this.contentEl.scrollTop = this.tabScrollTop[tab];
+    this.renderSegmentBar();
+    sessionStorage.setItem(HERO_TAB_KEY, tab);
+  }
+
+  private renderSegmentBar(): void {
+    const waitingTrades = this.lastProposedTrades.filter(t => this.isWaitingOnMe(t)).length;
+    setHtml(this.segmentsEl, renderSegments([
+      { id: 'gear', label: 'Gear', badge: this.lastMailbox.length + waitingTrades },
+      { id: 'skills', label: 'Skills', badge: this.skillsNeedAttention },
+      { id: 'stats', label: 'Stats' },
+    ], this.tab));
+  }
+
+  private isWaitingOnMe(trade: TradeState): boolean {
+    return trade.lastUpdatedBy !== this.lastUsername;
+  }
+
+  private onTradeClick(e: Event): void {
+    const target = e.target as HTMLElement;
+    const cancelBtn = target.closest<HTMLButtonElement>('button[data-trade-cancel]');
+    if (cancelBtn) {
+      const id = cancelBtn.getAttribute('data-trade-cancel');
+      if (id) void this.confirmCancelTrade(id);
+      return;
+    }
+    const id = target.closest('[data-trade-id]')?.getAttribute('data-trade-id');
+    if (id) this.onOpenTrade?.(id);
+  }
+
+  private async confirmCancelTrade(tradeId: string): Promise<void> {
+    const confirmed = await confirmDialog({
+      title: 'Cancel this trade?',
+      body: 'The offer will be withdrawn.',
+      confirmLabel: 'Cancel trade',
+      cancelLabel: 'Keep trade',
+      danger: true,
+    });
+    if (confirmed) this.gameClient.sendCancelTrade(tradeId);
   }
 
   private updateFromState(state: ServerStateMessage): void {
@@ -358,7 +444,6 @@ export class CharItemsScreen implements Screen {
     this.lastProposedTrades = state.social?.proposedTrades ?? [];
     this.lastUsername = state.username ?? '';
 
-    // Once we know who's logged in, restore their persisted sort choice.
     if (!this.sortPrefLoaded && this.lastUsername) {
       this.sortPrefLoaded = true;
       const saved = this.loadSortPref();
@@ -368,7 +453,6 @@ export class CharItemsScreen implements Screen {
       }
     }
 
-    // Hero portrait + class info — only re-render when className changes
     const heroKey = char.className;
     if (heroKey !== this.lastHeroKey) {
       this.lastHeroKey = heroKey;
@@ -376,21 +460,19 @@ export class CharItemsScreen implements Screen {
       this.renderClassPassive(char.className);
     }
 
-    // Equipment / inventory key — re-render when items actually change
-    const equipKey = JSON.stringify(char.equipment);
+    const defsSize = Object.keys(this.itemDefs).length;
+    const equipKey = JSON.stringify(char.equipment) + '|' + defsSize;
     if (equipKey !== this.lastEquipKey) {
       this.lastEquipKey = equipKey;
       this.renderEquipment(char);
     }
 
-    const invKey = JSON.stringify(char.inventory);
+    const invKey = JSON.stringify(char.inventory) + '|' + char.className + '|' + defsSize;
     if (invKey !== this.lastInvKey) {
       this.lastInvKey = invKey;
       this.renderInventory();
     }
 
-    // Skill loadout — re-render when skill state, the content catalog, or the
-    // equipment-granted skill set changes
     const skillKey = JSON.stringify(char.skillLoadout) + '|' + char.level
       + '|' + this.worldCache.contentGeneration
       + '|' + JSON.stringify(char.grantedSkillIds ?? []);
@@ -399,7 +481,6 @@ export class CharItemsScreen implements Screen {
       this.renderSkillStrip(state);
     }
 
-    // Stat card — re-render when stats change
     const statKey = JSON.stringify({
       d: char.baseDamage,
       hp: char.maxHp,
@@ -412,6 +493,7 @@ export class CharItemsScreen implements Screen {
     if (statKey !== this.lastStatKey) {
       this.lastStatKey = statKey;
       this.renderStatCard(state);
+      this.renderBannerTitle(char.className, char.level);
       this.renderMetaRow(char.className, char.level, char.gold);
       this.renderXpBar(char.xp, char.xpForNextLevel);
     }
@@ -420,7 +502,6 @@ export class CharItemsScreen implements Screen {
 
     this.bestiaryCard.update(char.mastery, this.gameClient.lastBestiary?.entries ?? [], char.level);
 
-    // Mailbox & trades — re-render on change
     const mailboxKey = JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false]));
     if (mailboxKey !== this.lastMailboxKey) {
       this.lastMailboxKey = mailboxKey;
@@ -432,19 +513,17 @@ export class CharItemsScreen implements Screen {
       this.lastTradesKey = tradesKey;
       this.renderProposedTrades();
     }
+
+    this.renderSegmentBar();
   }
 
-  // ── Hero / portrait ──────────────────────────────────────────
-
   private renderPortrait(className: string): void {
-    // TODO: drop-in `class-artwork/Knight.png` etc. when art exists; the placeholder shows the class glyph for now.
-    this.portraitEl.innerHTML = renderAssetImg('class', className, {
-      label: className,
-      width: 360,
-      height: 440,
+    const img = renderTrackedImg(artworkUrl('class', className), {
+      className: 'hero-portrait-img',
       alt: `${className} portrait`,
-      glyph: CLASS_GLYPHS[className],
     });
+    const glyph = CLASS_GLYPHS[className] ?? escapeHtml(className.charAt(0));
+    this.portraitEl.innerHTML = `${img}<span class="hero-portrait-glyph" aria-hidden="true">${glyph}</span>`;
   }
 
   private renderClassPassive(className: string): void {
@@ -454,12 +533,10 @@ export class CharItemsScreen implements Screen {
       return;
     }
     this.classPassiveEl.innerHTML = `
-      <strong>${this.escapeHtml(def.displayName)}</strong> &middot; <em>${this.escapeHtml(def.damageType)}</em><br>
-      ${this.escapeHtml(def.description)}
+      <strong>${escapeHtml(def.displayName)}</strong> &middot; <em>${escapeHtml(def.damageType)}</em><br>
+      ${escapeHtml(def.description)}
     `;
   }
-
-  // ── Equipment slots ─────────────────────────────────────────
 
   private renderEquipment(char: { equipment: Record<string, string | null>; className: string }): void {
     const renderSlotSquare = (slot: EquipSlot) => {
@@ -474,49 +551,56 @@ export class CharItemsScreen implements Screen {
           setDefs: this.setDefs,
           extraClass: 'items-equip-slot-square',
           dataAttrs,
+          interactive: true,
         });
       }
-      return renderEmptySlotIcon(slot, { extraClass: 'items-equip-slot-square', dataAttrs });
+      return renderEmptySlotIcon(slot, { extraClass: 'items-equip-slot-square', dataAttrs, interactive: true });
     };
 
-    // Mainhand/offhand are now the last items in LEFT_SLOTS / RIGHT_SLOTS;
-    // the standalone bottom row is gone.
-    this.equipLeftCol.innerHTML = LEFT_SLOTS.map(renderSlotSquare).join('');
-    this.equipRightCol.innerHTML = RIGHT_SLOTS.map(renderSlotSquare).join('');
+    setHtml(this.equipLeftCol, LEFT_SLOTS.map(renderSlotSquare).join(''));
+    setHtml(this.equipRightCol, RIGHT_SLOTS.map(renderSlotSquare).join(''));
   }
-
-  // ── Skill loadout strip ─────────────────────────────────────
 
   private renderSkillStrip(state: ServerStateMessage): void {
     const char = state.character;
     if (!char) return;
 
     const slots = this.worldCache.getSlotSchedule(char.className);
+    const equipped = new Set(char.skillLoadout.equippedSkills.filter(Boolean) as string[]);
+    const available = [...(char.skillLoadout.unlockedSkills ?? []), ...(char.grantedSkillIds ?? [])]
+      .filter(id => !equipped.has(id))
+      .map(id => this.worldCache.getSkill(id));
     let html = '';
+    let attention = false;
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
       const isUnlocked = char.level >= slot.unlocksAtLevel;
       const equippedId = char.skillLoadout.equippedSkills[i] ?? null;
       const skill = equippedId ? this.worldCache.getSkill(equippedId) : null;
+      const kind = slot.type === 'active' ? 'Active' : 'Passive';
 
       if (!isUnlocked) {
         html += `<div class="charitems-skill-slot locked">
-          <span class="charitems-skill-slot-name">Lv ${slot.unlocksAtLevel}</span>
-          <span class="charitems-skill-slot-meta">${slot.type}</span>
+          <span class="charitems-skill-slot-kind">${kind}</span>
+          <span class="charitems-skill-slot-name">Unlocks at Lv ${slot.unlocksAtLevel}</span>
         </div>`;
       } else if (skill) {
-        html += `<div class="charitems-skill-slot filled ${skill.type}" data-slot-index="${i}">
-          <span class="charitems-skill-slot-name">${this.escapeHtml(skill.name)}</span>
+        html += `<div class="charitems-skill-slot filled ${skill.type}" data-slot-index="${i}" role="button" tabindex="0">
+          <span class="charitems-skill-slot-name">${escapeHtml(skill.name)}</span>
           ${renderSkillCardMeta(skill)}
+          <span class="charitems-skill-slot-desc">${escapeHtml(skill.description)}</span>
         </div>`;
       } else {
-        html += `<div class="charitems-skill-slot empty" data-slot-index="${i}">
-          <span class="charitems-skill-slot-name">+ ${slot.type}</span>
-          <span class="charitems-skill-slot-meta">slot ${i + 1}</span>
+        const canFill = available.some(s => s?.type === slot.type);
+        attention ||= canFill;
+        html += `<div class="charitems-skill-slot empty${canFill ? ' can-fill' : ''}" data-slot-index="${i}" role="button" tabindex="0">
+          <span class="charitems-skill-slot-kind">${kind}</span>
+          <span class="charitems-skill-slot-name">${canFill ? `Choose ${slot.type === 'active' ? 'an active' : 'a passive'} skill` : 'Empty slot'}</span>
         </div>`;
       }
     }
-    this.skillStripEl.innerHTML = html;
+    this.skillsNeedAttention = attention;
+    setHtml(this.skillStripEl, html || '<div class="ui-empty">No skill slots yet.</div>');
   }
 
   private openSkillPopup(slotIndex: number): void {
@@ -536,11 +620,6 @@ export class CharItemsScreen implements Screen {
     const grantedIds = new Set(char.grantedSkillIds ?? []);
     const classSkills = getSkillsForClass(char.className as ClassName, this.worldCache.getSkillContent());
 
-    // Build a single list of candidates (available + future-locked) so the
-    // player can see what's coming. Locked rows are visually dimmed and
-    // non-clickable; available rows behave as before. Availability comes from
-    // level unlocks OR equipment grants; grant-only skills (unlockLevel null)
-    // never appear in the future-locked list.
     type Candidate = { skill: SkillDefinition; locked: boolean; granted: boolean };
     const candidates: Candidate[] = [];
     const seen = new Set<string>();
@@ -550,7 +629,6 @@ export class CharItemsScreen implements Screen {
       const isUnlocked = unlockedIds.has(skill.id);
       const isGranted = grantedIds.has(skill.id);
       if (isUnlocked || isGranted) {
-        // Hide already-equipped-elsewhere available skills (the existing rule).
         if (equippedIds.has(skill.id) && skill.id !== equippedId) continue;
         candidates.push({ skill, locked: false, granted: !isUnlocked });
       } else if (skill.unlockLevel !== null) {
@@ -558,8 +636,6 @@ export class CharItemsScreen implements Screen {
       }
     }
 
-    // Equipment-granted skills outside the class tree (cross-class or
-    // grant-only) — equippable rows appended after the class list.
     const grantedExtras: SkillDefinition[] = [];
     for (const id of grantedIds) {
       if (seen.has(id)) continue;
@@ -587,17 +663,17 @@ export class CharItemsScreen implements Screen {
         if (locked) classes.push('locked');
         const attrs = locked
           ? `data-locked="1"`
-          : `data-skill-id="${this.escapeHtml(s.id)}" ${isCurrent ? 'data-current="1"' : ''}`;
+          : `data-skill-id="${escapeHtml(s.id)}" ${isCurrent ? 'data-current="1"' : ''}`;
         const tagline = locked
           ? `<div class="charitems-skill-row-locklabel">Unlocks at Lv ${s.unlockLevel}</div>`
           : granted
             ? `<div class="charitems-skill-row-locklabel">Granted by equipment</div>`
             : '';
         return `<div class="${classes.join(' ')}" ${attrs}>
-          <div class="charitems-skill-row-name">${this.escapeHtml(s.name)}${isCurrent ? ' &middot; equipped' : ''}</div>
+          <div class="charitems-skill-row-name">${escapeHtml(s.name)}${isCurrent ? ' &middot; equipped' : ''}</div>
           <div class="charitems-skill-row-meta">${renderSkillCardMeta(s)}</div>
           ${tagline}
-          <div class="charitems-skill-row-desc">${this.escapeHtml(s.description)}</div>
+          <div class="charitems-skill-row-desc">${escapeHtml(s.description)}</div>
         </div>`;
       }).join('');
     }
@@ -605,7 +681,7 @@ export class CharItemsScreen implements Screen {
     overlay.innerHTML = `
       <div class="charitems-skill-popup">
         <div class="charitems-skill-popup-title">Slot ${slotIndex + 1} &middot; ${slot.type === 'active' ? 'Active' : 'Passive'} skill</div>
-        ${equippedNow ? `<div class="charitems-skill-popup-current">Currently: <strong>${this.escapeHtml(equippedNow.name)}</strong></div>` : ''}
+        ${equippedNow ? `<div class="charitems-skill-popup-current">Currently: <strong>${escapeHtml(equippedNow.name)}</strong></div>` : ''}
         <div class="charitems-skill-popup-list">${rowsHtml}</div>
         <div class="charitems-skill-popup-actions">
           <button class="charitems-skill-popup-btn cancel-btn">Cancel</button>
@@ -614,11 +690,11 @@ export class CharItemsScreen implements Screen {
       </div>
     `;
 
-    document.body.appendChild(overlay);
-    bringToFront(overlay);
-    this.skillPopupOpen = true;
-
     const close = () => this.closeSkillPopup();
+
+    document.body.appendChild(overlay);
+    bringToFront(overlay, close);
+    this.skillPopupOpen = true;
 
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) close();
@@ -649,8 +725,6 @@ export class CharItemsScreen implements Screen {
     this.skillPopupOpen = false;
   }
 
-  // ── Stat card / meta / XP ───────────────────────────────────
-
   private renderStatCard(state: ServerStateMessage): void {
     const char = state.character;
     if (!char) return;
@@ -673,39 +747,47 @@ export class CharItemsScreen implements Screen {
           : `${bonuses.magicReductionMin}-${bonuses.magicReductionMax}`)
       : '0';
 
-    this.statCardEl.innerHTML = `
+    const stats = [
+      { key: 'ATK', value: atkVal, sub: atkType },
+      { key: 'DR', value: drVal, sub: '' },
+      { key: 'MR', value: mrVal, sub: '' },
+      { key: 'HP', value: String(char.maxHp), sub: '' },
+    ];
+
+    setHtml(this.statCardEl, stats.map(({ key, value }) => `
       <div class="charitems-stat">
-        <span class="charitems-stat-label" data-tooltip="ATK">ATK</span>
-        <span class="charitems-stat-value">${atkVal}</span>
-        ${atkType ? `<span class="charitems-stat-sub">${this.escapeHtml(atkType)}</span>` : ''}
+        <span class="charitems-stat-value">${value}</span>
+        <span class="charitems-stat-label" data-tooltip="${key}">${key}</span>
       </div>
-      <div class="charitems-stat">
-        <span class="charitems-stat-label" data-tooltip="DR">DR</span>
-        <span class="charitems-stat-value">${drVal}</span>
+    `).join(''));
+
+    setHtml(this.statListEl, stats.map(({ key, value, sub }) => `
+      <div class="hero-stat-row">
+        <div class="hero-stat-row-head">
+          <span class="hero-stat-row-name">${STAT_TOOLTIPS[key].full}${sub ? ` <span class="charitems-stat-sub">${escapeHtml(sub)}</span>` : ''}</span>
+          <span class="hero-stat-row-value">${value}</span>
+        </div>
+        <div class="hero-stat-row-desc">${STAT_TOOLTIPS[key].desc}</div>
       </div>
-      <div class="charitems-stat">
-        <span class="charitems-stat-label" data-tooltip="MR">MR</span>
-        <span class="charitems-stat-value">${mrVal}</span>
-      </div>
-      <div class="charitems-stat">
-        <span class="charitems-stat-label" data-tooltip="HP">HP</span>
-        <span class="charitems-stat-value">${char.maxHp}</span>
-      </div>
-    `;
+    `).join(''));
+  }
+
+  private renderBannerTitle(className: string, level: number): void {
+    setHtml(this.bannerTitleEl, `<span class="hero-banner-class">${escapeHtml(className)}</span><span class="hero-banner-level">Lv ${level}</span>`);
   }
 
   private renderMetaRow(className: string, level: number, gold: number): void {
-    this.metaRowEl.innerHTML = `
-      <span><strong>${classIconHtml(className)} ${this.escapeHtml(className)}</strong></span>
+    setHtml(this.metaRowEl, `
+      <span><strong>${classIconHtml(className)} ${escapeHtml(className)}</strong></span>
       <span>Lv <strong>${level}</strong></span>
       <span>Gold <strong>${gold.toLocaleString()}</strong></span>
-    `;
+    `);
   }
 
   private renderXpBar(xp: number, xpForNextLevel: number): void {
     this.xpLabelEl.textContent = `${xp.toLocaleString()} / ${xpForNextLevel.toLocaleString()}`;
-    const pct = xpForNextLevel > 0 ? (xp / xpForNextLevel) * 100 : 0;
-    this.xpFill.style.width = `${pct}%`;
+    const ratio = xpForNextLevel > 0 ? Math.min(1, xp / xpForNextLevel) : 0;
+    this.xpFill.style.transform = `scaleX(${ratio})`;
   }
 
   private renderXpRate(xpRate: { startTime: number; totalXp: number }): void {
@@ -733,8 +815,6 @@ export class CharItemsScreen implements Screen {
     return `${mon}/${day} ${h}:${m}`;
   }
 
-  // ── Stat tooltip ────────────────────────────────────────────
-
   private showStatTooltip(anchor: HTMLElement): void {
     this.removeStatTooltip();
     const key = anchor.getAttribute('data-tooltip') ?? '';
@@ -744,13 +824,14 @@ export class CharItemsScreen implements Screen {
     const tooltip = document.createElement('div');
     tooltip.className = 'charitems-stat-tooltip';
     tooltip.innerHTML = `
-      <div class="charitems-stat-tooltip-title">${this.escapeHtml(info.full)}</div>
-      <div>${this.escapeHtml(info.desc)}</div>
+      <div class="charitems-stat-tooltip-title">${escapeHtml(info.full)}</div>
+      <div>${escapeHtml(info.desc)}</div>
     `;
     document.body.appendChild(tooltip);
 
     const rect = anchor.getBoundingClientRect();
-    tooltip.style.left = `${Math.max(8, rect.left + rect.width / 2 - tooltip.offsetWidth / 2)}px`;
+    const maxLeft = window.innerWidth - tooltip.offsetWidth - 8;
+    tooltip.style.left = `${Math.max(8, Math.min(maxLeft, rect.left + rect.width / 2 - tooltip.offsetWidth / 2))}px`;
     tooltip.style.top = `${rect.bottom + 6}px`;
 
     const dismiss = () => {
@@ -764,12 +845,11 @@ export class CharItemsScreen implements Screen {
     document.querySelectorAll('.charitems-stat-tooltip').forEach(el => el.remove());
   }
 
-  // ── Inventory ───────────────────────────────────────────────
-
   private renderInventory(): void {
     const entries = Object.entries(this.lastInventory).filter(([, count]) => count > 0);
+    this.inventoryCountEl.textContent = entries.length > 0 ? `(${entries.length})` : '';
     if (entries.length === 0) {
-      this.inventoryGrid.innerHTML = '<div class="items-empty" style="grid-column:1/-1">No items yet</div>';
+      this.setInventoryHtml(false, '<div class="items-empty">No items yet</div>');
       return;
     }
 
@@ -792,39 +872,43 @@ export class CharItemsScreen implements Screen {
     if (this.sortMode === 'rarity') {
       filtered.sort(([aId], [bId]) => rarityRank(aId) - rarityRank(bId));
     } else if (this.sortMode === 'type') {
-      // Type bucket first, then rarity within each type bucket so the
-      // best-of-each-slot floats to the top of its group.
       filtered.sort(([aId], [bId]) => {
         const slotDelta = slotRank(aId) - slotRank(bId);
         if (slotDelta !== 0) return slotDelta;
         return rarityRank(aId) - rarityRank(bId);
       });
     }
-    // 'newest' keeps original order
 
     if (filtered.length === 0) {
-      this.inventoryGrid.innerHTML = '<div class="items-empty" style="grid-column:1/-1">No matches</div>';
+      this.setInventoryHtml(false, '<div class="items-empty">No matches</div>');
       return;
     }
 
     const grouped = this.sortMode === 'rarity' || this.sortMode === 'type';
+    this.setInventoryHtml(grouped, grouped
+      ? this.renderGroupedInventory(filtered)
+      : filtered.map(([itemId, count]) => this.renderInventoryEntry(itemId, count)).join(''));
+  }
+
+  private setInventoryHtml(grouped: boolean, html: string): void {
     this.inventoryGrid.classList.toggle('items-inv-grid-grouped', grouped);
-    if (grouped) {
-      this.inventoryGrid.innerHTML = this.renderGroupedInventory(filtered);
-    } else {
-      this.inventoryGrid.innerHTML = filtered.map(([itemId, count]) => this.renderInventoryEntry(itemId, count)).join('');
-    }
+    setHtml(this.inventoryGrid, html);
+  }
+
+  private canUse(def: ItemDefinition): boolean {
+    return !this.lastClassName || canClassEquipItem(def, this.lastClassName);
   }
 
   private renderInventoryEntry(itemId: string, count: number): string {
     const def = this.itemDefs[itemId];
     if (!def) return '';
-    return renderItemIcon(itemId, def, {
+    return renderItemCell(itemId, def, {
       qty: count,
-      showSlotIcon: this.sortMode !== 'type',
+      showSlotIcon: true,
       showSetIndicator: true,
       setDefs: this.setDefs,
       dataAttrs: { item: itemId },
+      unusable: !!def.equipSlot && !this.canUse(def),
     });
   }
 
@@ -839,13 +923,13 @@ export class CharItemsScreen implements Screen {
 
     const orderedKeys = this.sortMode === 'rarity'
       ? RARITY_BUCKET_ORDER.filter(k => buckets.has(k))
-      : [...buckets.keys()].sort((a, b) => (SLOT_ORDER[a] ?? 99) - (SLOT_ORDER[b] ?? 99));
+      : ['gear', 'material'].filter(k => buckets.has(k));
 
     let html = '';
     for (const key of orderedKeys) {
       const items = buckets.get(key);
       if (!items) continue;
-      html += `<div class="charitems-inv-group"><div class="charitems-inv-group-header">${this.escapeHtml(this.formatBucketLabel(key))}</div>`;
+      html += `<div class="charitems-inv-group"><div class="charitems-inv-group-header">${escapeHtml(this.formatBucketLabel(key))}</div>`;
       html += `<div class="charitems-inv-group-items">${items.map(([id, count]) => this.renderInventoryEntry(id, count)).join('')}</div></div>`;
     }
     return html;
@@ -853,22 +937,17 @@ export class CharItemsScreen implements Screen {
 
   private getBucketKey(def: ItemDefinition | undefined): string {
     if (this.sortMode === 'rarity') return def?.rarity ?? 'common';
-    return def?.equipSlot ?? 'material';
+    return def?.equipSlot ? 'gear' : 'material';
   }
 
   private formatBucketLabel(key: string): string {
-    if (this.sortMode === 'rarity') {
-      return key.charAt(0).toUpperCase() + key.slice(1);
-    }
     if (key === 'material') return 'Materials';
-    return SLOT_LABELS[key] ?? (key.charAt(0).toUpperCase() + key.slice(1));
+    return key.charAt(0).toUpperCase() + key.slice(1);
   }
-
-  // ── Mailbox / trades ───────────────────────────────────────
 
   private renderMailbox(): void {
     if (this.lastMailbox.length === 0) {
-      this.mailboxContainer.innerHTML = '';
+      setHtml(this.mailboxContainer, '');
       return;
     }
     const rows = this.lastMailbox.map(entry => {
@@ -879,39 +958,48 @@ export class CharItemsScreen implements Screen {
       const willOverflow = fullCount > 99;
       const note = entry.returned ? '<span class="mailbox-note">(returned)</span>' : '';
       const overflow = willOverflow
-        ? `<div class="mailbox-warn">Inventory full — would exceed 99 (${this.lastInventory[entry.itemId] ?? 0} + ${entry.quantity})</div>`
+        ? `<div class="mailbox-warn">Inventory full: would exceed 99 (${this.lastInventory[entry.itemId] ?? 0} + ${entry.quantity})</div>`
         : '';
+      const icon = def ? renderItemIcon(entry.itemId, def, { extraClass: 'hero-row-icon' }) : '';
       return `<div class="mailbox-row">
+        ${icon}
         <div class="mailbox-info">
-          <div class="mailbox-from">From <strong>${this.escapeHtml(entry.fromUsername)}</strong> ${note}</div>
+          <div class="mailbox-from">From <strong>${escapeHtml(entry.fromUsername)}</strong> ${note}</div>
           <div class="mailbox-item">
-            <span class="mailbox-item-name" style="color:${color}">${this.escapeHtml(name)}</span>
+            <span class="mailbox-item-name" style="color:${color}">${escapeHtml(name)}</span>
             <span class="mailbox-item-qty">×${entry.quantity}</span>
           </div>
           ${overflow}
         </div>
         <div class="mailbox-actions">
-          <button class="social-action-btn add-friend" data-mb-action="accept" data-entry-id="${this.escapeHtml(entry.id)}"${willOverflow ? ' disabled' : ''}>Accept</button>
-          <button class="social-action-btn remove-friend" data-mb-action="deny" data-entry-id="${this.escapeHtml(entry.id)}">Decline</button>
+          <button class="social-action-btn add-friend" data-mb-action="accept" data-entry-id="${escapeHtml(entry.id)}"${willOverflow ? ' disabled' : ''}>Accept</button>
+          <button class="social-action-btn remove-friend" data-mb-action="deny" data-entry-id="${escapeHtml(entry.id)}">Decline</button>
         </div>
       </div>`;
     }).join('');
-    this.mailboxContainer.innerHTML = `
+    setHtml(this.mailboxContainer, `
       <div class="items-section-label">Mailbox <span class="items-section-count">(${this.lastMailbox.length})</span></div>
       <div class="mailbox-list">${rows}</div>
-    `;
+    `);
   }
 
   private renderProposedTrades(): void {
-    if (this.lastProposedTrades.length === 0) {
-      this.tradesContainer.innerHTML = '';
+    const waiting = this.lastProposedTrades.filter(t => this.isWaitingOnMe(t));
+    const sent = this.lastProposedTrades.filter(t => !this.isWaitingOnMe(t));
+    this.renderTradeGroup(this.tradesContainer, 'Trades for you', waiting);
+    this.renderTradeGroup(this.sentTradesContainer, 'Sent trades', sent);
+  }
+
+  private renderTradeGroup(container: HTMLElement, label: string, trades: TradeState[]): void {
+    if (trades.length === 0) {
+      setHtml(container, '');
       return;
     }
-    const rows = this.lastProposedTrades.map(t => {
+    const rows = trades.map(t => {
       const partner = t.initiator.username === this.lastUsername
         ? (t.target?.username ?? '')
         : t.initiator.username;
-      const waitingOnMe = t.lastUpdatedBy !== this.lastUsername;
+      const waitingOnMe = this.isWaitingOnMe(t);
       const status = waitingOnMe
         ? (t.status === 'countered' ? 'Confirm or counter' : 'Awaiting your response')
         : (t.status === 'countered' ? 'Waiting for partner to confirm' : 'Waiting for partner');
@@ -923,34 +1011,102 @@ export class CharItemsScreen implements Screen {
         : t.initiator.items;
       const summarize = (items: { itemId: string; quantity: number }[]) =>
         items.length === 0
-          ? '<span class="trade-row-empty">— nothing —</span>'
+          ? '<span class="trade-row-empty">nothing</span>'
           : items.map(({ itemId, quantity }) => {
               const def = this.itemDefs[itemId];
               const color = def ? (RARITY_COLORS[def.rarity] ?? 'var(--text-1)') : 'var(--text-1)';
-              return `<span class="trade-row-item" style="color:${color}">${this.escapeHtml(def?.name ?? itemId)} ×${quantity}</span>`;
+              return `<span class="trade-row-item" style="color:${color}">${escapeHtml(def?.name ?? itemId)} ×${quantity}</span>`;
             }).join(', ');
-      return `<div class="trade-row${waitingOnMe ? ' trade-row-attention' : ''}" data-trade-id="${this.escapeHtml(t.id)}">
+      return `<div class="trade-row${waitingOnMe ? ' trade-row-attention' : ''}" data-trade-id="${escapeHtml(t.id)}">
         <div class="trade-row-main">
-          <div class="trade-row-partner">${this.escapeHtml(partner)}</div>
-          <div class="trade-row-status">${this.escapeHtml(status)}</div>
+          <div class="trade-row-partner">${escapeHtml(partner)}</div>
+          <div class="trade-row-status">${escapeHtml(status)}</div>
           <div class="trade-row-offers">
             <div class="trade-row-side"><span class="trade-row-label">You:</span> ${summarize(myItems)}</div>
             <div class="trade-row-side"><span class="trade-row-label">Them:</span> ${summarize(theirItems)}</div>
           </div>
         </div>
         <div class="trade-row-actions">
-          <button class="social-action-btn add-friend" data-trade-id="${this.escapeHtml(t.id)}">Open</button>
-          <button class="social-action-btn remove-friend" data-trade-cancel="${this.escapeHtml(t.id)}">Cancel</button>
+          <button class="social-action-btn add-friend" data-trade-id="${escapeHtml(t.id)}">Open</button>
+          <button class="social-action-btn remove-friend" data-trade-cancel="${escapeHtml(t.id)}">Cancel</button>
         </div>
       </div>`;
     }).join('');
-    this.tradesContainer.innerHTML = `
-      <div class="items-section-label">Proposed Trades <span class="items-section-count">(${this.lastProposedTrades.length})</span></div>
+    setHtml(container, `
+      <div class="items-section-label">${label} <span class="items-section-count">(${trades.length})</span></div>
       <div class="trade-list">${rows}</div>
-    `;
+    `);
   }
 
-  // ── Item popups (preserved from ItemsScreen) ───────────────
+  private openModal(innerHtml: string, popupClass = ''): void {
+    this.modalOverlay.innerHTML = `
+      <div class="item-popup-overlay">
+        <div class="item-popup${popupClass ? ` ${popupClass}` : ''}" role="dialog" aria-modal="true">${ITEM_POPUP_CLOSE_HTML}${innerHtml}</div>
+      </div>
+    `;
+    this.modalOverlay.style.display = 'flex';
+    bringToFront(this.modalOverlay, () => this.hideModal());
+  }
+
+  private onModalClick(e: Event): void {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('item-popup-overlay') || target === this.modalOverlay || target.closest('.item-popup-close')) {
+      this.hideModal();
+      return;
+    }
+    const equipId = target.closest('[data-picker-equip]')?.getAttribute('data-picker-equip');
+    if (equipId) {
+      this.gameClient.sendEquipItem(equipId);
+      this.hideModal();
+      return;
+    }
+    const itemId = target.closest('[data-picker-item]')?.getAttribute('data-picker-item');
+    if (itemId) this.showItemPopup(itemId, 'inventory', undefined);
+  }
+
+  private bagItemsForSlot(slot: EquipSlot): string[] {
+    const accepts = SLOT_ACCEPTS[slot] ?? [slot];
+    return Object.entries(this.lastInventory)
+      .filter(([id, count]) => {
+        const equipSlot = this.itemDefs[id]?.equipSlot;
+        return count > 0 && !!equipSlot && accepts.includes(equipSlot);
+      })
+      .map(([id]) => id)
+      .sort((a, b) => {
+        const usable = Number(this.canUse(this.itemDefs[b])) - Number(this.canUse(this.itemDefs[a]));
+        if (usable !== 0) return usable;
+        return (RARITY_ORDER[this.itemDefs[a].rarity] ?? 5) - (RARITY_ORDER[this.itemDefs[b].rarity] ?? 5);
+      });
+  }
+
+  private showSlotPicker(slot: EquipSlot): void {
+    const label = SLOT_LABELS[slot] ?? slot;
+    const ids = this.bagItemsForSlot(slot);
+    const skills = this.worldCache.getSkillContent().skills;
+    const rows = ids.map(id => {
+      const def = this.itemDefs[id];
+      const color = RARITY_COLORS[def.rarity] ?? 'var(--text-1)';
+      const usable = this.canUse(def);
+      const effect = getItemEffectText(def, skills);
+      const action = usable
+        ? `<button type="button" class="pixel-btn popup-action-equip" data-picker-equip="${escapeHtml(id)}">Equip</button>`
+        : `<span class="hero-picker-note">${escapeHtml((def.classRestriction ?? []).join(', '))} only</span>`;
+      return `<div class="hero-picker-row ui-row${usable ? '' : ' item-cell-unusable'}" data-picker-item="${escapeHtml(id)}" role="button" tabindex="0">
+        ${renderItemIcon(id, def, { extraClass: 'hero-row-icon' })}
+        <div class="ui-row-main">
+          <div class="ui-row-title" style="color:${color}">${escapeHtml(def.name)}</div>
+          <div class="ui-row-sub">${escapeHtml(effect)}</div>
+        </div>
+        <div class="ui-row-actions">${action}</div>
+      </div>`;
+    }).join('');
+    this.openModal(`
+      <div class="item-popup-name">${escapeHtml(label)}</div>
+      ${rows
+        ? `<div class="hero-picker-list">${rows}</div>`
+        : `<div class="ui-empty">Nothing in your bag fits this slot.</div>`}
+    `, 'hero-slot-picker');
+  }
 
   private showItemPopup(itemId: string, context: 'equipped' | 'inventory', equippedSlot?: EquipSlot): void {
     const def = this.itemDefs[itemId];
@@ -962,26 +1118,27 @@ export class CharItemsScreen implements Screen {
     const count = this.lastInventory[itemId] ?? 0;
     let actionsHtml = '';
     if (context === 'equipped' && equippedSlot) {
-      actionsHtml = `<button class="popup-action-unequip" data-slot="${equippedSlot}">Unequip</button>`;
+      if (this.bagItemsForSlot(equippedSlot).length > 0) {
+        actionsHtml += `<button class="popup-action-equip popup-action-change" data-slot="${equippedSlot}">Change</button>`;
+      }
+      actionsHtml += `<button class="popup-action-unequip" data-slot="${equippedSlot}">Unequip</button>`;
     } else if (context === 'inventory') {
       if (def.equipSlot) {
-        // If a copy of this exact item is already in the slot, show
-        // "Equipped" disabled instead of an Equip button — clicking would be
-        // a no-op and the player should know it's already on.
         const heldSlot = def.equipSlot === 'twohanded' ? 'mainhand' : def.equipSlot;
         const alreadyEquipped = this.lastEquipment[heldSlot] === itemId;
         if (alreadyEquipped) {
-          actionsHtml += `<button class="popup-action-equip" data-item="${itemId}" disabled aria-disabled="true">Equipped</button>`;
+          actionsHtml += `<button class="popup-action-equip" data-item="${escapeHtml(itemId)}" disabled aria-disabled="true">Equipped</button>`;
         } else {
-          actionsHtml += `<button class="popup-action-equip" data-item="${itemId}">Equip</button>`;
+          const blocked = this.canUse(def) ? '' : ' popup-action-blocked';
+          actionsHtml += `<button class="popup-action-equip${blocked}" data-item="${escapeHtml(itemId)}">Equip</button>`;
         }
       }
-      actionsHtml += `<button class="popup-action-destroy danger" data-item="${itemId}" data-max="${count}">Destroy</button>`;
+      actionsHtml += `<button class="popup-action-destroy danger" data-item="${escapeHtml(itemId)}" data-max="${count}">Destroy</button>`;
     }
 
     const extraHtml = context === 'inventory' ? renderEquipCompareBlock(def, this.lastEquipment, this.itemDefs) : '';
 
-    const popupContent = renderItemPopupContent(def, {
+    this.openModal(renderItemPopupContent(def, {
       itemDefs: this.itemDefs,
       setDefs: this.setDefs,
       ownedItemIds,
@@ -990,19 +1147,10 @@ export class CharItemsScreen implements Screen {
       skills: this.worldCache.getSkillContent().skills,
       actionsHtml,
       extraHtml,
-    });
+    }));
 
-    this.modalOverlay.innerHTML = `
-      <div class="item-popup-overlay">
-        <div class="item-popup">${popupContent}</div>
-      </div>
-    `;
-    this.modalOverlay.style.display = 'flex';
-    bringToFront(this.modalOverlay);
-
-    const overlay = this.modalOverlay.querySelector('.item-popup-overlay') as HTMLElement;
-    overlay?.addEventListener('click', (e) => {
-      if (e.target === overlay) this.hideModal();
+    this.modalOverlay.querySelector('.popup-action-change')?.addEventListener('click', () => {
+      if (equippedSlot) this.showSlotPicker(equippedSlot);
     });
 
     const unequipBtn = this.modalOverlay.querySelector('.popup-action-unequip') as HTMLElement | null;
@@ -1014,20 +1162,16 @@ export class CharItemsScreen implements Screen {
       });
     }
 
-    const equipBtn = this.modalOverlay.querySelector('.popup-action-equip') as HTMLElement | null;
+    const equipBtn = this.modalOverlay.querySelector('.popup-action-equip:not(.popup-action-change)') as HTMLElement | null;
     if (equipBtn) {
       equipBtn.addEventListener('click', () => {
         const id = equipBtn.getAttribute('data-item');
         if (!id) { this.hideModal(); return; }
         const eDef = this.itemDefs[id];
-        // Class-restricted item the player can't use → keep the popup open
-        // and pulse-highlight the class line so they catch the red text.
-        if (eDef && this.lastClassName && !canClassEquipItem(eDef, this.lastClassName)) {
+        if (eDef && !this.canUse(eDef)) {
           this.pulseClassRestriction();
           return;
         }
-        // Inline compare in the popup already shows the swap diff, so
-        // clicking Equip just commits — no second confirmation popup.
         this.gameClient.sendEquipItem(id);
         this.hideModal();
       });
@@ -1053,51 +1197,33 @@ export class CharItemsScreen implements Screen {
   }
 
   private showConfirmModal(title: string, message: string, onConfirm: () => void): void {
-    this.modalOverlay.innerHTML = `
-      <div class="item-popup-overlay">
-        <div class="item-popup">
-          <div class="item-popup-name">${title}</div>
-          <div class="item-popup-stats items-modal-prompt">${message}</div>
-          <div class="item-popup-actions">
-            <button class="items-modal-confirm danger">Destroy</button>
-            <button class="items-modal-cancel">Cancel</button>
-          </div>
-        </div>
+    this.openModal(`
+      <div class="item-popup-name">${escapeHtml(title)}</div>
+      <div class="item-popup-stats items-modal-prompt">${escapeHtml(message)}</div>
+      <div class="item-popup-actions">
+        <button class="items-modal-confirm danger">Destroy</button>
+        <button class="items-modal-cancel">Cancel</button>
       </div>
-    `;
-    this.modalOverlay.style.display = 'flex';
-    bringToFront(this.modalOverlay);
-
-    const overlay = this.modalOverlay.querySelector('.item-popup-overlay') as HTMLElement;
-    overlay?.addEventListener('click', (e) => { if (e.target === overlay) this.hideModal(); });
+    `);
     this.modalOverlay.querySelector('.items-modal-confirm')!.addEventListener('click', onConfirm);
     this.modalOverlay.querySelector('.items-modal-cancel')!.addEventListener('click', () => this.hideModal());
   }
 
   private showDestroyCountModal(itemId: string, itemName: string, max: number): void {
-    this.modalOverlay.innerHTML = `
-      <div class="item-popup-overlay">
-        <div class="item-popup">
-          <div class="item-popup-name">Destroy ${itemName}</div>
-          <div class="item-popup-stats items-modal-prompt">How many? (1-${max})</div>
-          <div class="items-modal-count-row">
-            <button class="items-modal-btn items-modal-minus">-</button>
-            <span class="items-modal-count-value">1</span>
-            <button class="items-modal-btn items-modal-plus">+</button>
-            <button class="items-modal-btn items-modal-max">Max</button>
-          </div>
-          <div class="item-popup-actions">
-            <button class="items-modal-confirm danger">Destroy</button>
-            <button class="items-modal-cancel">Cancel</button>
-          </div>
-        </div>
+    this.openModal(`
+      <div class="item-popup-name">Destroy ${escapeHtml(itemName)}</div>
+      <div class="item-popup-stats items-modal-prompt">How many? (1-${max})</div>
+      <div class="items-modal-count-row">
+        <button class="items-modal-btn items-modal-minus" aria-label="One fewer">-</button>
+        <span class="items-modal-count-value">1</span>
+        <button class="items-modal-btn items-modal-plus" aria-label="One more">+</button>
+        <button class="items-modal-btn items-modal-max">Max</button>
       </div>
-    `;
-    this.modalOverlay.style.display = 'flex';
-    bringToFront(this.modalOverlay);
-
-    const overlay = this.modalOverlay.querySelector('.item-popup-overlay') as HTMLElement;
-    overlay?.addEventListener('click', (e) => { if (e.target === overlay) this.hideModal(); });
+      <div class="item-popup-actions">
+        <button class="items-modal-confirm danger">Destroy</button>
+        <button class="items-modal-cancel">Cancel</button>
+      </div>
+    `);
 
     const countEl = this.modalOverlay.querySelector('.items-modal-count-value') as HTMLElement;
     let count = 1;
@@ -1132,19 +1258,6 @@ export class CharItemsScreen implements Screen {
     );
   }
 
-  private showSlotTooltip(anchor: HTMLElement, slot: EquipSlot): void {
-    document.querySelector('.items-slot-tooltip')?.remove();
-    const label = SLOT_LABELS[slot] ?? slot;
-    const tooltip = document.createElement('div');
-    tooltip.className = 'items-slot-tooltip';
-    tooltip.textContent = label;
-    document.body.appendChild(tooltip);
-    const rect = anchor.getBoundingClientRect();
-    tooltip.style.left = `${rect.left + rect.width / 2 - tooltip.offsetWidth / 2}px`;
-    tooltip.style.top = `${rect.bottom + 4}px`;
-    setTimeout(() => tooltip.remove(), 1500);
-  }
-
   private hideModal(): void {
     this.modalOverlay.style.display = 'none';
     this.modalOverlay.innerHTML = '';
@@ -1171,22 +1284,12 @@ export class CharItemsScreen implements Screen {
     try { localStorage.setItem(key, this.sortMode); } catch { /* ignore */ }
   }
 
-  /**
-   * Pulse-highlight the class-restriction line in the open item popup so
-   * the player notices the red class text. The popup itself stays open;
-   * just the class row gets a brief attention animation.
-   */
+  /** Restarting needs a forced reflow, so repeated Equip presses pulse again. */
   private pulseClassRestriction(): void {
     const row = this.modalOverlay.querySelector('[data-class-restriction]') as HTMLElement | null;
     if (!row) return;
     row.classList.remove('class-restriction-pulse');
-    // Force reflow so re-adding the class restarts the animation if the
-    // user clicks Equip multiple times in a row.
     void row.offsetWidth;
     row.classList.add('class-restriction-pulse');
-  }
-
-  private escapeHtml(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 }

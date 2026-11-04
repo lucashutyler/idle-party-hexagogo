@@ -1,0 +1,803 @@
+/* Settings, onboarding, Quest Log, Shop, NPC talk and the modal shells they share. */
+
+@keyframes popup-rise {
+  from {
+    transform: translateY(24px);
+    opacity: 0.6;
+  }
+}
+
+/* ── Modal shell: Player Options, prefs, patch notes, Quest Log, Bestiary, Recap ── */
+.player-options-modal {
+  max-height: 85dvh;
+}
+.player-options-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: none;
+}
+.player-options-close {
+  position: relative;
+  flex: none;
+}
+.player-options-close::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.player-options-close:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* ── Settings ────────────────────────────────────────────── */
+.settings-content {
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}
+.settings-page {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 12px calc(12px + var(--safe-right)) 20px calc(12px + var(--safe-left));
+}
+.settings-title {
+  margin: 0;
+  padding: 2px 12px 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-xl);
+  line-height: 1.2;
+  color: var(--gold);
+  text-shadow: 0 2px 0 var(--outline);
+}
+.settings-group {
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 1px 0 var(--stroke);
+}
+.settings-row {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--stroke);
+  color: inherit;
+  font-family: var(--font-body);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.settings-row:last-child {
+  border-bottom: none;
+}
+.settings-row:active {
+  background: rgba(255, 255, 255, 0.07);
+}
+.settings-row:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.settings-row:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .settings-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+.settings-row-glyph {
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+.settings-row-chevron {
+  flex: none;
+  font-size: var(--fs-xl);
+  line-height: 1;
+  color: var(--text-3);
+}
+.settings-row-danger .ui-row-title {
+  color: var(--red);
+}
+
+.player-options-modal .settings-options-list {
+  padding: 12px;
+}
+.settings-option-desc {
+  padding-left: 0;
+}
+
+/* ── Patch notes ─────────────────────────────────────────── */
+.patch-notes-modal {
+  max-width: 560px;
+  overflow: hidden;
+}
+.patch-notes-modal .patch-notes-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 10px;
+  padding: 12px;
+}
+.patch-notes-modal .patch-note-entry {
+  flex: none;
+  padding: 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+/* ── Notification preferences ────────────────────────────── */
+.player-options-modal.notif-prefs-modal {
+  overflow: hidden;
+}
+.notif-prefs-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  padding: 12px 12px 8px;
+}
+.notif-prefs-toolbar {
+  margin-bottom: 8px;
+}
+button.notif-prefs-bulk-btn {
+  flex: 1;
+  min-height: 40px;
+}
+.notif-prefs-unavailable {
+  margin-bottom: 8px;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.notif-prefs-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.notif-prefs-grid th:not(:first-child),
+.notif-prefs-grid td:not(:first-child) {
+  width: 54px;
+  padding: 0;
+}
+.notif-prefs-grid thead th {
+  position: sticky;
+  top: -12px;
+  z-index: 1;
+  padding: 4px 0;
+  background: var(--surface-2);
+}
+.notif-prefs-col-head,
+.notif-prefs-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.notif-prefs-col-head {
+  flex-direction: column;
+  gap: 4px;
+  min-height: 48px;
+}
+.notif-prefs-cell {
+  min-height: 44px;
+}
+.notif-prefs-off {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.notif-prefs-col-head input,
+.notif-prefs-cell input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: inherit;
+}
+.notif-prefs-cat-row td {
+  padding: 8px 4px 6px;
+}
+.notif-prefs-event-label {
+  padding: 4px 4px;
+  overflow-wrap: anywhere;
+}
+
+/* ── Login ───────────────────────────────────────────────── */
+.login-content {
+  justify-content: safe center;
+  overflow-y: auto;
+  gap: 16px;
+  padding: calc(20px + var(--safe-top)) calc(16px + var(--safe-right)) calc(20px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.login-logo {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(320px, 76vw);
+  max-height: 24dvh;
+  image-rendering: var(--art-rendering);
+}
+.login-brand.has-art .login-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.login-subtitle {
+  margin: 0;
+  max-width: 340px;
+  text-align: center;
+  text-wrap: balance;
+}
+.login-form {
+  align-items: stretch;
+  flex: none;
+  gap: 10px;
+  max-width: 360px;
+  padding: 16px;
+}
+.login-form > .login-input,
+.login-fields .login-input {
+  width: 100%;
+  min-height: 48px;
+  font-size: 16px;
+}
+.login-fields,
+.login-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.login-label {
+  font-size: var(--fs-sm);
+  font-weight: 800;
+  color: var(--text-2);
+}
+button.login-button {
+  min-height: 48px;
+  font-size: var(--fs-md);
+}
+.login-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text-3);
+}
+.login-sent-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-xl);
+  line-height: 1.2;
+  text-align: center;
+  color: var(--gold);
+  text-shadow: 0 2px 0 var(--outline);
+}
+.login-sent-text {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-2);
+}
+.login-sent-address {
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+button.login-resend {
+  --mt-btn-bg: var(--grad-secondary);
+  --mt-btn-edge: var(--edge-secondary);
+  --mt-btn-fg: var(--text-1);
+  --mt-btn-text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+  min-height: 44px;
+}
+.login-sent-status {
+  min-height: 1.4em;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-align: center;
+  color: var(--green);
+}
+.login-cancel-link {
+  margin-top: 0;
+  padding: 10px 0;
+}
+.login-error {
+  line-height: 1.4;
+}
+
+/* ── Class pick ──────────────────────────────────────────── */
+.class-select-content {
+  gap: 8px;
+  padding: calc(12px + var(--safe-top)) calc(12px + var(--safe-right)) 0 calc(12px + var(--safe-left));
+}
+.class-select-content .login-title {
+  margin: 0;
+  font-size: var(--fs-2xl);
+}
+.class-select-content .login-subtitle {
+  flex: none;
+}
+.class-card-list {
+  flex: none;
+  gap: 8px;
+  max-width: 460px;
+}
+.class-card {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px;
+}
+.class-card:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.class-card-art {
+  position: relative;
+  flex: none;
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, var(--surface-3) 0%, var(--bg-1) 100%);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-md);
+}
+.class-card-icon .icon-inline {
+  width: 40px;
+  height: 40px;
+}
+.class-card-icon .icon-inline.icon-glyph {
+  font-size: var(--fs-2xl);
+  line-height: 40px;
+}
+.class-card-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: var(--art-rendering);
+}
+.class-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.class-card.selected .class-card-title::after {
+  content: ' ✓';
+}
+.class-card-desc {
+  line-height: 1.35;
+}
+.class-card-stats {
+  gap: 4px;
+}
+.class-card-stats span {
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.class-card-passive {
+  line-height: 1.35;
+}
+.class-confirm-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: auto calc(-12px - var(--safe-right)) 0 calc(-12px - var(--safe-left));
+  padding: 10px calc(12px + var(--safe-right)) calc(14px + var(--safe-bottom)) calc(12px + var(--safe-left));
+  background: var(--bg-1);
+  border-top: 2px solid var(--outline);
+}
+.class-confirm-btn {
+  max-width: 460px;
+}
+@media (min-width: 768px) {
+  .class-card-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 840px;
+  }
+  .class-card-art {
+    width: 88px;
+    height: 88px;
+  }
+}
+
+/* ── Quest cards and the Quest Log ───────────────────────── */
+.quest-progress {
+  display: block;
+  height: 4px;
+  margin: 3px 0 5px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(6, 9, 24, 0.6);
+}
+.quest-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cyan);
+  transform-origin: left center;
+}
+.quest-objective-done .quest-progress-fill {
+  background: var(--green);
+}
+.quest-log-body {
+  padding: 10px 12px 12px;
+}
+.quest-card-header {
+  align-items: flex-start;
+}
+.quest-log-pills {
+  flex: none;
+  max-width: 55%;
+}
+.quest-log-empty {
+  font-style: normal;
+  font-size: var(--fs-sm);
+  padding: 20px 8px;
+}
+.quest-log-givers {
+  background: rgba(62, 224, 122, 0.08);
+}
+.quest-log-givers-list {
+  gap: 4px;
+}
+.quest-log-turnin:has(.quest-log-go) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.quest-log-turnin-label {
+  font-weight: 800;
+}
+.quest-log-or {
+  text-align: center;
+  color: var(--text-3);
+}
+.quest-log-go {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  text-align: left;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stroke-hi);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.quest-log-go::after {
+  content: '›';
+  flex: none;
+  font-size: var(--fs-xl);
+  line-height: 1;
+  color: var(--gold);
+}
+.quest-log-go:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+.quest-log-go:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+@media (hover: hover) {
+  .quest-log-go:hover {
+    border-color: var(--gold);
+  }
+}
+.quest-log-completed-toggle {
+  min-height: 44px;
+  padding: 6px 0;
+}
+
+/* ── NPC talk ────────────────────────────────────────────── */
+.npc-talk-modal {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  max-height: 85dvh;
+}
+.npc-talk-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
+  border-bottom: 2px solid var(--outline);
+  box-shadow: inset 0 1px 0 var(--stroke-hi);
+}
+.npc-talk-header {
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+}
+.npc-talk-name {
+  font-size: var(--fs-lg);
+  line-height: 1.15;
+}
+.npc-talk-portrait {
+  flex-basis: 52px;
+  width: 52px;
+  height: 52px;
+}
+.npc-talk-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 14px;
+}
+.npc-talk-scroll > * {
+  flex: none;
+}
+.npc-talk-greeting {
+  font-style: normal;
+}
+.npc-talk-actions {
+  flex: none;
+  padding: 8px 14px calc(10px + var(--safe-bottom));
+  border-top: 2px solid var(--outline);
+}
+.npc-talk-actions button.npc-talk-close {
+  flex: 1;
+  min-height: 44px;
+}
+.quest-card-actions .npc-talk-btn {
+  min-height: 40px;
+}
+@media (min-width: 768px) {
+  .npc-talk-portrait {
+    flex-basis: 64px;
+    width: 64px;
+    height: 64px;
+  }
+  .npc-talk-actions button.npc-talk-close {
+    flex: 0 0 auto;
+  }
+}
+
+/* ── Shop ────────────────────────────────────────────────── */
+.shop-popup {
+  display: flex;
+  flex-direction: column;
+  max-height: 85dvh;
+  overflow: hidden;
+  padding: 12px 14px 14px;
+}
+.shop-popup:not(.shop-detail-view, .shop-replace-view) {
+  min-height: min(420px, 60dvh);
+}
+.shop-replace-view {
+  overflow-y: auto;
+}
+.shop-header {
+  flex: none;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.shop-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-lg);
+  line-height: 1.15;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.shop-gold {
+  flex: none;
+}
+.shop-notice {
+  flex: none;
+  margin-bottom: 8px;
+}
+.shop-toggle {
+  flex: none;
+  margin-bottom: 10px;
+}
+.shop-toggle .shop-toggle-btn {
+  min-height: 40px;
+}
+.shop-items-grid,
+.shop-hire-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  margin: 0 -14px -14px;
+  padding: 2px 14px 14px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+.shop-items-grid {
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  grid-auto-rows: min-content;
+  align-content: start;
+  gap: 10px 8px;
+}
+.shop-item-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.shop-item-cell:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+.shop-item-cell:active .item-square {
+  transform: translateY(1px);
+}
+.shop-item-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-weight: 800;
+  font-size: var(--fs-2xs);
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.shop-items-grid .shop-empty {
+  grid-column: 1 / -1;
+}
+.shop-hire-row .item-popup-btn {
+  flex: none;
+  min-height: 40px;
+}
+.shop-detail-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 -14px;
+  padding: 0 14px 10px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+.shop-detail-controls {
+  flex: none;
+  margin: 0 -14px -14px;
+  padding: 10px 14px 14px;
+  border-top: 2px solid var(--outline);
+}
+.shop-detail-total {
+  margin-top: 6px;
+  font-size: var(--fs-md);
+}
+.shop-detail-actions {
+  margin-top: 10px;
+}
+.shop-detail-actions .shop-action-confirm {
+  flex: 1;
+  order: 2;
+  min-height: 44px;
+}
+.shop-detail-actions .shop-detail-back {
+  flex: none;
+  min-height: 44px;
+}
+
+/* ── Phones: every sheet docks at the bottom ─────────────── */
+@media (max-width: 767px) {
+  :is(.player-options-overlay, .shop-overlay, .npc-talk-overlay) {
+    align-items: flex-end;
+    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  }
+  :is(.player-options-modal, .shop-popup, .npc-talk-modal) {
+    width: 100%;
+    max-width: 560px;
+    max-height: 85dvh;
+    border-bottom: none;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+  .player-options-overlay > .player-options-modal,
+  .npc-talk-modal,
+  .shop-opening .shop-popup {
+    animation: popup-rise 180ms ease-out;
+  }
+  .player-options-modal {
+    padding-bottom: var(--safe-bottom);
+  }
+  .shop-popup {
+    padding-bottom: calc(14px + var(--safe-bottom));
+  }
+  .shop-items-grid,
+  .shop-hire-list,
+  .shop-detail-controls {
+    margin-bottom: calc(-14px - var(--safe-bottom));
+    padding-bottom: calc(14px + var(--safe-bottom));
+  }
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+  :is(.player-options-modal, .shop-popup, .npc-talk-modal) {
+    max-height: 92dvh;
+  }
+  .npc-talk-modal {
+    padding: 0;
+  }
+  .shop-popup:not(.shop-detail-view, .shop-replace-view) {
+    min-height: 0;
+  }
+  .login-logo {
+    max-height: 30dvh;
+  }
+  .shop-popup.shop-detail-view {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    column-gap: 16px;
+    align-items: start;
+    width: min(720px, 94vw);
+    max-width: none;
+  }
+  .shop-detail-view > :is(.shop-header, .shop-notice) {
+    grid-column: 1 / -1;
+  }
+  .shop-detail-view .shop-detail-content {
+    grid-column: 1;
+    grid-row: 3;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  .shop-detail-view .shop-detail-controls {
+    grid-column: 2;
+    grid-row: 3;
+    margin: 0;
+    padding: 0;
+    border-top: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-options-overlay > .player-options-modal,
+  .npc-talk-modal,
+  .shop-opening .shop-popup {
+    animation: none;
+  }
+}

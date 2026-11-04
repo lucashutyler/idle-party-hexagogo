@@ -1,6 +1,7 @@
 import type { ClientCombatSkill, SkillCardType } from '@idle-party-rpg/shared';
 import { SKILL_CARD_TYPE_INFO } from '@idle-party-rpg/shared';
 import { fx, reducedMotion } from '../ui/motion';
+import { setHtml } from '../ui/render';
 import { escapeHtml, formatSeconds } from './CombatFormat';
 
 export interface SkillBarCard {
@@ -20,6 +21,8 @@ export interface SkillBarLayout {
   passives: SkillBarChip[];
   /** Muted trailing note ("Active skill unlocks at level 5", "Joining next battle"). */
   note?: string;
+  /** The note leads to the Skills view, where it can be acted on. */
+  noteLinksToSkills?: boolean;
 }
 
 export interface SkillBarState {
@@ -29,6 +32,8 @@ export interface SkillBarState {
   cooldownMs: number;
   castProgress?: number;
 }
+
+const SWEEP_EPSILON = 0.02;
 
 const STATE_LABEL: Record<ClientCombatSkill['state'], string> = {
   ready: 'READY',
@@ -40,6 +45,7 @@ const STATE_LABEL: Record<ClientCombatSkill['state'], string> = {
 
 interface CardRefs {
   el: HTMLElement;
+  sweepEl: HTMLElement;
   status: HTMLElement;
   lastState: string;
   lastSweep: number;
@@ -86,12 +92,18 @@ export class CombatSkillBar {
       const info = SKILL_CARD_TYPE_INFO[chip.cardType];
       parts.push(`<button type="button" class="combat-skill-passive" data-skill-id="${escapeHtml(chip.id)}" data-card-type="${chip.cardType}" title="${escapeHtml(chip.name)}"><span class="combat-skill-passive-icon">${info.icon}</span><span class="combat-skill-passive-name">${escapeHtml(chip.name)}</span></button>`);
     }
-    if (layout.note) parts.push(`<span class="combat-skillbar-note">${escapeHtml(layout.note)}</span>`);
-    this.track.innerHTML = parts.join('');
+    if (layout.note) {
+      const note = escapeHtml(layout.note);
+      parts.push(layout.noteLinksToSkills
+        ? `<button type="button" class="combat-skillbar-note combat-skillbar-link" data-nav="items:skills">${note}<span aria-hidden="true">›</span></button>`
+        : `<span class="combat-skillbar-note">${note}</span>`);
+    }
+    setHtml(this.track, parts.join(''));
     this.root.classList.toggle('empty', layout.cards.length === 0);
     for (const el of this.track.querySelectorAll<HTMLElement>('.combat-skill')) {
       this.cards.set(el.dataset.skillId!, {
         el,
+        sweepEl: el.querySelector('.combat-skill-sweep')!,
         status: el.querySelector('.combat-skill-status')!,
         lastState: '',
         lastSweep: -1,
@@ -113,9 +125,9 @@ export class CombatSkillBar {
       const sweep = s.state === 'casting'
         ? s.castProgress ?? 0
         : s.state === 'cooldown' && s.cooldownMs > 0 ? Math.max(0, Math.min(1, s.remainingMs / s.cooldownMs)) : 0;
-      if (Math.abs(sweep - refs.lastSweep) >= 0.005) {
+      if (Math.abs(sweep - refs.lastSweep) >= SWEEP_EPSILON || (sweep === 0 && refs.lastSweep !== 0)) {
         refs.lastSweep = sweep;
-        refs.el.style.setProperty('--cd', sweep.toFixed(3));
+        refs.sweepEl.style.setProperty('--cd', sweep.toFixed(2));
       }
       if (writeText || stateChanged) {
         const text = s.state === 'cooldown' ? `${formatSeconds(s.remainingMs)}s` : STATE_LABEL[s.state];

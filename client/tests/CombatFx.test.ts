@@ -26,6 +26,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('CombatFx clearAll', () => {
+  it('can let a result banner finish over the next fight, and clears anything else', () => {
+    fx.banner('RETREAT', 'retreat', 1000);
+    fx.clearAll(true);
+    expect(fx.currentBanner).toBe('retreat');
+    fx.clearAll();
+    expect(fx.currentBanner).toBeNull();
+    fx.banner('FIGHT!', 'fight', 1000);
+    fx.clearAll(true);
+    expect(fx.currentBanner).toBeNull();
+  });
+});
+
 describe('CombatFx banner queue', () => {
   it('shows a banner with its tone and optional subline, then hides it', () => {
     expect(fx.banner('REGROUP', 'regroup', 1000, 'Checkpoint 2 · 2 retries left')).toBe(true);

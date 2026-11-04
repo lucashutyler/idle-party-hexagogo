@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsScreen } from '../src/screens/SettingsScreen';
+import { dismissTop } from '../src/ui/ModalStack';
 import type { GameClient } from '../src/network/GameClient';
 
 
@@ -108,5 +109,53 @@ describe('Player Options auto-retreat', () => {
     screen.openPlayerOptions();
     expect(document.querySelectorAll('.player-options-overlay')).toHaveLength(1);
     expect(parseInt(first.style.zIndex, 10)).toBeGreaterThan(z);
+  });
+});
+
+describe('Settings list', () => {
+  function mount(client: ReturnType<typeof fakeClient>): SettingsScreen {
+    document.body.innerHTML = '<div id="screen-settings"></div>';
+    return new SettingsScreen('screen-settings', client as unknown as GameClient);
+  }
+
+  const click = (selector: string) => (document.querySelector(selector) as HTMLElement).click();
+
+  it('groups its rows and shows the current values', () => {
+    const screen = mount(fakeClient({ pct: 40 }));
+    screen.onActivate();
+    expect([...document.querySelectorAll('.settings-group')].map(g => g.querySelectorAll('.settings-row').length)).toEqual([2, 1, 1]);
+    expect(document.querySelector('#btn-player-options .ui-row-sub')!.textContent).toBe('Auto-retreat: below 40 %');
+    expect(document.querySelector('#btn-sign-out .ui-row-sub')!.textContent).toBe('Signed in as me');
+  });
+
+  it('keeps row values current only while the screen is active', () => {
+    const client = fakeClient({ pct: 40 });
+    const screen = mount(client);
+    screen.onActivate();
+    client.lastState.character = { level: 3, combatPrefs: { autoRetreatBelowPct: 0 } };
+    client.listeners.forEach(l => l());
+    expect(document.querySelector('#btn-player-options .ui-row-sub')!.textContent).toBe('Auto-retreat: off');
+    screen.onDeactivate();
+    expect(client.listeners).toHaveLength(0);
+  });
+
+  it('builds patch notes only when opened, and closes them with Back', () => {
+    mount(fakeClient());
+    expect(document.querySelector('.patch-note-entry')).toBeNull();
+    click('#btn-patch-notes');
+    expect(document.querySelector('.patch-notes-modal .patch-note-entry')).not.toBeNull();
+    click('#btn-patch-notes');
+    expect(document.querySelectorAll('.patch-notes-modal')).toHaveLength(1);
+    expect(dismissTop()).toBe(true);
+    expect(document.querySelector('.patch-notes-modal')).toBeNull();
+  });
+
+  it('closes every sheet it opened when leaving the screen', () => {
+    const screen = mount(fakeClient());
+    click('#btn-patch-notes');
+    screen.openPlayerOptions();
+    expect(document.querySelectorAll('.player-options-overlay')).toHaveLength(2);
+    screen.onDeactivate();
+    expect(document.querySelectorAll('.player-options-overlay')).toHaveLength(0);
   });
 });

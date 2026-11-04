@@ -6,6 +6,7 @@ import {
 import type { NotificationChannel, NotificationPreferences } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { confirmDialog } from './ConfirmDialog';
+import { deferWhilePressed } from './render';
 import { subscribeToPush, unsubscribeFromPush, getPushPermission, isPushSupported, isPushConfiguredOnServer } from '../network/PushNotifications';
 
 const CHANNEL_LABELS: Record<NotificationChannel, string> = {
@@ -76,7 +77,7 @@ export function renderNotificationPreferences(container: HTMLElement, gameClient
   Promise.all([pushCheck, emailCheck]).then(() => {
     if (!container.isConnected) return;
     if (disabledReasons.browser_push || disabledReasons.email) {
-      renderGrid(container, gameClient, prefs, disabledReasons);
+      deferWhilePressed(container, () => renderGrid(container, gameClient, prefs, disabledReasons));
     }
   });
 }
@@ -91,26 +92,30 @@ function renderGrid(container: HTMLElement, gameClient: GameClient, prefs: Notif
 
   const categories = activeCategories();
 
+  const unavailable = ALL_NOTIFICATION_CHANNELS.flatMap(ch => {
+    const reason = disabledReasons[ch];
+    return reason ? [`${CHANNEL_LABELS[ch]}: ${reason.toLowerCase()}.`] : [];
+  });
+
   container.innerHTML = `
     <div class="notif-prefs-toolbar">
-      <button class="notif-prefs-bulk-btn" data-bulk="enable">Enable all</button>
-      <button class="notif-prefs-bulk-btn" data-bulk="disable">Disable all</button>
+      <button type="button" class="notif-prefs-bulk-btn" data-bulk="enable">Enable all</button>
+      <button type="button" class="notif-prefs-bulk-btn" data-bulk="disable">Disable all</button>
     </div>
-    <div class="notif-prefs-status" style="display:none"></div>
+    ${unavailable.length > 0 ? `<div class="notif-prefs-unavailable">${unavailable.join(' ')}</div>` : ''}
+    <div class="notif-prefs-status" role="status" style="display:none"></div>
     <table class="notif-prefs-grid">
       <thead>
         <tr>
           <th></th>
           ${ALL_NOTIFICATION_CHANNELS.map(ch => `
             <th>
-              <div class="notif-prefs-col-head">
+              <label class="notif-prefs-col-head${disabledReasons[ch] ? ' notif-prefs-off' : ''}">
                 <span>${CHANNEL_LABELS[ch]}</span>
-                ${disabledReasons[ch] ? `<span class="notif-prefs-col-note">${disabledReasons[ch]}</span>` : ''}
-                <label class="notif-prefs-master">
-                  <input type="checkbox" data-master-channel="${ch}" ${!disabledReasons[ch] && !prefs.channelDisabled[ch] ? 'checked' : ''}
-                    ${disabledReasons[ch] ? 'disabled' : ''} />
-                </label>
-              </div>
+                <input type="checkbox" data-master-channel="${ch}" aria-label="${CHANNEL_LABELS[ch]}: all notifications"
+                  ${!disabledReasons[ch] && !prefs.channelDisabled[ch] ? 'checked' : ''}
+                  ${disabledReasons[ch] ? 'disabled' : ''} />
+              </label>
             </th>
           `).join('')}
         </tr>
@@ -123,9 +128,11 @@ function renderGrid(container: HTMLElement, gameClient: GameClient, prefs: Notif
               <td class="notif-prefs-event-label">${evt.label}</td>
               ${ALL_NOTIFICATION_CHANNELS.map(ch => `
                 <td>
-                  <input type="checkbox" data-event="${evt.eventKey}" data-channel="${ch}"
-                    ${!disabledReasons[ch] && prefs.events[evt.eventKey].includes(ch) ? 'checked' : ''}
-                    ${disabledReasons[ch] ? 'disabled' : ''} />
+                  <label class="notif-prefs-cell${disabledReasons[ch] ? ' notif-prefs-off' : ''}">
+                    <input type="checkbox" data-event="${evt.eventKey}" data-channel="${ch}" aria-label="${evt.label}: ${CHANNEL_LABELS[ch]}"
+                      ${!disabledReasons[ch] && prefs.events[evt.eventKey].includes(ch) ? 'checked' : ''}
+                      ${disabledReasons[ch] ? 'disabled' : ''} />
+                  </label>
                 </td>
               `).join('')}
             </tr>

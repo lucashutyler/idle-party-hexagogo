@@ -12,18 +12,29 @@ import {
   MAX_HENCHMEN_PER_PARTY,
   MAX_STACK,
 } from '@idle-party-rpg/shared';
-import { renderItemIcon, escapeHtml } from './ItemIcon';
+import { RARITY_COLORS, renderItemIcon, escapeHtml } from './ItemIcon';
 import { renderItemPopupContent } from './ItemPopup';
 import { renderEquipCompareBlock } from './EquipCompare';
 import { renderTrackedImg } from './assets';
 import { deferWhilePressed } from './render';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 
+const UNKNOWN_ITEM = 'Unknown item';
+
 type ShopView =
   | { kind: 'grid' }
   | { kind: 'buy'; itemId: string; price: number; qty: number }
   | { kind: 'sell'; itemId: string; qty: number }
   | { kind: 'replace'; henchmanId: string };
+
+/** A sale awaiting its answer. A success shows up as the item's stack shrinking; a refusal as an error. */
+interface PendingSell {
+  itemId: string;
+  name: string;
+  value: number;
+  qty: number;
+  startCount: number;
+}
 
 /** Buy requests still awaiting answers. A success shows up as the item's stack growing; a refusal as an error. */
 interface PendingBuy {
@@ -49,6 +60,7 @@ export class ShopPopup {
   /** Henchman id of a hire awaiting a server answer, so only its refusal shows. */
   private pendingHireId: string | null = null;
   private pendingBuy: PendingBuy | null = null;
+  private pendingSell: PendingSell | null = null;
   private unsubscribeError: (() => void) | null = null;
   /** Inputs of the most recent render; a push with the same inputs only patches gold in place. */
   private lastRenderKey = '';
@@ -62,8 +74,9 @@ export class ShopPopup {
     this.overlay.className = 'shop-overlay';
     this.overlay.style.display = 'none';
     this.overlay.addEventListener('click', (e) => {
-      if (e.target === this.overlay) this.hide();
+      if (e.target === this.overlay || (e.target instanceof Element && e.target.closest('.shop-close'))) this.hide();
     });
+    this.overlay.addEventListener('animationend', () => this.overlay.classList.remove('shop-opening'));
     document.body.appendChild(this.overlay);
     wireFocusOnInteract(this.overlay);
   }
@@ -78,12 +91,14 @@ export class ShopPopup {
     this.lastRenderKey = '';
     this.renderCurrentView(state);
     this.overlay.style.display = 'flex';
-    bringToFront(this.overlay);
+    this.overlay.classList.add('shop-opening');
+    bringToFront(this.overlay, () => this.dismiss());
 
     this.unsubscribeState?.();
     this.unsubscribeState = this.gameClient.subscribe(() => {
       this.settleHire();
       this.settleBuy();
+      this.settleSell();
       deferWhilePressed(this.overlay, () => this.refresh());
     });
 
@@ -97,6 +112,9 @@ export class ShopPopup {
         this.pendingBuy.refused++;
         if (!this.pendingBuy.refusal) this.pendingBuy.refusal = message;
         this.settleBuy();
+      } else if (this.pendingSell) {
+        this.pendingSell = null;
+        this.setNotice(message);
       } else {
         return;
       }
@@ -106,6 +124,7 @@ export class ShopPopup {
 
   hide(): void {
     this.overlay.style.display = 'none';
+    this.overlay.classList.remove('shop-opening');
     this.overlay.innerHTML = '';
     release(this.overlay);
     this.unsubscribeState?.();
@@ -116,11 +135,22 @@ export class ShopPopup {
     this.renderedPlace = '';
     this.pendingHireId = null;
     this.pendingBuy = null;
+    this.pendingSell = null;
     if (this.noticeTimer !== null) {
       window.clearTimeout(this.noticeTimer);
       this.noticeTimer = null;
     }
     this.notice = null;
+  }
+
+  /** Back and Escape step out of a detail view first, then close the shop. */
+  private dismiss(): void {
+    if (this.view.kind === 'grid') {
+      this.hide();
+      return;
+    }
+    this.view = { kind: 'grid' };
+    this.rerender();
   }
 
   private static hiredHenchmen(state: ServerStateMessage): HiredHenchman[] {
@@ -312,6 +342,31 @@ export class ShopPopup {
     else this.setNotice(success ? `${pending.refusal}. ${success}` : pending.refusal);
   }
 
+  private settleSell(): void {
+    const pending = this.pendingSell;
+    const char = this.gameClient.lastState?.character;
+    if (!pending || !char) return;
+    const sold = pending.startCount - getUnequippedCount(pending.itemId, char.inventory);
+    if (sold < pending.qty) return;
+    this.pendingSell = null;
+    const noun = pending.qty === 1 ? pending.name : `${pending.qty} ${pending.name}`;
+    this.setNotice(`You sold ${noun} for ${pending.qty * pending.value} gold.`);
+  }
+
+  private headerHtml(title: string, gold: number | null): string {
+    return `
+      <div class="shop-header">
+        <span class="shop-title">${escapeHtml(title)}</span>
+        ${gold === null ? '' : `<span class="shop-gold">${gold.toLocaleString()} gold</span>`}
+        <button type="button" class="player-options-close shop-close" aria-label="Close">×</button>
+      </div>
+    `;
+  }
+
+  private noticeHtml(): string {
+    return this.notice ? `<div class="shop-notice" role="status">${escapeHtml(this.notice)}</div>` : '';
+  }
+
   /** Render the main grid view (buy / sell item list, or the hire list). */
   private renderGrid(state: ServerStateMessage, shop: ShopDefinition): void {
     const char = state.character;
@@ -333,24 +388,16 @@ export class ShopPopup {
       ? `<button class="shop-toggle-btn${hireActive}" data-mode="hire">Hire</button>`
       : '';
 
-    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
-
     this.overlay.innerHTML = `
-      <div class="shop-popup">
-        <div class="shop-header">
-          <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${char.gold.toLocaleString()} gold</span>
-        </div>
-        ${noticeHtml}
+      <div class="shop-popup" role="dialog" aria-label="${escapeHtml(shop.name)}">
+        ${this.headerHtml(shop.name, char.gold)}
+        ${this.noticeHtml()}
         <div class="shop-toggle">
           <button class="shop-toggle-btn${buyActive}" data-mode="buy">Buy</button>
           <button class="shop-toggle-btn${sellActive}" data-mode="sell">Sell</button>
           ${hireToggle}
         </div>
         ${listHtml}
-        <div class="shop-footer">
-          <button class="item-popup-btn item-popup-btn-secondary shop-close-btn">Close</button>
-        </div>
       </div>
     `;
 
@@ -376,18 +423,28 @@ export class ShopPopup {
       });
     }
 
-    for (const el of this.overlay.querySelectorAll<HTMLElement>('.shop-item-square')) {
-      el.addEventListener('click', () => {
-        const itemId = el.dataset.itemId;
-        if (!itemId) return;
+    for (const cell of this.overlay.querySelectorAll<HTMLElement>('.shop-item-cell')) {
+      const open = () => {
+        const el = cell.querySelector<HTMLElement>('.shop-item-square');
+        const itemId = el?.dataset.itemId;
+        if (!el || !itemId) return;
         this.view = this.mode === 'buy'
           ? { kind: 'buy', itemId, price: parseInt(el.dataset.price ?? '0', 10), qty: 1 }
           : { kind: 'sell', itemId, qty: 1 };
         this.rerender();
+      };
+      cell.addEventListener('click', open);
+      cell.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        open();
       });
     }
+  }
 
-    this.overlay.querySelector('.shop-close-btn')?.addEventListener('click', () => this.hide());
+  private static itemCell(square: string, name: string, rarity: string | undefined): string {
+    const color = RARITY_COLORS[rarity ?? 'common'] ?? RARITY_COLORS.common;
+    return `<div class="shop-item-cell" role="button" tabindex="0">${square}<div class="shop-item-name" style="color:${color}">${escapeHtml(name)}</div></div>`;
   }
 
   private renderBuyItems(shop: ShopDefinition, itemDefs: Record<string, ItemDefinition>, className: string, gold: number): string {
@@ -396,10 +453,10 @@ export class ShopPopup {
       const def = itemDefs[si.itemId];
       if (!def) {
         const name = si.itemId;
-        return `<div class="item-square shop-item-square" data-item-id="${escapeHtml(si.itemId)}" data-price="${si.price}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(name)}">
+        return ShopPopup.itemCell(`<div class="item-square shop-item-square" data-item-id="${escapeHtml(si.itemId)}" data-price="${si.price}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(name)}">
           <span class="item-square-initials">${escapeHtml(name.split(' ').map(w => w[0]).join('').slice(0, 2))}</span>
           ${price}
-        </div>`;
+        </div>`, UNKNOWN_ITEM, undefined);
       }
       const restriction = ShopPopup.restrictionLabel(def, className);
       const html = renderItemIcon(si.itemId, def, {
@@ -408,7 +465,7 @@ export class ShopPopup {
         tooltip: restriction ? `${def.name} (${restriction})` : undefined,
       });
       const badge = restriction ? '<span class="shop-item-unusable" aria-hidden="true"></span>' : '';
-      return html.replace(/<\/div>$/, `${badge}${price}</div>`);
+      return ShopPopup.itemCell(html.replace(/<\/div>$/, `${badge}${price}</div>`), def.name, def.rarity);
     }).join('');
   }
 
@@ -424,10 +481,10 @@ export class ShopPopup {
     return entries.map(([itemId, qty]) => {
       const def = itemDefs[itemId];
       if (!def) {
-        return `<div class="item-square shop-item-square" data-item-id="${escapeHtml(itemId)}" data-qty="${qty}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(itemId)}">
+        return ShopPopup.itemCell(`<div class="item-square shop-item-square" data-item-id="${escapeHtml(itemId)}" data-qty="${qty}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(itemId)}">
           <span class="item-square-initials">${escapeHtml(itemId.split(' ').map(w => w[0]).join('').slice(0, 2))}</span>
           <span class="shop-item-price">1g</span>
-        </div>`;
+        </div>`, UNKNOWN_ITEM, undefined);
       }
       const value = def.value ?? 1;
       const html = renderItemIcon(itemId, def, {
@@ -435,7 +492,7 @@ export class ShopPopup {
         extraClass: 'shop-item-square',
         dataAttrs: { 'item-id': itemId, qty: String(qty) },
       });
-      return html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`);
+      return ShopPopup.itemCell(html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`), def.name, def.rarity);
     }).join('');
   }
 
@@ -453,8 +510,8 @@ export class ShopPopup {
       .join('');
 
     this.overlay.innerHTML = `
-      <div class="shop-popup">
-        <div class="shop-header"><span class="shop-title">Make room for ${escapeHtml(offer.name)}?</span></div>
+      <div class="shop-popup shop-replace-view" role="dialog" aria-label="Make room for ${escapeHtml(offer.name)}">
+        ${this.headerHtml(`Make room for ${offer.name}?`, null)}
         <div class="shop-hire-row">
           <div class="shop-hire-portrait">
             ${ShopPopup.henchmanPortrait(offer)}
@@ -549,8 +606,6 @@ export class ShopPopup {
     const maxQty = Math.max(1, affordable);
     let qty = Math.min(view.qty, maxQty);
     view.qty = qty;
-    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
-
     const restriction = ShopPopup.restrictionLabel(def, char.className);
     const unusableNote = restriction
       ? `<div class="shop-unusable-note">${escapeHtml(restriction)} — you can still buy it.</div>`
@@ -567,12 +622,9 @@ export class ShopPopup {
     const disabled = canAfford ? '' : ' disabled';
 
     this.overlay.innerHTML = `
-      <div class="shop-popup shop-detail-view">
-        <div class="shop-header">
-          <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${char.gold.toLocaleString()} gold</span>
-        </div>
-        ${noticeHtml}
+      <div class="shop-popup shop-detail-view" role="dialog" aria-label="${escapeHtml(shop.name)}">
+        ${this.headerHtml(shop.name, char.gold)}
+        ${this.noticeHtml()}
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
           <div class="shop-qty-row">
@@ -648,7 +700,6 @@ export class ShopPopup {
 
     let qty = Math.min(view.qty, max);
     view.qty = qty;
-    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
@@ -660,19 +711,16 @@ export class ShopPopup {
     });
 
     this.overlay.innerHTML = `
-      <div class="shop-popup shop-detail-view">
-        <div class="shop-header">
-          <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${char.gold.toLocaleString()} gold</span>
-        </div>
-        ${noticeHtml}
+      <div class="shop-popup shop-detail-view" role="dialog" aria-label="${escapeHtml(shop.name)}">
+        ${this.headerHtml(shop.name, char.gold)}
+        ${this.noticeHtml()}
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
           <div class="shop-qty-row">
             <button class="shop-qty-btn shop-qty-minus">-</button>
             <span class="shop-qty-value">${qty}</span>
             <button class="shop-qty-btn shop-qty-plus">+</button>
-            <button class="shop-qty-btn shop-qty-all">All</button>
+            <button class="shop-qty-btn shop-qty-all">Max</button>
           </div>
           <div class="shop-detail-total">Available: ${max} · Total: ${qty * value} gold</div>
           <div class="shop-detail-actions">
@@ -704,9 +752,12 @@ export class ShopPopup {
       updateQty();
     });
     this.overlay.querySelector('.shop-action-confirm')?.addEventListener('click', () => {
-      this.gameClient.sendShopSell(itemId, qty);
-      const noun = qty === 1 ? def.name : `${qty} ${def.name}`;
-      this.setNotice(`You sold ${noun} for ${qty * value} gold.`);
+      const startCount = this.computeSellable(this.gameClient.lastState ?? state, itemId);
+      if (this.gameClient.sendShopSell(itemId, qty)) {
+        this.pendingSell = { itemId, name: def.name, value, qty, startCount };
+      } else {
+        this.setNotice(OFFLINE_NOTICE);
+      }
       this.view = { kind: 'grid' };
       this.rerender();
     });

@@ -16,6 +16,43 @@ function unit(overrides: Partial<PlaybackUnit> = {}): PlaybackUnit {
   };
 }
 
+describe('UnitCard paint targets', () => {
+  it('writes the timers on the element that draws them, not the whole card', () => {
+    const card = new UnitCard('monster:4', 'monster', 4);
+    card.update(unit({ cast: { skill: 'Slam', skillId: 'slam', totalMs: 1000, remainingMs: 500 } }), 0);
+    expect(card.el.querySelector<HTMLElement>('.combat-card-ring')!.style.getPropertyValue('--act')).toBe('0.50');
+    expect(card.el.querySelector<HTMLElement>('.combat-card-cast-fill')!.style.getPropertyValue('--cast')).toBe('0.50');
+    expect(card.el.style.getPropertyValue('--act')).toBe('');
+    expect(card.el.style.getPropertyValue('--cast')).toBe('');
+  });
+
+  it('skips action ring writes smaller than the epsilon, but always lands on empty', () => {
+    const card = new UnitCard('monster:4', 'monster', 4);
+    const ring = card.el.querySelector<HTMLElement>('.combat-card-ring')!;
+    card.update(unit({ actionMs: 500 }), 0);
+    card.update(unit({ actionMs: 490 }), 0);
+    expect(ring.style.getPropertyValue('--act')).toBe('0.50');
+    card.update(unit({ actionMs: 470 }), 0);
+    expect(ring.style.getPropertyValue('--act')).toBe('0.53');
+    card.update(unit({ hp: 0 }), 0);
+    expect(ring.style.getPropertyValue('--act')).toBe('0.00');
+  });
+});
+
+describe('UnitCard HP numbers', () => {
+  it('shows current and max HP and rewrites them only when they change', () => {
+    const card = new UnitCard('player:4', 'player', 4);
+    const text = card.el.querySelector('.combat-card-hp-text')!;
+    card.update(unit({ hp: 1234, maxHp: 15000 }), 0);
+    expect(text.textContent).toBe('1234 / 15k');
+    const current = text.querySelector('b')!.firstChild;
+    card.update(unit({ hp: 1234, maxHp: 15000 }), 16);
+    expect(text.querySelector('b')!.firstChild).toBe(current);
+    card.update(unit({ hp: 0, maxHp: 15000 }), 32);
+    expect(text.textContent).toBe('0 / 15k');
+  });
+});
+
 describe('UnitCard level badge and tier frame', () => {
   it('shows an authored level coloured by the viewer and recolours when the viewer levels up', () => {
     const card = new UnitCard('monster:4', 'monster', 4);
