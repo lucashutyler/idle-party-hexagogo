@@ -37,7 +37,8 @@ const STORAGE_KEY_OPEN = 'chatPopoutOpen';
 const STORAGE_KEY_LAST_SEEN = 'chatLastSeenAt';
 
 const DESKTOP_COLUMN_QUERY = '(min-width: 860px)';
-const DOCKED_COLUMN_QUERY = `${DESKTOP_COLUMN_QUERY}, (orientation: landscape) and (max-height: 500px)`;
+const SHORT_LANDSCAPE_QUERY = '(orientation: landscape) and (max-height: 500px)';
+const DOCKED_COLUMN_QUERY = `${DESKTOP_COLUMN_QUERY}, ${SHORT_LANDSCAPE_QUERY}`;
 const COARSE_POINTER_QUERY = '(pointer: coarse)';
 const FINE_POINTER_QUERY = '(pointer: fine)';
 
@@ -248,7 +249,7 @@ export class ChatPopout {
 
   /** The column as a phone in landscape shows it. The sheet and full layouts are on ModalStack, and the desktop column stays. */
   isLandscapeColumn(): boolean {
-    return this.isOpen && this.currentLayout() === 'column' && !matches(DESKTOP_COLUMN_QUERY);
+    return this.isOpen && this.currentLayout() === 'column' && matches(SHORT_LANDSCAPE_QUERY);
   }
 
   /** Closes a chat that covers the whole screen, so that what a navigation brings up can be seen. */

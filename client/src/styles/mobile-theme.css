@@ -32,7 +32,7 @@
   .dungeon-entry-title, .room-view-name, .room-view-here-label, .notif-dropdown-title, .map-toast,
   .three-map-badge, .social-group-header, .profile-section-label, .npc-quest-section-title,
   .dungeon-entry-reqs-title, .charitems-inv-group-header, .room-party-other-label, .room-party-group-label,
-  .chat-popout-title, .trade-qty-val, .items-modal-count-value, .item-square-initials, .item-square-qty,
+  .trade-qty-val, .items-modal-count-value, .item-square-initials, .item-square-qty,
   .item-square-set, .item-popup-initials, .social-user-level, .profile-level, .user-popup-level,
   .craft-skill-level, .compare-block-old-name, .notif-bell-badge, .offline-icon, .trade-vs,
   .npc-talk-completion-label, .charitems-xp-numbers, .social-badge, .craft-class-tag, .user-popup-name
@@ -47,7 +47,7 @@
   .charitems-stat-value, .charitems-xp-numbers, .charitems-xp-rate-value, .craft-skill-xptext,
   .craft-queue-status, .trade-qty-val, .shop-qty-value, .items-modal-count-value, .shop-gold,
   .shop-detail-total, .shop-item-price, .item-square-qty, .social-user-level, .chat-msg-time,
-  .chat-timestamp, .notif-row-time, .compare-row, .profile-level, .user-popup-level, .craft-skill-level,
+  .notif-row-time, .compare-row, .profile-level, .user-popup-level, .craft-skill-level,
   .notif-bell-badge, .trade-item-count, .trade-offer-qty, .mailbox-item-qty
 ) {
   font-variant-numeric: tabular-nums;
@@ -57,7 +57,7 @@
   .charitems-content, .social-panel, .settings-content, .craft-screen, .class-select-content,
   .player-options-modal, .item-popup, .charitems-skill-popup, .trade-modal, .player-profile-modal,
   .shop-popup, .npc-talk-modal, .trade-picker-list, .shop-items-grid, .room-view-parties,
-  .notif-dropdown-list, .chat-popout-timeline, .notif-prefs-body, .social-chat-messages
+  .notif-dropdown-list, .chat-popout-timeline, .notif-prefs-body
 ) {
   scrollbar-width: thin;
   scrollbar-color: var(--surface-3) transparent;
@@ -68,7 +68,7 @@
   .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
   .item-popup-actions button, .item-popup-actions button.danger, .charitems-skill-popup-btn,
   .items-modal-btn, .social-action-btn, .profile-close-btn, .craft-queue-btn, .craft-cancel-btn,
-  .compare-confirm, .compare-cancel, .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
+  .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
   .gift-qty-dec, .gift-qty-inc, .notif-prefs-bulk-btn, .notif-mark-all-btn, .notif-clear-all-btn,
   .map-zoom-btn
 ) {
@@ -101,7 +101,7 @@
   .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
   .item-popup-actions button, .item-popup-actions button.danger, .charitems-skill-popup-btn,
   .items-modal-btn, .social-action-btn, .profile-close-btn, .craft-queue-btn, .craft-cancel-btn,
-  .compare-confirm, .compare-cancel, .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
+  .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
   .gift-qty-dec, .gift-qty-inc, .notif-prefs-bulk-btn, .notif-mark-all-btn, .notif-clear-all-btn,
   .map-zoom-btn
 ):is(:hover, :active, :focus) {
@@ -115,7 +115,7 @@
   .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
   .item-popup-actions button, .item-popup-actions button.danger, .charitems-skill-popup-btn,
   .items-modal-btn, .social-action-btn, .profile-close-btn, .craft-queue-btn, .craft-cancel-btn,
-  .compare-confirm, .compare-cancel, .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
+  .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
   .gift-qty-dec, .gift-qty-inc, .notif-prefs-bulk-btn, .notif-mark-all-btn, .notif-clear-all-btn,
   .map-zoom-btn
 ):active:not(:disabled) {
@@ -132,7 +132,7 @@
   .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
   .item-popup-actions button, .item-popup-actions button.danger, .charitems-skill-popup-btn,
   .items-modal-btn, .social-action-btn, .profile-close-btn, .craft-queue-btn, .craft-cancel-btn,
-  .compare-confirm, .compare-cancel, .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
+  .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
   .gift-qty-dec, .gift-qty-inc, .notif-prefs-bulk-btn, .notif-mark-all-btn, .notif-clear-all-btn,
   .map-zoom-btn
 ):focus-visible {
@@ -145,7 +145,7 @@
   .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
   .item-popup-actions button, .item-popup-actions button.danger, .charitems-skill-popup-btn,
   .items-modal-btn, .social-action-btn, .profile-close-btn, .craft-queue-btn, .craft-cancel-btn,
-  .compare-confirm, .compare-cancel, .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
+  .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
   .gift-qty-dec, .gift-qty-inc, .notif-prefs-bulk-btn, .notif-mark-all-btn, .notif-clear-all-btn,
   .map-zoom-btn
 ):is(:disabled, [aria-disabled="true"]) {
@@ -159,7 +159,7 @@
   .login-button, .offline-retry, .suspension-submit, .pixel-btn, .npc-talk-btn,
   .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
   .item-popup-actions button, .charitems-skill-popup-btn, .items-modal-btn, .social-action-btn,
-  .profile-close-btn, .craft-queue-btn, .craft-cancel-btn, .compare-confirm, .compare-cancel
+  .profile-close-btn, .craft-queue-btn, .craft-cancel-btn
 ) {
   min-height: 40px;
   padding: 8px 16px;
@@ -167,7 +167,7 @@
   line-height: 1.15;
 }
 
-:is(.mailbox-actions, .trade-row-actions, .social-user-actions, .social-party-actions, .social-guild-header) button {
+:is(.mailbox-actions, .trade-row-actions, .social-user-actions) button {
   padding: 6px 12px;
   font-size: var(--fs-sm);
 }
@@ -181,7 +181,7 @@
 }
 
 :is(
-  .add-friend, .trade-send-btn, .gift-send-btn, .trade-modal-confirm-btn, .social-chat-send-btn
+  .add-friend, .trade-send-btn, .gift-send-btn, .trade-modal-confirm-btn
 ) {
   --mt-btn-bg: var(--grad-success);
   --mt-btn-edge: var(--edge-success);
@@ -190,7 +190,7 @@
 
 :is(
   .login-button, .offline-retry, .suspension-submit, .npc-talk-btn-primary, .npc-talk-completion-dismiss,
-  .dungeon-entry-enter, .item-popup-btn-primary, .popup-action-equip, .compare-confirm, .chat-popout-send,
+  .dungeon-entry-enter, .item-popup-btn-primary, .popup-action-equip, .chat-popout-send,
   .trade-modal-review-btn, .room-view-action-go
 ) {
   --mt-btn-bg: var(--grad-primary);
@@ -200,7 +200,7 @@
 }
 
 :is(
-  .settings-btn-danger, .remove-friend, .block, .danger, .items-modal-confirm, .popup-action-destroy,
+  .remove-friend, .block, .danger, .items-modal-confirm, .popup-action-destroy,
   .craft-cancel-btn, .item-popup-btn-danger, .trade-modal-cancel-btn
 ) {
   --mt-btn-bg: var(--grad-danger);
@@ -223,7 +223,7 @@
 :is(
   .trade-modal-close-btn, .gift-close-btn, .unblock, .npc-talk-close, .dungeon-entry-cancel,
   .room-view-action-cancel, .item-popup-btn-secondary, .items-modal-cancel, .popup-action-unequip,
-  .compare-cancel, .profile-close-btn, .profile-item-close-btn, .notif-mark-all-btn, .notif-clear-all-btn
+  .profile-close-btn, .profile-item-close-btn, .notif-mark-all-btn, .notif-clear-all-btn
 ) {
   --mt-btn-bg: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
   --mt-btn-edge: var(--bg-0);
@@ -232,7 +232,7 @@
 }
 
 :is(
-  .shop-toggle-btn, .social-filter-btn, .social-sort-btn, .chat-filter, .chat-filter-btn
+  .shop-toggle-btn, .social-filter-btn, .social-sort-btn, .chat-filter
 ) {
   appearance: none;
   -webkit-appearance: none;
@@ -254,19 +254,12 @@
   transition: background 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
 }
 
-:is(.shop-toggle-btn, .social-filter-btn, .chat-filter-btn).active {
+:is(.shop-toggle-btn, .social-filter-btn).active {
   color: var(--text-1);
   background: var(--grad-secondary);
   border-color: var(--outline);
   box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.35), 0 2px 0 var(--edge-secondary);
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
-}
-
-.chat-filter-btn.active:is(
-  .chat-color-tile, .chat-color-zone, .chat-color-party, .chat-color-guild, .chat-color-global,
-  .chat-color-dm, .chat-color-server
-) {
-  border-color: var(--outline);
 }
 
 .chat-filter.active {
@@ -330,25 +323,9 @@
   box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.3), 0 1px 0 var(--edge-danger);
 }
 
-.chat-popout-header-actions button {
-  width: 30px;
-  height: 30px;
-  margin-left: 6px;
-  font-size: var(--fs-lg);
-}
-
-.chat-popout-header-actions .chat-popout-layout-btn {
-  background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
-  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.3), 0 3px 0 var(--bg-0);
-}
-
-.chat-popout-header-actions .chat-popout-layout-btn:is(:hover, :active) {
-  background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
-}
-
 :is(
   .login-input, .social-search, .items-search-input, .items-sort-select, .items-search-sort input,
-  .items-search-sort select, .chat-send-select, .chat-popout-channel, .chat-popout-dm-target,
+  .items-search-sort select, .chat-popout-channel, .chat-popout-dm-target,
   .chat-popout-input, .suspension-textarea
 ) {
   min-height: 40px;
@@ -367,7 +344,7 @@
 
 :is(
   .login-input, .social-search, .items-search-input, .items-sort-select, .items-search-sort input,
-  .items-search-sort select, .chat-send-select, .chat-popout-channel, .chat-popout-dm-target,
+  .items-search-sort select, .chat-popout-channel, .chat-popout-dm-target,
   .chat-popout-input, .suspension-textarea
 )::placeholder {
   color: var(--text-3);
@@ -376,14 +353,14 @@
 
 :is(
   .login-input, .social-search, .items-search-input, .items-sort-select, .items-search-sort input,
-  .items-search-sort select, .chat-send-select, .chat-popout-channel, .chat-popout-dm-target,
+  .items-search-sort select, .chat-popout-channel, .chat-popout-dm-target,
   .chat-popout-input, .suspension-textarea
 ):focus {
   border-color: var(--blue);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(61, 178, 255, 0.3);
 }
 
-:is(.items-sort-select, .items-search-sort select, .chat-send-select, .chat-popout-channel) {
+:is(.items-sort-select, .items-search-sort select, .chat-popout-channel) {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 30px;
@@ -395,16 +372,13 @@
   cursor: pointer;
 }
 
-.chat-dm-input.dm-valid {
-  border-color: var(--green);
-}
-
-.chat-dm-input.dm-invalid {
-  border-color: var(--red);
+:is(.items-sort-select, .items-search-sort select, .chat-popout-channel) option {
+  color: var(--text-1);
+  background: var(--bg-1);
 }
 
 :is(
-  .charitems-hero, .charitems-stat-card, .patch-note-entry, .class-card, .craft-skill-header,
+  .charitems-stat-card, .patch-note-entry, .class-card, .craft-skill-header,
   .craft-section, .craft-locked, .social-guild-info, .login-form
 ) {
   background: var(--grad-panel);
@@ -461,7 +435,7 @@
 
 :is(
   .social-user-row, .mailbox-row, .trade-row, .trade-picker-row, .craft-queue-row, .craft-recipe-card,
-  .charitems-skill-row, .settings-option-row, .room-party-group, .social-chat-msg
+  .charitems-skill-row, .settings-option-row, .room-party-group
 ) {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 100%), var(--surface-1);
   border: 2px solid var(--outline);
@@ -476,7 +450,7 @@
   gap: 8px;
 }
 
-:is(.social-user-list, .social-friends-list, .mailbox-list, .trade-list, .trade-picker-list) {
+:is(.social-user-list, .mailbox-list, .trade-list, .trade-picker-list) {
   gap: 6px;
 }
 
@@ -588,19 +562,6 @@
   font-synthesis: none;
   font-size: var(--fs-sm);
   color: var(--gold);
-}
-
-@media (min-width: 768px) and (hover: hover) {
-  .item-square[data-tooltip]:hover::after {
-    font-family: var(--font-display);
-    font-weight: 400;
-    font-size: var(--fs-2xs);
-    padding: 4px 8px;
-    background: rgba(10, 15, 36, 0.96);
-    border: 2px solid var(--outline);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-1);
-  }
 }
 
 .map-toast {
@@ -806,41 +767,10 @@ button:is(.offline-retry, .suspension-submit) {
   gap: 16px;
 }
 
-.settings-header {
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.settings-icon-img {
-  image-rendering: var(--art-rendering);
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
-}
-
 .settings-title {
   font-size: var(--fs-2xl);
   color: var(--gold);
   text-shadow: 0 3px 0 var(--outline);
-}
-
-.settings-buttons {
-  max-width: 340px;
-  gap: 14px;
-}
-
-.pixel-btn.settings-btn {
-  width: 100%;
-  min-height: 52px;
-  font-size: var(--fs-lg);
-}
-
-.patch-notes-panel {
-  max-width: 560px;
-  gap: 12px;
-}
-
-.pixel-btn.patch-notes-back {
-  min-height: 40px;
-  font-size: var(--fs-md);
 }
 
 .patch-notes-list {
@@ -907,12 +837,6 @@ button:is(.offline-retry, .suspension-submit) {
   gap: 6px;
 }
 
-.settings-option {
-  gap: 12px;
-  min-height: 32px;
-  font-family: var(--font-body);
-}
-
 .settings-option-label {
   font-size: var(--fs-md);
   font-weight: 800;
@@ -925,48 +849,6 @@ button:is(.offline-retry, .suspension-submit) {
   line-height: 1.45;
   color: var(--text-2);
   padding-left: 58px;
-}
-
-.settings-option input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  flex-shrink: 0;
-  width: 46px;
-  height: 28px;
-  margin: 0;
-  background: rgba(6, 9, 24, 0.65);
-  border: 2px solid var(--outline);
-  border-radius: var(--radius-pill);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
-  cursor: pointer;
-  transition: background 150ms ease-out;
-}
-
-.settings-option input[type="checkbox"]::before {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: linear-gradient(180deg, #fff 0%, var(--text-2) 100%);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
-  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.settings-option input[type="checkbox"]:checked {
-  background: var(--grad-success);
-}
-
-.settings-option input[type="checkbox"]:checked::before {
-  transform: translateX(18px);
-}
-
-.settings-option input[type="checkbox"]:focus-visible {
-  outline: 3px solid var(--cyan);
-  outline-offset: 2px;
 }
 
 .notif-prefs-body {
@@ -1007,13 +889,7 @@ button.notif-prefs-bulk-btn {
   border-bottom: 2px solid var(--outline);
 }
 
-.notif-prefs-col-note {
-  font-family: var(--font-body);
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-}
-
-:is(.notif-prefs-master input, .notif-prefs-grid td input) {
+:is(.notif-prefs-grid td input) {
   width: 20px;
   height: 20px;
   accent-color: var(--green);
@@ -1039,20 +915,9 @@ button.notif-prefs-bulk-btn {
   gap: 14px;
 }
 
-.charitems-hero {
-  padding: 14px;
-  gap: 12px;
-  border-radius: var(--radius-xl);
-}
-
 .charitems-portrait {
   background: radial-gradient(circle at 50% 60%, rgba(61, 178, 255, 0.28) 0%, rgba(61, 178, 255, 0.06) 55%, transparent 72%);
   border-radius: var(--radius-lg);
-}
-
-.charitems-portrait img {
-  image-rendering: var(--art-rendering);
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.5));
 }
 
 .charitems-skills-strip {
@@ -1105,13 +970,6 @@ button.notif-prefs-bulk-btn {
   line-height: 1.1;
   color: var(--text-1);
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
-}
-
-.charitems-skill-slot-meta {
-  font-size: var(--fs-2xs);
-  font-weight: 800;
-  color: var(--text-2);
-  letter-spacing: 0.04em;
 }
 
 .charitems-stat-card {
@@ -1655,10 +1513,6 @@ button.notif-prefs-bulk-btn {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
 }
 
-.social-user-sep {
-  color: var(--text-3);
-}
-
 .social-user-row.self {
   padding-left: 10px;
   border-color: var(--gold);
@@ -1682,7 +1536,7 @@ button.notif-prefs-bulk-btn {
   background: var(--text-3);
 }
 
-:is(.social-empty, .social-placeholder) {
+:is(.social-placeholder) {
   font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--text-3);
@@ -1707,12 +1561,6 @@ button.notif-prefs-bulk-btn {
   background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-1) 100%);
   border-color: var(--stroke-hi);
   box-shadow: inset 0 1px 0 var(--stroke-hi), 0 3px 0 var(--bg-0);
-}
-
-.social-party-cell-empty {
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  color: var(--text-3);
 }
 
 .party-drag-ghost {
@@ -1746,22 +1594,6 @@ button.notif-prefs-bulk-btn {
 
 .social-guild-form {
   gap: 8px;
-}
-
-.social-chat-msg {
-  font-size: var(--fs-sm);
-  padding: 4px 8px;
-  border-width: 1px;
-}
-
-.social-chat-input-bar {
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.chat-timestamp {
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
 }
 
 .user-popup-header {
@@ -2402,25 +2234,6 @@ button.map-zoom-btn {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
 }
 
-.three-map-party-inner {
-  background: var(--green);
-  box-shadow: 0 0 0 2px var(--outline), 0 0 10px rgba(62, 224, 122, 0.6);
-}
-
-.three-map-party[data-visual="fighting"] .three-map-party-inner {
-  background: var(--orange);
-  box-shadow: 0 0 0 2px var(--outline), 0 0 10px rgba(255, 154, 61, 0.7);
-}
-
-.three-map-party[data-visual="defeat"] .three-map-party-inner {
-  background: var(--red);
-  box-shadow: 0 0 0 2px var(--outline), 0 0 10px rgba(255, 77, 109, 0.7);
-}
-
-.three-map-path-step {
-  background: rgba(255, 203, 61, 0.55);
-}
-
 .three-map-path-dest {
   background: var(--green);
   box-shadow: 0 0 0 2px var(--outline), 0 0 8px rgba(62, 224, 122, 0.8);
@@ -2434,29 +2247,6 @@ button.map-zoom-btn {
   font-family: var(--font-body);
   background: var(--grad-panel);
   border: 2px solid var(--outline);
-}
-
-.chat-popout-header {
-  padding: 6px 8px 6px 12px;
-  font-size: var(--fs-md);
-  color: var(--gold);
-  background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
-  border-bottom: 2px solid var(--outline);
-  box-shadow: inset 0 1px 0 var(--stroke-hi);
-  text-shadow: 0 2px 0 var(--outline);
-}
-
-.chat-popout-filters {
-  gap: 6px;
-  padding: 6px 8px;
-  background: rgba(6, 9, 24, 0.5);
-  border-bottom: 2px solid var(--outline);
-}
-
-.chat-popout-filters .chat-filter {
-  min-height: 30px;
-  padding: 4px 10px;
-  font-size: var(--fs-xs);
 }
 
 .chat-popout-body {
@@ -2628,15 +2418,15 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
     .login-button, .offline-retry, .suspension-submit, .pixel-btn, .npc-talk-btn,
     .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
     .item-popup-actions button, .charitems-skill-popup-btn, .items-modal-btn, .social-action-btn,
-    .profile-close-btn, .craft-queue-btn, .craft-cancel-btn, .compare-confirm, .compare-cancel,
+    .profile-close-btn, .craft-queue-btn, .craft-cancel-btn,
     .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc, .gift-qty-dec, .gift-qty-inc,
     .notif-prefs-bulk-btn, .notif-mark-all-btn, .notif-clear-all-btn, .map-zoom-btn,
-    .player-options-close, .room-view-close, .chat-popout-header-actions button
+    .player-options-close, .room-view-close
   ):hover:not(:disabled) {
     filter: brightness(1.1) saturate(1.05);
   }
 
-  :is(.shop-toggle-btn, .social-filter-btn, .social-sort-btn, .chat-filter, .chat-filter-btn):not(.active):hover {
+  :is(.shop-toggle-btn, .social-filter-btn, .social-sort-btn, .chat-filter):not(.active):hover {
     color: var(--text-1);
     background: rgba(255, 255, 255, 0.08);
   }
@@ -2717,15 +2507,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
     font-size: var(--fs-2xl);
   }
 
-  .settings-header {
-    margin-top: 0;
-  }
-
-  .settings-icon-img {
-    width: 56px;
-    height: 56px;
-  }
-
   .item-popup-artwork {
     width: 64px;
     height: 64px;
@@ -2738,7 +2519,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
     .player-profile-overlay, .shop-overlay, .npc-talk-overlay, .dungeon-entry-overlay, .room-view-overlay,
     .player-options-modal, .item-popup-overlay > .item-popup, .charitems-skill-popup, .trade-modal,
     .player-profile-modal, .dungeon-entry-modal, .user-popup-menu,
-    .item-rarity-epic, .item-rarity-legendary, .item-rarity-heirloom,
     .three-map-party-inner, .three-map-party[data-visual="fighting"] .three-map-party-inner
   ) {
     animation: none;
@@ -2749,33 +2529,19 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
       0 0 8px color-mix(in srgb, var(--rarity, var(--rarity-epic)) 65%, transparent);
   }
 
-  .social-party-cell.drag-hover-green {
-    animation: none;
-    border-color: var(--green);
-  }
-
-  .social-party-cell.drag-hover-red {
-    animation: none;
-    border-color: var(--red);
-  }
-
   :is(
     .login-button, .offline-retry, .suspension-submit, .pixel-btn, .npc-talk-btn,
     .npc-talk-completion-dismiss, .dungeon-entry-btn, .room-view-action, .item-popup-btn,
     .item-popup-actions button, .item-popup-actions button.danger, .charitems-skill-popup-btn,
     .items-modal-btn, .social-action-btn, .profile-close-btn, .craft-queue-btn, .craft-cancel-btn,
-    .compare-confirm, .compare-cancel, .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
+    .chat-popout-send, .shop-qty-btn, .trade-qty-dec, .trade-qty-inc,
     .gift-qty-dec, .gift-qty-inc, .notif-prefs-bulk-btn, .notif-mark-all-btn, .notif-clear-all-btn,
-    .map-zoom-btn, .player-options-close, .room-view-close, .chat-popout-header-actions button,
-    .shop-toggle-btn, .social-filter-btn, .social-sort-btn, .chat-filter, .chat-filter-btn,
+    .map-zoom-btn, .player-options-close, .room-view-close,
+    .shop-toggle-btn, .social-filter-btn, .social-sort-btn, .chat-filter,
     .class-card, .charitems-skill-slot, .charitems-skill-row, .user-popup-item,
-    .settings-option input[type="checkbox"], .charitems-xp-fill, .craft-skill-xpfill,
+    .charitems-xp-fill, .craft-skill-xpfill,
     .room-view-arrival
   ) {
-    transition: none;
-  }
-
-  .settings-option input[type="checkbox"]::before {
     transition: none;
   }
 }
@@ -2936,29 +2702,9 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   text-align: center;
 }
 
-.items-slot-tooltip {
-  position: fixed;
-  z-index: 1000;
-  padding: 4px 10px;
-  border: 1px solid var(--stroke-hi);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
-  box-shadow: var(--shadow-1);
-  color: var(--text-1);
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
 .shop-hire-list {
   max-height: 45vh;
   overflow-y: auto;
-}
-
-.shop-footer {
-  margin-top: 12px;
-  text-align: center;
 }
 
 .shop-empty {
@@ -3100,17 +2846,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 
 /* ── Screens polish: Char ── */
 
-.charitems-portrait {
-  height: 292px;
-  min-width: 0;
-}
-
-.charitems-portrait img {
-  height: 100%;
-  max-width: 100%;
-  object-fit: contain;
-}
-
 .charitems-stat {
   justify-content: center;
   min-width: 0;
@@ -3191,10 +2926,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 }
 
 @media (min-width: 768px) {
-  .charitems-portrait {
-    height: 340px;
-  }
-
   .charitems-inv-group-items > .item-square {
     width: 56px;
     height: 56px;
@@ -3259,11 +2990,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   border-radius: var(--radius-pill);
 }
 
-.social-party-cell-empty {
-  width: 100%;
-  text-align: center;
-}
-
 .social-toolbar-btns {
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -3289,11 +3015,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 
 .social-toolbar-btns .social-sort-btn {
   margin-left: auto;
-}
-
-.social-user-sep {
-  margin: 0 -2px;
-  opacity: 0.6;
 }
 
 .profile-portrait {
@@ -3347,12 +3068,6 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 
 /* ── Screens polish: Settings ── */
 
-.settings-icon-img {
-  width: 72px;
-  height: 72px;
-  object-fit: contain;
-}
-
 .notif-prefs-grid {
   table-layout: fixed;
 }
@@ -3374,39 +3089,7 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   padding-left: 4px;
 }
 
-.notif-prefs-col-note {
-  max-width: 56px;
-}
-
 @media (max-height: 480px) and (orientation: landscape) {
-  .charitems-hero {
-    flex-direction: row;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .charitems-hero-grid {
-    flex: 0 0 auto;
-  }
-
-  .items-equip-panel {
-    grid-template-columns: auto;
-    gap: 6px;
-  }
-
-  .items-equip-panel .charitems-portrait {
-    display: none;
-  }
-
-  .items-equip-panel .items-equip-col {
-    flex-direction: row;
-  }
-
-  .items-equip-panel .items-equip-col > .items-equip-slot-square:nth-child(6) {
-    margin-top: 0;
-    margin-left: 8px;
-  }
-
   .charitems-skills-strip {
     flex: 1 1 auto;
     min-width: 0;

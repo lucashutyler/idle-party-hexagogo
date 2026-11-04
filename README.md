@@ -25,7 +25,7 @@ npm run build        # build shared types first (required before first dev run)
 npm run dev
 ```
 
-In dev mode, email verification is instant — enter any email, click Verify, choose a username, and you're in.
+In dev mode, email verification is instant — enter any email, choose "Email me a sign-in link", pick a username, and you're in.
 
 ## Production Setup
 
@@ -157,22 +157,25 @@ Admin content changes (monsters, items, zones, world map tiles) go through a **d
 
 Publishing a draft creates an **immutable snapshot** of all content at that point in time. Published versions cannot be edited; to make further changes the admin creates a new draft. This gives a clear history of every content release and makes rollbacks straightforward.
 
-**Deploying** a published version swaps it into the live game. The server hot-reloads the new content so players see updated zones, monsters, and map tiles without a restart. If a deployed version removes tiles that players are currently standing on, those players are automatically relocated to the nearest valid tile.
+**Deploying** a published version swaps it into the live game. The server hot-reloads the new content so players see updated zones, monsters, and rooms without a restart. If a deployed version removes rooms that players are currently standing in, those players are automatically relocated to the nearest valid room.
 
 ## Roadmap
 
 ### World Map
 - [x] Hex grid with cube coordinates
 - [x] A* pathfinding
-- [x] Tile unlocking on victory (fog of war)
+- [x] Room unlocking on victory (fog of war)
 - [x] Camera zoom/pan
 - [x] Data-driven content (ContentStore: monsters, items, zones, world in JSON files)
-- [x] Server-driven map state (per-player fog of war, room names, tile discovery)
+- [x] Server-driven map state (per-player fog of war, room names, room discovery)
 - [x] Multiple regions/zones with border transitions
 - [x] Multi-map / interior maps (rooms link to a room on another map via a transition; one HexGrid per map; admin authoring) — overworld map-select still to come (#168)
 - [x] Room entry requirements (gate a room or a map transition on an equipped item, a minimum level, and/or completed quests — every party member must qualify)
 - [x] Room actions on explored rooms (map markers for NPCs, shops, dungeon entrances and travel points; hover tooltip lists them plus a player count; NPCs marked with a green `!` for a new quest or a gold `?` for one ready to hand in)
-- [x] Room status panel for the current room (desktop card / mobile chips that talk, shop, enter or travel directly)
+- [x] Room status panel for the current room (desktop card / mobile chips that talk, shop, enter or travel directly; a travel chip confirms first on phones)
+- [x] Room sheet (tap a room for its name, actions, forecast and Go; tap it again to go)
+- [x] Terrain, fog and art layers (procedural terrain from room-type colours, separate fog, room art loaded near the view)
+- [x] Follow camera, route line and route chip with Stop, zone labels, zoom-based detail levels
 - [x] Stop here — tap your own room mid-route to stop (or walk back if you've already left it)
 
 ### Combat
@@ -202,7 +205,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Individual character creation (one per player, class selection on first login)
 - [x] Character stats (HP + base damage scale linearly per class — no STR/INT/etc., no stat allocation on level-up)
 - [x] XP and leveling system (`floor(18000 * L^1.2 * 1.06^L)` XP to next level)
-- [x] Inventory tab (merged Char + Items — hero card, equipped gear, skill loadout, stat card, inventory grid)
+- [x] Hero tab (Gear: equipped gear, inventory, mailbox and trades; Skills: skill loadout; Stats: stats, XP numbers, bestiary)
 - [x] Class system (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong together)
 - [x] Damage types (physical/magical/holy; Knight Guard rates against physical, Priest Bless against magical and holy)
 - [x] Henchmen (hireable NPCs for solo players; they wait at a dungeon's entrance while the party runs it)
@@ -213,17 +216,17 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Party combat rewards (XP, gold, loot per member on victory)
 
 ### Social
-- [x] Social tab with fly-out submenu (Party / Guild / Leaderboard); Chat is a global pop-out from a dedicated Chat nav button
-- [x] Online player list with search, sort, filter
+- [x] Social tab with segments (Party / Guild / Friends / Ranks); chat is docked in the shell, not part of Social
+- [x] Ranks: all players with rank numbers, search, sort, filter
 - [x] Friends system (request-based two-way: send/accept/decline/revoke, auto-accept cross-requests)
 - [x] Guild system (create at level 20+, join, leave, invite)
-- [x] Chat system (unified timeline, 7 channels: Room/Zone/Party/Guild/Global/DM/Server, per-user persistent history, timestamps, clickable senders + channel tags, mobile-docked or desktop floating)
-- [x] User blocking (DM-only or all messages)
+- [x] Chat system (unified timeline, 7 channels: Room/Zone/Party/Guild/Global/DM/Server, per-user persistent history, timestamps, clickable senders + channel tags, All/Party/Guild/DMs tabs, channel filters, DM threads)
+- [x] User blocking (hidden on the client)
 - [x] Unread message indicators
-- [x] Social badge notifications (bottom nav dot + sub-tab badges for friend requests, party invites, unread chat)
-- [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Gift, Block)
+- [x] Social badge notifications (nav dot + segment counts for friend requests and party invites; unread count on the chat strip and rail)
+- [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Gift, Block; a bottom sheet on phones)
 - [x] Class icons next to usernames everywhere
-- [x] XP rate calculator (trip counter on Character tab)
+- [x] XP rate calculator (trip counter on Hero › Stats)
 
 ### Notifications
 - [x] Pluggable notification framework (category registry, per-user channel preferences, capped persisted inbox, save/restore)
@@ -258,7 +261,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Quest types (kill, collect, visit)
 - [x] Quest rewards (XP, gold, item)
 - [x] Quest scope (solo party only OR party-shared), prerequisites, weekly-repeatable
-- [x] Quest log (Settings → Quest Log: who has new quests for you, active quests with ready-to-turn-in first and where to turn them in; completed quests behind a toggle)
+- [x] Quest log (utility strip or rail: who has new quests for you, active quests with ready-to-turn-in first and where to turn them in, rows that take you to the room, progress bars; completed quests behind a toggle)
 - [x] Quest discovery (green `!` on NPCs with a quest you can take, quest destinations outlined on the map, objectives name rooms instead of coordinates)
 - [x] Quest popup feedback (Accept / Turn In show progress and the reason for any refusal)
 - [ ] Quest chains / storylines
@@ -288,29 +291,35 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Real-time client sync
 
 ### UI
-- [x] Login screen with email input + username choice screen
-- [x] Map tab with hex rendering (three.js WebGL canvas + HTML overlay, lazy-created on first Map visit)
-- [x] Other players visible on map (per-tile flags within same zone, readable +N/×N counts that scale with zoom, see-through party marker)
-- [x] Browser tab resume (instant state request, party snaps, camera pans smoothly)
-- [x] Floating bottom navigation: Map, Char (merged Char+Items), Craft, raised centre Battle button, Social (submenu), Settings, Chat (overlay); emoji icon fallbacks
-- [x] Top HUD (class avatar + level, name, gold, notification bell)
+- [x] Login screen with email input (sign-in link with resend) + username choice screen; class pick with a reply timeout
+- [x] Map tab with hex rendering (three.js WebGL canvas + HTML overlay, loaded on first Map visit)
+- [x] Other players visible on map (per-room flags within same zone, readable +N/×N counts that scale with zoom, party token)
+- [x] Browser tab resume (instant state request, party snaps, camera re-centres while following)
+- [x] Tab bar on phones: Map, Hero, a Battle disc inside the bar, Craft, Social; emoji icon fallbacks
+- [x] Desktop rail with the same tabs plus Quests, Chat and Settings, and an icon rail on short landscape screens
+- [x] Top HUD (class avatar + level for Settings, room and route status for Map, gold for Hero, notification bell)
+- [x] Utility strip on phones (chat preview + Quests button)
+- [x] Back steps through overlays, then chat, then Battle, before leaving the app; Escape closes the top overlay
 - [x] Mobile-first responsive design
 - [x] Modern mobile-game visual style (Lilita One + Nunito, glossy panels, chunky buttons, design tokens)
-- [x] Real-time combat screen (action rings, cast bars with telegraphs, status pips, floating numbers, reaction cards, skill bar with cooldown sweeps, live log ticker; adapts to portrait/landscape; honours reduced motion)
+- [x] Real-time combat screen (action rings, cast bars with telegraphs, status pips, floating numbers, reaction cards, skill bar with cooldown sweeps, live log ticker, between-fights status chip, art that fills small boards; adapts to portrait/landscape; honours reduced motion)
 - [x] Image-everywhere convention (`<mount>/{id}.png` with placeholder fallback) across all 17 asset kinds — items, monsters, classes, rooms, room types, sets, shops, zones, NPCs, henchmen, map parchment, combat/room backdrops, the splash logo, and the class/slot/nav icon sets — all declared once in a shared registry
-- [x] Nav bar battle status indicators (glow while fighting, flash on victory/defeat)
+- [x] Nav battle status indicators (ring while fighting, flash on victory/defeat)
 - [x] Server unavailable / offline screen with retry
 - [x] Desktop font scaling (token font scale, larger on desktop via media query)
-- [x] Mobile zoom controls (+/- buttons on map) + 2-finger pinch zoom
-- [x] RoomView (replaces TileInfoModal) — three states: current room (full-screen with background art, one button per room action, Stop here while travelling), remote discovered (small popup listing the room's actions, Go button), undiscovered (minimal)
+- [x] Map controls (recentre and +/- buttons, 2-finger pinch zoom, keyboard pan and zoom)
+- [x] RoomView — current room (background art, one button per room action, Stop here while travelling), or another explored room behind the room sheet's Details (the room's actions, Go button)
 - [x] Dungeon entry popup + in-combat dungeon header (floor / BOSS badge + Leave); entry popup shows the run forecast, per-floor strip and resume point
 - [x] Boss fight UI (pooled boss HP bar with checkpoint flags, retry pips, enrage timer; banner queue with a screen-reader live region; level badges and tier frames on cards)
 - [x] Forecast chips (rooms, dungeons, live elite/boss fights) with verdict, likely range and reasons
-- [x] Global chat pop-out (floating/draggable/resizable on desktop, docked bottom-sheet on mobile)
-- [x] Persistent XP bar above the bottom nav, visible on every screen
-- [x] ModalStack click-order z-index across all overlays
+- [x] Docked chat (strip preview and in-flow sheet with a full layout on phones, collapsible column on desktop)
+- [x] Persistent XP hairline under the HUD, visible on every screen
+- [x] ModalStack click-order z-index, Back and Escape order and keyboard focus across all overlays; every modal docks at the bottom on phones
+- [x] Performance budgets (lazy map and patch notes, idle screens run no frame loop, hidden screens keep their layout)
 - [x] Stable rendering — state pushes never swallow a click mid-press (`deferWhilePressed` / `setHtml`), and item art remembers what loaded so it never flickers
-- [x] Shop usability (can't-use badge on gear your class can't equip, can't-afford prices, the inventory's equip comparison in the shop)
+- [x] Shop usability (item names under squares, can't-use badge on gear your class can't equip, can't-afford prices, the inventory's equip comparison in the shop, sales confirmed by the server)
+- [x] Hero and Craft usability (equip from an empty slot, item names under squares, Craftable filter, visible blocked reasons)
+- [x] Confirm dialogs for lasting social actions (kick, transfer, leave, block, cancel trade)
 
 ### World Manager
 - [x] Separate admin client (World Manager dashboard at /admin)

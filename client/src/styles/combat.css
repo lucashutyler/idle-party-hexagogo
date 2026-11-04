@@ -95,7 +95,8 @@
   transition: transform 120ms ease-out;
 }
 .combat-run-btn::after,
-.combat-dungeon-leave::after {
+.combat-dungeon-leave::after,
+.combat-forecast::after {
   content: '';
   position: absolute;
   inset: -8px -4px -14px;
@@ -146,8 +147,9 @@
   display: none;
 }
 
-/* Live win chance (elite/boss/raid fights): ring + number, at most 56px; ring only on narrow headers. */
+/* Live win chance (elite/boss/raid fights): ring + number, at most 60px; ring only on narrow headers. */
 .combat-forecast {
+  position: relative;
   flex: none;
   max-width: 60px;
   height: 30px;
@@ -155,7 +157,6 @@
   padding: 0 5px 0 3px;
   display: inline-flex;
   align-items: center;
-  overflow: hidden;
   border: 1.5px solid var(--outline);
   border-radius: var(--radius-pill);
   background: rgba(6, 9, 24, 0.72);
@@ -309,7 +310,8 @@
 .combat-stage.victory .combat-stage-scrim {
   opacity: 0.4;
 }
-.combat-stage.retreat .combat-stage-scrim {
+.combat-stage.retreat .combat-stage-scrim,
+.combat-stage.defeat .combat-stage-scrim {
   opacity: 0.7;
 }
 .combat-stage.no-combat .combat-card {

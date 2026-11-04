@@ -6,7 +6,9 @@ Auth is handled over REST (`/auth/*`), not WebSocket. Sessions use `express-sess
 
 **Dev flow**: Enter email → token returned directly → auto-verified → session created on same browser → game.
 
-**Prod flow (approve/poll)**: Enter email → magic link emailed → requesting browser polls `GET /auth/login-status?loginId=...` every 2s. User clicks magic link on any device → `POST /auth/approve` marks login approved (no session on approving device, shows "Sign in approved!"). Requesting browser's next poll detects approval → session created on that response → game. `ApproveScreen` handles the magic link landing; `LoginScreen` manages the polling/waiting UI.
+**Prod flow (approve/poll)**: Enter email → magic link emailed → requesting browser polls `GET /auth/login-status?loginId=...` every 2s. User clicks magic link on any device → `POST /auth/approve` marks login approved (no session on approving device, shows "Sign in approved!"). Requesting browser's next poll detects approval → session created on that response → game. `ApproveScreen` handles the magic link landing; `App` polls and `LoginScreen` shows the waiting state.
+
+**Login screen.** `LoginScreen` is a real form with a labelled email field and an "Email me a sign-in link" button; errors are `role=alert`. After sending it shows "Check your email" with the address, a resend button and "Use a different email". Resend posts `/auth/login` again for the same address, which replaces the poll with one for the new `loginId`; "Use a different email" stops polling and returns to the form. An expired link returns to the form with a message.
 
 ## WebSocket auth via session cookie
 

@@ -91,6 +91,17 @@ describe('ChatPopout over a navigation', () => {
     t.chat.open();
     expect(t.chat.isLandscapeColumn()).toBe(true);
   });
+
+  it('treats the column as a phone panel on a phone wide enough for the rail', () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('max-height: 500px') || query.includes('min-width: 860px'),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }) as unknown as MediaQueryList);
+    const t = setup();
+    t.chat.open();
+    expect(t.chat.isLandscapeColumn()).toBe(true);
+  });
 });
 
 function setup(initialState: ServerStateMessage | null = stateWith()) {

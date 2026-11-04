@@ -28,7 +28,7 @@ Each player has a `CharacterState` (className, level, xp, gold, inventory, equip
 
 ## XP rate calculator
 
-Client-side trip counter on the Character tab. Tracks cumulative XP earned since last reset, divides by elapsed time to show XP/hr. Formatted with suffixes (k/m/b/t, `?` for >= 1 quadrillion). Reset button clears the counter. Handles level-ups by computing total cumulative XP across all levels.
+Client-side trip counter on Hero › Stats. Tracks cumulative XP earned since last reset, divides by elapsed time to show XP/hr. Formatted with suffixes (k/m/b/t, `?` for >= 1 quadrillion). Reset button clears the counter. Handles level-ups by computing total cumulative XP across all levels.
 
 ## Combat engine (real-time timeline)
 

@@ -413,17 +413,15 @@
 .social-party-cell.grid-move-anim {
   animation-duration: 200ms;
 }
-.social-party-cell.grid-flash-red {
+.social-party-grid .social-party-cell.grid-flash-red {
   border-color: var(--red);
   animation: social-cell-shake 200ms ease-out;
 }
-.social-party-cell.drag-hover-green {
+.social-party-grid .social-party-cell.drag-hover-green {
   border: 2px solid var(--green);
-  animation: none;
 }
-.social-party-cell.drag-hover-red {
+.social-party-grid .social-party-cell.drag-hover-red {
   border: 2px solid var(--red);
-  animation: none;
 }
 @keyframes social-cell-shake {
   25% { transform: translateX(-3px); }
@@ -830,7 +828,7 @@ button.social-modal-close,
     animation: none;
   }
   .social-party-cell.grid-move-anim,
-  .social-party-cell.grid-flash-red {
+  .social-party-grid .social-party-cell.grid-flash-red {
     animation-duration: 1ms;
   }
 }

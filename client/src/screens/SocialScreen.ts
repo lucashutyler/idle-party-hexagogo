@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ClientSocialState, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, CLASS_GLYPHS, classIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, MIN_GUILD_LEVEL, CLASS_GLYPHS, classIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
 import { RARITY_COLORS, RARITY_ORDER, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
@@ -27,8 +27,6 @@ const LEGACY_SUB_TABS: Record<string, SubTab> = { users: 'friends', friend_reque
 
 const SHEET_QUERY = '(max-width: 767px), (max-height: 520px)';
 const SEARCH_DEBOUNCE_MS = 120;
-/** Mirrors the server's guild creation floor. */
-const GUILD_MIN_LEVEL = 20;
 const FRIEND_SEARCH_LIMIT = 30;
 const GRID_MOVE_MS = 200;
 const GRID_RESYNC_MS = 1500;
@@ -540,7 +538,7 @@ export class SocialScreen implements Screen {
       guildId: social.guild?.id ?? null,
       leader: social.guild?.leaderUsername ?? null,
       members: (social.guildMembers ?? []).map(m => `${m.username}:${m.role}:${onlineSet.has(m.username) ? 1 : 0}:${this.playerEntry(m.username)?.level ?? ''}`),
-      canCreate: this.selfLevel() >= GUILD_MIN_LEVEL,
+      canCreate: this.selfLevel() >= MIN_GUILD_LEVEL,
     });
   }
 
@@ -1215,9 +1213,9 @@ export class SocialScreen implements Screen {
 
   private guildCreateHtml(): string {
     const level = this.selfLevel();
-    const note = level >= GUILD_MIN_LEVEL
+    const note = level >= MIN_GUILD_LEVEL
       ? 'Pick a name to start your guild.'
-      : `Starting a guild needs level ${GUILD_MIN_LEVEL}. You are level ${level}.`;
+      : `Starting a guild needs level ${MIN_GUILD_LEVEL}. You are level ${level}.`;
     return `
       <div class="social-guild-create">
         <div class="social-guild-create-title">You are not in a guild</div>
@@ -1233,7 +1231,7 @@ export class SocialScreen implements Screen {
 
   private syncGuildCreateButton(): void {
     const btn = this.panelContainer.querySelector<HTMLButtonElement>('.social-guild-create-btn');
-    const eligible = this.selfLevel() >= GUILD_MIN_LEVEL;
+    const eligible = this.selfLevel() >= MIN_GUILD_LEVEL;
     const named = !!this.guildNameDraft.trim();
     if (btn) btn.disabled = !eligible || !named;
     const reason = this.panelContainer.querySelector<HTMLElement>('.social-guild-reason');

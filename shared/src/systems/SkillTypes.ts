@@ -706,7 +706,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'mage_ignite',
       name: 'Ignite',
-      description: 'Normal attacks add a permanent burn stack equal to 25% of pre-resistance damage. Stacks indefinitely for the rest of combat.',
+      description: 'Normal attacks add a permanent burn stack equal to 25% of pre-resistance damage. Stacks up to 8 times for the rest of combat.',
       className: 'Mage',
       type: 'passive',
       treeOrder: 4,

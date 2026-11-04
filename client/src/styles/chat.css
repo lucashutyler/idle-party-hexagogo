@@ -258,7 +258,7 @@ body[data-chat-layout="column"] .chat-filter-pop {
 }
 .chat-filter-pop .chat-filter,
 .chat-filter-pop .chat-filter.active {
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 10px;
   display: flex;
   align-items: center;
@@ -455,7 +455,7 @@ body[data-chat-layout="column"] .chat-filter-pop {
 .chat-thread-name::before {
   content: '';
   position: absolute;
-  inset: 0 0 -6px;
+  inset: 0 0 -13px;
 }
 .chat-thread-name {
   min-width: 0;
@@ -613,10 +613,6 @@ body[data-chat-layout="column"] .chat-filter-pop {
   color: var(--ch-color, var(--text-1));
   background-position: calc(100% - 11px) 50%, calc(100% - 6px) 50%;
   border-radius: var(--radius-pill);
-}
-.chat-popout-composer .chat-popout-channel option {
-  color: #fff;
-  background: var(--bg-1);
 }
 .chat-popout-composer .chat-popout-channel:disabled {
   width: 70px;
