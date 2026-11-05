@@ -26,7 +26,10 @@ export function setReducedMotionOverride(value: boolean | null): void {
 export function fx(el: Element, keyframes: Keyframe[] | PropertyIndexedKeyframes, opts: number | KeyframeAnimationOptions): Animation | null {
   if (typeof (el as HTMLElement).animate !== 'function') return null;
   try {
-    return (el as HTMLElement).animate(keyframes, opts);
+    const animation = (el as HTMLElement).animate(keyframes, opts);
+    // cancel() rejects `finished`; browsers mark that handled, happy-dom doesn't.
+    animation.finished.catch(() => {});
+    return animation;
   } catch {
     return null;
   }

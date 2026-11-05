@@ -90,6 +90,7 @@ export class MapScreen implements Screen {
     // While the entry popup is open it shows the refusal itself.
     this.gameClient.onServerError((message, code) => {
       if (code === 'dungeon_entry_refused' && !this.dungeonEntryPopup?.isOpen) this.showMoveToast(message);
+      if (code === 'travel_refused') this.showMoveToast(message);
     });
     if (typeof ResizeObserver !== 'undefined') {
       new ResizeObserver(() => this.onScreenResize()).observe(this.container);

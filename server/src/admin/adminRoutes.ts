@@ -13,6 +13,7 @@ import type { ApiTokenStore, ApiTokenRecord } from '../auth/ApiTokenStore.js';
 import { isApiTokenExpired } from '../auth/ApiTokenStore.js';
 import { grantedAdminRole, isAdminRole, isEnvSuperAdmin } from '../auth/AdminRoles.js';
 import { DraftEditor, toRecord } from '../game/DraftEditor.js';
+import { findContentProblems, formatPublishRefusal } from '../game/ContentValidation.js';
 import { AssetValidationError, MAX_ASSET_BYTES } from '../game/AssetStore.js';
 import type { AssetStore } from '../game/AssetStore.js';
 import { registerAssetRoutes, assetUploadErrorHandler } from './assetRoutes.js';
@@ -1511,6 +1512,13 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
   /** Publish a draft version (freeze it). */
   router.post('/versions/:id/publish', async (req, res) => {
     const versions = getVersionStore();
+    if (versions.get(req.params.id)?.status === 'draft') {
+      const problems = findContentProblems(await versions.loadSnapshot(req.params.id));
+      if (problems.length > 0) {
+        res.status(400).json({ error: formatPublishRefusal(problems), problems });
+        return;
+      }
+    }
     const result = await versions.publish(req.params.id);
     if (!result.success) {
       res.status(400).json({ error: result.error });

@@ -27,7 +27,7 @@ Built as a separate Vite entry point (`admin.html`) isolated from the game clien
 
 **Modular layout**: shell + per-tab modules under `client/src/admin/tabs/`, all sharing state via the `AdminContext` interface. The shell renders:
 
-- A sticky **status bar** (always visible at the top with a version selector + Publish/Deploy/+New Draft buttons; creating a new draft auto-selects it so the UI immediately becomes editable).
+- A sticky **status bar** (always visible at the top with a version selector + Publish/Deploy/+New Draft buttons; creating a new draft auto-selects it so the UI immediately becomes editable). Publish is refused, with the problem list in an alert, while the draft has content problems (see `content.md` → Content versioning).
 - A left **sidebar** (collapsible to a hamburger menu under 900px wide; each item also shows a **UI Size selector** S/M/L/XL — value persisted to `localStorage['adminUiSize']` and applied as the `data-admin-size` attribute on `<html>` so the density tokens cascade). Tabs marked `footer: true` in `TABS` (`client/src/admin/types.ts`) render *below* the sidebar spacer in the utility cluster alongside UI Size and Refresh, rather than in the main content list — currently just **API Tokens**. They are ordinary tabs otherwise: `visibleTabs()` still governs reachability by URL and session restore.
 - The active tab's content.
 

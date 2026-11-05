@@ -10,7 +10,7 @@ import type {
   UiSize,
 } from './types';
 import { TABS } from './types';
-import { fetchAdmin } from './api';
+import { fetchAdmin, postAdmin } from './api';
 import { applyUiSize, getUiSize, setUiSize } from './components/UiSize';
 import { closeAllModals } from './components/Modal';
 
@@ -352,15 +352,12 @@ export class AdminApp implements AdminContext {
       if (!this.selectedVersionId) return;
       if (!confirm('Publish this draft? It will become immutable.')) return;
       try {
-        await fetch(`/api/admin/versions/${this.selectedVersionId}/publish`, {
-          method: 'POST',
-          credentials: 'include',
-        });
+        await postAdmin(`/api/admin/versions/${this.selectedVersionId}/publish`, {});
         await this.refreshVersions();
         this.refreshStatusBar();
         this.rerenderTab();
-      } catch {
-        alert('Failed to publish');
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to publish');
       }
     });
 

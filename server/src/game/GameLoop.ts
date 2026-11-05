@@ -13,7 +13,7 @@ import { ContentStore } from './ContentStore.js';
 import { VersionStore } from './VersionStore.js';
 import { ForecastService } from './ForecastService.js';
 import type { AccountStore } from '../auth/AccountStore.js';
-import type { WorldTileDefinition } from '@idle-party-rpg/shared';
+import type { QuestDefinition, WorldTileDefinition } from '@idle-party-rpg/shared';
 import { seedDevContent, seedDevPlayers } from './DevSeed.js';
 
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
@@ -23,12 +23,14 @@ const FORECAST_LOG_EVERY_MS = 60_000;
 
 /**
  * Carry live room GUIDs onto a snapshot about to be deployed, keyed on
- * (mapId, col, row) — a position-only key hands one GUID to two rooms.
+ * (mapId, col, row) — a position-only key hands one GUID to two rooms —
+ * and repoint the snapshot's transitions and visit objectives at the new ids.
  * See docs/architecture/content.md.
  */
 export function preserveTileGuids(
   liveTiles: readonly WorldTileDefinition[],
   snapshotTiles: WorldTileDefinition[],
+  quests: QuestDefinition[] = [],
 ): void {
   const key = (t: WorldTileDefinition) => `${t.mapId}:${t.col},${t.row}`;
 
@@ -38,7 +40,10 @@ export function preserveTileGuids(
   }
 
   const assignedIds = new Set<string>();
+  const keptIds = new Set<string>();
+  const renamed = new Map<string, string>();
   for (const tile of snapshotTiles) {
+    const before = tile.id;
     const liveGuid = liveGuidByPos.get(key(tile));
     if (liveGuid && !assignedIds.has(liveGuid)) {
       tile.id = liveGuid;
@@ -46,6 +51,22 @@ export function preserveTileGuids(
       tile.id = crypto.randomUUID();
     }
     assignedIds.add(tile.id);
+    if (before === tile.id) keptIds.add(before);
+    else if (before && !renamed.has(before)) renamed.set(before, tile.id);
+  }
+
+  // A duplicate id that one room kept unchanged still names that room.
+  for (const id of keptIds) renamed.delete(id);
+  if (renamed.size === 0) return;
+
+  const remap = (id: string) => renamed.get(id) ?? id;
+  for (const tile of snapshotTiles) {
+    for (const link of tile.transitions ?? []) link.tileId = remap(link.tileId);
+  }
+  for (const quest of quests) {
+    for (const objective of quest.objectives) {
+      if (objective.kind === 'visit') objective.tileId = remap(objective.tileId);
+    }
   }
 }
 
@@ -254,7 +275,7 @@ export class GameLoop {
     //    This keeps player unlock data valid after deploying an old snapshot.
     const snapshot = await this.versionStore.loadSnapshot(versionId);
     const liveWorld = this.contentStore.getWorld();
-    preserveTileGuids(liveWorld.tiles, snapshot.world.tiles);
+    preserveTileGuids(liveWorld.tiles, snapshot.world.tiles, snapshot.quests ?? []);
     await this.contentStore.replaceAll(snapshot);
 
     // 2. Rebuild grid, refresh party tiles, relocate displaced parties
