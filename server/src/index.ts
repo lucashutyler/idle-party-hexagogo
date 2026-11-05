@@ -20,6 +20,7 @@ import { clientAcceptsPartialState } from './game/StatePush.js';
 import { GameLoop } from './game/GameLoop.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
+import { isStoreFileName } from './auth/reservedUsernames.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { InviteListStore } from './auth/InviteListStore.js';
 import { ApiTokenStore } from './auth/ApiTokenStore.js';
@@ -273,7 +274,7 @@ server.on('upgrade', async (req, socket, head) => {
 
   const username = await getSessionUsername(req).catch(() => null);
 
-  if (!username || username === 'undefined') {
+  if (!username || username === 'undefined' || isStoreFileName(username)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
