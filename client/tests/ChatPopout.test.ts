@@ -606,6 +606,8 @@ describe('ChatPopout tabs and DMs', () => {
 });
 
 describe('ChatPopout sending', () => {
+  const unsent = () => document.querySelector('.chat-unsent') as HTMLElement;
+
   function choose(t: ReturnType<typeof setup>, channel: string): void {
     t.select().value = channel;
     t.select().dispatchEvent(new Event('change'));
@@ -709,26 +711,97 @@ describe('ChatPopout sending', () => {
     t.serverError('You aren\'t in that zone', 'chat_refused');
 
     expect(t.input().value).toBe('first');
-    expect(t.status().textContent).toContain('Not sent: second');
-    expect(t.status().hidden).toBe(false);
+    expect(unsent().hidden).toBe(false);
+    expect(unsent().textContent).toContain('second');
+    expect(unsent().textContent).not.toContain('first');
   });
 
-  it('leaves what was typed since alone and holds the refused text until the next send', () => {
+  it('keeps every refused text when several are refused in a row', () => {
+    const t = setup();
+    t.chat.open();
+    for (const text of ['first', 'second', 'third']) {
+      t.input().value = text;
+      t.clickSend();
+    }
+
+    for (let i = 0; i < 3; i++) t.serverError('You aren\'t in that zone', 'chat_refused');
+
+    expect(t.input().value).toBe('first');
+    expect(unsent().textContent).toContain('second');
+    expect(unsent().textContent).toContain('third');
+  });
+
+  it('leaves what was typed since alone and keeps the refused text until dismissed', () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      t.chat.open();
+      t.input().value = 'refused';
+      t.clickSend();
+      t.input().value = 'typed since';
+
+      t.serverError('You aren\'t in that zone', 'chat_refused');
+      expect(t.input().value).toBe('typed since');
+      expect(t.status().textContent).toBe('You aren\'t in that zone');
+      expect(unsent().textContent).toContain('refused');
+
+      t.input().dispatchEvent(new Event('input'));
+      t.clickSend();
+      vi.advanceTimersByTime(60_000);
+      expect(unsent().hidden).toBe(false);
+      expect(unsent().textContent).toContain('refused');
+
+      (unsent().querySelector('.chat-unsent-dismiss') as HTMLElement).click();
+      expect(unsent().hidden).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a refused text through a failed send and a status message', () => {
     const t = setup();
     t.chat.open();
     t.input().value = 'refused';
     t.clickSend();
     t.input().value = 'typed since';
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+
+    t.gameClient.sendChat.mockReturnValueOnce(false);
+    t.clickSend();
+
+    expect(t.status().textContent).toContain('Not connected');
+    expect(unsent().textContent).toContain('refused');
+  });
+
+  it('keeps a held text when a later send comes back into the composer', () => {
+    const t = setup();
+    t.chat.open();
+    choose(t, 'dm');
+    t.dmTarget().value = 'Nobody';
+    t.input().value = 'a private note';
+    t.clickSend();
+    choose(t, 'global');
+    t.input().value = 'hello all';
+    t.clickSend();
+
+    t.serverError('User not found', 'chat_refused');
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+
+    expect(t.input().value).toBe('hello all');
+    expect(unsent().textContent).toContain('a private note');
+  });
+
+  it('shows a refused text as text, not markup', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = '<img src=x onerror=alert(1)>';
+    t.clickSend();
+    t.input().value = 'typed since';
 
     t.serverError('You aren\'t in that zone', 'chat_refused');
-    expect(t.input().value).toBe('typed since');
-    expect(t.status().textContent).toContain('Not sent: refused');
 
-    t.input().dispatchEvent(new Event('input'));
-    expect(t.status().hidden).toBe(false);
-
-    t.clickSend();
-    expect(t.status().hidden).toBe(true);
+    expect(unsent().querySelector('img')).toBeNull();
+    expect(unsent().textContent).toContain('<img src=x');
   });
 
   it('never carries a refused DM into a composer for another audience', () => {
@@ -742,7 +815,7 @@ describe('ChatPopout sending', () => {
 
     t.serverError('User not found', 'chat_refused');
     expect(t.input().value).toBe('');
-    expect(t.status().textContent).toContain('Not sent: a private note');
+    expect(unsent().textContent).toContain('a private note');
 
     t.input().value = 'selling swords';
     t.clickSend();
@@ -761,7 +834,7 @@ describe('ChatPopout sending', () => {
     t.serverError('User not found', 'chat_refused');
 
     expect(t.input().value).toBe('');
-    expect(t.status().textContent).toContain('Not sent: a private note');
+    expect(unsent().textContent).toContain('a private note');
   });
 
   it('never makes the composer longer than a message can be', () => {

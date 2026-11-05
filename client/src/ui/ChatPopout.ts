@@ -96,6 +96,8 @@ export class ChatPopout {
   private timelineEl!: HTMLElement;
   private newPill!: HTMLElement;
   private statusEl!: HTMLElement;
+  private unsentEl!: HTMLElement;
+  private unsentTextEl!: HTMLElement;
   private composerEl!: HTMLElement;
   private channelSelect!: HTMLSelectElement;
   private dmInput!: HTMLInputElement;
@@ -136,7 +138,7 @@ export class ChatPopout {
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
   /** Sends awaiting an echo or a refusal, oldest first. The server answers in send order. */
   private pendingSends: { text: string; channel: ChatChannelType; target: string; at: number }[] = [];
-  private statusHoldsText = false;
+  private unsentTexts: string[] = [];
 
   private typing = false;
   private typingExitTimer: ReturnType<typeof setTimeout> | undefined;
@@ -283,6 +285,10 @@ export class ChatPopout {
           <div class="chat-popout-timeline" role="log" aria-label="Chat messages"></div>
           <button type="button" class="chat-new-pill" hidden></button>
           <div class="chat-status" role="status" hidden></div>
+          <div class="chat-unsent" hidden>
+            <div class="chat-unsent-text"></div>
+            <button type="button" class="chat-icon-btn chat-unsent-dismiss" aria-label="Dismiss unsent messages" title="Dismiss">${ICON_CLOSE}</button>
+          </div>
         </div>
         <div class="chat-popout-composer">
           <select class="chat-popout-channel" aria-label="Send to"></select>
@@ -304,6 +310,8 @@ export class ChatPopout {
     this.timelineEl = this.window.querySelector('.chat-popout-timeline')!;
     this.newPill = this.window.querySelector('.chat-new-pill')!;
     this.statusEl = this.window.querySelector('.chat-status')!;
+    this.unsentEl = this.window.querySelector('.chat-unsent')!;
+    this.unsentTextEl = this.window.querySelector('.chat-unsent-text')!;
     this.composerEl = this.window.querySelector('.chat-popout-composer')!;
     this.channelSelect = this.window.querySelector('.chat-popout-channel')!;
     this.dmInput = this.window.querySelector('.chat-popout-dm-target')!;
@@ -598,6 +606,7 @@ export class ChatPopout {
       if (e.key === 'Enter' && !e.isComposing) this.send();
     });
     this.inputEl.addEventListener('input', () => this.clearStatus());
+    this.unsentEl.querySelector('.chat-unsent-dismiss')!.addEventListener('click', () => this.dismissUnsent());
     this.channelSelect.addEventListener('change', () => {
       if (this.tab !== 'all') return;
       this.allChannel = this.channelSelect.value as ChatChannelType;
@@ -629,7 +638,7 @@ export class ChatPopout {
     }
     this.pendingSends.push({ text, channel, target: channel === 'dm' ? target.channelId : '', at: Date.now() });
     this.inputEl.value = '';
-    this.hideStatus();
+    this.clearStatus();
     if (this.tab === 'dm' && !this.thread) this.showThread(target.channelId);
   }
 
@@ -650,34 +659,32 @@ export class ChatPopout {
       this.enterViewDeferred();
     }
 
-    const reason = sent.target ? `No player is called "${sent.target}".` : message;
-    if (composerFree) this.showStatus(reason);
-    else this.holdTextInStatus(`${reason} Not sent: ${sent.text}`);
+    if (!composerFree) this.keepUnsent(sent.text);
+    this.showStatus(sent.target ? `No player is called "${sent.target}".` : message);
+  }
+
+  /** The only copy of a refused message, so it stays until the player dismisses it. */
+  private keepUnsent(text: string): void {
+    this.unsentTexts.push(text);
+    this.unsentTextEl.textContent = `Not sent: ${this.unsentTexts.join(' / ')}`;
+    this.unsentEl.hidden = false;
+  }
+
+  private dismissUnsent(): void {
+    this.unsentTexts = [];
+    this.unsentTextEl.textContent = '';
+    this.unsentEl.hidden = true;
   }
 
   private showStatus(text: string): void {
-    this.statusHoldsText = false;
     this.statusEl.textContent = text;
     this.statusEl.hidden = false;
     clearTimeout(this.statusTimer);
     this.statusTimer = setTimeout(() => this.clearStatus(), STATUS_VISIBLE_MS);
   }
 
-  /** The only copy of a refused message: it stays until the next send. */
-  private holdTextInStatus(text: string): void {
-    clearTimeout(this.statusTimer);
-    this.statusHoldsText = true;
-    this.statusEl.textContent = text;
-    this.statusEl.hidden = false;
-  }
-
   private clearStatus(): void {
-    if (!this.statusHoldsText) this.hideStatus();
-  }
-
-  private hideStatus(): void {
     clearTimeout(this.statusTimer);
-    this.statusHoldsText = false;
     this.statusEl.hidden = true;
   }
 
