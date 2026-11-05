@@ -193,11 +193,12 @@ export class AccountStore {
   private rebuildUsernameIndex(): void {
     this.accountsByLowerUsername.clear();
     for (const account of Object.values(this.accounts)) {
-      const key = account.username?.toLowerCase();
+      // A file that holds something other than accounts must still load.
+      const username: unknown = account?.username;
+      if (typeof username !== 'string') continue;
+      const key = username.toLowerCase();
       // keep-first: a file that repeats a name must keep resolving it to the earliest account.
-      if (key !== undefined && !this.accountsByLowerUsername.has(key)) {
-        this.accountsByLowerUsername.set(key, account);
-      }
+      if (!this.accountsByLowerUsername.has(key)) this.accountsByLowerUsername.set(key, account);
     }
   }
 }

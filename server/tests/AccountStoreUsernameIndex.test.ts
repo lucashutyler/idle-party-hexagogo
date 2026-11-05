@@ -72,6 +72,24 @@ describe('AccountStore username lookups', () => {
       expect(store.findByUsername('undefined')).toBeNull();
     });
 
+    it('skips anything in the file that is not an account', async () => {
+      files.set(ACCOUNTS_FILE, JSON.stringify({
+        empty: null,
+        text: 'accounts',
+        count: 7,
+        position: { col: 0, row: 0 },
+        odd: { username: 7 },
+        'a@example.test': savedAccount('a@example.test', 'Alice'),
+      }));
+      const store = new AccountStore();
+
+      await store.load();
+
+      expect(store.findByUsername('alice')?.email).toBe('a@example.test');
+      expect(store.findByUsername('accounts')).toBeNull();
+      expect(store.findByUsername('7')).toBeNull();
+    });
+
     it('reflects the file again on a second load', async () => {
       const store = await storeWith(savedAccount('a@example.test', 'Alice'));
 
