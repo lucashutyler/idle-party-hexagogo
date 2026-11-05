@@ -102,6 +102,11 @@ export class CraftingScreen implements Screen {
     this.closeDetails();
   }
 
+  prebuild(): void {
+    const state = this.gameClient.lastState;
+    if (state) this.updateFromState(state);
+  }
+
   private updateFromState(state: ServerStateMessage): void {
     this.lastState = state.crafting ?? null;
     this.lastInventory = state.character?.inventory ?? {};

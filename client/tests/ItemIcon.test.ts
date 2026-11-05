@@ -29,6 +29,16 @@ describe('renderItemIcon', () => {
     expect(square.querySelector('.item-square-initials')?.textContent).toBe('IB');
   });
 
+  it('leaves art unfetched until the square can be seen, so a hidden screen costs no data', () => {
+    const square = mount(renderItemIcon('icon_lazy', def('icon_lazy'), { showSlotIcon: true }));
+    const images = [...square.querySelectorAll('img')];
+    expect(images.length).toBeGreaterThan(1);
+    for (const img of images) expect(img.getAttribute('loading')).toBe('lazy');
+
+    const empty = mount(renderEmptySlotIcon('head'));
+    expect(empty.querySelector('img')!.getAttribute('loading')).toBe('lazy');
+  });
+
   it('renders only the initials once the artwork is known to be missing', () => {
     const first = mount(renderItemIcon('icon_missing', def('icon_missing')));
     first.querySelector('img')!.dispatchEvent(new Event('error'));

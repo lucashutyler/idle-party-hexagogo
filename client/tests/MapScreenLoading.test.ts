@@ -97,6 +97,24 @@ describe('MapScreen map loading', () => {
   beforeEach(() => { mapStub.instances.length = 0; mapStub.failNext = false; });
   afterEach(() => dismissMapToast());
 
+  it('waits for the tab to be shown before fetching the map code', () => {
+    const original = window.requestIdleCallback;
+    const askForIdleTime = vi.fn(() => 1);
+    vi.stubGlobal('requestIdleCallback', askForIdleTime);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      mount();
+      expect(askForIdleTime).not.toHaveBeenCalled();
+
+      Reflect.deleteProperty(document, 'visibilityState');
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(askForIdleTime).toHaveBeenCalledTimes(1);
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+      vi.stubGlobal('requestIdleCallback', original);
+    }
+  });
+
   it('creates one map however often the tab is reopened during the import', async () => {
     const { screen } = mount();
     screen.onActivate();

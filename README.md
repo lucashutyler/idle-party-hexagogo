@@ -315,7 +315,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Docked chat (strip preview and in-flow sheet with a full layout on phones, collapsible column on desktop)
 - [x] Persistent XP hairline under the HUD, visible on every screen
 - [x] ModalStack click-order z-index, Back and Escape order and keyboard focus across all overlays; every modal docks at the bottom on phones
-- [x] Performance budgets (lazy map and patch notes, idle screens run no frame loop, hidden screens keep their layout)
+- [x] Performance budgets (lazy map and patch notes, idle screens run no frame loop, hidden screens keep their layout, Hero and Craft built during idle time)
 - [x] Stable rendering — state pushes never swallow a click mid-press (`deferWhilePressed` / `setHtml`), and item art remembers what loaded so it never flickers
 - [x] Shop usability (item names under squares, can't-use badge on gear your class can't equip, can't-afford prices, the inventory's equip comparison in the shop, sales confirmed by the server)
 - [x] Hero and Craft usability (equip from an empty slot, item names under squares, Craftable filter, visible blocked reasons)

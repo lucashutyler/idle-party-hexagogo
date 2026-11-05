@@ -3,6 +3,8 @@ export interface Screen {
   onDeactivate(): void;
   /** Selects a sub-view, from the `sub` part of a navigation target. */
   setSubTab?(sub: string): void;
+  /** Renders the latest state while hidden, so the first visit only has to show it. Must not subscribe or send. */
+  prebuild?(): void;
 }
 
 interface RegisteredScreen {
@@ -10,20 +12,45 @@ interface RegisteredScreen {
   screen: Screen;
 }
 
+/** Hidden screens skip layout, so `data-prebuilding` lifts that (see shell.css) for one layout pass; nothing paints. */
+function layOutWhileHidden(element: HTMLElement): void {
+  element.dataset.prebuilding = '';
+  void element.offsetHeight;
+  delete element.dataset.prebuilding;
+}
+
 export class ScreenManager {
   private screens = new Map<string, RegisteredScreen>();
   private activeScreenId: string | null = null;
+  private shownIds = new Set<string>();
 
   register(id: string, element: HTMLElement, screen: Screen): void {
     this.screens.set(id, { element, screen });
+    this.shownIds.delete(id);
   }
 
   get(id: string): Screen | undefined {
     return this.screens.get(id)?.screen;
   }
 
+  /** Steps that build the given screens ahead of their first visit; a screen shown in the meantime is skipped. */
+  prebuildSteps(ids: readonly string[]): (() => void)[] {
+    return ids.flatMap(id => {
+      const registered = this.screens.get(id);
+      if (!registered?.screen.prebuild) return [];
+      const unlessShown = (step: () => void) => () => {
+        if (!this.shownIds.has(id)) step();
+      };
+      return [
+        unlessShown(() => registered.screen.prebuild?.()),
+        unlessShown(() => layOutWhileHidden(registered.element)),
+      ];
+    });
+  }
+
   switchTo(id: string): void {
     if (this.activeScreenId === id) return;
+    this.shownIds.add(id);
 
     // Deactivate the tracked active screen
     const current = this.activeScreenId ? this.screens.get(this.activeScreenId) : undefined;
