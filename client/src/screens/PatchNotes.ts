@@ -1,33 +1,6 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.11.05.4',
-    notes: [
-      'The game now uses much less mobile data while you play.',
-    ],
-  },
-  {
-    version: '2026.11.05.3',
-    notes: [
-      'The Hero and Craft screens now open faster the first time you visit them.',
-      'Item pictures load when they come into view, so opening a long list uses less data.',
-    ],
-  },
-  {
-    version: '2026.11.05.2',
-    notes: [
-      'A block now stays in place if the blocked player\'s name changes, and what they said before stays hidden.',
-      'Fixed players with certain names showing as blocked when nobody had blocked them, which also stopped anyone trading with them.',
-    ],
-  },
-  {
     version: '2026.11.05.1',
-    notes: [
-      'Blocking a player now also stops their direct messages from notifying you, including push notifications and emails.',
-      'If a chat message can\'t be sent to your zone or guild, for example because you just left it, chat now tells you and keeps your message so you can send it again.',
-    ],
-  },
-  {
-    version: '2026.11.04.1',
     notes: [
       'Combat is now real-time! Everyone in a fight — your party and the enemies — acts on their own timer instead of waiting for turns, so battles move faster and more happens at once.',
       'Skills are now cards with a type. Attack skills fire when they are ready, Support skills wait until someone actually needs them, Enchantments leave a lasting effect, Instants react the moment something happens, and Interrupts counter enemy spells. Cooldowns are now counted in seconds (never below 1 second), and your skill slots, the skill picker and player profiles show each skill\'s card type, cooldown, cast time and trigger.',
@@ -37,7 +10,9 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'A brand-new look: new fonts, glossy panels and chunky buttons on every screen, and a slim top bar with your portrait, level, gold and notifications.',
       'New navigation. Phones have five labelled tabs along the bottom: Map, Hero, Battle, Craft and Social. On larger screens they become a rail down the left side, with Quests, Chat and Settings close at hand. On phones, Quests has its own button next to the chat strip. The Back button now closes popups first, then returns you to Battle.',
       'Chat has been rebuilt. On phones, a slim strip above the tabs shows the latest message; tap it for a chat sheet that leaves the game visible, or expand it to fill the screen. On larger screens, chat is a column beside the game that you can close when you don\'t need it. Direct messages now read as conversations.',
-      'Fixed messages sent to your zone or guild going missing.',
+      'Fixed messages sent to your zone or guild going missing. If one can\'t be sent, for example because you just left, chat now tells you and keeps your message so you can send it again.',
+      'Blocking a player now also stops their direct messages from notifying you, including push notifications and emails. A block stays in place if the blocked player\'s name changes, and what they said before stays hidden.',
+      'Fixed players with certain names showing as blocked when nobody had blocked them, which also stopped anyone trading with them.',
       'The map has been redrawn. Rooms now have waves, treetops, dunes and mountain peaks, with a coastline around the land and soft fog over what you haven\'t explored yet, and it should stay smooth on slower phones.',
       'Tap a room on the map to see what is there and your chance of winning, then press Go. Your route is drawn on the map with a button to stop, and tapping a room you can\'t walk to now tells you so. The buttons over the map have names, and on phones they ask before taking you to another map.',
       'The battle screen has been rebuilt. Rings show when each fighter acts next, cast bars and target lines warn you about incoming spells, and damage numbers, reaction cards and a skill bar with cooldown timers show every moment of the fight. It fits both portrait and landscape and follows your device\'s reduced-motion setting.',
@@ -46,6 +21,7 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'The Social screen now has Party, Guild, Friends and Ranks tabs, with a tidier party layout, and Ranks opens quickly even with many players. The Zone filter on Ranks now finds the right players.',
       'Settings is now one tidy list, opened from your portrait or the rail. Popups slide up from the bottom on phones, and work properly with the keyboard on larger screens: Tab stays inside them and Escape closes them.',
       'Sign-in and choosing your class have a fresh look too, and the game uses less battery while nothing is happening on screen.',
+      'The game now uses much less mobile data while you play. Item pictures load when they come into view, and the Hero and Craft screens open faster the first time you visit them.',
       'Your party formation now marks which side is the front. On phones it is drawn with the front row on top, matching the battle layout.',
       'Legendary items are now gold and heirloom items pink, and missing pictures show colourful artwork instead of grey boxes.',
       'Armour, magic resistance, Guard and Bless now block a share of each hit instead of a flat amount, so they stay useful as you level and no enemy is ever completely unable to hurt you — every hit deals at least 1. Bless now uses the strongest Priest in the party, and Guard and Bless skill cards show how much they protect you against enemies of your level.',
