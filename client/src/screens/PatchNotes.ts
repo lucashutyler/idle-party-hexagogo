@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.1',
+    notes: [
+      'Some names are now reserved and can\'t be chosen.',
+    ],
+  },
+  {
     version: '2026.10.09.1',
     notes: [
       'Fixed buttons sometimes ignoring your tap or click during a fight. This was most noticeable on Accept and Turn In for quests, and also affected shops, notifications, crafting, trades, chat and the combat view.',

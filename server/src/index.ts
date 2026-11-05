@@ -18,6 +18,7 @@ import type { IncomingMessage } from 'http';
 import { GameLoop } from './game/GameLoop.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
+import { isStoreFileName } from './auth/reservedUsernames.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { InviteListStore } from './auth/InviteListStore.js';
 import { ApiTokenStore } from './auth/ApiTokenStore.js';
@@ -262,7 +263,7 @@ function getSessionUsername(req: IncomingMessage): Promise<string | null> {
 server.on('upgrade', async (req, socket, head) => {
   const username = await getSessionUsername(req);
 
-  if (!username || username === 'undefined') {
+  if (!username || username === 'undefined' || isStoreFileName(username)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
@@ -306,6 +307,9 @@ wss.on('connection', (ws) => {
   // Register the connection and send initial state
   playerManager.login(ws, username).then(() => {
     playerManager.sendStateToPlayer(username);
+  }).catch((err) => {
+    console.error(`[WS] Login failed for "${username}":`, err);
+    ws.close(1011, 'Login failed');
   });
 
   ws.on('message', (data) => {

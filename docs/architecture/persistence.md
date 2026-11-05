@@ -40,3 +40,5 @@ Everything in `data/` is persisted behind a **swappable interface** so the stora
 - **Artwork**: `AssetStore` (`server/src/game/AssetStore.ts`) reads/writes the PNG folders for all 17 registered asset kinds (`data/item-artwork/`, `data/monster-artwork/`, `data/class-icons/`, …), each folder's path taken from `ASSET_KIND_INFO` in `shared/src/assets/AssetKinds.ts`. Artwork is live and global — deliberately **not** part of `ContentSnapshot`, so publish/rollback never moves a PNG. See `docs/architecture/content.md` → "Artwork & imagery".
 
 **When adding new persistent data to `data/`, always define an interface or extend an existing one. Never read/write files directly from game logic — go through the store abstraction.**
+
+**A new file directly in `data/` also goes in `STORE_FILE_NAMES`** (`server/src/auth/reservedUsernames.ts`), because `JsonFileStore` keeps player saves in the same folder. `server/tests/ReservedUsernames.test.ts` checks this.

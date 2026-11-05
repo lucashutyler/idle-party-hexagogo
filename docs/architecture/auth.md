@@ -2,7 +2,7 @@
 
 ## Email-based magic link auth
 
-Auth is handled over REST (`/auth/*`), not WebSocket. Sessions use `express-session` with httpOnly cookies (30-day expiry), persisted to disk via `JsonSessionStore` (survives server restarts/deploys). Account data (email, username, verified status) is stored in `data/accounts.json` via `AccountStore`. Magic link tokens are in-memory with 15-minute expiry (`TokenStore`). Username is changeable later.
+Auth is handled over REST (`/auth/*`), not WebSocket. Sessions use `express-session` with httpOnly cookies (30-day expiry), persisted to disk via `JsonSessionStore` (survives server restarts/deploys). Account data (email, username, verified status) is stored in `data/accounts.json` via `AccountStore`. Magic link tokens are in-memory with 15-minute expiry (`TokenStore`). Username is changeable later. `AccountStore.setUsername` refuses reserved names (`server/src/auth/reservedUsernames.ts`). An account that already holds a store file's name can't connect until it is renamed by hand, and `AccountStore.load` logs each one at startup. `AccountStore.save` runs one write at a time.
 
 **Dev flow**: Enter email → token returned directly → auto-verified → session created on same browser → game.
 
