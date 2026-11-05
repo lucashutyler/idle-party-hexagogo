@@ -15,6 +15,18 @@ import type { DesignNote } from '@idle-party-rpg/shared';
 import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_HENCHMEN, SEED_DUNGEONS, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, migrateLegacySet, migrateLegacySkill, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
 
+/** Generated definitions merged only where their id is still free. */
+export interface SeedDefinitions {
+  encounters?: EncounterDefinition[];
+  monsters?: MonsterDefinition[];
+  dungeons?: DungeonDefinition[];
+}
+
+export interface SeedUpgrade extends SeedDefinitions {
+  zoneTables?: { zoneId: string; encounterTable: EncounterTableEntry[] }[];
+  tiles?: WorldTileDefinition[];
+}
+
 const DATA_DIR = path.resolve('data');
 const MONSTERS_FILE = path.join(DATA_DIR, 'monsters.json');
 const ITEMS_FILE = path.join(DATA_DIR, 'items.json');
@@ -63,8 +75,15 @@ export class ContentStore {
     defaultMapId: DEFAULT_MAP_ID,
     tiles: [],
   };
+  private epoch = 0;
+
+  /** Bumps on every load, save and replace, so anything derived from content (forecasts) can tell it went stale. */
+  get contentEpoch(): number {
+    return this.epoch;
+  }
 
   async load(): Promise<void> {
+    this.epoch++;
     const exists = await this.tryLoadAll();
     if (!exists) {
       console.log('[ContentStore] No data files found — seeding defaults');
@@ -75,6 +94,13 @@ export class ContentStore {
   }
 
   async save(): Promise<void> {
+    // Synchronous, before the first await: every mutator calls save() right after changing content.
+    this.epoch++;
+    await this.persist();
+  }
+
+  /** Write the current content to disk without marking it changed (periodic saves). */
+  async persist(): Promise<void> {
     await fs.mkdir(DATA_DIR, { recursive: true });
     await fs.writeFile(MONSTERS_FILE, JSON.stringify(Array.from(this.monsters.values()), null, 2));
     await fs.writeFile(ITEMS_FILE, JSON.stringify(Array.from(this.items.values()), null, 2));
@@ -438,9 +464,14 @@ export class ContentStore {
    * zones + tiles to the in-memory maps and persists once at the end —
    * much cheaper than 1000 individual `addOrUpdateTile` calls. Skips
    * any tile whose (mapId, col, row) already has a tile so a partial re-seed
-   * doesn't clobber existing content.
+   * doesn't clobber existing content. Encounters and monsters are only added
+   * when their id is free.
    */
-  async mergeSeedContent(zones: ZoneDefinition[], tiles: WorldTileDefinition[]): Promise<void> {
+  async mergeSeedContent(
+    zones: ZoneDefinition[],
+    tiles: WorldTileDefinition[],
+    extras: SeedDefinitions = {},
+  ): Promise<void> {
     for (const z of zones) this.zones.set(z.id, z);
     const occupied = new Set(this.world.tiles.map(t => `${t.mapId}:${t.col},${t.row}`));
     for (const t of tiles) {
@@ -449,7 +480,31 @@ export class ContentStore {
       this.world.tiles.push(t);
       occupied.add(key);
     }
+    this.addMissingSeedDefinitions(extras);
     await this.save();
+  }
+
+  /**
+   * Apply a seed upgrade in one save: add definitions whose ids are missing, replace the listed zone
+   * tables, and overwrite the listed tiles in place (keeping each live room's GUID). Deciding what is
+   * safe to replace is the caller's job. Returns the change count.
+   */
+  async upgradeSeedContent(upgrade: SeedUpgrade): Promise<number> {
+    let changes = this.addMissingSeedDefinitions(upgrade);
+    for (const { zoneId, encounterTable } of upgrade.zoneTables ?? []) {
+      const live = this.zones.get(zoneId);
+      if (!live) continue;
+      this.zones.set(zoneId, { ...live, encounterTable: encounterTable.map(e => ({ ...e })) });
+      changes++;
+    }
+    for (const tile of upgrade.tiles ?? []) {
+      const idx = this.world.tiles.findIndex(t => t.mapId === tile.mapId && t.col === tile.col && t.row === tile.row);
+      if (idx < 0) continue;
+      this.world.tiles[idx] = { ...tile, id: this.world.tiles[idx].id };
+      changes++;
+    }
+    if (changes > 0) await this.save();
+    return changes;
   }
 
   async deleteZone(id: string): Promise<{ success: boolean; error?: string }> {
@@ -748,6 +803,7 @@ export class ContentStore {
 
   /** Bulk-replace all content from a snapshot (used for deploy). */
   async replaceAll(snapshot: { monsters: MonsterDefinition[]; items: ItemDefinition[]; zones: ZoneDefinition[]; encounters?: EncounterDefinition[]; sets?: SetDefinition[]; shops?: ShopDefinition[]; henchmen?: HenchmanDefinition[]; tileTypes?: TileTypeDefinition[]; recipes?: RecipeDefinition[]; npcs?: NpcDefinition[]; quests?: QuestDefinition[]; dungeons?: DungeonDefinition[]; skills?: SkillDefinition[]; skillSlotSchedules?: { className: string; slots: SkillSlot[] }[]; designNotes?: DesignNote[]; world: WorldData }): Promise<void> {
+    this.epoch++;
     this.monsters.clear();
     for (const m of snapshot.monsters) this.monsters.set(m.id, m);
 
@@ -847,6 +903,26 @@ export class ContentStore {
   }
 
   // --- Private ---
+
+  private addMissingSeedDefinitions(defs: SeedDefinitions): number {
+    let added = 0;
+    for (const monster of defs.monsters ?? []) {
+      if (this.monsters.has(monster.id)) continue;
+      this.monsters.set(monster.id, { ...monster, drops: monster.drops?.filter(d => this.items.has(d.itemId)) });
+      added++;
+    }
+    for (const encounter of defs.encounters ?? []) {
+      if (this.encounters.has(encounter.id)) continue;
+      this.encounters.set(encounter.id, encounter);
+      added++;
+    }
+    for (const dungeon of defs.dungeons ?? []) {
+      if (this.dungeons.has(dungeon.id)) continue;
+      this.dungeons.set(dungeon.id, dungeon);
+      added++;
+    }
+    return added;
+  }
 
   /** Serialize the per-class slot schedules as an array (snapshot/file shape). */
   private skillSlotSchedulesToArray(): { className: string; slots: SkillSlot[] }[] {

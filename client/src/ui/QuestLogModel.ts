@@ -15,11 +15,13 @@ export interface CompletedQuestSummary {
 export interface NpcLocation {
   npcName: string;
   npcEmoji: string;
+  roomId?: string;
+  mapId?: string;
   roomName?: string;
   zoneName?: string;
 }
 
-export type NpcRoom = Pick<WorldTileDefinition, 'id' | 'name' | 'zoneName'>;
+export type NpcRoom = Pick<WorldTileDefinition, 'id' | 'mapId' | 'name' | 'zoneName'>;
 
 // must match the weekly cooldown in canAcceptQuest (shared QuestTypes.ts)
 export const WEEKLY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
@@ -79,7 +81,7 @@ export function turnInLocations(
       continue;
     }
     for (const room of explored) {
-      locations.push({ npcName: npc.name, npcEmoji: npc.emoji, roomName: room.name, zoneName: room.zoneName });
+      locations.push(locationIn(npc, room));
     }
   }
   return locations;
@@ -99,10 +101,21 @@ export function giverLocations(
     if (!npc.questIds?.some(id => available.has(id))) continue;
     for (const room of roomsWithNpc(npc.id)) {
       if (!unlockedIds.has(room.id)) continue;
-      locations.push({ npcName: npc.name, npcEmoji: npc.emoji, roomName: room.name, zoneName: room.zoneName });
+      locations.push(locationIn(npc, room));
     }
   }
   return locations;
+}
+
+function locationIn(npc: NpcDefinition, room: NpcRoom): NpcLocation {
+  return {
+    npcName: npc.name,
+    npcEmoji: npc.emoji,
+    roomId: room.id,
+    mapId: room.mapId,
+    roomName: room.name,
+    zoneName: room.zoneName,
+  };
 }
 
 function timeOf(iso: string): number {

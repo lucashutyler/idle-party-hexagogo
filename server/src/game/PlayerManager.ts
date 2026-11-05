@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember } from '@idle-party-rpg/shared';
+import { offsetToCube, cubeDistance, cubeToKey, isBlockedUser } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -11,24 +11,61 @@ import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem, canMove } from './social/PartySystem.js';
 import { TradeSystem } from './social/TradeSystem.js';
-import { MailboxSystem } from './social/MailboxSystem.js';
+import { MailboxSystem, mailboxesWithEntriesFrom } from './social/MailboxSystem.js';
+import type { MailboxStore, Mailboxes } from './social/MailboxStore.js';
 import { NotificationSystem } from './social/NotificationSystem.js';
 import { NotificationService } from './social/NotificationService.js';
 import { InAppNotificationDriver } from './social/InAppNotificationDriver.js';
 import { BrowserPushNotificationDriver } from './social/BrowserPushNotificationDriver.js';
 import { EmailNotificationDriver } from './social/EmailNotificationDriver.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
+import type { CombatSendOptions } from './PartyBattleManager.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
+import { prepareStatePush, encodeStatePush } from './StatePush.js';
+import type { SentStateFields } from './StatePush.js';
+
+/** A socket buffering more than this skips droppable combat messages. */
+export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
+/** A socket buffering more than this skips state pushes, which it can catch up on with a single later push. */
+export const STATE_BACKPRESSURE_BYTES = 64 * 1024;
+/** How soon a player whose state push was skipped is tried again. */
+export const STATE_RETRY_MS = 500;
+/** How long a new socket's visibility stays unknown before it counts as visible without a `presence` message. */
+export const PRESENCE_GRACE_MS = 5000;
+
+type PlayerChatChannel = Exclude<ChatChannelType, 'server'>;
+
+const PLAYER_CHAT_CHANNELS: readonly unknown[] = ['tile', 'zone', 'party', 'guild', 'dm', 'global'] satisfies PlayerChatChannel[];
+const INVALID_CHANNEL = 'Invalid channel';
+
+function isPlayerChatChannel(value: unknown): value is PlayerChatChannel {
+  return PLAYER_CHAT_CHANNELS.includes(value);
+}
+
+/** What a double tap gets once the first tap has gone through. */
+export const GIFT_NOT_FOUND = 'Gift not found';
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
+  private combatViewHidden = new WeakSet<WebSocket>();
+  /** Sockets whose page reported itself hidden. */
+  private pageHidden = new WeakSet<WebSocket>();
+  /** New sockets that have not sent `presence` yet: they neither start nor end an absence until the grace runs out. */
+  private presencePending = new WeakSet<WebSocket>();
+  private sentStateFields = new WeakMap<WebSocket, SentStateFields>();
+  private stateRetryPending = new WeakSet<WebSocket>();
+  private wholeStateSockets = new WeakSet<WebSocket>();
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
   private store: GameStateStore;
+  private mailboxStore?: MailboxStore;
+  private saveQueue: Promise<void> = Promise.resolve();
+  /** What the mailbox file holds, as far as this process knows. */
+  private savedMailboxes: Mailboxes = new Map();
   readonly friends: FriendsSystem;
   readonly guilds: GuildSystem;
   readonly chat: ChatSystem;
@@ -41,7 +78,8 @@ export class PlayerManager {
   private getAllUsernames: () => string[];
   private readonly serverVersion = Date.now().toString();
 
-  constructor(grids: WorldGrids, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore) {
+  constructor(grids: WorldGrids, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore, mailboxStore?: MailboxStore) {
+    this.mailboxStore = mailboxStore;
     this.grids = grids;
     this.content = content;
     this.accountStore = accountStore;
@@ -78,6 +116,24 @@ export class PlayerManager {
       (partyId) => this.parties.getHenchmen(partyId),
       (partyId, mapId) => this.parties.dismissHenchmenOffMap(partyId, mapId),
     );
+    this.partyBattles.setCombatDelivery({
+      isWatching: (username) => this.hasCombatViewer(username),
+      sendRaw: (username, payload, opts) => this.sendCombatRaw(username, payload, opts),
+    });
+    this.partyBattles.setGridPositionLookup(
+      (partyId, username) => this.parties.getParty(partyId)?.members.find(m => m.username === username)?.gridPosition,
+    );
+    this.partyBattles.setAutoRetreatPolicy((partyId) => this.autoRetreatPolicy(partyId));
+    this.partyBattles.setNotifier((username, eventKey, vars) => this.notify.notify(username, eventKey, vars));
+  }
+
+  /** The party's auto-retreat setting: its owner's, read at use time. */
+  autoRetreatPolicy(partyId: string): PartyAutoRetreatInfo | null {
+    const members = this.parties.getParty(partyId)?.members;
+    const owner = members?.find(m => m.role === 'owner') ?? members?.[0];
+    const session = owner ? this.sessions.get(owner.username) : undefined;
+    if (!owner || !session) return null;
+    return { belowPct: session.getCombatPrefs().autoRetreatBelowPct, setBy: owner.username };
   }
 
   /** The world's default (spawn) map grid. */
@@ -88,6 +144,8 @@ export class PlayerManager {
   async login(ws: WebSocket, username: string): Promise<PlayerSession> {
     // Associate this connection with the username
     this.connections.set(ws, username);
+    this.presencePending.add(ws);
+    setTimeout(() => this.endPresenceGrace(ws), PRESENCE_GRACE_MS);
 
     let wsSet = this.playerConnections.get(username);
     if (!wsSet) {
@@ -121,8 +179,7 @@ export class PlayerManager {
       }
       this.sessions.set(username, session);
       this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
-      const initialMailbox = session.consumeInitialMailbox();
-      if (initialMailbox.length > 0) this.mailboxes.setMailbox(username, initialMailbox);
+      this.mailboxes.mergeEntries(username, session.consumeInitialMailbox());
       const initialNotifications = session.consumeInitialNotifications();
       if (initialNotifications.length > 0) this.notifications.setInbox(username, initialNotifications);
       this.wireCallbacks(session);
@@ -134,6 +191,8 @@ export class PlayerManager {
       console.log(`[PlayerManager] "${username}" connected (${wsSet.size} connections, ${this.sessions.size} sessions)`);
     }
 
+    // The caller pushes state right after login, which carries any recap this produces.
+    this.refreshPresence(username);
     return session;
   }
 
@@ -151,6 +210,7 @@ export class PlayerManager {
         // Trades are async — they persist across disconnect. Nothing to cancel here.
       }
     }
+    this.refreshPresence(username);
 
     console.log(`[PlayerManager] "${username}" disconnected (session preserved, ${this.connectionCount} connections)`);
   }
@@ -188,20 +248,7 @@ export class PlayerManager {
 
     // Save current state before removal (freezes XP/inventory at ban time)
     if (session) {
-      const partyId = session.getPartyId();
-      const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
-      const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
-      let partyInfo: { role: PartyRole; gridPosition: number } | undefined;
-      if (partyId) {
-        const party = this.parties.getParty(partyId);
-        if (party) {
-          const member = party.members.find(m => m.username === username);
-          if (member) partyInfo = { role: member.role, gridPosition: member.gridPosition };
-        }
-      }
-      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
-      const saveData = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen);
-      await saveStore.saveAll([saveData]);
+      await this.saveAll(saveStore);
     }
 
     // Remove from party (and its battle entry)
@@ -248,12 +295,28 @@ export class PlayerManager {
   }
 
   /**
-   * Rename a player: re-key the session map and update the session's username.
+   * Rename a player: re-key their session and connections, and move other players' blocks to the new name.
+   * Returns whether the player had a session. See docs/architecture/social.md → Renames.
    */
   renamePlayer(oldUsername: string, newUsername: string): boolean {
-    const session = this.sessions.get(oldUsername);
-    if (!session) return false;
+    this.mailboxes.rename(oldUsername, newUsername);
 
+    const session = this.sessions.get(oldUsername);
+    if (session) this.rekeySession(session, oldUsername, newUsername);
+    this.moveBlocksToNewName(oldUsername, newUsername);
+    return session !== undefined;
+  }
+
+  private moveBlocksToNewName(oldUsername: string, newUsername: string): void {
+    const blockers = this.getAllSessions().filter(session => session.moveBlockToNewName(oldUsername, newUsername));
+    if (blockers.length === 0) return;
+
+    this.store.saveAll(blockers.map(blocker => this.saveDataFor(blocker)))
+      .catch(err => console.error(`[PlayerManager] Failed to save blocks moved to "${newUsername}":`, err));
+    for (const blocker of blockers) this.sendStateToPlayer(blocker.username);
+  }
+
+  private rekeySession(session: PlayerSession, oldUsername: string, newUsername: string): void {
     this.sessions.delete(oldUsername);
     session.username = newUsername;
     this.sessions.set(newUsername, session);
@@ -269,7 +332,6 @@ export class PlayerManager {
     }
 
     console.log(`[PlayerManager] Renamed "${oldUsername}" → "${newUsername}"`);
-    return true;
   }
 
   /** Send a chat_message to a specific player (all connections) and store in their history. */
@@ -286,6 +348,86 @@ export class PlayerManager {
     for (const ws of wsSet) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }
+  }
+
+  /** Sends a player's message and returns null, or returns why it was refused. See docs/architecture/social.md → Chat. */
+  sendPlayerChat(username: string, channelType: unknown, channelId: unknown, text: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return null;
+    if (!isPlayerChatChannel(channelType)) return 'Invalid channel type';
+    if (typeof channelId !== 'string') return INVALID_CHANNEL;
+
+    const route = this.routeChat(session, channelType, channelId);
+    if (typeof route === 'string') return route;
+
+    const recipients = route.recipients.map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
+    const message = this.chat.sendMessage(username, channelType, route.channelId, text, recipients);
+    if (!message) return null;
+
+    this.sendChatToPlayer(username, message);
+    if (channelType === 'dm') this.notifyDmReceived(route.channelId, username, text);
+    return null;
+  }
+
+  private routeChat(
+    session: PlayerSession,
+    channelType: PlayerChatChannel,
+    channelId: string,
+  ): { channelId: string; recipients: string[] } | string {
+    const username = session.username;
+    const othersWhere = (matches: (other: PlayerSession) => boolean): string[] =>
+      Array.from(this.sessions.entries()).filter(([u, s]) => u !== username && matches(s)).map(([u]) => u);
+
+    switch (channelType) {
+      case 'dm': {
+        // Accounts match a name in any case but sessions need the exact spelling.
+        const recipient = this.accountStore.findByUsername(channelId)?.username;
+        return recipient ? { channelId: recipient, recipients: [recipient] } : 'User not found';
+      }
+      case 'zone':
+        if (channelId !== session.getZone()) return 'You aren\'t in that zone';
+        return { channelId, recipients: othersWhere(s => s.getZone() === channelId) };
+      case 'guild': {
+        const members = this.guilds.getGuild(channelId)?.members.map(m => m.username);
+        if (!members?.includes(username)) return 'You aren\'t in that guild';
+        return { channelId, recipients: members.filter(u => u !== username) };
+      }
+      case 'party': {
+        if (channelId !== '') return INVALID_CHANNEL;
+        const partyId = session.getPartyId();
+        const members = partyId ? this.parties.getParty(partyId)?.members ?? [] : [];
+        return { channelId, recipients: members.map(m => m.username).filter(u => u !== username) };
+      }
+      case 'tile': {
+        if (channelId !== '') return INVALID_CHANNEL;
+        const mapId = session.getMapId();
+        const { col, row } = session.getPosition();
+        return {
+          channelId,
+          recipients: othersWhere(s => {
+            const position = s.getPosition();
+            return s.getMapId() === mapId && position.col === col && position.row === row;
+          }),
+        };
+      }
+      case 'global':
+        if (channelId !== '') return INVALID_CHANNEL;
+        return { channelId, recipients: othersWhere(() => true) };
+    }
+  }
+
+  private notifyDmReceived(recipient: string, sender: string, text: string): void {
+    const session = this.sessions.get(recipient);
+    if (session && isBlockedUser(sender, session.getBlockedUsers())) return;
+
+    const focus = session?.getChatFocus();
+    if (focus?.channelType === 'dm' && focus.channelId === sender) return;
+
+    this.notify.notify(recipient, 'dm_received', {
+      title: `Message from ${sender}`,
+      body: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+      payload: { fromUsername: sender },
+    });
   }
 
   /** Push a live notification toast over any open WebSocket connections (in_app channel). */
@@ -347,19 +489,196 @@ export class PlayerManager {
 
   sendStateToPlayer(username: string): void {
     const wsSet = this.playerConnections.get(username);
-    if (!wsSet || wsSet.size === 0) return;
+    if (wsSet) this.pushStateTo(username, wsSet);
+  }
 
+  /** This socket gets every field on every push. */
+  requireWholeState(ws: WebSocket): void {
+    this.wholeStateSockets.add(ws);
+  }
+
+  private pushStateTo(username: string, sockets: Iterable<WebSocket>): void {
     const session = this.sessions.get(username);
     if (!session) return;
 
-    const otherPlayers = this.getOtherPlayers(username);
-    const state = JSON.stringify({ type: 'state' as const, ...session.getState(otherPlayers), serverVersion: this.serverVersion });
-
-    for (const ws of wsSet) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(state);
-      }
+    // A socket that is behind skips this push: nothing is recorded as sent, so its next push carries the difference.
+    const ready: WebSocket[] = [];
+    for (const ws of sockets) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (ws.bufferedAmount > STATE_BACKPRESSURE_BYTES) this.retryStateSoon(ws);
+      else ready.push(ws);
     }
+    if (ready.length === 0) return;
+
+    const otherPlayers = this.getOtherPlayers(username);
+    const fields = prepareStatePush({ type: 'state', ...session.getState(otherPlayers), serverVersion: this.serverVersion });
+
+    for (const ws of ready) {
+      ws.send(encodeStatePush(fields, this.sentStateFieldsOf(ws)));
+    }
+  }
+
+  /** Mid-fight nothing else may push for minutes, so a skipped push can't wait for the next event. */
+  private retryStateSoon(ws: WebSocket): void {
+    if (this.stateRetryPending.has(ws)) return;
+    this.stateRetryPending.add(ws);
+    setTimeout(() => {
+      this.stateRetryPending.delete(ws);
+      const username = this.connections.get(ws);
+      if (username) this.pushStateTo(username, [ws]);
+    }, STATE_RETRY_MS).unref();
+  }
+
+  private sentStateFieldsOf(ws: WebSocket): SentStateFields {
+    if (this.wholeStateSockets.has(ws)) return new Map();
+    let sent = this.sentStateFields.get(ws);
+    if (!sent) {
+      sent = new Map();
+      this.sentStateFields.set(ws, sent);
+    }
+    return sent;
+  }
+
+  /** Send a pre-serialised combat message to every open socket of `username` that shows combat. */
+  sendCombatRaw(username: string, payload: string, opts: CombatSendOptions): void {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet) return;
+    for (const ws of wsSet) {
+      if (!this.wantsCombat(ws)) continue;
+      if (opts.droppable && ws.bufferedAmount > COMBAT_BACKPRESSURE_BYTES) continue;
+      ws.send(payload);
+    }
+  }
+
+  /** Whether any of this player's sockets would receive combat messages right now. */
+  hasCombatViewer(username: string): boolean {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet) return false;
+    for (const ws of wsSet) {
+      if (this.wantsCombat(ws)) return true;
+    }
+    return false;
+  }
+
+  /** Record whether a socket is showing the combat view; turning it on resyncs the live fight. */
+  setCombatView(ws: WebSocket, visible: boolean): void {
+    if (!this.connections.has(ws)) return;
+    const wasHidden = this.combatViewHidden.has(ws);
+    if (visible) {
+      this.combatViewHidden.delete(ws);
+      if (wasHidden) this.sendCombatResync(ws);
+    } else {
+      this.combatViewHidden.add(ws);
+    }
+  }
+
+  /** Record a socket's page visibility (`presence`); becoming visible delivers any recap at once. */
+  setPresence(ws: WebSocket, visible: boolean, now: number = Date.now()): void {
+    const username = this.connections.get(ws);
+    if (!username) return;
+    this.presencePending.delete(ws);
+    if (visible) this.pageHidden.delete(ws);
+    else this.pageHidden.add(ws);
+    if (this.refreshPresence(username, now)) this.sendStateToPlayer(username);
+  }
+
+  /** Whether any of this player's sockets shows the game (a socket that never sent `presence` counts once its grace is over). */
+  hasVisibleSocket(username: string): boolean {
+    const wsSet = this.playerConnections.get(username);
+    if (!wsSet) return false;
+    for (const ws of wsSet) {
+      if (!this.pageHidden.has(ws) && !this.presencePending.has(ws)) return true;
+    }
+    return false;
+  }
+
+  private hasPresencePending(username: string): boolean {
+    const wsSet = this.playerConnections.get(username);
+    return !!wsSet && [...wsSet].some(ws => this.presencePending.has(ws));
+  }
+
+  private endPresenceGrace(ws: WebSocket): void {
+    if (!this.presencePending.delete(ws)) return;
+    const username = this.connections.get(ws);
+    if (username && this.refreshPresence(username)) this.sendStateToPlayer(username);
+  }
+
+  /**
+   * Away begins the moment no socket shows the game (all hidden or all closed) and ends when one does;
+   * a socket whose visibility is still unknown changes neither. The session decides whether the
+   * finished ledger is worth a recap. Returns whether the pending recap changed.
+   */
+  private refreshPresence(username: string, now: number = Date.now()): boolean {
+    const session = this.sessions.get(username);
+    if (!session) return false;
+    if (this.hasVisibleSocket(username)) return session.endAway(now);
+    if (this.hasPresencePending(username)) return false;
+    session.beginAway(now);
+    return false;
+  }
+
+  /** Clear the player's recap once the client has shown it; state goes to every socket. */
+  handleAckRecap(username: string, id: string): boolean {
+    const session = this.sessions.get(username);
+    if (!session?.ackRecap(id)) return false;
+    this.sendStateToPlayer(username);
+    return true;
+  }
+
+  /** Change the player's auto-retreat threshold. Party members see the owner's setting, so they all get state. */
+  handleSetCombatPrefs(username: string, autoRetreatBelowPct: AutoRetreatPct): boolean {
+    const session = this.sessions.get(username);
+    if (!session) return false;
+    const changed = session.setCombatPrefs({ autoRetreatBelowPct });
+    const partyId = session.getPartyId();
+    if (changed && partyId && this.autoRetreatPolicy(partyId)?.setBy === username) {
+      this.partyBattles.clearRetreatHold(partyId);
+    }
+    this.sendStateToParty(username);
+    return changed;
+  }
+
+  /** State to every socket of the player and of their party members (whose forecast key follows the player's build). */
+  sendStateToParty(username: string): void {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    const members = partyId ? this.parties.getParty(partyId)?.members.map(m => m.username) : undefined;
+    for (const member of members ?? [username]) this.sendStateToPlayer(member);
+  }
+
+  /** A player's forecast request for a room or dungeon; every reply goes through `reply`. */
+  handleForecastRequest(username: string, target: ForecastRequestTarget, reply: (message: ServerForecastMessage) => void): void {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    if (!partyId) {
+      reply({ type: 'forecast', target, key: '', result: null, status: 'unavailable' });
+      return;
+    }
+    this.partyBattles.requestForecast(partyId, username, target, reply, this.dungeonEntrant(partyId, username));
+  }
+
+  /** Whose saved dungeon progress an entry would use: the requester's when they may lead the party in, else the owner's. */
+  private dungeonEntrant(partyId: string, username: string): string {
+    const members = this.parties.getParty(partyId)?.members;
+    const me = members?.find(m => m.username === username);
+    if (!members || !me || canMove(me.role)) return username;
+    return members.find(m => m.role === 'owner')?.username ?? username;
+  }
+
+  /** The player's full kill-mastery list for the bestiary. */
+  buildBestiary(username: string): ServerBestiaryMessage | null {
+    const session = this.sessions.get(username);
+    if (!session) return null;
+    return { type: 'bestiary', version: session.getMasterySummary().version, entries: session.getBestiary() };
+  }
+
+  /** Send one socket the live fight as a full snapshot plus the recent log and live forecast. No-op between battles. */
+  sendCombatResync(ws: WebSocket): void {
+    if (!this.wantsCombat(ws)) return;
+    const username = this.connections.get(ws);
+    const partyId = username ? this.sessions.get(username)?.getPartyId() : null;
+    if (!partyId) return;
+    const message = this.partyBattles.buildCombatResync(partyId);
+    if (message) ws.send(JSON.stringify(message));
+    for (const forecast of this.partyBattles.liveForecastResync(partyId)) ws.send(JSON.stringify(forecast));
   }
 
   /** Send an error message to all connections for a specific player. */
@@ -387,6 +706,10 @@ export class PlayerManager {
   /** Get list of online (connected) usernames. */
   getOnlinePlayers(): string[] {
     return Array.from(this.playerConnections.keys());
+  }
+
+  private wantsCombat(ws: WebSocket): boolean {
+    return ws.readyState === WebSocket.OPEN && !this.combatViewHidden.has(ws);
   }
 
   private validHenchmen(saved: HiredHenchman[], partyMapId: string): HiredHenchman[] {
@@ -433,6 +756,8 @@ export class PlayerManager {
         ...partyData,
         members: this.resolvePartyMembers(partyData.members),
         henchmen: this.resolveHenchmen(partyData.henchmen),
+        autoRetreat: this.autoRetreatPolicy(partyData.id) ?? undefined,
+        forecastKey: this.partyBattles.forecastKey(partyData.id),
       },
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
@@ -465,7 +790,6 @@ export class PlayerManager {
   /** Wire all callbacks onto a session (social state, battle state, position). */
   private wireCallbacks(session: PlayerSession): void {
     session.getSocialState = () => this.getSocialState(session.username);
-    session.getMailbox = () => this.mailboxes.getMailbox(session.username);
     session.getNotifications = () => this.notifications.getInbox(session.username);
     session.getBattleState = () => {
       const partyId = session.getPartyId();
@@ -528,6 +852,15 @@ export class PlayerManager {
     }
   }
 
+  /** After a class is set: a new character gets a party (its first fight already uses the class); an existing party restarts its fight. */
+  applyClassChange(username: string): void {
+    const session = this.sessions.get(username);
+    if (!session) return;
+    const existingPartyId = session.getPartyId();
+    this.ensureParty(username);
+    if (existingPartyId) this.partyBattles.restartBattle(existingPartyId);
+  }
+
   /** Ensure a player is in a party, creating battle entry at a specific tile on `mapId`. */
   ensurePartyAtTile(username: string, tile: import('@idle-party-rpg/shared').HexTile, mapId: string): void {
     const session = this.sessions.get(username);
@@ -543,6 +876,25 @@ export class PlayerManager {
     if (typeof result !== 'string') {
       this.partyBattles.createEntry(result.id, username, tile, mapId);
     }
+  }
+
+  /** Hire into the player's party, or swap out `replaceInstanceId`. Returns the hire or an error string. */
+  hireHenchman(username: string, henchmanId: string, mapId: string, replaceInstanceId?: string): HiredHenchman | string {
+    this.settleBeforeRosterChange(username);
+    const getPartyId = (u: string) => this.sessions.get(u)?.getPartyId() ?? null;
+    return this.parties.hireHenchman(username, henchmanId, mapId, getPartyId, replaceInstanceId);
+  }
+
+  /** Dismiss a hire from the player's party. Returns the dismissed hire or an error string. */
+  dismissHenchman(username: string, instanceId: string): HiredHenchman | string {
+    this.settleBeforeRosterChange(username);
+    return this.parties.dismissHenchman(username, instanceId, u => this.sessions.get(u)?.getPartyId() ?? null);
+  }
+
+  /** A win still in its kill beat is shared among the roster that fought it. */
+  private settleBeforeRosterChange(username: string): void {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    if (partyId) this.partyBattles.settlePendingResult(partyId);
   }
 
   /** Handle a player joining a party (after accept invite). */
@@ -606,7 +958,7 @@ export class PlayerManager {
       return 'You must be at the dungeon entrance.';
     }
 
-    const result = this.partyBattles.enterDungeon(partyId, dungeonId);
+    const result = this.partyBattles.enterDungeon(partyId, dungeonId, username);
     if (!result.success) return result.error;
 
     // State for every member is pushed by enterDungeon's broadcast.
@@ -701,28 +1053,28 @@ export class PlayerManager {
    * Collect save data for all active sessions.
    */
   getAllSaveData(): PlayerSaveData[] {
-    const data: PlayerSaveData[] = [];
-    for (const session of this.sessions.values()) {
-      const partyId = session.getPartyId();
-      const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
-      const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
+    return this.getAllSessions().map(session => this.saveDataFor(session));
+  }
 
-      // Get party role/position info
-      let partyInfo: { role: 'owner' | 'leader' | 'member'; gridPosition: number } | undefined;
-      if (partyId) {
-        const party = this.parties.getParty(partyId);
-        if (party) {
-          const member = party.members.find(m => m.username === session.username);
-          if (member) {
-            partyInfo = { role: member.role, gridPosition: member.gridPosition };
-          }
+  private saveDataFor(session: PlayerSession): PlayerSaveData {
+    const partyId = session.getPartyId();
+    const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
+    const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
+
+    // Get party role/position info
+    let partyInfo: { role: 'owner' | 'leader' | 'member'; gridPosition: number } | undefined;
+    if (partyId) {
+      const party = this.parties.getParty(partyId);
+      if (party) {
+        const member = party.members.find(m => m.username === session.username);
+        if (member) {
+          partyInfo = { role: member.role, gridPosition: member.gridPosition };
         }
       }
-
-      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
-      data.push(session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen));
     }
-    return data;
+
+    const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
+    return session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen);
   }
 
   /**
@@ -771,11 +1123,11 @@ export class PlayerManager {
         const session = PlayerSession.fromSaveData(data, this.grids, this.content);
         this.sessions.set(data.username, session);
         this.friends.initPlayer(data.username, session.getFriends(), session.getOutgoingFriendRequests());
-        const initialMailbox = session.consumeInitialMailbox();
-        if (initialMailbox.length > 0) this.mailboxes.setMailbox(data.username, initialMailbox);
+        this.mailboxes.mergeEntries(data.username, session.consumeInitialMailbox());
         const initialNotifications = session.consumeInitialNotifications();
         if (initialNotifications.length > 0) this.notifications.setInbox(data.username, initialNotifications);
         this.wireCallbacks(session);
+        session.beginAway();
         validSaves.push(data);
         console.log(`[PlayerManager] Restored session for "${data.username}"`);
       } catch (err) {
@@ -869,6 +1221,8 @@ export class PlayerManager {
         this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
       }
 
+      this.partyBattles.startEntry(party.id);
+
       console.log(`[PlayerManager] Restored party "${savedPartyId}" with ${members.length} members`);
     }
 
@@ -883,7 +1237,8 @@ export class PlayerManager {
       if (!soloGrid || !currentTile) {
         // Position was already corrected to start tile above, but double-check
         if (startTile) {
-          this.createSoloPartyAtTile(data.username, startTile, null, [], defaultMapId);
+          const partyId = this.createSoloPartyAtTile(data.username, startTile, null, [], defaultMapId);
+          if (partyId) this.partyBattles.startEntry(partyId);
         }
         continue;
       }
@@ -896,18 +1251,15 @@ export class PlayerManager {
         .map(p => soloGrid.getTile(offsetToCube(p)))
         .filter((t): t is NonNullable<typeof t> => t !== null);
 
-      this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
+      const partyId = this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
+      if (!partyId) continue;
 
-      // Resume an in-progress dungeon run for this solo player.
       if (data.partyHenchmen?.length) {
-        const partyId = this.sessions.get(data.username)?.getPartyId();
-        if (partyId) this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
+        this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
       }
-
-      if (data.dungeonRun) {
-        const partyId = this.sessions.get(data.username)?.getPartyId();
-        if (partyId) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
-      }
+      // After the henchmen, so a run dropped for vanished content can announce them rejoining.
+      if (data.dungeonRun) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
+      this.partyBattles.startEntry(partyId);
     }
 
     if (saves.length > 0) {
@@ -916,30 +1268,30 @@ export class PlayerManager {
     }
   }
 
-  /** Helper to create a solo party and its battle entry at a specific tile. */
+  /** Create a solo party and its (not yet started) battle entry at a specific tile. Returns the party id. */
   private createSoloPartyAtTile(
     username: string,
     currentTile: import('@idle-party-rpg/shared').HexTile,
     targetTile: import('@idle-party-rpg/shared').HexTile | null,
     movementQueue: import('@idle-party-rpg/shared').HexTile[],
     mapId: string,
-  ): void {
+  ): string | null {
     const partyResult = this.parties.createParty(
       username,
       (u) => this.sessions.get(u)?.getPartyId() ?? null,
       (u, id) => this.sessions.get(u)?.setPartyId(id),
     );
+    if (typeof partyResult === 'string') return null;
 
-    if (typeof partyResult !== 'string') {
-      this.partyBattles.createEntryFromSave(
-        partyResult.id,
-        username,
-        currentTile,
-        targetTile,
-        movementQueue,
-        mapId,
-      );
-    }
+    this.partyBattles.createEntryFromSave(
+      partyResult.id,
+      username,
+      currentTile,
+      targetTile,
+      movementQueue,
+      mapId,
+    );
+    return partyResult.id;
   }
 
   /**
@@ -1091,10 +1443,12 @@ export class PlayerManager {
 
       // Create a fresh solo party at start tile (only for players with characters)
       if (session.hasCharacter()) {
-        this.createSoloPartyAtTile(session.username, startTile, null, [], defaultMapId);
+        const partyId = this.createSoloPartyAtTile(session.username, startTile, null, [], defaultMapId);
+        if (partyId) this.partyBattles.startEntry(partyId);
       }
       count++;
     }
+    for (const username of this.sessions.keys()) this.refreshPresence(username);
 
     console.log(`[PlayerManager] Master reset: ${count} players reset to start`);
     return count;
@@ -1114,7 +1468,95 @@ export class PlayerManager {
     const sessionB = this.sessions.get(b);
     const blockedByA = sessionA?.getBlockedUsers() ?? {};
     const blockedByB = sessionB?.getBlockedUsers() ?? {};
-    return b in blockedByA || a in blockedByB;
+    return isBlockedUser(b, blockedByA) || isBlockedUser(a, blockedByB);
+  }
+
+  /** Returns why the gift can't be sent, or null once it has gone. */
+  sendGift(fromUsername: string, targetUsername: string, itemId: string, quantity: number): string | null {
+    if (!Number.isInteger(quantity) || quantity < 1) return 'Invalid quantity';
+    const target = this.accountStore.findByUsername(targetUsername);
+    if (!target?.username) return 'Player not found';
+    // Accounts match a name in any case, but mailboxes are keyed by the exact one.
+    const toUsername = target.username;
+    if (toUsername === fromUsername) return 'Cannot gift to yourself';
+    // One message for both, so a refusal doesn't reveal that someone blocked you.
+    if (target.deactivated || this.isTradeBlocked(fromUsername, toUsername)) return 'That player can\'t receive gifts';
+    const sender = this.sessions.get(fromUsername);
+    if (!sender) return 'No session';
+    if (!sender.removeFromInventory(itemId, quantity)) return 'Not enough items in inventory';
+
+    this.mailboxes.addEntry(toUsername, fromUsername, itemId, quantity);
+    sender.addLogEntry(`Sent ${this.giftLabel(itemId, quantity)} to ${toUsername}`, 'unlock');
+
+    this.sendStateToPlayer(fromUsername);
+    this.sendStateToPlayer(toUsername);
+    return null;
+  }
+
+  /** Returns why the gift can't be accepted, or null once it has been. */
+  acceptGift(username: string, entryId: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return 'No session';
+    const entry = this.mailboxes.findEntry(username, entryId);
+    if (!entry) return GIFT_NOT_FOUND;
+    if (!session.addToInventory(entry.itemId, entry.quantity)) return 'Inventory full for that item (max 99)';
+
+    this.mailboxes.removeEntry(username, entryId);
+    session.addLogEntry(`Accepted ${this.giftLabel(entry.itemId, entry.quantity)} from ${entry.fromUsername}`, 'unlock');
+
+    this.sendStateToPlayer(username);
+    return null;
+  }
+
+  /** Returns why the gift can't be declined, or null once it has been. */
+  denyGift(username: string, entryId: string): string | null {
+    const entry = this.mailboxes.findEntry(username, entryId);
+    if (!entry) return GIFT_NOT_FOUND;
+    const returnTo = this.accountStore.findByUsername(entry.fromUsername)?.username;
+    if (!entry.returned && !returnTo) return 'That gift can\'t be sent back';
+
+    this.mailboxes.removeEntry(username, entryId);
+    // A returned gift that is declined again is dropped, so it can't ping-pong forever.
+    if (!entry.returned && returnTo) {
+      this.mailboxes.addEntry(returnTo, username, entry.itemId, entry.quantity, { returned: true });
+      this.sendStateToPlayer(returnTo);
+    }
+    const session = this.sessions.get(username);
+    session?.addLogEntry(`Declined ${this.giftLabel(entry.itemId, entry.quantity)} from ${entry.fromUsername}`, 'move');
+
+    this.sendStateToPlayer(username);
+    return null;
+  }
+
+  /** At startup, so entries taken in from old saves are in the store before any player save drops them. */
+  saveMailboxes(): Promise<void> {
+    return this.inSaveOrder(async () => {
+      const boxes = this.mailboxes.snapshot();
+      await this.mailboxStore?.save(boxes);
+      this.savedMailboxes = boxes;
+    });
+  }
+
+  private giftLabel(itemId: string, quantity: number): string {
+    const name = this.content.getItem(itemId)?.name ?? itemId;
+    return quantity > 1 ? `${name} x${quantity}` : name;
+  }
+
+  /** A shutdown can land during a periodic save, and an older mailbox file must not be written last. */
+  private inSaveOrder(pass: () => Promise<void>): Promise<void> {
+    const done = this.saveQueue.then(pass);
+    this.saveQueue = done.catch(() => {});
+    return done;
+  }
+
+  /** A mailbox fault mustn't cost every player's progress too, so it is logged and tried again next pass. */
+  private async writeMailboxes(boxes: Mailboxes): Promise<void> {
+    try {
+      await this.mailboxStore?.save(boxes);
+      this.savedMailboxes = boxes;
+    } catch (err) {
+      console.error('[PlayerManager] Failed to save mailboxes:', err);
+    }
   }
 
   /** Check if a player has an item in their unequipped inventory. */
@@ -1127,10 +1569,16 @@ export class PlayerManager {
   /**
    * Save all sessions to the store.
    */
-  async saveAll(store: GameStateStore): Promise<void> {
-    const data = this.getAllSaveData();
-    if (data.length === 0) return;
-    await store.saveAll(data);
+  saveAll(store: GameStateStore): Promise<void> {
+    return this.inSaveOrder(async () => {
+      const boxes = this.mailboxes.snapshot();
+      const data = this.getAllSaveData();
+      // New entries land before player files change, and old ones go after, so a crash mid-pass can't lose a gift.
+      const onDiskOrRemoved = mailboxesWithEntriesFrom(this.savedMailboxes, this.mailboxes.takeRemoved());
+      await this.writeMailboxes(mailboxesWithEntriesFrom(onDiskOrRemoved, boxes));
+      if (data.length > 0) await store.saveAll(data);
+      await this.writeMailboxes(boxes);
+    });
   }
 
   /**

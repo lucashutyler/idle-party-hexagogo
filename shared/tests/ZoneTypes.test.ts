@@ -54,10 +54,9 @@ describe('ZoneTypes', () => {
     it('returns monsters for darkwood', () => {
       const monsters = createEncounter('darkwood', SEED_MONSTERS, SEED_ZONES, SEED_ENCOUNTERS);
       expect(monsters.length).toBeGreaterThanOrEqual(1);
-      expect(monsters.length).toBeLessThanOrEqual(3);
-      // darkwood has goblins, wolves, or bandits
+      expect(monsters.length).toBeLessThanOrEqual(4);
       for (const m of monsters) {
-        expect(['goblin', 'wolf', 'bandit']).toContain(m.id);
+        expect(['goblin', 'goblin_shaman', 'wolf', 'bandit', 'bandit_cutthroat']).toContain(m.id);
       }
     });
 

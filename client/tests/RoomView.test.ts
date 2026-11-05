@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { dismissTop } from '../src/ui/ModalStack';
 import { RoomView } from '../src/ui/RoomView';
 import type { TileClickInfo } from '../src/ui/ThreeWorldMap';
 import type { RoomAction } from '../src/ui/RoomActions';
@@ -296,5 +297,18 @@ describe('RoomView room actions', () => {
     (parent.querySelector('.room-view-action-dungeon') as HTMLElement).click();
     expect(onAction).toHaveBeenCalledWith(ACTIONS[2]);
     expect(overlay().style.display).toBe('none');
+  });
+
+  it('closes through Back and Escape, and leaves the stack when it does', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const view = new RoomView(parent, () => {});
+    view.show(makeInfo());
+    const overlay = parent.querySelector<HTMLElement>('.room-view-overlay')!;
+    expect(overlay.style.display).toBe('flex');
+
+    expect(dismissTop()).toBe(true);
+    expect(overlay.style.display).toBe('none');
+    expect(dismissTop()).toBe(false);
   });
 });

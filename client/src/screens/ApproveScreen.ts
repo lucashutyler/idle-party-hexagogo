@@ -65,10 +65,12 @@ export class ApproveScreen implements Screen {
     this.container.innerHTML = `
       <div class="login-content">
         <h1 class="login-title">Idle Party RPG</h1>
-        <p class="verify-message">Approving sign-in...</p>
-        <div class="login-error"></div>
-        <p class="approve-close-hint" style="display:none"></p>
-        <a href="/" class="verify-back-link" style="display:none">Back to sign in</a>
+        <div class="login-form verify-panel">
+          <p class="verify-message">Approving sign-in...</p>
+          <div class="login-error"></div>
+          <p class="approve-close-hint" style="display:none"></p>
+          <a href="/" class="verify-back-link" style="display:none">Back to sign in</a>
+        </div>
       </div>
     `;
 

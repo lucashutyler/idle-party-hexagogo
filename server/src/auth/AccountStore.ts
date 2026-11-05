@@ -2,6 +2,7 @@ import { readFile, writeFile, rename, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import type { AdminRole } from './AdminRoles.js';
+import { isReservedUsername, isStoreFileName } from './reservedUsernames.js';
 
 export interface SessionRecord {
   deviceToken: string;
@@ -37,6 +38,7 @@ export class AccountStore {
   // Only setUsername may change a username: accounts are handed out live, and this index would go stale.
   private accountsByLowerUsername = new Map<string, Account>();
   private accounts: AccountsData = {};
+  private writeQueue: Promise<void> = Promise.resolve();
 
   async load(): Promise<void> {
     if (!existsSync(ACCOUNTS_FILE)) {
@@ -53,9 +55,20 @@ export class AccountStore {
       this.accounts = {};
     }
     this.rebuildUsernameIndex();
+    for (const account of Object.values(this.accounts)) {
+      if (account?.username && isStoreFileName(account.username)) {
+        console.error(`[AccountStore] "${account.email}" holds the reserved name "${account.username}" and can't connect until it is renamed`);
+      }
+    }
   }
 
-  async save(): Promise<void> {
+  /** Writes run one at a time: they share a temp file, and an overlapping rename would fail. */
+  save(): Promise<void> {
+    this.writeQueue = this.writeQueue.then(() => this.writeNow(), () => this.writeNow());
+    return this.writeQueue;
+  }
+
+  private async writeNow(): Promise<void> {
     await mkdir(DATA_DIR, { recursive: true });
     const tmp = ACCOUNTS_FILE + '.tmp';
     await writeFile(tmp, JSON.stringify(this.accounts, null, 2), 'utf-8');
@@ -108,6 +121,8 @@ export class AccountStore {
   async setUsername(email: string, username: string): Promise<{ success: boolean; error?: string }> {
     const account = this.accounts[email.toLowerCase()];
     if (!account) return { success: false, error: 'Account not found' };
+
+    if (isReservedUsername(username)) return { success: false, error: 'That name is reserved' };
 
     // Check uniqueness (case-insensitive)
     const existing = this.findByUsername(username);

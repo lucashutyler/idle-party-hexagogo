@@ -17,6 +17,7 @@
     "test": "npm run test --workspaces --if-present",
     "test:shared": "npm run test --workspace=shared",
     "typecheck": "tsc --build",
+    "content:lab": "tsx tools/content-lab/cli.ts",
     "start": "NODE_ENV=production node server/dist/index.js"
   },
   "devDependencies": {

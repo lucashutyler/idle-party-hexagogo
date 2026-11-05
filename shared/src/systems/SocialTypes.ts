@@ -3,6 +3,7 @@
 import type { NotificationEntry, NotificationPreferences } from './NotificationTypes.js';
 // Must stay `import type`: erases the HenchmanTypes <-> SocialTypes cycle at compile time.
 import type { HiredHenchman } from './HenchmanTypes.js';
+import type { PartyAutoRetreatInfo } from './ForecastTypes.js';
 
 // --- Friend System ---
 export interface FriendRequest {
@@ -30,6 +31,8 @@ export interface GuildMemberEntry {
   role: 'leader' | 'member';
 }
 
+export const MIN_GUILD_LEVEL = 20;
+
 // --- Party System ---
 export type PartyRole = 'owner' | 'leader' | 'member';
 export type PartyGridPosition = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
@@ -51,6 +54,10 @@ export interface GamePartyInfo {
   members: GamePartyMember[];
   /** Never merge into `members` — member call sites all resolve an account. Grid slots are shared. */
   henchmen?: HiredHenchman[];
+  /** Auto-retreat policy in effect: the party owner's setting. */
+  autoRetreat?: PartyAutoRetreatInfo;
+  /** Digest of the party's forecast inputs; a forecast whose `partyKey` differs is stale. */
+  forecastKey?: string;
 }
 
 export interface PartyInvite {
@@ -129,6 +136,11 @@ export interface ChatChannel {
 
 // --- Block System ---
 export type BlockLevel = 'dm' | 'all';
+
+/** Own keys only: an older account can be called `constructor` or `__proto__`. */
+export function isBlockedUser(username: string, blocked: Readonly<Record<string, BlockLevel>>): boolean {
+  return Object.prototype.hasOwnProperty.call(blocked, username);
+}
 
 // --- Social State (sent to client) ---
 export interface PlayerListEntry {

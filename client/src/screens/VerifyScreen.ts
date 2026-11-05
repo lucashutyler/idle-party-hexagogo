@@ -88,10 +88,12 @@ export class VerifyScreen implements Screen {
     this.container.innerHTML = `
       <div class="login-content">
         <h1 class="login-title">Idle Party RPG</h1>
-        <p class="verify-message">Verifying your sign-in...</p>
-        <div class="login-error"></div>
-        <button class="verify-continue-btn login-button" style="display:none; max-width:280px;">Continue</button>
-        <a href="/" class="verify-back-link">Back to sign in</a>
+        <div class="login-form verify-panel">
+          <p class="verify-message">Verifying your sign-in...</p>
+          <div class="login-error"></div>
+          <button class="verify-continue-btn login-button" style="display:none">Continue</button>
+          <a href="/" class="verify-back-link">Back to sign in</a>
+        </div>
         <details class="verify-details" style="display:none;">
           <summary>Debug details</summary>
           <pre class="verify-debug-pre"></pre>

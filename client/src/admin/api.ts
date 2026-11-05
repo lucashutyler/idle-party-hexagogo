@@ -53,6 +53,11 @@ export function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** Any content value, escaped for an HTML attribute or text; null and undefined become ''. */
+export function escapeValue(value: unknown): string {
+  return escapeHtml(String(value ?? ''));
+}
+
 export function formatRelativeTime(iso: string | null): string {
   if (!iso) return '—';
   const diff = Date.now() - new Date(iso).getTime();

@@ -210,4 +210,300 @@ describe('ThreeWorldMap overlays', () => {
     expect(tip.style.display).toBe('block');
     expect([...tip.children].map(c => c.textContent)).toEqual(['Zone: Home', '🧙 Mira', '🗝️ Crystal Caves', '👥 1 player here']);
   });
+
+  it('draws the route as one line ending in a pin, instead of a dot per room', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    map.applyServerState(makeState({
+      party: { col: 0, row: 0, state: 'moving', path: [{ col: 1, row: 0 }, { col: 2, row: 0 }] } as ServerStateMessage['party'],
+    }));
+    const line = container.querySelector('.three-map-path .three-map-route-line')!;
+    expect(line.getAttribute('points')!.split(' ')).toHaveLength(3);
+    const pin = container.querySelector<HTMLElement>('.three-map-path-dest')!;
+    expect(parseFloat(pin.style.left)).toBeCloseTo(cubeToPixel(offsetToCube({ col: 2, row: 0 })).x, 4);
+    expect(container.querySelector('.three-map-path-step')).toBeNull();
+
+    map.applyServerState(makeState());
+    expect(container.querySelector('.three-map-path')!.children).toHaveLength(0);
+  });
+
+  it('keeps the party token topmost, with its class or initials, moved by transform', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    map.applyServerState(makeState());
+    const overlay = container.querySelector('.three-map-overlay')!;
+    const party = container.querySelector<HTMLElement>('.three-map-party')!;
+    expect(overlay.lastElementChild).toBe(party);
+    expect(party.querySelector('.three-map-party-initials')!.textContent).toBe('M');
+    expect(party.dataset.snap).toBe('1');
+
+    map.applyServerState(makeState({ character: { className: 'Knight' } as ServerStateMessage['character'] }));
+    expect(party.querySelector('.three-map-party-icon')).not.toBeNull();
+
+    map.applyServerState(makeState({ party: { col: 1, row: 0, state: 'moving', path: [] } as unknown as ServerStateMessage['party'] }));
+    const shop = cubeToPixel(offsetToCube({ col: 1, row: 0 }));
+    expect(party.style.transform).toBe(`translate(${shop.x}px, ${shop.y}px)`);
+    expect(party.style.left).toBe('');
+    expect(party.dataset.snap).toBe('0');
+  });
+
+  it('names explored zones only, away from the party and marked rooms', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    map.applyServerState(makeState({ unlocked: [] }));
+    expect(container.querySelector('.three-map-zone-label')).toBeNull();
+
+    map.applyServerState(makeState({ unlocked: ['t-shop', 't-home'] }));
+    const labels = [...container.querySelectorAll<HTMLElement>('.three-map-zone-label')];
+    expect(labels.map(l => l.textContent)).toEqual(['Zone']);
+    expect(labels[0].dataset.current).toBe('1');
+  });
+
+  it('never rebuilds the grid for exploring or for reopening the tab', async () => {
+    const cache = await makeCache();
+    const map = new ThreeWorldMap(container, cache);
+    map.applyServerState(makeState());
+    const getTiles = vi.spyOn(cache, 'getTiles');
+
+    map.applyServerState(makeState({ unlocked: ['t-home', 't-shop', 't-fog'] }));
+    map.applyServerState(makeState({ unlocked: ['t-home', 't-shop', 't-fog'] }), true);
+    expect(getTiles).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('.three-map-marker')).toHaveLength(3);
+
+    map.rebuildFromCache();
+    expect(getTiles).toHaveBeenCalledOnce();
+  });
+
+  it('switching map rebuilds and recentres', async () => {
+    const cache = await makeCache();
+    const map = new ThreeWorldMap(container, cache);
+    map.applyServerState(makeState());
+    const getTiles = vi.spyOn(cache, 'getTiles');
+    map.applyServerState(makeState({ currentMapId: 'cellar', party: { col: 2, row: 0, state: 'idle', path: [] } as unknown as ServerStateMessage['party'] }));
+    expect(getTiles).toHaveBeenCalled();
+    expect(container.querySelector('.three-map-party')!.getAttribute('data-snap')).toBe('1');
+  });
+
+  function press(canvas: Element, x: number, y: number): void {
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: x, clientY: y, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('mouseup', { clientX: x, clientY: y, bubbles: true }));
+  }
+
+  function touch(canvas: Element, type: string, points: { x: number; y: number }[]): void {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'touches', { value: points.map(p => ({ clientX: p.x, clientY: p.y })) });
+    canvas.dispatchEvent(event);
+  }
+
+  it('reports a room tap, and a tap on the sea or a blocked room separately', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    const onTile = vi.fn();
+    const onBackground = vi.fn();
+    map.setOnTileClick(onTile);
+    map.setOnBackgroundClick(onBackground);
+    map.applyServerState(makeState());
+    const canvas = container.querySelector('canvas')!;
+
+    press(canvas, 0, 0);
+    expect(onTile).toHaveBeenCalledOnce();
+    expect(onTile.mock.calls[0][0].roomName).toBe('Home');
+    expect(onBackground).not.toHaveBeenCalled();
+
+    press(canvas, 5000, 5000);
+    expect(onTile).toHaveBeenCalledOnce();
+    expect(onBackground).toHaveBeenCalledOnce();
+    expect(onBackground).toHaveBeenLastCalledWith(false);
+  });
+
+  it('tells a tap on a room that cannot be walked into from a tap on the sea', async () => {
+    const cache = await makeCache();
+    const original = cache.getTileTypeDef.bind(cache);
+    vi.spyOn(cache, 'getTileTypeDef').mockImplementation(type =>
+      ({ ...original(type)!, traversable: false }));
+    const map = new ThreeWorldMap(container, cache);
+    const onBackground = vi.fn();
+    map.setOnBackgroundClick(onBackground);
+    map.applyServerState(makeState());
+
+    press(container.querySelector('canvas')!, 0, 0);
+    expect(onBackground).toHaveBeenLastCalledWith(true);
+  });
+
+  describe('a press during a camera tween', () => {
+    function sized(): HTMLElement {
+      const el = document.createElement('div');
+      Object.defineProperty(el, 'clientWidth', { value: 400 });
+      Object.defineProperty(el, 'clientHeight', { value: 400 });
+      document.body.appendChild(el);
+      return el;
+    }
+
+    it('stops the camera where it was drawn, draws again, and hits what was on screen', async () => {
+      localStorage.setItem('mapZoom2', '1');
+      const frames: FrameRequestCallback[] = [];
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
+      vi.stubGlobal('cancelAnimationFrame', () => {});
+      const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+      const runFrames = () => { for (const frame of frames.splice(0)) frame(performance.now()); };
+      try {
+        const el = sized();
+        const map = new ThreeWorldMap(el, await makeCache());
+        const onTile = vi.fn();
+        map.setOnTileClick(onTile);
+        map.applyServerState(makeState());
+        runFrames();
+        const overlay = el.querySelector<HTMLElement>('.three-map-overlay')!;
+        const home = cubeToPixel(offsetToCube({ col: 0, row: 0 }));
+        expect(overlay.style.transform).toContain(`translate(${-home.x}px, ${-home.y}px)`);
+
+        map.focusOn(2, 0);
+        runFrames();
+        now.mockReturnValue(1010);
+        runFrames();
+        const midTween = overlay.style.transform;
+        expect(midTween).not.toContain(`translate(${-home.x}px, ${-home.y}px)`);
+
+        const canvas = el.querySelector('canvas')!;
+        canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 200, clientY: 200, bubbles: true }));
+        expect(frames.length).toBeGreaterThan(0);
+        now.mockReturnValue(5000);
+        runFrames();
+        expect(overlay.style.transform).toBe(midTween);
+
+        window.dispatchEvent(new MouseEvent('mouseup', { clientX: 200, clientY: 200, bubbles: true }));
+        expect(onTile.mock.calls[0][0].col).toBe(0);
+      } finally {
+        vi.unstubAllGlobals();
+        now.mockRestore();
+        localStorage.removeItem('mapZoom2');
+      }
+    });
+  });
+
+  it('does not treat a pinch release as a tap', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    const onTile = vi.fn();
+    map.setOnTileClick(onTile);
+    map.applyServerState(makeState());
+    const canvas = container.querySelector('canvas')!;
+
+    touch(canvas, 'touchstart', [{ x: 0, y: 0 }]);
+    touch(canvas, 'touchstart', [{ x: 0, y: 0 }, { x: 40, y: 0 }]);
+    touch(canvas, 'touchmove', [{ x: 0, y: 0 }, { x: 80, y: 0 }]);
+    touch(canvas, 'touchend', [{ x: 0, y: 0 }]);
+    touch(canvas, 'touchend', []);
+    expect(onTile).not.toHaveBeenCalled();
+
+    touch(canvas, 'touchstart', [{ x: 0, y: 0 }]);
+    touch(canvas, 'touchend', []);
+    expect(onTile).toHaveBeenCalledOnce();
+  });
+
+  it('writes the zoom only at the end of a pinch', async () => {
+    localStorage.removeItem('mapZoom2');
+    const map = new ThreeWorldMap(container, await makeCache());
+    map.applyServerState(makeState());
+    const canvas = container.querySelector('canvas')!;
+
+    touch(canvas, 'touchstart', [{ x: 0, y: 0 }, { x: 40, y: 0 }]);
+    touch(canvas, 'touchmove', [{ x: 0, y: 0 }, { x: 60, y: 0 }]);
+    touch(canvas, 'touchmove', [{ x: 0, y: 0 }, { x: 80, y: 0 }]);
+    expect(localStorage.getItem('mapZoom2')).toBeNull();
+    touch(canvas, 'touchend', []);
+    expect(localStorage.getItem('mapZoom2')).toBe('2');
+    localStorage.removeItem('mapZoom2');
+  });
+
+  it('stops following once the player drags, until asked to recentre', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    const onFollow = vi.fn();
+    map.setOnFollowChange(onFollow);
+    map.applyServerState(makeState());
+    expect(onFollow.mock.lastCall).toEqual([true]);
+    const canvas = container.querySelector('canvas')!;
+
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: 0, clientY: 0, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 30, clientY: 0, bubbles: true }));
+    window.dispatchEvent(new MouseEvent('mouseup', { clientX: 30, clientY: 0, bubbles: true }));
+    expect(onFollow.mock.lastCall).toEqual([false]);
+
+    map.recenterOnPlayer();
+    expect(onFollow.mock.lastCall).toEqual([true]);
+  });
+
+  it('outlines the selected room', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    const outline = container.querySelector<HTMLElement>('.three-map-selected')!;
+    expect(outline.style.display).toBe('none');
+    map.setSelectedRoom({ col: 1, row: 0 });
+    expect(outline.style.display).toBe('');
+    expect(parseFloat(outline.style.left)).toBeCloseTo(cubeToPixel(offsetToCube({ col: 1, row: 0 })).x, 4);
+    map.setSelectedRoom(null);
+    expect(outline.style.display).toBe('none');
+  });
+
+  describe('resizing', () => {
+    it('redraws in the same frame, and leaves the canvas alone when the size is unchanged', async () => {
+      let width = 400;
+      Object.defineProperty(container, 'clientWidth', { get: () => width });
+      Object.defineProperty(container, 'clientHeight', { value: 600 });
+      const map = new ThreeWorldMap(container, await makeCache());
+      const { renderer } = map as unknown as { renderer: { render(): void; setSize(): void } };
+      const render = vi.spyOn(renderer, 'render');
+      const setSize = vi.spyOn(renderer, 'setSize');
+
+      width = 300;
+      window.dispatchEvent(new Event('resize'));
+      expect(setSize).toHaveBeenCalledTimes(1);
+      expect(render).toHaveBeenCalledTimes(1);
+
+      window.dispatchEvent(new Event('resize'));
+      expect(setSize).toHaveBeenCalledTimes(1);
+      map.destroy();
+    });
+
+    it('does not draw a paused map', async () => {
+      let width = 400;
+      Object.defineProperty(container, 'clientWidth', { get: () => width });
+      Object.defineProperty(container, 'clientHeight', { value: 600 });
+      const map = new ThreeWorldMap(container, await makeCache());
+      const { renderer } = map as unknown as { renderer: { render(): void } };
+      const render = vi.spyOn(renderer, 'render');
+
+      map.pause();
+      width = 300;
+      window.dispatchEvent(new Event('resize'));
+      expect(render).not.toHaveBeenCalled();
+      map.destroy();
+    });
+  });
+
+  describe('default zoom', () => {
+    function sized(width: number): HTMLElement {
+      const el = document.createElement('div');
+      Object.defineProperty(el, 'clientWidth', { value: width });
+      Object.defineProperty(el, 'clientHeight', { value: 600 });
+      document.body.appendChild(el);
+      return el;
+    }
+
+    beforeEach(() => { localStorage.removeItem('mapZoom2'); });
+
+    it('is closer in on phones than desktop, and a stored zoom wins', async () => {
+      const inner = vi.spyOn(window, 'innerWidth', 'get');
+      inner.mockReturnValue(375);
+      const phone = sized(375);
+      new ThreeWorldMap(phone, await makeCache());
+      expect(phone.querySelector<HTMLElement>('.three-map-overlay')!.style.getPropertyValue('--map-zoom')).toBe('0.65');
+
+      inner.mockReturnValue(1280);
+      const desktop = sized(1000);
+      new ThreeWorldMap(desktop, await makeCache());
+      expect(desktop.querySelector<HTMLElement>('.three-map-overlay')!.style.getPropertyValue('--map-zoom')).toBe('1');
+
+      localStorage.setItem('mapZoom2', '1.5');
+      const stored = sized(1000);
+      new ThreeWorldMap(stored, await makeCache());
+      expect(stored.querySelector<HTMLElement>('.three-map-overlay')!.style.getPropertyValue('--map-zoom')).toBe('1.5');
+      inner.mockRestore();
+      localStorage.removeItem('mapZoom2');
+    });
+  });
 });

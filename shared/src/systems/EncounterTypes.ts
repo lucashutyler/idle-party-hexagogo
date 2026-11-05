@@ -39,7 +39,10 @@ export const SEED_ENCOUNTERS: Record<string, EncounterDefinition> = {
     id: 'darkwood_goblins',
     name: 'Darkwood Goblins',
     type: 'random',
-    monsterPool: [{ monsterId: 'goblin', min: 2, max: 3 }],
+    monsterPool: [
+      { monsterId: 'goblin', min: 2, max: 3 },
+      { monsterId: 'goblin_shaman', min: 0, max: 1 },
+    ],
     roomMax: 9,
   },
   darkwood_wolves: {
@@ -53,14 +56,20 @@ export const SEED_ENCOUNTERS: Record<string, EncounterDefinition> = {
     id: 'darkwood_bandits',
     name: 'Darkwood Bandits',
     type: 'random',
-    monsterPool: [{ monsterId: 'bandit', min: 1, max: 2 }],
+    monsterPool: [
+      { monsterId: 'bandit', min: 1, max: 2 },
+      { monsterId: 'bandit_cutthroat', min: 0, max: 1 },
+    ],
     roomMax: 9,
   },
   crystal_caves_goblins: {
     id: 'crystal_caves_goblins',
     name: 'Crystal Caves Goblins',
     type: 'random',
-    monsterPool: [{ monsterId: 'goblin', min: 1, max: 2 }],
+    monsterPool: [
+      { monsterId: 'goblin', min: 1, max: 2 },
+      { monsterId: 'goblin_shaman', min: 0, max: 1 },
+    ],
     roomMax: 9,
   },
   crystal_caves_wolves: {
@@ -69,6 +78,16 @@ export const SEED_ENCOUNTERS: Record<string, EncounterDefinition> = {
     type: 'random',
     monsterPool: [{ monsterId: 'wolf', min: 1, max: 2 }],
     roomMax: 9,
+  },
+  goblin_chieftain_court: {
+    id: 'goblin_chieftain_court',
+    name: "Goblin Chieftain's Court",
+    type: 'explicit',
+    placements: [
+      { monsterId: 'goblin_chieftain', gridPosition: 4 },
+      { monsterId: 'goblin', gridPosition: 1 },
+      { monsterId: 'goblin', gridPosition: 7 },
+    ],
   },
 };
 
@@ -81,11 +100,12 @@ export const SEED_ENCOUNTERS: Record<string, EncounterDefinition> = {
 export function resolveEncounter(
   encounter: EncounterDefinition,
   monsters: Record<string, MonsterDefinition>,
+  rng: () => number = Math.random,
 ): MonsterInstance[] {
   if (encounter.type === 'explicit') {
     return resolveExplicit(encounter, monsters);
   }
-  return resolveRandom(encounter, monsters);
+  return resolveRandom(encounter, monsters, rng);
 }
 
 function resolveExplicit(
@@ -107,6 +127,7 @@ function resolveExplicit(
 function resolveRandom(
   encounter: EncounterDefinition,
   monsters: Record<string, MonsterDefinition>,
+  rng: () => number,
 ): MonsterInstance[] {
   if (!encounter.monsterPool?.length) return [];
 
@@ -117,7 +138,7 @@ function resolveRandom(
   for (const entry of encounter.monsterPool) {
     const def = monsters[entry.monsterId];
     if (!def) continue;
-    const count = entry.min + Math.floor(Math.random() * (entry.max - entry.min + 1));
+    const count = entry.min + Math.floor(rng() * (entry.max - entry.min + 1));
     if (count > 0) {
       rolled.push({ monsterId: entry.monsterId, count });
     }
@@ -149,14 +170,14 @@ function resolveRandom(
 
   // Shuffle (Fisher-Yates)
   for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
 
   // Generate random unique grid positions
   const allPositions: PartyGridPosition[] = [0, 1, 2, 3, 4, 5, 6, 7, 8];
   for (let i = allPositions.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [allPositions[i], allPositions[j]] = [allPositions[j], allPositions[i]];
   }
 
@@ -174,9 +195,9 @@ function resolveRandom(
 // --- Encounter Table Resolution ---
 
 /** Pick a random entry from a weighted encounter table. */
-function pickWeightedEncounter(table: EncounterTableEntry[]): EncounterTableEntry {
+export function pickWeightedEncounter(table: EncounterTableEntry[], rng: () => number = Math.random): EncounterTableEntry {
   const totalWeight = table.reduce((sum, e) => sum + e.weight, 0);
-  let roll = Math.random() * totalWeight;
+  let roll = rng() * totalWeight;
   for (const entry of table) {
     roll -= entry.weight;
     if (roll <= 0) return entry;
@@ -197,6 +218,7 @@ export function createEncounter(
   zones: Record<string, ZoneDefinition>,
   encounters: Record<string, EncounterDefinition>,
   roomEncounterTable?: EncounterTableEntry[],
+  rng: () => number = Math.random,
 ): MonsterInstance[] {
   const fallbackDef = monsters['goblin'] ?? Object.values(monsters)[0];
   if (!fallbackDef) return [];
@@ -218,7 +240,7 @@ export function createEncounter(
     ];
   }
 
-  const entry = pickWeightedEncounter(encounterTable);
+  const entry = pickWeightedEncounter(encounterTable, rng);
   const encounterDef = encounters[entry.encounterId];
   if (!encounterDef) {
     return [
@@ -227,7 +249,7 @@ export function createEncounter(
     ];
   }
 
-  const result = resolveEncounter(encounterDef, monsters);
+  const result = resolveEncounter(encounterDef, monsters, rng);
   if (result.length === 0) {
     return [
       createMonsterInstance(fallbackDef, FALLBACK_POSITIONS[0]),

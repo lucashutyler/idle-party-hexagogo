@@ -1,4 +1,4 @@
-import type { CompletedQuestEntry, QuestDefinition, QuestProgressEntry, ServerStateMessage } from '@idle-party-rpg/shared';
+import type { CompletedQuestEntry, QuestDefinition, QuestObjective, QuestProgressEntry, ServerStateMessage } from '@idle-party-rpg/shared';
 import { getObjectiveTarget } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
@@ -18,14 +18,27 @@ import { deferWhilePressed, setHtml } from './render';
 
 const UNKNOWN_QUEST = 'Unknown quest';
 
-/** Settings → Quest Log modal: who has new quests, active quests (ready first), then a collapsed completed history. */
+/** Thin bar for counted objectives; a one-step objective's tick already says it all. */
+export function objectiveBarHtml(obj: QuestObjective, progress: number): string {
+  const target = getObjectiveTarget(obj);
+  if (target <= 1) return '';
+  const fraction = Math.min(1, Math.max(0, progress / target));
+  return `<span class="quest-progress" aria-hidden="true"><span class="quest-progress-fill" style="transform:scaleX(${fraction.toFixed(3)})"></span></span>`;
+}
+
+/** Quest Log modal, owned by App: who has new quests, active quests (ready first), then a collapsed completed history. */
 export class QuestLog {
   private overlay: HTMLElement | null = null;
   private body: HTMLElement | null = null;
   private unsubscribe: (() => void) | null = null;
   private showCompleted = false;
+  private currentMapId: string | undefined;
 
-  constructor(private gameClient: GameClient, private worldCache: WorldCache) {}
+  constructor(
+    private gameClient: GameClient,
+    private worldCache: WorldCache,
+    readonly onGoToRoom?: (roomId: string) => void,
+  ) {}
 
   open(): void {
     if (this.overlay) return;
@@ -51,12 +64,19 @@ export class QuestLog {
     });
     overlay.querySelector('.player-options-close')!.addEventListener('click', () => this.close());
     this.body.addEventListener('click', (e) => {
-      if (!(e.target instanceof Element) || !e.target.closest('.quest-log-completed-toggle')) return;
+      if (!(e.target instanceof Element)) return;
+      const roomId = e.target.closest<HTMLElement>('.quest-log-go')?.dataset.roomId;
+      if (roomId) {
+        this.close();
+        this.onGoToRoom?.(roomId);
+        return;
+      }
+      if (!e.target.closest('.quest-log-completed-toggle')) return;
       this.showCompleted = !this.showCompleted;
       this.render(this.gameClient.lastState);
     });
 
-    bringToFront(overlay);
+    bringToFront(overlay, () => this.close());
     wireFocusOnInteract(overlay);
 
     this.render(this.gameClient.lastState);
@@ -86,6 +106,7 @@ export class QuestLog {
     const resolutions = state?.questResolutions;
     const unlocked = new Set(state?.unlocked ?? []);
     const active = sortActiveQuests(state?.activeQuests ?? []);
+    this.currentMapId = state?.currentMapId;
 
     const activeHtml = active.length > 0
       ? active.map(entry => this.renderActive(entry, defs[entry.questId], resolutions, unlocked)).join('')
@@ -108,7 +129,7 @@ export class QuestLog {
       <div class="quest-log-givers">
         <div class="quest-log-givers-title">Quests available from</div>
         <ul class="quest-log-givers-list">
-          ${locations.map(loc => `<li class="quest-log-giver">${locationText(loc)}</li>`).join('')}
+          ${locations.map(loc => `<li class="quest-log-giver">${this.locationHtml(loc)}</li>`).join('')}
         </ul>
       </div>
     `;
@@ -124,7 +145,7 @@ export class QuestLog {
     const objectives = (def?.objectives ?? []).map((obj, i) => {
       const progress = entry.progress[i] ?? 0;
       const done = progress >= getObjectiveTarget(obj);
-      return `<div class="quest-objective${done ? ' quest-objective-done' : ''}">${done ? '✓' : '•'} ${objectiveText(obj, progress, resolutions)}</div>`;
+      return `<div class="quest-objective${done ? ' quest-objective-done' : ''}">${done ? '✓' : '•'} ${objectiveText(obj, progress, resolutions)}${objectiveBarHtml(obj, progress)}</div>`;
     }).join('');
 
     return `
@@ -154,9 +175,16 @@ export class QuestLog {
     if (locations.length === 0) return '';
     return `
       <div class="quest-log-turnin${ready ? ' quest-log-turnin-ready' : ''}">
-        Turn in to: ${locations.map(locationText).join(' or ')}
+        <span class="quest-log-turnin-label">Turn in to:</span> ${locations.map(loc => this.locationHtml(loc)).join(' <span class="quest-log-or">or</span> ')}
       </div>
     `;
+  }
+
+  /** A button when the room is on this map and someone can take us there; otherwise just the words. */
+  private locationHtml(loc: NpcLocation): string {
+    const text = locationText(loc);
+    if (!this.onGoToRoom || !loc.roomId || loc.mapId !== this.currentMapId) return text;
+    return `<button type="button" class="quest-log-go" data-room-id="${escapeHtml(loc.roomId)}">${text}</button>`;
   }
 
   private renderCompleted(

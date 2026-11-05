@@ -22,7 +22,13 @@
 import { TileType } from '../hex/HexTile.js';
 import { DEFAULT_MAP_ID } from '../hex/MapSchema.js';
 import type { WorldTileDefinition } from '../hex/MapSchema.js';
-import type { ZoneDefinition } from '../systems/ZoneTypes.js';
+import type { EncounterTableEntry, ZoneDefinition } from '../systems/ZoneTypes.js';
+import type { EncounterDefinition } from '../systems/EncounterTypes.js';
+import type { MonsterDefinition, MonsterSkillEntry, MonsterTier } from '../systems/MonsterTypes.js';
+import type { DungeonDefinition } from '../systems/DungeonTypes.js';
+import type { DamageType } from '../systems/CharacterStats.js';
+import { suggestMonsterStats } from '../systems/MonsterTemplates.js';
+import type { MonsterRole } from '../systems/MonsterTemplates.js';
 import {
   type CubeCoord,
   cubeDistance,
@@ -33,7 +39,7 @@ import {
 } from '../hex/HexUtils.js';
 
 /** Bumped when the generator's output structure changes. */
-export const DEV_SEED_VERSION = 1;
+export const DEV_SEED_VERSION = 3;
 
 /** Prefix shared by every generated zone id; lets server-side code
  *  recognise + skip already-seeded content idempotently. */
@@ -42,6 +48,14 @@ export const DEV_ZONE_PREFIX = 'dev_';
 /** First zone in the generated output; presence of this id in the
  *  ContentStore indicates the dev seed has already been applied. */
 export const DEV_SEED_MARKER_ZONE_ID = `${DEV_ZONE_PREFIX}sunscar_plains`;
+
+/** The single encounter every dev zone used before v3; an untouched v2 zone table is exactly `[{ this, weight 1 }]`. */
+export const DEV_MIXED_ENCOUNTER_ID = `${DEV_ZONE_PREFIX}mixed`;
+
+/** The v3 raid dungeon; its presence marks a dev world that already has v3 content. */
+export const DEV_RAID_DUNGEON_ID = `${DEV_ZONE_PREFIX}sunken_throne`;
+const DEV_RAID_LEVEL = 25;
+const DEV_RAID_ENTRANCE_ZONE_ID = `${DEV_ZONE_PREFIX}forgotten_vale`;
 
 // ─── PRNG ────────────────────────────────────────────────────────
 // mulberry32 — small, fast, well-distributed, fine for layout
@@ -538,11 +552,160 @@ function toRoman(n: number): string {
   return out;
 }
 
+// ─── Zone content (monsters + encounters) ────────────────────────
+
+type DevRole = 'brute' | 'skirmisher' | 'caster' | 'elite';
+
+const DEV_ROLE_NOUNS: Record<DevRole, readonly string[]> = {
+  brute: ['Brute', 'Ogre', 'Crusher', 'Bulwark', 'Hulk'],
+  skirmisher: ['Raider', 'Stalker', 'Skulker', 'Prowler', 'Cutpurse'],
+  caster: ['Hexer', 'Shaman', 'Mystic', 'Oracle', 'Warlock'],
+  elite: ['Warlord', 'Champion', 'Matriarch', 'Warden', 'Tyrant'],
+};
+
+/** Encounter-table weights: two-monster packs are the zone's typical fight, the warband is party content. */
+const DEV_ENCOUNTER_WEIGHTS = { pack: 4, casters: 3, lone: 2, warband: 1 } as const;
+
+interface DevMonsterSpec {
+  id: string;
+  name: string;
+  level: number;
+  tier: MonsterTier;
+  role?: MonsterRole;
+  damageType: DamageType;
+  /** Auto-attack damage multiplier, for monsters whose skills carry part of their damage. */
+  autoShare?: number;
+  skills?: (autoDamage: number) => MonsterSkillEntry[];
+  description?: string;
+}
+
+function devMonster(spec: DevMonsterSpec): MonsterDefinition {
+  const stats = suggestMonsterStats(spec.level, spec.tier, spec.role);
+  const def: MonsterDefinition = {
+    id: spec.id,
+    name: spec.name,
+    hp: stats.hp,
+    damage: Math.max(1, Math.round(stats.damage * (spec.autoShare ?? 1))),
+    damageType: spec.damageType,
+    attackInterval: stats.attackInterval,
+    xp: stats.xp,
+    goldMin: stats.goldMin,
+    goldMax: stats.goldMax,
+    level: spec.level,
+  };
+  if (spec.tier !== 'trash') def.tier = spec.tier;
+  if (spec.skills) def.skills = spec.skills(stats.damage);
+  if (spec.description) def.description = spec.description;
+  return def;
+}
+
+function randomEncounter(id: string, name: string, pool: [string, number, number][], roomMax = 9): EncounterDefinition {
+  return { id, name, type: 'random', monsterPool: pool.map(([monsterId, min, max]) => ({ monsterId, min, max })), roomMax };
+}
+
+interface DevZoneContent {
+  monsters: MonsterDefinition[];
+  encounters: EncounterDefinition[];
+  table: EncounterTableEntry[];
+}
+
+/** Four authored-level monsters per zone (brute at the low end of the range, caster and elite at the top). */
+function devZoneContent(theme: ZoneTheme, zoneId: string, index: number): DevZoneContent {
+  const [lo, hi] = theme.levelRange;
+  const mid = Math.round((lo + hi) / 2);
+  const word = theme.adjectives[0];
+  const noun = (role: DevRole) => DEV_ROLE_NOUNS[role][index % DEV_ROLE_NOUNS[role].length];
+  const id = (role: DevRole) => `${zoneId}_${role}`;
+  const monsters = [
+    devMonster({ id: id('brute'), name: `${word} ${noun('brute')}`, level: lo, tier: 'trash', role: 'bruiser', damageType: 'physical' }),
+    devMonster({ id: id('skirmisher'), name: `${word} ${noun('skirmisher')}`, level: mid, tier: 'trash', role: 'skirmisher', damageType: 'physical' }),
+    devMonster({
+      id: id('caster'), name: `${word} ${noun('caster')}`, level: hi, tier: 'trash', role: 'caster', damageType: 'magical', autoShare: 0.75,
+      skills: dmg => [{ skillId: 'fireball', value: Math.max(1, Math.round(dmg * 1.2)), cooldown: 8 }],
+    }),
+    devMonster({
+      id: id('elite'), name: `${word} ${noun('elite')}`, level: hi, tier: 'elite', damageType: 'physical',
+      skills: dmg => [{ skillId: 'assassinate', value: Math.max(1, dmg * 2), cooldown: 8 }],
+    }),
+  ];
+  const encounters = [
+    randomEncounter(`${zoneId}_pack`, `${theme.displayName} Pack`, [[id('brute'), 1, 1], [id('skirmisher'), 1, 1]]),
+    randomEncounter(`${zoneId}_casters`, `${theme.displayName} Casters`, [[id('skirmisher'), 1, 1], [id('caster'), 1, 1]]),
+    randomEncounter(`${zoneId}_lone`, `Lone ${word} ${noun('brute')}`, [[id('brute'), 1, 1]]),
+    randomEncounter(`${zoneId}_warband`, `${theme.displayName} Warband`, [[id('brute'), 1, 2], [id('skirmisher'), 1, 2], [id('caster'), 0, 1], [id('elite'), 1, 1]], 5),
+  ];
+  const table: EncounterTableEntry[] = [
+    { encounterId: `${zoneId}_pack`, weight: DEV_ENCOUNTER_WEIGHTS.pack },
+    { encounterId: `${zoneId}_casters`, weight: DEV_ENCOUNTER_WEIGHTS.casters },
+    { encounterId: `${zoneId}_lone`, weight: DEV_ENCOUNTER_WEIGHTS.lone },
+    { encounterId: `${zoneId}_warband`, weight: DEV_ENCOUNTER_WEIGHTS.warband },
+  ];
+  return { monsters, encounters, table };
+}
+
+interface DevRaidContent {
+  monsters: MonsterDefinition[];
+  encounters: EncounterDefinition[];
+  dungeon: DungeonDefinition;
+}
+
+/** A raid for a full party of 5 at level 25: a short antechamber, then a checkpointed ~45-minute boss. */
+function devRaidContent(): DevRaidContent {
+  const king = devMonster({
+    id: `${DEV_ZONE_PREFIX}drowned_king`, name: 'The Drowned King', level: DEV_RAID_LEVEL, tier: 'raid', damageType: 'physical', autoShare: 0.66,
+    skills: () => [{ skillId: 'fireball', value: 32, cooldown: 12 }, { skillId: 'fear', value: 0, cooldown: 20 }],
+    description: 'A crowned corpse on a throne of coral, still holding court beneath the tide. A raid for a full party.',
+  });
+  king.enrage = { afterSeconds: 3600 };
+  const sentinel = devMonster({
+    id: `${DEV_ZONE_PREFIX}tidebound_sentinel`, name: 'Tidebound Sentinel', level: DEV_RAID_LEVEL, tier: 'elite', damageType: 'physical',
+    skills: dmg => [{ skillId: 'assassinate', value: dmg * 2, cooldown: 8 }],
+  });
+  const thrall = devMonster({ id: `${DEV_ZONE_PREFIX}drowned_thrall`, name: 'Drowned Thrall', level: DEV_RAID_LEVEL, tier: 'trash', role: 'skirmisher', damageType: 'physical' });
+  const antechamber: EncounterDefinition = {
+    id: `${DEV_ZONE_PREFIX}sunken_antechamber`, name: 'Sunken Antechamber', type: 'explicit',
+    placements: [{ monsterId: sentinel.id, gridPosition: 4 }, { monsterId: thrall.id, gridPosition: 1 }, { monsterId: thrall.id, gridPosition: 7 }],
+  };
+  const throneRoom: EncounterDefinition = {
+    id: `${DEV_ZONE_PREFIX}sunken_throne_room`, name: 'The Sunken Throne', type: 'explicit',
+    placements: [{ monsterId: king.id, gridPosition: 4 }],
+  };
+  const dungeon: DungeonDefinition = {
+    id: DEV_RAID_DUNGEON_ID,
+    name: 'The Sunken Throne',
+    description: 'A drowned hall beneath the Forgotten Vale. Built for a full party of five around level 25; falling on the throne floor regroups you at the last checkpoint.',
+    floors: [
+      { floorNumber: 1, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: antechamber.id, weight: 1 }] },
+      {
+        floorNumber: 2, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: throneRoom.id, weight: 1 }],
+        isBoss: true, checkpoints: [0.8, 0.6, 0.4, 0.2], maxWipes: 3,
+      },
+    ],
+    entryRequirements: { minLevel: 20, maxPartySize: 5 },
+  };
+  return { monsters: [king, sentinel, thrall], encounters: [antechamber, throneRoom], dungeon };
+}
+
+/** Turns the vale's first walkable room into the raid entrance. */
+function placeRaidEntrance(tiles: WorldTileDefinition[]): void {
+  const entrance = tiles.find(t => t.zone === DEV_RAID_ENTRANCE_ZONE_ID && TRAVERSABLE_TYPES.has(t.type));
+  if (!entrance) return;
+  entrance.type = TileType.Dungeon;
+  entrance.name = 'Sunken Stair';
+  entrance.dungeonId = DEV_RAID_DUNGEON_ID;
+}
+
 // ─── Main generator ───────────────────────────────────────────────
 
 export interface DevWorldOutput {
   zones: ZoneDefinition[];
   tiles: WorldTileDefinition[];
+  /** Encounters the dev zones and the raid reference; merge them alongside the zones. */
+  encounters: EncounterDefinition[];
+  /** Zone-scaled monsters (authored levels) plus the raid's; merge only when missing. */
+  monsters: MonsterDefinition[];
+  /** The dev raid; one room in the Forgotten Vale links to it. */
+  dungeons: DungeonDefinition[];
 }
 
 export interface GenerateOptions {
@@ -567,17 +730,19 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
 
   const zones: ZoneDefinition[] = [];
   const tiles: WorldTileDefinition[] = [];
+  const monsters: MonsterDefinition[] = [];
+  const encounters: EncounterDefinition[] = [];
 
   for (let i = 0; i < THEMES.length; i++) {
     const theme = THEMES[i];
     const zoneId = `${DEV_ZONE_PREFIX}${theme.key}`;
+    const content = devZoneContent(theme, zoneId, i);
+    monsters.push(...content.monsters);
+    encounters.push(...content.encounters);
     zones.push({
       id: zoneId,
       displayName: theme.displayName,
-      // Dev zones don't reference real encounters — encounter IDs that
-      // don't exist in ContentStore would crash combat. Empty table is
-      // safe: the encounter selector falls back gracefully.
-      encounterTable: [],
+      encounterTable: content.table,
       levelRange: theme.levelRange,
     });
 
@@ -611,8 +776,8 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
   }
 
   // The "Old Roads" approach zone holds the anchor + all bridge tiles
-  // that the connectivity pass adds below. Empty encounter table — no
-  // combat on the road.
+  // that the connectivity pass adds below. Its empty table falls back
+  // to the default goblin pair.
   zones.push({
     id: BRIDGE_ZONE_ID,
     displayName: BRIDGE_ZONE_NAME,
@@ -638,8 +803,16 @@ export function generateDevWorld(opts: GenerateOptions = {}): DevWorldOutput {
   tiles.push(...deduped);
 
   ensureConnectivity(tiles, rng, idFactory);
+  placeRaidEntrance(tiles);
 
-  return { zones, tiles };
+  const raid = devRaidContent();
+  return {
+    zones,
+    tiles,
+    encounters: [...encounters, ...raid.encounters],
+    monsters: [...monsters, ...raid.monsters],
+    dungeons: [raid.dungeon],
+  };
 }
 
 /**

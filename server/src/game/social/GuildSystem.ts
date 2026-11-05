@@ -1,7 +1,6 @@
+import { MIN_GUILD_LEVEL } from '@idle-party-rpg/shared';
 import type { GuildInfo, GuildMemberEntry } from '@idle-party-rpg/shared';
 import type { GuildStore, GuildData } from './GuildStore.js';
-
-const MIN_GUILD_LEVEL = 20;
 
 let guildIdCounter = 0;
 
