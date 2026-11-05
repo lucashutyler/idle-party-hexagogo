@@ -55,7 +55,7 @@ Block lists are plain objects keyed by username, and `constructor` and `__proto_
 
 ## Renames
 
-`POST /auth/username` on an account that already has a name reaches `PlayerManager.renamePlayer`. The client only asks for a name once, so today this takes a hand-made request.
+Renames are turned off: `POST /auth/username` refuses a different name on an account that already has one, because most state doesn't follow a rename yet. So nothing calls `PlayerManager.renamePlayer` outside tests. It stays, with its block handling, because that part is finished and tested and real renames will need it. The rest of this section describes what `renamePlayer` does when called.
 
 **Blocks follow the rename.** `renamePlayer` moves the old name to the new one, at the same level, in every in-memory session's `blockedUsers`, whether or not the renamed player has a session. `isBlockedMessage`, `isTradeBlocked` and the `dm_received` check then keep applying, and whoever takes the old name next isn't blocked.
 

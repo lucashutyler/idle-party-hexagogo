@@ -148,9 +148,6 @@ app.use('/auth', createAuthRoutes({
   accountStore,
   tokenStore,
   inviteListStore,
-  onRenamePlayer: (oldUsername, newUsername) => {
-    playerManager.renamePlayer(oldUsername, newUsername);
-  },
 }));
 
 // Auth middleware for game API endpoints
