@@ -67,8 +67,10 @@ function makeState(parts: StateParts = {}): ServerStateMessage {
       plate: { id: 'plate', name: 'Iron Plate', rarity: 'rare', equipSlot: 'chest' },
     } as ClientCraftingState['itemDefs'],
   };
+  const { recipes, itemDefs, ...progress } = crafting;
   return {
-    crafting,
+    crafting: progress,
+    craftingCatalog: { recipes, itemDefs },
     character: { inventory: { ore: parts.ore ?? 3 }, equipment: {}, className: 'Warrior', level: 5 },
     itemDefinitions: {},
   } as unknown as ServerStateMessage;

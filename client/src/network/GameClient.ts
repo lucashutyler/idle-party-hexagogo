@@ -1,6 +1,7 @@
 import type { ServerStateMessage, ServerEquipBlockedMessage, ServerCombatMessage,
   ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode,
   ServerForecastMessage, ServerBestiaryMessage, ForecastTarget, ForecastRequestTarget, AutoRetreatPct, AwayLedger, ItemDefinition } from '@idle-party-rpg/shared';
+import { restoreElidedState } from '@idle-party-rpg/shared';
 import { CombatLogBuffer } from '../combat/CombatLogBuffer';
 
 const RECONNECT_DELAY = 2000;
@@ -239,6 +240,7 @@ export class GameClient {
             return;
           }
         }
+        restoreElidedState(msg, this.lastState);
         this.lastState = msg;
         this.combatLog.ingestJournal(msg.combatLog ?? []);
         this.updateRecap(msg as ServerStateMessage);

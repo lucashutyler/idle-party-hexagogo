@@ -21,9 +21,15 @@ import { PartyBattleManager } from './PartyBattleManager.js';
 import type { CombatSendOptions } from './PartyBattleManager.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
+import { prepareStatePush, encodeStatePush } from './StatePush.js';
+import type { SentStateFields } from './StatePush.js';
 
 /** A socket buffering more than this skips droppable combat messages. */
 export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
+/** A socket buffering more than this skips state pushes, which it can catch up on with a single later push. */
+export const STATE_BACKPRESSURE_BYTES = 64 * 1024;
+/** How soon a player whose state push was skipped is tried again. */
+export const STATE_RETRY_MS = 500;
 /** How long a new socket's visibility stays unknown before it counts as visible without a `presence` message. */
 export const PRESENCE_GRACE_MS = 5000;
 
@@ -45,6 +51,8 @@ export class PlayerManager {
   private pageHidden = new WeakSet<WebSocket>();
   /** New sockets that have not sent `presence` yet: they neither start nor end an absence until the grace runs out. */
   private presencePending = new WeakSet<WebSocket>();
+  private sentStateFields = new WeakMap<WebSocket, SentStateFields>();
+  private stateRetryPending = new Set<string>();
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -488,14 +496,37 @@ export class PlayerManager {
     const session = this.sessions.get(username);
     if (!session) return;
 
-    const otherPlayers = this.getOtherPlayers(username);
-    const state = JSON.stringify({ type: 'state' as const, ...session.getState(otherPlayers), serverVersion: this.serverVersion });
+    // A socket that is behind skips this push: nothing is recorded as sent, so its next push carries the difference.
+    const open = [...wsSet].filter(ws => ws.readyState === WebSocket.OPEN);
+    const ready = open.filter(ws => !(ws.bufferedAmount > STATE_BACKPRESSURE_BYTES));
+    if (ready.length < open.length) this.retryStateSoon(username);
+    if (ready.length === 0) return;
 
-    for (const ws of wsSet) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(state);
-      }
+    const otherPlayers = this.getOtherPlayers(username);
+    const fields = prepareStatePush({ type: 'state', ...session.getState(otherPlayers), serverVersion: this.serverVersion });
+
+    for (const ws of ready) {
+      ws.send(encodeStatePush(fields, this.sentStateFieldsOf(ws)));
     }
+  }
+
+  /** Mid-fight nothing else may push for minutes, so a skipped push can't wait for the next event. */
+  private retryStateSoon(username: string): void {
+    if (this.stateRetryPending.has(username)) return;
+    this.stateRetryPending.add(username);
+    setTimeout(() => {
+      this.stateRetryPending.delete(username);
+      this.sendStateToPlayer(username);
+    }, STATE_RETRY_MS).unref();
+  }
+
+  private sentStateFieldsOf(ws: WebSocket): SentStateFields {
+    let sent = this.sentStateFields.get(ws);
+    if (!sent) {
+      sent = new Map();
+      this.sentStateFields.set(ws, sent);
+    }
+    return sent;
   }
 
   /** Send a pre-serialised combat message to every open socket of `username` that shows combat. */

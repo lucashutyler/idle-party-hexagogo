@@ -375,6 +375,8 @@ export type {
   ClientCraftQueueMessage,
   ClientCraftCancelMessage,
   ClientCraftingState,
+  ClientCraftingCatalog,
+  ClientCraftingProgress,
   ClientAcceptQuestMessage,
   ClientTurnInQuestMessage,
   PlayerProfileMessage,
@@ -387,6 +389,7 @@ export {
   RESULT_PAUSE,
   MOVE_DURATION,
   GAME_VERSION,
+  restoreElidedState,
 } from './systems/BattleTypes.js';
 
 // Set types

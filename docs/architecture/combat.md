@@ -370,7 +370,7 @@ Each step emits timestamped `CombatEvent`s (`id` monotonic per battle via `state
 
 ### Combat message protocol
 
-State pushes (`type: 'state'`) no longer happen per tick — only on battle start, result, move and non-combat triggers. Live combat streams separately:
+State pushes (`type: 'state'`) no longer happen per tick — only on battle start, result, move and non-combat triggers, and each leaves out what the socket already holds (see `client.md` → WebSocket data use). Live combat streams separately:
 
 - `ServerCombatMessage { type: 'combat', battleId, snapshot?, events, log }`. The timer batches events and log lines and flushes every `COMBAT_SEND_MS` (200 ms) of combat time, immediately on start (full snapshot) and on finish (dynamic snapshot + `battle_end`). A dynamic snapshot is attached when ≥ `COMBAT_SNAPSHOT_MS` (500 ms) has passed since the last one, so in practice every 600 ms. A boundary with nothing to say sends nothing.
 - `PartyBattleManager.deliverCombat` serialises each flush once per party and skips building/stringifying entirely when no member has a socket showing combat (`setCombatDelivery({ isOnline, sendRaw })`, wired by `PlayerManager`), so offline parties and dev bots cost almost nothing.

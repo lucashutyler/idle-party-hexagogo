@@ -8,7 +8,7 @@ import type {
   ServerCombatMessage,
   WorldTileDefinition,
 } from '@idle-party-rpg/shared';
-import { PlayerManager, COMBAT_BACKPRESSURE_BYTES } from '../src/game/PlayerManager.js';
+import { PlayerManager, COMBAT_BACKPRESSURE_BYTES, STATE_BACKPRESSURE_BYTES, STATE_RETRY_MS } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore, PlayerSaveData } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
@@ -606,5 +606,119 @@ describe('Combat delivery (PartyBattleManager ↔ PlayerManager)', () => {
       expect(pm.partyBattles.canEscape(partyId)).toBe(false);
       expect(pm.partyBattles.escapeBattle(partyId)).toBe(false);
     });
+  });
+});
+
+describe('state pushes per socket', () => {
+  function lastState(ws: FakeWs): Record<string, unknown> {
+    const states = sent(ws).map(m => m.msg as unknown as Record<string, unknown>).filter(m => m.type === 'state');
+    return states[states.length - 1];
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('leaves out of a repeat push what the socket already holds', async () => {
+    const pm = newManager(['alice']);
+    const tab = await loginKnight(pm, 'alice');
+    pm.sendStateToPlayer('alice');
+    pm.sendStateToPlayer('alice');
+
+    const repeat = lastState(tab);
+    expect(repeat.social).toBeUndefined();
+    expect(repeat.unchangedFields).toContain('social');
+    expect(repeat.type).toBe('state');
+  });
+
+  it('sends everything to a second tab, and to a socket that reconnects', async () => {
+    const pm = newManager(['alice']);
+    const firstTab = await loginKnight(pm, 'alice');
+    pm.sendStateToPlayer('alice');
+
+    const secondTab = createWs();
+    await pm.login(asWs(secondTab), 'alice');
+    pm.sendStateToPlayer('alice');
+
+    expect(lastState(firstTab).unchangedFields).toContain('social');
+    expect(lastState(secondTab).unchangedFields).toBeUndefined();
+    expect(lastState(secondTab).social).toBeDefined();
+  });
+
+  it('skips a socket that is behind, then catches it up on what it missed', async () => {
+    const pm = newManager(['alice']);
+    const tab = await loginKnight(pm, 'alice');
+    pm.sendStateToPlayer('alice');
+
+    tab.bufferedAmount = STATE_BACKPRESSURE_BYTES + 1;
+    const pushesBefore = tab.send.mock.calls.length;
+    pm.getSessionByUsername('alice')!.incrementBattleCount();
+    pm.sendStateToPlayer('alice');
+    expect(tab.send.mock.calls.length).toBe(pushesBefore);
+
+    tab.bufferedAmount = 0;
+    pm.sendStateToPlayer('alice');
+    expect(tab.send.mock.calls.length).toBe(pushesBefore + 1);
+    expect(lastState(tab).battleCount).toBe(battleCount(pm, 'alice'));
+  });
+
+  it('delivers a skipped push soon, even if nothing else happens', async () => {
+    const pm = newManager(['alice']);
+    const tab = await loginKnight(pm, 'alice');
+    pm.sendStateToPlayer('alice');
+    const pushes = () => sent(tab).filter(m => m.msg.type === 'state').length;
+    const session = pm.getSessionByUsername('alice')!;
+
+    tab.bufferedAmount = STATE_BACKPRESSURE_BYTES + 1;
+    session.incrementBattleCount();
+    pm.sendStateToPlayer('alice');
+    const whileBehind = pushes();
+
+    tab.bufferedAmount = 0;
+    vi.advanceTimersByTime(STATE_RETRY_MS);
+
+    expect(pushes()).toBeGreaterThan(whileBehind);
+    expect(lastState(tab).battleCount).toBe(battleCount(pm, 'alice'));
+  });
+
+  it('keeps trying while the socket stays behind, without stacking retries', async () => {
+    const pm = newManager(['alice']);
+    const tab = await loginKnight(pm, 'alice');
+    pm.sendStateToPlayer('alice');
+    const pushes = () => sent(tab).filter(m => m.msg.type === 'state').length;
+    const session = pm.getSessionByUsername('alice')!;
+
+    tab.bufferedAmount = STATE_BACKPRESSURE_BYTES + 1;
+    session.incrementBattleCount();
+    pm.sendStateToPlayer('alice');
+    pm.sendStateToPlayer('alice');
+    const whileBehind = pushes();
+    vi.advanceTimersByTime(STATE_RETRY_MS * 3);
+    expect(pushes()).toBe(whileBehind);
+
+    tab.bufferedAmount = 0;
+    vi.advanceTimersByTime(STATE_RETRY_MS);
+    expect(pushes() - whileBehind).toBeGreaterThanOrEqual(1);
+    expect(lastState(tab).battleCount).toBe(battleCount(pm, 'alice'));
+  });
+
+  it('still reaches a second tab when the first is behind', async () => {
+    const pm = newManager(['alice']);
+    const slowTab = await loginKnight(pm, 'alice');
+    const fastTab = createWs();
+    await pm.login(asWs(fastTab), 'alice');
+
+    slowTab.bufferedAmount = STATE_BACKPRESSURE_BYTES + 1;
+    const slowBefore = slowTab.send.mock.calls.length;
+    pm.sendStateToPlayer('alice');
+
+    expect(slowTab.send.mock.calls.length).toBe(slowBefore);
+    expect(lastState(fastTab).type).toBe('state');
   });
 });

@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.4',
+    notes: [
+      'The game now uses much less mobile data while you play.',
+    ],
+  },
+  {
     version: '2026.11.05.3',
     notes: [
       'The Hero and Craft screens now open faster the first time you visit them.',

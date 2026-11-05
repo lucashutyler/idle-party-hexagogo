@@ -144,8 +144,10 @@ export interface ServerStateMessage {
   shopDefinition?: ShopDefinition;
   /** Henchmen the current room's shop offers for hire. */
   henchmanOffers?: HenchmanOffer[];
-  /** Crafting state: visible recipes, queue, and progress on the active job. */
-  crafting?: ClientCraftingState;
+  /** Craft queue, progress on the active job, and craft skill. */
+  crafting?: ClientCraftingProgress;
+  /** Recipes this class can see. Separate from `crafting` because it almost never changes. */
+  craftingCatalog?: ClientCraftingCatalog;
   /** Active quests the player has accepted (with live progress / status). */
   activeQuests?: import('./QuestTypes.js').QuestProgressEntry[];
   /** Completed quest history (most recent at the end). */
@@ -174,10 +176,21 @@ export interface ServerStateMessage {
   awayRecap?: AwayLedger;
   /** Definitions for the recap's notable items. */
   awayRecapItemDefinitions?: Record<string, ItemDefinition>;
+  /**
+   * Wire only: fields left out because this socket already holds the same value.
+   * `restoreElidedState` fills them back in, so subscribers never see this. See docs/architecture/client.md.
+   */
+  unchangedFields?: string[];
 }
 
-export interface ClientCraftingState {
+export interface ClientCraftingCatalog {
   recipes: RecipeDefinition[];
+  /** Item definitions for every ingredient and result referenced by `recipes` — needed so the
+   *  client can render names even for items the player doesn't own yet. */
+  itemDefs: Record<string, ItemDefinition>;
+}
+
+export interface ClientCraftingProgress {
   queue: CraftQueueState;
   activeProgress: ActiveJobProgress | null;
   /** Per-class craft skill name (Smithing, Alchemy, etc.). */
@@ -185,9 +198,16 @@ export interface ClientCraftingState {
   skillLevel: number;
   skillXp: number;
   skillXpForNext: number;
-  /** Item definitions for every ingredient and result referenced by `recipes` — needed so the
-   *  client can render names even for items the player doesn't own yet. */
-  itemDefs: Record<string, ItemDefinition>;
+}
+
+export type ClientCraftingState = ClientCraftingCatalog & ClientCraftingProgress;
+
+/** Fills in what the server left out of a state push, from the previous state on the same socket. Mutates `msg`. */
+export function restoreElidedState(msg: ServerStateMessage, previous: ServerStateMessage | null): void {
+  const target = msg as unknown as Record<string, unknown>;
+  const source = previous as unknown as Record<string, unknown> | null;
+  for (const field of msg.unchangedFields ?? []) target[field] = source?.[field];
+  delete msg.unchangedFields;
 }
 
 export interface ClientMoveMessage {
