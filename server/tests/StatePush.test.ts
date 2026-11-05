@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { restoreElidedState } from '@idle-party-rpg/shared';
+import { PARTIAL_STATE_PARAM, restoreElidedState } from '@idle-party-rpg/shared';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import { clientAcceptsPartialState, prepareStatePush, encodeStatePush } from '../src/game/StatePush.js';
 import type { SentStateFields } from '../src/game/StatePush.js';
@@ -105,9 +105,13 @@ describe('state push encoding', () => {
 
 describe('clientAcceptsPartialState', () => {
   it('is true only for a client that asks', () => {
-    expect(clientAcceptsPartialState('/?partialState=1')).toBe(true);
+    expect(clientAcceptsPartialState(`/?${PARTIAL_STATE_PARAM}=1`)).toBe(true);
     expect(clientAcceptsPartialState('/')).toBe(false);
     expect(clientAcceptsPartialState(undefined)).toBe(false);
+  });
+
+  it('is false for a bundle that only knows the first version of partial pushes', () => {
+    expect(clientAcceptsPartialState('/?partialState=1')).toBe(false);
   });
 
   it.each(['//', '///', '/\\', '?', '%', '//[', '/?%zz', ''])('copes with the request target %s', (target) => {
@@ -115,6 +119,6 @@ describe('clientAcceptsPartialState', () => {
   });
 
   it('finds the parameter on an odd path', () => {
-    expect(clientAcceptsPartialState('//?partialState=1')).toBe(true);
+    expect(clientAcceptsPartialState(`//?${PARTIAL_STATE_PARAM}=1`)).toBe(true);
   });
 });

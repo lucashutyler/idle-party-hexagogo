@@ -289,7 +289,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Persistent game state across server restarts
 - [ ] Instanced worlds (soft-cap 1000 players)
 - [x] Real-time client sync
-- [x] Low mobile data use: state pushes leave out what a socket already holds, and WebSocket messages are compressed
+- [x] Low mobile data use: state pushes leave out what a socket already holds, player rosters go out as changes, and WebSocket messages are compressed
 
 ### UI
 - [x] Login screen with email input (sign-in link with resend) + username choice screen; class pick with a reply timeout

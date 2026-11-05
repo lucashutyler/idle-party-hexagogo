@@ -35,8 +35,9 @@ export function prepareStatePush(state: ServerStateMessage): PreparedStateField[
 /**
  * The state message for one socket, leaving out what it already holds, and records what it now holds.
  * Must only be called for a message that is really sent: the client's copy is what `sent` describes.
+ * `rosters` is what `SharedRosters.encodeFor` returned for this socket, if it gets rosters that way.
  */
-export function encodeStatePush(fields: readonly PreparedStateField[], sent: SentStateFields): string {
+export function encodeStatePush(fields: readonly PreparedStateField[], sent: SentStateFields, rosters?: string): string {
   const parts: string[] = [];
   const unchanged: string[] = [];
   const present = new Set<string>();
@@ -55,5 +56,6 @@ export function encodeStatePush(fields: readonly PreparedStateField[], sent: Sen
     if (!present.has(name)) sent.delete(name);
   }
   if (unchanged.length > 0) parts.push(`"unchangedFields":${JSON.stringify(unchanged)}`);
+  if (rosters !== undefined) parts.push(`"rosters":${rosters}`);
   return `{${parts.join(',')}}`;
 }

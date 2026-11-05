@@ -17,7 +17,7 @@
  * Player saves are dropped onto disk; `GameLoop.init` then calls
  * `store.loadAll()` and `restoreFromSaveData()` as usual, which builds
  * the in-memory sessions + parties for us. The bots appear as other
- * players on the map because PlayerManager.getOtherPlayers() iterates
+ * players on the map because PlayerManager builds its rosters from
  * `this.sessions` — connection isn't required.
  */
 
