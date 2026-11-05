@@ -263,8 +263,15 @@ function getSessionUsername(req: IncomingMessage): Promise<string | null> {
   });
 }
 
+function warnUpgradeSocketError(err: Error): void {
+  console.warn(`WebSocket upgrade socket error: ${err.message}`);
+}
+
 server.on('upgrade', async (req, socket, head) => {
-  const username = await getSessionUsername(req);
+  // Node removes its own listener on upgrade, and ws adds one only in handleUpgrade.
+  socket.on('error', warnUpgradeSocketError);
+
+  const username = await getSessionUsername(req).catch(() => null);
 
   if (!username || username === 'undefined') {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -280,6 +287,7 @@ server.on('upgrade', async (req, socket, head) => {
     return;
   }
 
+  socket.removeListener('error', warnUpgradeSocketError);
   wss.handleUpgrade(req, socket, head, (ws) => {
     (ws as any)._username = username;
     wss.emit('connection', ws, req);
@@ -312,6 +320,9 @@ wss.on('connection', (ws, req) => {
   playerManager.login(ws, username).then(() => {
     playerManager.sendStateToPlayer(username);
     playerManager.sendCombatResync(ws);
+  }).catch((err) => {
+    console.error(`[WS] Login failed for "${username}":`, err);
+    ws.close(1011, 'Login failed');
   });
 
   ws.on('message', (data) => {

@@ -35,6 +35,7 @@ const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 
 export class AccountStore {
   private accounts: AccountsData = {};
+  private writeQueue: Promise<void> = Promise.resolve();
 
   async load(): Promise<void> {
     if (!existsSync(ACCOUNTS_FILE)) {
@@ -51,7 +52,13 @@ export class AccountStore {
     }
   }
 
-  async save(): Promise<void> {
+  /** Writes run one at a time: they share a temp file, and an overlapping rename would fail. */
+  save(): Promise<void> {
+    this.writeQueue = this.writeQueue.then(() => this.writeNow(), () => this.writeNow());
+    return this.writeQueue;
+  }
+
+  private async writeNow(): Promise<void> {
     await mkdir(DATA_DIR, { recursive: true });
     const tmp = ACCOUNTS_FILE + '.tmp';
     await writeFile(tmp, JSON.stringify(this.accounts, null, 2), 'utf-8');
