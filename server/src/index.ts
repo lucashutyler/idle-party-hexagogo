@@ -62,6 +62,10 @@ function dungeonEntryRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'dungeon_entry_refused' };
 }
 
+function chatRefusal(message: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'chat_refused' };
+}
+
 const app = express();
 const server = createServer(app);
 
@@ -1108,92 +1112,8 @@ wss.on('connection', (ws) => {
       // --- Chat messages ---
 
       if (msg.type === 'send_chat' && typeof msg.text === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-
-        const channelType = msg.channelType;
-        const channelId = msg.channelId;
-        const validTypes = ['tile', 'zone', 'party', 'guild', 'dm', 'global'];
-        if (!validTypes.includes(channelType)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid channel type' }));
-          return;
-        }
-
-        // Build recipient list based on channel type
-        const recipients: { username: string; send: (m: any) => void }[] = [];
-
-        if (channelType === 'zone') {
-          // All players in the same zone
-          for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
-            if (u === username) continue;
-            if (s.getZone() === channelId) {
-              recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
-            }
-          }
-        } else if (channelType === 'dm') {
-          // Direct message to specific user — account must exist
-          if (!accountStore.findByUsername(channelId)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'User not found' }));
-            return;
-          }
-          recipients.push({ username: channelId, send: (m: any) => playerManager.sendChatToPlayer(channelId, m) });
-        } else if (channelType === 'guild') {
-          // All guild members
-          const guildData = playerManager.guilds.getGuild(channelId);
-          if (guildData) {
-            for (const m of guildData.members) {
-              if (m.username === username) continue;
-              recipients.push({ username: m.username, send: (msg: any) => playerManager.sendChatToPlayer(m.username, msg) });
-            }
-          }
-        } else if (channelType === 'party') {
-          // All party members
-          const partyId = session.getPartyId();
-          if (partyId) {
-            const party = playerManager.parties.getParty(partyId);
-            if (party) {
-              for (const m of party.members) {
-                if (m.username === username) continue;
-                recipients.push({ username: m.username, send: (msg: any) => playerManager.sendChatToPlayer(m.username, msg) });
-              }
-            }
-          }
-        } else if (channelType === 'tile') {
-          // All players in the same room on the same map
-          const pos = session.getPosition();
-          const mapId = session.getMapId();
-          for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
-            if (u === username) continue;
-            const otherPos = s.getPosition();
-            if (s.getMapId() === mapId && otherPos.col === pos.col && otherPos.row === pos.row) {
-              recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
-            }
-          }
-        } else if (channelType === 'global') {
-          // All players (online and offline — offline get it stored in chat history)
-          for (const [u] of Array.from(playerManager['sessions'] as Map<string, any>)) {
-            if (u === username) continue;
-            recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
-          }
-        }
-
-        // Also send back to sender
-        const chatMsg = playerManager.chat.sendMessage(username, channelType, channelId, msg.text, recipients);
-        if (chatMsg) {
-          playerManager.sendChatToPlayer(username, chatMsg);
-        }
-
-        if (chatMsg && channelType === 'dm') {
-          const recipientFocus = playerManager.getSessionByUsername(channelId)?.getChatFocus();
-          const recipientIsLooking = recipientFocus?.channelType === 'dm' && recipientFocus.channelId === username;
-          if (!recipientIsLooking) {
-            playerManager.notify.notify(channelId, 'dm_received', {
-              title: `Message from ${username}`,
-              body: msg.text.length > 140 ? `${msg.text.slice(0, 140)}…` : msg.text,
-              payload: { fromUsername: username },
-            });
-          }
-        }
+        const refusal = playerManager.sendPlayerChat(username, msg.channelType, msg.channelId, msg.text);
+        if (refusal) ws.send(JSON.stringify(chatRefusal(refusal)));
         return;
       }
 

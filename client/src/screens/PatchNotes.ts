@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.1',
+    notes: [
+      'Blocking a player now also stops their direct messages from notifying you, including push notifications and emails.',
+      'If a chat message can\'t be sent to your zone or guild, for example because you just left it, chat now tells you and keeps your message so you can send it again.',
+    ],
+  },
+  {
     version: '2026.11.04.1',
     notes: [
       'Combat is now real-time! Everyone in a fight — your party and the enemies — acts on their own timer instead of waiting for turns, so battles move faster and more happens at once.',

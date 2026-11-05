@@ -1,4 +1,4 @@
-import type { ChatChannelType, ChatMessage, ServerStateMessage } from '@idle-party-rpg/shared';
+import type { ChatChannelType, ChatMessage, ServerErrorCode, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import { chatFocusTracker } from '../network/ChatFocusTracker';
@@ -46,7 +46,6 @@ const PREVIEW_MIN_INTERVAL_MS = 1000;
 const STATUS_VISIBLE_MS = 6000;
 const AT_BOTTOM_SLOP_PX = 24;
 const SEND_REJECTION_WINDOW_MS = 5000;
-const USER_NOT_FOUND = /user not found/i;
 /** Long enough for a tap on a button to land before the layout snaps back from typing. */
 const TYPING_EXIT_DELAY_MS = 150;
 const KEYBOARD_SHOWN_MIN_SHRINK_PX = 120;
@@ -171,7 +170,7 @@ export class ChatPopout {
     gameClient.onConnection((connected) => {
       if (connected) gameClient.sendSyncChat(this.log.latestId());
     });
-    gameClient.onServerError((message) => this.handleServerError(message));
+    gameClient.onServerError((message, code) => this.handleServerError(message, code));
   }
 
   setOnClose(cb: () => void): void { this.onClose = cb; }
@@ -633,12 +632,16 @@ export class ChatPopout {
     if (this.tab === 'dm' && !this.thread) this.showThread(target.channelId);
   }
 
-  /** A mistyped DM name comes back as a plain error rather than an echo, so the text is put back for another try. */
-  private handleServerError(message: string): void {
+  /** A refused send comes back as an error rather than an echo, so the text is put back for another try. */
+  private handleServerError(message: string, code: ServerErrorCode | undefined): void {
     const sent = this.lastSend;
-    if (!sent?.target || !USER_NOT_FOUND.test(message) || Date.now() - sent.at > SEND_REJECTION_WINDOW_MS) return;
+    if (code !== 'chat_refused' || !sent || Date.now() - sent.at > SEND_REJECTION_WINDOW_MS) return;
     this.lastSend = null;
     if (!this.inputEl.value) this.inputEl.value = sent.text;
+    if (!sent.target) {
+      this.showStatus(message);
+      return;
+    }
     if (this.tab === 'dm' && this.thread && sameUser(this.thread, sent.target)) {
       this.thread = null;
       this.enterViewDeferred();

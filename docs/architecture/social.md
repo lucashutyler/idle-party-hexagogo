@@ -34,11 +34,22 @@ All registered players sorted by level descending by default (proxy for XP). Sor
 
 The UI is documented in [`client.md`](client.md) → Chat: phone strip and sheet, desktop column, clickable senders + channel tags, and the body data-attributes that drive the layout. Protocol-level chat behavior:
 
-WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM), plus a day-separator row ("Today"/"Yesterday"/short date) inserted wherever consecutive messages cross a calendar-day boundary. 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). A filter popover shows or hides each channel on the All tab. Channel selector dropdown for sending (Party/Guild left out when solo or guildless; `server` is server-emit-only). `channelId` for a zone send is the room's raw zone key and for a guild send the guild id, because the server compares those directly; it relays the field without validating it, so the client treats everything on a message as untrusted. Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel; the client holds the newest 500.
+WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM), plus a day-separator row ("Today"/"Yesterday"/short date) inserted wherever consecutive messages cross a calendar-day boundary. 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). A filter popover shows or hides each channel on the All tab. Channel selector dropdown for sending (Party/Guild left out when solo or guildless; `server` is server-emit-only). Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel; the client holds the newest 500.
 
-Blocking is **client-side only**, and the player UI only ever sets the `all` level (the server also accepts `dm`): `send_chat` delivers regardless, and `isBlockedMessage` hides the blocked sender's messages in the timeline, preview, thread list and unread count; a thread you started keeps its row with your own lines. `dm_received` has no block check either, so a blocked sender's DM still notifies.
+`send_chat` goes through `PlayerManager.sendPlayerChat`, which validates `channelId` against the channel type and refuses anything else with a `chat_refused` error:
 
-A DM also fires a `dm_received` notification, suppressed when the recipient has that thread on screen — see [`notifications.md`](notifications.md) → "Chat focus".
+| Channel | `channelId` must be |
+|---|---|
+| `zone` | The sender's own raw zone key |
+| `guild` | The id of a guild the sender belongs to |
+| `dm` | A username with an account, in any case; the message carries the account's spelling, because sessions and block lists match exact names |
+| `party`, `tile`, `global` | An empty string: the server works out the audience from the sender |
+
+A sender who has just crossed a zone boundary can be refused for the zone they left; the client puts the text back so they can send again. History saved before these checks can still hold other values, so the client keeps treating everything on a message as untrusted.
+
+Message delivery ignores blocks: `send_chat` delivers regardless, and `isBlockedMessage` hides the blocked sender's messages in the timeline, preview, thread list and unread count; a thread you started keeps its row with your own lines. Unblocking brings the hidden messages back. The player UI only ever sets the `all` level (the server also accepts `dm`).
+
+A DM also fires a `dm_received` notification, unless the recipient has blocked the sender at either level (so no in-app, push or email) or has that thread on screen — see [`notifications.md`](notifications.md) → "Chat focus".
 
 ## User popup menu
 
