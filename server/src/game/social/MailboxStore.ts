@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'fs/promises';
 import path from 'path';
 import type { MailboxEntry } from '@idle-party-rpg/shared';
 
-/** Recipient's exact username → their pending gifts. A Map because `__proto__` is a legal username. */
+/** Recipient's exact username → their pending gifts. A Map because an older account can be called `__proto__`. */
 export type Mailboxes = Map<string, MailboxEntry[]>;
 
 export interface MailboxStore {

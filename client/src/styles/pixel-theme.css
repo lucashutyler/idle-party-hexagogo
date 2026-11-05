@@ -737,7 +737,7 @@ button, input, select, textarea {
 /* Not over the map: above everything else on screen. */
 body > .map-toast {
   position: fixed;
-  top: 16px;
+  top: calc(16px + var(--safe-top, 0px));
   bottom: auto;
   z-index: 100001;
 }

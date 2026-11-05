@@ -51,7 +51,7 @@ Message delivery ignores blocks: `send_chat` delivers regardless, and `isBlocked
 
 A DM also fires a `dm_received` notification, unless the recipient has blocked the sender at either level (so no in-app, push or email) or has that thread on screen — see [`notifications.md`](notifications.md) → "Chat focus".
 
-Block lists are plain objects keyed by username, and `constructor` and `__proto__` are legal usernames, so reads go through `isBlockedUser` (own keys only) rather than `in`.
+Block lists are plain objects keyed by username, and an older account can be called `constructor` or `__proto__` even though new accounts can't, so reads go through `isBlockedUser` (own keys only) rather than `in`.
 
 ## Renames
 
