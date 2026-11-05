@@ -65,7 +65,7 @@ export function escapeChatHtml(value: unknown): string {
   return String(value ?? '').replace(/[&<>"']/g, c => HTML_ESCAPES[c]);
 }
 
-/** The server relays `channelId` unvalidated, so nothing on a message can be trusted to be a string. */
+/** Saved history outlives the server's `channelId` checks, so nothing on a message can be trusted to be a string. */
 export function normalizeChatMessage(raw: ChatMessage): ChatMessage {
   return {
     id: String(raw.id),

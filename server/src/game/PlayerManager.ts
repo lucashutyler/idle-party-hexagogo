@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -26,6 +26,15 @@ import type { AccountStore } from '../auth/AccountStore.js';
 export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
 /** How long a new socket's visibility stays unknown before it counts as visible without a `presence` message. */
 export const PRESENCE_GRACE_MS = 5000;
+
+type PlayerChatChannel = Exclude<ChatChannelType, 'server'>;
+
+const PLAYER_CHAT_CHANNELS: readonly unknown[] = ['tile', 'zone', 'party', 'guild', 'dm', 'global'] satisfies PlayerChatChannel[];
+const INVALID_CHANNEL = 'Invalid channel';
+
+function isPlayerChatChannel(value: unknown): value is PlayerChatChannel {
+  return PLAYER_CHAT_CHANNELS.includes(value);
+}
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
@@ -320,6 +329,87 @@ export class PlayerManager {
     for (const ws of wsSet) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }
+  }
+
+  /** Sends a player's message and returns null, or returns why it was refused. See docs/architecture/social.md → Chat. */
+  sendPlayerChat(username: string, channelType: unknown, channelId: unknown, text: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return null;
+    if (!isPlayerChatChannel(channelType)) return 'Invalid channel type';
+    if (typeof channelId !== 'string') return INVALID_CHANNEL;
+
+    const route = this.routeChat(session, channelType, channelId);
+    if (typeof route === 'string') return route;
+
+    const recipients = route.recipients.map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
+    const message = this.chat.sendMessage(username, channelType, route.channelId, text, recipients);
+    if (!message) return null;
+
+    this.sendChatToPlayer(username, message);
+    if (channelType === 'dm') this.notifyDmReceived(route.channelId, username, text);
+    return null;
+  }
+
+  private routeChat(
+    session: PlayerSession,
+    channelType: PlayerChatChannel,
+    channelId: string,
+  ): { channelId: string; recipients: string[] } | string {
+    const username = session.username;
+    const othersWhere = (matches: (other: PlayerSession) => boolean): string[] =>
+      Array.from(this.sessions.entries()).filter(([u, s]) => u !== username && matches(s)).map(([u]) => u);
+
+    switch (channelType) {
+      case 'dm': {
+        // Accounts match a name in any case but sessions need the exact spelling.
+        const recipient = this.accountStore.findByUsername(channelId)?.username;
+        return recipient ? { channelId: recipient, recipients: [recipient] } : 'User not found';
+      }
+      case 'zone':
+        if (channelId !== session.getZone()) return 'You aren\'t in that zone';
+        return { channelId, recipients: othersWhere(s => s.getZone() === channelId) };
+      case 'guild': {
+        const members = this.guilds.getGuild(channelId)?.members.map(m => m.username);
+        if (!members?.includes(username)) return 'You aren\'t in that guild';
+        return { channelId, recipients: members.filter(u => u !== username) };
+      }
+      case 'party': {
+        if (channelId !== '') return INVALID_CHANNEL;
+        const partyId = session.getPartyId();
+        const members = partyId ? this.parties.getParty(partyId)?.members ?? [] : [];
+        return { channelId, recipients: members.map(m => m.username).filter(u => u !== username) };
+      }
+      case 'tile': {
+        if (channelId !== '') return INVALID_CHANNEL;
+        const mapId = session.getMapId();
+        const { col, row } = session.getPosition();
+        return {
+          channelId,
+          recipients: othersWhere(s => {
+            const position = s.getPosition();
+            return s.getMapId() === mapId && position.col === col && position.row === row;
+          }),
+        };
+      }
+      case 'global':
+        if (channelId !== '') return INVALID_CHANNEL;
+        return { channelId, recipients: othersWhere(() => true) };
+    }
+  }
+
+  private notifyDmReceived(recipient: string, sender: string, text: string): void {
+    const session = this.sessions.get(recipient);
+    // not `in`: "constructor" is a legal username
+    if (session && Object.prototype.hasOwnProperty.call(session.getBlockedUsers(), sender)) return;
+
+    const focus = session?.getChatFocus();
+    if (focus?.channelType === 'dm' && focus.channelId === sender) return;
+
+    this.notify.notify(recipient, 'dm_received', {
+      title: `Message from ${sender}`,
+      body: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+      payload: { fromUsername: sender },
+    });
   }
 
   /** Push a live notification toast over any open WebSocket connections (in_app channel). */

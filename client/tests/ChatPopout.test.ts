@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, ServerStateMessage } from '@idle-party-rpg/shared';
+import type { ChatMessage, ServerErrorCode, ServerStateMessage } from '@idle-party-rpg/shared';
 import { ChatPopout } from '../src/ui/ChatPopout';
 import { ChatStrip } from '../src/ui/ChatStrip';
 import type { ChatPreview } from '../src/ui/chatModel';
@@ -12,7 +12,7 @@ type ChatListener = (msg: ChatMessage) => void;
 type SyncListener = (messages: ChatMessage[], full: boolean) => void;
 type StateListener = (state: ServerStateMessage) => void;
 type ConnectionListener = (connected: boolean) => void;
-type ErrorListener = (message: string) => void;
+type ErrorListener = (message: string, code?: ServerErrorCode) => void;
 
 interface MediaOverrides {
   column?: boolean;
@@ -141,7 +141,7 @@ function setup(initialState: ServerStateMessage | null = stateWith()) {
     for (const l of stateListeners) l(state);
   };
   const connect = () => { for (const l of connectionListeners) l(true); };
-  const serverError = (text: string) => { for (const l of errorListeners) l(text); };
+  const serverError = (text: string, code?: ServerErrorCode) => { for (const l of errorListeners) l(text, code); };
   const senderBtn = (user: string) => document.querySelector(`.chat-msg-sender-btn[data-user="${user}"]`) as HTMLButtonElement | null;
   const texts = () => [...document.querySelectorAll('.chat-msg-text')].map(el => el.textContent);
   const tab = (id: string) => document.querySelector(`.chat-tab[data-tab="${id}"]`) as HTMLButtonElement;
@@ -664,9 +664,21 @@ describe('ChatPopout sending', () => {
     t.clickSend();
     expect(t.input().value).toBe('');
 
-    t.serverError('User not found');
+    t.serverError('User not found', 'chat_refused');
     expect(t.input().value).toBe('are you there');
     expect(t.status().textContent).toContain('Nobody');
+  });
+
+  it('puts a refused channel send back and says why', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'hi zone';
+    t.clickSend();
+    expect(t.input().value).toBe('');
+
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+    expect(t.input().value).toBe('hi zone');
+    expect(t.status().textContent).toBe('You aren\'t in that zone');
   });
 
   it('ignores unrelated server errors', () => {
@@ -675,6 +687,7 @@ describe('ChatPopout sending', () => {
     t.input().value = 'hi';
     t.clickSend();
     t.serverError('Only owners and leaders can move');
+    t.serverError('User not found');
     expect(t.input().value).toBe('');
     expect(t.status().hidden).toBe(true);
   });
@@ -1039,7 +1052,7 @@ describe('ChatPopout state-driven view changes', () => {
     const mira = t.senderBtn('Mira')!;
 
     press(mira);
-    t.serverError('User not found');
+    t.serverError('User not found', 'chat_refused');
     expect(t.senderBtn('Mira')).toBe(mira);
     expect(t.status().hidden).toBe(false);
 
