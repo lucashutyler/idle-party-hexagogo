@@ -10,8 +10,8 @@ import type { PlayerSaveData } from '../src/game/GameStateStore.js';
 
 const SERVER_SRC = resolve(__dirname, '../src');
 const JSON_FILE_LITERAL = /['"`]([A-Za-z0-9_-]+)\.json['"`]/g;
-/** VersionStore's file is in data/versions/, so a player can have this name. */
-const NOT_DIRECTLY_IN_DATA = new Set(['manifest']);
+/** These live in data/versions/ and data/mailboxes/, so a player can have these names. */
+const NOT_DIRECTLY_IN_DATA = new Set(['manifest', 'entries']);
 
 function jsonFileNamesInSource(): string[] {
   const names = new Set<string>();

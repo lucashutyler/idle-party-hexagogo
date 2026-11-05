@@ -14,6 +14,8 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'Blocking a player now also stops their direct messages from notifying you, including push notifications and emails.',
       'Fixed players with certain names showing as blocked when nobody had blocked them, which also stopped anyone trading with them.',
       'Some names are now reserved and can\'t be chosen.',
+      'Gifts now stay safe in the mailbox until they are accepted or declined, even if the other player has never logged in and the server restarts.',
+      'Suspended players can no longer be sent gifts.',
       'The map has been redrawn. Rooms now have waves, treetops, dunes and mountain peaks, with a coastline around the land and soft fog over what you haven\'t explored yet, and it should stay smooth on slower phones.',
       'Tap a room on the map to see what is there and your chance of winning, then press Go. Your route is drawn on the map with a button to stop, and tapping a room you can\'t walk to now tells you so. The buttons over the map have names, and on phones they ask before taking you to another map.',
       'The battle screen has been rebuilt. Rings show when each fighter acts next, cast bars and target lines warn you about incoming spells, and damage numbers, reaction cards and a skill bar with cooldown timers show every moment of the fight. It fits both portrait and landscape and follows your device\'s reduced-motion setting.',

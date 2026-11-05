@@ -11,7 +11,8 @@ import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem, canMove } from './social/PartySystem.js';
 import { TradeSystem } from './social/TradeSystem.js';
-import { MailboxSystem } from './social/MailboxSystem.js';
+import { MailboxSystem, mailboxesWithEntriesFrom } from './social/MailboxSystem.js';
+import type { MailboxStore, Mailboxes } from './social/MailboxStore.js';
 import { NotificationSystem } from './social/NotificationSystem.js';
 import { NotificationService } from './social/NotificationService.js';
 import { InAppNotificationDriver } from './social/InAppNotificationDriver.js';
@@ -42,6 +43,9 @@ function isPlayerChatChannel(value: unknown): value is PlayerChatChannel {
   return PLAYER_CHAT_CHANNELS.includes(value);
 }
 
+/** What a double tap gets once the first tap has gone through. */
+export const GIFT_NOT_FOUND = 'Gift not found';
+
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private connections = new Map<WebSocket, string>();
@@ -58,6 +62,10 @@ export class PlayerManager {
   private content: ContentStore;
   private accountStore: AccountStore;
   private store: GameStateStore;
+  private mailboxStore?: MailboxStore;
+  private saveQueue: Promise<void> = Promise.resolve();
+  /** What the mailbox file holds, as far as this process knows. */
+  private savedMailboxes: Mailboxes = new Map();
   readonly friends: FriendsSystem;
   readonly guilds: GuildSystem;
   readonly chat: ChatSystem;
@@ -70,7 +78,8 @@ export class PlayerManager {
   private getAllUsernames: () => string[];
   private readonly serverVersion = Date.now().toString();
 
-  constructor(grids: WorldGrids, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore) {
+  constructor(grids: WorldGrids, content: ContentStore, guildStore: GuildStore, accountStore: AccountStore, store: GameStateStore, mailboxStore?: MailboxStore) {
+    this.mailboxStore = mailboxStore;
     this.grids = grids;
     this.content = content;
     this.accountStore = accountStore;
@@ -170,8 +179,7 @@ export class PlayerManager {
       }
       this.sessions.set(username, session);
       this.friends.initPlayer(username, session.getFriends(), session.getOutgoingFriendRequests());
-      const initialMailbox = session.consumeInitialMailbox();
-      if (initialMailbox.length > 0) this.mailboxes.setMailbox(username, initialMailbox);
+      this.mailboxes.mergeEntries(username, session.consumeInitialMailbox());
       const initialNotifications = session.consumeInitialNotifications();
       if (initialNotifications.length > 0) this.notifications.setInbox(username, initialNotifications);
       this.wireCallbacks(session);
@@ -240,20 +248,7 @@ export class PlayerManager {
 
     // Save current state before removal (freezes XP/inventory at ban time)
     if (session) {
-      const partyId = session.getPartyId();
-      const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
-      const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
-      let partyInfo: { role: PartyRole; gridPosition: number } | undefined;
-      if (partyId) {
-        const party = this.parties.getParty(partyId);
-        if (party) {
-          const member = party.members.find(m => m.username === username);
-          if (member) partyInfo = { role: member.role, gridPosition: member.gridPosition };
-        }
-      }
-      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
-      const saveData = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen);
-      await saveStore.saveAll([saveData]);
+      await this.saveAll(saveStore);
     }
 
     // Remove from party (and its battle entry)
@@ -304,6 +299,8 @@ export class PlayerManager {
    * Returns whether the player had a session. See docs/architecture/social.md → Renames.
    */
   renamePlayer(oldUsername: string, newUsername: string): boolean {
+    this.mailboxes.rename(oldUsername, newUsername);
+
     const session = this.sessions.get(oldUsername);
     if (session) this.rekeySession(session, oldUsername, newUsername);
     this.moveBlocksToNewName(oldUsername, newUsername);
@@ -793,7 +790,6 @@ export class PlayerManager {
   /** Wire all callbacks onto a session (social state, battle state, position). */
   private wireCallbacks(session: PlayerSession): void {
     session.getSocialState = () => this.getSocialState(session.username);
-    session.getMailbox = () => this.mailboxes.getMailbox(session.username);
     session.getNotifications = () => this.notifications.getInbox(session.username);
     session.getBattleState = () => {
       const partyId = session.getPartyId();
@@ -1127,8 +1123,7 @@ export class PlayerManager {
         const session = PlayerSession.fromSaveData(data, this.grids, this.content);
         this.sessions.set(data.username, session);
         this.friends.initPlayer(data.username, session.getFriends(), session.getOutgoingFriendRequests());
-        const initialMailbox = session.consumeInitialMailbox();
-        if (initialMailbox.length > 0) this.mailboxes.setMailbox(data.username, initialMailbox);
+        this.mailboxes.mergeEntries(data.username, session.consumeInitialMailbox());
         const initialNotifications = session.consumeInitialNotifications();
         if (initialNotifications.length > 0) this.notifications.setInbox(data.username, initialNotifications);
         this.wireCallbacks(session);
@@ -1476,6 +1471,94 @@ export class PlayerManager {
     return isBlockedUser(b, blockedByA) || isBlockedUser(a, blockedByB);
   }
 
+  /** Returns why the gift can't be sent, or null once it has gone. */
+  sendGift(fromUsername: string, targetUsername: string, itemId: string, quantity: number): string | null {
+    if (!Number.isInteger(quantity) || quantity < 1) return 'Invalid quantity';
+    const target = this.accountStore.findByUsername(targetUsername);
+    if (!target?.username) return 'Player not found';
+    // Accounts match a name in any case, but mailboxes are keyed by the exact one.
+    const toUsername = target.username;
+    if (toUsername === fromUsername) return 'Cannot gift to yourself';
+    // One message for both, so a refusal doesn't reveal that someone blocked you.
+    if (target.deactivated || this.isTradeBlocked(fromUsername, toUsername)) return 'That player can\'t receive gifts';
+    const sender = this.sessions.get(fromUsername);
+    if (!sender) return 'No session';
+    if (!sender.removeFromInventory(itemId, quantity)) return 'Not enough items in inventory';
+
+    this.mailboxes.addEntry(toUsername, fromUsername, itemId, quantity);
+    sender.addLogEntry(`Sent ${this.giftLabel(itemId, quantity)} to ${toUsername}`, 'unlock');
+
+    this.sendStateToPlayer(fromUsername);
+    this.sendStateToPlayer(toUsername);
+    return null;
+  }
+
+  /** Returns why the gift can't be accepted, or null once it has been. */
+  acceptGift(username: string, entryId: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return 'No session';
+    const entry = this.mailboxes.findEntry(username, entryId);
+    if (!entry) return GIFT_NOT_FOUND;
+    if (!session.addToInventory(entry.itemId, entry.quantity)) return 'Inventory full for that item (max 99)';
+
+    this.mailboxes.removeEntry(username, entryId);
+    session.addLogEntry(`Accepted ${this.giftLabel(entry.itemId, entry.quantity)} from ${entry.fromUsername}`, 'unlock');
+
+    this.sendStateToPlayer(username);
+    return null;
+  }
+
+  /** Returns why the gift can't be declined, or null once it has been. */
+  denyGift(username: string, entryId: string): string | null {
+    const entry = this.mailboxes.findEntry(username, entryId);
+    if (!entry) return GIFT_NOT_FOUND;
+    const returnTo = this.accountStore.findByUsername(entry.fromUsername)?.username;
+    if (!entry.returned && !returnTo) return 'That gift can\'t be sent back';
+
+    this.mailboxes.removeEntry(username, entryId);
+    // A returned gift that is declined again is dropped, so it can't ping-pong forever.
+    if (!entry.returned && returnTo) {
+      this.mailboxes.addEntry(returnTo, username, entry.itemId, entry.quantity, { returned: true });
+      this.sendStateToPlayer(returnTo);
+    }
+    const session = this.sessions.get(username);
+    session?.addLogEntry(`Declined ${this.giftLabel(entry.itemId, entry.quantity)} from ${entry.fromUsername}`, 'move');
+
+    this.sendStateToPlayer(username);
+    return null;
+  }
+
+  /** At startup, so entries taken in from old saves are in the store before any player save drops them. */
+  saveMailboxes(): Promise<void> {
+    return this.inSaveOrder(async () => {
+      const boxes = this.mailboxes.snapshot();
+      await this.mailboxStore?.save(boxes);
+      this.savedMailboxes = boxes;
+    });
+  }
+
+  private giftLabel(itemId: string, quantity: number): string {
+    const name = this.content.getItem(itemId)?.name ?? itemId;
+    return quantity > 1 ? `${name} x${quantity}` : name;
+  }
+
+  /** A shutdown can land during a periodic save, and an older mailbox file must not be written last. */
+  private inSaveOrder(pass: () => Promise<void>): Promise<void> {
+    const done = this.saveQueue.then(pass);
+    this.saveQueue = done.catch(() => {});
+    return done;
+  }
+
+  /** A mailbox fault mustn't cost every player's progress too, so it is logged and tried again next pass. */
+  private async writeMailboxes(boxes: Mailboxes): Promise<void> {
+    try {
+      await this.mailboxStore?.save(boxes);
+      this.savedMailboxes = boxes;
+    } catch (err) {
+      console.error('[PlayerManager] Failed to save mailboxes:', err);
+    }
+  }
+
   /** Check if a player has an item in their unequipped inventory. */
   hasItemInInventory(username: string, itemId: string, quantity: number = 1): boolean {
     const session = this.sessions.get(username);
@@ -1486,10 +1569,16 @@ export class PlayerManager {
   /**
    * Save all sessions to the store.
    */
-  async saveAll(store: GameStateStore): Promise<void> {
-    const data = this.getAllSaveData();
-    if (data.length === 0) return;
-    await store.saveAll(data);
+  saveAll(store: GameStateStore): Promise<void> {
+    return this.inSaveOrder(async () => {
+      const boxes = this.mailboxes.snapshot();
+      const data = this.getAllSaveData();
+      // New entries land before player files change, and old ones go after, so a crash mid-pass can't lose a gift.
+      const onDiskOrRemoved = mailboxesWithEntriesFrom(this.savedMailboxes, this.mailboxes.takeRemoved());
+      await this.writeMailboxes(mailboxesWithEntriesFrom(onDiskOrRemoved, boxes));
+      if (data.length > 0) await store.saveAll(data);
+      await this.writeMailboxes(boxes);
+    });
   }
 
   /**

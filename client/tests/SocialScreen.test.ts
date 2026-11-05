@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import { SocialScreen } from '../src/screens/SocialScreen';
 import { dismissTop } from '../src/ui/ModalStack';
+import { dismissMapToast } from '../src/ui/MapToast';
 import type { GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 
@@ -47,12 +48,13 @@ function setup() {
   const listeners = new Set<StateListener>();
   let lastState: ServerStateMessage | null = null;
   const sends: Record<string, ReturnType<typeof vi.fn>> = {};
+  let serverError: (message: string, code?: string) => void = () => {};
 
   const gameClient = new Proxy({
     get lastState() { return lastState; },
     subscribe: (l: StateListener) => { listeners.add(l); return () => { listeners.delete(l); }; },
     onResume: () => () => {},
-    onServerError: () => () => {},
+    onServerError: (l: typeof serverError) => { serverError = l; return () => {}; },
     onPlayerProfile: () => () => {},
   }, {
     get(target, prop: string) {
@@ -82,12 +84,35 @@ function setup() {
   const badge = (id: string) => tab(id).querySelector('.ui-segment-badge')?.textContent ?? null;
   const panel = () => document.querySelector('.social-panel') as HTMLElement;
 
-  return { screen, push, acceptBtn, send, tab, badge, panel, listeners };
+  return { screen, push, acceptBtn, send, tab, badge, panel, listeners, serverError: (message: string, code?: string) => serverError(message, code) };
 }
 
 function press(target: Element): void {
   target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
 }
+
+describe('SocialScreen gift refusals', () => {
+  afterEach(() => {
+    dismissMapToast();
+    document.body.innerHTML = '';
+  });
+
+  it('shows the reason a gift was refused', () => {
+    const t = setup();
+
+    t.serverError('That player can\'t receive gifts', 'gift_refused');
+
+    expect(document.querySelector('.map-toast')?.textContent).toBe('That player can\'t receive gifts');
+  });
+
+  it('leaves other server errors alone', () => {
+    const t = setup();
+
+    t.serverError('Invalid message format');
+
+    expect(document.querySelector('.map-toast')).toBeNull();
+  });
+});
 
 function stubSheetViewport(matches: boolean): void {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches, media: query, addEventListener() {}, removeEventListener() {} }));

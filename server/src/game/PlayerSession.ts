@@ -179,10 +179,8 @@ export class PlayerSession {
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
   private craftQueue: CraftQueueState = emptyCraftQueue();
-  /** Initial mailbox snapshot from save data; live state lives in MailboxSystem. */
+  /** Mailbox entries from a save written before MailboxStore existed. */
   private initialMailbox: MailboxEntry[] = [];
-  /** Callback to fetch the player's live mailbox from MailboxSystem. */
-  getMailbox?: () => MailboxEntry[];
   /** Initial notification inbox snapshot from save data; live state lives in NotificationSystem. */
   private initialNotifications: NotificationEntry[] = [];
   /** Callback to fetch the player's live notification inbox from NotificationSystem. */
@@ -928,7 +926,7 @@ export class PlayerSession {
   getChatDmTarget(): string { return this.chatDmTarget; }
   setChatDmTarget(target: string): void { this.chatDmTarget = target; }
 
-  /** Mailbox snapshot from save data — used once at startup to populate MailboxSystem. */
+  /** Mailbox entries from an old save file, to be taken into MailboxSystem once. */
   consumeInitialMailbox(): MailboxEntry[] {
     const m = this.initialMailbox;
     this.initialMailbox = [];
@@ -980,7 +978,8 @@ export class PlayerSession {
   /** Returns the count of an item in the unequipped inventory (0 if not present). */
   getInventoryCount(itemId: string): number {
     if (!this.character) return 0;
-    return this.character.inventory[itemId] ?? 0;
+    // Own keys only: item ids come from clients, and `constructor` is on every object.
+    return Object.prototype.hasOwnProperty.call(this.character.inventory, itemId) ? this.character.inventory[itemId] : 0;
   }
 
   /** Remove one item from the unequipped inventory. Returns false if item not present. */
@@ -1005,7 +1004,7 @@ export class PlayerSession {
   /** Remove `quantity` items from the unequipped inventory. Returns false if insufficient. */
   removeFromInventory(itemId: string, quantity: number): boolean {
     if (!this.character) return false;
-    const current = this.character.inventory[itemId] ?? 0;
+    const current = this.getInventoryCount(itemId);
     if (current < quantity) return false;
     const newCount = current - quantity;
     if (newCount === 0) {
@@ -1490,7 +1489,6 @@ export class PlayerSession {
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
-      mailbox: this.getMailbox ? this.getMailbox() : this.initialMailbox,
       craftQueue: { activeStartedAtMs: this.craftQueue.activeStartedAtMs, jobs: [...this.craftQueue.jobs] },
       activeQuests: this.quests.toSaveData().active,
       completedQuests: this.quests.toSaveData().completed,

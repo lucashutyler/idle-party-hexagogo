@@ -54,7 +54,7 @@ A toast tap that navigates first closes any open modals (`dismissModals`), other
 
 ## Persistence
 
-`PlayerSaveData` (`server/src/game/GameStateStore.ts`) gained: `notifications` (capped inbox), `notificationPreferences`, `pushSubscriptions`. Restore flow mirrors mailbox exactly — `PlayerSession.consumeInitialNotifications()` ferries the saved inbox into `NotificationSystem` once at login/restore (`PlayerManager.login()` and `restoreFromSaveData()`), and `toSaveData()` snapshots the live inbox back via a `getNotifications` callback wired in `PlayerManager.wireCallbacks()`. `notificationPreferences` and `pushSubscriptions` are plain per-player fields on `PlayerSession` (like `blockedUsers`) since they're never mutated by anyone but the owning player.
+`PlayerSaveData` (`server/src/game/GameStateStore.ts`) gained: `notifications` (capped inbox), `notificationPreferences`, `pushSubscriptions`. `PlayerSession.consumeInitialNotifications()` ferries the saved inbox into `NotificationSystem` once at login/restore (`PlayerManager.login()` and `restoreFromSaveData()`), and `toSaveData()` snapshots the live inbox back via a `getNotifications` callback wired in `PlayerManager.wireCallbacks()`. `notificationPreferences` and `pushSubscriptions` are plain per-player fields on `PlayerSession` (like `blockedUsers`) since they're never mutated by anyone but the owning player.
 
 ## Client
 

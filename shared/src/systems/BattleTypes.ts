@@ -293,7 +293,7 @@ export interface ClientUnequipSkillMessage {
  * Machine-readable tag on an `error` message, for the cases a screen needs to react
  * to rather than just log. Most errors carry no code.
  */
-export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused';
+export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused';
 
 export interface ServerForecastMessage {
   type: 'forecast';

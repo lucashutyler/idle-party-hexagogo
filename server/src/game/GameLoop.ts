@@ -7,6 +7,8 @@ import { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
 import { TradeStore } from './social/TradeStore.js';
+import { JsonMailboxStore } from './social/MailboxStore.js';
+import type { MailboxStore } from './social/MailboxStore.js';
 import { ContentStore } from './ContentStore.js';
 import { VersionStore } from './VersionStore.js';
 import { ForecastService } from './ForecastService.js';
@@ -55,6 +57,7 @@ export class GameLoop {
   private store: GameStateStore;
   private guildStore: GuildStore;
   private tradeStore: TradeStore;
+  private mailboxStore: MailboxStore;
   private saveInterval?: ReturnType<typeof setInterval>;
   private craftTickInterval?: ReturnType<typeof setInterval>;
   private grids!: WorldGrids;
@@ -65,6 +68,7 @@ export class GameLoop {
     this.guildStore = new GuildStore();
     this.tradeStore = new TradeStore();
     this.forecaster = new ForecastService({ logEveryMs: FORECAST_LOG_EVERY_MS });
+    this.mailboxStore = new JsonMailboxStore();
     this.store = store;
   }
 
@@ -132,6 +136,11 @@ export class GameLoop {
     this.grids = new WorldGrids(this.contentStore);
     console.log(`[Startup] World grids built (${this.grids.totalSize()} tiles across ${this.grids.mapIds().length} map(s)) in ${(performance.now() - t).toFixed(1)}ms`);
 
+    // Loaded before the player manager exists, so a shutdown signal can't save an empty set over the file.
+    t = performance.now();
+    const savedMailboxes = await this.mailboxStore.load();
+    console.log(`[Startup] MailboxStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
+
     // Create player manager now that grids + content are ready
     (this as { playerManager: PlayerManager }).playerManager = new PlayerManager(
       this.grids,
@@ -139,8 +148,11 @@ export class GameLoop {
       this.guildStore,
       accountStore,
       this.store,
+      this.mailboxStore,
     );
     this.playerManager.partyBattles.setForecaster(this.forecaster);
+
+    this.playerManager.mailboxes.restore(savedMailboxes);
 
     t = performance.now();
     await this.guildStore.load();
@@ -172,6 +184,9 @@ export class GameLoop {
       console.log('[GameLoop] No save files found — fresh start');
     }
 
+    // Entries taken in from old saves must be in the store before any player save drops them.
+    await this.playerManager.saveMailboxes();
+
     // Announce new version to all restored sessions if GAME_VERSION changed
     let lastVersion = '';
     try { lastVersion = (await fs.readFile(VERSION_FILE, 'utf-8')).trim(); } catch { /* first boot */ }
@@ -198,10 +213,8 @@ export class GameLoop {
    */
   async saveAll(): Promise<void> {
     const count = this.playerManager.sessionCount;
-    if (count > 0) {
-      await this.playerManager.saveAll(this.store);
-      console.log(`[GameLoop] Saved ${count} session(s)`);
-    }
+    await this.playerManager.saveAll(this.store);
+    if (count > 0) console.log(`[GameLoop] Saved ${count} session(s)`);
     await this.guildStore.save();
     await this.tradeStore.save(this.playerManager.trades.getAllTrades());
     await this.contentStore.persist();

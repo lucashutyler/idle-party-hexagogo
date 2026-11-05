@@ -38,7 +38,7 @@ export interface PlayerSaveData {
   chatHistory?: ChatMessage[];
   chatSendChannel?: string;
   chatDmTarget?: string;
-  /** Pending gift entries awaiting accept/deny in the player's mailbox. */
+  /** Only in saves from before MailboxStore. Read on load, never written. */
   mailbox?: MailboxEntry[];
   /** Per-player FIFO craft queue. Materials are reserved (already deducted from inventory). */
   craftQueue?: CraftQueueState;
