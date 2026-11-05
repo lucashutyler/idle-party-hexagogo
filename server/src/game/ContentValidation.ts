@@ -1,15 +1,30 @@
-import { migrateLegacySet, findZonesSpanningMaps } from '@idle-party-rpg/shared';
+import {
+  MIN_MONSTER_ACTION_INTERVAL_MS,
+  MONSTER_SKILL_CATALOG,
+  findZonesSpanningMaps,
+  isAuthoredMonsterLevel,
+  suggestTierFromHp,
+  migrateLegacySet,
+  migrateLegacySkill,
+  validateSkillDefinition,
+} from '@idle-party-rpg/shared';
 import type { RoomEntryRequirements } from '@idle-party-rpg/shared';
+import {
+  checkpointEncounterProblems,
+  checkpointEncounterWarnings,
+  floorCheckpointProblems,
+  monsterScalingProblems,
+} from '../admin/contentChecks.js';
 import type { ContentSnapshot } from './VersionStore.js';
 
 const PUBLISH_PROBLEMS_SHOWN = 5;
 
-/** The admin-facing reason a draft with broken references can't be published. */
+/** The admin-facing reason a draft with content problems can't be published. */
 export function formatPublishRefusal(problems: readonly string[]): string {
   const shown = problems.slice(0, PUBLISH_PROBLEMS_SHOWN).join(' ');
   const hidden = problems.length - PUBLISH_PROBLEMS_SHOWN;
   const more = hidden > 0 ? ` (+${hidden} more)` : '';
-  return `Can't publish: the draft has ${problems.length} broken reference(s). ${shown}${more}`;
+  return `Can't publish: the draft has ${problems.length} problem(s). ${shown}${more}`;
 }
 
 /**
@@ -112,17 +127,49 @@ export function findContentProblems(snapshot: ContentSnapshot): string[] {
   }
 
   // --- Monsters ---
+  const minAttackInterval = MIN_MONSTER_ACTION_INTERVAL_MS / 1000;
   for (const monster of snapshot.monsters) {
     (monster.drops ?? []).forEach((drop, index) => {
       if (!itemIds.has(drop.itemId)) {
         problems.push(`Monster '${monster.id}' drops reference unknown item '${drop.itemId}' (index ${index}).`);
       }
     });
+    if (monster.attackInterval !== undefined && !isNumberAtLeast(monster.attackInterval, minAttackInterval)) {
+      problems.push(`Monster '${monster.id}' attackInterval must be a number of seconds, at least ${minAttackInterval} (got ${String(monster.attackInterval)}).`);
+    }
+    (monster.skills ?? []).forEach((entry, index) => {
+      const label = `Monster '${monster.id}' skill ${index}`;
+      if (!MONSTER_SKILL_CATALOG[entry.skillId]) {
+        problems.push(`${label} references unknown monster skill '${entry.skillId}' (known: ${Object.keys(MONSTER_SKILL_CATALOG).join(', ')}).`);
+      }
+      if (!isNumberAtLeast(entry.value, 0)) {
+        problems.push(`${label} value must be a number, 0 or more (got ${String(entry.value)}).`);
+      }
+      if (!isNumberAtLeast(entry.cooldown, 0)) {
+        problems.push(`${label} cooldown must be a number of seconds, 0 or more (got ${String(entry.cooldown)}).`);
+      }
+      if (entry.castTime !== undefined && !isNumberAtLeast(entry.castTime, 0)) {
+        problems.push(`${label} castTime must be a number of seconds, 0 or more (got ${String(entry.castTime)}).`);
+      }
+    });
+    problems.push(...monsterScalingProblems(monster));
+  }
+
+  // --- Skills ---
+  for (const skill of snapshot.skills ?? []) {
+    for (const error of validateSkillDefinition(migrateLegacySkill(skill))) {
+      problems.push(`Skill '${skill.id}': ${error}`);
+    }
   }
 
   // --- Dungeons ---
+  const encountersById = new Map((snapshot.encounters ?? []).map(e => [e.id, e]));
+  const monstersById = new Map(snapshot.monsters.map(m => [m.id, m]));
   for (const dungeon of snapshot.dungeons ?? []) {
     dungeon.floors.forEach((floor, floorIndex) => {
+      const floorLabel = `Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber})`;
+      problems.push(...floorCheckpointProblems(floor, floorLabel));
+      problems.push(...checkpointEncounterProblems(floor, floorLabel, encountersById, monstersById));
       floor.encounterTable.forEach((entry, entryIndex) => {
         if (!encounterIds.has(entry.encounterId)) {
           problems.push(`Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber}) encounter table references unknown encounter '${entry.encounterId}' (index ${entryIndex}).`);
@@ -296,6 +343,45 @@ export function findContentProblems(snapshot: ContentSnapshot): string[] {
   }
 
   return problems;
+}
+
+const MAX_LISTED_IDS = 20;
+
+/** Advisory findings that don't block publishing (unauthored levels, tier hints, dungeon checkpoint caveats). */
+export function findContentInfo(snapshot: ContentSnapshot): string[] {
+  const info: string[] = [];
+  const unleveled = snapshot.monsters.filter(m => !m.passive && !isAuthoredMonsterLevel(m.level)).map(m => m.id);
+  if (unleveled.length > 0) {
+    const listed = unleveled.slice(0, MAX_LISTED_IDS).join(', ');
+    const more = unleveled.length > MAX_LISTED_IDS ? `, … (+${unleveled.length - MAX_LISTED_IDS} more)` : '';
+    info.push(`No level scaling for ${unleveled.length} monster${unleveled.length === 1 ? '' : 's'} with no level set: ${listed}${more}. Set a level (1–200) to make a monster scale against player levels.`);
+  }
+  for (const monster of snapshot.monsters) {
+    if (monster.tier !== undefined) continue;
+    const suggested = suggestTierFromHp(monster);
+    if (suggested !== 'trash') {
+      info.push(`Monster '${monster.id}' has no tier, but its HP is in the '${suggested}' range for its damage — consider tier '${suggested}' (tiers are never set automatically).`);
+    }
+  }
+  const encountersById = new Map((snapshot.encounters ?? []).map(e => [e.id, e]));
+  const monstersById = new Map(snapshot.monsters.map(m => [m.id, m]));
+  for (const dungeon of snapshot.dungeons ?? []) {
+    dungeon.floors.forEach((floor, floorIndex) => {
+      const floorLabel = `Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber})`;
+      info.push(...checkpointEncounterWarnings(floor, floorLabel, encountersById, monstersById));
+      const hasCheckpoints = Array.isArray(floor.checkpoints) && floor.checkpoints.length > 0;
+      if (hasCheckpoints) return;
+      const inert = (['maxWipes', 'checkpointRewardFraction'] as const).filter(key => floor[key] !== undefined);
+      if (inert.length > 0) {
+        info.push(`${floorLabel} sets ${inert.join(' and ')} without checkpoints — they have no effect.`);
+      }
+    });
+  }
+  return info;
+}
+
+function isNumberAtLeast(value: unknown, min: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min;
 }
 
 /**

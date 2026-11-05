@@ -2,6 +2,9 @@ import type { ItemDefinition, SetDefinition, SkillDefinition } from '@idle-party
 import { getItemEffectText, getSetsForItem, getSetBonusText, getSetDisplayName, getActiveBreakpoint, canClassEquipItem } from '@idle-party-rpg/shared';
 import { RARITY_COLORS, SLOT_LABELS, SHINY_RARITIES, getItemInitials, escapeHtml } from './ItemIcon';
 import { artworkUrl, renderTrackedImg } from './assets';
+import { bringToFront, release } from './ModalStack';
+
+export const ITEM_POPUP_CLOSE_HTML = '<button type="button" class="item-popup-close" aria-label="Close">&times;</button>';
 
 export interface ItemPopupOptions {
   /** Item definitions for looking up set piece names */
@@ -29,7 +32,8 @@ export interface ItemPopupOptions {
  * Useful for embedding in other modals.
  */
 export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupOptions): string {
-  const color = def.iconColor ?? RARITY_COLORS[def.rarity] ?? '#e8e8e8';
+  const color = RARITY_COLORS[def.rarity] ?? 'var(--text-1)';
+  const artStyle = `--rarity:${color}${def.iconColor ? `;--item-bg:${escapeHtml(def.iconColor)}` : ''}`;
   const initials = getItemInitials(def.name);
   const shinyClass = SHINY_RARITIES.has(def.rarity) ? ` item-rarity-${def.rarity}` : '';
 
@@ -47,9 +51,9 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     statLines.push(`<div><span class="stat-label">Type</span><span>Material</span></div>`);
   }
   if (def.consumable) {
-    statLines.push(`<div><span class="stat-label">Use</span><span style="color:#f6c177">Not usable yet — coming soon!</span></div>`);
+    statLines.push(`<div><span class="stat-label">Use</span><span class="item-popup-coming-soon">Not usable yet — coming soon!</span></div>`);
   }
-  statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1)}</span></div>`);
+  statLines.push(`<div><span class="stat-label">Rarity</span><span style="color:${color}">${escapeHtml(def.rarity.charAt(0).toUpperCase() + def.rarity.slice(1))}</span></div>`);
   if (def.value != null && def.value > 0) {
     statLines.push(`<div><span class="stat-label">Value</span><span>${def.value}g</span></div>`);
   }
@@ -65,8 +69,8 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     // red if not. The wrapper has a data attribute so the equip-restricted
     // animation can target it for an in-place attention pulse.
     const allowed = !!className && canClassEquipItem(def, className);
-    const restrictColor = allowed ? '#66bb6a' : '#ff6b6b';
-    const cls = def.classRestriction.map(c => `<span style="color:${restrictColor}">${c}</span>`).join(', ');
+    const restrictClass = allowed ? 'item-popup-class-allowed' : 'item-popup-class-denied';
+    const cls = def.classRestriction.map(c => `<span class="${restrictClass}">${escapeHtml(c)}</span>`).join(', ');
     statLines.push(`<div data-class-restriction="1"><span class="stat-label">Class</span><span>${cls}</span></div>`);
   }
 
@@ -114,10 +118,10 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 
   const artworkInner = def.iconEmoji
     ? `<span class="item-popup-emoji">${escapeHtml(def.iconEmoji)}</span>`
-    : `${renderTrackedImg(artworkUrl('item', def.id), { className: 'item-popup-img' })}<span class="item-popup-initials">${initials}</span>`;
+    : `${renderTrackedImg(artworkUrl('item', def.id), { className: 'item-popup-img' })}<span class="item-popup-initials">${escapeHtml(initials)}</span>`;
 
   return `
-    <div class="item-popup-artwork${shinyClass}" style="background:${color}">
+    <div class="item-popup-artwork${shinyClass}" style="${artStyle}">
       ${artworkInner}
     </div>
     <div class="item-popup-name" style="color:${color}">${escapeHtml(def.name)}</div>
@@ -129,18 +133,25 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
 }
 
 /**
- * Show an item popup modal overlay. Returns the overlay element.
+ * Show an item popup modal overlay on the modal stack. Returns the overlay element.
  * Caller is responsible for wiring action button click handlers.
  */
 export function showItemPopup(def: ItemDefinition, options?: ItemPopupOptions): HTMLElement {
   const overlay = document.createElement('div');
   overlay.className = 'item-popup-overlay';
-  overlay.innerHTML = `<div class="item-popup">${renderItemPopupContent(def, options)}</div>`;
+  overlay.innerHTML = `<div class="item-popup" role="dialog" aria-modal="true">${ITEM_POPUP_CLOSE_HTML}${renderItemPopupContent(def, options)}</div>`;
 
+  const close = () => closeItemPopup(overlay);
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    if (e.target === overlay || (e.target as Element).closest('.item-popup-close')) close();
   });
 
   document.body.appendChild(overlay);
+  bringToFront(overlay, close);
   return overlay;
+}
+
+export function closeItemPopup(overlay: HTMLElement): void {
+  release(overlay);
+  overlay.remove();
 }

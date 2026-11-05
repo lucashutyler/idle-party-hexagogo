@@ -1,32 +1,18 @@
 import type { ItemDefinition, SetDefinition } from '@idle-party-rpg/shared';
-import { artworkUrl, renderTrackedImg } from './assets';
+import { artworkUrl, isAssetLoaded, renderTrackedImg } from './assets';
 
+/** CSS colour values (theme tokens) per rarity; usable in inline `color`/`background`. */
 export const RARITY_COLORS: Record<string, string> = {
-  janky: '#808080',
-  common: '#e8e8e8',
-  uncommon: '#66bb6a',
-  rare: '#4fc3f7',
-  epic: '#ee66e3',
-  legendary: '#9233df',
-  heirloom: '#e9bc18',
+  janky: 'var(--rarity-janky)',
+  common: 'var(--rarity-common)',
+  uncommon: 'var(--rarity-uncommon)',
+  rare: 'var(--rarity-rare)',
+  epic: 'var(--rarity-epic)',
+  legendary: 'var(--rarity-legendary)',
+  heirloom: 'var(--rarity-heirloom)',
 };
 
-/** Border colors: gray for all rarities. Epic+ get animated glow via CSS. */
-export const RARITY_BORDER_COLORS: Record<string, string> = {
-  janky: 'rgba(180,180,180,0.25)',
-  common: 'rgba(180,180,180,0.25)',
-  uncommon: 'rgba(180,180,180,0.25)',
-  rare: 'rgba(180,180,180,0.25)',
-  epic: 'rgba(180,180,180,0.4)',
-  legendary: 'rgba(180,180,180,0.4)',
-  heirloom: 'rgba(180,180,180,0.4)',
-};
-
-/**
- * Slot icon image URLs. Replace emoji glyphs that previously decorated
- * equipment-slot dogears. Drop PNGs into `data/slot-icons/{slot}.png` and
- * mount `/slot-icons` server-side; missing files fall through to placehold.co.
- */
+/** Slot icon art (content, served from `/slot-icons`); `SLOT_GLYPHS` shows until it loads or when it is missing. */
 export const SLOT_ICONS: Record<string, string> = {
   head: '/slot-icons/head.png',
   shoulders: '/slot-icons/shoulders.png',
@@ -41,6 +27,12 @@ export const SLOT_ICONS: Record<string, string> = {
   necklace: '/slot-icons/necklace.png',
   back: '/slot-icons/back.png',
   relic: '/slot-icons/relic.png',
+};
+
+export const SLOT_GLYPHS: Record<string, string> = {
+  head: '⛑️', shoulders: '🦺', chest: '👕', bracers: '🔗', gloves: '🧤',
+  mainhand: '🗡️', offhand: '🛡️', twohanded: '⚔️', foot: '🥾', ring: '💍',
+  necklace: '📿', back: '🧥', relic: '🏺',
 };
 
 export const SLOT_LABELS: Record<string, string> = {
@@ -74,12 +66,17 @@ export function getItemSetId(itemId: string, setDefs: Record<string, SetDefiniti
   return null;
 }
 
-function renderSlotDogear(slot: string): string {
+function renderSlotArt(slot: string, wrapClass: string, imgClass: string, glyphClass: string): string {
   const src = SLOT_ICONS[slot];
   if (!src) return '';
-  const label = (SLOT_LABELS[slot] ?? slot).slice(0, 8);
-  const placeholder = `https://placehold.co/16x16/2a2a40/e8e8e8/png?text=${encodeURIComponent(label)}`;
-  return `<span class="item-dogear">${renderTrackedImg(src, { className: 'item-dogear-img', alt: label, fallback: placeholder })}</span>`;
+  const label = SLOT_LABELS[slot] ?? slot;
+  const glyph = SLOT_GLYPHS[slot] ?? '';
+  const hasArt = isAssetLoaded(src) ? ' has-art' : '';
+  return `<span class="${wrapClass}${hasArt}"><span class="${glyphClass}" aria-hidden="true">${glyph}</span>${renderTrackedImg(src, { className: imgClass, alt: label, lazy: true })}</span>`;
+}
+
+function renderSlotDogear(slot: string): string {
+  return renderSlotArt(slot, 'item-dogear', 'item-dogear-img', 'item-dogear-glyph');
 }
 
 export interface ItemIconOptions {
@@ -95,6 +92,8 @@ export interface ItemIconOptions {
   dataAttrs?: Record<string, string>;
   /** Hover text in place of the item name. */
   tooltip?: string;
+  /** Focusable with a button role; pair with `wireRoleButtons` on a parent. */
+  interactive?: boolean;
 }
 
 /**
@@ -103,8 +102,8 @@ export interface ItemIconOptions {
  */
 export function renderItemIcon(itemId: string, def: ItemDefinition, options?: ItemIconOptions): string {
   const rarity = def.rarity ?? 'common';
-  const bgColor = def.iconColor ?? RARITY_COLORS[rarity] ?? '#e8e8e8';
-  const borderColor = RARITY_BORDER_COLORS[rarity] ?? 'rgba(180,180,180,0.25)';
+  const rarityColor = RARITY_COLORS[rarity] ?? RARITY_COLORS.common;
+  const itemBg = def.iconColor ? `;--item-bg:${escapeHtml(def.iconColor)}` : '';
   const shinyClass = SHINY_RARITIES.has(rarity) ? ` item-rarity-${rarity}` : '';
   const initials = getItemInitials(def.name);
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
@@ -118,7 +117,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   if (def.iconEmoji) {
     inner = `<span class="item-square-emoji">${escapeHtml(def.iconEmoji)}</span>`;
   } else {
-    inner = `${renderTrackedImg(artworkUrl('item', itemId), { className: 'item-square-img' })}<span class="item-square-initials">${initials}</span>`;
+    inner = `${renderTrackedImg(artworkUrl('item', itemId), { className: 'item-square-img', lazy: true })}<span class="item-square-initials">${escapeHtml(initials)}</span>`;
   }
 
   if (options?.showSetIndicator && options.setDefs && getItemSetId(itemId, options.setDefs)) {
@@ -137,19 +136,58 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   }
 
   const tooltip = escapeHtml(options?.tooltip ?? def.name);
-  const title = options?.tooltip ? ` title="${tooltip}"` : '';
-  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${tooltip}"${title} style="background:${bgColor};border-color:${borderColor}"${dataStr}>${inner}</div>`;
+  const title = options?.tooltip || options?.interactive ? ` title="${tooltip}"` : '';
+  const role = options?.interactive ? ` role="button" tabindex="0" aria-label="${escapeHtml(def.name)}"` : '';
+  return `<div class="item-square${shinyClass}${extraClass}" data-tooltip="${tooltip}"${title}${role} style="--rarity:${rarityColor}${itemBg}"${dataStr}>${inner}</div>`;
 }
 
-/**
- * Render an empty equipment slot icon with a dogear showing the slot icon.
- */
-export function renderEmptySlotIcon(slot: string, options?: { extraClass?: string; dataAttrs?: Record<string, string> }): string {
+export interface ItemCellOptions extends Omit<ItemIconOptions, 'interactive'> {
+  /** Dims the cell: this character can't use the item. */
+  unusable?: boolean;
+}
+
+/** An item square with its name beneath, for grids where a square alone doesn't identify the item. */
+export function renderItemCell(itemId: string, def: ItemDefinition, options?: ItemCellOptions): string {
+  const color = RARITY_COLORS[def.rarity ?? 'common'] ?? RARITY_COLORS.common;
+  const unusable = options?.unusable ? ' item-cell-unusable' : '';
+  const label = escapeHtml(options?.unusable ? `${def.name}, can't be used by your class` : def.name);
+  return `<div class="item-cell${unusable}" role="button" tabindex="0" aria-label="${label}">`
+    + renderItemIcon(itemId, def, options)
+    + `<span class="item-cell-name" style="color:${color}">${escapeHtml(def.name)}</span></div>`;
+}
+
+/** Empty equipment slot showing a faded slot icon. */
+export function renderEmptySlotIcon(slot: string, options?: { extraClass?: string; dataAttrs?: Record<string, string>; interactive?: boolean }): string {
   const extraClass = options?.extraClass ? ` ${options.extraClass}` : '';
   const dataStr = options?.dataAttrs
     ? Object.entries(options.dataAttrs).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('')
     : '';
   const label = SLOT_LABELS[slot] ?? slot;
 
-  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" style="background:#2a2a3a;border-color:rgba(255,255,255,0.08)"${dataStr}>${renderSlotDogear(slot)}</div>`;
+  const ghost = renderSlotArt(slot, 'item-slot-ghost', 'item-slot-ghost-img', 'item-slot-ghost-glyph');
+  const role = options?.interactive ? ` role="button" tabindex="0" aria-label="${escapeHtml(label)}, empty"` : '';
+  return `<div class="item-square item-square-empty${extraClass}" data-tooltip="${escapeHtml(label)}" title="${escapeHtml(label)}"${role}${dataStr}>${ghost}</div>`;
+}
+
+/** Sets the stack badge on a rendered square; a single item shows none. */
+export function writeItemSquareQty(square: HTMLElement, qty: number): void {
+  const badge = square.querySelector('.item-square-qty');
+  if (qty <= 1) {
+    badge?.remove();
+  } else if (badge) {
+    badge.textContent = String(qty);
+  } else {
+    square.insertAdjacentHTML('beforeend', `<span class="item-square-qty">${qty}</span>`);
+  }
+}
+
+/** Enter and Space activate `[role="button"]` children, so div-based tiles work from the keyboard. */
+export function wireRoleButtons(root: HTMLElement): void {
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const target = e.target as HTMLElement;
+    if (target.getAttribute('role') !== 'button') return;
+    e.preventDefault();
+    target.click();
+  });
 }

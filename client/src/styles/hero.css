@@ -1,0 +1,906 @@
+/* Hero and Craft screens. Loads after mobile-theme.css and overrides its skin by load order. */
+
+/* ── Hero shell ──────────────────────────────────────────── */
+.charitems-content {
+  container: hero / inline-size;
+  gap: 0;
+  padding: 0;
+}
+.hero-segments {
+  display: contents;
+}
+.hero-pane {
+  display: none;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 8px 12px 16px;
+  padding-left: calc(12px + var(--safe-left));
+  padding-right: calc(12px + var(--safe-right));
+  box-sizing: border-box;
+}
+.charitems-content[data-hero-tab='gear'] > [data-pane='gear'],
+.charitems-content[data-hero-tab='skills'] > [data-pane='skills'],
+.charitems-content[data-hero-tab='stats'] > [data-pane='stats'] {
+  display: flex;
+}
+
+/* ── Banner ──────────────────────────────────────────────── */
+.hero-loadout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.hero-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: var(--grad-panel);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 1px 0 var(--stroke-hi);
+}
+.hero-portrait {
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: radial-gradient(circle at 50% 35%, var(--surface-3) 0%, var(--bg-1) 100%);
+  box-shadow: inset 0 0 0 1px var(--stroke-hi);
+}
+.hero-portrait .hero-portrait-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
+  object-position: 50% 15%;
+  filter: none;
+}
+.hero-portrait-glyph {
+  font-size: 26px;
+  line-height: 1;
+}
+.hero-portrait-img.asset-loaded + .hero-portrait-glyph {
+  display: none;
+}
+.hero-banner-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hero-banner-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1.1;
+}
+.hero-banner-class {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-md);
+  color: var(--gold);
+}
+.hero-banner-level {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.charitems-stat-card {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.charitems-stat-card .charitems-stat {
+  flex: none;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  cursor: help;
+}
+.charitems-stat-card .charitems-stat-value {
+  font-size: var(--fs-md);
+  line-height: 1.15;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+.charitems-stat-card .charitems-stat-label {
+  font-size: var(--fs-2xs);
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  text-decoration: none;
+}
+
+/* ── Summary under the gear grid (wide layouts only) ─────── */
+.hero-summary {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-1);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-lg);
+}
+.hero-summary-xp .character-xp-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  font-size: var(--fs-xs);
+}
+.hero-summary-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hero-summary-skill {
+  overflow: hidden;
+  padding-left: 8px;
+  border-left: 3px solid var(--gold);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.hero-summary-skill.passive {
+  border-left-color: var(--green);
+}
+.hero-summary-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+.hero-summary-links {
+  display: flex;
+  gap: 8px;
+}
+.hero-summary-link {
+  flex: 1;
+  height: 32px;
+  padding: 0 8px;
+  background: none;
+  border: 1.5px solid var(--stroke-hi);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  cursor: pointer;
+}
+.hero-summary-link:hover {
+  color: var(--text-1);
+  border-color: var(--gold);
+}
+
+/* ── Gear grid ───────────────────────────────────────────── */
+.items-equip-panel {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 46px));
+  justify-content: space-between;
+  align-items: start;
+  gap: 6px 4px;
+  margin: 0;
+}
+.items-equip-col {
+  display: contents;
+}
+.items-equip-panel .items-equip-col > .items-equip-slot-square:nth-child(n) {
+  width: 100%;
+  height: auto;
+  margin: 0;
+}
+.items-equip-panel .item-square-empty {
+  cursor: pointer;
+}
+.items-equip-panel .item-square-initials {
+  font-size: var(--fs-sm);
+}
+.items-equip-panel .item-square:focus-visible,
+.item-cell:focus-visible,
+.craft-recipe-media:focus-visible,
+.hero-picker-row:focus-visible,
+.charitems-skill-slot:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+.items-equip-panel .item-square:active {
+  transform: translateY(1px);
+}
+
+/* ── Rarity: a static ring, never an animation ───────────── */
+.item-square:is(.item-rarity-epic, .item-rarity-legendary, .item-rarity-heirloom) {
+  border-color: var(--rarity);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -3px 0 rgba(0, 0, 0, 0.25),
+    0 0 0 1px color-mix(in srgb, var(--rarity) 55%, transparent), 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* ── Inventory ───────────────────────────────────────────── */
+.hero-inventory {
+  min-width: 0;
+}
+.items-search-sort {
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.hero-inventory .items-section-label {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  white-space: nowrap;
+}
+.items-search-sort input,
+.items-search-sort select {
+  height: 36px;
+  box-sizing: border-box;
+}
+.items-search-sort :is(input, select) {
+  min-height: 44px;
+}
+.items-search-sort input {
+  width: 0;
+}
+.items-search-sort select {
+  flex: none;
+}
+@media (pointer: coarse) {
+  .items-search-input {
+    font-size: 16px;
+  }
+}
+.items-inv-grid,
+.charitems-inv-group-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: 10px 6px;
+}
+.items-inv-grid.items-inv-grid-grouped {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 12px;
+}
+.items-inv-grid > .items-empty {
+  grid-column: 1 / -1;
+}
+.charitems-inv-group {
+  width: 100%;
+}
+.items-inv-grid-grouped .charitems-inv-group-header {
+  padding: 0 0 3px;
+  border-bottom-width: 1px;
+}
+.item-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.item-cell .item-square {
+  width: 100%;
+}
+.items-inv-grid .item-cell {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 86px;
+}
+.item-cell:active .item-square {
+  transform: translateY(1px);
+}
+.item-cell-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  -webkit-hyphens: auto;
+  hyphens: auto;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+}
+.item-cell-unusable {
+  opacity: 0.5;
+}
+
+/* ── Mailbox and trades ──────────────────────────────────── */
+.items-mailbox,
+.items-trades,
+.items-trades-sent {
+  margin: 0;
+}
+.items-trades-sent:empty {
+  display: none;
+}
+.hero-row-icon.item-square {
+  flex: none;
+  width: 40px;
+  height: 40px;
+}
+.hero-row-icon .item-square-initials {
+  font-size: var(--fs-sm);
+}
+.mailbox-list,
+.trade-list {
+  margin-bottom: 0;
+}
+:is(.mailbox-actions, .trade-row-actions) button {
+  min-height: 40px;
+}
+.trade-row {
+  cursor: pointer;
+}
+
+/* ── Skills ──────────────────────────────────────────────── */
+.charitems-skills-strip {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 8px;
+  padding: 0;
+  border: none;
+}
+.charitems-skill-slot {
+  position: relative;
+  flex: none;
+  min-width: 0;
+  max-width: none;
+  min-height: 56px;
+  box-sizing: border-box;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+}
+.charitems-skill-slot.filled.active {
+  box-shadow: inset 4px 0 0 var(--gold), inset 0 1px 0 var(--stroke-hi);
+}
+.charitems-skill-slot.filled.passive {
+  box-shadow: inset 4px 0 0 var(--green), inset 0 1px 0 var(--stroke-hi);
+}
+.charitems-skill-slot.empty.can-fill {
+  border-color: var(--gold);
+}
+.charitems-skill-slot.empty.can-fill .charitems-skill-slot-name {
+  color: var(--gold);
+}
+.charitems-skill-slot.locked {
+  opacity: 0.55;
+}
+.charitems-skill-slot-kind {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.charitems-skill-slot .charitems-skill-slot-name {
+  padding-right: 64px;
+  font-size: var(--fs-md);
+  line-height: 1.2;
+}
+.charitems-skill-slot-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  color: var(--text-2);
+}
+.charitems-skill-slot .skill-card-meta {
+  justify-content: flex-start;
+}
+.charitems-skill-slot .skill-card-meta-trigger {
+  text-align: left;
+}
+
+/* ── Stats ───────────────────────────────────────────────── */
+.hero-stats-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.hero-stat-list {
+  background: var(--surface-1);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.hero-stat-row {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--stroke);
+}
+.hero-stat-row:last-child {
+  border-bottom: none;
+}
+.hero-stat-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hero-stat-row-name {
+  font-size: var(--fs-sm);
+  font-weight: 800;
+  color: var(--text-1);
+}
+.hero-stat-row-value {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-lg);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.hero-stat-row-desc {
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  color: var(--text-2);
+}
+.charitems-xp-fill {
+  width: 100%;
+  border-radius: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 200ms ease-out;
+}
+.charitems-xp-rate-reset {
+  position: relative;
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--gold);
+  font-size: var(--fs-lg);
+  cursor: pointer;
+}
+.charitems-xp-rate-reset::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.charitems-bestiary {
+  margin-top: 0;
+  min-width: 0;
+}
+
+/* ── Item popup and slot picker ──────────────────────────── */
+.item-popup {
+  position: relative;
+  overflow-x: hidden;
+}
+.item-popup-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  margin: -10px -8px -26px auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(6, 9, 24, 0.6);
+  border: none;
+  border-radius: 50%;
+  color: var(--text-1);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.item-popup-close::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+.item-popup-close + .item-popup-name {
+  padding-inline: 28px;
+}
+.item-popup > .item-popup-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 12px -16px calc(-1 * var(--item-popup-bottom, 16px));
+  padding: 10px 16px var(--item-popup-bottom, 16px);
+  background: var(--surface-1);
+  border-top: 1px solid var(--stroke);
+}
+.item-popup-actions button {
+  min-height: 44px;
+}
+.item-popup .item-popup-actions .popup-action-destroy {
+  flex: none;
+  color: var(--red);
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  text-shadow: none;
+}
+.item-popup-actions :is(.popup-action-equip, .popup-action-unequip, .items-modal-confirm, .items-modal-cancel) {
+  flex: 1;
+}
+.item-popup .item-popup-actions .popup-action-blocked {
+  --mt-btn-bg: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
+  --mt-btn-edge: var(--bg-0);
+  --mt-btn-fg: var(--text-3);
+  --mt-btn-text-shadow: none;
+}
+.hero-picker-list {
+  margin: 0 -16px;
+  text-align: left;
+  border-top: 1px solid var(--stroke);
+}
+.hero-picker-row {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hero-picker-row .ui-row-sub {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+.hero-picker-row .pixel-btn {
+  min-height: 40px;
+  padding: 0 14px;
+}
+.hero-picker-note {
+  max-width: 88px;
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: right;
+  color: var(--red);
+}
+@media (max-width: 767px) {
+  .item-popup-overlay,
+  .charitems-skill-popup-overlay {
+    align-items: flex-end;
+    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  }
+  .item-popup-overlay > .item-popup,
+  .charitems-skill-popup {
+    --item-popup-bottom: calc(14px + var(--safe-bottom));
+    width: 100%;
+    max-width: none;
+    max-height: 85dvh;
+    padding-bottom: var(--item-popup-bottom);
+    border-bottom: none;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    animation: confirm-rise 160ms ease-out;
+  }
+}
+
+/* ── Craft ───────────────────────────────────────────────── */
+.craft-screen {
+  gap: 0;
+  padding: 0;
+}
+.craft-head,
+.craft-section {
+  flex: none;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding-left: calc(12px + var(--safe-left));
+  padding-right: calc(12px + var(--safe-right));
+}
+.craft-head {
+  padding-top: 8px;
+}
+.craft-segments {
+  display: contents;
+}
+.craft-skill-header {
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 1px 0 var(--stroke-hi);
+}
+.craft-skill-row {
+  justify-content: flex-start;
+}
+.craft-skill-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--fs-lg);
+}
+.craft-skill-level {
+  flex: none;
+}
+.craft-skill-xptext {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+.craft-skill-xpbar {
+  height: 8px;
+}
+.craft-section {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.craft-section:empty {
+  display: none;
+}
+.craft-recipes-section {
+  padding-bottom: 16px;
+}
+.craft-section h3 {
+  margin: 0 0 6px;
+}
+.craft-queue-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  padding: 8px 10px;
+}
+.craft-queue-row > .craft-queue-text:first-child {
+  grid-column: 1 / 3;
+}
+.craft-queue-icon.item-square {
+  width: 36px;
+  height: 36px;
+}
+.craft-queue-icon .item-square-initials {
+  font-size: var(--fs-xs);
+}
+.craft-queue-text {
+  min-width: 0;
+}
+.craft-progress {
+  height: 8px;
+}
+.craft-recipe-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: 8px;
+}
+.craft-recipe-card {
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 10px;
+  cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+.craft-recipe-media {
+  border-radius: var(--radius-md);
+}
+.craft-recipe-card.blocked .craft-recipe-media {
+  opacity: 0.6;
+}
+.craft-recipe-icon.item-square {
+  width: 48px;
+  height: 48px;
+}
+.craft-recipe-ings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  margin-top: 2px;
+}
+.craft-ing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.craft-ing-icon {
+  position: relative;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--rarity) 45%, var(--bg-0));
+  box-shadow: inset 0 0 0 1px var(--stroke-hi);
+}
+/* Keeps its box until the art fails: a lazy image in a display:none parent never loads. */
+.craft-ing-icon:not(:has(.asset-loaded)) {
+  background: none;
+  box-shadow: none;
+}
+.craft-ing-icon:not(:has(.asset-img:not(.asset-failed))) {
+  display: none;
+}
+.craft-ing-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: var(--art-rendering);
+}
+.craft-recipe-reason {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--gold);
+}
+.craft-recipe-reason[data-reason='missing_ingredients'] {
+  color: var(--red);
+}
+.craft-screen .craft-recipe-card .craft-queue-btn,
+.craft-screen .craft-queue-row .craft-cancel-btn {
+  min-height: 40px;
+  padding: 0 12px;
+}
+.craft-screen .craft-recipe-card .craft-queue-btn:disabled {
+  background: none;
+  border-color: var(--stroke-hi);
+  box-shadow: none;
+  color: var(--text-3);
+  text-shadow: none;
+  filter: none;
+  opacity: 1;
+}
+
+/* ── Roomy and narrow main columns ───────────────────────── */
+@container hero (width >= 560px) {
+  .hero-loadout {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .hero-banner {
+    flex: 1;
+    min-width: 0;
+  }
+  .items-equip-panel {
+    flex: none;
+    width: 320px;
+  }
+  .charitems-stat-card {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+  }
+}
+@container hero (width >= 720px) {
+  .hero-pane-gear {
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    align-items: start;
+    gap: 12px 16px;
+  }
+  .charitems-content[data-hero-tab='gear'] > .hero-pane-gear {
+    display: grid;
+  }
+  .hero-pane-gear > .items-mailbox,
+  .hero-pane-gear > .items-trades,
+  .hero-pane-gear > .items-trades-sent {
+    grid-column: 1 / -1;
+  }
+  .hero-pane-gear > :is(.items-mailbox, .items-trades):empty {
+    display: none;
+  }
+  .hero-loadout {
+    position: sticky;
+    top: 56px;
+    flex-direction: column;
+  }
+  .hero-banner {
+    flex: none;
+  }
+  .charitems-stat-card {
+    display: flex;
+  }
+  .hero-summary {
+    display: flex;
+  }
+  .items-equip-panel {
+    width: auto;
+    grid-template-columns: repeat(6, minmax(0, 54px));
+  }
+  .items-inv-grid,
+  .charitems-inv-group-items {
+    grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  }
+  .charitems-content[data-hero-tab='stats'] > .hero-pane-stats {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 16px;
+  }
+}
+@container hero (width < 340px) {
+  .items-search-sort {
+    flex-wrap: wrap;
+  }
+  .hero-inventory .items-section-label {
+    flex-basis: 100%;
+  }
+  .hero-pane {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .hero-banner {
+    gap: 8px;
+    padding: 8px;
+  }
+  .hero-portrait {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+  .charitems-stat-card .charitems-stat-value {
+    font-size: var(--fs-sm);
+  }
+}
+
+@container hero (width < 300px) {
+  .hero-banner {
+    align-items: flex-start;
+  }
+  .items-equip-panel {
+    grid-template-columns: repeat(4, minmax(0, 46px));
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item-popup-overlay > .item-popup,
+  .charitems-skill-popup {
+    animation: none;
+  }
+  .craft-progress-fill,
+  .charitems-xp-fill,
+  .craft-skill-xpfill {
+    transition: none;
+  }
+}

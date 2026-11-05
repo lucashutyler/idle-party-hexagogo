@@ -14,8 +14,8 @@ import type { AssetStore } from './AssetStore.js';
  * entry reports both whether it has art of its own and what it really renders.
  */
 
-/** Nav destinations that draw a PNG. Chat uses a chevron glyph, so it has no icon. */
-const NAV_ICON_IDS = ['combat', 'map', 'items', 'craft', 'social', 'settings'] as const;
+/** Nav destinations that draw a PNG. */
+const NAV_ICON_IDS = ['combat', 'map', 'items', 'craft', 'social', 'settings', 'quests', 'chat'] as const;
 
 /** Placeholder glyphs the class-icon set carries beyond the real classes. */
 const CLASS_ICON_EXTRA_IDS = ['Unknown', 'Server'] as const;

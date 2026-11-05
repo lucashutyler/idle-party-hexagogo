@@ -59,6 +59,7 @@ export {
   inlineIconHtml,
   classIconHtml,
   serverIconHtml,
+  CLASS_GLYPHS,
   ALL_CLASS_NAMES,
   CRAFT_SKILL_NAMES,
   getCraftSkillName,
@@ -93,6 +94,11 @@ export {
   getSkillsForClass,
   getSlotSchedule,
   getUnlockedSkillsForLevel,
+  SKILL_TRIGGER_VALUES,
+  SKILL_TRIGGER_INFO,
+  SKILL_CARD_TYPE_INFO,
+  getSkillTrigger,
+  getSkillCardType,
 } from './systems/SkillTypes.js';
 export type {
   SkillSlotType,
@@ -105,6 +111,8 @@ export type {
   SkillDefinition,
   SkillLoadout,
   SkillContent,
+  SkillTrigger,
+  SkillCardType,
 } from './systems/SkillTypes.js';
 
 // Skill option catalog (admin editor + validation)
@@ -164,6 +172,7 @@ export {
 // Monster types
 export {
   SEED_MONSTERS,
+  MONSTER_TIERS,
   createMonsterInstance,
 } from './systems/MonsterTypes.js';
 export type {
@@ -171,11 +180,15 @@ export type {
   MonsterSkillEntry,
   MonsterDefinition,
   MonsterInstance,
+  MonsterTier,
+  MonsterLevelSource,
+  MonsterEnrage,
 } from './systems/MonsterTypes.js';
 
 // Monster skills
 export {
   MONSTER_SKILL_CATALOG,
+  getMonsterSkillCastTimeMs,
 } from './systems/MonsterSkills.js';
 export type {
   MonsterSkillDefinition,
@@ -186,6 +199,7 @@ export {
   SEED_ENCOUNTERS,
   resolveEncounter,
   createEncounter,
+  pickWeightedEncounter,
 } from './systems/EncounterTypes.js';
 export type {
   RandomMonsterEntry,
@@ -209,6 +223,8 @@ export {
   DEV_SEED_VERSION,
   DEV_ZONE_PREFIX,
   DEV_SEED_MARKER_ZONE_ID,
+  DEV_MIXED_ENCOUNTER_ID,
+  DEV_RAID_DUNGEON_ID,
 } from './seed/SeedDevWorld.js';
 export type {
   DevWorldOutput,
@@ -218,22 +234,113 @@ export type {
 // Combat engine
 export {
   createPartyCombatState,
-  processPartyTick,
+  processCombatStep,
+  advanceCombat,
+  cloneCombatState,
+  createRng,
+  buildClientCombatSnapshot,
   findTarget,
   applyMonsterResistance,
+  effectiveCooldownMs,
+  wouldHaveEffect,
+  isInterruptFlashMode,
 } from './systems/CombatEngine.js';
 export type {
   TickResult,
   PartyCombatant,
+  PartyCombatantInit,
   CombatMonster,
   PartyCombatState,
-  CombatAction,
+  CombatSetup,
+  CombatBossPhases,
+  CombatEnrage,
+  CombatCast,
+  PendingCounter,
+  PartyBuff,
+  InFlightAttack,
+  EffectContext,
   DotEffect,
   HotEffect,
   CombatBuff,
   CombatDebuff,
   SunderMark,
 } from './systems/CombatEngine.js';
+
+// Combat scaling (level-relative mitigation, caps, enrage)
+export {
+  ARMOR_K,
+  SKILL_RATING_SCALE,
+  MAX_MITIGATION,
+  MAX_PERCENT_RESIST,
+  LEVEL_GAP_SLOPE,
+  GAP_LEVEL_OFFSET,
+  LEVEL_GAP_MIN,
+  LEVEL_GAP_MAX,
+  MAX_ENEMY_DAMAGE_REDUCTION,
+  MAX_DODGE,
+  FOCUS_MAX_STACKS,
+  SUNDER_MAX_STACKS,
+  WAR_SONG_MAX_STACKS,
+  IGNITE_MAX_STACKS,
+  ENRAGE_STEP_SECONDS,
+  ENRAGE_STEP_PERCENT,
+  ENRAGE_MAX_STACKS,
+  ENRAGE_TIER_DEFAULTS,
+  ratingMitigation,
+  skillRatingMitigation,
+  levelGapMultiplier,
+  pairScaling,
+  percentResistFactor,
+  scaleDamage,
+  masteryFactor,
+  isBossTier,
+  resolveEnrage,
+  enrageStacksAt,
+} from './systems/CombatScaling.js';
+export type {
+  CombatLevel,
+  ResolvedEnrage,
+} from './systems/CombatScaling.js';
+
+// Combat timing
+export {
+  COMBAT_STEP_MS,
+  BASE_ACTION_INTERVAL_MS,
+  MIN_MONSTER_ACTION_INTERVAL_MS,
+  STATUS_PULSE_MS,
+  STUN_MS,
+  SCORCH_MS,
+  MIN_COOLDOWN_MS,
+  INTERRUPT_DELAY_MS,
+  RUN_AVAILABLE_MS,
+  KILL_BEAT_MS,
+  FIRST_ACTION_PLAYER_MS,
+  FIRST_ACTION_MONSTER_MS,
+  STALEMATE_WINDOW_MS,
+  BOSS_STALEMATE_WINDOW_MS,
+  LOW_HP_THRESHOLD,
+  HEAL_NEEDED_THRESHOLD,
+  COMBAT_SEND_MS,
+  COMBAT_SNAPSHOT_MS,
+  PLAYBACK_DELAY_MS,
+  STATE_LOG_TAIL,
+} from './systems/CombatTiming.js';
+
+// Combat events & client snapshot
+export type {
+  CombatSide,
+  CombatRef,
+  CombatResult,
+  CombatEventKind,
+  CombatEvent,
+  ClientCombatEnrage,
+  ClientCombatBossPhases,
+  ClientCombatStatus,
+  ClientCombatSkill,
+  ClientCombatCast,
+  ClientCombatUnit,
+  ClientCombatSnapshot,
+} from './systems/CombatEvents.js';
 
 // Battle types & constants
 export type {
@@ -242,11 +349,9 @@ export type {
   PartyState,
   BattleVisual,
   ServerPartyState,
-  ClientPlayerCombatant,
-  ClientMonsterState,
-  ClientCombatAction,
-  ClientCombatState,
   ServerBattleState,
+  ServerCombatMessage,
+  ClientCombatViewMessage,
   ClientCharacterState,
   OtherPlayerState,
   CombatLogType,
@@ -270,6 +375,8 @@ export type {
   ClientCraftQueueMessage,
   ClientCraftCancelMessage,
   ClientCraftingState,
+  ClientCraftingCatalog,
+  ClientCraftingProgress,
   ClientAcceptQuestMessage,
   ClientTurnInQuestMessage,
   PlayerProfileMessage,
@@ -281,8 +388,9 @@ export type {
 export {
   RESULT_PAUSE,
   MOVE_DURATION,
-  RUN_AVAILABLE_ROUNDS,
   GAME_VERSION,
+  PARTIAL_STATE_PARAM,
+  restoreElidedState,
 } from './systems/BattleTypes.js';
 
 // Set types
@@ -404,7 +512,7 @@ export type {
 } from './systems/DungeonTypes.js';
 
 // Social types
-export { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY } from './systems/SocialTypes.js';
+export { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY, MIN_GUILD_LEVEL, isBlockedUser } from './systems/SocialTypes.js';
 export type {
   PlayerListEntry,
   FriendEntry,
@@ -522,3 +630,209 @@ export type {
   AssetOverrideSource,
   AssetFallback,
 } from './assets/AssetKinds.js';
+
+// Monster levels, templates, mastery, away recap, forecasts, dungeon checkpoints
+export {
+  AOE_DPS_WEIGHT,
+  TIER_HP_RATIOS,
+  LEVEL_CONS,
+  LEVEL_CON_INFO,
+  XP_CON_FACTOR,
+  clampMonsterLevel,
+  monsterDamagePerSecond,
+  deriveMonsterLevel,
+  isAuthoredMonsterLevel,
+  effectiveMonsterLevel,
+  effectiveMonsterTier,
+  suggestTierFromHp,
+  levelCon,
+  monsterLevelCon,
+  xpConFactor,
+  formatMonsterLevel,
+} from './systems/MonsterLevels.js';
+export type { LevelCon, LevelConInfo, EffectiveMonsterLevel } from './systems/MonsterLevels.js';
+export {
+  XP_INCOME_SOLO_L1_PER_DAY,
+  XP_INCOME_PARTY_L10_PER_DAY,
+  XP_INCOME_DOUBLING_LEVELS,
+  XP_INCOME_MODEL,
+  CLASS_AVERAGE_HP_BASE,
+  CLASS_AVERAGE_HP_PER_LEVEL,
+  CLASS_AVERAGE_DAMAGE_BASE,
+  CLASS_AVERAGE_DAMAGE_PER_LEVEL,
+  TRASH_HP_PER_CLASS_DAMAGE,
+  TRASH_DPS_PER_CLASS_HP,
+  ELITE_HP_MULTIPLIER,
+  ELITE_DPS_MULTIPLIER,
+  ROLE_MODIFIERS,
+  TIER_DEFAULT_ATTACK_INTERVAL,
+  REFERENCE_PARTY,
+  REFERENCE_PARTY_SIZE,
+  REFERENCE_PARTY_STEADY_DPS,
+  BOSS_TARGET_SECONDS,
+  RAID_TARGET_SECONDS,
+  BOSS_DPS_BASE,
+  BOSS_DPS_PER_LEVEL,
+  RAID_DPS_BASE,
+  RAID_DPS_PER_LEVEL,
+  REFERENCE_PACK_SIZE,
+  REFERENCE_FIGHT_SECONDS,
+  FIGHT_OVERHEAD_SECONDS,
+  TIER_XP_BONUS,
+  GOLD_PER_XP,
+  classAverageHp,
+  classAverageDamage,
+  trashTemplateHp,
+  trashTemplateDps,
+  templateHp,
+  templateDps,
+  levelForTemplateDps,
+  referencePartyDps,
+  bossDpsMultiplier,
+  raidDpsMultiplier,
+  tierMemberSeconds,
+  suggestMonsterStats,
+} from './systems/MonsterTemplates.js';
+export type { MonsterRole, SuggestedMonsterStats, MonsterRoleModifier } from './systems/MonsterTemplates.js';
+export {
+  MASTERY_THRESHOLDS,
+  MASTERY_BONUS_PER_RANK,
+  MASTERY_MAX_RANK,
+  MASTERY_TRASH_MOMENT_MIN_RANK,
+  masteryRank,
+  nextMasteryAt,
+  prevMasteryAt,
+  masteryBonus,
+  isMasteryMoment,
+  buildMasteryEntry,
+  masteryRanks,
+} from './systems/Mastery.js';
+export type { MasteryEntry, MasterySummary, MasteryMonsterInfo } from './systems/Mastery.js';
+export {
+  AWAY_MIN_MS,
+  AWAY_TOAST_MAX_MS,
+  AWAY_MAX_MOMENTS,
+  AWAY_MAX_NOTABLE_ITEMS,
+  AWAY_MAX_DUNGEONS,
+  AWAY_MAX_RETREATS,
+  AWAY_NOTABLE_MIN_RARITY,
+  AWAY_MOMENT_PRIORITY,
+  awayRarityRank,
+  createAwayLedger,
+  closeAwayLedger,
+  isAwayLedgerWorthRecap,
+  awayRecapStyle,
+  recordAwayBattle,
+  recordAwayItem,
+  recordAwayItemsLost,
+  recordAwayRetreat,
+  recordAwayDungeon,
+  recordAwayMastery,
+  recordAwayCloseCall,
+  recordAwayRouteStopped,
+  addAwayMoment,
+  mergeAwayLedgers,
+  topAwayMoments,
+} from './systems/AwayTypes.js';
+export type {
+  AwayMomentKind,
+  AwayMoment,
+  AwayDungeonOutcome,
+  AwayDungeonEntry,
+  AwayRetreatEntry,
+  AwayNotableItem,
+  AwayMasteryUp,
+  AwayCloseCall,
+  AwayLedger,
+  AwayProgress,
+  AwayRecapStyle,
+} from './systems/AwayTypes.js';
+export {
+  AUTO_RETREAT_OPTIONS,
+  DEFAULT_COMBAT_PREFS,
+  isAutoRetreatPct,
+  sanitizeCombatPrefs,
+} from './systems/ForecastTypes.js';
+export type {
+  ForecastTarget,
+  ForecastRequestTarget,
+  ForecastStatus,
+  ForecastReasonCode,
+  ForecastReason,
+  ForecastStats,
+  ForecastFloor,
+  ForecastStratum,
+  ForecastResult,
+  AutoRetreatPct,
+  CombatPrefs,
+  PartyAutoRetreatInfo,
+} from './systems/ForecastTypes.js';
+export {
+  DEFAULT_MAX_WIPES,
+  DEFAULT_CHECKPOINT_REWARD_FRACTION,
+  DUNGEON_CHECKPOINT_TTL_MS,
+  floorCheckpoints,
+  floorMaxWipes,
+  floorCheckpointRewardFraction,
+  clampCheckpointPhase,
+  checkpointPhaseKey,
+  isDungeonCheckpointFresh,
+  isBossMonster,
+  encounterCanFieldBoss,
+  floorCanFieldBoss,
+} from './systems/DungeonTypes.js';
+export type { DungeonRunState, DungeonCheckpoint } from './systems/DungeonTypes.js';
+export type {
+  ServerForecastMessage,
+  ServerBestiaryMessage,
+  ClientRequestForecastMessage,
+  ClientSetCombatPrefsMessage,
+  ClientRequestBestiaryMessage,
+  ClientAckRecapMessage,
+  ClientPresenceMessage,
+} from './systems/BattleTypes.js';
+
+// Forecasting (Monte Carlo over the real engine)
+export {
+  FORECAST_MIN_SIMS,
+  FORECAST_MIN_SIMS_PER_STRATUM,
+  FORECAST_TARGET_HALF_WIDTH_PCT,
+  FORECAST_SIM_BUDGET,
+  FORECAST_HORIZON_AFTER_ENRAGE_MS,
+  FORECAST_HORIZON_WITHOUT_ENRAGE_MS,
+  FORECAST_MAX_REASONS,
+  FORECAST_WORST_MIN_SHARE_PCT,
+  FORECAST_STALEMATE_REASON_FRACTION,
+  FORECAST_NO_HEALER_MEDIAN_MS,
+  FORECAST_LEVEL_GAP_REASON,
+  FORECAST_OUTLEVEL_REASON,
+  FORECAST_NEEDS_GROUP_HUMANS,
+  FORECAST_NEEDS_GROUP_WIN_PCT,
+  FORECAST_QUIET_WIN_PCT,
+  defaultHorizonMs,
+  simulateToEnd,
+  wilsonInterval,
+  killEtaFor,
+  summarize,
+  seedFromKey,
+  partyKey,
+  formatForecastClock,
+  nearestShareFraction,
+  fightsShareText,
+  forecastReasons,
+  createForecastJob,
+  runForecast,
+} from './systems/Forecast.js';
+export type {
+  SimResult,
+  SimOutcome,
+  RoomForecastInput,
+  DungeonForecastStart,
+  DungeonForecastInput,
+  BattleForecastInput,
+  ForecastInput,
+  ForecastJobOptions,
+  ForecastJob,
+  ForecastReasonInput,
+  SummarizeOptions,
+} from './systems/Forecast.js';

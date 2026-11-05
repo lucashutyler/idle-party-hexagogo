@@ -1,8 +1,16 @@
 import type { Screen } from './ScreenManager';
-import type { GameClient } from '../network/GameClient';
+import { OFFLINE_NOTICE, type GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import { ALL_CLASS_NAMES, CLASS_DEFINITIONS, classIconHtml, getSkillsForClass } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
+import { artworkUrl, renderTrackedImg } from '../ui/assets';
+import { escapeHtml } from '../ui/ItemIcon';
+
+export const CLASS_CHOICE_TIMEOUT_MS = 10000;
+export const CLASS_NO_REPLY_NOTICE = 'No answer from the server. Please try again.';
+
+const PICK_LABEL = 'Pick a class';
+const CREATING_LABEL = 'Creating…';
 
 export class ClassSelectScreen implements Screen {
   private container: HTMLElement;
@@ -11,6 +19,12 @@ export class ClassSelectScreen implements Screen {
   private onClassChosen: () => void;
   private selectedClass: ClassName | null = null;
   private confirmBtn!: HTMLButtonElement;
+  private errorEl!: HTMLElement;
+  private cards!: HTMLElement[];
+  private waiting = false;
+  private replyTimer: ReturnType<typeof setTimeout> | null = null;
+  private unsubscribeState: (() => void) | null = null;
+  private unsubscribeError: (() => void) | null = null;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache, onClassChosen: () => void) {
     const el = document.getElementById(containerId);
@@ -24,39 +38,41 @@ export class ClassSelectScreen implements Screen {
   }
 
   onActivate(): void {
+    this.stopWaiting();
     this.selectedClass = null;
-    this.confirmBtn.disabled = true;
-    this.container.querySelectorAll('.class-card').forEach(c => c.classList.remove('selected'));
+    this.showError('');
+    this.paintSelection();
   }
 
   onDeactivate(): void {
-    // no-op
+    this.stopWaiting();
+    this.unsubscribeState?.();
+    this.unsubscribeState = null;
   }
 
   private buildDOM(): void {
-    const esc = (s: string) => s
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const skillContent = this.worldCache.getSkillContent();
-    const cards = ALL_CLASS_NAMES.map(cn => {
+    const cards = ALL_CLASS_NAMES.map((cn, i) => {
       const def = CLASS_DEFINITIONS[cn];
-      // Starting-skill preview: the class's level-1 passive. getSkillsForClass
-      // returns skills sorted by sortOrder, so the first match wins ties.
       const startingSkill = getSkillsForClass(cn, skillContent)
         .find(s => s.type === 'passive' && s.unlockLevel === 1);
-      const skillText = startingSkill ? `${esc(startingSkill.name)}: ${esc(startingSkill.description)}` : 'No starting skill';
+      const art = renderTrackedImg(artworkUrl('class', cn), { className: 'class-card-img', alt: '' });
 
       return `
-        <div class="class-card" data-class="${cn}">
-          <div class="class-card-header">
+        <div class="class-card" data-class="${cn}" role="radio" aria-checked="false" tabindex="${i === 0 ? 0 : -1}">
+          <div class="class-card-art">
             <span class="class-card-icon">${classIconHtml(cn)}</span>
-            <span class="class-card-title">${def.displayName}</span>
+            ${art}
           </div>
-          <div class="class-card-desc">${def.description}</div>
-          <div class="class-card-stats">
-            <span>HP: ${def.baseHp} +${def.hpPerLevel}/lv</span>
-            <span>DMG: ${def.baseDamage} +${def.damagePerLevel}/lv (${def.damageType})</span>
+          <div class="class-card-main">
+            <span class="class-card-title">${escapeHtml(def.displayName)}</span>
+            <div class="class-card-desc">${escapeHtml(def.description)}</div>
+            <div class="class-card-stats">
+              <span>${def.baseHp} HP, +${def.hpPerLevel} a level</span>
+              <span>${def.baseDamage} ${escapeHtml(def.damageType)} damage, +${def.damagePerLevel} a level</span>
+            </div>
+            ${startingSkill ? `<div class="class-card-passive">${escapeHtml(startingSkill.name)}: ${escapeHtml(startingSkill.description)}</div>` : ''}
           </div>
-          <div class="class-card-passive">${skillText}</div>
         </div>
       `;
     }).join('');
@@ -65,41 +81,107 @@ export class ClassSelectScreen implements Screen {
       <div class="class-select-content">
         <h1 class="login-title">Choose Your Class</h1>
         <p class="login-subtitle">Each class is weak alone but powerful in a party.</p>
-        <div class="class-card-list">
+        <div class="class-card-list" role="radiogroup" aria-label="Class">
           ${cards}
         </div>
-        <button class="login-button class-confirm-btn" disabled>Choose Class</button>
+        <div class="class-confirm-bar">
+          <div class="login-error" role="alert"></div>
+          <button type="button" class="login-button class-confirm-btn" disabled>${PICK_LABEL}</button>
+        </div>
       </div>
     `;
 
     this.confirmBtn = this.container.querySelector('.class-confirm-btn')!;
+    this.errorEl = this.container.querySelector('.login-error')!;
+    this.cards = [...this.container.querySelectorAll<HTMLElement>('.class-card')];
 
-    // Wire card clicks
-    this.container.querySelectorAll('.class-card').forEach(card => {
-      card.addEventListener('click', () => {
-        this.container.querySelectorAll('.class-card').forEach(c => c.classList.remove('selected'));
-        card.classList.add('selected');
-        this.selectedClass = card.getAttribute('data-class') as ClassName;
-        this.confirmBtn.disabled = false;
-      });
+    const list = this.container.querySelector<HTMLElement>('.class-card-list')!;
+    list.addEventListener('click', (e) => {
+      const card = e.target instanceof Element ? e.target.closest<HTMLElement>('.class-card') : null;
+      if (card) this.select(card);
     });
+    list.addEventListener('keydown', (e) => this.handleKeydown(e));
+    this.confirmBtn.addEventListener('click', () => this.confirm());
+  }
 
-    // Wire confirm
-    this.confirmBtn.addEventListener('click', () => {
-      if (!this.selectedClass) return;
-      this.confirmBtn.disabled = true;
-      this.confirmBtn.textContent = 'Creating...';
-      this.gameClient.sendSetClass(this.selectedClass);
+  private handleKeydown(e: KeyboardEvent): void {
+    const current = e.target instanceof Element ? e.target.closest<HTMLElement>('.class-card') : null;
+    if (!current) return;
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      this.select(current);
+      return;
+    }
+    const step = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    const next = this.cards[(this.cards.indexOf(current) + step + this.cards.length) % this.cards.length];
+    this.select(next);
+    next.focus();
+  }
 
-      // Listen for the state update confirming class change
-      const unsub = this.gameClient.subscribe((state) => {
-        if (state.character !== null) {
-          unsub();
-          // Defer to next microtask so enterGame() runs outside the subscriber
-          // loop — errors propagate properly instead of being swallowed
-          queueMicrotask(() => this.onClassChosen());
-        }
-      });
+  private select(card: HTMLElement): void {
+    if (this.waiting) return;
+    this.selectedClass = card.dataset.class as ClassName;
+    this.showError('');
+    this.paintSelection();
+  }
+
+  private paintSelection(): void {
+    this.cards.forEach((card, i) => {
+      const on = card.dataset.class === this.selectedClass;
+      card.classList.toggle('selected', on);
+      card.setAttribute('aria-checked', String(on));
+      card.tabIndex = on || (!this.selectedClass && i === 0) ? 0 : -1;
     });
+    this.confirmBtn.disabled = !this.selectedClass;
+    this.confirmBtn.textContent = this.selectedClass
+      ? `Play as ${CLASS_DEFINITIONS[this.selectedClass].displayName}`
+      : PICK_LABEL;
+  }
+
+  private confirm(): void {
+    if (!this.selectedClass || this.waiting) return;
+    if (!this.gameClient.sendSetClass(this.selectedClass)) {
+      this.showError(OFFLINE_NOTICE);
+      return;
+    }
+    this.waiting = true;
+    this.showError('');
+    this.confirmBtn.disabled = true;
+    this.confirmBtn.textContent = CREATING_LABEL;
+
+    // A reply that beats a shown timeout still enters the game, so this outlives the wait.
+    this.unsubscribeState ??= this.gameClient.subscribe((state) => {
+      if (state.character === null) return;
+      this.stopWaiting();
+      this.unsubscribeState?.();
+      this.unsubscribeState = null;
+      // Defer so enterGame() runs outside the subscriber loop and its errors surface.
+      queueMicrotask(() => this.onClassChosen());
+    });
+    this.unsubscribeError = this.gameClient.onServerError((message, code) => {
+      if (!code) this.failWaiting(message);
+    });
+    this.replyTimer = setTimeout(() => this.failWaiting(CLASS_NO_REPLY_NOTICE), CLASS_CHOICE_TIMEOUT_MS);
+  }
+
+  private failWaiting(message: string): void {
+    this.stopWaiting();
+    this.paintSelection();
+    this.showError(message);
+  }
+
+  private stopWaiting(): void {
+    this.waiting = false;
+    if (this.replyTimer !== null) clearTimeout(this.replyTimer);
+    this.replyTimer = null;
+    this.unsubscribeError?.();
+    this.unsubscribeError = null;
+  }
+
+  private showError(message: string): void {
+    this.errorEl.style.display = message ? 'block' : 'none';
+    this.errorEl.textContent = message;
   }
 }

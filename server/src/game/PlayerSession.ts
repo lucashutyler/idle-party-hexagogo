@@ -43,10 +43,59 @@ import {
   xpForCraftLevel,
   getCraftSkillName,
   emptyNotificationPreferences,
+  STATE_LOG_TAIL,
+  DEFAULT_COMBAT_PREFS,
+  sanitizeCombatPrefs,
+  masteryRank,
+  masteryRanks,
+  masteryBonus,
+  isMasteryMoment,
+  buildMasteryEntry,
+  MASTERY_THRESHOLDS,
+  effectiveMonsterTier,
+  isAuthoredMonsterLevel,
+  clampMonsterLevel,
+  createAwayLedger,
+  closeAwayLedger,
+  isAwayLedgerWorthRecap,
+  mergeAwayLedgers,
+  recordAwayBattle,
+  recordAwayItem,
+  recordAwayItemsLost,
+  recordAwayRetreat,
+  recordAwayMastery,
+  recordAwayCloseCall,
+  recordAwayRouteStopped,
+  addAwayMoment,
+  awayRarityRank,
+  AWAY_NOTABLE_MIN_RARITY,
+  AWAY_MAX_MOMENTS,
+  AWAY_MAX_NOTABLE_ITEMS,
+  AWAY_MAX_DUNGEONS,
+  AWAY_MAX_RETREATS,
+  AWAY_MOMENT_PRIORITY,
   acceptableQuestIds,
   nextWeeklyReopening,
+  isBlockedUser,
 } from '@idle-party-rpg/shared';
 import type {
+  CombatPrefs,
+  DungeonCheckpoint,
+  DungeonRunState,
+  AwayLedger,
+  AwayMoment,
+  AwayMomentKind,
+  AwayRetreatEntry,
+  AwayCloseCall,
+  AwayDungeonEntry,
+  AwayDungeonOutcome,
+  AwayMasteryUp,
+  AwayNotableItem,
+  ItemRarity,
+  MasteryEntry,
+  MasteryMonsterInfo,
+  MasterySummary,
+  MonsterTier,
   HiredHenchman,
   HenchmanOffer,
   ServerStateMessage,
@@ -56,7 +105,7 @@ import type {
   CombatLogEntry,
   CharacterState,
   ClassName,
-  PartyCombatant,
+  PartyCombatantInit,
   ClientCharacterState,
   EquipSlot,
   ClientSocialState,
@@ -73,12 +122,14 @@ import type {
   SkillContent,
   MailboxEntry,
   CraftQueueState,
-  ClientCraftingState,
+  ClientCraftingCatalog,
+  ClientCraftingProgress,
   EnqueueError,
   NotificationEntry,
   NotificationPreferences,
   WebPushSubscription,
 } from '@idle-party-rpg/shared';
+import { randomUUID } from 'crypto';
 import type { PlayerSaveData } from './GameStateStore.js';
 import type { ContentStore } from './ContentStore.js';
 import type { WorldGrids } from './WorldGrids.js';
@@ -89,6 +140,16 @@ import type { QuestDefinition, QuestProgressEntry, CompletedQuestEntry } from '@
 const MAX_LOG_ENTRIES = 1000;
 const MAX_SAVE_LOG_ENTRIES = 1000;
 const MAX_CHAT_HISTORY = 1000;
+const MASTERY_RECENT_COUNT = 5;
+/** A victory at or below this share of party HP becomes a recap moment. */
+const CLOSE_CALL_MOMENT_PCT = 20;
+
+/** A monster credited to kill mastery; the tier is the one it had in the fight. */
+export interface KilledMonster {
+  id: string;
+  name: string;
+  tier?: MonsterTier;
+}
 
 export class PlayerSession {
   username: string;
@@ -107,13 +168,19 @@ export class PlayerSession {
   private partyId: string | null = null;
   /** Dungeon IDs this player has cleared at least once (for one-time first-clear rewards). */
   private clearedDungeons = new Set<string>();
+  private dungeonCheckpoints: Record<string, DungeonCheckpoint> = emptyCheckpoints();
+  private monsterKills: Record<string, number> = emptyKillCounts();
+  /** Monster ids by most recent kill, newest first. In memory only. */
+  private recentKills: string[] = [];
+  private combatPrefs: CombatPrefs = { ...DEFAULT_COMBAT_PREFS };
+  private autoRetreatNotified = false;
+  private awayLedger: AwayLedger | null = null;
+  private pendingRecap: AwayLedger | null = null;
   private chatSendChannel: ChatChannelType = 'zone';
   private chatDmTarget = '';
   private craftQueue: CraftQueueState = emptyCraftQueue();
-  /** Initial mailbox snapshot from save data; live state lives in MailboxSystem. */
+  /** Mailbox entries from a save written before MailboxStore existed. */
   private initialMailbox: MailboxEntry[] = [];
-  /** Callback to fetch the player's live mailbox from MailboxSystem. */
-  getMailbox?: () => MailboxEntry[];
   /** Initial notification inbox snapshot from save data; live state lives in NotificationSystem. */
   private initialNotifications: NotificationEntry[] = [];
   /** Callback to fetch the player's live notification inbox from NotificationSystem. */
@@ -201,8 +268,8 @@ export class PlayerSession {
     this.forceUnlockTileArea(arrivalTile);
   }
 
-  /** Get combat info for the party combat system. Requires character to exist. */
-  getCombatInfo(): PartyCombatant {
+  /** Get combat info for the party combat system. Requires character to exist. Without `gridPosition` it is read from the party. */
+  getCombatInfo(gridPosition?: PartyGridPosition): PartyCombatantInit {
     if (!this.character) throw new Error('getCombatInfo called on characterless session');
     const baseMaxHp = calculateMaxHp(this.character.level, this.character.className);
     let baseDamage = calculateBaseDamage(this.character.level, this.character.className);
@@ -224,41 +291,26 @@ export class PlayerSession {
       id => id ? this.content.getSkill(id) ?? null : null
     );
 
-    // Get grid position from party info via social state
-    let gridPosition: PartyGridPosition = 4;
-    const social = this.getSocialState?.();
-    if (social?.party) {
-      const member = social.party.members.find(m => m.username === this.username);
-      if (member) gridPosition = member.gridPosition;
-    }
-
-    return {
+    const info: PartyCombatantInit = {
       username: this.username,
       maxHp,
-      currentHp: maxHp,
       baseDamage,
       playerDamageType,
       equipBonuses,
       setBonuses: setResult.bonuses,
-      gridPosition,
+      gridPosition: gridPosition ?? this.partyGridPosition(),
       className: this.character.className,
       level: this.character.level,
       equippedSkills,
-      attackCount: 0,
-      stunTurns: 0,
-      dots: [],
-      hots: [],
-      damageShield: 0,
-      debuffs: [],
-      consecutiveHits: 0,
-      lastTargetId: '',
-      hasResurrected: false,
-      martyrBonus: 0,
-      braceActive: false,
-      braceDamageTaken: 0,
-      interceptActive: false,
-      activeSkillCount: 0,
     };
+    const mastery = masteryRanks(this.monsterKills, id => this.monsterTier(id));
+    if (Object.keys(mastery).length > 0) info.mastery = mastery;
+    return info;
+  }
+
+  private partyGridPosition(): PartyGridPosition {
+    const member = this.getSocialState?.().party?.members.find(m => m.username === this.username);
+    return member?.gridPosition ?? 4;
   }
 
   /**
@@ -269,7 +321,7 @@ export class PlayerSession {
   handleVictory(
     rewards: { xp: number; gold: number; items: string[] },
     tile: HexTile,
-    options?: { unlockTiles?: boolean },
+    options?: { unlockTiles?: boolean; kills?: number },
   ): void {
     if (!this.character) return;
     this.addLogEntry('Victory!', 'victory');
@@ -281,33 +333,59 @@ export class PlayerSession {
       }
     }
 
+    let goldAdded = 0;
     if (rewards.gold > 0) {
-      addGold(this.character, rewards.gold);
+      goldAdded = addGold(this.character, rewards.gold);
       this.addLogEntry(`+${rewards.gold} Gold`, 'victory');
     }
 
     for (const itemId of rewards.items) {
-      const itemDef = this.content.getItem(itemId);
-      if (itemDef && addItemToInventory(this.character.inventory, itemId)) {
-        this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
-      }
+      const itemDef = this.storeRewardItem(itemId);
+      if (itemDef) this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
     }
 
-    const { leveledUp, levelsGained } = addXp(this.character, rewards.xp);
+    const { levelsGained } = addXp(this.character, rewards.xp);
     this.xpRateXpTotal += rewards.xp;
     this.addLogEntry(`+${rewards.xp} XP`, 'victory');
-    if (leveledUp) {
-      for (let i = 0; i < levelsGained; i++) {
-        this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
-      }
-      // Auto-unlock skills for the new level
-      this.autoUnlockSkills();
+    this.announceLevelUps(levelsGained);
+    this.updateAway(l => recordAwayBattle(l, { won: true, xp: rewards.xp, gold: goldAdded, kills: options?.kills ?? 0 }));
+  }
+
+  /** Journal lines, recap moment and skill unlocks for levels just gained. */
+  private announceLevelUps(levelsGained: number): void {
+    if (!this.character || levelsGained <= 0) return;
+    for (let i = 0; i < levelsGained; i++) {
+      this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
     }
+    this.addAwayMoment('level_up', `Reached level ${this.character.level}`);
+    this.autoUnlockSkills();
+  }
+
+  /** Add a combat reward item; a full stack counts as lost in the away recap. Returns the definition when stored. */
+  private storeRewardItem(itemId: string): ItemDefinition | null {
+    if (!this.character) return null;
+    const def = this.content.getItem(itemId);
+    if (!def) return null;
+    if (!addItemToInventory(this.character.inventory, itemId)) {
+      this.updateAway(l => recordAwayItemsLost(l, 1));
+      return null;
+    }
+    const rarity = def.rarity ?? 'common';
+    this.updateAway(l => recordAwayItem(l, itemId, rarity));
+    if (awayRarityRank(rarity) >= awayRarityRank(AWAY_NOTABLE_MIN_RARITY)) {
+      this.addAwayMoment('rare_item', `Found ${def.name}`, { itemId });
+    }
+    return def;
   }
 
   /** Check if a tile is unlocked for this player. */
   isTileUnlocked(tile: HexTile): boolean {
     return this.unlockSystem.isUnlocked(tile);
+  }
+
+  /** Unlocks are keyed by room GUID, so this works for rooms on any map. */
+  isTileIdUnlocked(tileId: string): boolean {
+    return this.unlockSystem.isUnlockedByKey(tileId);
   }
 
   /** Returns true if this player has no character (hasn't selected a class yet). */
@@ -611,15 +689,10 @@ export class PlayerSession {
       if (itemDef) this.addLogEntry(`Quest reward: ${itemDef.name}`, 'victory');
     }
     if (totalXp > 0) {
-      const { leveledUp, levelsGained } = addXp(this.character, totalXp);
+      const { levelsGained } = addXp(this.character, totalXp);
       this.xpRateXpTotal += totalXp;
       this.addLogEntry(`+${totalXp} XP (quest reward)`, 'victory');
-      if (leveledUp) {
-        for (let i = 0; i < levelsGained; i++) {
-          this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
-        }
-        this.autoUnlockSkills();
-      }
+      this.announceLevelUps(levelsGained);
     }
     this.addLogEntry(`Completed quest: ${def.name}`, 'victory');
     return { success: true };
@@ -654,6 +727,8 @@ export class PlayerSession {
         xpRate: { startTime: this.xpRateStartTime, totalXp: this.xpRateXpTotal },
         craftLevel: this.character.craftLevel,
         craftXp: this.character.craftXp,
+        combatPrefs: { ...this.combatPrefs },
+        mastery: this.getMasterySummary(),
       };
     }
 
@@ -663,8 +738,10 @@ export class PlayerSession {
 
     const setDefs = this.getOwnedSetDefinitions();
     const questBlock = this.buildQuestState();
+    const recap = this.pendingRecap ? this.recapBlock(this.pendingRecap) : {};
 
     return {
+      ...recap,
       username: this.username,
       party: partyState ?? { col: 0, row: 0, state: 'idle', path: [] },
       battle: battleState ?? { state: 'battle', visual: 'none', duration: 0 },
@@ -672,16 +749,18 @@ export class PlayerSession {
       mapSize: this.currentGrid().size,
       currentMapId: this.getMapId(),
       otherPlayers,
-      combatLog: this.combatLog,
+      combatLog: this.combatLog.slice(-STATE_LOG_TAIL),
       battleCount: this.battleCount,
       character: charState,
+      zone: partyZone ?? '',
       zoneName,
       social: this.getSocialState?.(),
       itemDefinitions: this.getOwnedItemDefinitions(setDefs),
       setDefinitions: setDefs,
       shopDefinition: this.getCurrentShop(),
       henchmanOffers: this.getHenchmanOffers(),
-      crafting: this.getCraftingState(),
+      crafting: this.getCraftingProgress(),
+      craftingCatalog: this.getCraftingCatalog(),
       activeQuests: questBlock.activeQuests,
       completedQuests: questBlock.completedQuests,
       weeklyCompletions: questBlock.weeklyCompletions,
@@ -694,12 +773,21 @@ export class PlayerSession {
     };
   }
 
+  private recapBlock(recap: AwayLedger): Pick<ServerStateMessage, 'awayRecap' | 'awayRecapItemDefinitions'> {
+    const defs: Record<string, ItemDefinition> = {};
+    const itemIds = [...recap.notableItems.map(n => n.itemId), ...recap.moments.map(m => m.itemId)];
+    for (const itemId of itemIds) {
+      const def = itemId ? this.content.getItem(itemId) : undefined;
+      if (itemId && def) defs[itemId] = def;
+    }
+    return { awayRecap: recap, awayRecapItemDefinitions: defs };
+  }
+
   // ── Crafting ──────────────────────────────────────
 
-  getCraftingState(now: number = Date.now()): ClientCraftingState | undefined {
+  getCraftingCatalog(): ClientCraftingCatalog | undefined {
     if (!this.character) return undefined;
-    const recipes = this.content.getAllRecipes();
-    const visible = getVisibleRecipes(recipes, this.character.className);
+    const visible = getVisibleRecipes(this.content.getAllRecipes(), this.character.className);
 
     // Collect every item def referenced by visible recipes (ingredients + results), so the
     // client can show readable names even for items the player doesn't own yet.
@@ -714,15 +802,18 @@ export class PlayerSession {
       }
     }
 
+    return { recipes: visible, itemDefs };
+  }
+
+  getCraftingProgress(now: number = Date.now()): ClientCraftingProgress | undefined {
+    if (!this.character) return undefined;
     return {
-      recipes: visible,
       queue: { activeStartedAtMs: this.craftQueue.activeStartedAtMs, jobs: [...this.craftQueue.jobs] },
-      activeProgress: getActiveJobProgress(recipes, this.craftQueue, now),
+      activeProgress: getActiveJobProgress(this.content.getAllRecipes(), this.craftQueue, now),
       skillName: getCraftSkillName(this.character.className),
       skillLevel: this.character.craftLevel,
       skillXp: this.character.craftXp,
       skillXpForNext: xpForCraftLevel(this.character.craftLevel),
-      itemDefs,
     };
   }
 
@@ -809,6 +900,21 @@ export class PlayerSession {
   getBlockedUsers(): Record<string, BlockLevel> { return this.blockedUsers; }
   setBlockedUsers(blocked: Record<string, BlockLevel>): void { this.blockedUsers = blocked; }
 
+  blockUser(username: string, level: BlockLevel): void {
+    // Object.fromEntries, not assignment: `blocked['__proto__'] = level` is silently dropped.
+    this.blockedUsers = Object.fromEntries([...Object.entries(this.blockedUsers), [username, level]]);
+  }
+
+  /** Moves a block onto a blocked player's new name, with the chat history it hides. False when they weren't blocked. */
+  moveBlockToNewName(oldUsername: string, newUsername: string): boolean {
+    if (!isBlockedUser(oldUsername, this.blockedUsers)) return false;
+    this.blockedUsers = Object.fromEntries(
+      Object.entries(this.blockedUsers).map(([name, level]): [string, BlockLevel] => [name === oldUsername ? newUsername : name, level]),
+    );
+    this.chatHistory = this.chatHistory.map(message => withRenamedUser(message, oldUsername, newUsername));
+    return true;
+  }
+
   getGuildId(): string | null { return this.guildId; }
   setGuildId(id: string | null): void { this.guildId = id; }
 
@@ -820,7 +926,7 @@ export class PlayerSession {
   getChatDmTarget(): string { return this.chatDmTarget; }
   setChatDmTarget(target: string): void { this.chatDmTarget = target; }
 
-  /** Mailbox snapshot from save data — used once at startup to populate MailboxSystem. */
+  /** Mailbox entries from an old save file, to be taken into MailboxSystem once. */
   consumeInitialMailbox(): MailboxEntry[] {
     const m = this.initialMailbox;
     this.initialMailbox = [];
@@ -872,7 +978,8 @@ export class PlayerSession {
   /** Returns the count of an item in the unequipped inventory (0 if not present). */
   getInventoryCount(itemId: string): number {
     if (!this.character) return 0;
-    return this.character.inventory[itemId] ?? 0;
+    // Own keys only: item ids come from clients, and `constructor` is on every object.
+    return Object.prototype.hasOwnProperty.call(this.character.inventory, itemId) ? this.character.inventory[itemId] : 0;
   }
 
   /** Remove one item from the unequipped inventory. Returns false if item not present. */
@@ -897,7 +1004,7 @@ export class PlayerSession {
   /** Remove `quantity` items from the unequipped inventory. Returns false if insufficient. */
   removeFromInventory(itemId: string, quantity: number): boolean {
     if (!this.character) return false;
-    const current = this.character.inventory[itemId] ?? 0;
+    const current = this.getInventoryCount(itemId);
     if (current < quantity) return false;
     const newCount = current - quantity;
     if (newCount === 0) {
@@ -940,15 +1047,33 @@ export class PlayerSession {
    */
   grantXp(amount: number, logText?: string): void {
     if (!this.character || amount <= 0) return;
-    const { leveledUp, levelsGained } = addXp(this.character, amount);
+    const { levelsGained } = addXp(this.character, amount);
     this.xpRateXpTotal += amount;
     if (logText) this.addLogEntry(logText, 'victory');
-    if (leveledUp) {
-      for (let i = 0; i < levelsGained; i++) {
-        this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
-      }
-      this.autoUnlockSkills();
-    }
+    this.announceLevelUps(levelsGained);
+  }
+
+  /** {@link grantXp} for combat and dungeon rewards, which also count toward the away recap. */
+  grantRewardXp(amount: number, logText?: string, logType: CombatLogEntry['type'] = 'victory'): void {
+    if (!this.character || amount <= 0) return;
+    const { levelsGained } = addXp(this.character, amount);
+    this.xpRateXpTotal += amount;
+    if (logText) this.addLogEntry(logText, logType);
+    this.announceLevelUps(levelsGained);
+    this.updateAway(l => ({ ...l, xp: l.xp + amount }));
+  }
+
+  /** Gold from combat and dungeon rewards; returns what was actually added (capped at MAX_GOLD). */
+  grantRewardGold(amount: number): number {
+    if (!this.character || amount <= 0) return 0;
+    const added = addGold(this.character, amount);
+    this.updateAway(l => ({ ...l, gold: l.gold + added }));
+    return added;
+  }
+
+  /** One dungeon reward item; false when the stack is full (counted as lost in the away recap). */
+  grantRewardItem(itemId: string): boolean {
+    return this.storeRewardItem(itemId) !== null;
   }
 
   getLevel(): number { return this.character?.level ?? 0; }
@@ -966,6 +1091,195 @@ export class PlayerSession {
 
   /** All dungeon IDs this player has cleared (for persistence). */
   getClearedDungeons(): string[] { return [...this.clearedDungeons]; }
+
+  getDungeonCheckpoint(dungeonId: string): DungeonCheckpoint | undefined {
+    return hasOwn(this.dungeonCheckpoints, dungeonId) ? copyCheckpoint(this.dungeonCheckpoints[dungeonId]) : undefined;
+  }
+
+  getDungeonCheckpoints(): Record<string, DungeonCheckpoint> {
+    const copy = emptyCheckpoints();
+    for (const [id, checkpoint] of Object.entries(this.dungeonCheckpoints)) copy[id] = copyCheckpoint(checkpoint);
+    return copy;
+  }
+
+  setDungeonCheckpoint(dungeonId: string, checkpoint: DungeonCheckpoint): void {
+    this.dungeonCheckpoints[dungeonId] = copyCheckpoint(checkpoint);
+  }
+
+  clearDungeonCheckpoint(dungeonId: string): void {
+    delete this.dungeonCheckpoints[dungeonId];
+  }
+
+  // ── Kill mastery ──────────────────────────────────────
+
+  getMonsterKills(): Record<string, number> { return { ...this.monsterKills }; }
+
+  /** Credit kills (one entry per monster killed); rank-ups go to the journal and the away recap. */
+  recordKills(killed: readonly KilledMonster[]): void {
+    const tally = new Map<string, { monster: KilledMonster; count: number }>();
+    for (const monster of killed) {
+      const seen = tally.get(monster.id);
+      if (seen) seen.count++;
+      else tally.set(monster.id, { monster, count: 1 });
+    }
+    for (const { monster, count } of tally.values()) {
+      const before = killCount(this.monsterKills, monster.id);
+      const after = before + count;
+      this.monsterKills[monster.id] = after;
+      this.recentKills = [monster.id, ...this.recentKills.filter(id => id !== monster.id)].slice(0, MASTERY_RECENT_COUNT);
+      const rankFrom = masteryRank(before, monster.tier);
+      const rankTo = masteryRank(after, monster.tier);
+      if (rankTo <= rankFrom) continue;
+      const bonusPct = Math.round(masteryBonus(rankTo) * 100);
+      this.addLogEntry(`Mastery rank ${rankTo}: ${monster.name} (+${bonusPct}% against them).`, 'mastery');
+      this.updateAway(l => recordAwayMastery(l, { monsterId: monster.id, name: monster.name, rankFrom, rankTo }));
+      if (isMasteryMoment(rankTo, monster.tier)) {
+        this.addAwayMoment('mastery', `${monster.name} mastery rank ${rankTo}`, { monsterId: monster.id });
+      }
+    }
+  }
+
+  getMasterySummary(): MasterySummary {
+    let discovered = 0;
+    let mastered = 0;
+    let version = 0;
+    for (const [id, kills] of Object.entries(this.monsterKills)) {
+      version += kills;
+      const def = this.content.getMonster(id);
+      if (!def) continue;
+      discovered++;
+      const tier = effectiveMonsterTier(def);
+      if (masteryRank(kills, tier) >= MASTERY_THRESHOLDS[tier].length) mastered++;
+    }
+    const recentIds = this.recentKills.length > 0
+      ? this.recentKills
+      : Object.entries(this.monsterKills).sort((a, b) => b[1] - a[1]).slice(0, MASTERY_RECENT_COUNT).map(([id]) => id);
+    const recent = recentIds
+      .map(id => this.masteryEntry(id))
+      .filter((e): e is MasteryEntry => e !== null);
+    return { discovered, mastered, version, recent };
+  }
+
+  /** Every monster this player has killed that still exists in content, by name. */
+  getBestiary(): MasteryEntry[] {
+    return Object.keys(this.monsterKills)
+      .map(id => this.masteryEntry(id))
+      .filter((e): e is MasteryEntry => e !== null)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Levels shown are authored only; a monster without one has no level scaling and shows none. */
+  private masteryEntry(monsterId: string): MasteryEntry | null {
+    const kills = killCount(this.monsterKills, monsterId);
+    const def = this.content.getMonster(monsterId);
+    if (!def || kills <= 0) return null;
+    const info: MasteryMonsterInfo = { name: def.name, tier: effectiveMonsterTier(def) };
+    if (isAuthoredMonsterLevel(def.level)) info.level = clampMonsterLevel(def.level);
+    return buildMasteryEntry(monsterId, kills, info);
+  }
+
+  private monsterTier(monsterId: string): MonsterTier | undefined {
+    const def = this.content.getMonster(monsterId);
+    return def ? effectiveMonsterTier(def) : undefined;
+  }
+
+  // ── Combat preferences ──────────────────────────────────────
+
+  getCombatPrefs(): CombatPrefs { return { ...this.combatPrefs }; }
+
+  /** True only the first time auto-retreat acts for this player (the one-time explanation). */
+  noteAutoRetreat(): boolean {
+    if (this.autoRetreatNotified) return false;
+    this.autoRetreatNotified = true;
+    return true;
+  }
+
+  /** Returns whether anything changed. */
+  setCombatPrefs(prefs: CombatPrefs): boolean {
+    const next = sanitizeCombatPrefs(prefs);
+    const changed = next.autoRetreatBelowPct !== this.combatPrefs.autoRetreatBelowPct;
+    this.combatPrefs = next;
+    return changed;
+  }
+
+  // ── While you were away ──────────────────────────────────────
+
+  isAway(): boolean { return this.awayLedger !== null; }
+
+  getAwayLedger(): AwayLedger | null { return this.awayLedger; }
+
+  getPendingRecap(): AwayLedger | null { return this.pendingRecap; }
+
+  /** Open a ledger unless one is already open. Characterless players have nothing to recap. */
+  beginAway(now: number = Date.now()): void {
+    if (this.awayLedger || !this.character) return;
+    this.awayLedger = createAwayLedger(randomUUID(), now, this.awayProgress());
+  }
+
+  /**
+   * Close the open ledger. A long enough absence with something in it becomes (or folds into) the
+   * pending recap; anything else is dropped. Returns whether the pending recap changed.
+   */
+  endAway(now: number = Date.now()): boolean {
+    const ledger = this.awayLedger;
+    if (!ledger) return false;
+    this.awayLedger = null;
+    if (!isAwayLedgerWorthRecap(ledger, now)) return false;
+    const closed = closeAwayLedger(ledger, now, this.awayProgress());
+    // A fresh id, so an ack for the recap the client already showed can't clear what was merged in.
+    this.pendingRecap = this.pendingRecap ? { ...mergeAwayLedgers(this.pendingRecap, closed), id: closed.id } : closed;
+    return true;
+  }
+
+  /** Clears the pending recap when `id` matches it. */
+  ackRecap(id: string): boolean {
+    if (!this.pendingRecap || this.pendingRecap.id !== id) return false;
+    this.pendingRecap = null;
+    return true;
+  }
+
+  /** Apply a recap update while a ledger is open; a no-op otherwise. */
+  recordAway(update: (ledger: AwayLedger) => AwayLedger): void {
+    this.updateAway(update);
+  }
+
+  addAwayMoment(kind: AwayMomentKind, text: string, refs: { monsterId?: string; itemId?: string } = {}): void {
+    this.updateAway(l => addAwayMoment(l, { at: Date.now(), kind, text, ...refs }));
+  }
+
+  /** Recap hook for auto-retreat: every retreat counts; a relocation is also a moment. */
+  recordRetreat(retreat: AwayRetreatEntry): void {
+    this.updateAway(l => recordAwayRetreat(l, retreat));
+    if (retreat.kind === 'relocate') {
+      const to = retreat.to ? ` to ${retreat.to}` : '';
+      this.addAwayMoment('relocate', `Retreated from ${retreat.from}${to} (win chance ${Math.round(retreat.winPct)}%)`);
+    }
+  }
+
+  recordRouteStopped(where: string): void {
+    this.updateAway(l => recordAwayRouteStopped(l, Date.now(), where));
+  }
+
+  /** Keeps the lowest-HP victory; a new low at or below CLOSE_CALL_MOMENT_PCT is also a moment. */
+  recordCloseCall(call: AwayCloseCall): void {
+    const ledger = this.awayLedger;
+    if (!ledger) return;
+    const previous = ledger.closestCall?.hpPct;
+    this.awayLedger = recordAwayCloseCall(ledger, call);
+    if (call.hpPct <= CLOSE_CALL_MOMENT_PCT && (previous === undefined || call.hpPct < previous)) {
+      this.addAwayMoment('closest_call', `Won with ${call.hpPct}% health left against ${call.vs}`);
+    }
+  }
+
+  private updateAway(update: (ledger: AwayLedger) => AwayLedger): void {
+    if (this.awayLedger) this.awayLedger = update(this.awayLedger);
+  }
+
+  private awayProgress(): { level: number; xpFrac: number } {
+    if (!this.character) return { level: 0, xpFrac: 0 };
+    const need = xpForNextLevel(this.character.level);
+    return { level: this.character.level, xpFrac: need > 0 ? Math.min(1, Math.max(0, this.character.xp / need)) : 0 };
+  }
 
   /** Returns publicly visible profile data (no HP, damage, gold, inventory). */
   getPublicProfile(): { className: string; level: number; equipment: Record<string, string | null>; skillLoadout: SkillLoadout } | null {
@@ -1080,6 +1394,14 @@ export class PlayerSession {
     }
   }
 
+  /** The newest journal entry of this type (the journal survives restarts). */
+  lastLogEntryOfType(type: CombatLogEntry['type']): CombatLogEntry | undefined {
+    for (let i = this.combatLog.length - 1; i >= 0; i--) {
+      if (this.combatLog[i].type === type) return this.combatLog[i];
+    }
+    return undefined;
+  }
+
   /** Force-unlock a tile and its adjacent tiles (for relocation after deploy). */
   forceUnlockTileArea(tile: HexTile): void {
     this.unlockSystem.forceUnlock(tile);
@@ -1105,6 +1427,11 @@ export class PlayerSession {
     this.unlockSystem = new UnlockSystem(this.defaultGrid(), startTile);
     this.partyId = null;
     this.clearedDungeons.clear();
+    this.dungeonCheckpoints = emptyCheckpoints();
+    this.monsterKills = emptyKillCounts();
+    this.recentKills = [];
+    this.awayLedger = null;
+    this.pendingRecap = null;
 
     this.addLogEntry('The world has been reset! Starting fresh...', 'battle');
   }
@@ -1129,11 +1456,7 @@ export class PlayerSession {
   }, partyInfo?: {
     role: 'owner' | 'leader' | 'member';
     gridPosition: number;
-  }, dungeonRun?: {
-    dungeonId: string;
-    currentFloorIndex: number;
-    entrance: { col: number; row: number };
-  } | null, partyHenchmen?: HiredHenchman[]): PlayerSaveData {
+  }, dungeonRun?: DungeonRunState | null, partyHenchmen?: HiredHenchman[]): PlayerSaveData {
     const pos = movementData?.position ?? this.getPosition();
 
     return {
@@ -1166,7 +1489,6 @@ export class PlayerSession {
       chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
-      mailbox: this.getMailbox ? this.getMailbox() : this.initialMailbox,
       craftQueue: { activeStartedAtMs: this.craftQueue.activeStartedAtMs, jobs: [...this.craftQueue.jobs] },
       activeQuests: this.quests.toSaveData().active,
       completedQuests: this.quests.toSaveData().completed,
@@ -1174,6 +1496,12 @@ export class PlayerSession {
       dungeonRun: dungeonRun ?? undefined,
       partyHenchmen: partyHenchmen?.length ? partyHenchmen : undefined,
       clearedDungeons: [...this.clearedDungeons],
+      dungeonCheckpoints: this.getDungeonCheckpoints(),
+      monsterKills: { ...this.monsterKills },
+      combatPrefs: { ...this.combatPrefs },
+      autoRetreatNotified: this.autoRetreatNotified || undefined,
+      awayLedger: this.awayLedger,
+      pendingRecap: this.pendingRecap,
       notifications: this.getNotifications ? this.getNotifications() : this.initialNotifications,
       notificationPreferences: this.notificationPreferences,
       pushSubscriptions: [...this.pushSubscriptions],
@@ -1274,6 +1602,14 @@ export class PlayerSession {
     session['guildId'] = data.guildId ?? null;
     session['partyId'] = null; // Parties are transient, not restored across restarts
     session['clearedDungeons'] = new Set(data.clearedDungeons ?? []);
+    session['dungeonCheckpoints'] = sanitizeCheckpoints(data.dungeonCheckpoints);
+    session['monsterKills'] = sanitizeKillCounts(data.monsterKills);
+    session['recentKills'] = [];
+    session['combatPrefs'] = sanitizeCombatPrefs(data.combatPrefs);
+    session['autoRetreatNotified'] = data.autoRetreatNotified === true;
+    const level = data.character?.level ?? 0;
+    session['awayLedger'] = sanitizeLedger(data.awayLedger, level);
+    session['pendingRecap'] = sanitizeLedger(data.pendingRecap, level);
     session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
@@ -1423,4 +1759,186 @@ export class PlayerSession {
     return result.success;
   }
 
+}
+
+function copyCheckpoint(checkpoint: DungeonCheckpoint): DungeonCheckpoint {
+  return { ...checkpoint, rewardedPhases: [...checkpoint.rewardedPhases] };
+}
+
+/** Copies rather than mutates: every recipient's history holds the same message object. */
+function withRenamedUser(message: ChatMessage, oldUsername: string, newUsername: string): ChatMessage {
+  const isSender = message.senderUsername === oldUsername;
+  const isDmPartner = message.channelType === 'dm' && message.channelId === oldUsername;
+  if (!isSender && !isDmPartner) return message;
+  return {
+    ...message,
+    senderUsername: isSender ? newUsername : message.senderUsername,
+    channelId: isDmPartner ? newUsername : message.channelId,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/** Keyed by free-form monster ids, so it must not inherit keys such as `constructor`. */
+function emptyKillCounts(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
+}
+
+function killCount(kills: Record<string, number>, monsterId: string): number {
+  return hasOwn(kills, monsterId) ? kills[monsterId] : 0;
+}
+
+function sanitizeKillCounts(raw: unknown): Record<string, number> {
+  const kills = emptyKillCounts();
+  if (!isRecord(raw)) return kills;
+  for (const [id, count] of Object.entries(raw)) {
+    if (isNonNegativeInteger(count) && count > 0) kills[id] = count;
+  }
+  return kills;
+}
+
+/** Keyed by free-form dungeon ids, like the kill counts. */
+function emptyCheckpoints(): Record<string, DungeonCheckpoint> {
+  return Object.create(null) as Record<string, DungeonCheckpoint>;
+}
+
+function sanitizeCheckpoints(raw: unknown): Record<string, DungeonCheckpoint> {
+  const checkpoints = emptyCheckpoints();
+  if (!isRecord(raw)) return checkpoints;
+  for (const [dungeonId, value] of Object.entries(raw)) {
+    if (!isRecord(value) || !isNonNegativeInteger(value.floorIndex) || typeof value.at !== 'number' || !Number.isFinite(value.at)) continue;
+    checkpoints[dungeonId] = {
+      floorIndex: value.floorIndex,
+      phase: isNonNegativeInteger(value.phase) ? value.phase : 0,
+      wipes: isNonNegativeInteger(value.wipes) ? value.wipes : 0,
+      rewardedPhases: Array.isArray(value.rewardedPhases) ? value.rewardedPhases.filter((k): k is string => typeof k === 'string') : [],
+      at: value.at,
+    };
+  }
+  return checkpoints;
+}
+
+const AWAY_DUNGEON_OUTCOMES: readonly AwayDungeonOutcome[] = ['cleared', 'ejected', 'left', 'in_progress'];
+
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function count(value: unknown): number {
+  return isFiniteNumber(value) && value > 0 ? value : 0;
+}
+
+function clamp(value: unknown, max: number): number {
+  return isFiniteNumber(value) ? Math.min(max, Math.max(0, value)) : 0;
+}
+
+function recordsOf<T>(raw: unknown, parse: (value: Record<string, unknown>) => T | null): T[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap(value => {
+    const parsed = isRecord(value) ? parse(value) : null;
+    return parsed ? [parsed] : [];
+  });
+}
+
+function sanitizeRarity(value: unknown): ItemRarity | undefined {
+  return typeof value === 'string' && awayRarityRank(value as ItemRarity) >= 0 ? value as ItemRarity : undefined;
+}
+
+function sanitizeNotable(v: Record<string, unknown>): AwayNotableItem | null {
+  if (typeof v.itemId !== 'string' || count(v.count) <= 0) return null;
+  const item: AwayNotableItem = { itemId: v.itemId, count: count(v.count) };
+  const rarity = sanitizeRarity(v.rarity);
+  if (rarity) item.rarity = rarity;
+  return item;
+}
+
+function sanitizeMasteryUp(v: Record<string, unknown>): AwayMasteryUp | null {
+  if (typeof v.monsterId !== 'string' || typeof v.name !== 'string') return null;
+  return { monsterId: v.monsterId, name: v.name, rankFrom: count(v.rankFrom), rankTo: count(v.rankTo) };
+}
+
+function sanitizeDungeonEntry(v: Record<string, unknown>): AwayDungeonEntry | null {
+  const outcome = AWAY_DUNGEON_OUTCOMES.find(o => o === v.outcome);
+  if (typeof v.dungeonId !== 'string' || typeof v.name !== 'string' || !outcome) return null;
+  const entry: AwayDungeonEntry = { dungeonId: v.dungeonId, name: v.name, outcome, wipes: count(v.wipes) };
+  if (count(v.checkpoint) > 0) entry.checkpoint = count(v.checkpoint);
+  return entry;
+}
+
+function sanitizeRetreatEntry(v: Record<string, unknown>): AwayRetreatEntry | null {
+  const kind = v.kind === 'skip' || v.kind === 'relocate' ? v.kind : null;
+  if (!isFiniteNumber(v.at) || !kind || typeof v.from !== 'string') return null;
+  const entry: AwayRetreatEntry = { at: v.at, kind, from: v.from, winPct: clamp(v.winPct, 100) };
+  if (typeof v.to === 'string') entry.to = v.to;
+  return entry;
+}
+
+function sanitizeMoment(v: Record<string, unknown>): AwayMoment | null {
+  const kind = typeof v.kind === 'string' && hasOwn(AWAY_MOMENT_PRIORITY, v.kind) ? v.kind as AwayMomentKind : null;
+  if (!isFiniteNumber(v.at) || !kind || typeof v.text !== 'string') return null;
+  const moment: AwayMoment = { at: v.at, kind, text: v.text };
+  if (typeof v.monsterId === 'string') moment.monsterId = v.monsterId;
+  if (typeof v.itemId === 'string') moment.itemId = v.itemId;
+  return moment;
+}
+
+/** Rebuilt field by field: a malformed save must not reach the recap code, which trusts every field. */
+function sanitizeLedger(raw: unknown, level: number): AwayLedger | null {
+  if (!isRecord(raw) || typeof raw.id !== 'string' || !isFiniteNumber(raw.since)) return null;
+  const items: Partial<Record<ItemRarity, number>> = {};
+  if (isRecord(raw.items)) {
+    for (const [key, n] of Object.entries(raw.items)) {
+      const rarity = sanitizeRarity(key);
+      if (rarity && count(n) > 0) items[rarity] = count(n);
+    }
+  }
+  const notableItems = recordsOf(raw.notableItems, sanitizeNotable).slice(0, AWAY_MAX_NOTABLE_ITEMS);
+  const masteryUps = recordsOf(raw.masteryUps, sanitizeMasteryUp);
+  const dungeons = recordsOf(raw.dungeons, sanitizeDungeonEntry).slice(-AWAY_MAX_DUNGEONS);
+  const retreatLog = recordsOf(raw.retreatLog, sanitizeRetreatEntry).slice(-AWAY_MAX_RETREATS);
+  const moments = recordsOf(raw.moments, sanitizeMoment).slice(-AWAY_MAX_MOMENTS);
+
+  const ledger: AwayLedger = {
+    id: raw.id,
+    since: raw.since,
+    battles: count(raw.battles),
+    wins: count(raw.wins),
+    losses: count(raw.losses),
+    retreats: count(raw.retreats),
+    skips: count(raw.skips),
+    xp: count(raw.xp),
+    gold: count(raw.gold),
+    levelFrom: isFiniteNumber(raw.levelFrom) && raw.levelFrom >= 0 ? raw.levelFrom : level,
+    levelTo: isFiniteNumber(raw.levelTo) && raw.levelTo >= 0 ? raw.levelTo : level,
+    xpFracFrom: clamp(raw.xpFracFrom, 1),
+    xpFracTo: clamp(raw.xpFracTo, 1),
+    items,
+    notableItems,
+    itemsLost: count(raw.itemsLost),
+    kills: count(raw.kills),
+    masteryUps,
+    dungeons,
+    retreatLog,
+    moments,
+  };
+  if (isFiniteNumber(raw.until)) ledger.until = raw.until;
+  const stopped = raw.routeStopped;
+  if (isRecord(stopped) && isFiniteNumber(stopped.at) && typeof stopped.where === 'string') {
+    ledger.routeStopped = { at: stopped.at, where: stopped.where };
+  }
+  const call = raw.closestCall;
+  if (isRecord(call) && isFiniteNumber(call.hpPct) && typeof call.vs === 'string' && typeof call.where === 'string') {
+    ledger.closestCall = { hpPct: call.hpPct, vs: call.vs, where: call.where };
+  }
+  return ledger;
 }

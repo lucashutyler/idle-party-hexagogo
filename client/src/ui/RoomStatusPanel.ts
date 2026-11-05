@@ -1,5 +1,5 @@
 import type { DungeonRunInfo } from '@idle-party-rpg/shared';
-import { ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
+import { ROOM_ICONS, actionLabel, actionShortLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import { deferWhilePressed } from './render';
 
@@ -15,6 +15,8 @@ export interface RoomStatus {
 interface Chip {
   icon: string;
   label: string;
+  /** Shown under the round chip where `label` is hidden (mobile). */
+  short: string;
   /** Stands in for the label where labels are hidden (mobile). */
   badge?: string;
   detail?: string;
@@ -83,6 +85,7 @@ export class RoomStatusPanel {
     const chips: Chip[] = status.actions.map(action => ({
       icon: action.icon,
       label: actionLabel(action),
+      short: actionShortLabel(action),
       detail: action.detail,
       pip: questPipClass(action),
       onClick: () => this.onAction(action),
@@ -92,6 +95,7 @@ export class RoomStatusPanel {
       chips.push({
         icon: ROOM_ICONS.players,
         label: `${n} ${n === 1 ? 'player' : 'players'} here`,
+        short: 'Players',
         badge: String(n),
         onClick: () => this.onShowPlayers(),
       });
@@ -101,6 +105,7 @@ export class RoomStatusPanel {
       chips.push({
         icon: ROOM_ICONS.dungeon,
         label: `${name} · Floor ${floor}/${totalFloors}`,
+        short: 'Floor',
         badge: `${floor}/${totalFloors}`,
       });
     }
@@ -126,7 +131,12 @@ export class RoomStatusPanel {
     const label = document.createElement('span');
     label.className = 'room-status-chip-label';
     label.textContent = chip.label;
-    el.append(icon, label);
+
+    const short = document.createElement('span');
+    short.className = 'room-status-chip-short';
+    short.textContent = chip.short;
+    short.setAttribute('aria-hidden', 'true');
+    el.append(icon, label, short);
 
     if (chip.badge) {
       const badge = document.createElement('span');

@@ -93,30 +93,30 @@ describe('preserveTileGuids', () => {
   });
 
   it('repoints a transition at a room whose id the deploy replaced', () => {
-    const live = [tile({ id: 'live-pier', mapId: 'overworld', col: 12, row: 3 })];
+    const live = [tile({ id: 'live-dock', mapId: 'overworld', col: 2, row: 3 })];
     const snap = [
-      tile({ id: 'draft-pier', mapId: 'overworld', col: 12, row: 3 }),
-      tile({ id: 'landing', mapId: 'pomperly', col: 14, row: 22, transitions: [{ mapId: 'overworld', tileId: 'draft-pier' }] }),
+      tile({ id: 'draft-dock', mapId: 'overworld', col: 2, row: 3 }),
+      tile({ id: 'far-door', mapId: 'crypt', col: 0, row: 0, transitions: [{ mapId: 'overworld', tileId: 'draft-dock' }] }),
     ];
 
     preserveTileGuids(live, snap);
 
-    expect(snap[0].id).toBe('live-pier');
-    expect(snap[1].transitions).toEqual([{ mapId: 'overworld', tileId: 'live-pier' }]);
+    expect(snap[0].id).toBe('live-dock');
+    expect(snap[1].transitions).toEqual([{ mapId: 'overworld', tileId: 'live-dock' }]);
   });
 
   it('repoints a quest visit objective at a room whose id the deploy replaced', () => {
-    const live = [tile({ id: 'live-band', mapId: 'overworld', col: 10, row: 3 })];
-    const snap = [tile({ id: 'draft-band', mapId: 'overworld', col: 10, row: 3 })];
+    const live = [tile({ id: 'live-goal', mapId: 'overworld', col: 4, row: 5 })];
+    const snap = [tile({ id: 'draft-goal', mapId: 'overworld', col: 4, row: 5 })];
     const quests: QuestDefinition[] = [{
       id: 'q', name: 'Q', description: '', scope: 'solo',
-      objectives: [{ kind: 'visit', tileId: 'draft-band' }, { kind: 'kill', monsterId: 'm', count: 1 }],
+      objectives: [{ kind: 'visit', tileId: 'draft-goal' }, { kind: 'kill', monsterId: 'm', count: 1 }],
       rewards: [],
     }];
 
     preserveTileGuids(live, snap, quests);
 
-    expect(quests[0].objectives[0]).toEqual({ kind: 'visit', tileId: 'live-band' });
+    expect(quests[0].objectives[0]).toEqual({ kind: 'visit', tileId: 'live-goal' });
     expect(quests[0].objectives[1]).toEqual({ kind: 'kill', monsterId: 'm', count: 1 });
   });
 

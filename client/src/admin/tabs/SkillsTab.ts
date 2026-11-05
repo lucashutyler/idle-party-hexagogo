@@ -3,8 +3,13 @@ import type { AdminContext } from '../AdminContext';
 import {
   ALL_CLASS_NAMES,
   CLASS_DEFINITIONS,
+  SKILL_CARD_TYPE_INFO,
   SKILL_CONDITION_VALUES,
   SKILL_OPTION_CATALOG,
+  SKILL_TRIGGER_INFO,
+  SKILL_TRIGGER_VALUES,
+  getSkillCardType,
+  getSkillTrigger,
   getSlotSchedule,
   validateSkillDefinition,
 } from '@idle-party-rpg/shared';
@@ -13,11 +18,13 @@ import type {
   ClassName,
   PassiveEffect,
   SkillContent,
+  SkillCardType,
   SkillDefinition,
   SkillOptionDefinition,
   SkillOptionParamSpec,
   SkillSlot,
   SkillSlotType,
+  SkillTrigger,
 } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, postAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
@@ -61,7 +68,8 @@ export class SkillsTab implements Tab {
         <p class="admin-page-subtitle">
           Skills are versioned content: each is composed of one or more effect options from the catalog.
           Players learn class skills at their unlock level; grant-only skills come from items/sets.
-          Actives trigger every Nth attack (CD column).
+          Actives fire on the owner's action (or on their trigger, for Instants and Interrupts),
+          then wait out their cooldown in seconds.
         </p>
         <div class="skills-class-nav">${nav}</div>
         ${sections}
@@ -156,7 +164,7 @@ export class SkillsTab implements Tab {
                 <th>Skill</th>
                 <th>Description</th>
                 <th>Options</th>
-                <th>CD</th>
+                <th>Card &middot; CD</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -173,9 +181,6 @@ export class SkillsTab implements Tab {
       : String(skill.unlockLevel);
     const startPill = isStart ? ' <span class="admin-pill admin-pill-start">start</span>' : '';
     const typeLabel = skill.type === 'passive' ? 'Passive' : 'Active';
-    const cooldown = skill.type === 'active' && skill.cooldown != null
-      ? `every ${skill.cooldown}`
-      : '&mdash;';
     const options = [...(skill.passiveEffects ?? []), ...(skill.activeEffects ?? [])];
     const optionsHtml = options.length > 0
       ? options.map(e => this.renderEffect(e)).join('')
@@ -195,10 +200,24 @@ export class SkillsTab implements Tab {
         </td>
         <td>${escapeHtml(skill.description)}</td>
         <td>${optionsHtml}</td>
-        <td>${cooldown}</td>
+        <td>${this.renderCardCell(skill)}</td>
         <td class="admin-actions-cell">${actions}</td>
       </tr>
     `;
+  }
+
+  private renderCardCell(skill: SkillDefinition): string {
+    const timing: string[] = [];
+    if (skill.type === 'active') {
+      if (skill.cooldown != null) timing.push(formatSeconds(skill.cooldown));
+      if ((skill.castTime ?? 0) > 0) timing.push(`cast ${formatSeconds(skill.castTime!)}`);
+      const trigger = getSkillTrigger(skill);
+      if (trigger) timing.push(`on ${SKILL_TRIGGER_INFO[trigger].label.toLowerCase()}`);
+    }
+    const timingHtml = timing.length > 0
+      ? `<div class="skills-timing">${escapeHtml(timing.join(' · '))}</div>`
+      : '';
+    return `${cardPillHtml(getSkillCardType(skill))}${timingHtml}`;
   }
 
   private renderEffect(effect: PassiveEffect | ActiveEffect): string {
@@ -237,6 +256,12 @@ export class SkillsTab implements Tab {
     const typeOptions = (['passive', 'active'] as SkillSlotType[]).map(t =>
       `<option value="${t}" ${s.type === t ? 'selected' : ''}>${t}</option>`
     ).join('');
+    const triggerOptions = [
+      `<option value="" ${s.trigger ? '' : 'selected'}>None — uses its action</option>`,
+      ...SKILL_TRIGGER_VALUES.map(t =>
+        `<option value="${t}" ${s.trigger === t ? 'selected' : ''}>${escapeHtml(SKILL_TRIGGER_INFO[t].label)}</option>`),
+    ].join('');
+    const activeOnlyStyle = s.type === 'active' ? '' : 'style="display:none"';
 
     const optionRows = [...(s.passiveEffects ?? []), ...(s.activeEffects ?? [])]
       .map(e => this.optionRowHtml(e)).join('');
@@ -257,11 +282,28 @@ export class SkillsTab implements Tab {
           Grant-only (item/set) — never learned by level
         </label>
         <label>Sort order<input type="number" id="skf-sortOrder" value="${s.sortOrder}" step="1"></label>
-        <label id="skf-cooldown-wrap" ${s.type === 'active' ? '' : 'style="display:none"'}>
-          Cooldown (triggers every Nth attack)
-          <input type="number" id="skf-cooldown" value="${s.cooldown ?? 2}" min="1" step="1">
+        <label id="skf-cooldown-wrap" class="skf-active-only" ${activeOnlyStyle}>
+          Cooldown (seconds)
+          <input type="number" id="skf-cooldown" value="${s.cooldown ?? 2}" min="1" step="0.1">
         </label>
+        <label id="skf-castTime-wrap" class="skf-active-only" ${activeOnlyStyle}>
+          Cast time (s)
+          <input type="number" id="skf-castTime" value="${s.castTime ?? ''}" min="0" max="10" step="0.1" placeholder="0 (instant)">
+        </label>
+        <label id="skf-warmup-wrap" class="skf-active-only" ${activeOnlyStyle}>
+          Warm-up (s, blank = default)
+          <input type="number" id="skf-warmup" value="${s.warmup ?? ''}" min="0" max="60" step="0.1" placeholder="default">
+        </label>
+        <label id="skf-trigger-wrap" class="skf-active-only" ${activeOnlyStyle}>
+          Trigger
+          <select id="skf-trigger">${triggerOptions}</select>
+        </label>
+        <div class="skills-card-field">
+          Card type
+          <span id="skf-card-type"></span>
+        </div>
       </div>
+      <div id="skf-trigger-help" class="admin-form-hint skf-active-only skills-trigger-help" ${activeOnlyStyle}></div>
       <label class="admin-form-fullrow">Description
         <textarea id="skf-description" rows="3">${escapeHtml(s.description)}</textarea>
       </label>
@@ -309,13 +351,17 @@ export class SkillsTab implements Tab {
       if (levelInput) levelInput.disabled = grantCheck.checked;
     });
 
-    // Type select toggles the cooldown field and re-filters the picker.
     const typeSelect = root.querySelector<HTMLSelectElement>('#skf-type');
     typeSelect?.addEventListener('change', () => {
-      const wrap = root.querySelector<HTMLElement>('#skf-cooldown-wrap');
-      if (wrap) wrap.style.display = typeSelect.value === 'active' ? '' : 'none';
+      root.querySelectorAll<HTMLElement>('.skf-active-only').forEach(el => {
+        el.style.display = typeSelect.value === 'active' ? '' : 'none';
+      });
       this.applyPickerFilter(root);
     });
+
+    const refreshCard = () => this.refreshCardPreview(root);
+    root.addEventListener('input', refreshCard);
+    root.addEventListener('change', refreshCard);
 
     // Option picker: toggle + search filter.
     const picker = root.querySelector<HTMLElement>('#skf-option-picker');
@@ -336,14 +382,39 @@ export class SkillsTab implements Tab {
         if (!opt) return;
         root.querySelector('#skf-options-list')
           ?.insertAdjacentHTML('beforeend', this.optionRowHtml(this.defaultEffect(opt)));
-        this.wireRowRemovers(root, '.skf-option-remove', '.skills-option-row');
+        this.wireRowRemovers(root, '.skf-option-remove', '.skills-option-row', refreshCard);
         if (picker) picker.hidden = true;
         const search = root.querySelector<HTMLInputElement>('#skf-option-search');
         if (search) search.value = '';
+        refreshCard();
       });
     });
 
-    this.wireRowRemovers(root, '.skf-option-remove', '.skills-option-row');
+    this.wireRowRemovers(root, '.skf-option-remove', '.skills-option-row', refreshCard);
+    refreshCard();
+  }
+
+  private refreshCardPreview(root: HTMLElement): void {
+    const def = this.readForm(root);
+    const chip = root.querySelector<HTMLElement>('#skf-card-type');
+    if (chip) chip.innerHTML = cardPillHtml(getSkillCardType(def));
+
+    const warmupInput = root.querySelector<HTMLInputElement>('#skf-warmup');
+    if (warmupInput) warmupInput.placeholder = `default (${formatSeconds(defaultWarmupSeconds(def))})`;
+
+    const help = root.querySelector<HTMLElement>('#skf-trigger-help');
+    if (help) help.innerHTML = this.triggerHelpHtml(def);
+  }
+
+  private triggerHelpHtml(def: SkillDefinition): string {
+    const inferenceNote = `Leave the trigger as None on skills with the ${escapeHtml(SKILL_OPTION_CATALOG.redirect_hit?.label ?? 'redirect_hit')}
+      or ${escapeHtml(SKILL_OPTION_CATALOG.brace_reflect?.label ?? 'brace_reflect')} option and it is inferred
+      (${escapeHtml(SKILL_TRIGGER_INFO.ally_targeted.label)} / ${escapeHtml(SKILL_TRIGGER_INFO.self_hit.label)}).`;
+    const trigger = getSkillTrigger(def);
+    if (!trigger) return `No trigger: the skill fires when the owner's action comes up. ${inferenceNote}`;
+    const info = SKILL_TRIGGER_INFO[trigger];
+    const source = def.trigger ? '' : ' (inferred from its options)';
+    return `<strong>${escapeHtml(info.label)}${source}:</strong> ${escapeHtml(info.description)} ${inferenceNote}`;
   }
 
   private pickerRowHtml(opt: SkillOptionDefinition): string {
@@ -453,13 +524,16 @@ export class SkillsTab implements Tab {
     return `<label${title}>${label}<input type="number" ${attrs} value="${display}"${min}${max}${step}></label>`;
   }
 
-  private wireRowRemovers(root: HTMLElement, btnSel: string, rowSel: string): void {
+  private wireRowRemovers(root: HTMLElement, btnSel: string, rowSel: string, onRemove?: () => void): void {
     root.querySelectorAll<HTMLButtonElement>(btnSel).forEach(btn => {
-      btn.onclick = () => btn.closest(rowSel)?.remove();
+      btn.onclick = () => {
+        btn.closest(rowSel)?.remove();
+        onRemove?.();
+      };
     });
   }
 
-  private async saveForm(root: HTMLElement, ctx: AdminContext, close: () => void): Promise<void> {
+  private readForm(root: HTMLElement): SkillDefinition {
     const existingId = (root.querySelector('#skf-id') as HTMLInputElement).value.trim();
     const name = (root.querySelector('#skf-name') as HTMLInputElement).value.trim();
     const className = (root.querySelector('#skf-class') as HTMLSelectElement).value as ClassName;
@@ -467,10 +541,11 @@ export class SkillsTab implements Tab {
     const grantOnly = (root.querySelector('#skf-grantOnly') as HTMLInputElement).checked;
     const unlockLevel = parseInt((root.querySelector('#skf-unlockLevel') as HTMLInputElement).value);
     const sortOrder = parseInt((root.querySelector('#skf-sortOrder') as HTMLInputElement).value) || 0;
-    const cooldown = parseInt((root.querySelector('#skf-cooldown') as HTMLInputElement).value);
+    const cooldown = parseFloat((root.querySelector('#skf-cooldown') as HTMLInputElement).value);
+    const castTime = parseFloat((root.querySelector('#skf-castTime') as HTMLInputElement).value);
+    const warmup = parseFloat((root.querySelector('#skf-warmup') as HTMLInputElement).value);
+    const trigger = (root.querySelector('#skf-trigger') as HTMLSelectElement).value as SkillTrigger | '';
     const description = (root.querySelector('#skf-description') as HTMLTextAreaElement).value.trim();
-
-    const id = existingId || crypto.randomUUID();
 
     const passiveEffects: PassiveEffect[] = [];
     const activeEffects: ActiveEffect[] = [];
@@ -498,13 +573,25 @@ export class SkillsTab implements Tab {
     });
 
     const def: SkillDefinition = {
-      id, name, description, className, type,
+      id: existingId, name, description, className, type,
       unlockLevel: grantOnly ? null : unlockLevel,
       sortOrder,
     };
     if (passiveEffects.length > 0) def.passiveEffects = passiveEffects;
     if (activeEffects.length > 0) def.activeEffects = activeEffects;
-    if (type === 'active' && Number.isFinite(cooldown)) def.cooldown = cooldown;
+    if (type === 'active') {
+      if (Number.isFinite(cooldown)) def.cooldown = cooldown;
+      if (Number.isFinite(castTime) && castTime !== 0) def.castTime = castTime;
+      if (Number.isFinite(warmup)) def.warmup = warmup;
+      if (trigger) def.trigger = trigger;
+    }
+    return def;
+  }
+
+  private async saveForm(root: HTMLElement, ctx: AdminContext, close: () => void): Promise<void> {
+    const def = this.readForm(root);
+    const id = def.id || crypto.randomUUID();
+    def.id = id;
 
     const errors = validateSkillDefinition(def, this.skillContentOf(ctx));
     if (errors.length > 0) {
@@ -648,6 +735,22 @@ export class SkillsTab implements Tab {
       alert(err instanceof Error ? err.message : 'Network error');
     }
   }
+}
+
+function formatSeconds(seconds: number): string {
+  return `${Math.round(seconds * 100) / 100}s`;
+}
+
+/** Warm-up the engine applies when `warmup` is blank, before cooldown reduction. */
+function defaultWarmupSeconds(def: SkillDefinition): number {
+  const trigger = getSkillTrigger(def);
+  if (trigger && trigger !== 'enemy_cast') return 0;
+  return Math.max(0, (def.cooldown ?? 1) - 1);
+}
+
+function cardPillHtml(cardType: SkillCardType): string {
+  const info = SKILL_CARD_TYPE_INFO[cardType];
+  return `<span class="admin-pill skills-card-pill skills-card-${cardType}" data-card-type="${cardType}" title="${escapeHtml(info.blurb)}">${info.icon} ${escapeHtml(info.label)}</span>`;
 }
 
 /** Format an effect parameter for display, per the catalog's param spec (input: 'percent' → 0-1 fraction shown as a percentage). */

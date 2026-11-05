@@ -1,7 +1,15 @@
-import type { ServerStateMessage, ServerEquipBlockedMessage,
-  ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ServerEquipBlockedMessage, ServerCombatMessage,
+  ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode,
+  ServerForecastMessage, ServerBestiaryMessage, ForecastTarget, ForecastRequestTarget, AutoRetreatPct, AwayLedger, ItemDefinition } from '@idle-party-rpg/shared';
+import { PARTIAL_STATE_PARAM, restoreElidedState } from '@idle-party-rpg/shared';
+import { CombatLogBuffer } from '../combat/CombatLogBuffer';
 
 const RECONNECT_DELAY = 2000;
+export const FORECAST_TTL_MS = 60_000;
+const FORECAST_RETRY_MS = 15_000;
+const FORECAST_UNAVAILABLE_TTL_MS = 10_000;
+const BESTIARY_RETRY_MS = 15_000;
+const FORECAST_CACHE_MAX = 200;
 
 type StateListener = (state: ServerStateMessage) => void;
 type ChatListener = (message: ChatMessage) => void;
@@ -20,6 +28,33 @@ export interface ServerErrorDetail {
   questId?: string;
 }
 type ServerErrorListener = (message: string, code?: ServerErrorCode, detail?: ServerErrorDetail) => void;
+type CombatListener = (message: ServerCombatMessage, receivedAt: number) => void;
+type ForecastListener = (message: ServerForecastMessage) => void;
+type BestiaryListener = (message: ServerBestiaryMessage) => void;
+type RecapListener = (recap: AwayLedger | null) => void;
+
+interface CachedForecast {
+  message: ServerForecastMessage;
+  at: number;
+}
+
+function setBounded<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > FORECAST_CACHE_MAX) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+}
+
+/** Stable cache key for a forecast target (property order independent). */
+export function forecastTargetKey(target: ForecastTarget): string {
+  switch (target.kind) {
+    case 'room': return JSON.stringify({ kind: 'room', tileId: target.tileId });
+    case 'dungeon': return JSON.stringify({ kind: 'dungeon', dungeonId: target.dungeonId });
+    case 'battle': return JSON.stringify({ kind: 'battle', battleId: target.battleId });
+  }
+}
 
 export class GameClient {
   private ws: WebSocket | null = null;
@@ -40,6 +75,26 @@ export class GameClient {
   private playerProfileListeners = new Set<PlayerProfileListener>();
   private notificationListeners = new Set<NotificationListener>();
   private serverErrorListeners = new Set<ServerErrorListener>();
+  private combatListeners = new Set<CombatListener>();
+  private forecastListeners = new Set<ForecastListener>();
+  private bestiaryListeners = new Set<BestiaryListener>();
+  private recapListeners = new Set<RecapListener>();
+  private combatViewRequested = false;
+  private combatViewSent: boolean | null = null;
+
+  /** Keyed by `forecastTargetKey(target)|partyKey`. */
+  private forecastCache = new Map<string, CachedForecast>();
+  /** Latest message per target regardless of party key, for late mounts. */
+  private latestForecast = new Map<string, ServerForecastMessage>();
+  /** `inFlight`: requests sent for this target and not yet answered. */
+  private forecastPending = new Map<string, { target: ForecastRequestTarget; sentAt: number; inFlight: number }>();
+  /** The server keeps one explicit forecast per player: a request for another target drops this one. */
+  private lastForecastSent: string | null = null;
+  /** `targetKey|forecastKey` pairs already re-requested after a stale reply. */
+  private staleRetried = new Set<string>();
+  private bestiaryRequestedAt: number | null = null;
+  private notifiedRecapId: string | null = null;
+  private ackedRecapIds = new Set<string>();
 
   /** Pending connect resolve — set during connect() call. */
   private connectResolve?: (result: { success: boolean; error?: string }) => void;
@@ -49,6 +104,21 @@ export class GameClient {
 
   /** Most recent state from the server (null until first message). */
   lastState: ServerStateMessage | null = null;
+
+  /** Most recent `combat` message (null until one arrives). */
+  lastCombat: ServerCombatMessage | null = null;
+
+  /** Most recent bestiary (null until one arrives). */
+  lastBestiary: ServerBestiaryMessage | null = null;
+
+  /** Unacknowledged "while you were away" recap from the latest state (null when none). */
+  lastRecap: AwayLedger | null = null;
+
+  /** Definitions for the recap's notable items. */
+  lastRecapItemDefinitions: Record<string, ItemDefinition> = {};
+
+  /** Journal + live combat lines, kept whether or not the combat screen is showing. */
+  readonly combatLog = new CombatLogBuffer();
 
   /** Server version from first state message — reload if it changes. */
   private knownServerVersion: string | null = null;
@@ -60,11 +130,13 @@ export class GameClient {
     // Prod: single server serves both client and WS on the same origin
     const port = window.location.port === '3000' ? '3001' : window.location.port;
     this.url = port
-      ? `${protocol}//${host}:${port}`
-      : `${protocol}//${host}`;
+      ? `${protocol}//${host}:${port}/?${PARTIAL_STATE_PARAM}=1`
+      : `${protocol}//${host}/?${PARTIAL_STATE_PARAM}=1`;
 
     // Snap party position when returning from a background browser tab
     document.addEventListener('visibilitychange', () => {
+      this.sendPresence();
+      this.syncCombatView();
       if (document.visibilityState === 'visible') {
         this.isInitialState = true;
         for (const listener of this.resumeListeners) {
@@ -98,10 +170,20 @@ export class GameClient {
     });
   }
 
-  /** Subscribe to state updates. Returns an unsubscribe function. */
-  subscribe(listener: StateListener): () => void {
+  /**
+   * Subscribe to state updates. Returns an unsubscribe function. `replay` also delivers
+   * the cached last state immediately — state pushes are rare mid-fight, so late mounts need it.
+   */
+  subscribe(listener: StateListener, opts?: { replay?: boolean }): () => void {
     this.stateListeners.add(listener);
+    if (opts?.replay && this.lastState) listener(this.lastState);
     return () => { this.stateListeners.delete(listener); };
+  }
+
+  /** Subscribe to live combat messages. Returns an unsubscribe function. */
+  onCombat(listener: CombatListener): () => void {
+    this.combatListeners.add(listener);
+    return () => { this.combatListeners.delete(listener); };
   }
 
   /** Subscribe to connection status changes. Returns an unsubscribe function. */
@@ -131,6 +213,9 @@ export class GameClient {
       console.log('[GameClient] connected');
       this.connected = true;
       this.isInitialState = true;
+      this.syncCombatView(true);
+      this.sendPresence();
+      this.resendPending();
       for (const listener of this.connectionListeners) {
         listener(true);
       }
@@ -155,7 +240,10 @@ export class GameClient {
             return;
           }
         }
+        restoreElidedState(msg, this.lastState);
         this.lastState = msg;
+        this.combatLog.ingestJournal(msg.combatLog ?? []);
+        this.updateRecap(msg as ServerStateMessage);
 
         // Resolve pending connect on first state message
         if (this.connectResolve) {
@@ -171,6 +259,12 @@ export class GameClient {
           }
         }
         this.isInitialState = false;
+      } else if (msg.type === 'combat') {
+        this.handleCombat(msg as ServerCombatMessage);
+      } else if (msg.type === 'forecast') {
+        this.handleForecast(msg as ServerForecastMessage);
+      } else if (msg.type === 'bestiary') {
+        this.handleBestiary(msg as ServerBestiaryMessage);
       } else if (msg.type === 'chat_message') {
         for (const listener of this.chatListeners) {
           try {
@@ -269,6 +363,109 @@ export class GameClient {
     };
   }
 
+  private handleCombat(msg: ServerCombatMessage): void {
+    const receivedAt = performance.now();
+    this.lastCombat = msg;
+    const events = msg.events ?? [];
+    const log = msg.log ?? [];
+    if (msg.snapshot?.full && events.length === 0) {
+      this.combatLog.replaceLive(msg.battleId, log);
+    } else {
+      let releaseAt = msg.snapshot?.elapsedMs;
+      for (const ev of events) if (releaseAt === undefined || ev.t > releaseAt) releaseAt = ev.t;
+      this.combatLog.pushLive(msg.battleId, log, releaseAt);
+    }
+    for (const listener of this.combatListeners) {
+      try {
+        listener(msg, receivedAt);
+      } catch (err) {
+        console.error('[GameClient] error in combat listener:', err);
+      }
+    }
+  }
+
+  private handleForecast(msg: ServerForecastMessage): void {
+    if (!msg.target) return;
+    const targetKey = forecastTargetKey(msg.target);
+    if (msg.status !== 'pending') {
+      const pending = this.forecastPending.get(targetKey);
+      if (msg.status === 'unavailable' && pending && pending.inFlight > 1) {
+        pending.inFlight--;
+        return;
+      }
+      this.forecastPending.delete(targetKey);
+      const superseded = msg.status === 'unavailable' && targetKey !== this.lastForecastSent;
+      if (!superseded) {
+        const partyKey = msg.result?.partyKey ?? this.currentForecastKey();
+        setBounded(this.forecastCache, `${targetKey}|${partyKey}`, { message: msg, at: Date.now() });
+      }
+      if (msg.status === 'ok' && msg.result) setBounded(this.latestForecast, targetKey, msg);
+    }
+    for (const listener of this.forecastListeners) {
+      try {
+        listener(msg);
+      } catch (err) {
+        console.error('[GameClient] error in forecast listener:', err);
+      }
+    }
+    this.retryIfStale(msg, targetKey);
+  }
+
+  private retryIfStale(msg: ServerForecastMessage, targetKey: string): void {
+    const forecastKey = this.currentForecastKey();
+    if (!msg.result || !forecastKey || msg.result.partyKey === forecastKey || msg.target.kind === 'battle') return;
+    const retryKey = `${targetKey}|${forecastKey}`;
+    if (this.staleRetried.has(retryKey)) return;
+    this.staleRetried.add(retryKey);
+    this.requestForecast(msg.target);
+  }
+
+  private handleBestiary(msg: ServerBestiaryMessage): void {
+    this.lastBestiary = msg;
+    this.bestiaryRequestedAt = null;
+    for (const listener of this.bestiaryListeners) {
+      try {
+        listener(msg);
+      } catch (err) {
+        console.error('[GameClient] error in bestiary listener:', err);
+      }
+    }
+  }
+
+  private updateRecap(state: ServerStateMessage): void {
+    const recap = state.awayRecap && !this.ackedRecapIds.has(state.awayRecap.id) ? state.awayRecap : null;
+    this.lastRecap = recap;
+    this.lastRecapItemDefinitions = recap ? (state.awayRecapItemDefinitions ?? {}) : {};
+    const id = recap?.id ?? null;
+    if (id === this.notifiedRecapId) return;
+    this.notifiedRecapId = id;
+    for (const listener of this.recapListeners) {
+      try {
+        listener(recap);
+      } catch (err) {
+        console.error('[GameClient] error in recap listener:', err);
+      }
+    }
+  }
+
+  private currentForecastKey(): string {
+    return this.lastState?.social?.party?.forecastKey ?? '';
+  }
+
+  private resendPending(): void {
+    const now = Date.now();
+    for (const [targetKey, pending] of this.forecastPending) {
+      pending.sentAt = now;
+      pending.inFlight = 1;
+      this.lastForecastSent = targetKey;
+      this.sendRaw({ type: 'request_forecast', target: pending.target });
+    }
+    if (this.bestiaryRequestedAt !== null) {
+      this.bestiaryRequestedAt = now;
+      this.sendRaw({ type: 'request_bestiary' });
+    }
+  }
+
   private scheduleReconnect(): void {
     if (this.destroyed) return;
     // Only auto-reconnect if we've connected at least once
@@ -287,12 +484,108 @@ export class GameClient {
     return true;
   }
 
-  sendMove(col: number, row: number): void {
-    this.sendRaw({ type: 'move', col, row });
+  sendMove(col: number, row: number): boolean {
+    return this.sendRaw({ type: 'move', col, row });
   }
 
   sendRun(): void {
     this.sendRaw({ type: 'run' });
+  }
+
+  /**
+   * Whether the active screen shows the live combat view. The server only streams combat messages
+   * while this is true and the page is visible; every new socket is told the current value.
+   */
+  sendCombatView(visible: boolean): void {
+    this.combatViewRequested = visible;
+    this.syncCombatView();
+  }
+
+  private syncCombatView(force = false): void {
+    const visible = this.combatViewRequested && document.visibilityState !== 'hidden';
+    if (!force && this.combatViewSent === visible) return;
+    this.combatViewSent = visible;
+    this.sendRaw({ type: 'combat_view', visible });
+  }
+
+  private sendPresence(): void {
+    this.sendRaw({ type: 'presence', visible: document.visibilityState !== 'hidden' });
+  }
+
+  // --- Forecasts ---
+
+  /** Subscribe to forecast replies and server-pushed live battle forecasts. Returns an unsubscribe function. */
+  onForecast(listener: ForecastListener): () => void {
+    this.forecastListeners.add(listener);
+    return () => { this.forecastListeners.delete(listener); };
+  }
+
+  /**
+   * The cached reply for `target` when fresh for the party's current forecast inputs; otherwise
+   * asks the server (once while it is the latest outstanding request) and returns null.
+   */
+  requestForecast(target: ForecastRequestTarget): ServerForecastMessage | null {
+    const targetKey = forecastTargetKey(target);
+    const cached = this.forecastCache.get(`${targetKey}|${this.currentForecastKey()}`);
+    const now = Date.now();
+    if (cached) {
+      const ttl = cached.message.status === 'unavailable' ? FORECAST_UNAVAILABLE_TTL_MS : FORECAST_TTL_MS;
+      if (now - cached.at <= ttl) return cached.message;
+    }
+    const pending = this.forecastPending.get(targetKey);
+    if (pending && now - pending.sentAt < FORECAST_RETRY_MS && this.lastForecastSent === targetKey) return null;
+    this.forecastPending.set(targetKey, { target, sentAt: now, inFlight: (pending?.inFlight ?? 0) + 1 });
+    this.lastForecastSent = targetKey;
+    this.sendRaw({ type: 'request_forecast', target });
+    return null;
+  }
+
+  /** Latest successful reply for `target` whatever the party key or age (null when none). */
+  peekForecast(target: ForecastTarget): ServerForecastMessage | null {
+    return this.latestForecast.get(forecastTargetKey(target)) ?? null;
+  }
+
+  // --- Bestiary ---
+
+  onBestiary(listener: BestiaryListener): () => void {
+    this.bestiaryListeners.add(listener);
+    return () => { this.bestiaryListeners.delete(listener); };
+  }
+
+  /** Returns the cached bestiary when it matches the state's mastery version; otherwise requests it. */
+  requestBestiary(): ServerBestiaryMessage | null {
+    const version = this.lastState?.character?.mastery?.version;
+    if (this.lastBestiary && (version === undefined || this.lastBestiary.version === version)) return this.lastBestiary;
+    const now = Date.now();
+    if (this.bestiaryRequestedAt !== null && now - this.bestiaryRequestedAt < BESTIARY_RETRY_MS) return null;
+    this.bestiaryRequestedAt = now;
+    this.sendRaw({ type: 'request_bestiary' });
+    return null;
+  }
+
+  // --- Combat preferences ---
+
+  sendSetCombatPrefs(autoRetreatBelowPct: AutoRetreatPct): void {
+    this.sendRaw({ type: 'set_combat_prefs', autoRetreatBelowPct });
+  }
+
+  // --- Away recap ---
+
+  /** Called with the current recap right away (when there is one) and whenever it changes or clears. */
+  onRecap(listener: RecapListener): () => void {
+    this.recapListeners.add(listener);
+    if (this.lastRecap) listener(this.lastRecap);
+    return () => { this.recapListeners.delete(listener); };
+  }
+
+  sendAckRecap(id: string): void {
+    this.ackedRecapIds.add(id);
+    if (this.lastRecap?.id === id) {
+      this.lastRecap = null;
+      this.lastRecapItemDefinitions = {};
+      this.notifiedRecapId = null;
+    }
+    this.sendRaw({ type: 'ack_recap', id });
   }
 
   // --- Dungeons ---
@@ -306,8 +599,8 @@ export class GameClient {
   }
 
   /** Travel through the current room's transition to the target room (by GUID). */
-  sendEnterTransition(tileId: string): void {
-    this.sendRaw({ type: 'enter_transition', tileId });
+  sendEnterTransition(tileId: string): boolean {
+    return this.sendRaw({ type: 'enter_transition', tileId });
   }
 
   sendEquipSkill(skillId: string, slotIndex: number): void {
@@ -318,8 +611,8 @@ export class GameClient {
     this.sendRaw({ type: 'unequip_skill', slotIndex });
   }
 
-  sendSetClass(className: string): void {
-    this.sendRaw({ type: 'set_class', className });
+  sendSetClass(className: string): boolean {
+    return this.sendRaw({ type: 'set_class', className });
   }
 
   sendEquipItem(itemId: string): void {
@@ -360,8 +653,8 @@ export class GameClient {
     return this.sendRaw({ type: 'shop_buy', itemId });
   }
 
-  sendShopSell(itemId: string, quantity: number): void {
-    this.sendRaw({ type: 'shop_sell', itemId, quantity });
+  sendShopSell(itemId: string, quantity: number): boolean {
+    return this.sendRaw({ type: 'shop_sell', itemId, quantity });
   }
 
   // --- Crafting ---
@@ -544,8 +837,9 @@ export class GameClient {
 
   // --- Chat ---
 
-  sendChat(channelType: ChatChannelType, channelId: string, text: string): void {
-    this.sendRaw({ type: 'send_chat', channelType, channelId, text });
+  /** False when the socket isn't open and nothing was sent. */
+  sendChat(channelType: ChatChannelType, channelId: string, text: string): boolean {
+    return this.sendRaw({ type: 'send_chat', channelType, channelId, text });
   }
 
   sendSyncChat(sinceId?: string): void {
@@ -632,5 +926,9 @@ export class GameClient {
     this.resumeListeners.clear();
     this.notificationListeners.clear();
     this.serverErrorListeners.clear();
+    this.combatListeners.clear();
+    this.forecastListeners.clear();
+    this.bestiaryListeners.clear();
+    this.recapListeners.clear();
   }
 }

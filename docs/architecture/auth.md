@@ -2,11 +2,13 @@
 
 ## Email-based magic link auth
 
-Auth is handled over REST (`/auth/*`), not WebSocket. Sessions use `express-session` with httpOnly cookies (30-day expiry), persisted to disk via `JsonSessionStore` (survives server restarts/deploys). Account data (email, username, verified status) is stored in `data/accounts.json` via `AccountStore`. Magic link tokens are in-memory with 15-minute expiry (`TokenStore`). Username is changeable later.
+Auth is handled over REST (`/auth/*`), not WebSocket. Sessions use `express-session` with httpOnly cookies (30-day expiry), persisted to disk via `JsonSessionStore` (survives server restarts/deploys). Account data (email, username, verified status) is stored in `data/accounts.json` via `AccountStore`. Magic link tokens are in-memory with 15-minute expiry (`TokenStore`). A username can't change once chosen: `POST /auth/username` refuses a different name on an account that has one, and re-sending the current name succeeds. `AccountStore.setUsername` refuses reserved names (`server/src/auth/reservedUsernames.ts`). An account that already holds a store file's name can't connect until it is renamed by hand with the server stopped, and `AccountStore.load` logs each one at startup. `AccountStore.save` runs one write at a time.
 
 **Dev flow**: Enter email → token returned directly → auto-verified → session created on same browser → game.
 
-**Prod flow (approve/poll)**: Enter email → magic link emailed → requesting browser polls `GET /auth/login-status?loginId=...` every 2s. User clicks magic link on any device → `POST /auth/approve` marks login approved (no session on approving device, shows "Sign in approved!"). Requesting browser's next poll detects approval → session created on that response → game. `ApproveScreen` handles the magic link landing; `LoginScreen` manages the polling/waiting UI.
+**Prod flow (approve/poll)**: Enter email → magic link emailed → requesting browser polls `GET /auth/login-status?loginId=...` every 2s. User clicks magic link on any device → `POST /auth/approve` marks login approved (no session on approving device, shows "Sign in approved!"). Requesting browser's next poll detects approval → session created on that response → game. `ApproveScreen` handles the magic link landing; `App` polls and `LoginScreen` shows the waiting state.
+
+**Login screen.** `LoginScreen` is a real form with a labelled email field and an "Email me a sign-in link" button; errors are `role=alert`. After sending it shows "Check your email" with the address, a resend button and "Use a different email". Resend posts `/auth/login` again for the same address, which replaces the poll with one for the new `loginId`; "Use a different email" stops polling and returns to the form. An expired link returns to the form with a message.
 
 ## WebSocket auth via session cookie
 

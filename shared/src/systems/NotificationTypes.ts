@@ -56,6 +56,7 @@ export const NOTIFICATION_EVENT_REGISTRY: NotificationEventDefinition[] = [
   { eventKey: 'dm_received', category: 'dm', label: 'New direct message', defaultChannels: ['in_app'] },
   { eventKey: 'friend_request_received', category: 'friend', label: 'New friend request', defaultChannels: ['in_app'] },
   { eventKey: 'friend_request_accepted', category: 'friend', label: 'Friend request accepted', defaultChannels: ['in_app'] },
+  { eventKey: 'auto_retreat', category: 'system', label: 'Auto-retreat pulled your party out of a fight for the first time', defaultChannels: ['in_app'] },
 ];
 
 export function getNotificationEventDefinition(eventKey: string): NotificationEventDefinition | undefined {
@@ -163,6 +164,7 @@ export type NotificationNavigationTarget =
   | { kind: 'party' }
   | { kind: 'friend_requests' }
   | { kind: 'dm_reply'; username: string }
+  | { kind: 'options' }
   | { kind: 'none' };
 
 /**
@@ -183,6 +185,8 @@ export function resolveNotificationNavigation(
       const from = entry.payload?.fromUsername;
       return typeof from === 'string' ? { kind: 'dm_reply', username: from } : { kind: 'none' };
     }
+    case 'auto_retreat':
+      return { kind: 'options' };
     default:
       return { kind: 'none' };
   }

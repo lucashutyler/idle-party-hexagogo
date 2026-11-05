@@ -34,6 +34,10 @@ describe('resolveNotificationNavigation', () => {
     expect(resolveNotificationNavigation(entryFor('friend_request_accepted'))).toEqual({ kind: 'none' });
   });
 
+  it('routes the first auto-retreat notice to Player Options', () => {
+    expect(resolveNotificationNavigation(entryFor('auto_retreat'))).toEqual({ kind: 'options' });
+  });
+
   it('an unknown eventKey/category falls back to none', () => {
     expect(resolveNotificationNavigation({ category: 'system', eventKey: 'nonexistent_event' })).toEqual({ kind: 'none' });
   });

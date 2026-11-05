@@ -3,7 +3,7 @@ import type { SetDefinition } from './SetTypes.js';
 import type { ShopDefinition } from './ShopTypes.js';
 import type { HenchmanOffer } from './HenchmanTypes.js';
 import type { RecipeDefinition, CraftQueueState, ActiveJobProgress } from './CraftingTypes.js';
-import type { PartyGridPosition } from './SocialTypes.js';
+import type { ClientCombatSnapshot, CombatEvent } from './CombatEvents.js';
 import type {
   ClientSocialState,
   ClientSocialMessage,
@@ -18,6 +18,9 @@ import type { SkillLoadout } from './SkillTypes.js';
 import type { DungeonRunInfo } from './DungeonTypes.js';
 import type { ClientNotificationMessage, ServerNotificationMessage } from './NotificationTypes.js';
 import type { RoomEntryFailureKind } from './RoomRequirements.js';
+import type { CombatPrefs, ForecastRequestTarget, ForecastResult, ForecastStatus, ForecastTarget } from './ForecastTypes.js';
+import type { MasteryEntry, MasterySummary } from './Mastery.js';
+import type { AwayLedger } from './AwayTypes.js';
 
 
 export type BattleTimerState = 'battle' | 'result';
@@ -26,12 +29,11 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const RUN_AVAILABLE_ROUNDS = 5; // rounds before "Run" becomes available
-export const GAME_VERSION = '2026.11.03.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.05.2'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
-export type BattleVisual = 'none' | 'fighting' | 'victory' | 'defeat';
+export type BattleVisual = 'none' | 'fighting' | 'victory' | 'defeat' | 'retreat';
 
 export interface ServerPartyState {
   col: number;
@@ -42,63 +44,28 @@ export interface ServerPartyState {
   path: { col: number; row: number }[];
 }
 
-export interface ClientPlayerCombatant {
-  username: string;
-  currentHp: number;
-  maxHp: number;
-  gridPosition: PartyGridPosition;
-  className: string;
-  /** Remaining stun turns (0 or undefined = not stunned). */
-  stunTurns?: number;
-  /** Set for hired henchmen — the client must not offer player-only actions on them. */
-  henchman?: boolean;
-}
-
-export interface ClientMonsterState {
-  /** Monster definition id (its artwork key). Same for all instances of a type. */
-  id: string;
-  name: string;
-  currentHp: number;
-  maxHp: number;
-  gridPosition: PartyGridPosition;
-  /** Remaining stun turns (0 or undefined = not stunned). */
-  stunTurns?: number;
-  /** Optional flavor text shown in the monster popup. */
-  description?: string;
-}
-
-export interface ClientCombatAction {
-  attackerSide: 'player' | 'monster';
-  attackerPos: PartyGridPosition;
-  targetPos: PartyGridPosition | null;
-  targetSide: 'player' | 'monster' | null;
-  dodged: boolean;
-  /** Name of the skill used (if any). */
-  skillName?: string;
-  /** Whether a stun was applied. */
-  stunApplied?: boolean;
-  /** Amount healed (if any). */
-  healAmount?: number;
-  /** Username of the heal target. */
-  healTarget?: string;
-}
-
-export interface ClientCombatState {
-  players: ClientPlayerCombatant[];
-  monsters: ClientMonsterState[];
-  tickCount: number;
-  /** Number of full combat rounds completed. */
-  roundCount: number;
-  /** The action that occurred on the most recent tick. */
-  lastAction?: ClientCombatAction;
-}
-
 export interface ServerBattleState {
   state: BattleTimerState;
   result?: BattleResult;
   visual: BattleVisual;
   duration: number;
-  combat?: ClientCombatState;
+  /** Always a full snapshot. */
+  combat?: ClientCombatSnapshot;
+}
+
+/** Live combat stream: events and log lines since the last message, plus an optional snapshot. */
+export interface ServerCombatMessage {
+  type: 'combat';
+  battleId: number;
+  snapshot?: ClientCombatSnapshot;
+  events: CombatEvent[];
+  log: string[];
+}
+
+/** Tells the server whether this socket currently shows the combat view. */
+export interface ClientCombatViewMessage {
+  type: 'combat_view';
+  visible: boolean;
 }
 
 export interface ClientCharacterState {
@@ -120,6 +87,8 @@ export interface ClientCharacterState {
   xpRate: { startTime: number; totalXp: number };
   craftLevel: number;
   craftXp: number;
+  combatPrefs?: CombatPrefs;
+  mastery?: MasterySummary;
 }
 
 export interface ClientResetXpRateMessage {
@@ -144,7 +113,7 @@ export interface OtherPlayerState {
   dungeonName?: string;
 }
 
-export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup';
+export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'checkpoint' | 'mastery';
 
 export interface CombatLogEntry {
   id: number;
@@ -165,6 +134,8 @@ export interface ServerStateMessage {
   combatLog: CombatLogEntry[];
   battleCount: number;
   character: ClientCharacterState | null;
+  /** Raw key of the zone the party is in, which is what zone chat addresses. Empty when it isn't in one. */
+  zone: string;
   zoneName: string;
   social?: ClientSocialState;
   /** Item definitions for items the player currently owns (inventory + equipment). */
@@ -175,8 +146,10 @@ export interface ServerStateMessage {
   shopDefinition?: ShopDefinition;
   /** Henchmen the current room's shop offers for hire. */
   henchmanOffers?: HenchmanOffer[];
-  /** Crafting state: visible recipes, queue, and progress on the active job. */
-  crafting?: ClientCraftingState;
+  /** Craft queue, progress on the active job, and craft skill. */
+  crafting?: ClientCraftingProgress;
+  /** Recipes this class can see. Separate from `crafting` because it almost never changes. */
+  craftingCatalog?: ClientCraftingCatalog;
   /** Active quests the player has accepted (with live progress / status). */
   activeQuests?: import('./QuestTypes.js').QuestProgressEntry[];
   /** Completed quest history (most recent at the end). */
@@ -201,10 +174,25 @@ export interface ServerStateMessage {
   dungeon?: DungeonRunInfo;
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
+  /** Sent on every state until the client acks it with `ack_recap`. */
+  awayRecap?: AwayLedger;
+  /** Definitions for the recap's notable items. */
+  awayRecapItemDefinitions?: Record<string, ItemDefinition>;
+  /**
+   * Wire only: fields left out because this socket already holds the same value.
+   * `restoreElidedState` fills them back in, so subscribers never see this. See docs/architecture/client.md.
+   */
+  unchangedFields?: string[];
 }
 
-export interface ClientCraftingState {
+export interface ClientCraftingCatalog {
   recipes: RecipeDefinition[];
+  /** Item definitions for every ingredient and result referenced by `recipes` — needed so the
+   *  client can render names even for items the player doesn't own yet. */
+  itemDefs: Record<string, ItemDefinition>;
+}
+
+export interface ClientCraftingProgress {
   queue: CraftQueueState;
   activeProgress: ActiveJobProgress | null;
   /** Per-class craft skill name (Smithing, Alchemy, etc.). */
@@ -212,9 +200,19 @@ export interface ClientCraftingState {
   skillLevel: number;
   skillXp: number;
   skillXpForNext: number;
-  /** Item definitions for every ingredient and result referenced by `recipes` — needed so the
-   *  client can render names even for items the player doesn't own yet. */
-  itemDefs: Record<string, ItemDefinition>;
+}
+
+export type ClientCraftingState = ClientCraftingCatalog & ClientCraftingProgress;
+
+/** WebSocket URL query parameter: this client understands `unchangedFields`. */
+export const PARTIAL_STATE_PARAM = 'partialState';
+
+/** Fills in what the server left out of a state push, from the previous state on the same socket. Mutates `msg`. */
+export function restoreElidedState(msg: ServerStateMessage, previous: ServerStateMessage | null): void {
+  const target = msg as unknown as Record<string, unknown>;
+  const source = previous as unknown as Record<string, unknown> | null;
+  for (const field of msg.unchangedFields ?? []) target[field] = source?.[field];
+  delete msg.unchangedFields;
 }
 
 export interface ClientMoveMessage {
@@ -295,10 +293,25 @@ export interface ClientUnequipSkillMessage {
  * Machine-readable tag on an `error` message, for the cases a screen needs to react
  * to rather than just log. Most errors carry no code.
  */
-export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'travel_refused';
+export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused' | 'travel_refused';
+
+export interface ServerForecastMessage {
+  type: 'forecast';
+  target: ForecastTarget;
+  key: string;
+  result: ForecastResult | null;
+  status: ForecastStatus;
+}
+
+export interface ServerBestiaryMessage {
+  type: 'bestiary';
+  version: number;
+  entries: MasteryEntry[];
+}
 
 export type ServerMessage =
   | ServerStateMessage
+  | ServerCombatMessage
   | ServerSocialStateMessage
   | ServerChatMessageMessage
   | ServerSyncChatMessage
@@ -309,6 +322,8 @@ export type ServerMessage =
   | ServerTradeCompletedMessage
   | ServerNotificationMessage
   | PlayerProfileMessage
+  | ServerForecastMessage
+  | ServerBestiaryMessage
   | ServerErrorMessage;
 
 export interface ServerErrorMessage {
@@ -396,8 +411,34 @@ export interface ClientEnterTransitionMessage {
   tileId: string;
 }
 
+export interface ClientRequestForecastMessage {
+  type: 'request_forecast';
+  target: ForecastRequestTarget;
+}
+
+export interface ClientSetCombatPrefsMessage {
+  type: 'set_combat_prefs';
+  autoRetreatBelowPct: CombatPrefs['autoRetreatBelowPct'];
+}
+
+export interface ClientRequestBestiaryMessage {
+  type: 'request_bestiary';
+}
+
+export interface ClientAckRecapMessage {
+  type: 'ack_recap';
+  id: string;
+}
+
+/** Page visibility, separate from `combat_view`; a socket that never sends it counts as visible. */
+export interface ClientPresenceMessage {
+  type: 'presence';
+  visible: boolean;
+}
+
 export type ClientMessage =
   | ClientMoveMessage
+  | ClientCombatViewMessage
   | ClientRequestStateMessage
   | ClientEquipItemMessage
   | ClientUnequipItemMessage
@@ -418,5 +459,10 @@ export type ClientMessage =
   | ClientEnterDungeonMessage
   | ClientLeaveDungeonMessage
   | ClientEnterTransitionMessage
+  | ClientRequestForecastMessage
+  | ClientSetCombatPrefsMessage
+  | ClientRequestBestiaryMessage
+  | ClientAckRecapMessage
+  | ClientPresenceMessage
   | ClientSocialMessage
   | ClientNotificationMessage;

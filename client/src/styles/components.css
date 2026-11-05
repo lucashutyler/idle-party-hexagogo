@@ -1,0 +1,293 @@
+/* Shared components. Every screen builds lists, sub-tabs and confirmations from these. */
+
+/* ── Row: 40px media, title and sub, actions ─────────────── */
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--stroke);
+}
+.ui-row:last-child {
+  border-bottom: none;
+}
+.ui-row-media {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  font-size: var(--fs-lg);
+}
+.ui-row-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: var(--art-rendering);
+}
+.ui-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ui-row-title,
+.ui-row-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ui-row-title {
+  font-weight: 800;
+  font-size: var(--fs-md);
+  line-height: 1.2;
+  color: var(--text-1);
+}
+.ui-row-sub {
+  font-size: var(--fs-xs);
+  line-height: 1.25;
+  color: var(--text-2);
+}
+.ui-row-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-section-label {
+  padding: 12px 12px 6px;
+  font-weight: 900;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.ui-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+/* ── Segments: sticky tab row ────────────────────────────── */
+.ui-segments {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex: none;
+  display: flex;
+  height: 44px;
+  padding: 0 calc(4px + var(--safe-right)) 0 calc(4px + var(--safe-left));
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--stroke);
+}
+.ui-segment {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-md);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ui-segment::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--gold);
+  transform: scaleX(0);
+  transition: transform 150ms ease-out;
+}
+.ui-segment.active {
+  color: var(--gold);
+}
+.ui-segment.active::after {
+  transform: scaleX(1);
+}
+.ui-segment:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -3px;
+}
+.ui-segment-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+@media (min-width: 768px) {
+  .ui-segments {
+    padding-left: max(calc(4px + var(--safe-left)), calc((100% - var(--segments-max, 860px)) / 2));
+    padding-right: max(calc(4px + var(--safe-right)), calc((100% - var(--segments-max, 860px)) / 2));
+  }
+  /* The width of these screens' content boxes, so the tabs line up with what's under them. */
+  :is(#screen-items, #screen-craft) {
+    --segments-max: 1096px;
+  }
+}
+.ui-segment-badge {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+}
+.ui-segment-badge-count {
+  width: auto;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  color: var(--text-1);
+  font-family: var(--font-body);
+  font-weight: 900;
+  font-size: var(--fs-2xs);
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Hover: a highlight, not a transform ─────────────────── */
+@media (hover: hover) {
+  .ui-segment:not(.active):hover {
+    color: var(--text-1);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  #top-hud .top-hud-status:hover,
+  .room-sheet-close:hover,
+  .map-route-stop:hover {
+    background: rgba(255, 255, 255, 0.07);
+  }
+  .room-sheet-go:not(:disabled):hover,
+  .room-sheet-details:hover,
+  .map-zoom-btn:hover,
+  .map-recenter:hover,
+  .combat-skill:hover,
+  .combat-skill-passive:hover,
+  .combat-run-btn:hover,
+  .log-fullscreen-btn:hover,
+  .social-party-cell:hover,
+  .charitems-skill-slot:hover,
+  .top-hud-player:hover,
+  .top-hud-gold:hover,
+  .room-view-forecast-btn:hover,
+  .item-cell:hover {
+    filter: brightness(1.12);
+  }
+}
+
+/* A modal panel takes focus so Tab starts inside it; it isn't a control, so no ring. */
+[tabindex="-1"]:focus {
+  outline: none;
+}
+
+/* ── Confirm dialog ──────────────────────────────────────── */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  background: var(--scrim);
+  animation: confirm-fade-in 120ms ease-out;
+}
+.confirm-dialog {
+  width: 100%;
+  max-width: 480px;
+  max-height: 85dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 16px calc(14px + var(--safe-bottom));
+  background: var(--grad-panel);
+  border: 2px solid var(--outline);
+  border-bottom: none;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-3);
+  color: var(--text-1);
+  animation: confirm-rise 160ms ease-out;
+}
+.confirm-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-lg);
+  line-height: 1.2;
+}
+.confirm-body {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.confirm-actions .pixel-btn {
+  flex: 1;
+  min-height: 44px;
+}
+.pixel-btn.confirm-ok {
+  --mt-btn-bg: var(--grad-primary);
+  --mt-btn-edge: var(--edge-primary);
+  --mt-btn-fg: #5a3300;
+  --mt-btn-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.pixel-btn.confirm-ok-danger {
+  --mt-btn-bg: var(--grad-danger);
+  --mt-btn-edge: var(--edge-danger);
+  --mt-btn-fg: var(--text-1);
+  --mt-btn-text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+@media (min-width: 768px) {
+  .confirm-overlay {
+    align-items: center;
+    padding: 20px;
+  }
+  .confirm-dialog {
+    max-width: 400px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--outline);
+    border-radius: var(--radius-xl);
+  }
+}
+@keyframes confirm-fade-in {
+  from { opacity: 0; }
+}
+@keyframes confirm-rise {
+  from { transform: translateY(16px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confirm-overlay,
+  .confirm-dialog {
+    animation: none;
+  }
+  .ui-segment::after {
+    transition-duration: 0s;
+  }
+}

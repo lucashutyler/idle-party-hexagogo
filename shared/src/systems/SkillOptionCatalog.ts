@@ -1,4 +1,5 @@
 import { ALL_CLASS_NAMES } from './CharacterStats.js';
+import { SKILL_TRIGGER_VALUES, getSkillTrigger } from './SkillTypes.js';
 import type {
   ActiveEffect,
   ActiveEffectKind,
@@ -45,6 +46,9 @@ export interface SkillOptionDefinition {
 
 // --- Constants ---
 
+const MAX_CAST_TIME_SECONDS = 10;
+const MAX_WARMUP_SECONDS = 60;
+
 /** The condition strings the engine understands for conditional_damage_bonus. */
 export const SKILL_CONDITION_VALUES = ['target_above_75_hp', 'front_column', 'target_bleeding_or_stunned'] as const;
 
@@ -75,7 +79,7 @@ const CATALOG = {
     kind: 'physical_reduction',
     slotType: 'passive',
     label: 'Physical damage reduction',
-    description: 'Reduces physical damage the owner takes by (value × owner level). Applies to direct hits and to physical DoT ticks. Contributions from multiple options/skills sum.',
+    description: 'Physical armor for the owner: rating = 2 × value × owner level; mitigation = rating / (rating + 4 × attacker level), max 80%. Applies to direct hits and to physical DoT pulses. Contributions from multiple options/skills sum.',
     targeting: 'self',
     params: [
       { key: 'valuePerLevel', label: 'Reduction per level', input: 'number', min: 0, step: 1, required: true },
@@ -98,7 +102,7 @@ const CATALOG = {
     kind: 'magical_reduction_party',
     slotType: 'passive',
     label: 'Party magic/holy reduction',
-    description: 'Reduces magical AND holy damage taken by every party member by (value × owner level) while the owner is alive. Applies to direct hits and DoT ticks; this is the only reduction that touches holy damage. Contributions sum across owners.',
+    description: 'Party-wide magical AND holy rating while the owner is alive: rating = 2 × value × owner level; mitigation = rating / (rating + 4 × attacker level), max 80%. Applies to direct hits and DoT pulses; this is the only reduction that touches holy damage. Bless uses the highest owner — owners do not stack.',
     targeting: 'party',
     params: [
       { key: 'valuePerLevel', label: 'Reduction per level', input: 'number', min: 0, step: 1, required: true },
@@ -142,7 +146,7 @@ const CATALOG = {
     kind: 'stun_on_phys_hit',
     slotType: 'passive',
     label: 'Stun attacker on physical hit',
-    description: 'When the owner is hit by a physical attack, chance to stun the attacker for 1 turn. Never triggers from magical or holy hits. First-match: only the first equipped skill with this option counts — duplicates do not stack. The combat log uses the skill\'s name.',
+    description: 'When the owner is hit by a physical attack (even one fully absorbed), chance to stun the attacker for 1 second; a stunned enemy caster loses its spell. Never triggers from magical or holy hits. First-match: only the first equipped skill with this option counts — duplicates do not stack. The combat log uses the skill\'s name.',
     targeting: 'self',
     params: [
       { key: 'flatValue', label: 'Stun chance', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
@@ -153,7 +157,7 @@ const CATALOG = {
     kind: 'stun_immune',
     slotType: 'passive',
     label: 'Stun immunity',
-    description: 'The owner shrugs off stuns: instead of skipping the turn, the stun is cleared and the turn proceeds. The combat log uses the skill\'s name.',
+    description: 'The owner resists every stun as it lands and is never stunned. The combat log uses the skill\'s name.',
     targeting: 'self',
     params: [],
     seedExample: 'Knight — Iron Will',
@@ -251,7 +255,7 @@ const CATALOG = {
     kind: 'martyr',
     slotType: 'passive',
     label: 'Martyr heal bonus',
-    description: 'When a Knight in the party (other than the owner) takes any damage — direct hit or DoT tick — the owner\'s next heal is boosted by this fraction. Capped at ONE stack between heals; each owner tracks their own stack. First-match: only the first equipped skill with this option counts.',
+    description: 'When a Knight in the party (other than the owner) takes any damage — direct hit or DoT pulse — the owner\'s next heal is boosted by this fraction. Capped at ONE stack between heals; each owner tracks their own stack. First-match: only the first equipped skill with this option counts.',
     targeting: 'self',
     params: [
       { key: 'flatValue', label: 'Next-heal bonus', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
@@ -284,7 +288,7 @@ const CATALOG = {
     kind: 'dot_on_auto',
     slotType: 'passive',
     label: 'Permanent burn on hit',
-    description: 'Every single-target hit adds a PERMANENT DoT stack dealing (value × pre-resistance damage) magical damage per tick for the rest of combat; resistance is applied at tick time. AoE hits never apply stacks. Each equipped option adds its own stack per hit. DoT log entries group by skill name — two skills with the same name merge in the log.',
+    description: 'Every single-target hit adds a PERMANENT DoT stack dealing (value × pre-resistance damage) magical damage on each of the target\'s pulses (once per second) for the rest of combat; resistance is applied at pulse time. AoE hits never apply stacks. Each equipped option adds its own stack per hit. DoT log entries group by skill name — two skills with the same name merge in the log.',
     targeting: 'single enemy',
     params: [
       { key: 'dotPercent', label: 'Stack damage fraction', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
@@ -295,7 +299,7 @@ const CATALOG = {
     kind: 'arcane_surge',
     slotType: 'passive',
     label: 'Arcane Surge cadence',
-    description: 'Every second active skill the owner successfully casts deals double damage. Wasted casts (whole-cast no-ops) do not advance the cadence.',
+    description: 'Every second active skill the owner successfully uses deals double damage (counted when the skill resolves, including reactions). Fizzled uses do not advance the cadence.',
     targeting: 'self',
     params: [],
     seedExample: 'Mage — Arcane Surge',
@@ -313,7 +317,7 @@ const CATALOG = {
     kind: 'scorch',
     slotType: 'passive',
     label: 'Scorch debuff on hit',
-    description: 'Enemies damaged by the owner take +value magical/holy damage from all sources for 2 turns (duration fixed by the engine). Shared debuff bucket: every scorch option writes the same "scorch" debuff — reapplying (from any skill) refreshes the duration instead of stacking. Only magical/holy attackers benefit. First-match: only the first equipped skill\'s value is applied.',
+    description: 'Enemies damaged by the owner take +value magical/holy damage from all sources for 2 seconds (duration fixed by the engine). Shared debuff bucket: every scorch option writes the same "scorch" debuff — reapplying (from any skill) refreshes the duration instead of stacking. Only magical/holy attackers benefit. First-match: only the first equipped skill\'s value is applied.',
     targeting: 'single enemy',
     params: [
       { key: 'flatValue', label: 'Bonus damage taken', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
@@ -324,10 +328,10 @@ const CATALOG = {
     kind: 'cooldown_reduction',
     slotType: 'passive',
     label: 'Cooldown reduction',
-    description: 'Reduces active skill cooldowns by this many attacks (effective cooldown never drops below 1). Self-only by default; with the party-wide flag it also applies to every OTHER living party member. Contributions sum.',
+    description: 'Reduces active skill cooldowns by this many seconds (effective cooldown never drops below 1 second). Never shortens interrupts (Enemy casts trigger). Self-only by default; with the party-wide flag it also applies to every OTHER living party member. Contributions sum.',
     targeting: 'self (party with flag)',
     params: [
-      { key: 'flatValue', label: 'Cooldown ticks removed', input: 'number', min: 0, step: 1, required: true },
+      { key: 'flatValue', label: 'Seconds removed', input: 'number', min: 0, step: 0.1, required: true },
       { key: 'partyWide', label: 'Party-wide', help: 'Off = affects only the owner (Tempo). On = also reduces every other living member\'s cooldowns (Encore).', input: 'boolean' },
     ],
     seedExample: 'Bard — Tempo / Encore',
@@ -336,7 +340,7 @@ const CATALOG = {
     kind: 'dodge_party',
     slotType: 'passive',
     label: 'Party dodge per member',
-    description: 'At combat start, grants the whole party (value × party size) chance to dodge monster attacks and direct-damage skills (AoE skills roll dodge per player). Only counted when "scales per party member" is enabled. Contributions sum.',
+    description: 'At combat start, grants the whole party (value × party size) chance to dodge monster attacks and direct-damage spells (AoE spells roll dodge per player). Only counted when "scales per party member" is enabled. Contributions sum.',
     targeting: 'party',
     params: [
       { key: 'flatValue', label: 'Dodge per member', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
@@ -373,7 +377,7 @@ const CATALOG = {
     kind: 'stun_single',
     slotType: 'active',
     label: 'Attack + stun chance',
-    description: 'Attacks the current grid target for full active damage, then rolls the chance to stun for 1 turn (stuns refresh to 1, never stack).',
+    description: 'Attacks an enemy that is casting (first in enemy order), else the current grid target, for full active damage, then rolls the chance to stun it for 1 second (stuns refresh, never stack). A landed stun interrupts an enemy spell.',
     targeting: 'single enemy',
     params: [
       { key: 'stunChance', label: 'Stun chance', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
@@ -384,7 +388,7 @@ const CATALOG = {
     kind: 'stun_aoe',
     slotType: 'active',
     label: 'Mass stun chance',
-    description: 'Rolls the stun chance against every living enemy; deals no damage. If nothing gets stunned this option is a no-op (and if every option of the skill no-ops, the cast falls back to a normal attack).',
+    description: 'Rolls the stun chance (1 second) against every living enemy; deals no damage. If nothing gets stunned the option fizzles; if every option fizzles the cooldown is still spent and the action falls back to a normal attack.',
     targeting: 'all enemies',
     params: [
       { key: 'stunChance', label: 'Stun chance per enemy', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
@@ -395,7 +399,7 @@ const CATALOG = {
     kind: 'heal_lowest',
     slotType: 'active',
     label: 'Heal lowest ally',
-    description: 'Heals the ally at the lowest HP percentage for (caster level × value), boosted by the caster\'s heal power and Martyr stack, and by the target\'s healing-received bonus. No-op when nobody is injured.',
+    description: 'Heals the most wounded ally (lowest HP percentage) for (caster level × value), boosted by the caster\'s heal power and Martyr stack, and by the target\'s healing-received bonus. Held until an ally is below half health or missing at least half the heal.',
     targeting: 'lowest-HP ally',
     params: [
       { key: 'healMultiplier', label: 'Heal per level', input: 'number', min: 0, step: 1, required: true },
@@ -426,9 +430,9 @@ const CATALOG = {
   redirect_hit: {
     kind: 'redirect_hit',
     slotType: 'active',
-    label: 'Intercept next attack',
-    description: 'Instead of attacking, the caster intercepts: the next single-target attack or monster skill aimed at another ally is redirected to the caster. Consumed after one redirect.',
-    targeting: 'self',
+    label: 'Intercept attack',
+    description: 'Reaction (requires the Ally targeted trigger): when an enemy aims a single-target attack or spell at an ally with less max HP than the owner, the owner takes it instead. While an enemy spell is locked onto another ally, it saves itself for that spell. Does not cost an action.',
+    targeting: 'attacked ally',
     params: [],
     seedExample: 'Knight — Intercept',
   },
@@ -436,7 +440,7 @@ const CATALOG = {
     kind: 'brace_reflect',
     slotType: 'active',
     label: 'Brace and reflect',
-    description: 'Instead of attacking, brace: physical damage taken before the caster\'s next turn accumulates, then (value × accumulated) is reflected to EVERY living enemy at end of tick. Magical and holy hits never build the reflect. Only the FIRST equipped skill with this option is consulted for the end-of-tick reflect. The combat log uses the skill\'s name.',
+    description: 'Reaction (requires the Hit by an enemy trigger): when a physical hit damages the owner, (value × damage taken) is reflected to EVERY living enemy, bypassing resistances. Magical and holy hits never reflect. Does not cost an action. The combat log uses the skill\'s name.',
     targeting: 'all enemies',
     params: [
       { key: 'reflectPercent', label: 'Reflect fraction', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
@@ -447,7 +451,7 @@ const CATALOG = {
     kind: 'stacking_mark',
     slotType: 'active',
     label: 'Attack + stacking mark',
-    description: 'Deals normal active damage and marks the target: each stack increases damage the target takes from ALL sources by this fraction. Stacks have no cap; the most recently applied option\'s multiplier is used for every stack on the target.',
+    description: 'Deals normal active damage and marks the target: each application adds this fraction to the damage the target takes from single-target player attacks and skills. Stacks have no cap and each keeps its own multiplier.',
     targeting: 'single enemy',
     params: [
       { key: 'markMultiplier', label: 'Damage taken per stack', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
@@ -490,11 +494,11 @@ const CATALOG = {
     kind: 'dot_attack',
     slotType: 'active',
     label: 'Attack + damage over time',
-    description: 'Deals normal active damage, then applies a DoT worth (value × damage dealt) split over N ticks in the caster\'s damage type. Applications stack; resistance applies at tick time. DoT log entries group by skill name — two skills with the same name merge in the log.',
+    description: 'Deals normal active damage, then applies a DoT worth (value × damage dealt) split over N pulses (one per second) in the caster\'s damage type. Applications stack; resistance applies at pulse time. DoT log entries group by skill name — two skills with the same name merge in the log.',
     targeting: 'single enemy',
     params: [
       { key: 'dotPercent', label: 'DoT fraction of damage', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
-      { key: 'dotTicks', label: 'DoT ticks', input: 'number', min: 1, max: 20, step: 1, required: true },
+      { key: 'dotTicks', label: 'DoT pulses (seconds)', input: 'number', min: 1, max: 20, step: 1, required: true },
     ],
     seedExample: 'Archer — Bleed',
   },
@@ -502,11 +506,11 @@ const CATALOG = {
     kind: 'debuff_attack',
     slotType: 'active',
     label: 'Attack + weaken',
-    description: 'Deals normal active damage and reduces the target\'s damage by this fraction for N turns. Shared debuff bucket: every debuff_attack writes the "crippling_shot" debuff type — applications from different skills all land and each multiplies the target\'s damage down.',
+    description: 'Deals normal active damage and reduces the target\'s damage by this fraction for N seconds. Shared debuff bucket: every debuff_attack writes the "crippling_shot" debuff type — applications from different skills all land and each multiplies the target\'s damage down.',
     targeting: 'single enemy',
     params: [
       { key: 'debuffPercent', label: 'Damage reduction', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
-      { key: 'debuffDuration', label: 'Duration (turns)', input: 'number', min: 1, max: 20, step: 1, required: true },
+      { key: 'debuffDuration', label: 'Duration (seconds)', input: 'number', min: 1, max: 20, step: 1, required: true },
     ],
     seedExample: 'Archer — Crippling Shot',
   },
@@ -525,8 +529,8 @@ const CATALOG = {
     kind: 'cure_debuffs',
     slotType: 'active',
     label: 'Cure afflictions',
-    description: 'Removes all debuffs, DoTs, and stuns from the ally at the lowest HP percentage. No-op when there is nothing to cure.',
-    targeting: 'lowest-HP ally',
+    description: 'Removes all debuffs, DoTs, and stuns from an afflicted ally (stunned allies first, then lowest HP percentage). A cured caster resumes its paused spell. Held while nobody is afflicted.',
+    targeting: 'afflicted ally',
     params: [],
     seedExample: 'Priest — Cure',
   },
@@ -534,11 +538,11 @@ const CATALOG = {
     kind: 'hot_lowest',
     slotType: 'active',
     label: 'Heal over time',
-    description: 'Applies a heal-over-time to the lowest-HP% ally: (caster level × value) HP per tick for N ticks. Heal power and the target\'s healing-received bonus are applied at cast time. HoT log entries group by skill name.',
+    description: 'Applies a heal-over-time to the most wounded ally: (caster level × value) HP on each of the target\'s pulses (once per second) for N pulses. Heal power and the target\'s healing-received bonus are applied when it lands. Held until an ally is below half health or missing at least half of one pulse. HoT log entries group by skill name.',
     targeting: 'lowest-HP ally',
     params: [
-      { key: 'healMultiplier', label: 'Heal per level per tick', input: 'number', min: 0, step: 1, required: true },
-      { key: 'dotTicks', label: 'Ticks', input: 'number', min: 1, max: 20, step: 1, required: true },
+      { key: 'healMultiplier', label: 'Heal per level per second', input: 'number', min: 0, step: 1, required: true },
+      { key: 'dotTicks', label: 'Pulses (seconds)', input: 'number', min: 1, max: 20, step: 1, required: true },
     ],
     seedExample: 'Priest — Mending',
   },
@@ -546,7 +550,7 @@ const CATALOG = {
     kind: 'shield_non_knight',
     slotType: 'active',
     label: 'Shield squishiest ally',
-    description: 'Shields the lowest-HP% non-Knight ally, absorbing up to (caster level × value) incoming damage. No-op when no valid target exists or the target is already shielded.',
+    description: 'Shields the most wounded unshielded non-Knight ally, absorbing up to (caster level × value) incoming damage. Held while every non-Knight ally is already shielded.',
     targeting: 'lowest-HP non-Knight ally',
     params: [
       { key: 'shieldMultiplier', label: 'Shield per level', input: 'number', min: 0, step: 1, required: true },
@@ -602,11 +606,11 @@ const CATALOG = {
     kind: 'enemy_debuff_aoe',
     slotType: 'active',
     label: 'Weaken all enemies',
-    description: 'All living enemies deal this fraction less damage for N turns. Shared debuff bucket: every enemy_debuff_aoe writes the same "lullaby" debuff — recasting (from any skill) refreshes the duration instead of stacking.',
+    description: 'All living enemies deal this fraction less damage for N seconds. Shared debuff bucket: every enemy_debuff_aoe writes the same "lullaby" debuff — recasting (from any skill) refreshes the duration instead of stacking.',
     targeting: 'all enemies',
     params: [
       { key: 'debuffPercent', label: 'Damage reduction', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
-      { key: 'debuffDuration', label: 'Duration (turns)', input: 'number', min: 1, max: 20, step: 1, required: true },
+      { key: 'debuffDuration', label: 'Duration (seconds)', input: 'number', min: 1, max: 20, step: 1, required: true },
     ],
     seedExample: 'Bard — Lullaby',
   },
@@ -614,7 +618,7 @@ const CATALOG = {
     kind: 'chaos',
     slotType: 'active',
     label: 'Sow chaos',
-    description: 'Every living enemy attacks a random enemy (possibly itself) on its next turn instead of the party.',
+    description: 'Every living enemy attacks a random enemy (possibly itself) on its next action instead of the party.',
     targeting: 'all enemies',
     params: [],
     seedExample: 'Bard — Chaos',
@@ -657,16 +661,17 @@ export function validateSkillDefinition(def: SkillDefinition, _content?: SkillCo
     }
   }
 
-  if (def.type === 'active') {
-    if (def.cooldown === undefined || !Number.isFinite(def.cooldown) || def.cooldown < 1) {
-      errors.push('Active skills require a cooldown of at least 1.');
-    }
-  } else if (def.cooldown !== undefined) {
-    errors.push('Cooldown only applies to active skills.');
-  }
-
   const passiveEffects = def.passiveEffects ?? [];
   const activeEffects = def.activeEffects ?? [];
+
+  if (def.type === 'active') {
+    validateActiveTiming(def, activeEffects, errors);
+  } else {
+    if (def.cooldown !== undefined) errors.push('Cooldown only applies to active skills.');
+    if (def.castTime !== undefined) errors.push('Cast time only applies to active skills.');
+    if (def.warmup !== undefined) errors.push('Warm-up only applies to active skills.');
+    if (def.trigger !== undefined) errors.push('Trigger only applies to active skills.');
+  }
 
   if (def.type === 'passive' && activeEffects.length > 0) {
     errors.push('Passive skills cannot have active options.');
@@ -679,6 +684,39 @@ export function validateSkillDefinition(def: SkillDefinition, _content?: SkillCo
   activeEffects.forEach((effect, i) => validateOption(effect, 'active', i, errors));
 
   return errors;
+}
+
+function validateActiveTiming(def: SkillDefinition, activeEffects: ActiveEffect[], errors: string[]): void {
+  if (def.cooldown === undefined || !Number.isFinite(def.cooldown) || def.cooldown < 1) {
+    errors.push('Active skills require a cooldown of at least 1 second.');
+  }
+  if (def.castTime !== undefined && !isNumberInRange(def.castTime, 0, MAX_CAST_TIME_SECONDS)) {
+    errors.push(`Cast time must be between 0 and ${MAX_CAST_TIME_SECONDS} seconds.`);
+  }
+  if (def.warmup !== undefined && !isNumberInRange(def.warmup, 0, MAX_WARMUP_SECONDS)) {
+    errors.push(`Warm-up must be between 0 and ${MAX_WARMUP_SECONDS} seconds.`);
+  }
+  if (def.trigger !== undefined && !SKILL_TRIGGER_VALUES.includes(def.trigger)) {
+    errors.push(`Unknown trigger "${String(def.trigger)}". Expected one of: ${SKILL_TRIGGER_VALUES.join(', ')}.`);
+  }
+
+  const hasRedirect = activeEffects.some(e => e.kind === 'redirect_hit');
+  const hasBrace = activeEffects.some(e => e.kind === 'brace_reflect');
+  const trigger = getSkillTrigger(def);
+  if (hasRedirect && hasBrace) {
+    errors.push('A skill cannot combine the Intercept attack and Brace and reflect options.');
+  } else if (hasRedirect && trigger !== 'ally_targeted') {
+    errors.push('The Intercept attack option requires the "ally_targeted" trigger.');
+  } else if (hasBrace && trigger !== 'self_hit') {
+    errors.push('The Brace and reflect option requires the "self_hit" trigger.');
+  }
+  if (trigger !== undefined && (def.castTime ?? 0) > 0) {
+    errors.push('Triggered skills cannot have a cast time.');
+  }
+}
+
+function isNumberInRange(value: unknown, min: number, max: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 }
 
 /** Validate one option (effect) against its catalog entry's param specs. */

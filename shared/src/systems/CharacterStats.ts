@@ -33,13 +33,7 @@ export interface CharacterState {
 
 // --- Constants ---
 
-/**
- * Class icon image URLs. Drop PNGs into `data/class-icons/{ClassName}.png`
- * and add a static mount at `/class-icons` in `server/src/index.ts`.
- * Missing files fall through to a placehold.co stub via `classIconHtml()`.
- *
- * Emoji are no longer used for icons anywhere in the game UI.
- */
+/** Class icon art (content, served from `/class-icons`); `classIconHtml` falls back to `CLASS_GLYPHS`. */
 export const CLASS_ICONS: Record<string, string> = {
   Knight: '/class-icons/Knight.png',
   Archer: '/class-icons/Archer.png',
@@ -50,29 +44,38 @@ export const CLASS_ICONS: Record<string, string> = {
 export const UNKNOWN_CLASS_ICON = '/class-icons/Unknown.png';
 export const SERVER_ICON = '/class-icons/Server.png';
 
+export const CLASS_GLYPHS: Record<string, string> = {
+  Knight: '🛡️',
+  Archer: '🏹',
+  Priest: '✨',
+  Mage: '🔮',
+  Bard: '🎻',
+};
+const UNKNOWN_CLASS_GLYPH = '❔';
+const SERVER_GLYPH = '📣';
+
 /**
- * Render an inline icon `<img>` as an HTML string. Loads `src`; on error
- * falls through to a placehold.co stub; hides itself if even that fails.
- * Drop-in replacement for emoji glyphs in template strings.
+ * Inline icon `<img>` HTML. Loads `src`; on error swaps itself for a styled `glyph` span
+ * (or hides itself when there is no glyph).
  */
-export function inlineIconHtml(src: string, label: string, extraClass = ''): string {
+export function inlineIconHtml(src: string, label: string, extraClass = '', glyph = ''): string {
   const safeLabel = label.replace(/[^A-Za-z0-9 ]/g, '').slice(0, 10) || '?';
-  const placeholder = `https://placehold.co/24x24/2a2a40/e8e8e8/png?text=${encodeURIComponent(safeLabel)}`;
-  const onerror = `if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}`;
   const cls = `icon-inline${extraClass ? ' ' + extraClass : ''}`;
-  return `<img class="${cls}" src="${src}" alt="${safeLabel}" onerror="${onerror}" />`;
+  const fallback = glyph
+    ? `this.outerHTML='<span class=&quot;${cls} icon-glyph&quot; role=&quot;img&quot; aria-label=&quot;${safeLabel}&quot;>${glyph}</span>'`
+    : `this.style.display='none'`;
+  return `<img class="${cls}" src="${src}" alt="${safeLabel}" style="opacity:0" onload="this.style.opacity=''" onerror="${fallback}" />`;
 }
 
-/** Inline class icon `<img>` HTML — drop-in replacement for the old emoji glyphs. */
 export function classIconHtml(className: string | undefined): string {
-  if (!className) return inlineIconHtml(UNKNOWN_CLASS_ICON, '?', 'icon-class');
+  if (!className) return inlineIconHtml(UNKNOWN_CLASS_ICON, '?', 'icon-class', UNKNOWN_CLASS_GLYPH);
   const src = CLASS_ICONS[className] ?? UNKNOWN_CLASS_ICON;
-  return inlineIconHtml(src, className, 'icon-class');
+  return inlineIconHtml(src, className, 'icon-class', CLASS_GLYPHS[className] ?? UNKNOWN_CLASS_GLYPH);
 }
 
-/** Inline server icon `<img>` HTML — used for the sender icon on system chat messages. */
+/** Inline server icon HTML — the sender icon on system chat messages. */
 export function serverIconHtml(): string {
-  return inlineIconHtml(SERVER_ICON, 'Server', 'icon-server');
+  return inlineIconHtml(SERVER_ICON, 'Server', 'icon-server', SERVER_GLYPH);
 }
 
 export const CLASS_DEFINITIONS: Record<ClassName, ClassDefinition> = {

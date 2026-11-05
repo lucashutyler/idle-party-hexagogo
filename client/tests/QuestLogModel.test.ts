@@ -81,10 +81,10 @@ describe('weeklyAvailableAgainAt', () => {
 describe('turnInLocations', () => {
   const rooms: Record<string, NpcRoom[]> = {
     mara: [
-      { id: 'room-explored', name: 'Town Square', zoneName: 'Hatchetmill' },
-      { id: 'room-hidden', name: 'Secret Grove', zoneName: 'Deepwood' },
+      { id: 'room-explored', mapId: 'overworld', name: 'Town Square', zoneName: 'Hatchetmill' },
+      { id: 'room-hidden', mapId: 'overworld', name: 'Secret Grove', zoneName: 'Deepwood' },
     ],
-    hermit: [{ id: 'room-far', name: 'Hermit Hut', zoneName: 'Far Peaks' }],
+    hermit: [{ id: 'room-far', mapId: 'overworld', name: 'Hermit Hut', zoneName: 'Far Peaks' }],
     ghost: [],
   };
   const roomsWithNpc = (id: string) => rooms[id] ?? [];
@@ -97,7 +97,7 @@ describe('turnInLocations', () => {
       new Set(['room-explored']),
     );
     expect(locations).toEqual([
-      { npcName: 'NPC mara', npcEmoji: '🧙', roomName: 'Town Square', zoneName: 'Hatchetmill' },
+      { npcName: 'NPC mara', npcEmoji: '🧙', roomId: 'room-explored', mapId: 'overworld', roomName: 'Town Square', zoneName: 'Hatchetmill' },
       { npcName: 'NPC hermit', npcEmoji: '🧙' },
     ]);
   });
@@ -115,11 +115,11 @@ describe('turnInLocations', () => {
 describe('giverLocations', () => {
   const rooms: Record<string, NpcRoom[]> = {
     mara: [
-      { id: 'room-square', name: 'Town Square', zoneName: 'Hatchetmill' },
-      { id: 'room-dock', name: 'Old Dock', zoneName: 'Hatchetmill' },
+      { id: 'room-square', mapId: 'overworld', name: 'Town Square', zoneName: 'Hatchetmill' },
+      { id: 'room-dock', mapId: 'cellar', name: 'Old Dock', zoneName: 'Hatchetmill' },
     ],
-    hermit: [{ id: 'room-far', name: 'Hermit Hut', zoneName: 'Far Peaks' }],
-    smith: [{ id: 'room-forge', name: 'Forge', zoneName: 'Hatchetmill' }],
+    hermit: [{ id: 'room-far', mapId: 'overworld', name: 'Hermit Hut', zoneName: 'Far Peaks' }],
+    smith: [{ id: 'room-forge', mapId: 'overworld', name: 'Forge', zoneName: 'Hatchetmill' }],
   };
   const roomsWithNpc = (id: string) => rooms[id] ?? [];
   const npcs = [npc('mara', ['q1', 'q2']), npc('hermit', ['q3']), npc('smith', ['q4'])];
@@ -127,8 +127,8 @@ describe('giverLocations', () => {
   it('lists every explored room of each npc offering an available quest', () => {
     const locations = giverLocations(['q2', 'q3'], npcs, roomsWithNpc, new Set(['room-square', 'room-dock', 'room-forge']));
     expect(locations).toEqual([
-      { npcName: 'NPC mara', npcEmoji: '🧙', roomName: 'Town Square', zoneName: 'Hatchetmill' },
-      { npcName: 'NPC mara', npcEmoji: '🧙', roomName: 'Old Dock', zoneName: 'Hatchetmill' },
+      { npcName: 'NPC mara', npcEmoji: '🧙', roomId: 'room-square', mapId: 'overworld', roomName: 'Town Square', zoneName: 'Hatchetmill' },
+      { npcName: 'NPC mara', npcEmoji: '🧙', roomId: 'room-dock', mapId: 'cellar', roomName: 'Old Dock', zoneName: 'Hatchetmill' },
     ]);
   });
 

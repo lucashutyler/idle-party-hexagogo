@@ -7,7 +7,7 @@ import type { InviteListStore } from '../auth/InviteListStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
 import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID, isManagedAssetKind, isDeferredAssetKind } from '@idle-party-rpg/shared';
-import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType, RoomEntryRequirements } from '@idle-party-rpg/shared';
+import type { ClassName, DungeonFloor, SkillDefinition, SkillSlot, SkillSlotType, RoomEntryRequirements } from '@idle-party-rpg/shared';
 import type { AdminAuth } from './adminMiddleware.js';
 import type { ApiTokenStore, ApiTokenRecord } from '../auth/ApiTokenStore.js';
 import { isApiTokenExpired } from '../auth/ApiTokenStore.js';
@@ -17,6 +17,7 @@ import { findContentProblems, formatPublishRefusal } from '../game/ContentValida
 import { AssetValidationError, MAX_ASSET_BYTES } from '../game/AssetStore.js';
 import type { AssetStore } from '../game/AssetStore.js';
 import { registerAssetRoutes, assetUploadErrorHandler } from './assetRoutes.js';
+import { floorCheckpointProblems, monsterScalingProblems } from './contentChecks.js';
 
 /**
  * Coerce an untrusted room/transition entry gate from a request body, dropping
@@ -482,7 +483,12 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     if (!monster.id || !monster.name || monster.hp == null ||
         monster.damage == null || !monster.damageType || monster.xp == null ||
         monster.goldMin == null || monster.goldMax == null) {
-      res.status(400).json({ error: 'Missing required fields: id, name, level, hp, damage, damageType, xp, goldMin, goldMax' });
+      res.status(400).json({ error: 'Missing required fields: id, name, hp, damage, damageType, xp, goldMin, goldMax' });
+      return;
+    }
+    const scalingProblems = monsterScalingProblems(monster);
+    if (scalingProblems.length > 0) {
+      res.status(400).json({ error: scalingProblems.join(' ') });
       return;
     }
 
@@ -531,8 +537,10 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       if (!m.id || !m.name || m.hp == null ||
           m.damage == null || !m.damageType || m.xp == null ||
           m.goldMin == null || m.goldMax == null) {
-        errors.push(`Monster at index ${i}: missing required fields (id, name, level, hp, damage, damageType, xp, goldMin, goldMax)`);
+        errors.push(`Monster at index ${i}: missing required fields (id, name, hp, damage, damageType, xp, goldMin, goldMax)`);
+        continue;
       }
+      for (const problem of monsterScalingProblems(m)) errors.push(`Monster at index ${i}: ${problem}`);
     }
     if (errors.length > 0) {
       res.status(400).json({ error: 'Validation failed', errors });
@@ -1048,6 +1056,12 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         res.status(400).json({ error: 'Each floor needs floorNumber, gridShape (cols/rows >= 1), and encounterTable.' });
         return;
       }
+    }
+    const floorProblems = dungeon.floors.flatMap((floor: DungeonFloor, index: number) =>
+      floorCheckpointProblems(floor, `Floor ${index + 1}`));
+    if (floorProblems.length > 0) {
+      res.status(400).json({ error: floorProblems.join(' ') });
+      return;
     }
 
     if (versionId) {

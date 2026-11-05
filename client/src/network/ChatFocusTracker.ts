@@ -2,23 +2,26 @@ import type { GameClient } from './GameClient';
 import type { ChatChannelType } from '@idle-party-rpg/shared';
 
 /**
- * Tracks which chat thread (if any) the player is actively looking at, across
- * both chat surfaces (SocialScreen's embedded chat tab and the global
- * ChatPopout), combined with window focus — and reports the effective result
- * to the server so it can suppress DM notifications for that thread.
- *
- * Either UI surface calls setActiveThread()/clearActiveThread() as its own
- * visibility changes; window blur immediately reports "not focused" so a
- * backgrounded tab still gets notified even if a thread is nominally open.
+ * Tells the server which chat thread the player is looking at, combined with window focus,
+ * so it can suppress DM notifications for that thread. A hidden or blurred tab reports none.
  */
 class ChatFocusTracker {
   private gameClient: GameClient | null = null;
+  private stopWatchingConnection: (() => void) | null = null;
+  private windowWatched = false;
   private currentThread: { channelType: ChatChannelType; channelId: string } | null = null;
   private windowFocused = document.hasFocus();
   private lastSent: { channelType: string | null; channelId: string | null } = { channelType: null, channelId: null };
 
   init(gameClient: GameClient): void {
     this.gameClient = gameClient;
+    this.stopWatchingConnection?.();
+    // The server keeps the last value across a dropped socket, so a new socket always gets the current one.
+    this.stopWatchingConnection = gameClient.onConnection((connected) => {
+      if (connected) this.report(true);
+    });
+    if (this.windowWatched) return;
+    this.windowWatched = true;
     window.addEventListener('focus', () => {
       this.windowFocused = true;
       this.report();
@@ -43,12 +46,12 @@ class ChatFocusTracker {
     this.report();
   }
 
-  private report(): void {
+  private report(force = false): void {
     if (!this.gameClient) return;
     const effective = this.windowFocused && this.currentThread ? this.currentThread : null;
     const channelType = effective?.channelType ?? null;
     const channelId = effective?.channelId ?? null;
-    if (channelType === this.lastSent.channelType && channelId === this.lastSent.channelId) return;
+    if (!force && channelType === this.lastSent.channelType && channelId === this.lastSent.channelId) return;
     this.lastSent = { channelType, channelId };
     this.gameClient.sendSetChatFocus(channelType, channelId);
   }

@@ -33,11 +33,32 @@ const sharedComponents = {
     },
     MonsterDefinition: {
       type: 'object',
-      required: ['id', 'name', 'level', 'hp', 'damage', 'damageType', 'xp', 'goldMin', 'goldMax'],
+      required: ['id', 'name', 'hp', 'damage', 'damageType', 'xp', 'goldMin', 'goldMax'],
       properties: {
         id: { type: 'string', example: 'crystal_golem' },
         name: { type: 'string', example: 'Crystal Golem' },
-        level: { type: 'number' },
+        level: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 200,
+          description: 'Turns on level-relative scaling (level-gap damage factor, rating mitigation vs the attacker\'s level, reduced XP for players far above it). Omit for no level scaling: the monster fights on its raw stats and players see no level.',
+        },
+        tier: {
+          type: 'string',
+          enum: ['trash', 'elite', 'boss', 'raid'],
+          description: 'Absent = trash. Boss/raid get a boss bar, a 180 s stalemate window, default enrage and can carry dungeon checkpoints. Never inferred from HP.',
+        },
+        enrage: {
+          type: 'object',
+          description: 'Outgoing damage x (1 + stacks x stepPercent). Absent = tier default (boss 480 s, raid 3600 s, none for trash/elite).',
+          required: ['afterSeconds'],
+          properties: {
+            afterSeconds: { type: 'number', minimum: 0, maximum: 86400, description: 'Seconds into the fight when the first stack lands' },
+            stepSeconds: { type: 'number', minimum: 1, maximum: 3600, description: 'Seconds between stacks (default 30)' },
+            stepPercent: { type: 'number', minimum: 0, maximum: 1, description: 'Damage bonus per stack as a fraction (default 0.10 = +10 %)' },
+            maxStacks: { type: 'integer', minimum: 0, maximum: 1000, description: 'Default 30' },
+          },
+        },
         hp: { type: 'number' },
         damage: { type: 'number' },
         damageType: { type: 'string', enum: ['physical', 'magical', 'holy'] },
@@ -54,6 +75,93 @@ const sharedComponents = {
             },
           },
         },
+        attackInterval: { type: 'number', description: 'Seconds between the monster\'s actions (default 1; clamped to >= 0.3)' },
+        resistances: {
+          type: 'array',
+          description: 'Reduce incoming player damage of one type',
+          items: {
+            type: 'object',
+            properties: {
+              damageType: { type: 'string', enum: ['physical', 'magical', 'holy'] },
+              flatReduction: { type: 'number', description: 'Armor rating vs the attacking player\'s level: mitigates R / (R + 4 x level), max 80 %' },
+              percentReduction: { type: 'number', description: '0-100 (capped at 75)' },
+            },
+          },
+        },
+        skills: {
+          type: 'array',
+          description: 'On each action the monster uses the first entry that is off cooldown and would have an effect, else it attacks',
+          items: {
+            type: 'object',
+            required: ['skillId', 'value', 'cooldown'],
+            properties: {
+              skillId: { type: 'string', example: 'fireball', description: 'Key of MONSTER_SKILL_CATALOG (fireball, fear, rot, heal, assassinate at time of writing); unknown ids are skipped' },
+              value: { type: 'number', description: 'Damage / heal / DoT amount' },
+              cooldown: { type: 'number', description: 'Seconds after use (>= 0; 0 = every action)' },
+              castTime: { type: 'number', description: 'Seconds of telegraphed wind-up; overrides the catalog default' },
+            },
+          },
+        },
+        passive: { type: 'boolean', description: 'Wall: never acts and does not count toward victory' },
+        description: { type: 'string', description: 'Flavor text shown in the monster popup' },
+      },
+    },
+    DungeonFloor: {
+      type: 'object',
+      required: ['floorNumber', 'gridShape', 'encounterTable'],
+      properties: {
+        floorNumber: { type: 'number' },
+        gridShape: { type: 'object', properties: { cols: { type: 'number' }, rows: { type: 'number' } } },
+        encounterTable: {
+          type: 'array',
+          items: { type: 'object', properties: { encounterId: { type: 'string' }, weight: { type: 'number' } } },
+        },
+        isBoss: { type: 'boolean', description: 'HUD badge only; boss behaviour comes from the monster tier' },
+        rewards: { type: 'array', items: { $ref: '#/components/schemas/DungeonReward' } },
+        checkpoints: {
+          type: 'array',
+          items: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 1 },
+          example: [0.66, 0.33],
+          description: 'Boss-HP fractions in descending order. Only on floors whose encounters are explicit and place a boss/raid-tier monster. A wipe regroups the party at the last checkpoint reached.',
+        },
+        maxWipes: { type: 'integer', minimum: 0, maximum: 20, description: 'Regroups allowed on a checkpoint floor before the party is ejected (default 3)' },
+        checkpointRewardFraction: { type: 'number', minimum: 0, maximum: 1, description: 'Share of the boss xp/average gold paid per checkpoint reached, once per run (default 0.15)' },
+      },
+    },
+    DungeonReward: {
+      type: 'object',
+      required: ['itemId', 'chance'],
+      properties: {
+        itemId: { type: 'string' },
+        chance: { type: 'number', description: '0-1' },
+        minQty: { type: 'number' },
+        maxQty: { type: 'number' },
+        classRestriction: { type: 'array', items: { type: 'string' } },
+      },
+    },
+    DungeonDefinition: {
+      type: 'object',
+      required: ['id', 'name', 'floors'],
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        floors: { type: 'array', items: { $ref: '#/components/schemas/DungeonFloor' } },
+        entryRequirements: {
+          type: 'object',
+          properties: {
+            minLevel: { type: 'number' },
+            maxLevel: { type: 'number' },
+            requiredItemId: { type: 'string' },
+            consumeRequiredItem: { type: 'boolean' },
+            requiredClasses: { type: 'array', items: { type: 'string' } },
+            minPartySize: { type: 'number' },
+            maxPartySize: { type: 'number' },
+          },
+        },
+        firstClearRewards: { type: 'array', items: { $ref: '#/components/schemas/DungeonReward' } },
+        firstClearXp: { type: 'number' },
+        firstClearGold: { type: 'number' },
       },
     },
     ZoneDefinition: {
@@ -90,7 +198,14 @@ const sharedComponents = {
         sortOrder: { type: 'number', description: 'Display order within the class tree' },
         passiveEffects: { type: 'array', items: { type: 'object' }, description: 'Effect options — allowed on both passive and active skills' },
         activeEffects: { type: 'array', items: { type: 'object' }, description: 'Effect options — allowed only on active skills' },
-        cooldown: { type: 'number', description: 'Actives: triggers every Nth attack (>= 1)' },
+        cooldown: { type: 'number', description: 'Actives only: seconds after use before it is ready again (>= 1, fractions allowed)' },
+        castTime: { type: 'number', description: 'Actives only: seconds of telegraphed wind-up (0-10, default 0; not allowed with a trigger)' },
+        warmup: { type: 'number', description: 'Actives only: seconds before first use each battle (0-60; omitted = derived from the cooldown)' },
+        trigger: {
+          type: 'string',
+          enum: ['ally_targeted', 'self_hit', 'enemy_cast', 'ally_afflicted', 'ally_low_hp'],
+          description: 'Actives only: fire as an off-action reaction. Omitted on a redirect_hit skill = ally_targeted, on a brace_reflect skill = self_hit',
+        },
       },
     },
     SkillSlot: {
@@ -307,6 +422,7 @@ export const adminSwaggerSpec = {
     { name: 'Overview', description: 'Server stats and content' },
     { name: 'Items', description: 'Item definition CRUD' },
     { name: 'Monsters', description: 'Monster definition CRUD' },
+    { name: 'Dungeons', description: 'Dungeon definition CRUD, including boss-floor checkpoints' },
     { name: 'Zones', description: 'Zone definition CRUD' },
     { name: 'Skills', description: 'Skill definition CRUD and per-class slot schedules' },
     { name: 'World', description: 'World map tile CRUD' },
@@ -562,7 +678,7 @@ export const adminSwaggerSpec = {
         },
         responses: {
           200: { description: 'Monster saved, returns all monsters' },
-          400: { description: 'Missing required fields' },
+          400: { description: 'Missing required fields, or level/tier/enrage out of range' },
         },
       },
       delete: {
@@ -575,6 +691,45 @@ export const adminSwaggerSpec = {
         responses: {
           200: { description: 'Monster deleted, returns all monsters' },
           400: { description: 'Monster not found' },
+        },
+      },
+    },
+
+    // ── Dungeons ──
+    '/api/admin/dungeons': {
+      get: {
+        tags: ['Dungeons'],
+        summary: 'List all dungeons',
+        responses: { 200: { description: 'All dungeon definitions keyed by ID' } },
+      },
+    },
+    '/api/admin/dungeons/{id}': {
+      put: {
+        tags: ['Dungeons'],
+        summary: 'Add or update a dungeon',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/DungeonDefinition' } } },
+        },
+        responses: {
+          200: { description: 'Dungeon saved, returns all dungeons' },
+          400: { description: 'Missing required fields, a malformed floor, or checkpoints/maxWipes/checkpointRewardFraction out of range' },
+        },
+      },
+      delete: {
+        tags: ['Dungeons'],
+        summary: 'Delete a dungeon',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'versionId', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: { description: 'Dungeon deleted, returns all dungeons' },
+          400: { description: 'Dungeon not found' },
         },
       },
     },
@@ -1230,7 +1385,7 @@ export const gameSwaggerSpec = {
     '/auth/username': {
       post: {
         tags: ['Auth'],
-        summary: 'Set or change username',
+        summary: 'Choose a username, which can\'t change afterwards',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: {
@@ -1240,8 +1395,9 @@ export const gameSwaggerSpec = {
           } } },
         },
         responses: {
-          200: { description: 'Username set' },
-          400: { description: 'Invalid or taken username' },
+          200: { description: 'Username set, or the current one sent again' },
+          400: { description: 'Invalid username' },
+          409: { description: 'Username taken, or the account already has a different one' },
         },
       },
     },

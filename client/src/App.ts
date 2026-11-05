@@ -16,19 +16,49 @@ import { CraftingScreen } from './screens/CraftingScreen';
 import { ClassSelectScreen } from './screens/ClassSelectScreen';
 import { SuspensionScreen } from './screens/SuspensionScreen';
 import { BottomNav } from './ui/BottomNav';
-import { ChatLocalStore } from './network/ChatLocalStore';
+import type { NavTabConfig } from './ui/BottomNav';
+import { UtilityStrip } from './ui/UtilityStrip';
 import { ChatPopout } from './ui/ChatPopout';
+import { ChatStrip } from './ui/ChatStrip';
+import { QuestLog } from './ui/QuestLog';
 import { PersistentXpBar } from './ui/PersistentXpBar';
+import { TopHud } from './ui/TopHud';
 import { NotificationCenter } from './ui/NotificationCenter';
+import { RecapModal } from './ui/RecapModal';
+import { BestiaryModal, MasteryToasts } from './ui/BestiaryModal';
+import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 import { forgetMissingAssets } from './ui/assets';
+import { dismissModals } from './ui/ModalStack';
+import { runStepsWhenIdle, saveDataRequested } from './ui/idleSteps';
+import {
+  ACTIVE_SCREEN_KEY,
+  DEFAULT_SCREEN,
+  initNavigation,
+  installBackHandler,
+  installEscapeHandler,
+  installNavDelegate,
+  navigate,
+} from './ui/navigate';
 
 const CONNECTION_ERROR = 'Could not connect to server';
+
+const NAV_TABS: readonly NavTabConfig[] = [
+  { id: 'map', label: 'Map', glyph: '🗺️' },
+  { id: 'items', label: 'Hero', glyph: '🎒' },
+  { id: 'combat', label: 'Battle', glyph: '⚔️' },
+  { id: 'craft', label: 'Craft', glyph: '🔨' },
+  { id: 'social', label: 'Social', glyph: '👥' },
+  { id: 'quests', label: 'Quests', glyph: '📜', railOnly: true },
+  { id: 'chat', label: 'Chat', glyph: '💬', railOnly: true },
+  { id: 'settings', label: 'Settings', glyph: '⚙️', railOnly: true },
+];
+const RETIRED_STORAGE_KEYS = ['chat_messages', 'chat_filters', 'chatPopoutGeometry', 'chatPopoutDesktopMax', 'mapZoom'];
+const PREBUILT_SCREENS = ['items', 'craft'];
 
 export class App {
   private gameClient!: GameClient;
   private worldCache = new WorldCache();
-  private chatStore = new ChatLocalStore();
   private screenManager: ScreenManager;
   private loginScreen!: LoginScreen;
   private verifyScreen!: VerifyScreen;
@@ -37,17 +67,29 @@ export class App {
   private suspensionScreen!: SuspensionScreen;
   private navEl!: HTMLElement;
   private xpBarEl!: HTMLElement;
+  private stripEl!: HTMLElement;
+  private topHudEl!: HTMLElement;
+  private topHud?: TopHud;
+  private xpBar?: PersistentXpBar;
   private chatPopout?: ChatPopout;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private recapModal?: RecapModal;
+  private masteryToasts?: MasteryToasts;
+  private openOptionsDelegate?: (e: MouseEvent) => void;
+  private removeShellListeners?: () => void;
+  private cancelPrebuild?: () => void;
 
   constructor() {
     this.screenManager = new ScreenManager();
 
-    // Hide bottom nav + persistent xp bar until logged in
     this.navEl = document.getElementById('bottom-nav')!;
     this.navEl.style.display = 'none';
     this.xpBarEl = document.getElementById('persistent-xp-bar')!;
     this.xpBarEl.style.display = 'none';
+    this.stripEl = document.getElementById('utility-strip')!;
+    this.stripEl.style.display = 'none';
+    this.topHudEl = document.getElementById('top-hud')!;
+    this.topHudEl.style.display = 'none';
 
     // Splash overlay: minimum 2-second hold, then fade once the window has
     // finished loading. Whichever takes longer wins — fast loads still see
@@ -354,16 +396,27 @@ export class App {
     }
     this.suspensionScreen.setEmail(email ?? localStorage.getItem('suspendedEmail') ?? '');
     this.navEl.style.display = 'none';
+    this.stripEl.style.display = 'none';
+    this.topHudEl.style.display = 'none';
+    this.topHud?.setVisible(false);
+    this.xpBar?.setVisible(false);
+    this.chatPopout?.close();
+    this.removeShellListeners?.();
+    this.removeShellListeners = undefined;
+    this.cancelPrebuild?.();
+    initNavigation(null);
     this.screenManager.switchTo('suspended');
   }
 
   private enterGame(): void {
+    RETIRED_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+
     const combatScreen = new CombatScreen('screen-combat', this.gameClient, this.worldCache);
     const mapScreen = new MapScreen('screen-map', this.gameClient, this.worldCache);
     const charItemsScreen = new CharItemsScreen('screen-items', this.gameClient, this.worldCache);
-    const socialScreen = new SocialScreen('screen-social', this.gameClient, this.chatStore, this.worldCache);
-    const craftingScreen = new CraftingScreen('screen-craft', this.gameClient);
-    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient, this.worldCache);
+    const socialScreen = new SocialScreen('screen-social', this.gameClient, this.worldCache);
+    const craftingScreen = new CraftingScreen('screen-craft', this.gameClient, this.worldCache);
+    const settingsScreen = new SettingsScreen('screen-settings', this.gameClient);
 
     // Wire map username click to social screen popup
     mapScreen.setOnUserClick((username, anchor, tileCol, tileRow) => {
@@ -397,133 +450,129 @@ export class App {
     this.screenManager.register('craft', document.getElementById('screen-craft')!, craftingScreen);
     this.screenManager.register('settings', document.getElementById('screen-settings')!, settingsScreen);
 
-    // Show bottom nav + persistent XP bar
     this.navEl.style.display = '';
-    this.xpBarEl.style.display = '';
+    this.stripEl.style.display = '';
 
-    // Persistent XP bar above nav — visible on every screen
-    new PersistentXpBar(this.gameClient);
+    this.xpBar = new PersistentXpBar(this.gameClient);
+    this.topHud = new TopHud(this.gameClient, this.worldCache);
 
-    // Chat popout — global overlay, toggled from the Chat nav tab
-    this.chatPopout = new ChatPopout(this.gameClient);
-    this.chatPopout.setOnUserClick((username, anchor) => {
+    const questLog = new QuestLog(this.gameClient, this.worldCache, (roomId) => {
+      navigate('map');
+      mapScreen.focusRoom(roomId);
+    });
+
+    const chatPopout = new ChatPopout(this.gameClient);
+    this.chatPopout = chatPopout;
+    chatPopout.setOnUserClick((username, anchor) => {
       socialScreen.showUserPopup(username, anchor);
     });
 
-    // Migrate any legacy 'character' saved screen to the merged 'items' tab.
-    let savedScreen = sessionStorage.getItem('activeScreen') ?? 'combat';
-    if (savedScreen === 'character') savedScreen = 'items';
+    const nav = new BottomNav(NAV_TABS, DEFAULT_SCREEN, (tabId, wasActive) => {
+      if (tabId === 'quests') {
+        questLog.open();
+      } else if (tabId === 'chat') {
+        chatPopout.toggle();
+        nav.setOverlayActive('chat', chatPopout.isVisible());
+      } else {
+        navigate(tabId);
+        if (tabId === 'map' && wasActive) mapScreen.recenterOnPlayer();
+      }
+    }, this.gameClient);
 
-    // Nav icons render as <img> tags (no emoji). Drop PNGs into
-    // data/nav-icons/{id}.png and add an Express mount at /nav-icons in
-    // server/src/index.ts. Missing art falls through to a placehold.co stub.
-    const navImg = (id: string, label: string) => {
-      const placeholder = `https://placehold.co/24x24/2a2a40/e8e8e8/png?text=${encodeURIComponent(label.slice(0, 4))}`;
-      // opacity:0 until a load resolves so a missing PNG doesn't flash the
-      // browser's broken-image glyph during the swap to the placehold stub.
-      return `<img class="nav-icon-img" src="/nav-icons/${id}.png" alt="${label}" style="opacity:0"`
-        + ` onload="this.style.opacity='1'"`
-        + ` onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${placeholder}';}else{this.style.display='none';}" />`;
+    const openChat = (): void => {
+      chatPopout.open();
+      nav.setOverlayActive('chat', true);
     };
-    const nav = new BottomNav(
-      [
-        { id: 'combat', label: 'Combat', icon: navImg('combat', 'Fight') },
-        { id: 'map', label: 'Map', icon: navImg('map', 'Map') },
-        { id: 'items', label: 'Char', icon: navImg('items', 'Char') },
-        { id: 'craft', label: 'Craft', icon: navImg('craft', 'Craft') },
-        // Social opens a fly-out submenu with the three sub-views; the
-        // pill bar inside the screen is gone in favor of this.
-        {
-          id: 'social',
-          label: 'Social',
-          icon: navImg('social', 'Soc'),
-          mode: 'submenu',
-          submenu: [
-            { id: 'party', label: 'Party', badge: 'party-invites' },
-            { id: 'guild', label: 'Guild' },
-            { id: 'users', label: 'Leaderboard', badge: 'friend-requests' },
-          ],
-        },
-        { id: 'settings', label: 'Settings', icon: navImg('settings', 'Set') },
-        // Chat is pinned to the far right as a square overlay button. The
-        // icon is a chevron (▲ when closed → "open me upward", ▼ when open
-        // → "tap to close") so it visually reads as a separate widget, not
-        // another nav destination. CSS swaps the chevron via .overlay-active.
-        {
-          id: 'chat',
-          label: 'Chat',
-          icon: '<span class="nav-chat-chevron"><span class="nav-chat-chevron-up">▲</span><span class="nav-chat-chevron-down">▼</span></span>',
-          mode: 'overlay',
-        },
-      ],
-      savedScreen,
-      (tabId, wasActive) => {
-        this.screenManager.switchTo(tabId);
-        // Re-click on Map → recenter on player (the only "tap again" gesture
-        // wired so far; other tabs ignore wasActive).
-        if (tabId === 'map' && wasActive) {
-          mapScreen.recenterOnPlayer();
-        }
-      },
-      this.gameClient,
-      (tabId, active) => {
-        if (tabId === 'chat') {
-          if (active) this.chatPopout?.open(); else this.chatPopout?.close();
-        }
-      },
-      (tabId, itemId) => {
-        if (tabId === 'social') {
-          socialScreen.setSubTab(itemId);
-          this.screenManager.switchTo('social');
-          nav.setActive('social');
-          sessionStorage.setItem('activeScreen', 'social');
-        }
-      },
-    );
 
-    // Wire popout → nav so closing the popout from its own button clears the
-    // overlay-active state, and unread mail lights up the Chat tab badge.
-    this.chatPopout.setOnClose(() => nav.setOverlayActive('chat', false));
-    this.chatPopout.setOnUnreadChange((hasUnread) => nav.setChatUnread(hasUnread));
+    const strip = new UtilityStrip(this.gameClient, {
+      onOpenChat: openChat,
+      onOpenQuests: () => questLog.open(),
+    });
 
-    // Wire user-popup "Chat" action → open the chat popout in DM mode and
-    // light up the Chat nav button.
+    const chatStrip = new ChatStrip(document.getElementById('chat-strip-slot')!, openChat);
+    chatPopout.setOnClose(() => nav.setOverlayActive('chat', false));
+    chatPopout.setOnPreviewChange((preview) => chatStrip.render(preview));
+    chatPopout.setOnUnreadChange((count) => {
+      nav.setChatUnread(count);
+      strip.setChatUnread(count);
+    });
+
     socialScreen.setOnDmRequest((username) => {
-      this.chatPopout?.openDm(username);
+      dismissModals();
+      chatPopout.openDm(username);
       nav.setOverlayActive('chat', true);
     });
 
-    // Notification bell — global overlay, visible on every screen. Constructed here (after nav +
-    // socialScreen exist) since clicking a notification can navigate to either of them.
-    new NotificationCenter(this.gameClient, (target) => {
+    // TopHud must exist first: the bell looks up its slot once, on construction.
+    const notifications = new NotificationCenter(this.gameClient, (target) => {
       switch (target.kind) {
         case 'party':
-          socialScreen.setSubTab('party');
-          this.screenManager.switchTo('social');
-          nav.setActive('social');
-          sessionStorage.setItem('activeScreen', 'social');
+          navigate('social', 'party');
           break;
         case 'friend_requests':
-          socialScreen.setSubTab('users');
-          this.screenManager.switchTo('social');
-          nav.setActive('social');
-          sessionStorage.setItem('activeScreen', 'social');
+          navigate('social', 'friends');
           break;
         case 'dm_reply':
           socialScreen.startDm(target.username);
+          break;
+        case 'options':
+          settingsScreen.openPlayerOptions();
           break;
         case 'none':
           break;
       }
     });
 
-    // Restore chat open/closed from the previous session on this browser.
-    if (this.chatPopout.wasOpen()) {
-      this.chatPopout.open();
+    let shellReady = false;
+    initNavigation({
+      getScreen: (id) => this.screenManager.get(id),
+      switchTo: (id) => this.screenManager.switchTo(id),
+      getActiveScreenId: () => this.screenManager.getActiveScreenId(),
+      setActiveTab: (id) => nav.setActive(id),
+      closeTransient: () => {
+        notifications.closeDropdown();
+        questLog.close();
+        if (shellReady) chatPopout.closeIfCovering();
+      },
+    });
+
+    this.removeShellListeners?.();
+    const shellListeners = [
+      installNavDelegate(),
+      installEscapeHandler(),
+      installBackHandler(() => {
+        if (!chatPopout.isLandscapeColumn()) return false;
+        chatPopout.close();
+        return true;
+      }),
+    ];
+    this.removeShellListeners = () => shellListeners.forEach(remove => remove());
+
+    if (chatPopout.wasOpen()) {
+      chatPopout.open();
       nav.setOverlayActive('chat', true);
     }
 
-    // Switch to saved screen (or combat by default)
-    this.screenManager.switchTo(savedScreen);
+    navigate(sessionStorage.getItem(ACTIVE_SCREEN_KEY) ?? DEFAULT_SCREEN);
+    shellReady = true;
+
+    this.cancelPrebuild?.();
+    if (!saveDataRequested()) this.cancelPrebuild = runStepsWhenIdle(this.screenManager.prebuildSteps(PREBUILT_SCREENS));
+
+    if (this.openOptionsDelegate) document.removeEventListener('click', this.openOptionsDelegate, true);
+    this.openOptionsDelegate = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest?.(`[${OPEN_OPTIONS_ATTR}]`)) settingsScreen.openPlayerOptions();
+    };
+    document.addEventListener('click', this.openOptionsDelegate, true);
+
+    this.masteryToasts?.destroy();
+    const bestiaryModal = new BestiaryModal(this.gameClient);
+    this.masteryToasts = new MasteryToasts(this.gameClient, () => bestiaryModal.open());
+
+    this.recapModal?.destroy();
+    this.recapModal = new RecapModal(this.gameClient, {
+      onOpenMap: () => navigate('map'),
+    });
   }
 }

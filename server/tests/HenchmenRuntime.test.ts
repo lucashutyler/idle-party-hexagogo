@@ -3,7 +3,7 @@ import { PlayerManager } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
-import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, COMBAT_STEP_MS, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import type { HenchmanDefinition, WorldTileDefinition, DungeonDefinition, PartyCombatant } from '@idle-party-rpg/shared';
@@ -265,6 +265,87 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     random.mockRestore();
 
     expect(pm.getSessionByUsername('alice')!.getInventoryCount('trinket')).toBe(1);
+  });
+
+  describe('changing the roster during the kill beat', () => {
+    // Fights here roll the two-goblin fallback pack, worth 40 XP and 100 gold in all.
+    const REWARD_MONSTER = { id: 'goblin', name: 'Goblin', hp: 1, damage: 0, damageType: 'physical', xp: 20, goldMin: 50, goldMax: 50 };
+    const BARD_ID = 'hench_bard';
+    const ROSTER = {
+      [HENCH_ID]: makeHenchman(),
+      [BARD_ID]: makeHenchman({ id: BARD_ID, name: 'Lute', className: 'Bard', skillIds: ['bard_inspiration'] }),
+    };
+
+    function xpOf(pm: PlayerManager): number {
+      return (pm.getSessionByUsername('alice') as unknown as { character: { xp: number } }).character.xp;
+    }
+
+    /** Win a real fight against a one-hit goblin, stopping inside its kill beat with nothing paid yet. */
+    function reachKillBeat(pm: PlayerManager, partyId: string) {
+      const content = (pm.partyBattles as unknown as { content: ContentStore }).content as unknown as Record<string, unknown>;
+      content.getMonster = () => REWARD_MONSTER;
+      content.getAllMonsters = () => ({ goblin: REWARD_MONSTER });
+      const timer = (pm.partyBattles as unknown as {
+        entries: Map<string, { battleTimer: { battleId: number; currentState: string; isFighting: (id: number) => boolean } }>;
+      }).entries.get(partyId)!.battleTimer;
+      pm.partyBattles.restartBattle(partyId);
+      const session = pm.getSessionByUsername('alice')!;
+      const before = { gold: session.getGold(), xp: xpOf(pm) };
+      for (let ms = 0; ms < 10_000 && timer.isFighting(timer.battleId); ms += COMBAT_STEP_MS) {
+        vi.advanceTimersByTime(COMBAT_STEP_MS);
+      }
+      expect(timer.isFighting(timer.battleId)).toBe(false);
+      expect(timer.currentState).toBe('battle');
+      expect(session.getGold()).toBe(before.gold);
+      return { before, session };
+    }
+
+    it('does not pay a new hire for a win it did not fight', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      const hired = pm.hireHenchman('alice', BARD_ID, DEFAULT_MAP_ID);
+      if (typeof hired === 'string') throw new Error(hired);
+      pm.partyBattles.henchmenChanged(partyId, [hired]);
+
+      expect(session.getGold() - before.gold).toBe(100);
+      expect(xpOf(pm) - before.xp).toBe(40);
+    });
+
+    it('still takes a dismissed hire\'s share and Inspiration for a win it fought', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const hired = hire(pm, BARD_ID);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      expect(typeof pm.dismissHenchman('alice', hired.instanceId)).not.toBe('string');
+      pm.partyBattles.henchmenChanged(partyId);
+
+      expect(session.getGold() - before.gold).toBe(50);
+      expect(xpOf(pm) - before.xp).toBe(24);
+    });
+
+    it('pays a replacement\'s win on the outgoing hire, not the incoming one', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const outgoing = hire(pm, BARD_ID);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      const incoming = pm.hireHenchman('alice', HENCH_ID, DEFAULT_MAP_ID, outgoing.instanceId);
+      if (typeof incoming === 'string') throw new Error(incoming);
+      pm.partyBattles.henchmenChanged(partyId, [incoming]);
+
+      expect(session.getGold() - before.gold).toBe(50);
+      expect(xpOf(pm) - before.xp).toBe(24);
+    });
+
+    it('pays the fighters before a joining player can dilute their win', async () => {
+      const { pm, partyId } = await setup(ROSTER);
+      const { before, session } = reachKillBeat(pm, partyId);
+
+      pm.partyBattles.addMember(partyId, 'latecomer');
+
+      expect(session.getGold() - before.gold).toBe(100);
+      expect(xpOf(pm) - before.xp).toBe(40);
+    });
   });
 
   describe('in a dungeon, hires wait at the entrance', () => {
