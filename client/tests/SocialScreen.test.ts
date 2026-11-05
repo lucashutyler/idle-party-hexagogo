@@ -761,6 +761,15 @@ describe('user popup', () => {
     expect(t.send('sendUnblockUser')).toHaveBeenCalledWith('bob');
   });
 
+  it('does not call a player named after an Object.prototype member blocked', () => {
+    const t = setup();
+    t.push([], { blockedUsers: {} });
+    t.screen.showUserPopup('constructor', anchor());
+    expect(item('Block')).not.toBeNull();
+    expect(item('Unblock')).toBeNull();
+    expect(document.querySelector('.user-popup-menu')?.textContent).not.toContain('Blocked');
+  });
+
   it('confirms removing a friend', async () => {
     const t = setup();
     t.push([], { friends: ['bob'] });

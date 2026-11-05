@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { offsetToCube, cubeDistance, cubeToKey } from '@idle-party-rpg/shared';
+import { offsetToCube, cubeDistance, cubeToKey, isBlockedUser } from '@idle-party-rpg/shared';
 import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
@@ -291,12 +291,26 @@ export class PlayerManager {
   }
 
   /**
-   * Rename a player: re-key the session map and update the session's username.
+   * Rename a player: re-key their session and connections, and move other players' blocks to the new name.
+   * Returns whether the player had a session. See docs/architecture/social.md → Renames.
    */
   renamePlayer(oldUsername: string, newUsername: string): boolean {
     const session = this.sessions.get(oldUsername);
-    if (!session) return false;
+    if (session) this.rekeySession(session, oldUsername, newUsername);
+    this.moveBlocksToNewName(oldUsername, newUsername);
+    return session !== undefined;
+  }
 
+  private moveBlocksToNewName(oldUsername: string, newUsername: string): void {
+    const blockers = this.getAllSessions().filter(session => session.moveBlockToNewName(oldUsername, newUsername));
+    if (blockers.length === 0) return;
+
+    this.store.saveAll(blockers.map(blocker => this.saveDataFor(blocker)))
+      .catch(err => console.error(`[PlayerManager] Failed to save blocks moved to "${newUsername}":`, err));
+    for (const blocker of blockers) this.sendStateToPlayer(blocker.username);
+  }
+
+  private rekeySession(session: PlayerSession, oldUsername: string, newUsername: string): void {
     this.sessions.delete(oldUsername);
     session.username = newUsername;
     this.sessions.set(newUsername, session);
@@ -312,7 +326,6 @@ export class PlayerManager {
     }
 
     console.log(`[PlayerManager] Renamed "${oldUsername}" → "${newUsername}"`);
-    return true;
   }
 
   /** Send a chat_message to a specific player (all connections) and store in their history. */
@@ -399,8 +412,7 @@ export class PlayerManager {
 
   private notifyDmReceived(recipient: string, sender: string, text: string): void {
     const session = this.sessions.get(recipient);
-    // not `in`: "constructor" is a legal username
-    if (session && Object.prototype.hasOwnProperty.call(session.getBlockedUsers(), sender)) return;
+    if (session && isBlockedUser(sender, session.getBlockedUsers())) return;
 
     const focus = session?.getChatFocus();
     if (focus?.channelType === 'dm' && focus.channelId === sender) return;
@@ -1001,28 +1013,28 @@ export class PlayerManager {
    * Collect save data for all active sessions.
    */
   getAllSaveData(): PlayerSaveData[] {
-    const data: PlayerSaveData[] = [];
-    for (const session of this.sessions.values()) {
-      const partyId = session.getPartyId();
-      const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
-      const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
+    return this.getAllSessions().map(session => this.saveDataFor(session));
+  }
 
-      // Get party role/position info
-      let partyInfo: { role: 'owner' | 'leader' | 'member'; gridPosition: number } | undefined;
-      if (partyId) {
-        const party = this.parties.getParty(partyId);
-        if (party) {
-          const member = party.members.find(m => m.username === session.username);
-          if (member) {
-            partyInfo = { role: member.role, gridPosition: member.gridPosition };
-          }
+  private saveDataFor(session: PlayerSession): PlayerSaveData {
+    const partyId = session.getPartyId();
+    const movementData = partyId ? this.partyBattles.getMovementSaveData(partyId) : undefined;
+    const dungeonData = partyId ? this.partyBattles.getDungeonSaveData(partyId) : null;
+
+    // Get party role/position info
+    let partyInfo: { role: 'owner' | 'leader' | 'member'; gridPosition: number } | undefined;
+    if (partyId) {
+      const party = this.parties.getParty(partyId);
+      if (party) {
+        const member = party.members.find(m => m.username === session.username);
+        if (member) {
+          partyInfo = { role: member.role, gridPosition: member.gridPosition };
         }
       }
-
-      const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
-      data.push(session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen));
     }
-    return data;
+
+    const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
+    return session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen);
   }
 
   /**
@@ -1417,7 +1429,7 @@ export class PlayerManager {
     const sessionB = this.sessions.get(b);
     const blockedByA = sessionA?.getBlockedUsers() ?? {};
     const blockedByB = sessionB?.getBlockedUsers() ?? {};
-    return b in blockedByA || a in blockedByB;
+    return isBlockedUser(b, blockedByA) || isBlockedUser(a, blockedByB);
   }
 
   /** Check if a player has an item in their unequipped inventory. */
