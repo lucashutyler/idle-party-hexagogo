@@ -51,6 +51,26 @@ Message delivery ignores blocks: `send_chat` delivers regardless, and `isBlocked
 
 A DM also fires a `dm_received` notification, unless the recipient has blocked the sender at either level (so no in-app, push or email) or has that thread on screen — see [`notifications.md`](notifications.md) → "Chat focus".
 
+Block lists are plain objects keyed by username, and `constructor` and `__proto__` are legal usernames, so reads go through `isBlockedUser` (own keys only) rather than `in`.
+
+## Renames
+
+`POST /auth/username` on an account that already has a name reaches `PlayerManager.renamePlayer`. The client only asks for a name once, so today this takes a hand-made request.
+
+**Blocks follow the rename.** `renamePlayer` moves the old name to the new one, at the same level, in every in-memory session's `blockedUsers`, whether or not the renamed player has a session. `isBlockedMessage`, `isTradeBlocked` and the `dm_received` check then keep applying, and whoever takes the old name next isn't blocked.
+
+`isBlockedMessage` matches on the name a message carries, so moving the block alone would bring back everything the player said before. `PlayerSession.moveBlockToNewName` therefore also rewrites the old name in that blocker's stored history, as sender and as DM partner. It copies the messages it changes because recipients share one message object: players without the block keep the old name.
+
+Each blocker is saved straight away, because the account store already holds the new name and a crash before the next periodic save would lose the block for good. Online blockers get a state push.
+
+Limits of this:
+
+- A client that is already open keeps the old-name lines in its `ChatLog`, which only ever merges, so they show again in that client until it reloads.
+- A suspended player has no session in memory, so the block list in their save file keeps the old name.
+- A block left behind by a rename before this existed can't be repaired, because the old name isn't recorded anywhere.
+
+**Nothing else follows yet.** Friends, friend requests, guild rosters, party members, trades, mailboxes, notification inboxes and other players' DM targets and chat history all stay under the old name, and a socket that was already open keeps acting as the old name until it reconnects.
+
 ## User popup menu
 
 A contextual popup shown when clicking any username across the app (Friends, Ranks, Guild/Party members, RoomView and room sheet players, combat cards, chat sender names). The header shows avatar, online dot, level, class and labels (Friend, Guild, Party, Blocked). Actions: View Player, Chat (DM), Trade (Open Trade when one is in progress), Send Gift, Add / Accept / Decline / Revoke / Remove Friend, Invite to Party, Invite to Guild, Block / Unblock. Disabled actions say why in visible text: Invite to Party names the role, full-party, already-invited or different-room reason, and paints "Invited to Party" only from `outgoingPartyInvites`. Trade is **not** room-gated — trades are async (see below). Block and Remove Friend go through `confirmDialog`. Dismissed on outside click, the X, Back, Escape or after an action.

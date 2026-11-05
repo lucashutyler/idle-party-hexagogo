@@ -1,6 +1,6 @@
 import type { GameClient } from '../network/GameClient';
 import type { ServerStateMessage, ClientSocialState, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, MIN_GUILD_LEVEL, CLASS_GLYPHS, classIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, MIN_GUILD_LEVEL, CLASS_GLYPHS, classIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds, isBlockedUser } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
 import { RARITY_COLORS, RARITY_ORDER, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIcon';
@@ -659,7 +659,7 @@ export class SocialScreen implements Screen {
     const isFriend = (social.friends ?? []).includes(username);
     const isGuildMember = (social.guildMembers ?? []).some(m => m.username === username);
     const isPartyMember = (social.party?.members ?? []).some(m => m.username === username);
-    const isBlocked = username in (social.blockedUsers ?? {});
+    const isBlocked = isBlockedUser(username, social.blockedUsers ?? {});
     const isOnline = (social.onlinePlayers ?? []).includes(username);
 
     const labels: string[] = [];
@@ -1147,7 +1147,7 @@ export class SocialScreen implements Screen {
     else if (friends.has(p.username)) notes.push('Friend');
     else if ((social?.incomingFriendRequests ?? []).some(r => r.fromUsername === p.username)) notes.push('Wants to be friends');
     else if ((social?.outgoingFriendRequests ?? []).some(r => r.toUsername === p.username)) notes.push('Request sent');
-    if (p.username in (social?.blockedUsers ?? {})) notes.push('Blocked');
+    if (isBlockedUser(p.username, social?.blockedUsers ?? {})) notes.push('Blocked');
     return this.playerRowHtml({
       username: p.username,
       online: onlineSet.has(p.username),

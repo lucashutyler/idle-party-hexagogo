@@ -76,6 +76,7 @@ import {
   AWAY_MOMENT_PRIORITY,
   acceptableQuestIds,
   nextWeeklyReopening,
+  isBlockedUser,
 } from '@idle-party-rpg/shared';
 import type {
   CombatPrefs,
@@ -895,6 +896,17 @@ export class PlayerSession {
 
   getBlockedUsers(): Record<string, BlockLevel> { return this.blockedUsers; }
   setBlockedUsers(blocked: Record<string, BlockLevel>): void { this.blockedUsers = blocked; }
+
+  /** Moves a block onto a blocked player's new name, with the chat history it hides. False when they weren't blocked. */
+  moveBlockToNewName(oldUsername: string, newUsername: string): boolean {
+    if (!isBlockedUser(oldUsername, this.blockedUsers)) return false;
+    // Object.fromEntries, not assignment: `blocked['__proto__'] = level` is silently dropped.
+    this.blockedUsers = Object.fromEntries(
+      Object.entries(this.blockedUsers).map(([name, level]): [string, BlockLevel] => [name === oldUsername ? newUsername : name, level]),
+    );
+    this.chatHistory = this.chatHistory.map(message => withRenamedUser(message, oldUsername, newUsername));
+    return true;
+  }
 
   getGuildId(): string | null { return this.guildId; }
   setGuildId(id: string | null): void { this.guildId = id; }
@@ -1744,6 +1756,18 @@ export class PlayerSession {
 
 function copyCheckpoint(checkpoint: DungeonCheckpoint): DungeonCheckpoint {
   return { ...checkpoint, rewardedPhases: [...checkpoint.rewardedPhases] };
+}
+
+/** Copies rather than mutates: every recipient's history holds the same message object. */
+function withRenamedUser(message: ChatMessage, oldUsername: string, newUsername: string): ChatMessage {
+  const isSender = message.senderUsername === oldUsername;
+  const isDmPartner = message.channelType === 'dm' && message.channelId === oldUsername;
+  if (!isSender && !isDmPartner) return message;
+  return {
+    ...message,
+    senderUsername: isSender ? newUsername : message.senderUsername,
+    channelId: isDmPartner ? newUsername : message.channelId,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

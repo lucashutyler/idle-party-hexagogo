@@ -137,6 +137,11 @@ export interface ChatChannel {
 // --- Block System ---
 export type BlockLevel = 'dm' | 'all';
 
+/** Own keys only: `constructor` and `__proto__` are legal usernames. */
+export function isBlockedUser(username: string, blocked: Readonly<Record<string, BlockLevel>>): boolean {
+  return Object.prototype.hasOwnProperty.call(blocked, username);
+}
+
 // --- Social State (sent to client) ---
 export interface PlayerListEntry {
   username: string;

@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.2',
+    notes: [
+      'A block now stays in place if the blocked player\'s name changes, and what they said before stays hidden.',
+      'Fixed players with certain names showing as blocked when nobody had blocked them, which also stopped anyone trading with them.',
+    ],
+  },
+  {
     version: '2026.11.05.1',
     notes: [
       'Blocking a player now also stops their direct messages from notifying you, including push notifications and emails.',
