@@ -259,8 +259,15 @@ function getSessionUsername(req: IncomingMessage): Promise<string | null> {
   });
 }
 
+function warnUpgradeSocketError(err: Error): void {
+  console.warn(`WebSocket upgrade socket error: ${err.message}`);
+}
+
 server.on('upgrade', async (req, socket, head) => {
-  const username = await getSessionUsername(req);
+  // Node removes its own listener on upgrade, and ws adds one only in handleUpgrade.
+  socket.on('error', warnUpgradeSocketError);
+
+  const username = await getSessionUsername(req).catch(() => null);
 
   if (!username || username === 'undefined') {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -276,6 +283,7 @@ server.on('upgrade', async (req, socket, head) => {
     return;
   }
 
+  socket.removeListener('error', warnUpgradeSocketError);
   wss.handleUpgrade(req, socket, head, (ws) => {
     (ws as any)._username = username;
     wss.emit('connection', ws, req);
@@ -306,6 +314,9 @@ wss.on('connection', (ws) => {
   // Register the connection and send initial state
   playerManager.login(ws, username).then(() => {
     playerManager.sendStateToPlayer(username);
+  }).catch((err) => {
+    console.error(`[WS] Login failed for "${username}":`, err);
+    ws.close(1011, 'Login failed');
   });
 
   ws.on('message', (data) => {
@@ -1819,6 +1830,11 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     playerManager.removeConnection(ws);
+  });
+
+  // ws expects a listener on every socket. `close` follows.
+  ws.on('error', (err) => {
+    console.warn(`WebSocket error for "${username}": ${err.message}`);
   });
 });
 
