@@ -467,3 +467,27 @@ describe('a block across a rename', () => {
     expect(statesSentTo('carol')).toEqual([]);
   });
 });
+
+describe('blockUser', () => {
+  it('blocks a player whose name is a prototype key, and keeps other blocks', async () => {
+    const t = await setup('alice', 'bob');
+    const bob = t.pm.getSessionByUsername('bob')!;
+
+    bob.blockUser('carol', 'dm');
+    bob.blockUser('__proto__', 'all');
+    bob.blockUser('carol', 'all');
+
+    expect(Object.entries(bob.getBlockedUsers()).sort()).toEqual([['__proto__', 'all'], ['carol', 'all']]);
+    expect(JSON.parse(JSON.stringify(bob.getBlockedUsers()))).toEqual(bob.getBlockedUsers());
+  });
+});
+
+describe('the zone in a state push', () => {
+  it('is the value zone chat accepts', async () => {
+    const t = await setup('alice', 'bob');
+    const zone = t.pm.getSessionByUsername('alice')!.getState([]).zone;
+
+    expect(zone).toBeTruthy();
+    expect(t.pm.sendPlayerChat('alice', 'zone', zone, 'hello')).toBeNull();
+  });
+});

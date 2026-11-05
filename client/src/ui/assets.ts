@@ -172,6 +172,7 @@ export interface TrackedImgOpts {
 const missingUrls = new Set<string>();
 const loadedUrls = new Set<string>();
 let tracking = false;
+let missingAssetRetries = 0;
 
 /**
  * `<img>` that starts hidden and reveals on load (`.asset-loaded`, plus `.has-art` on its parent), or hides on failure (`.asset-failed`).
@@ -194,9 +195,20 @@ export function isAssetLoaded(src: string): boolean {
   return loadedUrls.has(src);
 }
 
+/** `renderTrackedImg` markup minus what changes once an image loads: the DOM is already up to date on that, so it isn't worth a rewrite. */
+export function withoutArtLoadState(html: string): string {
+  return html.replace(/ asset-loaded| loading="lazy" decoding="async"/g, '');
+}
+
 /** Forget art that failed to load, so newly uploaded art is tried again. */
 export function forgetMissingAssets(): void {
+  if (missingUrls.size > 0) missingAssetRetries++;
   missingUrls.clear();
+}
+
+/** Goes up when art that had failed may now load, for markup cached behind a key. */
+export function missingAssetRetryCount(): number {
+  return missingAssetRetries;
 }
 
 function trackAssetImages(): void {

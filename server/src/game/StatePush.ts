@@ -1,8 +1,14 @@
-import { hash } from 'crypto';
+import { createHash } from 'crypto';
+import { PARTIAL_STATE_PARAM } from '@idle-party-rpg/shared';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 
 /** A field this small always goes out: naming it in `unchangedFields` would save nothing. */
 const MIN_ELIDED_JSON_LENGTH = 64;
+
+/** A service worker can still serve a bundle that predates partial pushes, and it never asks for them. */
+export function clientAcceptsPartialState(requestUrl: string | undefined): boolean {
+  return new URL(requestUrl ?? '/', 'http://localhost').searchParams.has(PARTIAL_STATE_PARAM);
+}
 
 export interface PreparedStateField {
   name: string;
@@ -19,7 +25,7 @@ export function prepareStatePush(state: ServerStateMessage): PreparedStateField[
   for (const [name, value] of Object.entries(state)) {
     const json = JSON.stringify(value);
     if (json === undefined) continue;
-    const fingerprint = json.length > MIN_ELIDED_JSON_LENGTH ? hash('sha1', json, 'base64') : null;
+    const fingerprint = json.length > MIN_ELIDED_JSON_LENGTH ? createHash('sha1').update(json).digest('base64') : null;
     fields.push({ name, json, fingerprint });
   }
   return fields;

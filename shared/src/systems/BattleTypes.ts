@@ -134,6 +134,8 @@ export interface ServerStateMessage {
   combatLog: CombatLogEntry[];
   battleCount: number;
   character: ClientCharacterState | null;
+  /** Raw key of the zone the party is in, which is what zone chat addresses. Empty when it isn't in one. */
+  zone: string;
   zoneName: string;
   social?: ClientSocialState;
   /** Item definitions for items the player currently owns (inventory + equipment). */
@@ -201,6 +203,9 @@ export interface ClientCraftingProgress {
 }
 
 export type ClientCraftingState = ClientCraftingCatalog & ClientCraftingProgress;
+
+/** WebSocket URL query parameter: this client understands `unchangedFields`. */
+export const PARTIAL_STATE_PARAM = 'partialState';
 
 /** Fills in what the server left out of a state push, from the previous state on the same socket. Mutates `msg`. */
 export function restoreElidedState(msg: ServerStateMessage, previous: ServerStateMessage | null): void {

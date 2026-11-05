@@ -52,7 +52,8 @@ export class PlayerManager {
   /** New sockets that have not sent `presence` yet: they neither start nor end an absence until the grace runs out. */
   private presencePending = new WeakSet<WebSocket>();
   private sentStateFields = new WeakMap<WebSocket, SentStateFields>();
-  private stateRetryPending = new Set<string>();
+  private stateRetryPending = new WeakSet<WebSocket>();
+  private wholeStateSockets = new WeakSet<WebSocket>();
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -491,15 +492,25 @@ export class PlayerManager {
 
   sendStateToPlayer(username: string): void {
     const wsSet = this.playerConnections.get(username);
-    if (!wsSet || wsSet.size === 0) return;
+    if (wsSet) this.pushStateTo(username, wsSet);
+  }
 
+  /** This socket gets every field on every push. */
+  requireWholeState(ws: WebSocket): void {
+    this.wholeStateSockets.add(ws);
+  }
+
+  private pushStateTo(username: string, sockets: Iterable<WebSocket>): void {
     const session = this.sessions.get(username);
     if (!session) return;
 
     // A socket that is behind skips this push: nothing is recorded as sent, so its next push carries the difference.
-    const open = [...wsSet].filter(ws => ws.readyState === WebSocket.OPEN);
-    const ready = open.filter(ws => !(ws.bufferedAmount > STATE_BACKPRESSURE_BYTES));
-    if (ready.length < open.length) this.retryStateSoon(username);
+    const ready: WebSocket[] = [];
+    for (const ws of sockets) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (ws.bufferedAmount > STATE_BACKPRESSURE_BYTES) this.retryStateSoon(ws);
+      else ready.push(ws);
+    }
     if (ready.length === 0) return;
 
     const otherPlayers = this.getOtherPlayers(username);
@@ -511,16 +522,18 @@ export class PlayerManager {
   }
 
   /** Mid-fight nothing else may push for minutes, so a skipped push can't wait for the next event. */
-  private retryStateSoon(username: string): void {
-    if (this.stateRetryPending.has(username)) return;
-    this.stateRetryPending.add(username);
+  private retryStateSoon(ws: WebSocket): void {
+    if (this.stateRetryPending.has(ws)) return;
+    this.stateRetryPending.add(ws);
     setTimeout(() => {
-      this.stateRetryPending.delete(username);
-      this.sendStateToPlayer(username);
+      this.stateRetryPending.delete(ws);
+      const username = this.connections.get(ws);
+      if (username) this.pushStateTo(username, [ws]);
     }, STATE_RETRY_MS).unref();
   }
 
   private sentStateFieldsOf(ws: WebSocket): SentStateFields {
+    if (this.wholeStateSockets.has(ws)) return new Map();
     let sent = this.sentStateFields.get(ws);
     if (!sent) {
       sent = new Map();

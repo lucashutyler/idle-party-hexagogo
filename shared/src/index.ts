@@ -389,6 +389,7 @@ export {
   RESULT_PAUSE,
   MOVE_DURATION,
   GAME_VERSION,
+  PARTIAL_STATE_PARAM,
   restoreElidedState,
 } from './systems/BattleTypes.js';
 

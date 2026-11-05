@@ -271,36 +271,28 @@ describe('canonicalUsername', () => {
 });
 
 describe('resolveSendTarget', () => {
-  const tileWithZone = () => ({ zone: 'raw_zone_key' });
-
-  it('sends the raw zone key of the current room, looked up on the current map', () => {
-    const lookups: unknown[] = [];
-    const getTileOn = (...args: [string, number, number]) => {
-      lookups.push(args);
-      return tileWithZone();
-    };
-    expect(resolveSendTarget('zone', '', state(), getTileOn)).toEqual({ ok: true, channelId: 'raw_zone_key' });
-    expect(lookups).toEqual([['map1', 3, 4]]);
+  it('sends the raw zone key the server reported for the party', () => {
+    expect(resolveSendTarget('zone', '', state({ zone: 'raw_zone_key' }))).toEqual({ ok: true, channelId: 'raw_zone_key' });
   });
 
-  it('refuses zone chat when the room cannot be resolved', () => {
-    expect(resolveSendTarget('zone', '', state(), () => undefined).ok).toBe(false);
-    expect(resolveSendTarget('zone', '', state(), undefined).ok).toBe(false);
+  it('refuses zone chat when the party is in no zone', () => {
+    expect(resolveSendTarget('zone', '', state({ zone: '' })).ok).toBe(false);
+    expect(resolveSendTarget('zone', '', null).ok).toBe(false);
   });
 
   it('sends the guild id, and refuses without a guild', () => {
     const inGuild = state({ social: { guild: { id: 'g1' } } });
-    expect(resolveSendTarget('guild', '', inGuild, tileWithZone)).toEqual({ ok: true, channelId: 'g1' });
-    expect(resolveSendTarget('guild', '', state(), tileWithZone).ok).toBe(false);
+    expect(resolveSendTarget('guild', '', inGuild)).toEqual({ ok: true, channelId: 'g1' });
+    expect(resolveSendTarget('guild', '', state()).ok).toBe(false);
   });
 
   it('sends the known spelling on a DM, and refuses an empty name', () => {
-    expect(resolveSendTarget('dm', 'mira', state(), tileWithZone)).toEqual({ ok: true, channelId: 'Mira' });
-    expect(resolveSendTarget('dm', '  ', state(), tileWithZone).ok).toBe(false);
+    expect(resolveSendTarget('dm', 'mira', state())).toEqual({ ok: true, channelId: 'Mira' });
+    expect(resolveSendTarget('dm', '  ', state()).ok).toBe(false);
   });
 
   it.each(['global', 'tile', 'party'] as const)('leaves %s to the server to resolve', (channel) => {
-    expect(resolveSendTarget(channel, '', state(), tileWithZone)).toEqual({ ok: true, channelId: '' });
+    expect(resolveSendTarget(channel, '', state())).toEqual({ ok: true, channelId: '' });
   });
 });
 

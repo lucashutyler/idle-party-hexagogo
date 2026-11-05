@@ -754,6 +754,7 @@ export class PlayerSession {
       combatLog: this.combatLog.slice(-STATE_LOG_TAIL),
       battleCount: this.battleCount,
       character: charState,
+      zone: partyZone ?? '',
       zoneName,
       social: this.getSocialState?.(),
       itemDefinitions: this.getOwnedItemDefinitions(setDefs),
@@ -901,10 +902,14 @@ export class PlayerSession {
   getBlockedUsers(): Record<string, BlockLevel> { return this.blockedUsers; }
   setBlockedUsers(blocked: Record<string, BlockLevel>): void { this.blockedUsers = blocked; }
 
+  blockUser(username: string, level: BlockLevel): void {
+    // Object.fromEntries, not assignment: `blocked['__proto__'] = level` is silently dropped.
+    this.blockedUsers = Object.fromEntries([...Object.entries(this.blockedUsers), [username, level]]);
+  }
+
   /** Moves a block onto a blocked player's new name, with the chat history it hides. False when they weren't blocked. */
   moveBlockToNewName(oldUsername: string, newUsername: string): boolean {
     if (!isBlockedUser(oldUsername, this.blockedUsers)) return false;
-    // Object.fromEntries, not assignment: `blocked['__proto__'] = level` is silently dropped.
     this.blockedUsers = Object.fromEntries(
       Object.entries(this.blockedUsers).map(([name, level]): [string, BlockLevel] => [name === oldUsername ? newUsername : name, level]),
     );

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientCraftingState, RecipeDefinition, ServerStateMessage } from '@idle-party-rpg/shared';
 import { MAX_CRAFT_QUEUE } from '@idle-party-rpg/shared';
@@ -150,6 +152,39 @@ describe('CraftingScreen', () => {
 
     expect(t.queueBtn()).toBe(btn);
     t.screen.onDeactivate();
+  });
+
+  it('shows current job progress at once on the first visit after a prebuild', () => {
+    const startedAt = Date.now();
+    const t = setup({ jobs: ['r-bar'], activeStartedAtMs: startedAt });
+    t.screen.prebuild();
+    vi.advanceTimersByTime(5_000);
+
+    t.screen.onActivate();
+
+    const status = document.querySelector('.craft-queue-status[data-active="1"]') as HTMLElement;
+    expect(status.textContent).toBe('5s remaining');
+    t.screen.onDeactivate();
+  });
+
+  it('keeps the recipe list when art finishing loading is all that changed', () => {
+    const t = setup();
+    t.screen.onActivate();
+    const btn = t.queueBtn();
+    const art = document.querySelector('.craft-recipe-card img.asset-img') as HTMLImageElement;
+    expect(art).toBeTruthy();
+
+    art.dispatchEvent(new Event('load'));
+    t.push({});
+
+    expect(t.queueBtn()).toBe(btn);
+    t.screen.onDeactivate();
+  });
+
+  it('gives ingredient art a box to load in until it fails', () => {
+    const css = readFileSync(resolve(__dirname, '../src/styles/hero.css'), 'utf8');
+    expect(css).toContain('.craft-ing-icon:not(:has(.asset-img:not(.asset-failed)))');
+    expect(css).not.toMatch(/\.craft-ing-icon:not\(:has\(\.asset-loaded\)\)\s*\{\s*display:\s*none/);
   });
 
   it('shows the latest state on the first visit after a stale prebuild', () => {

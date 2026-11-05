@@ -213,28 +213,25 @@ export function sendableChannels(membership: ChatMembership): ChatChannelType[] 
   return channels;
 }
 
-/** The server matches recipients by exact name, so a typed name takes the known player's spelling. */
+/** A typed name takes the known player's spelling, because threads and DM focus compare names exactly. */
 export function canonicalUsername(typed: string, known: readonly { username: string }[] | undefined): string {
   const trimmed = typed.trim();
   return known?.find(player => sameUser(player.username, trimmed))?.username ?? trimmed;
 }
 
-/** What goes in `channelId`: the server compares zone against the room's raw zone key, not its display name. */
+/** What goes in `channelId`: the server compares zone against the party's raw zone key, not its display name. */
 export function resolveSendTarget(
   channel: ChatChannelType,
   dmTarget: string,
   state: ServerStateMessage | null | undefined,
-  getTileOn: ((mapId: string, col: number, row: number) => { zone: string } | undefined) | undefined,
 ): SendTarget {
   switch (channel) {
     case 'dm': {
       const username = canonicalUsername(dmTarget, state?.social?.allPlayers);
       return username ? { ok: true, channelId: username } : { ok: false, reason: 'Choose who to message first.' };
     }
-    case 'zone': {
-      const tile = state ? getTileOn?.(state.currentMapId, state.party.col, state.party.row) : undefined;
-      return tile?.zone ? { ok: true, channelId: tile.zone } : { ok: false, reason: 'Zone chat isn\'t available in this room.' };
-    }
+    case 'zone':
+      return state?.zone ? { ok: true, channelId: state.zone } : { ok: false, reason: 'Zone chat isn\'t available in this room.' };
     case 'guild': {
       const guildId = state?.social?.guild?.id;
       return guildId ? { ok: true, channelId: guildId } : { ok: false, reason: 'You aren\'t in a guild.' };

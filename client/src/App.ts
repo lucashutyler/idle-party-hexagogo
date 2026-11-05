@@ -461,7 +461,7 @@ export class App {
       mapScreen.focusRoom(roomId);
     });
 
-    const chatPopout = new ChatPopout(this.gameClient, this.worldCache);
+    const chatPopout = new ChatPopout(this.gameClient);
     this.chatPopout = chatPopout;
     chatPopout.setOnUserClick((username, anchor) => {
       socialScreen.showUserPopup(username, anchor);

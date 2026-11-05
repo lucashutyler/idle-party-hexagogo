@@ -28,6 +28,7 @@ function stateWith(over: Record<string, unknown> = {}): ServerStateMessage {
   return {
     username: 'me',
     currentMapId: 'map1',
+    zone: 'raw_zone',
     party: { col: 1, row: 2 },
     social: {
       party: { id: 'p1', members: [{ username: 'me' }] },
@@ -129,8 +130,7 @@ function setup(initialState: ServerStateMessage | null = stateWith()) {
     sendSetChatPreferences: vi.fn(),
   };
 
-  const worldCache = { getTileOn: vi.fn(() => ({ zone: 'raw_zone' })) };
-  const chat = new ChatPopout(gameClient as unknown as GameClient, worldCache as never);
+  const chat = new ChatPopout(gameClient as unknown as GameClient);
   const onUserClick = vi.fn();
   chat.setOnUserClick(onUserClick);
 
@@ -154,7 +154,7 @@ function setup(initialState: ServerStateMessage | null = stateWith()) {
   const timeline = () => document.querySelector('.chat-popout-timeline') as HTMLElement;
 
   return {
-    chat, gameClient, worldCache, receive, sync, pushState, connect, serverError, senderBtn, texts,
+    chat, gameClient, receive, sync, pushState, connect, serverError, senderBtn, texts,
     onUserClick, tab, input, select, dmTarget, clickSend, status, pill, timeline,
   };
 }
@@ -617,7 +617,6 @@ describe('ChatPopout sending', () => {
     choose(t, 'zone');
     t.input().value = 'hi zone';
     t.clickSend();
-    expect(t.worldCache.getTileOn).toHaveBeenCalledWith('map1', 1, 2);
     expect(t.gameClient.sendChat).toHaveBeenCalledWith('zone', 'raw_zone', 'hi zone');
     expect(t.input().value).toBe('');
   });
@@ -679,6 +678,79 @@ describe('ChatPopout sending', () => {
     t.serverError('You aren\'t in that zone', 'chat_refused');
     expect(t.input().value).toBe('hi zone');
     expect(t.status().textContent).toBe('You aren\'t in that zone');
+  });
+
+  it('pairs a refusal with the send it answers when a later send is in flight', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'first';
+    t.clickSend();
+    t.input().value = 'second';
+    t.clickSend();
+
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+    expect(t.input().value).toBe('first');
+
+    t.receive(message('m1', 'me', 'second'));
+    t.input().value = '';
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+    expect(t.input().value).toBe('');
+  });
+
+  it('keeps both texts when two sends in a row are refused', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'first';
+    t.clickSend();
+    t.input().value = 'second';
+    t.clickSend();
+
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+
+    expect(t.input().value).toContain('first');
+    expect(t.input().value).toContain('second');
+  });
+
+  it('keeps a refused text and what was typed since', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'refused';
+    t.clickSend();
+    t.input().value = 'typed since';
+
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+
+    expect(t.input().value).toBe('refused typed since');
+  });
+
+  it('puts back a send refused well after it went out', () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      t.chat.open();
+      t.input().value = 'slow network';
+      t.clickSend();
+
+      vi.advanceTimersByTime(20_000);
+      t.serverError('You aren\'t in that zone', 'chat_refused');
+
+      expect(t.input().value).toBe('slow network');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forgets unanswered sends when the connection changes', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'lost with the socket';
+    t.clickSend();
+
+    t.connect();
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+
+    expect(t.input().value).toBe('');
   });
 
   it('ignores unrelated server errors', () => {

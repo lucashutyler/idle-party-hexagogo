@@ -16,6 +16,7 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import type { IncomingMessage } from 'http';
 import { WS_SERVER_OPTIONS } from './wsServerOptions.js';
+import { clientAcceptsPartialState } from './game/StatePush.js';
 import { GameLoop } from './game/GameLoop.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
@@ -305,9 +306,10 @@ function syncFriendState(a: string, b: string): void {
   playerManager.sendStateToPlayer(b);
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   const username: string = (ws as any)._username;
   console.log(`WebSocket connected for "${username}"`);
+  if (!clientAcceptsPartialState(req.url)) playerManager.requireWholeState(ws);
 
   // Register the connection and send initial state
   playerManager.login(ws, username).then(() => {
@@ -923,9 +925,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid block level' }));
           return;
         }
-        const blocked = session.getBlockedUsers();
-        blocked[msg.username] = msg.level;
-        session.setBlockedUsers(blocked);
+        session.blockUser(msg.username, msg.level);
         playerManager.sendStateToPlayer(username);
         return;
       }

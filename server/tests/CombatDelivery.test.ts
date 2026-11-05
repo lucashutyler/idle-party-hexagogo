@@ -721,4 +721,58 @@ describe('state pushes per socket', () => {
     expect(slowTab.send.mock.calls.length).toBe(slowBefore);
     expect(lastState(fastTab).type).toBe('state');
   });
+
+  it('retries only the socket that is behind, without building state for it', async () => {
+    const pm = newManager(['alice']);
+    const slowTab = await loginKnight(pm, 'alice');
+    const fastTab = createWs();
+    await pm.login(asWs(fastTab), 'alice');
+    pm.sendStateToPlayer('alice');
+
+    slowTab.bufferedAmount = STATE_BACKPRESSURE_BYTES + 1;
+    pm.sendStateToPlayer('alice');
+    const pushes = (ws: FakeWs) => sent(ws).filter(m => m.msg.type === 'state').length;
+    const fastBefore = pushes(fastTab);
+    const getState = vi.spyOn(pm.getSessionByUsername('alice')!, 'getState');
+
+    vi.advanceTimersByTime(STATE_RETRY_MS * 4);
+    expect(pushes(fastTab)).toBe(fastBefore);
+    expect(getState).not.toHaveBeenCalled();
+
+    const slowBefore = pushes(slowTab);
+    slowTab.bufferedAmount = 0;
+    vi.advanceTimersByTime(STATE_RETRY_MS);
+    expect(pushes(slowTab)).toBe(slowBefore + 1);
+    expect(pushes(fastTab)).toBe(fastBefore);
+  });
+
+  it('delivers a skipped push under the new name after a rename', async () => {
+    const pm = newManager(['alice', 'alicia']);
+    const tab = await loginKnight(pm, 'alice');
+    pm.sendStateToPlayer('alice');
+    const pushes = () => sent(tab).filter(m => m.msg.type === 'state').length;
+
+    tab.bufferedAmount = STATE_BACKPRESSURE_BYTES + 1;
+    pm.sendStateToPlayer('alice');
+    const whileBehind = pushes();
+    pm.renamePlayer('alice', 'alicia');
+
+    tab.bufferedAmount = 0;
+    vi.advanceTimersByTime(STATE_RETRY_MS);
+    expect(pushes()).toBe(whileBehind + 1);
+    expect(lastState(tab).username).toBe('alicia');
+  });
+
+  it('sends every field to a socket that never asked for partial pushes', async () => {
+    const pm = newManager(['alice']);
+    const tab = createWs();
+    pm.requireWholeState(asWs(tab));
+    await loginKnight(pm, 'alice', tab);
+
+    pm.sendStateToPlayer('alice');
+    pm.sendStateToPlayer('alice');
+
+    expect(lastState(tab).unchangedFields).toBeUndefined();
+    expect(lastState(tab).social).toBeDefined();
+  });
 });

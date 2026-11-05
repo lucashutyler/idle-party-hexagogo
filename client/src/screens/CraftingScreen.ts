@@ -14,7 +14,7 @@ import { deferWhilePressed, setHtml } from '../ui/render';
 import { RARITY_COLORS, escapeHtml, renderItemIcon, wireRoleButtons } from '../ui/ItemIcon';
 import { closeItemPopup, showItemPopup } from '../ui/ItemPopup';
 import { renderEquipCompareBlock } from '../ui/EquipCompare';
-import { artworkUrl, renderTrackedImg } from '../ui/assets';
+import { artworkUrl, renderTrackedImg, withoutArtLoadState } from '../ui/assets';
 import { renderSegments, wireSegments } from '../ui/Segments';
 
 const PROGRESS_TICK_MS = 1000;
@@ -45,6 +45,7 @@ export class CraftingScreen implements Screen {
   private unsubscribe?: () => void;
   private progressTimer?: ReturnType<typeof setInterval>;
   private filter: CraftFilter = 'all';
+  private lastRecipesKey = '';
   private detailOverlay: HTMLElement | null = null;
 
   private lastState: ClientCraftingState | null = null;
@@ -122,6 +123,7 @@ export class CraftingScreen implements Screen {
   private syncProgressTimer(): void {
     const running = this.isActive && !!this.lastState?.activeProgress;
     if (running && this.progressTimer === undefined) {
+      this.updateProgressBar();
       this.progressTimer = setInterval(() => this.updateProgressBar(), PROGRESS_TICK_MS);
     } else if (!running && this.progressTimer !== undefined) {
       clearInterval(this.progressTimer);
@@ -147,6 +149,7 @@ export class CraftingScreen implements Screen {
       setHtml(this.queueEl, '');
       setHtml(this.segmentsEl, '');
       setHtml(this.recipesEl, '');
+      this.lastRecipesKey = '';
       return;
     }
     const recipes = this.sortedRecipes(c);
@@ -157,7 +160,12 @@ export class CraftingScreen implements Screen {
       { id: 'all', label: 'All' },
       { id: 'craftable', label: 'Craftable', badge: craftable.length },
     ], this.filter));
-    setHtml(this.recipesEl, this.renderRecipes(c, this.filter === 'craftable' ? craftable : recipes));
+    const recipesHtml = this.renderRecipes(c, this.filter === 'craftable' ? craftable : recipes);
+    const recipesKey = withoutArtLoadState(recipesHtml);
+    if (recipesKey !== this.lastRecipesKey) {
+      this.lastRecipesKey = recipesKey;
+      setHtml(this.recipesEl, recipesHtml);
+    }
   }
 
   private onClick(e: Event): void {

@@ -4,10 +4,12 @@ import {
   artworkUrl,
   forgetMissingAssets,
   isAssetLoaded,
+  missingAssetRetryCount,
   placeholderInitials,
   placeholderUrl,
   renderAssetImg,
   renderTrackedImg,
+  withoutArtLoadState,
 } from '../src/ui/assets';
 import { renderEmptySlotIcon } from '../src/ui/ItemIcon';
 
@@ -236,5 +238,42 @@ describe('art presence on the parent', () => {
     document.body.innerHTML = renderEmptySlotIcon('back');
     expect(document.querySelector('.item-slot-ghost img')).toBeNull();
     expect(document.querySelector('.item-slot-ghost-glyph')?.textContent).toBe('🧥');
+  });
+});
+
+describe('withoutArtLoadState', () => {
+  it('reads the same before and after an image loads', () => {
+    const url = '/item-artwork/load-state-test.png';
+    const before = renderTrackedImg(url, { className: 'x', lazy: true });
+    const img = document.createElement('img');
+    img.className = 'asset-img';
+    img.setAttribute('src', url);
+    document.body.appendChild(img);
+    img.dispatchEvent(new Event('load'));
+    const after = renderTrackedImg(url, { className: 'x', lazy: true });
+
+    expect(after).not.toBe(before);
+    expect(withoutArtLoadState(after)).toBe(withoutArtLoadState(before));
+    img.remove();
+  });
+});
+
+describe('missingAssetRetryCount', () => {
+  it('goes up only when forgetting actually clears a failure', () => {
+    const url = '/item-artwork/retry-count-test.png';
+    renderTrackedImg(url);
+    forgetMissingAssets();
+    const start = missingAssetRetryCount();
+    forgetMissingAssets();
+    expect(missingAssetRetryCount()).toBe(start);
+
+    const img = document.createElement('img');
+    img.className = 'asset-img';
+    img.setAttribute('src', url);
+    document.body.appendChild(img);
+    img.dispatchEvent(new Event('error'));
+    forgetMissingAssets();
+    expect(missingAssetRetryCount()).toBe(start + 1);
+    img.remove();
   });
 });

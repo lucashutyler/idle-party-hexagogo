@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ItemDefinition, ServerStateMessage } from '@idle-party-rpg/shared';
 import { CharItemsScreen } from '../src/screens/CharItemsScreen';
 import { dismissTop } from '../src/ui/ModalStack';
+import { forgetMissingAssets, missingAssetRetryCount } from '../src/ui/assets';
 import type { GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 
@@ -135,6 +136,59 @@ describe('CharItemsScreen', () => {
     t.screen.onActivate();
 
     expect(document.querySelector('.items-inv-grid .item-square[data-item="rusty_sword"]')).toBeTruthy();
+    t.screen.onDeactivate();
+  });
+
+  it('shows a renamed item on the first visit after a prebuild', () => {
+    const t = setup('Knight', { old_boot: 1 }, EMPTY, {}, false);
+    t.screen.prebuild();
+
+    const state = makeState('Knight', { old_boot: 1 }, EMPTY);
+    t.push({ ...state, itemDefinitions: { ...ITEMS, old_boot: { ...ITEMS.old_boot, name: 'Worn Boot', rarity: 'epic' } } });
+    t.screen.onActivate();
+
+    expect(document.querySelector('.items-inv-grid')!.innerHTML).toContain('Worn Boot');
+    t.screen.onDeactivate();
+  });
+
+  it('keeps bag nodes across pushes that resend the same definitions', () => {
+    const t = setup('Knight', { old_boot: 1 }, EMPTY);
+    const cell = document.querySelector('.items-inv-grid .item-square[data-item="old_boot"]');
+
+    t.push({ ...makeState('Knight', { old_boot: 1 }, EMPTY), itemDefinitions: { ...ITEMS } });
+
+    expect(document.querySelector('.items-inv-grid .item-square[data-item="old_boot"]')).toBe(cell);
+    t.screen.onDeactivate();
+  });
+
+  it('rechecks a mailbox gift against the bag when the stack it would join grows', () => {
+    const gift = { id: 'g1', itemId: 'old_boot', quantity: 5, fromUsername: 'friend' };
+    const t = setup('Knight', { old_boot: 90 }, EMPTY, { mailbox: [gift] }, false);
+    t.screen.prebuild();
+    const accept = () => document.querySelector<HTMLButtonElement>('[data-mb-action="accept"]')!;
+    expect(accept().disabled).toBe(false);
+
+    t.push(makeState('Knight', { old_boot: 96 }, EMPTY, { mailbox: [gift] }));
+    t.screen.onActivate();
+
+    expect(accept().disabled).toBe(true);
+    t.screen.onDeactivate();
+  });
+
+  it('tries failed class art again once failures are forgotten', () => {
+    const t = setup('Knight', {}, EMPTY, {}, false);
+    t.screen.prebuild();
+    const portraitImg = () => document.querySelector<HTMLImageElement>('.hero-portrait-img');
+    portraitImg()!.dispatchEvent(new Event('error'));
+    t.push(makeState('Knight', {}, EMPTY));
+
+    forgetMissingAssets();
+    const forgetAgain = missingAssetRetryCount();
+    t.screen.onActivate();
+
+    expect(portraitImg()).toBeTruthy();
+    forgetMissingAssets();
+    expect(missingAssetRetryCount()).toBe(forgetAgain);
     t.screen.onDeactivate();
   });
 

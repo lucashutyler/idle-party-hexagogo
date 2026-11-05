@@ -1,7 +1,7 @@
 import type { ServerStateMessage, ServerEquipBlockedMessage, ServerCombatMessage,
   ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode,
   ServerForecastMessage, ServerBestiaryMessage, ForecastTarget, ForecastRequestTarget, AutoRetreatPct, AwayLedger, ItemDefinition } from '@idle-party-rpg/shared';
-import { restoreElidedState } from '@idle-party-rpg/shared';
+import { PARTIAL_STATE_PARAM, restoreElidedState } from '@idle-party-rpg/shared';
 import { CombatLogBuffer } from '../combat/CombatLogBuffer';
 
 const RECONNECT_DELAY = 2000;
@@ -130,8 +130,8 @@ export class GameClient {
     // Prod: single server serves both client and WS on the same origin
     const port = window.location.port === '3000' ? '3001' : window.location.port;
     this.url = port
-      ? `${protocol}//${host}:${port}`
-      : `${protocol}//${host}`;
+      ? `${protocol}//${host}:${port}/?${PARTIAL_STATE_PARAM}=1`
+      : `${protocol}//${host}/?${PARTIAL_STATE_PARAM}=1`;
 
     // Snap party position when returning from a background browser tab
     document.addEventListener('visibilitychange', () => {

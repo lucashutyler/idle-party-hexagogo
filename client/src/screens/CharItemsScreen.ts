@@ -37,7 +37,7 @@ import {
 } from '../ui/ItemIcon';
 import { ITEM_POPUP_CLOSE_HTML, renderItemPopupContent } from '../ui/ItemPopup';
 import { renderEquipCompareBlock } from '../ui/EquipCompare';
-import { artworkUrl, renderTrackedImg } from '../ui/assets';
+import { artworkUrl, missingAssetRetryCount, renderTrackedImg } from '../ui/assets';
 import { bringToFront, registerDismiss, release } from '../ui/ModalStack';
 import { renderSkillCardMeta } from '../ui/SkillCardChip';
 import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
@@ -130,6 +130,8 @@ export class CharItemsScreen implements Screen {
   private unsubBestiary?: () => void;
 
   private itemDefs: Record<string, ItemDefinition> = {};
+  private itemDefsJson = '';
+  private itemDefsVersion = 0;
   private setDefs: Record<string, SetDefinition> = {};
 
   private lastEquipment: Record<string, string | null> = {};
@@ -458,11 +460,21 @@ export class CharItemsScreen implements Screen {
     if (confirmed) this.gameClient.sendCancelTrade(tradeId);
   }
 
+  /** An unchanged field is the same object between pushes, so definitions are only serialised when a new object arrives. */
+  private noteItemDefinitions(defs: Record<string, ItemDefinition>): void {
+    if (defs === this.itemDefs) return;
+    this.itemDefs = defs;
+    const json = JSON.stringify(defs);
+    if (json === this.itemDefsJson) return;
+    this.itemDefsJson = json;
+    this.itemDefsVersion++;
+  }
+
   private updateFromState(state: ServerStateMessage): void {
     const char = state.character;
     if (!char) return;
 
-    this.itemDefs = state.itemDefinitions ?? {};
+    this.noteItemDefinitions(state.itemDefinitions ?? {});
     this.setDefs = state.setDefinitions ?? {};
     this.lastEquipment = { ...char.equipment };
     this.lastInventory = { ...char.inventory };
@@ -480,21 +492,20 @@ export class CharItemsScreen implements Screen {
       }
     }
 
-    const heroKey = char.className;
+    const heroKey = `${char.className}|${missingAssetRetryCount()}`;
     if (heroKey !== this.lastHeroKey) {
       this.lastHeroKey = heroKey;
       this.renderPortrait(char.className);
       this.renderClassPassive(char.className);
     }
 
-    const defsSize = Object.keys(this.itemDefs).length;
-    const equipKey = JSON.stringify(char.equipment) + '|' + defsSize;
+    const equipKey = JSON.stringify(char.equipment) + '|' + this.itemDefsVersion;
     if (equipKey !== this.lastEquipKey) {
       this.lastEquipKey = equipKey;
       this.renderEquipment(char);
     }
 
-    const invKey = JSON.stringify(char.inventory) + '|' + char.className + '|' + defsSize;
+    const invKey = JSON.stringify(char.inventory) + '|' + char.className + '|' + this.itemDefsVersion;
     if (invKey !== this.lastInvKey) {
       this.lastInvKey = invKey;
       this.renderInventory();
@@ -529,7 +540,7 @@ export class CharItemsScreen implements Screen {
 
     this.bestiaryCard.update(char.mastery, this.gameClient.lastBestiary?.entries ?? [], char.level);
 
-    const mailboxKey = JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false]));
+    const mailboxKey = JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false, this.lastInventory[e.itemId] ?? 0]));
     if (mailboxKey !== this.lastMailboxKey) {
       this.lastMailboxKey = mailboxKey;
       this.renderMailbox();
@@ -952,7 +963,7 @@ export class CharItemsScreen implements Screen {
 
   /** Everything a bag cell's markup depends on except its count. */
   private invOrderKey(grouped: boolean, entries: [string, number][]): string {
-    return JSON.stringify([grouped, this.sortMode, this.lastClassName, Object.keys(this.itemDefs).length, entries.map(([id]) => id)]);
+    return JSON.stringify([grouped, this.sortMode, this.lastClassName, this.itemDefsVersion, entries.map(([id]) => id)]);
   }
 
   /** A stack growing rewrites one badge, so looting doesn't rebuild the whole bag. */

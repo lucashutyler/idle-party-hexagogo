@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { restoreElidedState } from '@idle-party-rpg/shared';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
-import { prepareStatePush, encodeStatePush } from '../src/game/StatePush.js';
+import { clientAcceptsPartialState, prepareStatePush, encodeStatePush } from '../src/game/StatePush.js';
 import type { SentStateFields } from '../src/game/StatePush.js';
 
 const CATALOG = { recipes: [{ id: 'r1', name: 'A recipe with a long enough name to be worth leaving out' }], itemDefs: {} };
@@ -100,5 +100,13 @@ describe('state push encoding', () => {
 
       expect(received).toEqual(JSON.parse(JSON.stringify(state)));
     }
+  });
+});
+
+describe('clientAcceptsPartialState', () => {
+  it('is true only for a client that asks', () => {
+    expect(clientAcceptsPartialState('/?partialState=1')).toBe(true);
+    expect(clientAcceptsPartialState('/')).toBe(false);
+    expect(clientAcceptsPartialState(undefined)).toBe(false);
   });
 });

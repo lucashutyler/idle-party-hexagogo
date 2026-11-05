@@ -1,6 +1,5 @@
 import type { ChatChannelType, ChatMessage, ServerErrorCode, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
-import type { WorldCache } from '../network/WorldCache';
 import { chatFocusTracker } from '../network/ChatFocusTracker';
 import { artworkUrl, placeholderInitials, renderTrackedImg } from './assets';
 import {
@@ -45,7 +44,8 @@ const FINE_POINTER_QUERY = '(pointer: fine)';
 const PREVIEW_MIN_INTERVAL_MS = 1000;
 const STATUS_VISIBLE_MS = 6000;
 const AT_BOTTOM_SLOP_PX = 24;
-const SEND_REJECTION_WINDOW_MS = 5000;
+/** A send still unanswered after this long is forgotten, so a lost reply can't pair a later refusal with it. */
+const SEND_REPLY_WINDOW_MS = 30_000;
 /** Long enough for a tap on a button to land before the layout snaps back from typing. */
 const TYPING_EXIT_DELAY_MS = 150;
 const KEYBOARD_SHOWN_MIN_SHRINK_PX = 120;
@@ -104,7 +104,6 @@ export class ChatPopout {
   /** Held: a query list nothing references can be collected, and its change listener with it. */
   private columnQuery: MediaQueryList | undefined = window.matchMedia?.(DOCKED_COLUMN_QUERY);
   private gameClient: GameClient;
-  private worldCache?: Pick<WorldCache, 'getTileOn'>;
   private isOpen = false;
   private log = new ChatLog();
   private filters: ChatFilters;
@@ -135,7 +134,8 @@ export class ChatPopout {
   private previewTimer: ReturnType<typeof setTimeout> | undefined;
   private lastPreviewAt = 0;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
-  private lastSend: { text: string; target: string; at: number } | null = null;
+  /** Sends awaiting an echo or a refusal, oldest first. The server answers in send order. */
+  private pendingSends: { text: string; target: string; at: number }[] = [];
 
   private typing = false;
   private typingExitTimer: ReturnType<typeof setTimeout> | undefined;
@@ -148,9 +148,8 @@ export class ChatPopout {
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
   private unreadCount = 0;
 
-  constructor(gameClient: GameClient, worldCache?: Pick<WorldCache, 'getTileOn'>) {
+  constructor(gameClient: GameClient) {
     this.gameClient = gameClient;
-    this.worldCache = worldCache;
     this.filters = this.loadFilters();
     this.mobileLayout = readStorage(STORAGE_KEY_MOBILE_LAYOUT) === 'full' ? 'full' : 'sheet';
 
@@ -168,6 +167,7 @@ export class ChatPopout {
     gameClient.subscribe((state) => this.handleState(state), { replay: true });
     gameClient.onResume(() => gameClient.sendSyncChat(this.log.latestId()));
     gameClient.onConnection((connected) => {
+      this.pendingSends = [];
       if (connected) gameClient.sendSyncChat(this.log.latestId());
     });
     gameClient.onServerError((message, code) => this.handleServerError(message, code));
@@ -617,7 +617,7 @@ export class ChatPopout {
     if (!text) return;
     const channel = this.currentChannel();
     const dmTarget = this.thread ?? this.dmInput.value;
-    const target = resolveSendTarget(channel, dmTarget, this.gameClient.lastState, this.worldCache?.getTileOn.bind(this.worldCache));
+    const target = resolveSendTarget(channel, dmTarget, this.gameClient.lastState);
     if (!target.ok) {
       this.showStatus(target.reason);
       return;
@@ -626,7 +626,7 @@ export class ChatPopout {
       this.showStatus('Not connected. Your message wasn\'t sent.');
       return;
     }
-    this.lastSend = { text, target: channel === 'dm' ? target.channelId : '', at: Date.now() };
+    this.pendingSends.push({ text, target: channel === 'dm' ? target.channelId : '', at: Date.now() });
     this.inputEl.value = '';
     this.clearStatus();
     if (this.tab === 'dm' && !this.thread) this.showThread(target.channelId);
@@ -634,10 +634,13 @@ export class ChatPopout {
 
   /** A refused send comes back as an error rather than an echo, so the text is put back for another try. */
   private handleServerError(message: string, code: ServerErrorCode | undefined): void {
-    const sent = this.lastSend;
-    if (code !== 'chat_refused' || !sent || Date.now() - sent.at > SEND_REJECTION_WINDOW_MS) return;
-    this.lastSend = null;
-    if (!this.inputEl.value) this.inputEl.value = sent.text;
+    if (code !== 'chat_refused') return;
+    const now = Date.now();
+    this.pendingSends = this.pendingSends.filter(pending => now - pending.at <= SEND_REPLY_WINDOW_MS);
+    const sent = this.pendingSends.shift();
+    if (!sent) return;
+    const typed = this.inputEl.value;
+    this.inputEl.value = typed ? `${sent.text} ${typed}` : sent.text;
     if (!sent.target) {
       this.showStatus(message);
       return;
@@ -786,7 +789,11 @@ export class ChatPopout {
     } else {
       this.timelineStale = true;
     }
-    if (this.lastSend && added.some(m => m.senderUsername === me && m.text === this.lastSend?.text)) this.lastSend = null;
+    for (const message of added) {
+      if (message.senderUsername !== me) continue;
+      const echoed = this.pendingSends.findIndex(pending => pending.text === message.text);
+      if (echoed >= 0) this.pendingSends.splice(echoed, 1);
+    }
     this.schedulePreview();
   }
 

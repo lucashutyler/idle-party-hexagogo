@@ -752,7 +752,12 @@
   background: color-mix(in srgb, var(--rarity) 45%, var(--bg-0));
   box-shadow: inset 0 0 0 1px var(--stroke-hi);
 }
+/* Keeps its box until the art fails: a lazy image in a display:none parent never loads. */
 .craft-ing-icon:not(:has(.asset-loaded)) {
+  background: none;
+  box-shadow: none;
+}
+.craft-ing-icon:not(:has(.asset-img:not(.asset-failed))) {
   display: none;
 }
 .craft-ing-img {
