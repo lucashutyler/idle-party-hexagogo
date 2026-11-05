@@ -4,7 +4,7 @@ import path from 'path';
 // alias below: the alias is applied to app code, not to the config itself,
 // which vite loads before any of it takes effect. AssetKinds is pure data with
 // no imports of its own, so pulling the single file in is safe here.
-import { ASSET_KINDS, ASSET_KIND_INFO } from '../shared/src/assets/AssetKinds';
+import { ASSET_KINDS, ASSET_KIND_INFO } from '../shared/src/assets/AssetKinds.ts';
 
 /** One dev proxy entry per asset mount, so artwork requests reach the server. */
 function assetProxyEntries(): Record<string, { target: string; changeOrigin: boolean }> {
@@ -22,8 +22,8 @@ export default defineConfig({
     outDir: 'dist',
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html'),
-        admin: path.resolve(__dirname, 'admin.html'),
+        main: path.resolve(import.meta.dirname, 'index.html'),
+        admin: path.resolve(import.meta.dirname, 'admin.html'),
       },
     },
   },
@@ -60,7 +60,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@idle-party-rpg/shared': path.resolve(__dirname, '../shared/src'),
+      '@idle-party-rpg/shared': path.resolve(import.meta.dirname, '../shared/src'),
     },
   },
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey, isBlockedUser } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -24,6 +24,8 @@ import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import { prepareStatePush, encodeStatePush } from './StatePush.js';
 import type { SentStateFields } from './StatePush.js';
+import { SharedRosters } from './SharedRosters.js';
+import type { RosterSnapshot } from './SharedRosters.js';
 
 /** A socket buffering more than this skips droppable combat messages. */
 export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
@@ -58,6 +60,7 @@ export class PlayerManager {
   private sentStateFields = new WeakMap<WebSocket, SentStateFields>();
   private stateRetryPending = new WeakSet<WebSocket>();
   private wholeStateSockets = new WeakSet<WebSocket>();
+  private rosters = new SharedRosters(() => this.rosterSnapshot());
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -153,6 +156,7 @@ export class PlayerManager {
       this.playerConnections.set(username, wsSet);
     }
     wsSet.add(ws);
+    this.rosters.invalidate();
 
     // Record last activity timestamp
     this.accountStore.updateLastActive(username).catch(() => {});
@@ -207,6 +211,7 @@ export class PlayerManager {
       wsSet.delete(ws);
       if (wsSet.size === 0) {
         this.playerConnections.delete(username);
+        this.rosters.invalidate();
         // Trades are async — they persist across disconnect. Nothing to cancel here.
       }
     }
@@ -224,6 +229,7 @@ export class PlayerManager {
         this.connections.delete(ws);
       }
       this.playerConnections.delete(username);
+      this.rosters.invalidate();
     }
     console.log(`[PlayerManager] Kicked "${username}"`);
   }
@@ -510,12 +516,44 @@ export class PlayerManager {
     }
     if (ready.length === 0) return;
 
-    const otherPlayers = this.getOtherPlayers(username);
-    const fields = prepareStatePush({ type: 'state', ...session.getState(otherPlayers), serverVersion: this.serverVersion });
-
-    for (const ws of ready) {
-      ws.send(encodeStatePush(fields, this.sentStateFieldsOf(ws)));
+    const partial = ready.filter(ws => !this.wholeStateSockets.has(ws));
+    if (partial.length > 0) {
+      const fields = prepareStatePush({ type: 'state', ...session.getState([]), serverVersion: this.serverVersion });
+      const zone = session.getZone();
+      for (const ws of partial) {
+        ws.send(encodeStatePush(fields, this.sentStateFieldsOf(ws), this.rosters.encodeFor(ws, zone)));
+      }
     }
+    if (partial.length < ready.length) {
+      const fields = prepareStatePush({
+        type: 'state',
+        ...session.getState(this.getOtherPlayers(username)),
+        social: this.getSocialState(username),
+        serverVersion: this.serverVersion,
+      });
+      for (const ws of ready) {
+        if (this.wholeStateSockets.has(ws)) ws.send(encodeStatePush(fields, new Map()));
+      }
+    }
+  }
+
+  private rosterSnapshot(): RosterSnapshot {
+    const otherPlayersByZone: RosterSnapshot['otherPlayersByZone'] = new Map();
+    for (const [username, session] of this.sessions) {
+      if (!session.hasCharacter()) continue;
+      const zone = session.getZone();
+      let inZone = otherPlayersByZone.get(zone);
+      if (!inZone) {
+        inZone = new Map();
+        otherPlayersByZone.set(zone, inZone);
+      }
+      inZone.set(username, JSON.stringify(this.otherPlayerEntry(username, session)));
+    }
+    return {
+      otherPlayersByZone,
+      allPlayers: new Map(this.listedPlayers().map(player => [player.username, JSON.stringify(player)])),
+      onlinePlayers: new Map(this.getOnlinePlayers().map(username => [username, JSON.stringify(username)])),
+    };
   }
 
   /** Mid-fight nothing else may push for minutes, so a skipped push can't wait for the next event. */
@@ -530,7 +568,6 @@ export class PlayerManager {
   }
 
   private sentStateFieldsOf(ws: WebSocket): SentStateFields {
-    if (this.wholeStateSockets.has(ws)) return new Map();
     let sent = this.sentStateFields.get(ws);
     if (!sent) {
       sent = new Map();
@@ -738,8 +775,8 @@ export class PlayerManager {
     });
   }
 
-  /** Build ClientSocialState for a player. */
-  getSocialState(username: string): ClientSocialState {
+  /** Build ClientSocialState for a player. Without rosters, `allPlayers` and `onlinePlayers` are empty: `SharedRosters` sends them. */
+  getSocialState(username: string, withRosters = true): ClientSocialState {
     const session = this.sessions.get(username);
     const guildData = this.guilds.getPlayerGuild(username);
     const partyData = this.parties.getPlayerParty(
@@ -761,20 +798,8 @@ export class PlayerManager {
       },
       pendingInvites: this.parties.getPendingInvites(username),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
-      onlinePlayers: this.getOnlinePlayers(),
-      allPlayers: this.getAllUsernames()
-        .filter(u => {
-          const acct = this.accountStore.findByUsername(u);
-          if (acct?.deactivated) return false;
-          const s = this.sessions.get(u);
-          if (s && !s.hasCharacter()) return false;
-          return true;
-        })
-        .map(u => ({
-          username: u,
-          className: this.sessions.get(u)?.getClassName() ?? undefined,
-          level: this.sessions.get(u)?.getLevel(),
-        })),
+      onlinePlayers: withRosters ? this.getOnlinePlayers() : [],
+      allPlayers: withRosters ? this.listedPlayers() : [],
       blockedUsers: session?.getBlockedUsers() ?? {},
       chatPreferences: {
         sendChannel: session?.getChatSendChannel() ?? 'zone',
@@ -787,9 +812,25 @@ export class PlayerManager {
     };
   }
 
+  private listedPlayers(): PlayerListEntry[] {
+    return this.getAllUsernames()
+      .filter(u => {
+        const acct = this.accountStore.findByUsername(u);
+        if (acct?.deactivated) return false;
+        const s = this.sessions.get(u);
+        if (s && !s.hasCharacter()) return false;
+        return true;
+      })
+      .map(u => ({
+        username: u,
+        className: this.sessions.get(u)?.getClassName() ?? undefined,
+        level: this.sessions.get(u)?.getLevel(),
+      }));
+  }
+
   /** Wire all callbacks onto a session (social state, battle state, position). */
   private wireCallbacks(session: PlayerSession): void {
-    session.getSocialState = () => this.getSocialState(session.username);
+    session.getSocialState = () => this.getSocialState(session.username, false);
     session.getNotifications = () => this.notifications.getInbox(session.username);
     session.getBattleState = () => {
       const partyId = session.getPartyId();
@@ -1006,21 +1047,25 @@ export class PlayerManager {
     for (const [username, session] of this.sessions) {
       if (username === excludeUsername) continue;
       if (!session.hasCharacter()) continue;
-      const pos = session.getPosition();
-      const dungeon = session.getDungeonState?.();
-      others.push({
-        username,
-        col: pos.col,
-        row: pos.row,
-        mapId: session.getMapId(),
-        zone: session.getZone(),
-        className: session.getClassName() ?? undefined,
-        partyId: session.getPartyId() ?? undefined,
-        inDungeon: dungeon ? true : undefined,
-        dungeonName: dungeon?.name,
-      });
+      others.push(this.otherPlayerEntry(username, session));
     }
     return others;
+  }
+
+  private otherPlayerEntry(username: string, session: PlayerSession): OtherPlayerState {
+    const pos = session.getPosition();
+    const dungeon = session.getDungeonState?.();
+    return {
+      username,
+      col: pos.col,
+      row: pos.row,
+      mapId: session.getMapId(),
+      zone: session.getZone(),
+      className: session.getClassName() ?? undefined,
+      partyId: session.getPartyId() ?? undefined,
+      inDungeon: dungeon ? true : undefined,
+      dungeonName: dungeon?.name,
+    };
   }
 
   get sessionCount(): number {

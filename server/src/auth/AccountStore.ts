@@ -35,12 +35,15 @@ const DATA_DIR = path.resolve('data');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 
 export class AccountStore {
+  // Only setUsername may change a username: accounts are handed out live, and this index would go stale.
+  private accountsByLowerUsername = new Map<string, Account>();
   private accounts: AccountsData = {};
   private writeQueue: Promise<void> = Promise.resolve();
 
   async load(): Promise<void> {
     if (!existsSync(ACCOUNTS_FILE)) {
       this.accounts = {};
+      this.rebuildUsernameIndex();
       return;
     }
     try {
@@ -51,6 +54,7 @@ export class AccountStore {
       console.error('[AccountStore] Failed to load accounts:', err);
       this.accounts = {};
     }
+    this.rebuildUsernameIndex();
     for (const account of Object.values(this.accounts)) {
       if (account?.username && isStoreFileName(account.username)) {
         console.error(`[AccountStore] "${account.email}" holds the reserved name "${account.username}" and can't connect until it is renamed`);
@@ -86,11 +90,7 @@ export class AccountStore {
   }
 
   findByUsername(username: string): Account | null {
-    const lower = username.toLowerCase();
-    for (const account of Object.values(this.accounts)) {
-      if (account.username?.toLowerCase() === lower) return account;
-    }
-    return null;
+    return this.accountsByLowerUsername.get(username.toLowerCase()) ?? null;
   }
 
   async createAccount(email: string): Promise<Account> {
@@ -131,6 +131,7 @@ export class AccountStore {
     }
 
     account.username = username;
+    this.rebuildUsernameIndex();
     await this.save();
     console.log(`[AccountStore] Set username "${username}" for "${email}"`);
     return { success: true };
@@ -187,5 +188,17 @@ export class AccountStore {
 
   isDeactivated(email: string): boolean {
     return this.accounts[email.toLowerCase()]?.deactivated === true;
+  }
+
+  private rebuildUsernameIndex(): void {
+    this.accountsByLowerUsername.clear();
+    for (const account of Object.values(this.accounts)) {
+      // A file that holds something other than accounts must still load.
+      const username: unknown = account?.username;
+      if (typeof username !== 'string') continue;
+      const key = username.toLowerCase();
+      // keep-first: a file that repeats a name must keep resolving it to the earliest account.
+      if (!this.accountsByLowerUsername.has(key)) this.accountsByLowerUsername.set(key, account);
+    }
   }
 }

@@ -354,6 +354,8 @@ export type {
   ClientCombatViewMessage,
   ClientCharacterState,
   OtherPlayerState,
+  RosterChange,
+  RosterChanges,
   CombatLogType,
   CombatLogEntry,
   ServerStateMessage,

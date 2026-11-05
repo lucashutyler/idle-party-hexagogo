@@ -9,6 +9,7 @@ import type {
   WorldTileDefinition,
 } from '@idle-party-rpg/shared';
 import { PlayerManager, COMBAT_BACKPRESSURE_BYTES, STATE_BACKPRESSURE_BYTES, STATE_RETRY_MS } from '../src/game/PlayerManager.js';
+import { ROSTER_REFRESH_MS } from '../src/game/SharedRosters.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore, PlayerSaveData } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
@@ -774,5 +775,117 @@ describe('state pushes per socket', () => {
 
     expect(lastState(tab).unchangedFields).toBeUndefined();
     expect(lastState(tab).social).toBeDefined();
+  });
+
+  describe('rosters', () => {
+    interface WireState {
+      otherPlayers: { username: string }[];
+      social: { allPlayers: { username: string }[]; onlinePlayers: string[] };
+      rosters?: {
+        otherPlayers?: { whole?: { username: string }[] };
+        allPlayers?: { whole?: { username: string }[] };
+        onlinePlayers?: { whole?: string[]; upserts?: string[]; removes?: string[] };
+      };
+    }
+    const wireState = (ws: FakeWs) => lastState(ws) as unknown as WireState;
+    const usernames = (players: { username: string }[] | undefined) => (players ?? []).map(p => p.username).sort();
+
+    it('go inside the state for a socket that never asked for partial pushes', async () => {
+      const pm = newManager(['alice', 'bob']);
+      await loginKnight(pm, 'bob');
+      const tab = createWs();
+      pm.requireWholeState(asWs(tab));
+      await loginKnight(pm, 'alice', tab);
+
+      pm.sendStateToPlayer('alice');
+
+      const state = wireState(tab);
+      expect(state.rosters).toBeUndefined();
+      expect(usernames(state.otherPlayers)).toEqual(['bob']);
+      expect(usernames(state.social.allPlayers)).toEqual(['alice', 'bob']);
+      expect([...state.social.onlinePlayers].sort()).toEqual(['alice', 'bob']);
+    });
+
+    it('go out whole on a socket\'s first push, beside an empty state', async () => {
+      const pm = newManager(['alice', 'bob']);
+      await loginKnight(pm, 'bob');
+      const tab = await loginKnight(pm, 'alice');
+
+      pm.sendStateToPlayer('alice');
+
+      const first = sent(tab).map(m => m.msg as unknown as WireState & { type: string }).filter(m => m.type === 'state')[0];
+      expect(first.otherPlayers).toEqual([]);
+      expect(first.social.allPlayers).toEqual([]);
+      expect(first.social.onlinePlayers).toEqual([]);
+      expect(usernames(first.rosters?.otherPlayers?.whole)).toEqual(['alice', 'bob']);
+      expect(usernames(first.rosters?.allPlayers?.whole)).toEqual(['alice', 'bob']);
+      expect([...(first.rosters?.onlinePlayers?.whole ?? [])].sort()).toEqual(['alice', 'bob']);
+    });
+
+    it('name only what changed after that', async () => {
+      const pm = newManager(['alice', 'bob', 'carol', 'dave', 'erin']);
+      for (const name of ['bob', 'carol', 'dave']) await loginKnight(pm, name);
+      const erin = await loginKnight(pm, 'erin');
+      const tab = await loginKnight(pm, 'alice');
+      pm.sendStateToPlayer('alice');
+
+      vi.advanceTimersByTime(ROSTER_REFRESH_MS);
+      pm.sendStateToPlayer('alice');
+      expect(wireState(tab).rosters).toEqual({});
+
+      pm.removeConnection(asWs(erin));
+      pm.sendStateToPlayer('alice');
+      expect(wireState(tab).rosters).toEqual({ onlinePlayers: { removes: ['erin'] } });
+    });
+
+    it('count a player as online in the first push after they log in', async () => {
+      const pm = newManager(['alice', 'bob', 'carol', 'dave']);
+      for (const name of ['alice', 'bob', 'carol']) await loginKnight(pm, name);
+      const tab = createWs();
+      await pm.login(asWs(tab), 'dave');
+
+      pm.sendStateToPlayer('dave');
+
+      expect(wireState(tab).rosters?.onlinePlayers?.whole).toContain('dave');
+    });
+
+    it('are built once for many players pushing at the same moment', async () => {
+      const pm = newManager(['alice', 'bob', 'carol']);
+      for (const name of ['alice', 'bob', 'carol']) await loginKnight(pm, name);
+      vi.advanceTimersByTime(ROSTER_REFRESH_MS);
+      const snapshot = vi.spyOn(pm as unknown as { rosterSnapshot(): unknown }, 'rosterSnapshot');
+
+      for (const name of ['alice', 'bob', 'carol']) pm.sendStateToPlayer(name);
+
+      expect(snapshot).toHaveBeenCalledTimes(1);
+    });
+
+    it('catch a socket up on a later push when it skipped one', async () => {
+      const pm = newManager(['alice', 'bob', 'carol', 'dave', 'erin']);
+      for (const name of ['bob', 'carol', 'dave']) await loginKnight(pm, name);
+      const tab = await loginKnight(pm, 'alice');
+      pm.sendStateToPlayer('alice');
+
+      tab.bufferedAmount = STATE_BACKPRESSURE_BYTES + 1;
+      await loginKnight(pm, 'erin');
+      pm.sendStateToPlayer('alice');
+
+      tab.bufferedAmount = 0;
+      pm.sendStateToPlayer('alice');
+
+      expect(wireState(tab).rosters?.onlinePlayers).toEqual({ upserts: ['erin'] });
+    });
+
+    it('stay out of what the session itself builds, which runs often', async () => {
+      const pm = newManager(['alice', 'bob']);
+      await loginKnight(pm, 'bob');
+      await loginKnight(pm, 'alice');
+
+      const social = pm.getSessionByUsername('alice')!.getSocialState!();
+
+      expect(social.allPlayers).toEqual([]);
+      expect(social.onlinePlayers).toEqual([]);
+      expect(usernames(pm.getSocialState('alice').allPlayers)).toEqual(['alice', 'bob']);
+    });
   });
 });

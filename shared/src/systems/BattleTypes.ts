@@ -7,6 +7,7 @@ import type { ClientCombatSnapshot, CombatEvent } from './CombatEvents.js';
 import type {
   ClientSocialState,
   ClientSocialMessage,
+  PlayerListEntry,
   ServerSocialStateMessage,
   ServerChatMessageMessage,
   ServerSyncChatMessage,
@@ -29,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.05.2'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.05.3'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -130,6 +131,7 @@ export interface ServerStateMessage {
   mapSize: number;
   /** The map the player's party is currently on. The client renders only this map's rooms. */
   currentMapId: string;
+  /** Everyone else in this player's zone, which is as far as any reader looks. See docs/architecture/client.md. */
   otherPlayers: OtherPlayerState[];
   combatLog: CombatLogEntry[];
   battleCount: number;
@@ -183,6 +185,11 @@ export interface ServerStateMessage {
    * `restoreElidedState` fills them back in, so subscribers never see this. See docs/architecture/client.md.
    */
   unchangedFields?: string[];
+  /**
+   * Wire only: how this socket's copies of the player rosters change. `restoreElidedState` applies it, so
+   * subscribers never see this. A state without it holds the rosters itself. See docs/architecture/client.md.
+   */
+  rosters?: RosterChanges;
 }
 
 export interface ClientCraftingCatalog {
@@ -204,8 +211,40 @@ export interface ClientCraftingProgress {
 
 export type ClientCraftingState = ClientCraftingCatalog & ClientCraftingProgress;
 
-/** WebSocket URL query parameter: this client understands `unchangedFields`. */
-export const PARTIAL_STATE_PARAM = 'partialState';
+/** What changed in one roster since this socket's last copy. */
+export interface RosterChange<T> {
+  whole?: T[];
+  upserts?: T[];
+  removes?: string[];
+}
+
+/** A roster missing from here hasn't changed. */
+export interface RosterChanges {
+  otherPlayers?: RosterChange<OtherPlayerState>;
+  allPlayers?: RosterChange<PlayerListEntry>;
+  onlinePlayers?: RosterChange<string>;
+}
+
+/** WebSocket URL query parameter: this client understands `unchangedFields` and `rosters`. */
+export const PARTIAL_STATE_PARAM = 'partialStateV2';
+
+function applyRosterChange<T>(
+  previous: T[] | undefined,
+  change: RosterChange<T> | undefined,
+  keyOf: (entry: T) => string,
+  skipKey?: string,
+): T[] {
+  if (!change) return previous ?? [];
+  const byKey = new Map<string, T>();
+  if (!change.whole) {
+    for (const entry of previous ?? []) byKey.set(keyOf(entry), entry);
+  }
+  for (const key of change.removes ?? []) byKey.delete(key);
+  for (const entry of change.whole ?? change.upserts ?? []) {
+    if (keyOf(entry) !== skipKey) byKey.set(keyOf(entry), entry);
+  }
+  return [...byKey.values()];
+}
 
 /** Fills in what the server left out of a state push, from the previous state on the same socket. Mutates `msg`. */
 export function restoreElidedState(msg: ServerStateMessage, previous: ServerStateMessage | null): void {
@@ -213,6 +252,19 @@ export function restoreElidedState(msg: ServerStateMessage, previous: ServerStat
   const source = previous as unknown as Record<string, unknown> | null;
   for (const field of msg.unchangedFields ?? []) target[field] = source?.[field];
   delete msg.unchangedFields;
+
+  const { rosters } = msg;
+  if (!rosters) return;
+  delete msg.rosters;
+  // The server's roster for a zone includes this player.
+  msg.otherPlayers = applyRosterChange(previous?.otherPlayers, rosters.otherPlayers, player => player.username, msg.username);
+  if (!msg.social) return;
+  const allPlayers = applyRosterChange(previous?.social?.allPlayers, rosters.allPlayers, player => player.username);
+  const onlinePlayers = applyRosterChange(previous?.social?.onlinePlayers, rosters.onlinePlayers, username => username);
+  // An elided `social` is the previous state's object, which a subscriber may still hold.
+  if (msg.social.allPlayers !== allPlayers || msg.social.onlinePlayers !== onlinePlayers) {
+    msg.social = { ...msg.social, allPlayers, onlinePlayers };
+  }
 }
 
 export interface ClientMoveMessage {
