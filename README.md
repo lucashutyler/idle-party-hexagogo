@@ -282,7 +282,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Per-player game state (independent battle timers, movement, unlocks)
 - [x] Email-based magic link authentication (dev auto-verify, prod via AWS SES)
 - [x] Session cookies (express-session, 30-day expiry, httpOnly)
-- [x] Account system (email + username, username changeable)
+- [x] Account system (email + username)
 - [x] WebSocket auth via session cookie (no WS login messages)
 - [x] Multiple connections per username (same login in multiple tabs stays in sync)
 - [x] Server-side combat journal (last 1000 entries saved, last 100 in each state push) + live combat stream (batched events/snapshots, only to sockets showing the combat view)

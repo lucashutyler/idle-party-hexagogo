@@ -1385,7 +1385,7 @@ export const gameSwaggerSpec = {
     '/auth/username': {
       post: {
         tags: ['Auth'],
-        summary: 'Set or change username',
+        summary: 'Choose a username, which can\'t change afterwards',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: {
@@ -1395,8 +1395,9 @@ export const gameSwaggerSpec = {
           } } },
         },
         responses: {
-          200: { description: 'Username set' },
-          400: { description: 'Invalid or taken username' },
+          200: { description: 'Username set, or the current one sent again' },
+          400: { description: 'Invalid username' },
+          409: { description: 'Username taken, or the account already has a different one' },
         },
       },
     },

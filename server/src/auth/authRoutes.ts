@@ -12,10 +12,9 @@ interface AuthRouteOptions {
   accountStore: AccountStore;
   tokenStore: TokenStore;
   inviteListStore: InviteListStore;
-  onRenamePlayer?: (oldUsername: string, newUsername: string) => void;
 }
 
-export function createAuthRoutes({ accountStore, tokenStore, inviteListStore, onRenamePlayer }: AuthRouteOptions): Router {
+export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: AuthRouteOptions): Router {
   const router = Router();
 
   /**
@@ -262,7 +261,7 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore, on
 
   /**
    * POST /auth/username — { username }
-   * Set or change username for the authenticated user.
+   * Choose the authenticated account's username. A chosen name can't change; re-sending it succeeds.
    */
   router.post('/username', async (req, res) => {
     if (!req.session.email) {
@@ -287,7 +286,13 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore, on
       return;
     }
 
+    // No await between this check and setUsername: two requests could both pass it.
     const oldUsername = accountStore.getOldUsername(req.session.email);
+    if (oldUsername && oldUsername !== trimmed) {
+      res.status(409).json({ error: 'Your username can\'t be changed' });
+      return;
+    }
+
     const result = await accountStore.setUsername(req.session.email, trimmed);
 
     if (!result.success) {
@@ -301,11 +306,6 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore, on
         console.error('[Auth] Session save error:', err);
       }
     });
-
-    // Rename in-memory player session if username changed
-    if (oldUsername && oldUsername !== trimmed && onRenamePlayer) {
-      onRenamePlayer(oldUsername, trimmed);
-    }
 
     res.json({ success: true, username: trimmed, oldUsername });
   });
