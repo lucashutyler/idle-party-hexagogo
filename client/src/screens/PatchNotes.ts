@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.2',
+    notes: [
+      'Gifts now stay safe in the mailbox until they are accepted or declined, even if the other player has never logged in and the server restarts.',
+      'Suspended players can no longer be sent gifts.',
+    ],
+  },
+  {
     version: '2026.10.09.1',
     notes: [
       'Fixed buttons sometimes ignoring your tap or click during a fight. This was most noticeable on Accept and Turn In for quests, and also affected shops, notifications, crafting, trades, chat and the combat view.',

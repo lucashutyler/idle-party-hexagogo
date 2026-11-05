@@ -16,6 +16,7 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import type { IncomingMessage } from 'http';
 import { GameLoop } from './game/GameLoop.js';
+import { GIFT_NOT_FOUND } from './game/PlayerManager.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { TokenStore } from './auth/TokenStore.js';
@@ -59,6 +60,10 @@ function questRefusal(message: string, questId: string): ServerErrorMessage {
 
 function dungeonEntryRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'dungeon_entry_refused' };
+}
+
+function giftRefusal(message: string): ServerErrorMessage {
+  return message === GIFT_NOT_FOUND ? { type: 'error', message } : { type: 'error', message, code: 'gift_refused' };
 }
 
 const app = express();
@@ -1722,93 +1727,20 @@ wss.on('connection', (ws) => {
       // --- Gift / Mailbox messages ---
 
       if (msg.type === 'send_gift' && typeof msg.targetUsername === 'string' && typeof msg.itemId === 'string' && typeof msg.quantity === 'number') {
-        if (msg.targetUsername === username) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot gift to yourself' }));
-          return;
-        }
-        if (msg.quantity < 1) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid quantity' }));
-          return;
-        }
-        const targetAccount = accountStore.findByUsername(msg.targetUsername);
-        if (!targetAccount) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
-          return;
-        }
-        if (playerManager.isTradeBlocked(username, msg.targetUsername)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot gift to a blocked user' }));
-          return;
-        }
-
-        const senderSession = playerManager.getSessionByUsername(username);
-        if (!senderSession) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
-          return;
-        }
-        if (!senderSession.removeFromInventory(msg.itemId, msg.quantity)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not enough items in inventory' }));
-          return;
-        }
-
-        playerManager.mailboxes.addEntry(msg.targetUsername, username, msg.itemId, msg.quantity);
-
-        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
-        const label = msg.quantity > 1 ? `${itemDef?.name ?? msg.itemId} x${msg.quantity}` : (itemDef?.name ?? msg.itemId);
-        senderSession.addLogEntry(`Sent ${label} to ${msg.targetUsername}`, 'unlock');
-
-        playerManager.sendStateToPlayer(username);
-        playerManager.sendStateToPlayer(msg.targetUsername);
+        const refusal = playerManager.sendGift(username, msg.targetUsername, msg.itemId, msg.quantity);
+        if (refusal) ws.send(JSON.stringify(giftRefusal(refusal)));
         return;
       }
 
       if (msg.type === 'accept_gift' && typeof msg.entryId === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-
-        const entry = playerManager.mailboxes.findEntry(username, msg.entryId);
-        if (!entry) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Gift not found' }));
-          return;
-        }
-        // Stack capacity check at accept time
-        if (session.getInventoryCount(entry.itemId) + entry.quantity > 99) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full for that item (max 99)' }));
-          return;
-        }
-        if (!session.addToInventory(entry.itemId, entry.quantity)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full for that item (max 99)' }));
-          return;
-        }
-        playerManager.mailboxes.removeEntry(username, msg.entryId);
-
-        const itemDef = gameLoop.contentStore.getItem(entry.itemId);
-        const label = entry.quantity > 1 ? `${itemDef?.name ?? entry.itemId} x${entry.quantity}` : (itemDef?.name ?? entry.itemId);
-        session.addLogEntry(`Accepted ${label} from ${entry.fromUsername}`, 'unlock');
-        playerManager.sendStateToPlayer(username);
+        const refusal = playerManager.acceptGift(username, msg.entryId);
+        if (refusal) ws.send(JSON.stringify(giftRefusal(refusal)));
         return;
       }
 
       if (msg.type === 'deny_gift' && typeof msg.entryId === 'string') {
-        const entry = playerManager.mailboxes.findEntry(username, msg.entryId);
-        if (!entry) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Gift not found' }));
-          return;
-        }
-        playerManager.mailboxes.removeEntry(username, msg.entryId);
-
-        // If this was already a returned gift, drop it (don't ping-pong forever).
-        // Otherwise, return it to the original sender's mailbox.
-        if (!entry.returned) {
-          playerManager.mailboxes.addEntry(entry.fromUsername, username, entry.itemId, entry.quantity, { returned: true });
-          playerManager.sendStateToPlayer(entry.fromUsername);
-        }
-        const session = playerManager.getSessionByUsername(username);
-        if (session) {
-          const itemDef = gameLoop.contentStore.getItem(entry.itemId);
-          const label = entry.quantity > 1 ? `${itemDef?.name ?? entry.itemId} x${entry.quantity}` : (itemDef?.name ?? entry.itemId);
-          session.addLogEntry(`Declined ${label} from ${entry.fromUsername}`, 'move');
-        }
-        playerManager.sendStateToPlayer(username);
+        const refusal = playerManager.denyGift(username, msg.entryId);
+        if (refusal) ws.send(JSON.stringify(giftRefusal(refusal)));
         return;
       }
 

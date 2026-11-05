@@ -8,6 +8,7 @@ import { RARITY_COLORS, renderItemIcon, renderEmptySlotIcon } from '../ui/ItemIc
 import { renderItemPopupContent } from '../ui/ItemPopup';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { renderAssetImg } from '../ui/assets';
+import { showMapToast } from '../ui/MapToast';
 import { deferWhilePressed } from '../ui/render';
 
 type SubTab = 'users' | 'guild' | 'party' | 'chat';
@@ -141,7 +142,8 @@ export class SocialScreen implements Screen {
 
     // A confirm rejected on a stale nonce means the partner's offer moved. The
     // re-synced state repaints the new offer; this explains why nothing happened.
-    this.gameClient.onServerError((_message, code) => {
+    this.gameClient.onServerError((message, code) => {
+      if (code === 'gift_refused') showMapToast(document.body, message);
       if (code !== 'trade_nonce_mismatch' || !this.tradeModalEl) return;
       this.tradeNotice = 'That offer changed before your confirmation went through. Review the updated offer below, then confirm again.';
       deferWhilePressed(this.tradeModalEl, () => this.refreshTradeModal());

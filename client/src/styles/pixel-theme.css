@@ -2033,6 +2033,14 @@ html, body {
 }
 
 /* Map toast (ephemeral tooltip shown when action is blocked) */
+/* Not over the map: above everything else on screen. */
+body > .map-toast {
+  position: fixed;
+  top: 16px;
+  bottom: auto;
+  z-index: 10000;
+}
+
 .map-toast {
   position: absolute;
   top: 16px;

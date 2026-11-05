@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import { SocialScreen } from '../src/screens/SocialScreen';
+import { dismissMapToast } from '../src/ui/MapToast';
 import type { GameClient } from '../src/network/GameClient';
 import type { ChatLocalStore } from '../src/network/ChatLocalStore';
 import type { WorldCache } from '../src/network/WorldCache';
@@ -32,12 +33,13 @@ function setup() {
   const listeners = new Set<StateListener>();
   let lastState: ServerStateMessage | null = null;
   const sendAcceptPartyInvite = vi.fn();
+  let serverError: (message: string, code?: string) => void = () => {};
 
   const gameClient = {
     get lastState() { return lastState; },
     subscribe: (l: StateListener) => { listeners.add(l); return () => { listeners.delete(l); }; },
     onResume: () => () => {},
-    onServerError: () => () => {},
+    onServerError: (l: typeof serverError) => { serverError = l; return () => {}; },
     onChat: () => () => {},
     onSyncChat: () => () => {},
     sendSyncChat: () => {},
@@ -55,12 +57,35 @@ function setup() {
   const acceptBtn = (inviter: string) =>
     document.querySelector(`.social-accept-invite[data-party-id="party_${inviter}"]`) as HTMLButtonElement | null;
 
-  return { screen, push, acceptBtn, sendAcceptPartyInvite };
+  return { screen, push, acceptBtn, sendAcceptPartyInvite, serverError: (message: string, code?: string) => serverError(message, code) };
 }
 
 function press(target: Element): void {
   target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
 }
+
+describe('SocialScreen gift refusals', () => {
+  afterEach(() => {
+    dismissMapToast();
+    document.body.innerHTML = '';
+  });
+
+  it('shows the reason a gift was refused', () => {
+    const t = setup();
+
+    t.serverError('That player can\'t receive gifts', 'gift_refused');
+
+    expect(document.querySelector('.map-toast')?.textContent).toBe('That player can\'t receive gifts');
+  });
+
+  it('leaves other server errors alone', () => {
+    const t = setup();
+
+    t.serverError('Invalid message format');
+
+    expect(document.querySelector('.map-toast')).toBeNull();
+  });
+});
 
 describe('SocialScreen party panel', () => {
   beforeEach(() => {
