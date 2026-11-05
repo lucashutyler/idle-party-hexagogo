@@ -1,4 +1,10 @@
-import { xpForNextLevel } from '@idle-party-rpg/shared';
+import {
+  XP_INCOME_DOUBLING_LEVELS,
+  XP_INCOME_MODEL,
+  XP_INCOME_PARTY_L10_PER_DAY,
+  XP_INCOME_SOLO_L1_PER_DAY,
+  xpForNextLevel,
+} from '@idle-party-rpg/shared';
 import type { Tab } from './Tab';
 
 const MAX_LEVEL = 100;
@@ -13,15 +19,7 @@ export class XpTableTab implements Tab {
       const xpNeeded = xpForNextLevel(level);
       cumulativeXp += xpNeeded;
 
-      // Daily income model: 57.6k/day solo at L1, 557k/day party at L10,
-      // doubling every 10 levels above L10.
-      let dailyIncome: number;
-      if (level < 10) {
-        const t = (level - 1) / 9;
-        dailyIncome = 57600 + t * (557000 - 57600);
-      } else {
-        dailyIncome = 557000 * Math.pow(2, (level - 10) / 10);
-      }
+      const dailyIncome = XP_INCOME_MODEL(level);
 
       const daysToLevel = xpNeeded / dailyIncome;
       cumulativeDays += daysToLevel;
@@ -53,7 +51,7 @@ export class XpTableTab implements Tab {
         </div>
         <p class="admin-page-subtitle">
           Formula: floor(18000 &times; L<sup>1.2</sup> &times; 1.06<sup>L</sup>)
-          &mdash; Income model: 57.6k/day solo L1, 557k/day party L10, 2x per 10 levels
+          &mdash; Income model: ${formatNumber(XP_INCOME_SOLO_L1_PER_DAY)}/day solo L1, ${formatNumber(XP_INCOME_PARTY_L10_PER_DAY)}/day party L10, 2x per ${XP_INCOME_DOUBLING_LEVELS} levels
         </p>
         <div class="admin-table-wrap">
           <table class="admin-table xp-table">

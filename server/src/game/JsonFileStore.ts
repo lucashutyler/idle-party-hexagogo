@@ -2,6 +2,7 @@ import { readFile, writeFile, rename, readdir, mkdir, unlink } from 'fs/promises
 import { existsSync } from 'fs';
 import { join } from 'path';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
+import { isStoreFileName } from '../auth/reservedUsernames.js';
 
 const SAVE_DIR = 'data';
 
@@ -30,6 +31,10 @@ export class JsonFileStore implements GameStateStore {
   }
 
   async save(data: PlayerSaveData): Promise<void> {
+    if (isStoreFileName(data.username)) {
+      console.error(`[JsonFileStore] Refusing to save player "${data.username}" over a store file`);
+      return;
+    }
     await this.ensureDir();
     const json = JSON.stringify(data, null, 2);
     const target = this.filePath(data.username);
@@ -47,6 +52,7 @@ export class JsonFileStore implements GameStateStore {
   }
 
   async load(username: string): Promise<PlayerSaveData | null> {
+    if (isStoreFileName(username)) return null;
     const path = this.filePath(username);
     if (!existsSync(path)) return null;
     try {

@@ -12,18 +12,29 @@ import {
   MAX_HENCHMEN_PER_PARTY,
   MAX_STACK,
 } from '@idle-party-rpg/shared';
-import { renderItemIcon, escapeHtml } from './ItemIcon';
+import { RARITY_COLORS, renderItemIcon, escapeHtml } from './ItemIcon';
 import { renderItemPopupContent } from './ItemPopup';
 import { renderEquipCompareBlock } from './EquipCompare';
 import { renderTrackedImg } from './assets';
 import { deferWhilePressed } from './render';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 
+const UNKNOWN_ITEM = 'Unknown item';
+
 type ShopView =
   | { kind: 'grid' }
   | { kind: 'buy'; itemId: string; price: number; qty: number }
   | { kind: 'sell'; itemId: string; qty: number }
   | { kind: 'replace'; henchmanId: string };
+
+/** A sale awaiting its answer. A success shows up as the item's stack shrinking; a refusal as an error. */
+interface PendingSell {
+  itemId: string;
+  name: string;
+  value: number;
+  qty: number;
+  startCount: number;
+}
 
 /** Buy requests still awaiting answers. A success shows up as the item's stack growing; a refusal as an error. */
 interface PendingBuy {
@@ -49,11 +60,14 @@ export class ShopPopup {
   /** Henchman id of a hire awaiting a server answer, so only its refusal shows. */
   private pendingHireId: string | null = null;
   private pendingBuy: PendingBuy | null = null;
+  private pendingSell: PendingSell | null = null;
   private unsubscribeError: (() => void) | null = null;
   /** Inputs of the most recent render; a push with the same inputs only patches gold in place. */
   private lastRenderKey = '';
   /** Which list the current DOM shows, so a re-render of the same list keeps its scroll position. */
   private renderedPlace = '';
+  /** The last keyed control that had focus; repaints replace the DOM, and Back returns to the cell a detail came from. */
+  private focusKey: string | null = null;
 
   constructor(gameClient: GameClient, worldCache: WorldCache) {
     this.gameClient = gameClient;
@@ -62,8 +76,9 @@ export class ShopPopup {
     this.overlay.className = 'shop-overlay';
     this.overlay.style.display = 'none';
     this.overlay.addEventListener('click', (e) => {
-      if (e.target === this.overlay) this.hide();
+      if (e.target === this.overlay || (e.target instanceof Element && e.target.closest('.shop-close'))) this.hide();
     });
+    this.overlay.addEventListener('animationend', () => this.overlay.classList.remove('shop-opening'));
     document.body.appendChild(this.overlay);
     wireFocusOnInteract(this.overlay);
   }
@@ -78,13 +93,14 @@ export class ShopPopup {
     this.lastRenderKey = '';
     this.renderCurrentView(state);
     this.overlay.style.display = 'flex';
-    bringToFront(this.overlay);
+    this.overlay.classList.add('shop-opening');
+    bringToFront(this.overlay, () => this.dismiss());
 
     this.unsubscribeState?.();
     this.unsubscribeState = this.gameClient.subscribe(() => {
-      // A state tick means the hire landed — a refusal arrives as an error first.
-      this.pendingHireId = null;
+      this.settleHire();
       this.settleBuy();
+      this.settleSell();
       deferWhilePressed(this.overlay, () => this.refresh());
     });
 
@@ -98,6 +114,9 @@ export class ShopPopup {
         this.pendingBuy.refused++;
         if (!this.pendingBuy.refusal) this.pendingBuy.refusal = message;
         this.settleBuy();
+      } else if (this.pendingSell) {
+        this.pendingSell = null;
+        this.setNotice(message);
       } else {
         return;
       }
@@ -107,6 +126,7 @@ export class ShopPopup {
 
   hide(): void {
     this.overlay.style.display = 'none';
+    this.overlay.classList.remove('shop-opening');
     this.overlay.innerHTML = '';
     release(this.overlay);
     this.unsubscribeState?.();
@@ -115,13 +135,25 @@ export class ShopPopup {
     this.unsubscribeError = null;
     this.lastRenderKey = '';
     this.renderedPlace = '';
+    this.focusKey = null;
     this.pendingHireId = null;
     this.pendingBuy = null;
+    this.pendingSell = null;
     if (this.noticeTimer !== null) {
       window.clearTimeout(this.noticeTimer);
       this.noticeTimer = null;
     }
     this.notice = null;
+  }
+
+  /** Back and Escape step out of a detail view first, then close the shop. */
+  private dismiss(): void {
+    if (this.view.kind === 'grid') {
+      this.hide();
+      return;
+    }
+    this.view = { kind: 'grid' };
+    this.rerender();
   }
 
   private static hiredHenchmen(state: ServerStateMessage): HiredHenchman[] {
@@ -180,6 +212,7 @@ export class ShopPopup {
     }
     this.lastRenderKey = key;
 
+    const hadFocus = this.rememberFocus();
     const place = this.place();
     const scroll = place === this.renderedPlace ? this.readScroll() : null;
 
@@ -196,6 +229,21 @@ export class ShopPopup {
 
     this.renderedPlace = place;
     if (scroll) this.writeScroll(scroll);
+    if (hadFocus) this.restoreFocus();
+  }
+
+  private rememberFocus(): boolean {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active || !this.overlay.contains(active)) return active === document.body;
+    this.focusKey = active.dataset.focusKey ?? this.focusKey;
+    return true;
+  }
+
+  private restoreFocus(): void {
+    if (this.overlay.contains(document.activeElement) && document.activeElement !== this.overlay) return;
+    const controls = this.overlay.querySelectorAll<HTMLElement>('[data-focus-key]');
+    const control = [...controls].find(el => el.dataset.focusKey === this.focusKey);
+    (control ?? this.overlay).focus({ preventScroll: true });
   }
 
   /** Falls back to the grid when the open detail no longer applies to the latest state. */
@@ -250,7 +298,7 @@ export class ShopPopup {
   private patchGold(state: ServerStateMessage): void {
     const gold = state.character?.gold ?? 0;
     const goldEl = this.overlay.querySelector('.shop-gold');
-    if (goldEl) goldEl.textContent = `${gold} gold`;
+    if (goldEl) goldEl.textContent = `${gold.toLocaleString()} gold`;
     for (const square of this.overlay.querySelectorAll<HTMLElement>('.shop-items-grid [data-price]')) {
       square.querySelector('.shop-item-price')?.classList.toggle('unaffordable', Number(square.dataset.price) > gold);
     }
@@ -292,6 +340,13 @@ export class ShopPopup {
     }, 3500);
   }
 
+  /** Pushes also arrive for unrelated reasons, so only the henchman joining ends the wait for a refusal. */
+  private settleHire(): void {
+    const state = this.gameClient.lastState;
+    if (!this.pendingHireId || !state) return;
+    if (ShopPopup.hiredHenchmen(state).some(h => h.henchmanId === this.pendingHireId)) this.pendingHireId = null;
+  }
+
   /** Reports the pending buy once every request is answered — never before the server has said yes. */
   private settleBuy(): void {
     const pending = this.pendingBuy;
@@ -306,6 +361,31 @@ export class ShopPopup {
     else this.setNotice(success ? `${pending.refusal}. ${success}` : pending.refusal);
   }
 
+  private settleSell(): void {
+    const pending = this.pendingSell;
+    const char = this.gameClient.lastState?.character;
+    if (!pending || !char) return;
+    const sold = pending.startCount - getUnequippedCount(pending.itemId, char.inventory);
+    if (sold < pending.qty) return;
+    this.pendingSell = null;
+    const noun = pending.qty === 1 ? pending.name : `${pending.qty} ${pending.name}`;
+    this.setNotice(`You sold ${noun} for ${pending.qty * pending.value} gold.`);
+  }
+
+  private headerHtml(title: string, gold: number | null): string {
+    return `
+      <div class="shop-header">
+        <span class="shop-title">${escapeHtml(title)}</span>
+        ${gold === null ? '' : `<span class="shop-gold">${gold.toLocaleString()} gold</span>`}
+        <button type="button" class="player-options-close shop-close" aria-label="Close">×</button>
+      </div>
+    `;
+  }
+
+  private noticeHtml(): string {
+    return this.notice ? `<div class="shop-notice" role="status">${escapeHtml(this.notice)}</div>` : '';
+  }
+
   /** Render the main grid view (buy / sell item list, or the hire list). */
   private renderGrid(state: ServerStateMessage, shop: ShopDefinition): void {
     const char = state.character;
@@ -318,33 +398,25 @@ export class ShopPopup {
     const hireActive = this.mode === 'hire' ? ' active' : '';
 
     const listHtml = this.mode === 'hire'
-      ? `<div class="shop-hire-list" style="max-height:45vh;overflow-y:auto;">${this.renderHireList(offers, state)}</div>`
+      ? `<div class="shop-hire-list">${this.renderHireList(offers, state)}</div>`
       : `<div class="shop-items-grid">${this.mode === 'buy'
           ? this.renderBuyItems(shop, itemDefs, char.className, char.gold)
           : this.renderSellItems(char.inventory, itemDefs)}</div>`;
 
     const hireToggle = offers.length > 0
-      ? `<button class="shop-toggle-btn${hireActive}" data-mode="hire">Hire</button>`
+      ? `<button class="shop-toggle-btn${hireActive}" data-mode="hire" data-focus-key="mode:hire">Hire</button>`
       : '';
 
-    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
-
     this.overlay.innerHTML = `
-      <div class="shop-popup">
-        <div class="shop-header">
-          <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${char.gold} gold</span>
-        </div>
-        ${noticeHtml}
+      <div class="shop-popup" role="dialog" aria-label="${escapeHtml(shop.name)}">
+        ${this.headerHtml(shop.name, char.gold)}
+        ${this.noticeHtml()}
         <div class="shop-toggle">
-          <button class="shop-toggle-btn${buyActive}" data-mode="buy">Buy</button>
-          <button class="shop-toggle-btn${sellActive}" data-mode="sell">Sell</button>
+          <button class="shop-toggle-btn${buyActive}" data-mode="buy" data-focus-key="mode:buy">Buy</button>
+          <button class="shop-toggle-btn${sellActive}" data-mode="sell" data-focus-key="mode:sell">Sell</button>
           ${hireToggle}
         </div>
         ${listHtml}
-        <div style="margin-top:12px;text-align:center;">
-          <button class="item-popup-btn item-popup-btn-secondary shop-close-btn">Close</button>
-        </div>
       </div>
     `;
 
@@ -370,18 +442,28 @@ export class ShopPopup {
       });
     }
 
-    for (const el of this.overlay.querySelectorAll<HTMLElement>('.shop-item-square')) {
-      el.addEventListener('click', () => {
-        const itemId = el.dataset.itemId;
-        if (!itemId) return;
+    for (const cell of this.overlay.querySelectorAll<HTMLElement>('.shop-item-cell')) {
+      const open = () => {
+        const el = cell.querySelector<HTMLElement>('.shop-item-square');
+        const itemId = el?.dataset.itemId;
+        if (!el || !itemId) return;
         this.view = this.mode === 'buy'
           ? { kind: 'buy', itemId, price: parseInt(el.dataset.price ?? '0', 10), qty: 1 }
           : { kind: 'sell', itemId, qty: 1 };
         this.rerender();
+      };
+      cell.addEventListener('click', open);
+      cell.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        open();
       });
     }
+  }
 
-    this.overlay.querySelector('.shop-close-btn')?.addEventListener('click', () => this.hide());
+  private static itemCell(itemId: string, square: string, name: string, rarity: string | undefined): string {
+    const color = RARITY_COLORS[rarity ?? 'common'] ?? RARITY_COLORS.common;
+    return `<div class="shop-item-cell" role="button" tabindex="0" data-focus-key="item:${escapeHtml(itemId)}">${square}<div class="shop-item-name" style="color:${color}">${escapeHtml(name)}</div></div>`;
   }
 
   private renderBuyItems(shop: ShopDefinition, itemDefs: Record<string, ItemDefinition>, className: string, gold: number): string {
@@ -390,10 +472,10 @@ export class ShopPopup {
       const def = itemDefs[si.itemId];
       if (!def) {
         const name = si.itemId;
-        return `<div class="item-square shop-item-square" data-item-id="${escapeHtml(si.itemId)}" data-price="${si.price}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(name)}">
+        return ShopPopup.itemCell(si.itemId, `<div class="item-square shop-item-square" data-item-id="${escapeHtml(si.itemId)}" data-price="${si.price}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(name)}">
           <span class="item-square-initials">${escapeHtml(name.split(' ').map(w => w[0]).join('').slice(0, 2))}</span>
           ${price}
-        </div>`;
+        </div>`, UNKNOWN_ITEM, undefined);
       }
       const restriction = ShopPopup.restrictionLabel(def, className);
       const html = renderItemIcon(si.itemId, def, {
@@ -402,7 +484,7 @@ export class ShopPopup {
         tooltip: restriction ? `${def.name} (${restriction})` : undefined,
       });
       const badge = restriction ? '<span class="shop-item-unusable" aria-hidden="true"></span>' : '';
-      return html.replace(/<\/div>$/, `${badge}${price}</div>`);
+      return ShopPopup.itemCell(si.itemId, html.replace(/<\/div>$/, `${badge}${price}</div>`), def.name, def.rarity);
     }).join('');
   }
 
@@ -412,16 +494,16 @@ export class ShopPopup {
     const entries = listUnequippedEntries(inventory);
 
     if (entries.length === 0) {
-      return '<div style="color:#888;text-align:center;padding:16px;">No items to sell</div>';
+      return '<div class="shop-empty">No items to sell</div>';
     }
 
     return entries.map(([itemId, qty]) => {
       const def = itemDefs[itemId];
       if (!def) {
-        return `<div class="item-square shop-item-square" data-item-id="${escapeHtml(itemId)}" data-qty="${qty}" style="background:#e8e8e840;" data-tooltip="${escapeHtml(itemId)}">
+        return ShopPopup.itemCell(itemId, `<div class="item-square shop-item-square" data-item-id="${escapeHtml(itemId)}" data-qty="${qty}" style="--rarity:var(--rarity-common)" data-tooltip="${escapeHtml(itemId)}">
           <span class="item-square-initials">${escapeHtml(itemId.split(' ').map(w => w[0]).join('').slice(0, 2))}</span>
           <span class="shop-item-price">1g</span>
-        </div>`;
+        </div>`, UNKNOWN_ITEM, undefined);
       }
       const value = def.value ?? 1;
       const html = renderItemIcon(itemId, def, {
@@ -429,7 +511,7 @@ export class ShopPopup {
         extraClass: 'shop-item-square',
         dataAttrs: { 'item-id': itemId, qty: String(qty) },
       });
-      return html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`);
+      return ShopPopup.itemCell(itemId, html.replace(/<\/div>$/, `<span class="shop-item-price">${value}g</span></div>`), def.name, def.rarity);
     }).join('');
   }
 
@@ -441,28 +523,28 @@ export class ShopPopup {
     const choices = ShopPopup.hiredHenchmen(state)
       .filter(h => h.henchmanId !== henchmanId)
       .map(h => `
-        <button class="item-popup-btn item-popup-btn-primary shop-replace-confirm" data-instance-id="${escapeHtml(h.instanceId)}" style="display:block;width:100%;margin:4px 0;">
+        <button class="item-popup-btn item-popup-btn-primary shop-replace-confirm" data-instance-id="${escapeHtml(h.instanceId)}">
           Replace ${escapeHtml(h.name ?? 'henchman')}${h.level !== undefined ? ` · Lv ${h.level}` : ''}
         </button>`)
       .join('');
 
     this.overlay.innerHTML = `
-      <div class="shop-popup">
-        <div class="shop-header"><span class="shop-title">Make room for ${escapeHtml(offer.name)}?</span></div>
-        <div class="shop-hire-row" style="display:flex;align-items:center;gap:8px;padding:8px 0;text-align:left;">
-          <div class="shop-hire-portrait" style="position:relative;flex:0 0 auto;width:44px;height:44px;border-radius:4px;overflow:hidden;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;">
+      <div class="shop-popup shop-replace-view" role="dialog" aria-label="Make room for ${escapeHtml(offer.name)}">
+        ${this.headerHtml(`Make room for ${offer.name}?`, null)}
+        <div class="shop-hire-row">
+          <div class="shop-hire-portrait">
             ${ShopPopup.henchmanPortrait(offer)}
           </div>
-          <div class="shop-hire-info" style="flex:1;min-width:0;">
-            <div class="shop-hire-name" style="font-size:15px;">${escapeHtml(offer.name)}</div>
-            <div class="shop-hire-stats" style="font-size:12px;color:#ccc;">Lv ${offer.level} · ${offer.maxHp} HP · ${offer.baseDamage} DMG</div>
+          <div class="shop-hire-info">
+            <div class="shop-hire-name">${escapeHtml(offer.name)}</div>
+            <div class="shop-hire-stats">Lv ${offer.level} · ${offer.maxHp} HP · ${offer.baseDamage} DMG</div>
           </div>
         </div>
-        <div style="font-size:13px;color:#ccc;line-height:1.5;padding:4px 0 8px;">
+        <div class="shop-replace-text">
           Your party has no room. Choose who leaves; ${escapeHtml(offer.name)} takes their place in your formation.
         </div>
-        ${choices}
-        <div style="display:flex;gap:8px;justify-content:center;margin-top:8px;">
+        <div class="shop-replace-choices">${choices}</div>
+        <div class="shop-replace-actions">
           <button class="item-popup-btn item-popup-btn-secondary shop-replace-cancel">Cancel</button>
         </div>
       </div>
@@ -491,23 +573,23 @@ export class ShopPopup {
     const hasRoom = ShopPopup.hasRoomForHire(state);
     const partyFull = !hasRoom && hired.length === 0;
     if (offers.length === 0) {
-      return '<div style="color:#888;text-align:center;padding:16px;">Nobody here is looking for work</div>';
+      return '<div class="shop-empty">Nobody here is looking for work</div>';
     }
 
     return offers.map(o => {
       const description = o.description?.trim();
       const descriptionHtml = description
-        ? `<div class="shop-hire-desc" style="font-size:12px;color:#999;line-height:1.4;">${escapeHtml(description)}</div>`
+        ? `<div class="shop-hire-desc">${escapeHtml(description)}</div>`
         : '';
       return `
-        <div class="shop-hire-row" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);text-align:left;">
-          <div class="shop-hire-portrait" style="position:relative;flex:0 0 auto;width:44px;height:44px;border-radius:4px;overflow:hidden;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;">
+        <div class="shop-hire-row">
+          <div class="shop-hire-portrait">
             ${ShopPopup.henchmanPortrait(o)}
           </div>
-          <div class="shop-hire-info" style="flex:1;min-width:0;">
-            <div class="shop-hire-name" style="font-size:15px;">${escapeHtml(o.name)}</div>
+          <div class="shop-hire-info">
+            <div class="shop-hire-name">${escapeHtml(o.name)}</div>
             ${descriptionHtml}
-            <div class="shop-hire-stats" style="font-size:12px;color:#ccc;">Lv ${o.level} · ${o.maxHp} HP · ${o.baseDamage} DMG</div>
+            <div class="shop-hire-stats">Lv ${o.level} · ${o.maxHp} HP · ${o.baseDamage} DMG</div>
           </div>
           ${hiredIds.has(o.henchmanId)
             ? '<button class="item-popup-btn item-popup-btn-secondary" disabled>In party</button>'
@@ -521,7 +603,7 @@ export class ShopPopup {
 
   /** Photo layered over an emoji fallback, so a missing or broken image still renders a portrait. */
   private static henchmanPortrait(offer: HenchmanOffer): string {
-    const emoji = `<span class="shop-hire-emoji" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:24px;">${escapeHtml(offer.emoji)}</span>`;
+    const emoji = `<span class="shop-hire-emoji">${escapeHtml(offer.emoji)}</span>`;
     if (!offer.artworkUrl) return emoji;
     return emoji + renderTrackedImg(offer.artworkUrl, { className: 'shop-hire-img', alt: offer.name, lazy: true });
   }
@@ -543,8 +625,6 @@ export class ShopPopup {
     const maxQty = Math.max(1, affordable);
     let qty = Math.min(view.qty, maxQty);
     view.qty = qty;
-    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
-
     const restriction = ShopPopup.restrictionLabel(def, char.className);
     const unusableNote = restriction
       ? `<div class="shop-unusable-note">${escapeHtml(restriction)} — you can still buy it.</div>`
@@ -561,12 +641,9 @@ export class ShopPopup {
     const disabled = canAfford ? '' : ' disabled';
 
     this.overlay.innerHTML = `
-      <div class="shop-popup shop-detail-view">
-        <div class="shop-header">
-          <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${char.gold} gold</span>
-        </div>
-        ${noticeHtml}
+      <div class="shop-popup shop-detail-view" role="dialog" aria-label="${escapeHtml(shop.name)}">
+        ${this.headerHtml(shop.name, char.gold)}
+        ${this.noticeHtml()}
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
           <div class="shop-qty-row">
@@ -642,7 +719,6 @@ export class ShopPopup {
 
     let qty = Math.min(view.qty, max);
     view.qty = qty;
-    const noticeHtml = this.notice ? `<div class="shop-notice">${escapeHtml(this.notice)}</div>` : '';
 
     const popupContent = renderItemPopupContent(def, {
       itemDefs,
@@ -654,19 +730,16 @@ export class ShopPopup {
     });
 
     this.overlay.innerHTML = `
-      <div class="shop-popup shop-detail-view">
-        <div class="shop-header">
-          <span class="shop-title">${escapeHtml(shop.name)}</span>
-          <span class="shop-gold">${char.gold} gold</span>
-        </div>
-        ${noticeHtml}
+      <div class="shop-popup shop-detail-view" role="dialog" aria-label="${escapeHtml(shop.name)}">
+        ${this.headerHtml(shop.name, char.gold)}
+        ${this.noticeHtml()}
         <div class="shop-detail-content">${popupContent}</div>
         <div class="shop-detail-controls">
           <div class="shop-qty-row">
             <button class="shop-qty-btn shop-qty-minus">-</button>
             <span class="shop-qty-value">${qty}</span>
             <button class="shop-qty-btn shop-qty-plus">+</button>
-            <button class="shop-qty-btn shop-qty-all">All</button>
+            <button class="shop-qty-btn shop-qty-all">Max</button>
           </div>
           <div class="shop-detail-total">Available: ${max} · Total: ${qty * value} gold</div>
           <div class="shop-detail-actions">
@@ -698,9 +771,12 @@ export class ShopPopup {
       updateQty();
     });
     this.overlay.querySelector('.shop-action-confirm')?.addEventListener('click', () => {
-      this.gameClient.sendShopSell(itemId, qty);
-      const noun = qty === 1 ? def.name : `${qty} ${def.name}`;
-      this.setNotice(`You sold ${noun} for ${qty * value} gold.`);
+      const startCount = this.computeSellable(this.gameClient.lastState ?? state, itemId);
+      if (this.gameClient.sendShopSell(itemId, qty)) {
+        this.pendingSell = { itemId, name: def.name, value, qty, startCount };
+      } else {
+        this.setNotice(OFFLINE_NOTICE);
+      }
       this.view = { kind: 'grid' };
       this.rerender();
     });

@@ -17,6 +17,7 @@ import {
   QUEST_REPLY_TIMEOUT_MS,
 } from '../src/ui/NpcTalkPopup';
 import { OFFLINE_NOTICE, type GameClient, type ServerErrorDetail } from '../src/network/GameClient';
+import { dismissTop } from '../src/ui/ModalStack';
 
 type StateListener = (state: ServerStateMessage) => void;
 type ErrorListener = (message: string, code?: ServerErrorCode, detail?: ServerErrorDetail) => void;
@@ -180,6 +181,29 @@ describe('NpcTalkPopup', () => {
     t.push({ ...parts, activeQuests: [active('q2', 'in_progress', [2])] });
     expect(document.querySelector('.npc-quest-progress')!.textContent).toContain('Kill Goblin (2/3)');
     expect(acceptButton('q1')).toBe(button);
+  });
+
+  it('keeps the rendered modal when a state push changes nothing', () => {
+    const parts: StateParts = { offeredQuestIds: ['q1'], questDefinitions: { q1: quest('q1') } };
+    const t = setup(parts);
+    t.popup.show(GIVER);
+    const modal = document.querySelector('.npc-talk-modal');
+
+    t.push(parts);
+
+    expect(document.querySelector('.npc-talk-modal')).toBe(modal);
+  });
+
+  it('accepts through the delegated click handler after a repaint replaced the card', () => {
+    const t = setup({ offeredQuestIds: ['q1'], questDefinitions: { q1: quest('q1') } });
+    t.popup.show(GIVER);
+    const original = acceptButton('q1');
+
+    t.push({ offeredQuestIds: ['q1'], questDefinitions: { q1: quest('q1', { description: 'Changed' }) } });
+    expect(acceptButton('q1')).not.toBe(original);
+
+    tap(acceptButton('q1')!);
+    expect(t.sendAcceptQuest).toHaveBeenCalledWith('q1');
   });
 
   it('holds a repaint while Accept is pressed so the click lands, then applies it', () => {
@@ -559,7 +583,9 @@ describe('quest and NPC popup font sizes', () => {
   const SMALLEST_TOKEN_PX = 11;
 
   it('never set quest or NPC text below the smallest font token', () => {
-    const css = readFileSync(resolve(__dirname, '../src/styles/pixel-theme.css'), 'utf8')
+    const css = ['pixel-theme.css', 'popups.css']
+      .map(file => readFileSync(resolve(__dirname, '../src/styles', file), 'utf8'))
+      .join('\n')
       .replace(/\/\*[\s\S]*?\*\//g, '');
     const tooSmall: string[] = [];
     for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -569,5 +595,35 @@ describe('quest and NPC popup font sizes', () => {
       }
     }
     expect(tooSmall).toEqual([]);
+  });
+});
+
+describe('NPC popup closing', () => {
+  const overlay = () => document.querySelector('.npc-talk-overlay') as HTMLElement;
+
+  function open(): void {
+    document.body.innerHTML = '';
+    const lastState = { questGiverNpcId: GIVER.id, offeredQuestIds: [] } as unknown as ServerStateMessage;
+    const client = {
+      lastState,
+      subscribe: () => () => {},
+      onServerError: () => () => {},
+    } as unknown as GameClient;
+    new NpcTalkPopup(client).show(GIVER);
+  }
+
+  it('closes from the header X and from the bottom Close', () => {
+    open();
+    (document.querySelector('.npc-talk-x') as HTMLButtonElement).click();
+    expect(overlay().style.display).toBe('none');
+    open();
+    (document.querySelector('.npc-talk-close') as HTMLButtonElement).click();
+    expect(overlay().style.display).toBe('none');
+  });
+
+  it('closes with Back', () => {
+    open();
+    expect(dismissTop()).toBe(true);
+    expect(overlay().style.display).toBe('none');
   });
 });

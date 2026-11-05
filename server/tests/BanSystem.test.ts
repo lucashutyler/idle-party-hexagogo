@@ -36,6 +36,7 @@ function createFakeContentStore(): ContentStore {
     getAllEncounters: () => ({
       auto_goblin: { id: 'auto_goblin', name: 'Goblins', type: 'random', monsterPool: [{ monsterId: 'goblin', min: 1, max: 1 }], roomMax: 9 },
     }),
+    getTileById: () => undefined,
     getWorld: () => ({ tiles: [], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),
     getAllSets: () => ({}),
     ...fakeSkillContent(),

@@ -8,7 +8,7 @@ import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefiniti
  * A world holds multiple maps; the client only renders the map the party is
  * currently on (`currentMapId`, driven by the server state message). Tiles are
  * indexed by `mapId:col:row` so rooms at the same (col,row) on different maps
- * don't collide. Fog of war is determined by state.unlocked (sent every tick).
+ * don't collide. Fog of war is determined by state.unlocked (sent with every state push).
  */
 export class WorldCache {
   /** Keyed by "mapId:col:row". */

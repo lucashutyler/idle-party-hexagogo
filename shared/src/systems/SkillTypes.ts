@@ -11,9 +11,9 @@ export interface SkillSlot {
 }
 
 export type PassiveEffectKind =
-  | 'physical_reduction'        // Knight Guard: flat physical DR per level
+  | 'physical_reduction'        // Knight Guard: physical armor rating per level
   | 'party_damage_mult'         // Bard Rally: +% damage per party member (all types)
-  | 'magical_reduction_party'   // Priest Bless: flat magical/holy DR party-wide per level
+  | 'magical_reduction_party'   // Priest Bless: party-wide magical/holy rating per level (strongest owner)
   | 'crit_chance'               // Archer Pierce: % chance to crit (2x damage)
   | 'bonus_damage'              // Mage Burn: flat damage per level
   | 'max_hp_percent'            // Knight Fortify: +% max HP per level
@@ -34,7 +34,7 @@ export type PassiveEffectKind =
   | 'arcane_surge'              // Mage Arcane Surge: every 2nd active does 2x
   | 'overflow'                  // Mage Overflow: overkill splashes (single-target only)
   | 'scorch'                    // Mage Scorch: damaged enemies take +% magic damage
-  | 'cooldown_reduction'        // Bard Tempo/Encore: reduce own active CD by 1
+  | 'cooldown_reduction'        // Bard Tempo/Encore: reduce active cooldowns by N seconds
   | 'dodge_party'               // Bard Nimble: +% dodge per party member, party-wide
   | 'xp_bonus'                  // Bard Inspiration: +% XP for party
   | 'enemy_damage_reduction_party'; // Bard Unnerve: -% enemy damage per party member
@@ -67,8 +67,8 @@ export type ActiveEffectKind =
   | 'heal_lowest'         // Priest Minor Heal: heal lowest % HP ally
   | 'multi_hit'           // Mage Magic Missile: multiple hits at % damage
   | 'target_lowest_hp'    // Archer Cut Down: target lowest HP enemy
-  | 'redirect_hit'        // Knight Intercept: redirect next hit on ally to self
-  | 'brace_reflect'       // Knight Shield Slam: brace, reflect % of damage taken
+  | 'redirect_hit'        // Knight Intercept: take a single-target hit aimed at an ally
+  | 'brace_reflect'       // Knight Shield Slam: reflect % of physical damage taken
   | 'stacking_mark'       // Knight Sunder: mark target for +% incoming damage, stacks
   | 'remove_buffs'        // Knight Dispel: remove all buffs from target
   | 'multi_hit_random'    // Archer Triple Shot: hit N random enemies at % damage
@@ -83,7 +83,7 @@ export type ActiveEffectKind =
   | 'damage_aoe_all'      // Mage Blizzard/Chain Lightning, Bard Dissonance: deal damage to all enemies
   | 'high_damage_single'  // Mage Arcane Blast: high % damage single target
   | 'party_buff_permanent' // Bard War Song: +% party damage rest of combat, stacking
-  | 'enemy_debuff_aoe'    // Bard Lullaby: -% enemy damage for N turns
+  | 'enemy_debuff_aoe'    // Bard Lullaby: -% enemy damage for N seconds
   | 'chaos';              // Bard Chaos: enemies attack random enemies
 
 export interface ActiveEffect {
@@ -104,11 +104,11 @@ export interface ActiveEffect {
   reflectPercent?: number;
   /** DoT percent of damage dealt (for dot_attack). */
   dotPercent?: number;
-  /** DoT tick count (for dot_attack, hot_lowest). */
+  /** DoT/HoT pulse count, one per second (for dot_attack, hot_lowest). */
   dotTicks?: number;
   /** Debuff percent (for debuff_attack, enemy_debuff_aoe, e.g., 0.30 = -30%). */
   debuffPercent?: number;
-  /** Debuff duration in turns. */
+  /** Debuff duration in seconds. */
   debuffDuration?: number;
   /** Shield amount multiplier (level * shieldMultiplier). */
   shieldMultiplier?: number;
@@ -141,8 +141,95 @@ export interface SkillDefinition {
   passiveEffects?: PassiveEffect[];
   /** Active effect options — allowed ONLY on active skills. */
   activeEffects?: ActiveEffect[];
-  /** Cooldown for actives: triggers every Nth attack. */
+  /** Active only — seconds after use before it is ready again. */
   cooldown?: number;
+  /** Active only — seconds of telegraphed wind-up; default 0. */
+  castTime?: number;
+  /** Active only — seconds before first use in a battle; default derived from the cooldown. */
+  warmup?: number;
+  /** Active only — makes the skill an off-action reaction. */
+  trigger?: SkillTrigger;
+}
+
+export type SkillTrigger = 'ally_targeted' | 'self_hit' | 'enemy_cast' | 'ally_afflicted' | 'ally_low_hp';
+
+export const SKILL_TRIGGER_VALUES: readonly SkillTrigger[] = [
+  'ally_targeted', 'self_hit', 'enemy_cast', 'ally_afflicted', 'ally_low_hp',
+];
+
+export const SKILL_TRIGGER_INFO: Record<SkillTrigger, { label: string; description: string }> = {
+  ally_targeted: {
+    label: 'Ally targeted',
+    description: 'Fires when an enemy aims a single-target attack or spell at another ally.',
+  },
+  self_hit: {
+    label: 'Hit by an enemy',
+    description: 'Fires when an enemy attack or spell damages you.',
+  },
+  enemy_cast: {
+    label: 'Enemy casts',
+    description: 'Fires when an enemy begins casting a spell, countering it a moment later. Used as a normal action when no enemy in the fight can cast.',
+  },
+  ally_afflicted: {
+    label: 'Ally afflicted',
+    description: 'Fires while an ally is stunned or suffering a damage-over-time or weakening effect.',
+  },
+  ally_low_hp: {
+    label: 'Ally below half health',
+    description: 'Fires while an ally is below half health.',
+  },
+};
+
+export type SkillCardType = 'attack' | 'support' | 'enchantment' | 'instant' | 'interrupt' | 'passive' | 'triggered';
+
+export const SKILL_CARD_TYPE_INFO: Record<SkillCardType, { label: string; icon: string; blurb: string }> = {
+  attack: { label: 'Attack', icon: '⚔️', blurb: 'Uses your action when ready' },
+  support: { label: 'Support', icon: '✚', blurb: 'Held until someone needs it' },
+  enchantment: { label: 'Enchantment', icon: '✨', blurb: 'Lingering effect' },
+  instant: { label: 'Instant', icon: '⚡', blurb: 'Fires off-turn when its trigger happens' },
+  interrupt: { label: 'Interrupt', icon: '✋', blurb: 'Counters an enemy spell' },
+  passive: { label: 'Passive', icon: '◆', blurb: 'Always on' },
+  triggered: { label: 'Triggered', icon: '↯', blurb: 'Passive that fires on an event' },
+};
+
+const TRIGGERED_PASSIVE_KINDS: ReadonlySet<PassiveEffectKind> = new Set<PassiveEffectKind>([
+  'stun_on_phys_hit', 'martyr', 'resurrection', 'dot_on_auto', 'overflow', 'scorch',
+  'stacking_same_target', 'arcane_surge',
+]);
+
+const SUPPORT_ACTIVE_KINDS: ReadonlySet<ActiveEffectKind> = new Set<ActiveEffectKind>([
+  'heal_lowest', 'hot_lowest', 'cure_debuffs', 'shield_non_knight',
+]);
+
+const ENCHANTMENT_ACTIVE_KINDS: ReadonlySet<ActiveEffectKind> = new Set<ActiveEffectKind>([
+  'party_buff_permanent', 'enemy_debuff_aoe', 'chaos',
+]);
+
+/**
+ * The skill's reaction trigger: the explicit `trigger`, else inferred from its options.
+ * Inference is load-bearing — live content holds redirect/brace skills authored without a trigger.
+ */
+export function getSkillTrigger(skill: SkillDefinition): SkillTrigger | undefined {
+  if (skill.type !== 'active') return undefined;
+  if (skill.trigger) return skill.trigger;
+  const effects = skill.activeEffects ?? [];
+  if (effects.some(e => e.kind === 'redirect_hit')) return 'ally_targeted';
+  if (effects.some(e => e.kind === 'brace_reflect')) return 'self_hit';
+  return undefined;
+}
+
+export function getSkillCardType(skill: SkillDefinition): SkillCardType {
+  if (skill.type === 'passive') {
+    const triggered = (skill.passiveEffects ?? []).some(e => TRIGGERED_PASSIVE_KINDS.has(e.kind));
+    return triggered ? 'triggered' : 'passive';
+  }
+  const trigger = getSkillTrigger(skill);
+  if (trigger === 'enemy_cast') return 'interrupt';
+  if (trigger) return 'instant';
+  const kinds = (skill.activeEffects ?? []).map(e => e.kind);
+  if (kinds.length > 0 && kinds.every(k => SUPPORT_ACTIVE_KINDS.has(k))) return 'support';
+  if (kinds.some(k => ENCHANTMENT_ACTIVE_KINDS.has(k))) return 'enchantment';
+  return 'attack';
 }
 
 export interface SkillLoadout {
@@ -180,6 +267,9 @@ interface LegacySkillDefinition {
   passiveEffect?: PassiveEffect;
   activeEffect?: ActiveEffect;
   cooldown?: number;
+  castTime?: number;
+  warmup?: number;
+  trigger?: SkillTrigger;
 }
 
 /** Legacy unlock cadence: treeOrder 0 → level 1, otherwise treeOrder × 5. */
@@ -207,7 +297,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'knight_guard',
       name: 'Guard',
-      description: '+2 physical damage reduction per level.',
+      description: 'Armor that grows with your level: blocks about 50% of physical damage from enemies your level (less from stronger ones).',
       className: 'Knight',
       type: 'passive',
       treeOrder: 0,
@@ -217,7 +307,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'knight_bash',
       name: 'Bash',
-      description: '50% chance to stun target for one round.',
+      description: 'Attack card, every 2 seconds: strike your target with a 50% chance to stun it for 1 second. Prefers an enemy that is casting — a landed stun interrupts the spell.',
       className: 'Knight',
       type: 'active',
       treeOrder: 1,
@@ -238,18 +328,19 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'knight_intercept',
       name: 'Intercept',
-      description: 'Instead of attacking, redirect the next attack targeting any other player to the Knight.',
+      description: 'Instant, every 2 seconds: when an enemy aims a single-target attack at a frailer ally, jump in and take the hit instead. Saves itself for a telegraphed spell aimed at an ally.',
       className: 'Knight',
       type: 'active',
       treeOrder: 3,
       activeEffect: { kind: 'redirect_hit' },
-      cooldown: 1,
+      cooldown: 2,
+      trigger: 'ally_targeted',
     },
     // --- Passive 3 (Lv20) ---
     {
       id: 'knight_shield_bash',
       name: 'Shield Bash',
-      description: 'When hit by a physical attack, 10% chance to stun the attacker for 1 turn.',
+      description: 'When hit by a physical attack, 10% chance to stun the attacker for 1 second.',
       className: 'Knight',
       type: 'passive',
       treeOrder: 4,
@@ -259,18 +350,19 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'knight_shield_slam',
       name: 'Shield Slam',
-      description: 'Instead of attacking, brace — reflect 10% of physical damage taken this round back to attackers.',
+      description: 'Instant, every second: when a physical hit lands on you, reflect 10% of the damage taken to every enemy.',
       className: 'Knight',
       type: 'active',
       treeOrder: 5,
       activeEffect: { kind: 'brace_reflect', reflectPercent: 0.10 },
       cooldown: 1,
+      trigger: 'self_hit',
     },
     // --- Passive 4 (Lv30) ---
     {
       id: 'knight_iron_will',
       name: 'Iron Will',
-      description: 'Immune to stun effects.',
+      description: 'Immune to stun effects — stuns are resisted as they land.',
       className: 'Knight',
       type: 'passive',
       treeOrder: 6,
@@ -280,12 +372,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'knight_sunder',
       name: 'Sunder',
-      description: 'Deal normal damage and mark the target — marked enemies take 25% increased damage from all sources (stacks).',
+      description: 'Attack card, every 3 seconds (ready 1 second into a fight): deal normal damage and mark the target — marked enemies take 25% increased damage from attacks (stacks).',
       className: 'Knight',
       type: 'active',
       treeOrder: 7,
       activeEffect: { kind: 'stacking_mark', markMultiplier: 0.25 },
       cooldown: 3,
+      warmup: 1,
     },
     // --- Passive 5 (Lv40) ---
     {
@@ -301,12 +394,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'knight_dispel',
       name: 'Dispel',
-      description: 'Deal normal damage and remove all buffs from the target.',
+      description: 'Interrupt, every 5 seconds: when an enemy begins casting, strike the caster, strip its buffs and counter the spell. Used as a normal attack when no enemy can cast.',
       className: 'Knight',
       type: 'active',
       treeOrder: 9,
       activeEffect: { kind: 'remove_buffs' },
-      cooldown: 4,
+      cooldown: 5,
+      trigger: 'enemy_cast',
     },
     // --- Passive 6 (Lv50) ---
     {
@@ -337,7 +431,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'archer_cut_down',
       name: 'Cut Down',
-      description: 'Targets the lowest HP enemy.',
+      description: 'Attack card, every 3 seconds: strike the enemy with the lowest HP.',
       className: 'Archer',
       type: 'active',
       treeOrder: 1,
@@ -358,7 +452,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'archer_triple_shot',
       name: 'Triple Shot',
-      description: 'Attack 3 random enemies for 50% damage each.',
+      description: 'Attack card, every 4 seconds: fire at 3 random enemies for 50% damage each.',
       className: 'Archer',
       type: 'active',
       treeOrder: 3,
@@ -379,12 +473,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'archer_snipe',
       name: 'Snipe',
-      description: 'Deal 200% damage to a single target, ignoring damage reduction.',
+      description: 'Attack card, every 5 seconds: take aim for 1 second, then deal 200% damage to a single target, ignoring damage reduction.',
       className: 'Archer',
       type: 'active',
       treeOrder: 5,
       activeEffect: { kind: 'ignore_dr_single', damagePercent: 2.00 },
       cooldown: 5,
+      castTime: 1.0,
     },
     // --- Passive 4 (Lv30) ---
     {
@@ -400,7 +495,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'archer_bleed',
       name: 'Bleed',
-      description: 'Deal normal damage and apply a bleed: 20% of damage dealt over 3 ticks (stacks).',
+      description: 'Attack card, every 3 seconds: deal normal damage and apply a bleed — 20% of the damage dealt over 3 seconds (stacks).',
       className: 'Archer',
       type: 'active',
       treeOrder: 7,
@@ -421,7 +516,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'archer_crippling_shot',
       name: 'Crippling Shot',
-      description: 'Deal normal damage and reduce target\'s damage by 30% for 3 turns.',
+      description: 'Attack card, every 3 seconds: deal normal damage and reduce the target\'s damage by 30% for 3 seconds.',
       className: 'Archer',
       type: 'active',
       treeOrder: 9,
@@ -447,7 +542,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'priest_bless',
       name: 'Bless',
-      description: '+2 magical/holy damage reduction for the whole party per level.',
+      description: 'Wards the whole party: blocks about 50% of magical and holy damage from enemies your level. Only the strongest Bless in the party counts.',
       className: 'Priest',
       type: 'passive',
       treeOrder: 0,
@@ -457,7 +552,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'priest_minor_heal',
       name: 'Minor Heal',
-      description: 'Heals the lowest percent health ally for level × 4 HP.',
+      description: 'Support card, every second: heal the most wounded ally for level × 4 HP. Held until an ally needs it.',
       className: 'Priest',
       type: 'active',
       treeOrder: 1,
@@ -478,7 +573,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'priest_smite',
       name: 'Smite',
-      description: 'Deal normal physical damage plus level × 3 bonus holy damage to undead.',
+      description: 'Attack card, every 2 seconds: deal normal damage plus level × 3 bonus holy damage to undead.',
       className: 'Priest',
       type: 'active',
       treeOrder: 3,
@@ -499,12 +594,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'priest_cure',
       name: 'Cure',
-      description: 'Remove all debuffs from the lowest-HP ally.',
+      description: 'Instant, every 3 seconds: when an ally is stunned or afflicted, remove their stuns, damage-over-time and debuffs.',
       className: 'Priest',
       type: 'active',
       treeOrder: 5,
       activeEffect: { kind: 'cure_debuffs' },
       cooldown: 3,
+      trigger: 'ally_afflicted',
     },
     // --- Passive 4 (Lv30) ---
     {
@@ -520,12 +616,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'priest_mending',
       name: 'Mending',
-      description: 'Apply a heal-over-time to the lowest HP ally: level × 2 HP per tick for 3 ticks.',
+      description: 'When an ally drops below half health, heal them for level × 2 HP each second for 3 seconds.',
       className: 'Priest',
       type: 'active',
       treeOrder: 7,
       activeEffect: { kind: 'hot_lowest', healMultiplier: 2, dotTicks: 3 },
-      cooldown: 2,
+      cooldown: 4,
+      trigger: 'ally_low_hp',
     },
     // --- Passive 5 (Lv40) ---
     {
@@ -541,7 +638,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'priest_sanctuary',
       name: 'Sanctuary',
-      description: 'Instead of attacking, shield the lowest-HP non-Knight ally — absorb up to level × 4 incoming damage.',
+      description: 'Support card, every second: shield the most wounded unshielded non-Knight ally, absorbing up to level × 4 incoming damage.',
       className: 'Priest',
       type: 'active',
       treeOrder: 9,
@@ -577,7 +674,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'mage_magic_missile',
       name: 'Magic Missile',
-      description: '4 hits at 30% damage each.',
+      description: 'Attack card, every 3 seconds: 4 hits at 30% damage each.',
       className: 'Mage',
       type: 'active',
       treeOrder: 1,
@@ -598,7 +695,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'mage_zap',
       name: 'Zap',
-      description: 'Deal 75% damage to a single target.',
+      description: 'Attack card, every second: deal 75% damage to a single target.',
       className: 'Mage',
       type: 'active',
       treeOrder: 3,
@@ -609,7 +706,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'mage_ignite',
       name: 'Ignite',
-      description: 'Normal attacks add a permanent burn stack equal to 25% of pre-resistance damage. Stacks indefinitely for the rest of combat.',
+      description: 'Normal attacks add a permanent burn stack equal to 25% of pre-resistance damage. Stacks up to 8 times for the rest of combat.',
       className: 'Mage',
       type: 'passive',
       treeOrder: 4,
@@ -619,12 +716,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'mage_blizzard',
       name: 'Blizzard',
-      description: 'Deal 100% damage to all enemies.',
+      description: 'Attack card, every 6 seconds: channel for 1.5 seconds, then deal 100% damage to all enemies.',
       className: 'Mage',
       type: 'active',
       treeOrder: 5,
       activeEffect: { kind: 'damage_aoe_all', damagePercent: 1.00, isAoe: true },
       cooldown: 6,
+      castTime: 1.5,
     },
     // --- Passive 4 (Lv30) ---
     {
@@ -640,7 +738,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'mage_chain_lightning',
       name: 'Chain Lightning',
-      description: 'Deal 10% damage to all enemies.',
+      description: 'Attack card, every second: deal 10% damage to all enemies.',
       className: 'Mage',
       type: 'active',
       treeOrder: 7,
@@ -661,18 +759,19 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'mage_arcane_blast',
       name: 'Arcane Blast',
-      description: 'Deal 250% damage to a single target.',
+      description: 'Attack card, every 5 seconds: charge for 1 second, then deal 250% damage to a single target.',
       className: 'Mage',
       type: 'active',
       treeOrder: 9,
       activeEffect: { kind: 'high_damage_single', damagePercent: 2.50 },
       cooldown: 5,
+      castTime: 1.0,
     },
     // --- Passive 6 (Lv50) ---
     {
       id: 'mage_scorch',
       name: 'Scorch',
-      description: 'Enemies damaged by the Mage take +10% magical damage from all sources for 2 turns.',
+      description: 'Enemies damaged by the Mage take +10% magical damage from all sources for 2 s.',
       className: 'Mage',
       type: 'passive',
       treeOrder: 10,
@@ -697,7 +796,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'bard_dissonance',
       name: 'Dissonance',
-      description: 'Deal 0.2 damage per level to all enemies.',
+      description: 'Attack card, every 3 seconds: deal 0.2 damage per level to all enemies.',
       className: 'Bard',
       type: 'active',
       treeOrder: 1,
@@ -708,7 +807,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'bard_tempo',
       name: 'Tempo',
-      description: 'Reduce your own active skill cooldown by 1 (minimum 1).',
+      description: 'Your active skills get −1 s cooldown (minimum 1 s).',
       className: 'Bard',
       type: 'passive',
       treeOrder: 2,
@@ -718,12 +817,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'bard_drumroll',
       name: 'Drumroll',
-      description: '25% chance per enemy to stun for one round.',
+      description: 'Interrupt, every 4 seconds: when an enemy begins casting, counter the spell and roll a 25% chance to stun each enemy for 1 second. Used as a normal action when no enemy can cast.',
       className: 'Bard',
       type: 'active',
       treeOrder: 3,
       activeEffect: { kind: 'stun_aoe', stunChance: 0.25 },
-      cooldown: 3,
+      cooldown: 4,
+      trigger: 'enemy_cast',
     },
     // --- Passive 3 (Lv20) ---
     {
@@ -739,12 +839,13 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'bard_war_song',
       name: 'War Song',
-      description: 'Increase party damage by 10% for the rest of combat (stacks).',
+      description: 'Enchantment, every 4 seconds, starting with an opening anthem: increase party damage by 10% for the rest of combat (stacks).',
       className: 'Bard',
       type: 'active',
       treeOrder: 5,
       activeEffect: { kind: 'party_buff_permanent', buffPercent: 0.10 },
       cooldown: 4,
+      warmup: 0,
     },
     // --- Passive 4 (Lv30) ---
     {
@@ -760,7 +861,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'bard_lullaby',
       name: 'Lullaby',
-      description: 'All enemies deal 20% less damage for 3 turns.',
+      description: 'Enchantment, every 5 seconds: all enemies deal 20% less damage for 3 seconds.',
       className: 'Bard',
       type: 'active',
       treeOrder: 7,
@@ -781,7 +882,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'bard_chaos',
       name: 'Chaos',
-      description: 'All enemies attack a random enemy (including themselves) this round.',
+      description: 'Enchantment, every 6 seconds: each enemy\'s next action hits a random enemy (possibly itself) instead of the party.',
       className: 'Bard',
       type: 'active',
       treeOrder: 9,
@@ -792,7 +893,7 @@ const LEGACY_SKILL_TREES: Record<string, LegacySkillDefinition[]> = {
     {
       id: 'bard_encore',
       name: 'Encore',
-      description: 'Reduce all party members\' active skill cooldowns by 1 (stacks with Tempo for the Bard, minimum 1).',
+      description: 'Every party member\'s active skills get −1 s cooldown (stacks with Tempo for the Bard, minimum 1 s).',
       className: 'Bard',
       type: 'passive',
       treeOrder: 10,
@@ -847,7 +948,7 @@ export function migrateLegacySkill(
     treeOrder?: number; unlockLevel?: number | null; sortOrder?: number;
     passiveEffect?: PassiveEffect; activeEffect?: ActiveEffect;
     passiveEffects?: PassiveEffect[]; activeEffects?: ActiveEffect[];
-    cooldown?: number;
+    cooldown?: number; castTime?: number; warmup?: number; trigger?: SkillTrigger;
   };
 
   const unlockLevel = raw.unlockLevel !== undefined
@@ -876,6 +977,9 @@ export function migrateLegacySkill(
   if (passiveEffects && passiveEffects.length > 0) migrated.passiveEffects = passiveEffects;
   if (activeEffects && activeEffects.length > 0) migrated.activeEffects = activeEffects;
   if (raw.cooldown !== undefined) migrated.cooldown = raw.cooldown;
+  if (raw.castTime !== undefined) migrated.castTime = raw.castTime;
+  if (raw.warmup !== undefined) migrated.warmup = raw.warmup;
+  if (raw.trigger !== undefined) migrated.trigger = raw.trigger;
   return migrated;
 }
 

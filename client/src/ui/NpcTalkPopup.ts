@@ -9,6 +9,7 @@ import type {
 import { SOLO_QUEST_IN_PARTY_REASON } from '@idle-party-rpg/shared';
 import { renderTrackedImg } from './assets';
 import { escapeHtml } from './ItemIcon';
+import { objectiveBarHtml } from './QuestLog';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { objectiveText, rewardsText, scopeBadgeHtml, statusLabel, type QuestResolutions } from './QuestText';
 import { deferWhilePressed, setHtml } from './render';
@@ -81,14 +82,19 @@ export class NpcTalkPopup {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = `
       <div class="npc-talk-modal" role="dialog" aria-modal="true">
-        <div class="npc-talk-header"></div>
-        <div class="npc-talk-greeting"></div>
-        <div class="npc-talk-notice" role="status" aria-live="polite"></div>
-        <div class="npc-talk-completions"></div>
-        <div class="npc-quest-section npc-quest-ready"></div>
-        <div class="npc-quest-section npc-quest-progress"></div>
-        <div class="npc-quest-section npc-quest-available"></div>
-        <div class="npc-quest-section-empty"></div>
+        <div class="npc-talk-top">
+          <div class="npc-talk-header"></div>
+          <button class="player-options-close npc-talk-x" type="button" data-action="close" aria-label="Close">×</button>
+        </div>
+        <div class="npc-talk-scroll">
+          <div class="npc-talk-greeting"></div>
+          <div class="npc-talk-notice" role="status" aria-live="polite"></div>
+          <div class="npc-talk-completions"></div>
+          <div class="npc-quest-section npc-quest-ready"></div>
+          <div class="npc-quest-section npc-quest-progress"></div>
+          <div class="npc-quest-section npc-quest-available"></div>
+          <div class="npc-quest-section-empty"></div>
+        </div>
         <div class="npc-talk-actions">
           <button class="npc-talk-btn npc-talk-close" type="button" data-action="close">Close</button>
         </div>
@@ -122,7 +128,7 @@ export class NpcTalkPopup {
     setHtml(this.regions.header, this.headerHtml(npc));
     setHtml(this.regions.greeting, `"${escapeHtml(npc.greeting)}"`);
     this.overlay.style.display = 'flex';
-    bringToFront(this.overlay);
+    bringToFront(this.overlay, () => this.hide());
 
     if (!this.unsubscribeState) {
       this.unsubscribeState = this.gameClient.subscribe(() => {
@@ -381,8 +387,9 @@ export class NpcTalkPopup {
           <span class="quest-pill quest-status-${progress.status}">${statusLabel(progress.status)}</span>
         </div>
         <div class="quest-card-objectives">
-          ${def.objectives.map((o, i) => `<div class="quest-objective">• ${objectiveText(o, progress.progress[i] ?? 0, resolutions)}</div>`).join('')}
+          ${def.objectives.map((o, i) => `<div class="quest-objective">• ${objectiveText(o, progress.progress[i] ?? 0, resolutions)}${objectiveBarHtml(o, progress.progress[i] ?? 0)}</div>`).join('')}
         </div>
+        <div class="quest-card-rewards">Rewards: ${rewardsText(def.rewards, resolutions)}</div>
       </div>
     `;
   }

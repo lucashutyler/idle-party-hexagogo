@@ -7,8 +7,11 @@ import { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore } from './GameStateStore.js';
 import { GuildStore } from './social/GuildStore.js';
 import { TradeStore } from './social/TradeStore.js';
+import { JsonMailboxStore } from './social/MailboxStore.js';
+import type { MailboxStore } from './social/MailboxStore.js';
 import { ContentStore } from './ContentStore.js';
 import { VersionStore } from './VersionStore.js';
+import { ForecastService } from './ForecastService.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import type { WorldTileDefinition } from '@idle-party-rpg/shared';
 import { seedDevContent, seedDevPlayers } from './DevSeed.js';
@@ -16,6 +19,7 @@ import { seedDevContent, seedDevPlayers } from './DevSeed.js';
 const SAVE_INTERVAL_MS = 30_000; // Save every 30 seconds
 const CRAFT_TICK_MS = 1000;       // Check craft completions every 1s
 const VERSION_FILE = path.resolve('data', 'game-version.txt');
+const FORECAST_LOG_EVERY_MS = 60_000;
 
 /**
  * Carry live room GUIDs onto a snapshot about to be deployed, keyed on
@@ -49,9 +53,11 @@ export class GameLoop {
   readonly playerManager!: PlayerManager;
   readonly contentStore: ContentStore;
   readonly versionStore: VersionStore;
+  readonly forecaster: ForecastService;
   private store: GameStateStore;
   private guildStore: GuildStore;
   private tradeStore: TradeStore;
+  private mailboxStore: MailboxStore;
   private saveInterval?: ReturnType<typeof setInterval>;
   private craftTickInterval?: ReturnType<typeof setInterval>;
   private grids!: WorldGrids;
@@ -61,6 +67,8 @@ export class GameLoop {
     this.versionStore = new VersionStore();
     this.guildStore = new GuildStore();
     this.tradeStore = new TradeStore();
+    this.forecaster = new ForecastService({ logEveryMs: FORECAST_LOG_EVERY_MS });
+    this.mailboxStore = new JsonMailboxStore();
     this.store = store;
   }
 
@@ -77,9 +85,9 @@ export class GameLoop {
     console.log(`[Startup] ContentStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
 
     // Dev-only: inject 20 procedurally-generated zones and ~1000 rooms
-    // so the map has real scale to work against. Idempotent — re-runs
-    // skip the merge if the marker zone is already present in the live
-    // ContentStore. (Version-snapshot sync happens below.)
+    // so the map has real scale to work against. Idempotent — skipped once
+    // the dev raid dungeon exists; an older dev world is upgraded once.
+    // (Version-snapshot sync happens below.)
     const isDev = process.env.NODE_ENV !== 'production';
     let devContentAdded = false;
     if (isDev) {
@@ -128,6 +136,11 @@ export class GameLoop {
     this.grids = new WorldGrids(this.contentStore);
     console.log(`[Startup] World grids built (${this.grids.totalSize()} tiles across ${this.grids.mapIds().length} map(s)) in ${(performance.now() - t).toFixed(1)}ms`);
 
+    // Loaded before the player manager exists, so a shutdown signal can't save an empty set over the file.
+    t = performance.now();
+    const savedMailboxes = await this.mailboxStore.load();
+    console.log(`[Startup] MailboxStore loaded in ${(performance.now() - t).toFixed(1)}ms`);
+
     // Create player manager now that grids + content are ready
     (this as { playerManager: PlayerManager }).playerManager = new PlayerManager(
       this.grids,
@@ -135,7 +148,11 @@ export class GameLoop {
       this.guildStore,
       accountStore,
       this.store,
+      this.mailboxStore,
     );
+    this.playerManager.partyBattles.setForecaster(this.forecaster);
+
+    this.playerManager.mailboxes.restore(savedMailboxes);
 
     t = performance.now();
     await this.guildStore.load();
@@ -167,6 +184,9 @@ export class GameLoop {
       console.log('[GameLoop] No save files found — fresh start');
     }
 
+    // Entries taken in from old saves must be in the store before any player save drops them.
+    await this.playerManager.saveMailboxes();
+
     // Announce new version to all restored sessions if GAME_VERSION changed
     let lastVersion = '';
     try { lastVersion = (await fs.readFile(VERSION_FILE, 'utf-8')).trim(); } catch { /* first boot */ }
@@ -193,13 +213,11 @@ export class GameLoop {
    */
   async saveAll(): Promise<void> {
     const count = this.playerManager.sessionCount;
-    if (count > 0) {
-      await this.playerManager.saveAll(this.store);
-      console.log(`[GameLoop] Saved ${count} session(s)`);
-    }
+    await this.playerManager.saveAll(this.store);
+    if (count > 0) console.log(`[GameLoop] Saved ${count} session(s)`);
     await this.guildStore.save();
     await this.tradeStore.save(this.playerManager.trades.getAllTrades());
-    await this.contentStore.save();
+    await this.contentStore.persist();
     await this.versionStore.save();
   }
 
@@ -215,6 +233,7 @@ export class GameLoop {
       clearInterval(this.craftTickInterval);
       this.craftTickInterval = undefined;
     }
+    this.forecaster.stop();
     // Drain craft completions one last time so jobs that finished between ticks aren't lost.
     this.playerManager.tickAllCrafting();
 

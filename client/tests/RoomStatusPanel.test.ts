@@ -50,6 +50,7 @@ describe('RoomStatusPanel', () => {
     expect(panel.querySelector('.room-status-header')?.textContent).toBe('Hatchetmill · Town Square');
     expect(chips().map(c => c.getAttribute('aria-label'))).toEqual(['Talk to Mira', 'General Store']);
     expect(chips().map(c => c.querySelector('.room-status-chip-icon')?.textContent)).toEqual(['🧙', '🪙']);
+    expect(chips().map(c => c.querySelector('.room-status-chip-short')?.textContent)).toEqual(['Talk', 'Shop']);
   });
 
   it('adds a player-count chip and a dungeon floor status', () => {

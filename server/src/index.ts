@@ -15,9 +15,13 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import type { IncomingMessage } from 'http';
+import { WS_SERVER_OPTIONS } from './wsServerOptions.js';
+import { clientAcceptsPartialState } from './game/StatePush.js';
 import { GameLoop } from './game/GameLoop.js';
+import { GIFT_NOT_FOUND } from './game/PlayerManager.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
+import { isStoreFileName } from './auth/reservedUsernames.js';
 import { TokenStore } from './auth/TokenStore.js';
 import { InviteListStore } from './auth/InviteListStore.js';
 import { ApiTokenStore } from './auth/ApiTokenStore.js';
@@ -31,8 +35,9 @@ import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
 import type { ClassName, ItemDefinition, RoomEntryFailure, ServerErrorMessage, ServerMoveBlockedMessage } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, RUN_AVAILABLE_ROUNDS, getEquippedItemIds, setAppliesToClass, toShopSummary } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, getEquippedItemIds, setAppliesToClass, isAutoRetreatPct, toShopSummary } from '@idle-party-rpg/shared';
 import { canMove } from './game/social/PartySystem.js';
+import { parseForecastRequestTarget } from './game/ForecastService.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 import { isEmailConfigured } from './auth/EmailService.js';
 
@@ -59,6 +64,14 @@ function questRefusal(message: string, questId: string): ServerErrorMessage {
 
 function dungeonEntryRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'dungeon_entry_refused' };
+}
+
+function chatRefusal(message: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'chat_refused' };
+}
+
+function giftRefusal(message: string): ServerErrorMessage {
+  return message === GIFT_NOT_FOUND ? { type: 'error', message } : { type: 'error', message, code: 'gift_refused' };
 }
 
 const app = express();
@@ -141,9 +154,6 @@ app.use('/auth', createAuthRoutes({
   accountStore,
   tokenStore,
   inviteListStore,
-  onRenamePlayer: (oldUsername, newUsername) => {
-    playerManager.renamePlayer(oldUsername, newUsername);
-  },
 }));
 
 // Auth middleware for game API endpoints
@@ -242,7 +252,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // --- WebSocket with session auth ---
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer(WS_SERVER_OPTIONS);
 
 /**
  * Parse the session from an HTTP upgrade request.
@@ -259,10 +269,17 @@ function getSessionUsername(req: IncomingMessage): Promise<string | null> {
   });
 }
 
-server.on('upgrade', async (req, socket, head) => {
-  const username = await getSessionUsername(req);
+function warnUpgradeSocketError(err: Error): void {
+  console.warn(`WebSocket upgrade socket error: ${err.message}`);
+}
 
-  if (!username || username === 'undefined') {
+server.on('upgrade', async (req, socket, head) => {
+  // Node removes its own listener on upgrade, and ws adds one only in handleUpgrade.
+  socket.on('error', warnUpgradeSocketError);
+
+  const username = await getSessionUsername(req).catch(() => null);
+
+  if (!username || username === 'undefined' || isStoreFileName(username)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
@@ -276,6 +293,7 @@ server.on('upgrade', async (req, socket, head) => {
     return;
   }
 
+  socket.removeListener('error', warnUpgradeSocketError);
   wss.handleUpgrade(req, socket, head, (ws) => {
     (ws as any)._username = username;
     wss.emit('connection', ws, req);
@@ -299,13 +317,18 @@ function syncFriendState(a: string, b: string): void {
   playerManager.sendStateToPlayer(b);
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   const username: string = (ws as any)._username;
   console.log(`WebSocket connected for "${username}"`);
+  if (!clientAcceptsPartialState(req.url)) playerManager.requireWholeState(ws);
 
   // Register the connection and send initial state
   playerManager.login(ws, username).then(() => {
     playerManager.sendStateToPlayer(username);
+    playerManager.sendCombatResync(ws);
+  }).catch((err) => {
+    console.error(`[WS] Login failed for "${username}":`, err);
+    ws.close(1011, 'Login failed');
   });
 
   ws.on('message', (data) => {
@@ -314,6 +337,17 @@ wss.on('connection', (ws) => {
 
       if (msg.type === 'request_state') {
         playerManager.sendStateToPlayer(username);
+        playerManager.sendCombatResync(ws);
+        return;
+      }
+
+      if (msg.type === 'combat_view' && typeof msg.visible === 'boolean') {
+        playerManager.setCombatView(ws, msg.visible);
+        return;
+      }
+
+      if (msg.type === 'presence' && typeof msg.visible === 'boolean') {
+        playerManager.setPresence(ws, msg.visible);
         return;
       }
 
@@ -377,10 +411,9 @@ wss.on('connection', (ws) => {
           }
         }
 
-        // Check round threshold
-        const battleState = playerManager.partyBattles.getBattleState(partyId);
-        if (!battleState?.combat || battleState.combat.roundCount < RUN_AVAILABLE_ROUNDS) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot run yet' }));
+        if (playerManager.partyBattles.getDungeonRunInfo(partyId)) return;
+        if (!playerManager.partyBattles.canEscape(partyId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Run becomes available 5 seconds into a fight' }));
           return;
         }
 
@@ -460,7 +493,7 @@ wss.on('connection', (ws) => {
         if (!session.handleEquipSkill(msg.skillId, msg.slotIndex)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip skill' }));
         }
-        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -471,7 +504,7 @@ wss.on('connection', (ws) => {
           return;
         }
         session.handleUnequipSkill(msg.slotIndex);
-        playerManager.sendStateToPlayer(username);
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -490,13 +523,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot change class' }));
           return;
         }
-        // Create party + start battle (player just came into existence)
-        playerManager.ensureParty(username);
-        // Restart the current battle so combat uses the new class data
-        const classPartyId = session.getPartyId();
-        if (classPartyId) {
-          playerManager.partyBattles.restartBattle(classPartyId);
-        }
+        playerManager.applyClassChange(username);
         playerManager.sendStateToPlayer(username);
         // Only broadcast welcome for truly new players (not returning from ban/reset)
         if (wasNewPlayer) {
@@ -534,7 +561,9 @@ wss.on('connection', (ws) => {
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
           }
+          return;
         }
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -547,7 +576,9 @@ wss.on('connection', (ws) => {
 
         if (!session.handleEquipItemForceDestroy(msg.itemId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
+          return;
         }
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -574,7 +605,9 @@ wss.on('connection', (ws) => {
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Cannot unequip item' }));
           }
+          return;
         }
+        playerManager.sendStateToParty(username);
         return;
       }
 
@@ -906,9 +939,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid block level' }));
           return;
         }
-        const blocked = session.getBlockedUsers();
-        blocked[msg.username] = msg.level;
-        session.setBlockedUsers(blocked);
+        session.blockUser(msg.username, msg.level);
         playerManager.sendStateToPlayer(username);
         return;
       }
@@ -920,6 +951,38 @@ wss.on('connection', (ws) => {
         delete blocked[msg.username];
         session.setBlockedUsers(blocked);
         playerManager.sendStateToPlayer(username);
+        return;
+      }
+
+      if (msg.type === 'set_combat_prefs') {
+        if (!isAutoRetreatPct(msg.autoRetreatBelowPct)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid auto-retreat setting' }));
+          return;
+        }
+        playerManager.handleSetCombatPrefs(username, msg.autoRetreatBelowPct);
+        return;
+      }
+
+      if (msg.type === 'request_forecast') {
+        const target = parseForecastRequestTarget(msg.target);
+        if (!target) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid forecast target' }));
+          return;
+        }
+        playerManager.handleForecastRequest(username, target, (reply) => {
+          if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(reply));
+        });
+        return;
+      }
+
+      if (msg.type === 'ack_recap' && typeof msg.id === 'string') {
+        playerManager.handleAckRecap(username, msg.id);
+        return;
+      }
+
+      if (msg.type === 'request_bestiary') {
+        const bestiary = playerManager.buildBestiary(username);
+        if (bestiary) ws.send(JSON.stringify(bestiary));
         return;
       }
 
@@ -1064,92 +1127,8 @@ wss.on('connection', (ws) => {
       // --- Chat messages ---
 
       if (msg.type === 'send_chat' && typeof msg.text === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-
-        const channelType = msg.channelType;
-        const channelId = msg.channelId;
-        const validTypes = ['tile', 'zone', 'party', 'guild', 'dm', 'global'];
-        if (!validTypes.includes(channelType)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid channel type' }));
-          return;
-        }
-
-        // Build recipient list based on channel type
-        const recipients: { username: string; send: (m: any) => void }[] = [];
-
-        if (channelType === 'zone') {
-          // All players in the same zone
-          for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
-            if (u === username) continue;
-            if (s.getZone() === channelId) {
-              recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
-            }
-          }
-        } else if (channelType === 'dm') {
-          // Direct message to specific user — account must exist
-          if (!accountStore.findByUsername(channelId)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'User not found' }));
-            return;
-          }
-          recipients.push({ username: channelId, send: (m: any) => playerManager.sendChatToPlayer(channelId, m) });
-        } else if (channelType === 'guild') {
-          // All guild members
-          const guildData = playerManager.guilds.getGuild(channelId);
-          if (guildData) {
-            for (const m of guildData.members) {
-              if (m.username === username) continue;
-              recipients.push({ username: m.username, send: (msg: any) => playerManager.sendChatToPlayer(m.username, msg) });
-            }
-          }
-        } else if (channelType === 'party') {
-          // All party members
-          const partyId = session.getPartyId();
-          if (partyId) {
-            const party = playerManager.parties.getParty(partyId);
-            if (party) {
-              for (const m of party.members) {
-                if (m.username === username) continue;
-                recipients.push({ username: m.username, send: (msg: any) => playerManager.sendChatToPlayer(m.username, msg) });
-              }
-            }
-          }
-        } else if (channelType === 'tile') {
-          // All players in the same room on the same map
-          const pos = session.getPosition();
-          const mapId = session.getMapId();
-          for (const [u, s] of Array.from(playerManager['sessions'] as Map<string, any>)) {
-            if (u === username) continue;
-            const otherPos = s.getPosition();
-            if (s.getMapId() === mapId && otherPos.col === pos.col && otherPos.row === pos.row) {
-              recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
-            }
-          }
-        } else if (channelType === 'global') {
-          // All players (online and offline — offline get it stored in chat history)
-          for (const [u] of Array.from(playerManager['sessions'] as Map<string, any>)) {
-            if (u === username) continue;
-            recipients.push({ username: u, send: (m: any) => playerManager.sendChatToPlayer(u, m) });
-          }
-        }
-
-        // Also send back to sender
-        const chatMsg = playerManager.chat.sendMessage(username, channelType, channelId, msg.text, recipients);
-        if (chatMsg) {
-          playerManager.sendChatToPlayer(username, chatMsg);
-        }
-
-        if (chatMsg && channelType === 'dm') {
-          const recipientFocus = playerManager.getSessionByUsername(channelId)?.getChatFocus();
-          const recipientIsLooking = recipientFocus?.channelType === 'dm' && recipientFocus.channelId === username;
-          if (!recipientIsLooking) {
-            playerManager.notify.notify(channelId, 'dm_received', {
-              title: `Message from ${username}`,
-              body: msg.text.length > 140 ? `${msg.text.slice(0, 140)}…` : msg.text,
-              payload: { fromUsername: username },
-            });
-          }
-        }
+        const refusal = playerManager.sendPlayerChat(username, msg.channelType, msg.channelId, msg.text);
+        if (refusal) ws.send(JSON.stringify(chatRefusal(refusal)));
         return;
       }
 
@@ -1403,13 +1382,7 @@ wss.on('connection', (ws) => {
           ? gameLoop.contentStore.getHenchman(outgoing.henchmanId)?.name
           : undefined;
 
-        const result = playerManager.parties.hireHenchman(
-          username,
-          msg.henchmanId,
-          session.getMapId(),
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-          replaceInstanceId,
-        );
+        const result = playerManager.hireHenchman(username, msg.henchmanId, session.getMapId(), replaceInstanceId);
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
@@ -1430,11 +1403,7 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.type === 'dismiss_henchman' && typeof msg.instanceId === 'string') {
-        const result = playerManager.parties.dismissHenchman(
-          username,
-          msg.instanceId,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-        );
+        const result = playerManager.dismissHenchman(username, msg.instanceId);
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
@@ -1722,93 +1691,20 @@ wss.on('connection', (ws) => {
       // --- Gift / Mailbox messages ---
 
       if (msg.type === 'send_gift' && typeof msg.targetUsername === 'string' && typeof msg.itemId === 'string' && typeof msg.quantity === 'number') {
-        if (msg.targetUsername === username) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot gift to yourself' }));
-          return;
-        }
-        if (msg.quantity < 1) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid quantity' }));
-          return;
-        }
-        const targetAccount = accountStore.findByUsername(msg.targetUsername);
-        if (!targetAccount) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
-          return;
-        }
-        if (playerManager.isTradeBlocked(username, msg.targetUsername)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot gift to a blocked user' }));
-          return;
-        }
-
-        const senderSession = playerManager.getSessionByUsername(username);
-        if (!senderSession) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
-          return;
-        }
-        if (!senderSession.removeFromInventory(msg.itemId, msg.quantity)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not enough items in inventory' }));
-          return;
-        }
-
-        playerManager.mailboxes.addEntry(msg.targetUsername, username, msg.itemId, msg.quantity);
-
-        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
-        const label = msg.quantity > 1 ? `${itemDef?.name ?? msg.itemId} x${msg.quantity}` : (itemDef?.name ?? msg.itemId);
-        senderSession.addLogEntry(`Sent ${label} to ${msg.targetUsername}`, 'unlock');
-
-        playerManager.sendStateToPlayer(username);
-        playerManager.sendStateToPlayer(msg.targetUsername);
+        const refusal = playerManager.sendGift(username, msg.targetUsername, msg.itemId, msg.quantity);
+        if (refusal) ws.send(JSON.stringify(giftRefusal(refusal)));
         return;
       }
 
       if (msg.type === 'accept_gift' && typeof msg.entryId === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-
-        const entry = playerManager.mailboxes.findEntry(username, msg.entryId);
-        if (!entry) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Gift not found' }));
-          return;
-        }
-        // Stack capacity check at accept time
-        if (session.getInventoryCount(entry.itemId) + entry.quantity > 99) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full for that item (max 99)' }));
-          return;
-        }
-        if (!session.addToInventory(entry.itemId, entry.quantity)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full for that item (max 99)' }));
-          return;
-        }
-        playerManager.mailboxes.removeEntry(username, msg.entryId);
-
-        const itemDef = gameLoop.contentStore.getItem(entry.itemId);
-        const label = entry.quantity > 1 ? `${itemDef?.name ?? entry.itemId} x${entry.quantity}` : (itemDef?.name ?? entry.itemId);
-        session.addLogEntry(`Accepted ${label} from ${entry.fromUsername}`, 'unlock');
-        playerManager.sendStateToPlayer(username);
+        const refusal = playerManager.acceptGift(username, msg.entryId);
+        if (refusal) ws.send(JSON.stringify(giftRefusal(refusal)));
         return;
       }
 
       if (msg.type === 'deny_gift' && typeof msg.entryId === 'string') {
-        const entry = playerManager.mailboxes.findEntry(username, msg.entryId);
-        if (!entry) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Gift not found' }));
-          return;
-        }
-        playerManager.mailboxes.removeEntry(username, msg.entryId);
-
-        // If this was already a returned gift, drop it (don't ping-pong forever).
-        // Otherwise, return it to the original sender's mailbox.
-        if (!entry.returned) {
-          playerManager.mailboxes.addEntry(entry.fromUsername, username, entry.itemId, entry.quantity, { returned: true });
-          playerManager.sendStateToPlayer(entry.fromUsername);
-        }
-        const session = playerManager.getSessionByUsername(username);
-        if (session) {
-          const itemDef = gameLoop.contentStore.getItem(entry.itemId);
-          const label = entry.quantity > 1 ? `${itemDef?.name ?? entry.itemId} x${entry.quantity}` : (itemDef?.name ?? entry.itemId);
-          session.addLogEntry(`Declined ${label} from ${entry.fromUsername}`, 'move');
-        }
-        playerManager.sendStateToPlayer(username);
+        const refusal = playerManager.denyGift(username, msg.entryId);
+        if (refusal) ws.send(JSON.stringify(giftRefusal(refusal)));
         return;
       }
 
@@ -1819,6 +1715,11 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     playerManager.removeConnection(ws);
+  });
+
+  // ws expects a listener on every socket. `close` follows.
+  ws.on('error', (err) => {
+    console.warn(`WebSocket error for "${username}": ${err.message}`);
   });
 });
 

@@ -1056,6 +1056,23 @@ body.admin-modal-open { overflow: hidden; }
   color: var(--admin-dmg-magical);
   border-color: var(--admin-dmg-magical-border);
 }
+.skills-card-pill { white-space: nowrap; }
+.skills-card-attack { color: var(--admin-dmg-physical); border-color: var(--admin-dmg-physical-border); }
+.skills-card-support { color: var(--admin-success); border-color: var(--admin-success); background: rgba(22, 163, 74, 0.10); }
+.skills-card-enchantment { color: var(--admin-dmg-magical); border-color: var(--admin-dmg-magical-border); background: rgba(124, 58, 237, 0.10); }
+.skills-card-instant { color: var(--admin-link); border-color: var(--admin-accent); background: var(--admin-accent-bg); }
+.skills-card-interrupt { color: var(--admin-danger); border-color: var(--admin-danger); background: var(--admin-danger-bg); }
+.skills-card-triggered { color: var(--admin-warning); border-color: var(--admin-warning); background: rgba(217, 119, 6, 0.12); }
+.skills-timing { margin-top: 2px; font-size: 0.85em; white-space: nowrap; }
+.skills-card-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--admin-gap-tight);
+  font-size: 0.9em;
+  color: var(--admin-text-muted);
+}
+.skills-trigger-help { margin: calc(-1 * var(--admin-gap)) 0 var(--admin-gap-loose); }
 .skills-header-actions {
   display: flex;
   gap: var(--admin-gap-tight);

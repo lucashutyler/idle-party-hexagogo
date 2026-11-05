@@ -7,6 +7,7 @@ import {
   validateSkillDefinition,
 } from '../src/systems/SkillOptionCatalog';
 import { SEED_SKILLS } from '../src/systems/SkillTypes';
+import { SKILL_TRIGGER_VALUES } from '../src/systems/SkillTypes';
 import type { SkillDefinition } from '../src/systems/SkillTypes';
 
 function makeActive(overrides: Partial<SkillDefinition> = {}): SkillDefinition {
@@ -82,6 +83,14 @@ describe('SKILL_OPTION_CATALOG', () => {
     expect(SKILL_OPTION_CATALOG.dot_on_auto.description).toContain('skill name');
   });
 
+  it('describes timing in seconds, pulses and actions — never turns or rounds', () => {
+    for (const option of Object.values(SKILL_OPTION_CATALOG)) {
+      const text = `${option.label} ${option.description} ${option.params.map(p => p.label).join(' ')}`.toLowerCase();
+      expect(text, option.kind).not.toMatch(/\bturns?\b|\brounds?\b|every nth/);
+    }
+    expect(SKILL_OPTION_CATALOG.cooldown_reduction.description.toLowerCase()).toContain('second');
+  });
+
   it('exposes the three engine condition strings', () => {
     expect([...SKILL_CONDITION_VALUES]).toEqual(['target_above_75_hp', 'front_column', 'target_bleeding_or_stunned']);
   });
@@ -118,15 +127,64 @@ describe('validateSkillDefinition', () => {
     expect(errors.some(e => e.includes('Passive skills cannot have active options'))).toBe(true);
   });
 
-  it('requires a cooldown >= 1 on active skills', () => {
-    expect(validateSkillDefinition(makeActive({ cooldown: undefined })).some(e => e.includes('cooldown'))).toBe(true);
-    expect(validateSkillDefinition(makeActive({ cooldown: 0 })).some(e => e.includes('cooldown'))).toBe(true);
+  it('requires a finite cooldown of at least 1 second on active skills (fractions allowed)', () => {
+    for (const cooldown of [undefined, 0, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(validateSkillDefinition(makeActive({ cooldown })), `cooldown ${cooldown}`)
+        .toContain('Active skills require a cooldown of at least 1 second.');
+    }
     expect(validateSkillDefinition(makeActive({ cooldown: 1 }))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ cooldown: 2.5 }))).toEqual([]);
   });
 
-  it('rejects a cooldown on passive skills', () => {
-    const errors = validateSkillDefinition(makePassive({ cooldown: 2 }));
-    expect(errors.some(e => e.includes('Cooldown only applies to active skills'))).toBe(true);
+  it('rejects timing fields on passive skills', () => {
+    const errors = validateSkillDefinition(makePassive({ cooldown: 2, castTime: 1, warmup: 1, trigger: 'self_hit' }));
+    expect(errors).toEqual(expect.arrayContaining([
+      'Cooldown only applies to active skills.',
+      'Cast time only applies to active skills.',
+      'Warm-up only applies to active skills.',
+      'Trigger only applies to active skills.',
+    ]));
+  });
+
+  it('bounds castTime to 0–10 s and warmup to 0–60 s', () => {
+    expect(validateSkillDefinition(makeActive({ castTime: 0 }))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ castTime: 10 }))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ castTime: -1 })).some(e => e.includes('Cast time'))).toBe(true);
+    expect(validateSkillDefinition(makeActive({ castTime: 10.5 })).some(e => e.includes('Cast time'))).toBe(true);
+    expect(validateSkillDefinition(makeActive({ warmup: 0 }))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ warmup: 60 }))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ warmup: 61 })).some(e => e.includes('Warm-up'))).toBe(true);
+    expect(validateSkillDefinition(makeActive({ warmup: -0.5 })).some(e => e.includes('Warm-up'))).toBe(true);
+  });
+
+  it('accepts every known trigger and rejects unknown ones', () => {
+    for (const trigger of SKILL_TRIGGER_VALUES) {
+      expect(validateSkillDefinition(makeActive({ trigger })), trigger).toEqual([]);
+    }
+    const errors = validateSkillDefinition(makeActive({ trigger: 'on_sneeze' as never }));
+    expect(errors.some(e => e.includes('Unknown trigger') && e.includes('on_sneeze'))).toBe(true);
+  });
+
+  it('Intercept and Brace options need their trigger (explicit or inferred)', () => {
+    const redirect = { activeEffects: [{ kind: 'redirect_hit' as const }] };
+    const brace = { activeEffects: [{ kind: 'brace_reflect' as const, reflectPercent: 0.1 }] };
+    expect(validateSkillDefinition(makeActive(redirect))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ ...redirect, trigger: 'ally_targeted' }))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ ...redirect, trigger: 'self_hit' })))
+      .toContain('The Intercept attack option requires the "ally_targeted" trigger.');
+    expect(validateSkillDefinition(makeActive(brace))).toEqual([]);
+    expect(validateSkillDefinition(makeActive({ ...brace, trigger: 'ally_targeted' })))
+      .toContain('The Brace and reflect option requires the "self_hit" trigger.');
+    expect(validateSkillDefinition(makeActive({ activeEffects: [...redirect.activeEffects, ...brace.activeEffects] })))
+      .toContain('A skill cannot combine the Intercept attack and Brace and reflect options.');
+  });
+
+  it('a triggered skill (explicit or inferred) cannot have a cast time', () => {
+    expect(validateSkillDefinition(makeActive({ trigger: 'enemy_cast', castTime: 1 })))
+      .toContain('Triggered skills cannot have a cast time.');
+    expect(validateSkillDefinition(makeActive({ activeEffects: [{ kind: 'redirect_hit' }], castTime: 0.5 })))
+      .toContain('Triggered skills cannot have a cast time.');
+    expect(validateSkillDefinition(makeActive({ trigger: 'enemy_cast', castTime: 0 }))).toEqual([]);
   });
 
   it('rejects params outside their min/max range', () => {

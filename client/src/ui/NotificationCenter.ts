@@ -1,7 +1,8 @@
 import type { GameClient } from '../network/GameClient';
 import type { NotificationEntry, NotificationNavigationTarget } from '@idle-party-rpg/shared';
 import { resolveNotificationNavigation } from '@idle-party-rpg/shared';
-import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { confirmDialog } from './ConfirmDialog';
+import { bringToFront, dismissModals, release, wireFocusOnInteract } from './ModalStack';
 import { deferWhilePressed, setHtml } from './render';
 
 const TOAST_LIFETIME_MS = 6000;
@@ -23,8 +24,8 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Global notification bell + dropdown inbox + live toast stack. Mounted once
- * outside #app (like ChatPopout) so it survives screen switches.
+ * Global notification bell + dropdown inbox + live toast stack. The bell mounts into the
+ * top HUD's bell slot when present; the dropdown and toasts live in #notification-center-root.
  */
 export class NotificationCenter {
   private root: HTMLElement;
@@ -50,7 +51,8 @@ export class NotificationCenter {
       e.stopPropagation();
       this.toggleDropdown();
     });
-    this.root.appendChild(this.bellButton);
+    const hudSlot = document.querySelector<HTMLElement>('#top-hud .top-hud-bell-slot');
+    (hudSlot ?? this.root).appendChild(this.bellButton);
 
     this.toastStack = document.createElement('div');
     this.toastStack.className = 'notif-toast-stack';
@@ -62,7 +64,7 @@ export class NotificationCenter {
       this.notifications = state.social?.notifications ?? [];
       this.updateBadge();
       if (this.dropdown) deferWhilePressed(this.dropdown, () => this.renderDropdownList());
-    });
+    }, { replay: true });
 
     this.gameClient.onNotification((notification) => {
       this.showToast(notification);
@@ -109,10 +111,14 @@ export class NotificationCenter {
       this.gameClient.sendMarkAllNotificationsRead();
     });
 
-    panel.querySelector('.notif-clear-all-btn')!.addEventListener('click', () => {
-      if (this.notifications.length === 0) return;
-      if (!window.confirm("Clear all notifications? This can't be undone.")) return;
-      this.gameClient.sendClearAllNotifications();
+    panel.querySelector('.notif-clear-all-btn')!.addEventListener('click', async () => {
+      const clear = await confirmDialog({
+        title: 'Clear all notifications?',
+        body: "This can't be undone.",
+        confirmLabel: 'Clear all',
+        danger: true,
+      });
+      if (clear) this.gameClient.sendClearAllNotifications();
     });
 
     panel.querySelector('.notif-dropdown-list')!.addEventListener('click', (e) => this.onListClick(e));
@@ -132,11 +138,11 @@ export class NotificationCenter {
       panel.classList.add('notif-dropdown-shown');
     });
 
-    bringToFront(panel);
+    bringToFront(panel, () => this.closeDropdown());
     wireFocusOnInteract(panel);
   }
 
-  private closeDropdown(): void {
+  closeDropdown(): void {
     if (!this.dropdown) return;
     release(this.dropdown);
     this.dropdown.remove();
@@ -146,6 +152,8 @@ export class NotificationCenter {
   private renderDropdownList(): void {
     if (!this.dropdown) return;
     const list = this.dropdown.querySelector('.notif-dropdown-list') as HTMLElement;
+    this.dropdown.querySelector<HTMLElement>('.notif-mark-all-btn')!.hidden = this.unreadCount() === 0;
+    this.dropdown.querySelector<HTMLElement>('.notif-clear-all-btn')!.hidden = this.notifications.length === 0;
 
     if (this.notifications.length === 0) {
       setHtml(list, '<div class="notif-empty">No notifications yet.</div>');
@@ -203,7 +211,10 @@ export class NotificationCenter {
     toast.addEventListener('click', () => {
       this.gameClient.sendMarkNotificationRead(notification.id);
       const target = resolveNotificationNavigation(notification);
-      if (target.kind !== 'none') this.onNavigate(target);
+      if (target.kind !== 'none') {
+        dismissModals();
+        this.onNavigate(target);
+      }
       dismiss();
     });
 

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { buildHenchmanCombatant, henchmanDisplayNames } from '../src/systems/HenchmanTypes.js';
 import type { HenchmanDefinition, HiredHenchman } from '../src/systems/HenchmanTypes.js';
 import type { SkillDefinition } from '../src/systems/SkillTypes.js';
+import { createPartyCombatState } from '../src/systems/CombatEngine.js';
+import { createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes.js';
 
 function makeDef(overrides: Partial<HenchmanDefinition> = {}): HenchmanDefinition {
   return {
@@ -127,8 +129,16 @@ describe('buildHenchmanCombatant', () => {
     expect(c.hots).toEqual([]);
     expect(c.debuffs).toEqual([]);
     expect(c.damageShield).toBe(0);
-    expect(c.stunTurns).toBe(0);
     expect(c.attackCount).toBe(0);
     expect(c.hasResurrected).toBe(false);
+  });
+
+  it('leaves every engine timer field to createPartyCombatState', () => {
+    const c = buildHenchmanCombatant(makeDef(), makeHire(), noSkills, 'Grim');
+    for (const key of ['actionIntervalMs', 'actionRemainingMs', 'pulseRemainingMs', 'stunRemainingMs', 'cast', 'skillCooldowns', 'stunTurns', 'braceActive', 'interceptActive']) {
+      expect(c, key).not.toHaveProperty(key);
+    }
+    const state = createPartyCombatState([c], [createMonsterInstance(SEED_MONSTERS.goblin, 0)]);
+    expect(state.players[0]).toMatchObject({ isHenchman: true, actionRemainingMs: 1000, cast: null, stunRemainingMs: 0, currentHp: 90 });
   });
 });

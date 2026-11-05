@@ -13,6 +13,8 @@ export class ServerParty {
   private movementQueue: HexTile[] = [];
   private state: PartyState = 'idle';
   private mapId: string;
+  private lastRoom: HexTile | null = null;
+  private retreatTarget: HexTile | null = null;
 
   onStateChange?: (state: PartyState) => void;
   onTileReached?: (tile: HexTile) => void;
@@ -69,6 +71,16 @@ export class ServerParty {
     return this.movementQueue.length > 0 ? this.movementQueue[0] : null;
   }
 
+  /** The room the party last walked in from; never set by a retreat, cleared by any relocation or map change. */
+  get previousTile(): HexTile | null {
+    return this.lastRoom;
+  }
+
+  /** Whether the whole route is the single step a retreat queued. */
+  get isRetreatStepQueued(): boolean {
+    return this.retreatTarget !== null && this.movementQueue.length === 1 && this.movementQueue[0] === this.retreatTarget;
+  }
+
   setDestination(destinationTile: HexTile): boolean {
     if (!destinationTile.isTraversable) {
       return false;
@@ -94,6 +106,12 @@ export class ServerParty {
     this.movementQueue = [];
   }
 
+  /** Replace the route with a single step to `tile`; that step won't count as the room the party came from. */
+  retreatTo(tile: HexTile): void {
+    this.movementQueue = [tile];
+    this.retreatTarget = tile;
+  }
+
   /**
    * Restore a previously snapshotted movement queue. Used to roll back a
    * destination that turned out to be blocked, so a refused move leaves the
@@ -113,6 +131,9 @@ export class ServerParty {
     }
 
     const nextTile = this.movementQueue.shift()!;
+    const retreating = nextTile === this.retreatTarget;
+    this.retreatTarget = null;
+    this.lastRoom = retreating ? null : this.currentTile;
 
     // Server movement is instant — just update position
     this.currentTile = nextTile;
@@ -131,6 +152,8 @@ export class ServerParty {
     this.currentTile = tile;
     this.targetTile = null;
     this.movementQueue = [];
+    this.lastRoom = null;
+    this.retreatTarget = null;
   }
 
   /**
@@ -144,6 +167,8 @@ export class ServerParty {
     this.currentTile = tile;
     this.targetTile = null;
     this.movementQueue = [];
+    this.lastRoom = null;
+    this.retreatTarget = null;
   }
 
   enterBattle(): void {

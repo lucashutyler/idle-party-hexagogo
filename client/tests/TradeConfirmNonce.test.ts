@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientSocialState, ServerErrorCode, ServerStateMessage, TradeState } from '@idle-party-rpg/shared';
 import { SocialScreen } from '../src/screens/SocialScreen';
+import { dismissTop } from '../src/ui/ModalStack';
 import type { GameClient } from '../src/network/GameClient';
-import type { ChatLocalStore } from '../src/network/ChatLocalStore';
 import type { WorldCache } from '../src/network/WorldCache';
 
 /**
@@ -51,30 +51,22 @@ function setup() {
   const errorListeners = new Set<ErrorListener>();
   let lastState: ServerStateMessage | null = null;
   const sendConfirmTrade = vi.fn();
+  const sendCancelTrade = vi.fn();
 
   const gameClient = {
     get lastState() { return lastState; },
     subscribe: (l: StateListener) => { listeners.add(l); return () => { listeners.delete(l); }; },
     onResume: () => () => {},
     onServerError: (l: ErrorListener) => { errorListeners.add(l); return () => { errorListeners.delete(l); }; },
-    onChat: () => () => {},
-    onSyncChat: () => () => {},
-    sendSyncChat: () => {},
     sendConfirmTrade,
     sendCounterTrade: vi.fn(),
     sendProposeTrade: vi.fn(),
-    sendCancelTrade: vi.fn(),
+    sendCancelTrade,
   } as unknown as GameClient;
-
-  const chatStore = {
-    getLatestId: () => null,
-    addMessage: () => {},
-    mergeSyncBatch: () => {},
-  } as unknown as ChatLocalStore;
 
   const worldCache = { getSkillContent: () => ({ skills: {} }) } as unknown as WorldCache;
 
-  const screen = new SocialScreen('social', gameClient, chatStore, worldCache);
+  const screen = new SocialScreen('social', gameClient, worldCache);
 
   /** Push a state frame the way the server would. */
   const push = (trade: TradeState) => {
@@ -92,7 +84,7 @@ function setup() {
   const reviewBtn = () => document.querySelector('.trade-modal-review-btn') as HTMLButtonElement | null;
 
   return {
-    screen, push, pushError, sendConfirmTrade, modal, confirmBtn, reviewBtn,
+    screen, push, pushError, sendConfirmTrade, sendCancelTrade, modal, confirmBtn, reviewBtn,
     listenerCount: () => listeners.size,
   };
 }
@@ -270,6 +262,95 @@ describe('trade confirm nonce (client)', () => {
 function press(target: Element): void {
   target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
 }
+
+describe('trade modal layout and closing', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    while (dismissTop());
+  });
+
+  it('keeps every action outside the scrolling body', () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.openExistingTrade('trade_1');
+
+    const body = document.querySelector('.trade-modal-body')!;
+    const actions = document.querySelector('.trade-actions')!;
+    expect(body.contains(actions)).toBe(false);
+    expect(actions.querySelector('.trade-modal-confirm-btn')).not.toBeNull();
+    expect(actions.querySelector('.trade-send-btn')).not.toBeNull();
+    expect(actions.querySelector('.trade-modal-cancel-btn')).not.toBeNull();
+    expect(body.querySelector('.trade-picker-list')).not.toBeNull();
+  });
+
+  it('holds the list position across a quantity tap', () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.openExistingTrade('trade_1');
+    document.querySelector('.trade-modal-body')!.scrollTop = 120;
+
+    (document.querySelector('.trade-qty-inc') as HTMLButtonElement).click();
+    expect(document.querySelector('.trade-modal-body')!.scrollTop).toBe(120);
+    expect(document.querySelector('.trade-qty-val')!.textContent).toBe('1');
+  });
+
+  it('returns to the offers when a changed offer raises the review gate', () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.openExistingTrade('trade_1');
+    document.querySelector('.trade-modal-body')!.scrollTop = 120;
+
+    t.push(makeTrade({ nonce: 'nonce-2' }));
+    expect(t.reviewBtn()).not.toBeNull();
+    expect(document.querySelector('.trade-modal-body')!.scrollTop).toBe(0);
+  });
+
+  it('closes through Back and Escape without cancelling the trade', () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.openExistingTrade('trade_1');
+
+    expect(dismissTop()).toBe(true);
+    expect(t.modal()).toBeNull();
+    expect(t.listenerCount()).toBe(0);
+    expect(t.sendCancelTrade).not.toHaveBeenCalled();
+  });
+
+  it('asks before cancelling, and only then sends', async () => {
+    const t = setup();
+    t.push(makeTrade());
+    t.screen.openExistingTrade('trade_1');
+    const cancel = () => document.querySelector('.trade-modal-cancel-btn') as HTMLButtonElement;
+
+    cancel().click();
+    expect(t.sendCancelTrade).not.toHaveBeenCalled();
+    (document.querySelector('.confirm-cancel') as HTMLButtonElement).click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(t.sendCancelTrade).not.toHaveBeenCalled();
+    expect(t.modal()).not.toBeNull();
+
+    cancel().click();
+    (document.querySelector('.confirm-ok') as HTMLButtonElement).click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(t.sendCancelTrade).toHaveBeenCalledWith('trade_1');
+    expect(t.modal()).toBeNull();
+  });
+
+  it('calls it declining when the partner proposed and nothing came back yet', () => {
+    const t = setup();
+    t.push(makeTrade({ status: 'pending', initiator: { username: 'bob', items: [{ itemId: 'pebble', quantity: 1 }] }, target: { username: 'alice', items: [] } }));
+    t.screen.openExistingTrade('trade_1');
+
+    (document.querySelector('.trade-modal-cancel-btn') as HTMLButtonElement).click();
+    expect(document.querySelector('.confirm-title')!.textContent).toBe('Decline this trade?');
+  });
+});
 
 describe('trade modal during a press', () => {
   beforeEach(() => {

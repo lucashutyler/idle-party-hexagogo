@@ -12,6 +12,11 @@ import {
   getSkillsForClass,
   getSlotSchedule,
   getUnlockedSkillsForLevel,
+  getSkillTrigger,
+  getSkillCardType,
+  SKILL_TRIGGER_VALUES,
+  SKILL_TRIGGER_INFO,
+  SKILL_CARD_TYPE_INFO,
 } from '../src/systems/SkillTypes';
 import type { SkillContent, SkillDefinition, SkillSlot } from '../src/systems/SkillTypes';
 import type { ClassName } from '../src/systems/CharacterStats';
@@ -97,6 +102,19 @@ describe('SkillTypes', () => {
       expect(migrated.sortOrder).toBe(7);
       expect(migrated.activeEffects).toEqual([{ kind: 'stacking_mark', markMultiplier: 0.25 }]);
       expect(migrated.cooldown).toBe(3);
+    });
+
+    it('passes castTime, warmup and trigger through legacy migration', () => {
+      const migrated = migrateLegacySkill({
+        id: 'legacy_timing', name: 'Timing', description: 'd', className: 'Mage', type: 'active',
+        treeOrder: 2, activeEffect: { kind: 'damage_percent', damagePercent: 1 },
+        cooldown: 2.5, castTime: 1.5, warmup: 0, trigger: 'ally_low_hp',
+      } as never);
+      expect(migrated).toMatchObject({ cooldown: 2.5, castTime: 1.5, warmup: 0, trigger: 'ally_low_hp' });
+      const plain = migrateLegacySkill({ id: 'p', name: 'P', description: 'd', className: 'Mage', type: 'active', treeOrder: 1, activeEffect: { kind: 'damage_percent', damagePercent: 1 }, cooldown: 1 } as never);
+      expect(plain).not.toHaveProperty('castTime');
+      expect(plain).not.toHaveProperty('warmup');
+      expect(plain).not.toHaveProperty('trigger');
     });
 
     it('passes an already-migrated skill through unchanged (deep copy)', () => {
@@ -427,5 +445,117 @@ describe('SkillTypes', () => {
         }
       }
     });
+  });
+});
+
+describe('skill cards and triggers', () => {
+  const active = (overrides: Partial<SkillDefinition>): SkillDefinition => ({
+    id: 'x', name: 'X', description: 'd', className: 'Knight', type: 'active', unlockLevel: 1, sortOrder: 1, cooldown: 1,
+    activeEffects: [{ kind: 'damage_percent', damagePercent: 1 }], ...overrides,
+  });
+  const passive = (overrides: Partial<SkillDefinition>): SkillDefinition => ({
+    id: 'y', name: 'Y', description: 'd', className: 'Knight', type: 'passive', unlockLevel: 1, sortOrder: 0, ...overrides,
+  });
+
+  it('lists every trigger with a label and description', () => {
+    expect([...SKILL_TRIGGER_VALUES]).toEqual(['ally_targeted', 'self_hit', 'enemy_cast', 'ally_afflicted', 'ally_low_hp']);
+    for (const t of SKILL_TRIGGER_VALUES) {
+      expect(SKILL_TRIGGER_INFO[t].label.trim()).not.toBe('');
+      expect(SKILL_TRIGGER_INFO[t].description.trim()).not.toBe('');
+    }
+  });
+
+  it('has the spec card labels, icons and blurbs', () => {
+    expect(SKILL_CARD_TYPE_INFO).toEqual({
+      attack: { label: 'Attack', icon: '⚔️', blurb: 'Uses your action when ready' },
+      support: { label: 'Support', icon: '✚', blurb: 'Held until someone needs it' },
+      enchantment: { label: 'Enchantment', icon: '✨', blurb: 'Lingering effect' },
+      instant: { label: 'Instant', icon: '⚡', blurb: 'Fires off-turn when its trigger happens' },
+      interrupt: { label: 'Interrupt', icon: '✋', blurb: 'Counters an enemy spell' },
+      passive: { label: 'Passive', icon: '◆', blurb: 'Always on' },
+      triggered: { label: 'Triggered', icon: '↯', blurb: 'Passive that fires on an event' },
+    });
+  });
+
+  it('infers triggers for authored Intercept/Shield Slam skills that carry none', () => {
+    expect(getSkillTrigger(active({ activeEffects: [{ kind: 'redirect_hit' }] }))).toBe('ally_targeted');
+    expect(getSkillTrigger(active({ activeEffects: [{ kind: 'brace_reflect', reflectPercent: 0.1 }] }))).toBe('self_hit');
+    expect(getSkillTrigger(active({}))).toBeUndefined();
+    expect(getSkillTrigger(active({ trigger: 'ally_low_hp', activeEffects: [{ kind: 'redirect_hit' }] }))).toBe('ally_low_hp');
+    expect(getSkillTrigger(passive({ trigger: 'self_hit', passiveEffects: [{ kind: 'crit_chance', flatValue: 0.1 }] }))).toBeUndefined();
+  });
+
+  it('derives the card type (first match wins)', () => {
+    expect(getSkillCardType(passive({ passiveEffects: [{ kind: 'crit_chance', flatValue: 0.1 }] }))).toBe('passive');
+    expect(getSkillCardType(passive({ passiveEffects: [{ kind: 'crit_chance', flatValue: 0.1 }, { kind: 'overflow' }] }))).toBe('triggered');
+    expect(getSkillCardType(active({ trigger: 'enemy_cast', activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }] }))).toBe('interrupt');
+    expect(getSkillCardType(active({ trigger: 'ally_low_hp', activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }] }))).toBe('instant');
+    expect(getSkillCardType(active({ activeEffects: [{ kind: 'redirect_hit' }] }))).toBe('instant');
+    expect(getSkillCardType(active({ activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }, { kind: 'shield_non_knight', shieldMultiplier: 2 }] }))).toBe('support');
+    expect(getSkillCardType(active({ activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }, { kind: 'damage_percent', damagePercent: 1 }] }))).toBe('attack');
+    expect(getSkillCardType(active({ activeEffects: [{ kind: 'damage_percent', damagePercent: 1 }, { kind: 'chaos' }] }))).toBe('enchantment');
+    expect(getSkillCardType(active({ activeEffects: [] }))).toBe('attack');
+  });
+
+  it('seed skills follow the card table', () => {
+    const expected: Record<string, [string, number, { castTime?: number; warmup?: number; trigger?: string }?]> = {
+      knight_bash: ['attack', 2],
+      knight_intercept: ['instant', 2, { trigger: 'ally_targeted' }],
+      knight_shield_slam: ['instant', 1, { trigger: 'self_hit' }],
+      knight_sunder: ['attack', 3, { warmup: 1 }],
+      knight_dispel: ['interrupt', 5, { trigger: 'enemy_cast' }],
+      archer_cut_down: ['attack', 3],
+      archer_triple_shot: ['attack', 4],
+      archer_snipe: ['attack', 5, { castTime: 1 }],
+      archer_bleed: ['attack', 3],
+      archer_crippling_shot: ['attack', 3],
+      priest_minor_heal: ['support', 1],
+      priest_smite: ['attack', 2],
+      priest_cure: ['instant', 3, { trigger: 'ally_afflicted' }],
+      priest_mending: ['instant', 4, { trigger: 'ally_low_hp' }],
+      priest_sanctuary: ['support', 1],
+      mage_magic_missile: ['attack', 3],
+      mage_zap: ['attack', 1],
+      mage_chain_lightning: ['attack', 1],
+      mage_blizzard: ['attack', 6, { castTime: 1.5 }],
+      mage_arcane_blast: ['attack', 5, { castTime: 1 }],
+      bard_dissonance: ['attack', 3],
+      bard_drumroll: ['interrupt', 4, { trigger: 'enemy_cast' }],
+      bard_war_song: ['enchantment', 4, { warmup: 0 }],
+      bard_lullaby: ['enchantment', 5],
+      bard_chaos: ['enchantment', 6],
+    };
+    const actives = Object.values(SEED_SKILLS).filter(s => s.type === 'active').map(s => s.id).sort();
+    expect(actives).toEqual(Object.keys(expected).sort());
+    for (const [id, [cardType, cooldown, timing]] of Object.entries(expected)) {
+      const skill = SEED_SKILLS[id];
+      expect(getSkillCardType(skill), id).toBe(cardType);
+      expect(skill.cooldown, id).toBe(cooldown);
+      expect(skill.castTime, id).toBe(timing?.castTime);
+      expect(skill.warmup, id).toBe(timing?.warmup);
+      expect(skill.trigger, id).toBe(timing?.trigger);
+    }
+    expect(SEED_SKILLS.archer_bleed.activeEffects![0]).toMatchObject({ dotTicks: 3 });
+    expect(SEED_SKILLS.archer_crippling_shot.activeEffects![0]).toMatchObject({ debuffPercent: 0.3, debuffDuration: 3 });
+    expect(SEED_SKILLS.bard_lullaby.activeEffects![0]).toMatchObject({ debuffDuration: 3 });
+    expect(SEED_SKILLS.priest_mending.description).toBe('When an ally drops below half health, heal them for level × 2 HP each second for 3 seconds.');
+  });
+
+  it('seed passives with an event hook are triggered cards', () => {
+    const triggered = Object.values(SEED_SKILLS).filter(s => getSkillCardType(s) === 'triggered').map(s => s.id).sort();
+    expect(triggered).toEqual([
+      'archer_focus', 'knight_shield_bash', 'mage_arcane_surge', 'mage_ignite', 'mage_overflow', 'mage_scorch',
+      'priest_martyr', 'priest_resurrection',
+    ]);
+  });
+
+  it('seed descriptions use seconds, not turns or rounds', () => {
+    for (const skill of Object.values(SEED_SKILLS)) {
+      expect(skill.description, skill.id).not.toMatch(/\bturns?\b|\brounds?\b|\bticks?\b/i);
+    }
+    expect(SEED_SKILLS.bard_tempo.description).toContain('1 s');
+    expect(SEED_SKILLS.bard_encore.description).toContain('1 s');
+    expect(SEED_SKILLS.mage_scorch.description).toContain('2 s');
+    expect(SEED_SKILLS.knight_shield_bash.description).toContain('1 second');
   });
 });
