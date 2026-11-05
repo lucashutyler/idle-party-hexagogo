@@ -72,7 +72,7 @@ function renderSlotArt(slot: string, wrapClass: string, imgClass: string, glyphC
   const label = SLOT_LABELS[slot] ?? slot;
   const glyph = SLOT_GLYPHS[slot] ?? '';
   const hasArt = isAssetLoaded(src) ? ' has-art' : '';
-  return `<span class="${wrapClass}${hasArt}"><span class="${glyphClass}" aria-hidden="true">${glyph}</span>${renderTrackedImg(src, { className: imgClass, alt: label })}</span>`;
+  return `<span class="${wrapClass}${hasArt}"><span class="${glyphClass}" aria-hidden="true">${glyph}</span>${renderTrackedImg(src, { className: imgClass, alt: label, lazy: true })}</span>`;
 }
 
 function renderSlotDogear(slot: string): string {
@@ -117,7 +117,7 @@ export function renderItemIcon(itemId: string, def: ItemDefinition, options?: It
   if (def.iconEmoji) {
     inner = `<span class="item-square-emoji">${escapeHtml(def.iconEmoji)}</span>`;
   } else {
-    inner = `${renderTrackedImg(artworkUrl('item', itemId), { className: 'item-square-img' })}<span class="item-square-initials">${escapeHtml(initials)}</span>`;
+    inner = `${renderTrackedImg(artworkUrl('item', itemId), { className: 'item-square-img', lazy: true })}<span class="item-square-initials">${escapeHtml(initials)}</span>`;
   }
 
   if (options?.showSetIndicator && options.setDefs && getItemSetId(itemId, options.setDefs)) {

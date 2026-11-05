@@ -30,6 +30,7 @@ import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 import { forgetMissingAssets } from './ui/assets';
 import { dismissModals } from './ui/ModalStack';
+import { runStepsWhenIdle, saveDataRequested } from './ui/idleSteps';
 import {
   ACTIVE_SCREEN_KEY,
   DEFAULT_SCREEN,
@@ -53,6 +54,7 @@ const NAV_TABS: readonly NavTabConfig[] = [
   { id: 'settings', label: 'Settings', glyph: '⚙️', railOnly: true },
 ];
 const RETIRED_STORAGE_KEYS = ['chat_messages', 'chat_filters', 'chatPopoutGeometry', 'chatPopoutDesktopMax', 'mapZoom'];
+const PREBUILT_SCREENS = ['items', 'craft'];
 
 export class App {
   private gameClient!: GameClient;
@@ -75,6 +77,7 @@ export class App {
   private masteryToasts?: MasteryToasts;
   private openOptionsDelegate?: (e: MouseEvent) => void;
   private removeShellListeners?: () => void;
+  private cancelPrebuild?: () => void;
 
   constructor() {
     this.screenManager = new ScreenManager();
@@ -400,6 +403,7 @@ export class App {
     this.chatPopout?.close();
     this.removeShellListeners?.();
     this.removeShellListeners = undefined;
+    this.cancelPrebuild?.();
     initNavigation(null);
     this.screenManager.switchTo('suspended');
   }
@@ -551,6 +555,9 @@ export class App {
 
     navigate(sessionStorage.getItem(ACTIVE_SCREEN_KEY) ?? DEFAULT_SCREEN);
     shellReady = true;
+
+    this.cancelPrebuild?.();
+    if (!saveDataRequested()) this.cancelPrebuild = runStepsWhenIdle(this.screenManager.prebuildSteps(PREBUILT_SCREENS));
 
     if (this.openOptionsDelegate) document.removeEventListener('click', this.openOptionsDelegate, true);
     this.openOptionsDelegate = (e: MouseEvent) => {

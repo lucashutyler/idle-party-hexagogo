@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.3',
+    notes: [
+      'The Hero and Craft screens now open faster the first time you visit them.',
+      'Item pictures load when they come into view, so opening a long list uses less data.',
+    ],
+  },
+  {
     version: '2026.11.05.2',
     notes: [
       'A block now stays in place if the blocked player\'s name changes, and what they said before stays hidden.',

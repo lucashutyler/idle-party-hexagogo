@@ -9,6 +9,13 @@
     content-visibility: hidden;
     visibility: hidden;
   }
+  .screen:not(.active)[data-prebuilding] {
+    content-visibility: visible;
+  }
+  /* The first screenful: cards further down still lay out when scrolled to. */
+  .screen:not(.active)[data-prebuilding] :is(.item-cell, .craft-recipe-card):nth-child(-n + 30) {
+    content-visibility: visible;
+  }
 }
 
 /* ── Top HUD ─────────────────────────────────────────────── */

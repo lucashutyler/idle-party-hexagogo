@@ -127,6 +127,50 @@ describe('CraftingScreen', () => {
     t.screen.onDeactivate();
   });
 
+  it('prebuilds while hidden with no subscription and no progress timer', () => {
+    const t = setup({ ore: 3, jobs: ['r-bar'] });
+
+    t.screen.prebuild();
+    expect(t.ings()).toContain('3/2');
+    expect(vi.getTimerCount()).toBe(0);
+
+    t.push({ ore: 1, jobs: ['r-bar'] });
+    expect(t.ings()).toContain('3/2');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the prebuilt nodes on the first visit when nothing changed', () => {
+    const t = setup();
+    t.screen.prebuild();
+    const btn = t.queueBtn();
+
+    t.screen.onActivate();
+
+    expect(t.queueBtn()).toBe(btn);
+    t.screen.onDeactivate();
+  });
+
+  it('shows the latest state on the first visit after a stale prebuild', () => {
+    const t = setup({ ore: 3 });
+    t.screen.prebuild();
+
+    t.push({ ore: 1 });
+    t.screen.onActivate();
+
+    expect(t.ings()).toContain('1/2');
+    t.screen.onDeactivate();
+  });
+
+  it('prebuilds nothing before the first state', () => {
+    document.body.innerHTML = '<div id="craft"></div>';
+    const gameClient = { lastState: null, subscribe: () => () => {} } as unknown as GameClient;
+    const screen = new CraftingScreen('craft', gameClient);
+
+    screen.prebuild();
+
+    expect(document.querySelector('.craft-recipes-section')!.innerHTML).toBe('');
+  });
+
   it('queues and cancels through the delegated listener', () => {
     const t = setup({ ore: 3, jobs: ['r-bar'] });
     t.screen.onActivate();

@@ -14,6 +14,13 @@ On the grid the rail and the docked column absorb the side insets, so `#screen-c
 
 Inactive screens use `content-visibility: hidden` plus `visibility: hidden` rather than `display: none` (under `@supports`). They keep their boxes, so a return visit doesn't rebuild style and layout from nothing, and a `ResizeObserver` on the screen itself still fires.
 
+**Idle prebuild.** A first visit would otherwise pay for everything a hidden screen skips, and much of that is first-use font work later visits don't repeat. So `App.enterGame` hands `ScreenManager.prebuildSteps(['items', 'craft'])` to `runStepsWhenIdle` (`client/src/ui/idleSteps.ts`). Each screen gets two steps, each in its own idle slot: `Screen.prebuild()` renders the latest state without subscribing or sending, then `layOutWhileHidden` forces one layout with `data-prebuilding` set. `shell.css` uses that attribute to lift `content-visibility: hidden` from the screen and `auto` from the first 30 cards of each list. The attribute comes off in the same task, so nothing paints. A hidden screen can't be pressed, so these renders need no `deferWhilePressed`.
+
+- **Once per game session.** Nothing re-arms it, and state pushes don't touch a screen that isn't active. A prebuilt screen can therefore go stale; its first `onActivate` writes only what changed.
+- **Never in a hidden tab.** A step waits for `visibilitychange` and resumes when the tab is shown. `preloadMapCode` uses the same helper, and so should any new idle startup work.
+- **Skipped** for a screen shown in the meantime and when Save-Data is on. Without `requestIdleCallback` (Safari) a 1.5 s timer stands in. Without `content-visibility`, hidden screens are `display: none` and the layout step does nothing.
+- **No data.** A hidden screen must fetch no art, so item squares, slot icons and the Hero portrait use `loading="lazy"`. An image already known to have loaded renders eagerly, so a re-render doesn't flicker.
+
 **Top HUD** (`client/src/ui/TopHud.ts`, constructed in `App.enterGame()` next to `PersistentXpBar`), left to right:
 
 - Class avatar (`artworkUrl('class', …)` with class-icon fallback), level badge and a small gear mark: `data-nav="settings"`.
@@ -373,11 +380,16 @@ Targets, checked at 375x812 under 4x CPU throttle in a browser with software ras
 - **Main chunk**: at most 130 KB gzip. three.js and the map load on demand, and patch notes load when opened. Startup also loads the code chunk shared with the admin page (about 13 KB gzip), which this number leaves out.
 - **Phone chrome**: 139px (HUD 44, XP 3, strip 36, nav 56).
 - **Idle**: no rAF on the shell, Map or Craft. Battle's loop sleeps between fights (see Combat screen → Frame loop).
-- **Tab switch**: no bake, under 50 ms on a return visit. First visits to Hero and Craft are still over, because idle pre-building would need a method on those screens; Map sits just over on software GL.
+- **Tab switch**: no bake, under 50 ms from the tap to the start of the next frame, on first and return visits. A first visit takes about 20 ms on Hero and on Craft (145 and 95 ms before idle prebuild), and 21 and 34 ms if loot changed the state first. Paint can't be done ahead, so that first frame finishes at about 70 ms on Hero and 55 ms on Craft. A tap that beats the idle work, about the first second after entering the game at 4x, pays the old cost. Map's return visit measured 16 ms here, though an earlier run had its frame ending near 60 ms on software GL.
+- **Idle prebuild**: once per session, about 30 and 115 ms for Hero and 35 and 65 ms for Craft, each in its own idle slot. It adds nothing to entering the game. A player who never opens those screens still carries their DOM (about 3,000 nodes and 0.3 MB of JS heap for a mid-game character); hidden screens take no style or layout work after that.
 - **Map**: at most 2 MiB uploaded while exploring, and at most 60 MiB on a 6 MP map. A large map with art on every room still goes over the memory target. Chunked textures wait for a device trace showing a terrain upload over 100 ms.
 - **Animation**: transform and opacity only, with UI transitions at most 200 ms. Game feedback runs longer (party token, follow tween, banners, enrage pulses) but always ends. No `backdrop-filter`. The only infinite animations left are the forecast chip's loading ring and the splash dots.
 - **Chat**: at most 500 messages held and 200 rows in the DOM, appended rather than rebuilt.
 - **Targets**: at least 44px tall or with hit-slop. **Text**: at least 11px.
+
+**The first layout at boot is cold-start cost.** It is the longest task at startup, about 360 ms, for only about 150 layout objects, and the same layout takes about 37 ms on a reload in the same renderer. A trace puts about 60 % of it in shaping text with cold font caches: 13 system font fallback lookups for emoji and symbols, plus mapping font files. `measureCentres` shows up only because it is the first read that forces layout, and the first frame needs that layout anyway, so moving the read saves nothing. Naming emoji fonts in the stack doesn't help (385 ms), and not laying out the 8 nav glyphs saves about 57 ms, but they are the fallback when nav art is missing. This was traced on Windows, whose font path differs from a phone's, so nothing changes until a device trace shows the same.
+
+**Ranks search needs no fix.** At 1000 players a search that replaces most rows is a 32 ms task, then frames of about 62 and 28 ms, after the 120 ms debounce. An earlier "432 to 618 ms" included a fixed 300 ms sleep in the measuring script, and three runs of unchanged code spread from 445 to 597 ms.
 
 **The action ring is the exception to "transform and opacity only".** `.combat-card-ring` is a conic gradient driven by `--act`, so every write repaints. A transform-only half-disc ring stopped the paint but doubled layerize, and under software raster it cost about 15 to 30 % more main-thread time than the stepped conic with 2 to 12 cards on the board. So the ring stays conic and steps at about 10 writes a second (`RING_STEP_MS`, finer on slow timers so they stay smooth). Those figures may not hold on phones with GPU raster.
 

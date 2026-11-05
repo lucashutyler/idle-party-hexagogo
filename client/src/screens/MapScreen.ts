@@ -23,6 +23,7 @@ import { confirmDialog } from '../ui/ConfirmDialog';
 import { escapeHtml } from '../ui/ItemIcon';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { discoveredRoomName } from '../ui/routeSummary';
+import { runStepsWhenIdle, saveDataRequested } from '../ui/idleSteps';
 
 const SHEET_BOTTOM_HEIGHT = 112;
 const SHEET_SIDE_WIDTH = 320;
@@ -241,9 +242,8 @@ export class MapScreen implements Screen {
 
   /** The first tap on Map shouldn't also pay for fetching and parsing three.js. */
   private preloadMapCode(): void {
-    const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
-    if (saveData || typeof window.requestIdleCallback !== 'function') return;
-    window.requestIdleCallback(() => { void import('../ui/ThreeWorldMap').catch(() => {}); });
+    if (saveDataRequested() || typeof window.requestIdleCallback !== 'function') return;
+    runStepsWhenIdle([() => { void import('../ui/ThreeWorldMap').catch(() => {}); }]);
   }
 
   private async createMap(): Promise<void> {

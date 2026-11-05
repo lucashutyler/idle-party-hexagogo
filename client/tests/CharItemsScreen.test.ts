@@ -46,7 +46,7 @@ function makeState(className: string, inventory: Record<string, number>, equipme
   } as unknown as ServerStateMessage;
 }
 
-function setup(className: string, inventory: Record<string, number>, equipment: Record<string, string | null>, social: Social = {}) {
+function setup(className: string, inventory: Record<string, number>, equipment: Record<string, string | null>, social: Social = {}, activate = true) {
   document.body.innerHTML = '<div id="charitems"></div>';
   const listeners = new Set<StateListener>();
   let bestiaryListener = () => {};
@@ -72,7 +72,7 @@ function setup(className: string, inventory: Record<string, number>, equipment: 
   } as unknown as WorldCache;
 
   const screen = new CharItemsScreen('charitems', gameClient as unknown as GameClient, worldCache);
-  screen.onActivate();
+  if (activate) screen.onActivate();
 
   const push = (state: ServerStateMessage) => {
     lastState = state;
@@ -101,6 +101,41 @@ describe('CharItemsScreen', () => {
   afterEach(() => {
     document.dispatchEvent(new PointerEvent('pointercancel'));
     vi.useRealTimers();
+  });
+
+  it('prebuilds while hidden with no subscription and no request to the server', () => {
+    const t = setup('Knight', { old_boot: 1 }, EMPTY, {}, false);
+    const cell = () => document.querySelector('.items-inv-grid .item-square[data-item="old_boot"]');
+    expect(cell()).toBeNull();
+
+    t.screen.prebuild();
+    expect(cell()).toBeTruthy();
+    expect(t.gameClient.requestBestiary).not.toHaveBeenCalled();
+
+    t.push(makeState('Knight', {}, EMPTY));
+    expect(cell()).toBeTruthy();
+  });
+
+  it('keeps the prebuilt nodes on the first visit when nothing changed', () => {
+    const t = setup('Knight', { old_boot: 1 }, EMPTY, {}, false);
+    t.screen.prebuild();
+    const cell = document.querySelector('.items-inv-grid .item-square[data-item="old_boot"]');
+
+    t.screen.onActivate();
+
+    expect(document.querySelector('.items-inv-grid .item-square[data-item="old_boot"]')).toBe(cell);
+    t.screen.onDeactivate();
+  });
+
+  it('shows the latest state on the first visit after a stale prebuild', () => {
+    const t = setup('Knight', { old_boot: 1 }, EMPTY, {}, false);
+    t.screen.prebuild();
+
+    t.push(makeState('Knight', { old_boot: 1, rusty_sword: 1 }, EMPTY));
+    t.screen.onActivate();
+
+    expect(document.querySelector('.items-inv-grid .item-square[data-item="rusty_sword"]')).toBeTruthy();
+    t.screen.onDeactivate();
   });
 
   it('compares a two-handed weapon against both hand items it would replace', () => {

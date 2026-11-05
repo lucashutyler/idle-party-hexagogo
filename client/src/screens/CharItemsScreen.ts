@@ -217,6 +217,11 @@ export class CharItemsScreen implements Screen {
     this.removeStatTooltip();
   }
 
+  prebuild(): void {
+    const state = this.gameClient.lastState;
+    if (state) this.updateFromState(state);
+  }
+
   private buildDOM(): void {
     const savedTab = sessionStorage.getItem(HERO_TAB_KEY);
     if (isHeroTab(savedTab)) this.tab = savedTab;
@@ -543,6 +548,7 @@ export class CharItemsScreen implements Screen {
     const img = renderTrackedImg(artworkUrl('class', className), {
       className: 'hero-portrait-img',
       alt: `${className} portrait`,
+      lazy: true,
     });
     const glyph = CLASS_GLYPHS[className] ?? escapeHtml(className.charAt(0));
     this.portraitEl.innerHTML = `${img}<span class="hero-portrait-glyph" aria-hidden="true">${glyph}</span>`;
