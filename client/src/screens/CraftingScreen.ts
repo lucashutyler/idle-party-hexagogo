@@ -103,7 +103,7 @@ export class CraftingScreen implements Screen {
   }
 
   private updateFromState(state: ServerStateMessage): void {
-    this.lastState = state.crafting ?? null;
+    this.lastState = state.crafting && state.craftingCatalog ? { ...state.crafting, ...state.craftingCatalog } : null;
     this.lastInventory = state.character?.inventory ?? {};
     this.lastEquipment = state.character?.equipment ?? {};
     this.lastItemDefs = state.itemDefinitions ?? {};

@@ -15,6 +15,7 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import type { IncomingMessage } from 'http';
+import { WS_SERVER_OPTIONS } from './wsServerOptions.js';
 import { GameLoop } from './game/GameLoop.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
@@ -243,7 +244,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // --- WebSocket with session auth ---
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer(WS_SERVER_OPTIONS);
 
 /**
  * Parse the session from an HTTP upgrade request.
@@ -1853,6 +1854,11 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     playerManager.removeConnection(ws);
+  });
+
+  // ws expects a listener on every socket. `close` follows.
+  ws.on('error', (err) => {
+    console.warn(`WebSocket error for "${username}": ${err.message}`);
   });
 });
 

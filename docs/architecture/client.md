@@ -59,7 +59,7 @@ Each player has a `PlayerSession` with character state, unlocks, combat log, and
 
 ## GameClient subscriber pattern
 
-`subscribe(cb, { replay? })` / `onCombat(cb)` / `onConnection(cb)` return unsubscribe functions. Multiple screens listen concurrently. Connection is deferred until `connect()` is called (after auth). `lastState` and `lastCombat` cache the newest `state` and `combat` messages.
+`subscribe(cb, { replay? })` / `onCombat(cb)` / `onConnection(cb)` return unsubscribe functions. Multiple screens listen concurrently. Connection is deferred until `connect()` is called (after auth). `lastState` and `lastCombat` cache the newest `state` and `combat` messages. `lastState` is always a whole state, even though a push on the wire usually isn't (see WebSocket data use).
 
 State pushes are rare mid-fight (battle start, result, move, user actions), so a widget that mounts after the first push would otherwise stay blank until the next one. Pass `{ replay: true }` to receive the cached `lastState` immediately on subscribe — the shell widgets (`TopHud`, `PersistentXpBar`, `BottomNav`, `UtilityStrip`, `NotificationCenter`) and `ChatPopout` do. `GameClient` also owns `combatLog` (a `CombatLogBuffer`, see Combat screen) and fills it from every state and combat message whether or not the combat screen is showing, and `sendCombatView(visible)` (deduplicated, re-sent when the socket reopens).
 
@@ -72,6 +72,39 @@ Other per-connection duties:
 - **Recap.** `lastRecap` / `lastRecapItemDefinitions` come from each state; `onRecap(cb)` replays on subscribe, fires once per recap id and with `null` when the recap clears (so other tabs close their modal); `sendAckRecap(id)` drops that id locally even if the server still sends it for a moment.
 
 `sendRaw` returns `false` when the socket isn't open and the message was dropped; `sendMove`, `sendEnterTransition`, `sendSetClass`, `sendAcceptQuest`, `sendTurnInQuest`, `sendEnterDungeon`, `sendShopBuy`, `sendShopSell` and `sendChat` return it so their UI can say so at once (`OFFLINE_NOTICE`, "You're offline — reconnecting. Try again in a moment.") instead of waiting on a reply that will never come. `onServerError` listeners receive `(message, code?, detail?)`; `detail.questId` correlates a `quest_refused` error with the quest that was refused.
+
+## WebSocket data use
+
+Three kinds of message carry almost all the traffic: state pushes (event-driven, up to about one a second while a party walks and wins quickly), the live `combat` stream (up to five a second, only to sockets showing combat, see `combat.md`), and anything triggered by the player. Two measures keep them small on mobile data.
+
+**State pushes leave out what the socket already holds.** `PlayerManager.sendStateToPlayer` builds the whole state as before, then `server/src/game/StatePush.ts` serialises each top-level field once and fingerprints it. For each socket, a field whose fingerprint matches what that socket last received is left out and named in `unchangedFields`. `GameClient` calls `restoreElidedState` before it stores or fans out the message, so `lastState`, every subscriber and `{ replay: true }` see a complete state and nothing downstream knows about this.
+
+- A socket's first push is always whole, because fingerprints are per socket and start empty. That covers reconnects and second tabs. A socket delivers in order and doesn't lose messages while open, so the client's copy can't drift from what the server recorded.
+- Absent means gone. A field neither sent nor named (`shopDefinition` after leaving the shop) disappears from `lastState`, and the server forgets its fingerprint so its return is sent whole.
+- Fields of 64 bytes of JSON or less always go out, since naming one would save nothing.
+- A socket more than 64 KiB behind (`STATE_BACKPRESSURE_BYTES`) skips the push. Nothing is recorded as sent, so a later push carries whatever changed, and the player is retried after `STATE_RETRY_MS` because mid-fight nothing else may push for minutes. This matters with compression on: sends wait for zlib instead of going out at once, so on a saturated server an unbounded queue would grow in memory rather than just running late.
+- No field list to maintain: a new top-level state field takes part automatically. A field only saves anything if its JSON is stable, so keep clocks out of big fields. That's why the recipe list and its item definitions live in `craftingCatalog`, apart from `crafting`, whose `activeProgress.elapsedMs` changes on every push while a job runs.
+- **State objects are shared between pushes.** An unchanged field is the same object in consecutive states, so subscribers must never mutate state; copy before sorting.
+
+**Messages are compressed.** `server/src/wsServerOptions.ts` turns on `perMessageDeflate` at level 3 with `memLevel` 7, and caps inbound messages at 64 KiB because a small compressed frame can inflate to whatever the cap allows.
+
+- Keep context takeover on. Consecutive pushes are nearly identical, so it's what makes small state and combat messages compress at all, and `ws` keeps each socket's deflate context allocated whether or not takeover is on (it resets the context rather than freeing it), so turning it off costs data and saves no memory.
+- `threshold` does nothing here: `ws` only applies it without takeover, so every message is compressed.
+- Don't set a numeric `clientMaxWindowBits`: `ws` then refuses any offer that doesn't name that parameter, and that client silently goes uncompressed.
+- Every socket keeps an `error` listener, as `ws` expects; `close` follows the error, so nothing else needs cleaning up.
+
+**What it adds up to.** One client against the real server on a synthetic world (100 recipes, 40 owned items), counting TCP payload, so TLS and packet headers come on top:
+
+| Bytes per second | Before | Unchanged fields left out | Also compressed |
+| --- | --- | --- | --- |
+| Fresh character on the seed world | 1,932 | about 1,530 | 116 |
+| Large catalogue, fights of about 15 s | 9,596 | about 1,590 | 120 |
+| Large catalogue, fast fights | 48,036 | 3,139 | 199 |
+| Fast fights, a screen without combat | 43,453 | about 2,460 | 134 |
+
+A reconnect pays for one whole state: 71 KB, or about 10.5 KB compressed.
+
+**Cost at the 1000-player soft cap.** Compression alone, replaying recorded streams to 1000 real sockets: about 0.3 MB per socket, and 0.4 to 1.8 cores in total depending on the stream, mostly on the libuv threadpool, with no meaningful added lag. It holds up only while the main thread has headroom. Sends wait for zlib, so past saturation they queue instead of just running late: lag gets several times worse, and memory levels off around 1.2 GB at 1000 sockets thanks to the state-push limit above (about 2.9 GB and climbing without it). What saturates the main thread today is building state, not compression: `getSocialState` looks up every account with a linear scan on every push, and `otherPlayers` and `social.allPlayers` list everyone, so a whole state is about 290 KB at 1000 players and a moving roster is re-sent on most pushes.
 
 ## State-driven re-rendering
 
@@ -215,7 +248,7 @@ Clicking an item opens a popup with full details and equip/unequip/destroy actio
 
 ## Craft screen
 
-`CraftingScreen` is separate stable sections (head, queue, segments, recipes), each written through `setHtml`. A 1 Hz timer runs only while a job runs (`syncProgressTimer`) and fills the bar by `scaleX`. All / Craftable segments, the second with a count; craftable recipes sort first, then missing materials, then level, then class. Blocked reasons are visible text: "Missing materials", "Requires level N", "{class} only", "Queue is full" (the Craftable filter ignores queue fullness). Recipes and the queue show item art, and tapping a card opens the result in `showItemPopup` with the equip comparison.
+`CraftingScreen` is separate stable sections (head, queue, segments, recipes), each written through `setHtml`. It joins `state.crafting` (queue, progress, skill) with `state.craftingCatalog` (recipes and their item definitions). A 1 Hz timer runs only while a job runs (`syncProgressTimer`) and fills the bar by `scaleX`. All / Craftable segments, the second with a count; craftable recipes sort first, then missing materials, then level, then class. Blocked reasons are visible text: "Missing materials", "Requires level N", "{class} only", "Queue is full" (the Craftable filter ignores queue fullness). Recipes and the queue show item art, and tapping a card opens the result in `showItemPopup` with the equip comparison.
 
 ## Chat
 

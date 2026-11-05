@@ -121,7 +121,8 @@ import type {
   SkillContent,
   MailboxEntry,
   CraftQueueState,
-  ClientCraftingState,
+  ClientCraftingCatalog,
+  ClientCraftingProgress,
   EnqueueError,
   NotificationEntry,
   NotificationPreferences,
@@ -758,7 +759,8 @@ export class PlayerSession {
       setDefinitions: setDefs,
       shopDefinition: this.getCurrentShop(),
       henchmanOffers: this.getHenchmanOffers(),
-      crafting: this.getCraftingState(),
+      crafting: this.getCraftingProgress(),
+      craftingCatalog: this.getCraftingCatalog(),
       activeQuests: questBlock.activeQuests,
       completedQuests: questBlock.completedQuests,
       weeklyCompletions: questBlock.weeklyCompletions,
@@ -783,10 +785,9 @@ export class PlayerSession {
 
   // ── Crafting ──────────────────────────────────────
 
-  getCraftingState(now: number = Date.now()): ClientCraftingState | undefined {
+  getCraftingCatalog(): ClientCraftingCatalog | undefined {
     if (!this.character) return undefined;
-    const recipes = this.content.getAllRecipes();
-    const visible = getVisibleRecipes(recipes, this.character.className);
+    const visible = getVisibleRecipes(this.content.getAllRecipes(), this.character.className);
 
     // Collect every item def referenced by visible recipes (ingredients + results), so the
     // client can show readable names even for items the player doesn't own yet.
@@ -801,15 +802,18 @@ export class PlayerSession {
       }
     }
 
+    return { recipes: visible, itemDefs };
+  }
+
+  getCraftingProgress(now: number = Date.now()): ClientCraftingProgress | undefined {
+    if (!this.character) return undefined;
     return {
-      recipes: visible,
       queue: { activeStartedAtMs: this.craftQueue.activeStartedAtMs, jobs: [...this.craftQueue.jobs] },
-      activeProgress: getActiveJobProgress(recipes, this.craftQueue, now),
+      activeProgress: getActiveJobProgress(this.content.getAllRecipes(), this.craftQueue, now),
       skillName: getCraftSkillName(this.character.className),
       skillLevel: this.character.craftLevel,
       skillXp: this.character.craftXp,
       skillXpForNext: xpForCraftLevel(this.character.craftLevel),
-      itemDefs,
     };
   }
 
