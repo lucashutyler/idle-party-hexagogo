@@ -267,7 +267,7 @@ Real-time auto-battle with tick-based damage (1s per tick), HP tracked for both 
 - [x] Per-player game state (independent battle timers, movement, unlocks)
 - [x] Email-based magic link authentication (dev auto-verify, prod via AWS SES)
 - [x] Session cookies (express-session, 30-day expiry, httpOnly)
-- [x] Account system (email + username, username changeable)
+- [x] Account system (email + username)
 - [x] WebSocket auth via session cookie (no WS login messages)
 - [x] Multiple connections per username (same login in multiple tabs stays in sync)
 - [x] Server-side combat log (last 100 entries, streamed to all connections)
