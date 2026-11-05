@@ -708,11 +708,12 @@ describe('ChatPopout sending', () => {
     t.serverError('You aren\'t in that zone', 'chat_refused');
     t.serverError('You aren\'t in that zone', 'chat_refused');
 
-    expect(t.input().value).toContain('first');
-    expect(t.input().value).toContain('second');
+    expect(t.input().value).toBe('first');
+    expect(t.status().textContent).toContain('Not sent: second');
+    expect(t.status().hidden).toBe(false);
   });
 
-  it('keeps a refused text and what was typed since', () => {
+  it('leaves what was typed since alone and holds the refused text until the next send', () => {
     const t = setup();
     t.chat.open();
     t.input().value = 'refused';
@@ -720,8 +721,59 @@ describe('ChatPopout sending', () => {
     t.input().value = 'typed since';
 
     t.serverError('You aren\'t in that zone', 'chat_refused');
+    expect(t.input().value).toBe('typed since');
+    expect(t.status().textContent).toContain('Not sent: refused');
 
-    expect(t.input().value).toBe('refused typed since');
+    t.input().dispatchEvent(new Event('input'));
+    expect(t.status().hidden).toBe(false);
+
+    t.clickSend();
+    expect(t.status().hidden).toBe(true);
+  });
+
+  it('never carries a refused DM into a composer for another audience', () => {
+    const t = setup();
+    t.chat.open();
+    choose(t, 'dm');
+    t.dmTarget().value = 'Nobody';
+    t.input().value = 'a private note';
+    t.clickSend();
+    choose(t, 'global');
+
+    t.serverError('User not found', 'chat_refused');
+    expect(t.input().value).toBe('');
+    expect(t.status().textContent).toContain('Not sent: a private note');
+
+    t.input().value = 'selling swords';
+    t.clickSend();
+    expect(t.gameClient.sendChat).toHaveBeenLastCalledWith('global', '', 'selling swords');
+  });
+
+  it('never carries a refused DM into a composer addressed to someone else', () => {
+    const t = setup();
+    t.chat.open();
+    choose(t, 'dm');
+    t.dmTarget().value = 'Nobody';
+    t.input().value = 'a private note';
+    t.clickSend();
+    t.dmTarget().value = 'Mira';
+
+    t.serverError('User not found', 'chat_refused');
+
+    expect(t.input().value).toBe('');
+    expect(t.status().textContent).toContain('Not sent: a private note');
+  });
+
+  it('never makes the composer longer than a message can be', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'x'.repeat(500);
+    t.clickSend();
+    t.input().value = 'y'.repeat(100);
+
+    t.serverError('You aren\'t in that zone', 'chat_refused');
+
+    expect(t.input().value.length).toBe(100);
   });
 
   it('puts back a send refused well after it went out', () => {

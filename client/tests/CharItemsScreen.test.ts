@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ItemDefinition, ServerStateMessage } from '@idle-party-rpg/shared';
 import { CharItemsScreen } from '../src/screens/CharItemsScreen';
 import { dismissTop } from '../src/ui/ModalStack';
-import { forgetMissingAssets, missingAssetRetryCount } from '../src/ui/assets';
+import { forgetMissingAssets } from '../src/ui/assets';
 import type { GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 
@@ -153,11 +153,23 @@ describe('CharItemsScreen', () => {
 
   it('keeps bag nodes across pushes that resend the same definitions', () => {
     const t = setup('Knight', { old_boot: 1 }, EMPTY);
+    t.push(makeState('Knight', { old_boot: 2 }, EMPTY));
     const cell = document.querySelector('.items-inv-grid .item-square[data-item="old_boot"]');
 
-    t.push({ ...makeState('Knight', { old_boot: 1 }, EMPTY), itemDefinitions: { ...ITEMS } });
+    t.push({ ...makeState('Knight', { old_boot: 2 }, EMPTY), itemDefinitions: { ...ITEMS } });
 
     expect(document.querySelector('.items-inv-grid .item-square[data-item="old_boot"]')).toBe(cell);
+    t.screen.onDeactivate();
+  });
+
+  it('shows a renamed item in the mailbox', () => {
+    const gift = { id: 'g1', itemId: 'old_boot', quantity: 1, fromUsername: 'friend' };
+    const t = setup('Knight', {}, { mainhand: 'rusty_sword' }, { mailbox: [gift] });
+    const state = makeState('Knight', {}, { mainhand: 'rusty_sword' }, { mailbox: [gift] });
+
+    t.push({ ...state, itemDefinitions: { ...ITEMS, old_boot: { ...ITEMS.old_boot, name: 'Worn Boot' } } });
+
+    expect(document.querySelector('.mailbox-item-name')!.textContent).toBe('Worn Boot');
     t.screen.onDeactivate();
   });
 
@@ -183,12 +195,10 @@ describe('CharItemsScreen', () => {
     t.push(makeState('Knight', {}, EMPTY));
 
     forgetMissingAssets();
-    const forgetAgain = missingAssetRetryCount();
     t.screen.onActivate();
 
     expect(portraitImg()).toBeTruthy();
-    forgetMissingAssets();
-    expect(missingAssetRetryCount()).toBe(forgetAgain);
+    expect(portraitImg()!.classList.contains('asset-failed')).toBe(false);
     t.screen.onDeactivate();
   });
 

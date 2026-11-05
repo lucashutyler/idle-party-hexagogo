@@ -109,4 +109,12 @@ describe('clientAcceptsPartialState', () => {
     expect(clientAcceptsPartialState('/')).toBe(false);
     expect(clientAcceptsPartialState(undefined)).toBe(false);
   });
+
+  it.each(['//', '///', '/\\', '?', '%', '//[', '/?%zz', ''])('copes with the request target %s', (target) => {
+    expect(clientAcceptsPartialState(target)).toBe(false);
+  });
+
+  it('finds the parameter on an odd path', () => {
+    expect(clientAcceptsPartialState('//?partialState=1')).toBe(true);
+  });
 });

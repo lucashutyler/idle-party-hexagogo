@@ -162,7 +162,8 @@ export class CraftingScreen implements Screen {
     ], this.filter));
     const recipesHtml = this.renderRecipes(c, this.filter === 'craftable' ? craftable : recipes);
     const recipesKey = withoutArtLoadState(recipesHtml);
-    if (recipesKey !== this.lastRecipesKey) {
+    // A failed image never recovers in place: only a rewrite brings its art back.
+    if (recipesKey !== this.lastRecipesKey || this.recipesEl.querySelector('.asset-failed')) {
       this.lastRecipesKey = recipesKey;
       setHtml(this.recipesEl, recipesHtml);
     }

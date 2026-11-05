@@ -135,7 +135,8 @@ export class ChatPopout {
   private lastPreviewAt = 0;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
   /** Sends awaiting an echo or a refusal, oldest first. The server answers in send order. */
-  private pendingSends: { text: string; target: string; at: number }[] = [];
+  private pendingSends: { text: string; channel: ChatChannelType; target: string; at: number }[] = [];
+  private statusHoldsText = false;
 
   private typing = false;
   private typingExitTimer: ReturnType<typeof setTimeout> | undefined;
@@ -626,41 +627,57 @@ export class ChatPopout {
       this.showStatus('Not connected. Your message wasn\'t sent.');
       return;
     }
-    this.pendingSends.push({ text, target: channel === 'dm' ? target.channelId : '', at: Date.now() });
+    this.pendingSends.push({ text, channel, target: channel === 'dm' ? target.channelId : '', at: Date.now() });
     this.inputEl.value = '';
-    this.clearStatus();
+    this.hideStatus();
     if (this.tab === 'dm' && !this.thread) this.showThread(target.channelId);
   }
 
-  /** A refused send comes back as an error rather than an echo, so the text is put back for another try. */
+  /** A refused send comes back as an error rather than an echo. Its text must never land where it would reach someone else. */
   private handleServerError(message: string, code: ServerErrorCode | undefined): void {
     if (code !== 'chat_refused') return;
     const now = Date.now();
     this.pendingSends = this.pendingSends.filter(pending => now - pending.at <= SEND_REPLY_WINDOW_MS);
     const sent = this.pendingSends.shift();
     if (!sent) return;
-    const typed = this.inputEl.value;
-    this.inputEl.value = typed ? `${sent.text} ${typed}` : sent.text;
-    if (!sent.target) {
-      this.showStatus(message);
-      return;
-    }
+
+    const composerFree = !this.inputEl.value && this.currentChannel() === sent.channel
+      && (sent.channel !== 'dm' || sameUser(this.thread ?? this.dmInput.value.trim(), sent.target));
+    if (composerFree) this.inputEl.value = sent.text;
+
     if (this.tab === 'dm' && this.thread && sameUser(this.thread, sent.target)) {
       this.thread = null;
       this.enterViewDeferred();
     }
-    this.showStatus(`No player is called "${sent.target}".`);
+
+    const reason = sent.target ? `No player is called "${sent.target}".` : message;
+    if (composerFree) this.showStatus(reason);
+    else this.holdTextInStatus(`${reason} Not sent: ${sent.text}`);
   }
 
   private showStatus(text: string): void {
+    this.statusHoldsText = false;
     this.statusEl.textContent = text;
     this.statusEl.hidden = false;
     clearTimeout(this.statusTimer);
     this.statusTimer = setTimeout(() => this.clearStatus(), STATUS_VISIBLE_MS);
   }
 
-  private clearStatus(): void {
+  /** The only copy of a refused message: it stays until the next send. */
+  private holdTextInStatus(text: string): void {
     clearTimeout(this.statusTimer);
+    this.statusHoldsText = true;
+    this.statusEl.textContent = text;
+    this.statusEl.hidden = false;
+  }
+
+  private clearStatus(): void {
+    if (!this.statusHoldsText) this.hideStatus();
+  }
+
+  private hideStatus(): void {
+    clearTimeout(this.statusTimer);
+    this.statusHoldsText = false;
     this.statusEl.hidden = true;
   }
 

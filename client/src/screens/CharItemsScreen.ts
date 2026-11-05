@@ -527,6 +527,7 @@ export class CharItemsScreen implements Screen {
       gold: char.gold,
       xp: char.xp,
       xpNext: char.xpForNextLevel,
+      defs: this.itemDefsVersion,
     });
     if (statKey !== this.lastStatKey) {
       this.lastStatKey = statKey;
@@ -540,13 +541,13 @@ export class CharItemsScreen implements Screen {
 
     this.bestiaryCard.update(char.mastery, this.gameClient.lastBestiary?.entries ?? [], char.level);
 
-    const mailboxKey = JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false, this.lastInventory[e.itemId] ?? 0]));
+    const mailboxKey = this.itemDefsVersion + '|' + JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false, this.lastInventory[e.itemId] ?? 0]));
     if (mailboxKey !== this.lastMailboxKey) {
       this.lastMailboxKey = mailboxKey;
       this.renderMailbox();
     }
 
-    const tradesKey = JSON.stringify(this.lastProposedTrades.map(t => [t.id, t.status, t.lastUpdatedBy, t.initiator.items.length, t.target?.items.length ?? 0]));
+    const tradesKey = this.itemDefsVersion + '|' + JSON.stringify(this.lastProposedTrades.map(t => [t.id, t.status, t.lastUpdatedBy, t.initiator.items.length, t.target?.items.length ?? 0]));
     if (tradesKey !== this.lastTradesKey) {
       this.lastTradesKey = tradesKey;
       this.renderProposedTrades();

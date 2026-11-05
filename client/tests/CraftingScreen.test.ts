@@ -5,6 +5,7 @@ import type { ClientCraftingState, RecipeDefinition, ServerStateMessage } from '
 import { MAX_CRAFT_QUEUE } from '@idle-party-rpg/shared';
 import { CraftingScreen } from '../src/screens/CraftingScreen';
 import { dismissTop } from '../src/ui/ModalStack';
+import { forgetMissingAssets } from '../src/ui/assets';
 import type { GameClient } from '../src/network/GameClient';
 
 type StateListener = (state: ServerStateMessage) => void;
@@ -178,6 +179,28 @@ describe('CraftingScreen', () => {
     t.push({});
 
     expect(t.queueBtn()).toBe(btn);
+    t.screen.onDeactivate();
+  });
+
+  it('rewrites a failed image once its art is known to load', () => {
+    const t = setup();
+    t.screen.onActivate();
+    const url = '/item-artwork/ore.png';
+    const failed = () => document.querySelector(`.craft-recipe-card img[src$="ore.png"]`) as HTMLImageElement;
+    failed().dispatchEvent(new Event('error'));
+    forgetMissingAssets();
+    t.push({});
+    expect(failed().classList.contains('asset-failed')).toBe(true);
+
+    const elsewhere = document.createElement('img');
+    elsewhere.className = 'asset-img';
+    elsewhere.setAttribute('src', url);
+    document.body.appendChild(elsewhere);
+    elsewhere.dispatchEvent(new Event('load'));
+    t.push({});
+
+    expect(failed().classList.contains('asset-failed')).toBe(false);
+    expect(failed().classList.contains('asset-loaded')).toBe(true);
     t.screen.onDeactivate();
   });
 

@@ -7,7 +7,8 @@ const MIN_ELIDED_JSON_LENGTH = 64;
 
 /** A service worker can still serve a bundle that predates partial pushes, and it never asks for them. */
 export function clientAcceptsPartialState(requestUrl: string | undefined): boolean {
-  return new URL(requestUrl ?? '/', 'http://localhost').searchParams.has(PARTIAL_STATE_PARAM);
+  // Not new URL(): it throws on some targets a client can send, and this runs outside any try.
+  return new URLSearchParams(requestUrl?.split('?')[1] ?? '').has(PARTIAL_STATE_PARAM);
 }
 
 export interface PreparedStateField {
