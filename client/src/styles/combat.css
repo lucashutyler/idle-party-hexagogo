@@ -567,6 +567,10 @@
   --art-inset: 5px;
   --lvl-display: inline-flex;
   --tier-display: flex;
+  --lane0: minmax(0, 1fr);
+  --lane1: minmax(0, 1fr);
+  --lane2: minmax(0, 1fr);
+  --lanes: var(--lane0) var(--lane1) var(--lane2);
   position: absolute;
   inset: 0;
   z-index: 3;
@@ -612,8 +616,29 @@
   width: calc(3 * var(--col-w) + 6px);
   height: calc(3 * var(--row-h) + 6px);
   grid-template-columns: repeat(3, var(--col-w));
-  grid-template-rows: repeat(3, var(--row-h));
+  grid-template-rows: var(--lanes);
   gap: 3px;
+}
+/* One strip per grid row, lined up across both sides and meeting in the centre gap. */
+.combat-lanes {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: grid;
+  grid-template-rows: var(--lanes);
+  gap: 3px;
+  pointer-events: none;
+}
+.combat-lanes > span {
+  background: rgba(0, 0, 0, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+.combat-block-party .combat-lanes { right: calc(var(--center-gap) / -2); }
+.combat-block-enemy .combat-lanes { left: calc(var(--center-gap) / -2); }
+/* A lane can be taller than a row, but card art and radius are sized from the row. */
+.combat-block:not([data-roomy]) .combat-card {
+  max-height: var(--row-h);
+  align-self: center;
 }
 .combat-side > [data-grid="0"] { grid-area: 1 / 1; }
 .combat-side > [data-grid="1"] { grid-area: 1 / 2; }
@@ -808,6 +833,16 @@
     flex-direction: column;
     padding: var(--label-gutter) 8px 0;
   }
+  .combat-side {
+    grid-template-columns: var(--lanes);
+    grid-template-rows: repeat(3, var(--row-h));
+  }
+  .combat-lanes {
+    grid-template-columns: var(--lanes);
+    grid-template-rows: none;
+  }
+  .combat-block-party .combat-lanes { top: calc(var(--center-gap) / -2); right: 0; }
+  .combat-block-enemy .combat-lanes { bottom: calc(var(--center-gap) / -2); left: 0; }
   .combat-side > [data-grid="0"] { grid-area: 3 / 1; }
   .combat-side > [data-grid="1"] { grid-area: 2 / 1; }
   .combat-side > [data-grid="2"] { grid-area: 1 / 1; }
@@ -889,26 +924,23 @@
   .combat-stage-grid { --name-display: none; --lvl-display: none; --tier-display: none; }
 }
 
-/* Portrait: columns no unit stands in give their width to the rest, so names read. */
 @container combat-stage ((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) {
-  .combat-block:not([data-roomy]) .combat-side {
-    grid-template-columns: var(--track-row0, minmax(0, 1fr)) var(--track-row1, minmax(0, 1fr)) var(--track-row2, minmax(0, 1fr));
-  }
   .combat-block:not([data-roomy]) .combat-card {
     width: 100%;
     max-width: 420px;
     justify-self: center;
   }
 }
-/* A side of one or two units: its empty tracks collapse (see CombatScreen) and the art takes the room. */
+/* A side of one or two units: its empty depth tracks collapse (see CombatScreen) and the art takes the room. */
 .combat-block[data-roomy] .combat-side {
-  gap: 0;
+  gap: 3px 0;
   grid-template-columns: var(--track-col0) var(--track-col1) var(--track-col2);
-  grid-template-rows: var(--track-row0) var(--track-row1) var(--track-row2);
+  grid-template-rows: var(--lanes);
 }
 @container combat-stage ((aspect-ratio < 1.1) or ((width < 588px) and (aspect-ratio < 1.6))) {
   .combat-block[data-roomy] .combat-side {
-    grid-template-columns: var(--track-row0) var(--track-row1) var(--track-row2);
+    gap: 0 3px;
+    grid-template-columns: var(--lanes);
     grid-template-rows: var(--track-col2) var(--track-col1) var(--track-col0);
   }
 }
@@ -1015,6 +1047,11 @@
     --enemy-body-pad: 3px 8px 3px 3px;
     --name-fs: var(--fs-2xs);
     --art-inset: 4px;
+  }
+}
+@container combat-card (aspect-ratio >= 1.25) and (height < 84px) and (width < 220px) {
+  .combat-block[data-roomy] .combat-card-body {
+    --portrait: clamp(24px, min(100cqh - 12px, 42cqw), 72px);
   }
 }
 

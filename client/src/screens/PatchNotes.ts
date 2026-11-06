@@ -1,6 +1,6 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.11.05.4',
+    version: '2026.11.06.1',
     notes: [
       'Combat is slower and easier to follow. Knights now act about every 3.6 seconds, Archers every 2, Priests every 1.8, and Mages and Bards every 2.5. Enemies slow down too.',
       'Slower classes hit harder to make up for it, and each class\'s cast times now run at its own speed.',
@@ -12,6 +12,12 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
       'A new Priority list in Hero > Skills lets you choose which skill your hero reaches for first, Attack included. Instant skills still fire on their own.',
       'Blocks, automatic heals and counters now fire on their own during recovery, whenever they are charged, and never make you wait. Counters now only ever fire to counter a spell, so they wait quietly in fights with no enemy casters.',
       'Fewer card types: every skill is now an Action, an Instant or a Passive, alongside your Basic attack. Actions use your turn and have a charge and a recovery. Instants fire on their own and only have a charge. Instant skills you equip as actives show what sets them off.',
+    ],
+  },
+  {
+    version: '2026.11.05.4',
+    notes: [
+      'The battle screen now shows which row everyone is in, and both sides line up, so you can see who is facing whom.',
     ],
   },
   {

@@ -10,7 +10,7 @@ import type {
   SkillDefinition,
 } from '@idle-party-rpg/shared';
 import { COMBAT_PACE, paceActionSeconds } from '@idle-party-rpg/shared';
-import { CombatScreen, usedGridTracks } from '../src/screens/CombatScreen';
+import { CombatScreen, laneTracks, usedGridTracks } from '../src/screens/CombatScreen';
 import { formatDuration } from '../src/combat/CombatFormat';
 import { CombatLogBuffer } from '../src/combat/CombatLogBuffer';
 import { dismissTop } from '../src/ui/ModalStack';
@@ -514,10 +514,27 @@ describe('CombatScreen', () => {
       vi.advanceTimersByTime(FRAME_MS * 2);
       const side = block('.combat-enemy-side');
       expect(block('.combat-block-enemy').dataset.roomy).toBe('2');
-      expect(side.style.getPropertyValue('--track-row0')).toBe('minmax(0, 1fr)');
-      expect(side.style.getPropertyValue('--track-row1')).toBe('0');
       expect(side.style.getPropertyValue('--track-col2')).toBe('minmax(0, 1fr)');
       expect(side.style.getPropertyValue('--track-col1')).toBe('0');
+    });
+
+    it('shares its lanes across both sides, so a unit lines up with what it faces', () => {
+      const t = start();
+      const lane = (line: number) => block('.combat-stage-grid').style.getPropertyValue(`--lane${line}`);
+      t.push(fightOf([{ ...GOBLIN, pos: 1 }]));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect([lane(0), lane(1), lane(2)]).toEqual(['minmax(0, 1fr)', 'minmax(0, 1fr)', 'minmax(0, 0.25fr)']);
+
+      const nextFight = { ...snapshot(3, GOBLIN), units: [ALICE, { ...GOBLIN, pos: 8 }] };
+      t.push(withBattle(makeState(3, GOBLIN, []), { combat: nextFight }));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect([lane(0), lane(1), lane(2)]).toEqual(['minmax(0, 0.25fr)', 'minmax(0, 1fr)', 'minmax(0, 1fr)']);
+    });
+
+    it('draws a strip for every lane on both sides', () => {
+      start();
+      expect(document.querySelectorAll('.combat-block-enemy .combat-lanes > span')).toHaveLength(3);
+      expect(document.querySelectorAll('.combat-block-party .combat-lanes > span')).toHaveLength(3);
     });
 
     it('leaves a larger group on the full grid', () => {
@@ -538,6 +555,15 @@ describe('CombatScreen', () => {
     it('works out which tracks a side uses', () => {
       expect(usedGridTracks([1, 4])).toEqual({ rows: [true, true, false], cols: [false, true, false] });
       expect(usedGridTracks([])).toEqual({ rows: [false, false, false], cols: [false, false, false] });
+    });
+
+    it('narrows lanes nobody stands in, and leaves all three even on an empty board', () => {
+      const used = 'minmax(0, 1fr)';
+      const empty = 'minmax(0, 0.25fr)';
+      expect(laneTracks([4])).toEqual([empty, used, empty]);
+      expect(laneTracks([0, 8])).toEqual([used, empty, used]);
+      expect(laneTracks([0, 3, 6])).toEqual([used, used, used]);
+      expect(laneTracks([])).toEqual([used, used, used]);
     });
   });
 
