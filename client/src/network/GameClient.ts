@@ -611,6 +611,10 @@ export class GameClient {
     this.sendRaw({ type: 'unequip_skill', slotIndex });
   }
 
+  sendSetActionOrder(actionOrder: string[]): void {
+    this.sendRaw({ type: 'set_action_order', actionOrder });
+  }
+
   sendSetClass(className: string): boolean {
     return this.sendRaw({ type: 'set_class', className });
   }

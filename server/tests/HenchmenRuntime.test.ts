@@ -3,7 +3,7 @@ import { PlayerManager } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
-import { HexGrid, HexTile, offsetToCube, COMBAT_STEP_MS, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, COMBAT_PACE, COMBAT_STEP_MS, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import type { HenchmanDefinition, WorldTileDefinition, DungeonDefinition, PartyCombatant } from '@idle-party-rpg/shared';
@@ -12,6 +12,7 @@ import WebSocket from 'ws';
 const SHOP_TILE_ID = 'tile-start';
 const DUNGEON_ID = 'test_dungeon';
 const HENCH_ID = 'hench_sellsword';
+const pacedShare = (amount: number, shares = 1): number => Math.ceil((amount * COMBAT_PACE.rewardMultiplier) / shares);
 
 function makeHenchman(over: Partial<HenchmanDefinition> = {}): HenchmanDefinition {
   return {
@@ -201,6 +202,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       handleBattleEnd: (id: string, result: 'victory') => void;
     };
     battles.entries.get(partyId)!.battleTimer.combatState = {
+      pace: COMBAT_PACE,
       players: [],
       monsters: [{ id: 'goblin', name: 'Goblin', xp: 40, currentHp: 0, maxHp: 10, gridPosition: 4, damageType: 'physical' }],
       finished: true,
@@ -215,7 +217,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
 
     winBattle(pm, partyId);
 
-    expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(100);
+    expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(pacedShare(100));
   });
 
   it('splits gold with a hired henchman, whose share is lost', async () => {
@@ -225,7 +227,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
 
     winBattle(pm, partyId);
 
-    expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(50);
+    expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(pacedShare(100, 2));
   });
 
   it('counts a henchman\'s Inspiration toward the party XP bonus', async () => {
@@ -241,8 +243,8 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     const bardBefore = xpOf(bard.pm);
     winBattle(bard.pm, bard.partyId);
 
-    expect(xpOf(plain.pm) - plainBefore).toBe(20);
-    expect(xpOf(bard.pm) - bardBefore).toBe(24);
+    expect(xpOf(plain.pm) - plainBefore).toBe(pacedShare(40, 2));
+    expect(xpOf(bard.pm) - bardBefore).toBe(pacedShare(40 * 1.2, 2));
   });
 
   it('discards a drop that lands on a henchman\'s share', async () => {
@@ -308,8 +310,8 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       if (typeof hired === 'string') throw new Error(hired);
       pm.partyBattles.henchmenChanged(partyId, [hired]);
 
-      expect(session.getGold() - before.gold).toBe(100);
-      expect(xpOf(pm) - before.xp).toBe(40);
+      expect(session.getGold() - before.gold).toBe(pacedShare(100));
+      expect(xpOf(pm) - before.xp).toBe(pacedShare(40));
     });
 
     it('still takes a dismissed hire\'s share and Inspiration for a win it fought', async () => {
@@ -320,8 +322,8 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       expect(typeof pm.dismissHenchman('alice', hired.instanceId)).not.toBe('string');
       pm.partyBattles.henchmenChanged(partyId);
 
-      expect(session.getGold() - before.gold).toBe(50);
-      expect(xpOf(pm) - before.xp).toBe(24);
+      expect(session.getGold() - before.gold).toBe(pacedShare(100, 2));
+      expect(xpOf(pm) - before.xp).toBe(pacedShare(40 * 1.2, 2));
     });
 
     it('pays a replacement\'s win on the outgoing hire, not the incoming one', async () => {
@@ -333,8 +335,8 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       if (typeof incoming === 'string') throw new Error(incoming);
       pm.partyBattles.henchmenChanged(partyId, [incoming]);
 
-      expect(session.getGold() - before.gold).toBe(50);
-      expect(xpOf(pm) - before.xp).toBe(24);
+      expect(session.getGold() - before.gold).toBe(pacedShare(100, 2));
+      expect(xpOf(pm) - before.xp).toBe(pacedShare(40 * 1.2, 2));
     });
 
     it('pays the fighters before a joining player can dilute their win', async () => {
@@ -343,8 +345,8 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
 
       pm.partyBattles.addMember(partyId, 'latecomer');
 
-      expect(session.getGold() - before.gold).toBe(100);
-      expect(xpOf(pm) - before.xp).toBe(40);
+      expect(session.getGold() - before.gold).toBe(pacedShare(100));
+      expect(xpOf(pm) - before.xp).toBe(pacedShare(40));
     });
   });
 
@@ -398,7 +400,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
 
       winBattle(pm, partyId);
 
-      expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(100);
+      expect(pm.getSessionByUsername('alice')!.getGold() - before).toBe(pacedShare(100));
     });
 
     it('drops a waiting hire\'s Inspiration from the dungeon XP bonus', async () => {
@@ -408,7 +410,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
 
       winBattle(pm, partyId);
 
-      expect(xpOf(pm) - before).toBe(40);
+      expect(xpOf(pm) - before).toBe(pacedShare(40));
     });
 
     it('brings hires back after the final floor is cleared', async () => {

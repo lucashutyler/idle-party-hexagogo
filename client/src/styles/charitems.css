@@ -47,6 +47,8 @@
   border-color: var(--stroke-hi);
 }
 .charitems-skill-slot.filled.passive { box-shadow: inset 0 0 0 2px var(--green), inset 0 1px 0 var(--stroke-hi); }
+.charitems-skill-slot.filled.attack { box-shadow: inset 0 0 0 2px var(--card-basic), inset 0 1px 0 var(--stroke-hi); cursor: default; }
+.charitems-skill-slot.filled.attack:active { transform: none; }
 .charitems-skill-slot.filled.active { box-shadow: inset 0 0 0 2px var(--gold), inset 0 1px 0 var(--stroke-hi); }
 .charitems-skill-slot-name {
   font-size: var(--fs-xs);

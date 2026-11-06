@@ -95,13 +95,10 @@
   --rarity-legendary: #ffb21e;
   --rarity-heirloom: #ff5fb7;
 
-  --card-attack: #ff7a45;
-  --card-support: #3ee07a;
-  --card-enchantment: #a86bff;
+  --card-basic: #d6dbf0;
+  --card-action: #ff7a45;
   --card-instant: #37e3ff;
-  --card-interrupt: #ff4d6d;
   --card-passive: #8d99c9;
-  --card-triggered: #ffcb3d;
 
   --art-rendering: auto;
 
@@ -2569,6 +2566,7 @@ button.room-status-chip:active {
   text-transform: capitalize;
 }
 
+.profile-skill-slot.attack .profile-skill-type { color: var(--card-basic); }
 .profile-skill-slot.active .profile-skill-type {
   color: #4fc3f7;
 }

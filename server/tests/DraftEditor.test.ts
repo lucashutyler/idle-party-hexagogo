@@ -497,6 +497,26 @@ describe('DraftEditor', () => {
       expect(seedResult.entries.length).toBeGreaterThan(1);
     });
 
+    it('seedSkills replaces an attack skill held under another id, keeping other custom skills', async () => {
+      const { draftEditor, versionId } = await setupDraft();
+      const knightBasic = { id: 'knight_basic', name: 'Swing', description: '', className: 'Knight', type: 'attack', unlockLevel: 1, sortOrder: -5, charge: 1, recovery: 0 } as const;
+      const custom = { id: 'custom_passive', name: 'Custom', description: '', className: 'Knight', type: 'passive', unlockLevel: 1, sortOrder: 50, passiveEffects: [{ kind: 'bonus_damage', valuePerLevel: 1 }] } as const;
+      const seeded = await draftEditor.seedSkills(versionId);
+      if (!seeded.success) throw new Error('unreachable');
+      const withoutSeedAttack = seeded.skills.filter(s => s.id !== 'knight_attack');
+      await draftEditor.deleteSkill(versionId, 'knight_attack');
+      expect(seeded.skills.length).toBe(withoutSeedAttack.length + 1);
+      expect((await draftEditor.upsertSkill(versionId, knightBasic as never)).success).toBe(true);
+      expect((await draftEditor.upsertSkill(versionId, custom as never)).success).toBe(true);
+
+      const result = await draftEditor.seedSkills(versionId);
+      if (!result.success) throw new Error('unreachable');
+      const ids = result.skills.map(s => s.id);
+      expect(ids).toContain('knight_attack');
+      expect(ids).not.toContain('knight_basic');
+      expect(ids).toContain('custom_passive');
+    });
+
     it('seedSkills overwrites seed-id skills and replaces slot schedules', async () => {
       const { draftEditor, versionId } = await setupDraft();
       const result = await draftEditor.seedSkills(versionId);

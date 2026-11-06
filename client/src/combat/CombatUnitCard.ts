@@ -162,10 +162,10 @@ export class UnitCard {
       this.el.style.setProperty('--shield', shieldFrac.toFixed(4));
     }
 
-    const act = dead || unit.actionTotalMs <= 0 ? 0 : 1 - Math.max(0, Math.min(1, unit.actionMs / unit.actionTotalMs));
+    const act = unitActProgress(unit, dead);
     // The ring repaints on every write, so it moves at about 10 steps a second, however long the action takes.
     const ringStep = Math.min(RING_COARSEST_STEP, RING_STEP_MS / Math.max(1, unit.actionTotalMs));
-    if (Math.abs(act - this.lastAct) >= ringStep || (act === 0 && this.lastAct !== 0)) {
+    if (Math.abs(act - this.lastAct) >= ringStep || (act === 0 && this.lastAct !== 0) || (act === 1 && this.lastAct !== 1)) {
       this.lastAct = act;
       this.ringEl.style.setProperty('--act', act.toFixed(2));
     }
@@ -281,6 +281,13 @@ export class UnitCard {
       this.castFill.style.setProperty('--cast', progress.toFixed(2));
     }
   }
+}
+
+/** A player's timer of 0 means nothing is making them wait. A passive monster's means it never acts. */
+export function unitActProgress(unit: Pick<PlaybackUnit, 'side' | 'actionMs' | 'actionTotalMs'>, dead: boolean): number {
+  if (dead) return 0;
+  if (unit.actionTotalMs <= 0) return unit.side === 'player' ? 1 : 0;
+  return 1 - Math.max(0, Math.min(1, unit.actionMs / unit.actionTotalMs));
 }
 
 /** Reveal on load, try one fallback, hide on failure so the layer below shows through. */

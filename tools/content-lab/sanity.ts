@@ -42,7 +42,7 @@ function seedContent(mod: any): ContentSnapshot {
 function seedLoadout(content: ContentSnapshot, className: ClassName, level: number): (string | null)[] {
   const queues: Record<string, any[]> = { passive: [], active: [] };
   for (const skill of Object.values(content.skills) as any[]) {
-    if (skill.className === className && typeof skill.unlockLevel === 'number' && skill.unlockLevel <= level) queues[skill.type].push(skill);
+    if (skill.className === className && typeof skill.unlockLevel === 'number' && skill.unlockLevel <= level) queues[skill.type]?.push(skill);
   }
   for (const q of Object.values(queues)) q.sort((a, b) => a.unlockLevel - b.unlockLevel || a.id.localeCompare(b.id));
   return content.skillSlotSchedules[className].map(slot => (slot.unlocksAtLevel > level ? null : queues[slot.type].shift()?.id ?? null));
@@ -96,6 +96,7 @@ function chieftainLines(engine: EngineAdapter): SanityLine[] {
     {
       kind: 'dungeon',
       players: starterParty(engine, content, ['Knight', 'Priest', 'Mage'], 6),
+      pace: mod.COMBAT_PACE,
       dungeon,
       monsters: content.monsters,
       encounters: content.encounters,
@@ -112,15 +113,15 @@ function chieftainLines(engine: EngineAdapter): SanityLine[] {
     },
     {
       name: 'new: Goblin Chieftain, K+P+M L6, starter gear, one attempt through the harness',
-      expected: 'winning fights: median 4.9 min (the calibration row states no single-attempt win rate)',
+      expected: 'winning fights: median 6.3 min, on seed charge and recovery',
       measured: `${trio.winPct.toFixed(1)} % wins, median ${(trio.medianSec / 60).toFixed(2)} min`,
-      ok: Math.abs(trio.medianSec / 60 - 4.9) <= 0.5,
+      ok: Math.abs(trio.medianSec / 60 - 6.3) <= 0.6,
     },
     {
       name: 'new: Goblin Chieftain, 5-class party L6, one attempt through the harness',
-      expected: 'winning fights: median 1.5 min',
+      expected: 'winning fights: median 2 min, on seed charge and recovery',
       measured: `${five.winPct.toFixed(1)} % wins, median ${(five.medianSec / 60).toFixed(2)} min`,
-      ok: Math.abs(five.medianSec / 60 - 1.5) <= 0.3,
+      ok: Math.abs(five.medianSec / 60 - 2) <= 0.3,
     },
     {
       name: 'new: Goblin Chieftain, any class solo L6',
@@ -153,9 +154,9 @@ function soloTrashLines(engine: EngineAdapter): SanityLine[] {
     const priest = runSeed(engine, content, starterParty(engine, content, ['Priest'], level), table, TRASH_N, `solo-P-${level}`);
     lines.push({
       name: `new: solo on-level vs 2 trash, L${level}`,
-      expected: 'Knight 100 %, 15-16 s; Priest 100 %, 10-15 s',
+      expected: 'Knight 100 %, 18-23 s; Priest 100 %, 14-25 s, on seed charge and recovery',
       measured: `Knight ${knight.winPct.toFixed(0)} %, ${knight.medianSec.toFixed(1)} s; Priest ${priest.winPct.toFixed(0)} %, ${priest.medianSec.toFixed(1)} s`,
-      ok: knight.winPct === 100 && priest.winPct === 100 && Math.abs(knight.medianSec - 15.5) <= 2.5 && Math.abs(priest.medianSec - 12.5) <= 4,
+      ok: knight.winPct === 100 && priest.winPct === 100 && Math.abs(knight.medianSec - 20.5) <= 2.5 && Math.abs(priest.medianSec - 19.5) <= 5.5,
     });
   }
   return lines;
@@ -168,7 +169,7 @@ function forecastCrossCheck(engine: EngineAdapter, content: ContentSnapshot): Sa
   const seed = seedContent(mod);
   const seedTable = (Object.values(seed.zones) as any[]).find(z => (z.encounterTable?.length ?? 0) >= 2)?.encounterTable ?? table;
   const forecast = mod.runForecast(
-    { kind: 'room', players: trio, table: seedTable, monsters: seed.monsters, encounters: seed.encounters },
+    { kind: 'room', players: trio, table: seedTable, monsters: seed.monsters, encounters: seed.encounters, pace: mod.COMBAT_PACE },
     { key: 'content-lab-cross-check', maxSims: 200, minSims: 200 },
   );
   let wins = 0;

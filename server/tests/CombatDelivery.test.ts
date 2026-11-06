@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import WebSocket from 'ws';
-import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID, STATE_LOG_TAIL, KILL_BEAT_MS } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID, STATE_LOG_TAIL, KILL_BEAT_MS, combatRealElapsedMs, combatRealStepMs } from '@idle-party-rpg/shared';
 import type {
   DungeonDefinition,
   HenchmanDefinition,
@@ -245,7 +245,7 @@ describe('Combat delivery (PartyBattleManager ↔ PlayerManager)', () => {
     it('carries per-hit lines in combat messages and keeps them out of the journal', async () => {
       const pm = newManager(['alice']);
       const ws = await loginKnight(pm, 'alice');
-      vi.advanceTimersByTime(20_000);
+      vi.advanceTimersByTime(60_000);
 
       const session = pm.getSessionByUsername('alice')!;
       const journal = session.getState([]).combatLog;
@@ -375,7 +375,7 @@ describe('Combat delivery (PartyBattleManager ↔ PlayerManager)', () => {
       expect(resync).toEqual({
         type: 'combat',
         battleId: timer.battleId,
-        snapshot: expect.objectContaining({ full: true, battleId: timer.battleId, elapsedMs: timer.currentCombat!.elapsedMs }),
+        snapshot: expect.objectContaining({ full: true, battleId: timer.battleId, elapsedMs: combatRealElapsedMs(timer.currentCombat!) }),
         events: [],
         log: timer.recentLog,
       });
@@ -431,11 +431,12 @@ describe('Combat delivery (PartyBattleManager ↔ PlayerManager)', () => {
       const pm = newManager(['alice']);
       await loginKnight(pm, 'alice');
       const partyId = partyOf(pm, 'alice');
-      vi.advanceTimersByTime(300);
+      const threeSteps = 3 * combatRealStepMs(timerOf(pm, partyId).currentCombat!);
+      vi.advanceTimersByTime(threeSteps);
       const battle = pm.partyBattles.getBattleState(partyId)!;
       expect(battle.combat?.full).toBe(true);
       expect(battle.combat?.battleId).toBe(timerOf(pm, partyId).battleId);
-      expect(battle.duration).toBe(300);
+      expect(battle.duration).toBe(threeSteps);
     });
 
     it('carry only the last STATE_LOG_TAIL journal entries while saves keep the rest', async () => {

@@ -1,10 +1,15 @@
 import type { Screen } from './ScreenManager';
 import { OFFLINE_NOTICE, type GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
-import { ALL_CLASS_NAMES, CLASS_DEFINITIONS, classIconHtml, getSkillsForClass } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, CLASS_DEFINITIONS, COMBAT_PACE, classIconHtml, getSkillsForClass, paceActionSeconds, paceHitDamage, paceKit } from '@idle-party-rpg/shared';
 import type { ClassName } from '@idle-party-rpg/shared';
 import { artworkUrl, renderTrackedImg } from '../ui/assets';
+import { classAttackSkill, snappedSeconds } from '../ui/SkillCardChip';
 import { escapeHtml } from '../ui/ItemIcon';
+
+function oneDecimal(value: number): number {
+  return Math.round(value * 10) / 10;
+}
 
 export const CLASS_CHOICE_TIMEOUT_MS = 10000;
 export const CLASS_NO_REPLY_NOTICE = 'No answer from the server. Please try again.';
@@ -56,6 +61,10 @@ export class ClassSelectScreen implements Screen {
       const def = CLASS_DEFINITIONS[cn];
       const startingSkill = getSkillsForClass(cn, skillContent)
         .find(s => s.type === 'passive' && s.unlockLevel === 1);
+      const attack = classAttackSkill(cn, skillContent.skills);
+      const actionSeconds = attack
+        ? snappedSeconds(attack.charge) + snappedSeconds(attack.recovery)
+        : paceActionSeconds(COMBAT_PACE, cn);
       const art = renderTrackedImg(artworkUrl('class', cn), { className: 'class-card-img', alt: '' });
 
       return `
@@ -69,7 +78,8 @@ export class ClassSelectScreen implements Screen {
             <div class="class-card-desc">${escapeHtml(def.description)}</div>
             <div class="class-card-stats">
               <span>${def.baseHp} HP, +${def.hpPerLevel} a level</span>
-              <span>${def.baseDamage} ${escapeHtml(def.damageType)} damage, +${def.damagePerLevel} a level</span>
+              <span>${paceHitDamage(COMBAT_PACE, cn, def.baseDamage)} ${escapeHtml(def.damageType)} damage, +${oneDecimal(def.damagePerLevel * paceKit(COMBAT_PACE, cn))} a level</span>
+              <span>Acts every ${oneDecimal(actionSeconds)} seconds</span>
             </div>
             ${startingSkill ? `<div class="class-card-passive">${escapeHtml(startingSkill.name)}: ${escapeHtml(startingSkill.description)}</div>` : ''}
           </div>

@@ -1,9 +1,15 @@
-import type { PassiveEffectKind, SkillDefinition, SkillCardType } from '@idle-party-rpg/shared';
+import type { PassiveEffectKind, SkillDefinition, SkillCardType, SkillId } from '@idle-party-rpg/shared';
 import {
+  COMBAT_PACE,
+  findAttackSkill,
+  isTimedSkill,
+  paceEngineMs,
+  paceRealMs,
   SKILL_CARD_TYPE_INFO,
   SKILL_TRIGGER_INFO,
   getSkillCardType,
   getSkillTrigger,
+  paceSkillSeconds,
   skillRatingMitigation,
 } from '@idle-party-rpg/shared';
 
@@ -15,6 +21,9 @@ const RATING_KIND_LABELS: Partial<Record<PassiveEffectKind, string>> = {
 export interface SkillCardSummary {
   cardType: SkillCardType;
   cooldown: string | null;
+  /** Skills with charge and recovery only; `cooldown` is null on them, and `recovery` on an instant. */
+  charge: string | null;
+  recovery: string | null;
   castTime: string | null;
   trigger: string | null;
   triggerDescription: string | null;
@@ -26,23 +35,40 @@ export function formatSeconds(seconds: number): string {
   return `${rounded}s`;
 }
 
-export function summarizeSkillCard(skill: SkillDefinition): SkillCardSummary {
+/** The class's Attack card, if it has one the engine plays: an attack skill with neither timing field is ignored. */
+export function classAttackSkill(className: string, skills: Record<SkillId, SkillDefinition>): SkillDefinition | undefined {
+  const attack = findAttackSkill(className, skills);
+  return attack && isTimedSkill(attack) ? attack : undefined;
+}
+
+/** Real seconds a charge or recovery of `seconds` plays for, one decimal: it snaps to the engine's step grid. */
+export function snappedSeconds(seconds: number | undefined): number {
+  const realMs = paceRealMs(COMBAT_PACE, paceEngineMs(COMBAT_PACE, seconds ?? 0));
+  return Math.round(realMs / 100) / 10;
+}
+
+/** `ownerClass` matters for a granted skill, which runs at its wearer's pace rather than its home class's. */
+export function summarizeSkillCard(skill: SkillDefinition, ownerClass: string = skill.className): SkillCardSummary {
   const isActive = skill.type === 'active';
   const trigger = getSkillTrigger(skill);
   const castTime = isActive && skill.castTime && skill.castTime > 0 ? skill.castTime : 0;
+  const real = (seconds: number): string => formatSeconds(paceSkillSeconds(COMBAT_PACE, skill, ownerClass, seconds));
+  const timed = skill.type !== 'passive' && isTimedSkill(skill);
   return {
     cardType: getSkillCardType(skill),
-    cooldown: isActive ? `CD ${formatSeconds(skill.cooldown ?? 1)}` : null,
-    castTime: castTime > 0 ? `Cast ${formatSeconds(castTime)}` : null,
+    cooldown: isActive && !timed ? `CD ${real(skill.cooldown ?? 1)}` : null,
+    charge: timed ? `Charge ${formatSeconds(snappedSeconds(skill.charge))}` : null,
+    recovery: timed && !trigger ? `Recovery ${formatSeconds(snappedSeconds(skill.recovery))}` : null,
+    castTime: castTime > 0 ? `Cast ${real(castTime)}` : null,
     trigger: trigger ? SKILL_TRIGGER_INFO[trigger].label : null,
     triggerDescription: trigger ? SKILL_TRIGGER_INFO[trigger].description : null,
   };
 }
 
-/** Cooldown, cast time and trigger as display fragments, in that order, omitting absent ones. */
+/** Cooldown or charge and recovery, cast time and trigger as display fragments, in that order, omitting absent ones. */
 export function skillMetaParts(skill: SkillDefinition): string[] {
   const s = summarizeSkillCard(skill);
-  return [s.cooldown, s.castTime, s.trigger ? `Trigger: ${s.trigger}` : null]
+  return [s.cooldown, s.charge, s.recovery, s.castTime, s.trigger ? `Trigger: ${s.trigger}` : null]
     .filter((p): p is string => p !== null);
 }
 
@@ -64,10 +90,10 @@ export function renderSkillCardChip(skill: SkillDefinition): string {
     + `<span class="skill-card-chip-icon" aria-hidden="true">${info.icon}</span>${label}</span>`;
 }
 
-/** Chip plus a `CD · Cast · Trigger` line; the trigger's description rides along as a tooltip. */
-export function renderSkillCardMeta(skill: SkillDefinition): string {
-  const s = summarizeSkillCard(skill);
-  const timing = [s.cooldown, s.castTime].filter((p): p is string => p !== null)
+/** Chip plus a `CD · Cast · Trigger` or `Charge · Recovery · Cast · Trigger` line; the trigger's description rides along as a tooltip. */
+export function renderSkillCardMeta(skill: SkillDefinition, ownerClass?: string): string {
+  const s = summarizeSkillCard(skill, ownerClass);
+  const timing = [s.cooldown, s.charge, s.recovery, s.castTime].filter((p): p is string => p !== null)
     .map(p => `<span class="skill-card-meta-part">${p}</span>`).join('');
   const trigger = s.trigger
     ? `<span class="skill-card-meta-trigger" title="${escapeAttr(s.triggerDescription ?? '')}"><span class="skill-card-meta-trigger-prefix">Trigger: </span>${s.trigger}</span>`

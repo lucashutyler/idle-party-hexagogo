@@ -510,6 +510,19 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'set_action_order') {
+        const session = playerManager.getSessionByUsername(username);
+        if (!session) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
+          return;
+        }
+        if (!session.handleSetActionOrder(msg.actionOrder)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot set skill priority' }));
+        }
+        playerManager.sendStateToParty(username);
+        return;
+      }
+
       if (msg.type === 'set_class' && typeof msg.className === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) {

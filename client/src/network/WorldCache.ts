@@ -1,6 +1,9 @@
 import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, getSlotSchedule } from '@idle-party-rpg/shared';
 import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, ShopSummary, SkillDefinition, SkillSlot, SkillContent, ClassName } from '@idle-party-rpg/shared';
 
+/** Without the server's catalog there is no telling whether this world has Attack skills, so none are shown. */
+const FALLBACK_SKILLS = Object.fromEntries(Object.entries(SEED_SKILLS).filter(([, skill]) => skill.type !== 'attack'));
+
 /**
  * Client-side cache for world data.
  * Loaded once from GET /api/world on login.
@@ -26,7 +29,8 @@ export class WorldCache {
 
   /** Skill catalog + per-class slot schedules. Defaults to the built-in seed
    *  catalog so skill UIs never crash before /api/skills loads (or if it fails). */
-  private skillContent: SkillContent = { skills: SEED_SKILLS, slotSchedules: SEED_SKILL_SLOT_SCHEDULES };
+  private skillContent: SkillContent = { skills: FALLBACK_SKILLS, slotSchedules: SEED_SKILL_SLOT_SCHEDULES };
+  private serverSkillCatalog = false;
 
   /** Bumped on every successful loadWorld — screens include this in their
    *  re-render keys so content deploys refresh cached skill/world renders. */
@@ -118,9 +122,10 @@ export class WorldCache {
           slotSchedules: Record<string, SkillSlot[]>;
         };
         this.skillContent = {
-          skills: skillData.skills ?? SEED_SKILLS,
+          skills: skillData.skills ?? FALLBACK_SKILLS,
           slotSchedules: skillData.slotSchedules ?? SEED_SKILL_SLOT_SCHEDULES,
         };
+        this.serverSkillCatalog = !!skillData.skills;
       } catch (err) {
         console.warn('[WorldCache] Failed to parse skills response — using built-in skill catalog', err);
       }
@@ -268,6 +273,10 @@ export class WorldCache {
   }
 
   /** Skill catalog + slot schedules in the shape the shared helpers expect. */
+  hasServerSkillCatalog(): boolean {
+    return this.serverSkillCatalog;
+  }
+
   getSkillContent(): SkillContent {
     return this.skillContent;
   }

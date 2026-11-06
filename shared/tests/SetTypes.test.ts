@@ -412,9 +412,9 @@ describe('Combat integration — set bonuses are applied', () => {
 });
 
 describe('getSetBonusText cooldown reduction', () => {
-  it('shows the reduction in seconds', () => {
-    expect(getSetBonusText({ cooldownReduction: 1 })).toBe('-1s Active CD');
-    expect(getSetBonusText({ cooldownReduction: 1.5, damagePercent: 15 })).toBe('-1.5s Active CD, +15% Damage');
+  it('states the reduction in real seconds of skill charge', () => {
+    expect(getSetBonusText({ cooldownReduction: 1 })).toBe('-1.8s skill charge');
+    expect(getSetBonusText({ cooldownReduction: 1.5, damagePercent: 15 })).toBe('-2.7s skill charge, +15% Damage');
   });
 });
 
@@ -495,6 +495,15 @@ describe('computeGrantedSkillIds', () => {
     const equip = withEquipped({ mainhand: 'bash_sword', ring: 'echo_ring', head: 'gs_a', chest: 'gs_b' });
     const granted = computeGrantedSkillIds(equip, items, { dup_set: dupSet }, 'Knight');
     expect(granted.sort()).toEqual(['bard_rally', 'knight_bash']);
+  });
+
+  it('getSetBonusText words cooldown reduction for the content it is given', () => {
+    const legacy = { a: { cooldown: 4 } as SkillDefinition };
+    const timed = { ...legacy, b: { charge: 4 } as SkillDefinition };
+    expect(getSetBonusText({ cooldownReduction: 1 }, legacy)).toBe('-1 action Active CD');
+    expect(getSetBonusText({ cooldownReduction: 2 }, legacy)).toBe('-2 actions Active CD');
+    expect(getSetBonusText({ cooldownReduction: 1 }, timed)).toBe('-1.8s skill charge');
+    expect(getSetBonusText({ cooldownReduction: 1 })).toBe('-1.8s skill charge');
   });
 
   it('getSetBonusText renders granted skills with resolved names', () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { COMBAT_PACE } from '../../shared/src/systems/CombatPace.js';
 import type { ReworkConfig } from './rework.js';
 import { DEFAULT_REWORK_CONFIG, chooseInterval, classifyTier, collectMonsterUsage, isAlreadyReworked, renderChangelog, rework, staleDescriptions } from './rework.js';
 import { enrageTimes, fit, goldRollOptions } from './fit.js';
@@ -190,12 +191,81 @@ describe('rework', () => {
     expect(content.skills.knight_guard.passiveEffects[0].valuePerLevel).toBe(2);
   });
 
+  it('converts an action-counted warm-up the seed has none for, once', () => {
+    const before = snapshot();
+    Object.assign(before.skills.mage_blast, { warmup: 3 });
+    Object.assign(before.skills.mage_zap, { warmup: 0 });
+    before.skills.triggered = { id: 'triggered', className: 'Mage', type: 'active', unlockLevel: 9, cooldown: 4, warmup: 2, trigger: 'enemy_cast', activeEffects: [] };
+    const seed = {
+      mage_blast: { id: 'mage_blast', charge: 11.5, recovery: 1 },
+      mage_zap: { id: 'mage_zap', charge: 2, recovery: 0.5 },
+      triggered: { id: 'triggered', charge: 3.5 },
+    };
+    const { content } = rework(before, CONFIG, seed);
+    expect(content.skills.mage_blast.warmup).toBe(6.8);
+    expect(content.skills.mage_zap.warmup).toBe(0);
+    expect(content.skills.triggered.warmup).toBe(3.6);
+
+    const migrated = snapshot();
+    Object.assign(migrated.skills.mage_blast, { charge: 5, warmup: 3 });
+    delete migrated.skills.mage_blast.cooldown;
+    expect(rework(migrated, CONFIG, seed).content.skills.mage_blast.warmup).toBe(3);
+  });
+
+  it('leaves an instant with no recovery: the seed charge wins, else its recovery moves to the charge', () => {
+    const before = snapshot();
+    Object.assign(before.skills.mage_blast, { trigger: 'enemy_cast', charge: 9, recovery: 0.9 });
+    before.skills.custom_block = { id: 'custom_block', className: 'Mage', type: 'active', unlockLevel: 9, charge: 3, recovery: 0.5, activeEffects: [{ kind: 'brace_reflect', reflectPercent: 0.1 }] };
+    before.skills.custom_strike = { id: 'custom_strike', className: 'Mage', type: 'active', unlockLevel: 9, charge: 3, recovery: 0.5, activeEffects: [{ kind: 'damage_percent', damagePercent: 1 }] };
+    const { content } = rework(before, CONFIG, { mage_blast: { id: 'mage_blast', charge: 9.9, trigger: 'enemy_cast' } });
+    expect(content.skills.mage_blast.charge).toBe(9.9);
+    expect(content.skills.mage_blast.recovery).toBeUndefined();
+    expect(content.skills.custom_block.charge).toBe(3.5);
+    expect(content.skills.custom_block.recovery).toBeUndefined();
+    expect(content.skills.custom_strike).toMatchObject({ charge: 3, recovery: 0.5 });
+  });
+
+  it('adds no seed Attack to a class that already has an attack skill', () => {
+    const before = snapshot();
+    before.skills.mage_basic = { id: 'mage_basic', className: 'Mage', type: 'attack', unlockLevel: 1, charge: 1, recovery: 0 };
+    const seed = {
+      mage_attack: { id: 'mage_attack', className: 'Mage', type: 'attack', unlockLevel: 1, charge: 2, recovery: 0.5 },
+      knight_attack: { id: 'knight_attack', className: 'Knight', type: 'attack', unlockLevel: 1, charge: 3.6, recovery: 0 },
+    };
+    const { content } = rework(before, CONFIG, seed);
+    expect(content.skills.mage_attack).toBeUndefined();
+    expect(content.skills.mage_basic).toBeDefined();
+    expect(content.skills.knight_attack).toBeDefined();
+  });
+
   it('patches skills and reworks an auto-replacing trap', () => {
     const before = snapshot();
     expect(isAutoReplacingTrap(before.skills.mage_zap)).toBe(true);
     const { content } = rework(before, { ...CONFIG, skills: { mage_zap: { cooldown: 2, effects: { 0: { damagePercent: 1.2 } } } } }, SEED_SKILLS);
     expect(isAutoReplacingTrap(content.skills.mage_zap)).toBe(false);
     expect(content.skills.mage_zap.activeEffects[0].damagePercent).toBe(1.2);
+  });
+
+  it('adopts seed charge and recovery in place of a cooldown, and adds the seed Attack skills', () => {
+    const seed = {
+      mage_blast: { id: 'mage_blast', charge: 11.5, recovery: 1, castTime: 1, warmup: 3 },
+      mage_attack: { id: 'mage_attack', name: 'Attack', className: 'Mage', type: 'attack', unlockLevel: 1, sortOrder: -1, charge: 2, recovery: 0.5 },
+    };
+    const { content } = rework(snapshot(), CONFIG, seed);
+    expect(content.skills.mage_blast).toMatchObject({ charge: 11.5, recovery: 1, castTime: 1, warmup: 3 });
+    expect(content.skills.mage_blast.cooldown).toBeUndefined();
+    expect(content.skills.bm_blast).toMatchObject({ charge: 11.5, recovery: 1 });
+    expect(content.skills.bm_blast.cooldown).toBeUndefined();
+    expect(content.skills.mage_attack).toMatchObject({ type: 'attack', charge: 2, recovery: 0.5 });
+    expect(content.skills.mage_zap.cooldown).toBe(1);
+  });
+
+  it('judges a timed skill a trap only when it never leaves its owner a gap to attack in', () => {
+    const zap = { type: 'active', activeEffects: [{ kind: 'damage_percent', damagePercent: 0.75 }] };
+    expect(isAutoReplacingTrap({ ...zap, cooldown: 1 })).toBe(true);
+    expect(isAutoReplacingTrap({ ...zap, charge: 0, recovery: 2 })).toBe(true);
+    expect(isAutoReplacingTrap({ ...zap, recovery: 2 })).toBe(true);
+    expect(isAutoReplacingTrap({ ...zap, charge: 2, recovery: 0.5 })).toBe(false);
   });
 
   it('puts checkpoints only on boss floors that can field a boss', () => {
@@ -350,7 +420,7 @@ describe('enrageTimes', () => {
     const place: Place = { key: 'room|t4', kind: 'room', regionId: 'm2', monsterIds: ['capstone'], old: new Map([['K+hires', cell('K+hires', 230)]]), cur: new Map([['K+P', cell('K+P', 200)], ['K', cell('K', 900)]]) };
     const times = enrageTimes([place], [], reworked(), 'capstone');
     expect(times[0]).toBe(200);
-    expect(times[1]).toBeCloseTo(100);
+    expect(times[1]).toBeCloseTo(100 * COMBAT_PACE.clock);
   });
 });
 
@@ -420,7 +490,7 @@ describe('fit', () => {
     const oldB = baseline([cell('a', 'K+P', 230, 100, 100)], 2000);
     const cur = baseline([cell('a', 'K+P', 50, 100, 100)], 1800);
     fit(config, live, live, oldB, cur, ['hp'], options);
-    expect(config.hp.regions!.m2).toBeCloseTo(2, 1);
+    expect(config.hp.regions!.m2).toBeCloseTo(2 * COMBAT_PACE.clock, 1);
   });
 
   it('fits whole-number gold rolls against the old rate', () => {
@@ -441,6 +511,6 @@ describe('fit', () => {
     const oldB = baseline([cell('a', 'K+P+M', 58, 100, 100)], 2000);
     const cur = baseline([cell('a', 'K+P+M', 28, 100, 100)], 2000);
     fit(config, live, live, oldB, cur, ['drop'], options);
-    expect(config.drop.monsters!.wolf).toBeCloseTo(0.5, 2);
+    expect(config.drop.monsters!.wolf).toBeCloseTo(0.5 / COMBAT_PACE.rewardMultiplier, 2);
   });
 });

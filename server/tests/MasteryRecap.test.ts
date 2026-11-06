@@ -13,6 +13,7 @@ import {
   offsetToCube,
   DEFAULT_MAP_ID,
   AWAY_MIN_MS,
+  COMBAT_PACE,
   createMonsterInstance,
   createPartyCombatState,
   xpForNextLevel,
@@ -28,6 +29,8 @@ const MONSTERS: Record<string, MonsterDefinition> = {
   brute: { id: 'brute', name: 'Brute', hp: 10, damage: 1, damageType: 'physical', xp: 100, goldMin: 0, goldMax: 0 },
   chief: { id: 'chief', name: 'Chief', hp: 30, damage: 1, damageType: 'physical', xp: 50, goldMin: 0, goldMax: 0, tier: 'boss' },
 };
+
+const pacedXp = (amount: number, shares = 1): number => Math.ceil((amount * COMBAT_PACE.rewardMultiplier) / shares);
 
 function createFakeContentStore(): ContentStore {
   const startTile: WorldTileDefinition = { id: 'tile-start', mapId: DEFAULT_MAP_ID, col: 0, row: 0, type: 'plains', zone: 'meadow', name: 'Old Mill' };
@@ -141,7 +144,7 @@ describe('Kill mastery', () => {
     win(['goblin', 'wall', 'goblin'], [0]);
 
     expect(session.getMonsterKills()).toEqual({ goblin: 1 });
-    expect(session.toSaveData().character!.xp).toBe(xp0 + 5 + 7 + 5);
+    expect(session.toSaveData().character!.xp).toBe(xp0 + pacedXp(5 + 7 + 5));
   });
 
   it('logs a rank-up, feeds ranks into combat and fills the bestiary', async () => {
@@ -193,11 +196,11 @@ describe('XP by level con', () => {
     const [alice0, bob0] = [xpOf(session), xpOf(bob)];
 
     win(['elder']);
-    expect(xpOf(session) - alice0).toBe(Math.ceil((100 * 0.25) / 2));
-    expect(xpOf(bob) - bob0).toBe(50);
+    expect(xpOf(session) - alice0).toBe(pacedXp(100 * 0.25, 2));
+    expect(xpOf(bob) - bob0).toBe(pacedXp(100, 2));
 
     win(['brute']);
-    expect(xpOf(session) - alice0).toBe(Math.ceil((100 * 0.25) / 2) + 50);
+    expect(xpOf(session) - alice0).toBe(pacedXp(100 * 0.25, 2) + pacedXp(100, 2));
   });
 
   it('pays easy monsters three quarters', async () => {
@@ -205,7 +208,7 @@ describe('XP by level con', () => {
     setLevel(session, 5);
     const xp0 = session.toSaveData().character!.xp;
     win(['elder']);
-    expect(session.toSaveData().character!.xp - xp0).toBe(75);
+    expect(session.toSaveData().character!.xp - xp0).toBe(pacedXp(100 * 0.75));
   });
 });
 
@@ -228,7 +231,7 @@ describe('While you were away', () => {
 
     expect(session.isAway()).toBe(false);
     const recap = lastState(ws)?.awayRecap;
-    expect(recap).toMatchObject({ battles: 3, wins: 2, losses: 1, xp: 10, kills: 2, levelFrom: 1, levelTo: 1 });
+    expect(recap).toMatchObject({ battles: 3, wins: 2, losses: 1, xp: 2 * pacedXp(5), kills: 2, levelFrom: 1, levelTo: 1 });
     expect(recap!.until).toBeDefined();
 
     expect(pm.handleAckRecap('alice', 'not-it')).toBe(false);

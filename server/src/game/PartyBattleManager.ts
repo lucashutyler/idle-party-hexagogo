@@ -2,8 +2,11 @@ import {
   HexTile,
   offsetToCube,
   cubeToOffset,
+  COMBAT_PACE,
+  combatRealElapsedMs,
   createPartyCombatState,
   createEncounter,
+  paceDropChance,
   getZone,
   rollDrops,
   validateDungeonEntry,
@@ -11,6 +14,7 @@ import {
   rewardAppliesToClass,
   validateRoomEntry,
   buildHenchmanCombatant,
+  findAttackSkill,
   henchmanDisplayNames,
   buildClientCombatSnapshot,
   floorCheckpoints,
@@ -753,7 +757,8 @@ export class PartyBattleManager {
       .filter((h): h is { hired: HiredHenchman; def: HenchmanDefinition } => !!h.def);
     const names = henchmanDisplayNames(hires.map(h => h.def.name), players.map(p => p.username));
     hires.forEach(({ hired, def }, i) => {
-      players.push(buildHenchmanCombatant(def, hired, id => this.content.getSkill(id), names[i]));
+      const attack = findAttackSkill(def.className, this.content.getAllSkills());
+      players.push(buildHenchmanCombatant(def, hired, id => this.content.getSkill(id), names[i], attack));
     });
     return players;
   }
@@ -826,7 +831,7 @@ export class PartyBattleManager {
 
     if (!entry) {
       // Fallback: empty combat
-      return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones, allEncounters));
+      return createPartyCombatState([], createEncounter(undefined, allMonsters, allZones, allEncounters), { pace: COMBAT_PACE });
     }
 
     const floor = this.currentDungeonFloor(entry);
@@ -838,7 +843,7 @@ export class PartyBattleManager {
     const run = entry.dungeonRun;
     if (run && floor) {
       const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, floor.encounterTable);
-      return createPartyCombatState(players, monsters, this.checkpointSetup(run, floor));
+      return createPartyCombatState(players, monsters, { ...this.checkpointSetup(run, floor), pace: COMBAT_PACE });
     }
 
     const tileId = entry.serverParty.tile.id;
@@ -847,7 +852,7 @@ export class PartyBattleManager {
     entry.battle = { battleId: entry.battleTimer.battleId, tileId, entryId: rolled.entryId, players };
     entry.recentSkips = [...entry.recentSkips, false].slice(-AUTO_RETREAT_SKIP_WINDOW);
 
-    return createPartyCombatState(players, rolled.monsters);
+    return createPartyCombatState(players, rolled.monsters, { pace: COMBAT_PACE });
   }
 
   /** Boss-phase setup for a checkpoint floor, resuming at the run's (clamped) checkpoint. */
@@ -897,7 +902,7 @@ export class PartyBattleManager {
       }
     }
     const xpMultiplier = this.partyXpMultiplier(entry);
-    const splitGold = Math.ceil(totalGold / shareCount);
+    const splitGold = Math.ceil((totalGold * COMBAT_PACE.rewardMultiplier) / shareCount);
 
     // Roll item drops once and give each to one random share; a henchman's share is discarded.
     const memberItems: Map<string, string[]> = new Map();
@@ -911,7 +916,7 @@ export class PartyBattleManager {
       for (const m of combat.monsters) {
         const def = this.content.getMonster(m.id);
         if (def?.drops) {
-          const dropped = rollDrops(def.drops);
+          const dropped = rollDrops(def.drops.map(drop => ({ ...drop, chance: paceDropChance(COMBAT_PACE, drop.chance) })));
           for (const itemId of dropped) {
             const itemDef = this.content.getItem(itemId);
             let eligible = shares;
@@ -936,7 +941,7 @@ export class PartyBattleManager {
       if (!session) continue;
       const baseXp = combat ? this.memberXp(combat.monsters, session.getLevel()) : FALLBACK_VICTORY_XP;
       session.handleVictory(
-        { xp: Math.ceil((baseXp * xpMultiplier) / shareCount), gold: splitGold, items: memberItems.get(username)! },
+        { xp: Math.ceil((baseXp * xpMultiplier * COMBAT_PACE.rewardMultiplier) / shareCount), gold: splitGold, items: memberItems.get(username)! },
         entry.serverParty.tile,
         // Dungeon floors aren't overworld tiles — don't unlock neighbours mid-run.
         { unlockTiles: !entry.dungeonRun, kills: killed.length },
@@ -1080,6 +1085,7 @@ export class PartyBattleManager {
           encounters: this.content.getAllEncounters(),
           fallbackTable,
           start,
+          pace: COMBAT_PACE,
         },
         opts: { partyKey: pk },
       }),
@@ -1107,6 +1113,7 @@ export class PartyBattleManager {
         table: this.resolveEncounterTable(tileId),
         monsters: this.content.getAllMonsters(),
         encounters: this.content.getAllEncounters(),
+        pace: COMBAT_PACE,
       },
       opts: { partyKey: pk },
     };
@@ -1193,7 +1200,7 @@ export class PartyBattleManager {
     }
     entry.pendingRetreat = pending;
     const reason = pending.target ? 'Your party falls back to a safer room.' : 'Your party slips away from the fight.';
-    timer.scheduleRetreat(battle.battleId, RUN_AVAILABLE_MS - combat.elapsedMs, reason);
+    timer.scheduleRetreat(battle.battleId, RUN_AVAILABLE_MS - combatRealElapsedMs(combat), reason);
   }
 
   /**
@@ -1754,7 +1761,7 @@ export class PartyBattleManager {
       .filter((m): m is CombatMonster => !!m);
     if (bosses.length === 0) return;
 
-    const fraction = floorCheckpointRewardFraction(floor);
+    const fraction = floorCheckpointRewardFraction(floor) * COMBAT_PACE.rewardMultiplier;
     const members = [...entry.members];
     const xpMultiplier = this.partyXpMultiplier(entry);
     let averageGold = 0;

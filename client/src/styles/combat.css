@@ -1742,10 +1742,6 @@
   opacity: 0;
   backface-visibility: hidden;
 }
-.combat-reaction-card.interrupt {
-  --rc: var(--card-interrupt);
-  --rc-rgb: 255, 77, 109;
-}
 .combat-reaction-icon {
   width: calc(24px * var(--fx-scale));
   height: calc(24px * var(--fx-scale));
@@ -1954,7 +1950,7 @@
   display: none;
 }
 .combat-skill {
-  --tc: var(--card-attack);
+  --tc: var(--card-action);
   --tc-rgb: 255, 122, 69;
   container: skillcard / inline-size;
   position: relative;
@@ -1990,13 +1986,10 @@
   background: var(--tc);
   box-shadow: 0 0 8px var(--tc);
 }
-.combat-skill[data-card-type="attack"], .combat-skill-passive[data-card-type="attack"] { --tc: var(--card-attack); --tc-rgb: 255, 122, 69; }
-.combat-skill[data-card-type="support"], .combat-skill-passive[data-card-type="support"] { --tc: var(--card-support); --tc-rgb: 62, 224, 122; }
-.combat-skill[data-card-type="enchantment"], .combat-skill-passive[data-card-type="enchantment"] { --tc: var(--card-enchantment); --tc-rgb: 168, 107, 255; }
+.combat-skill[data-card-type="basic"], .combat-skill-passive[data-card-type="basic"] { --tc: var(--card-basic); --tc-rgb: 214, 219, 240; }
+.combat-skill[data-card-type="action"], .combat-skill-passive[data-card-type="action"] { --tc: var(--card-action); --tc-rgb: 255, 122, 69; }
 .combat-skill[data-card-type="instant"], .combat-skill-passive[data-card-type="instant"] { --tc: var(--card-instant); --tc-rgb: 55, 227, 255; }
-.combat-skill[data-card-type="interrupt"], .combat-skill-passive[data-card-type="interrupt"] { --tc: var(--card-interrupt); --tc-rgb: 255, 77, 109; }
 .combat-skill[data-card-type="passive"], .combat-skill-passive[data-card-type="passive"] { --tc: var(--card-passive); --tc-rgb: 141, 153, 201; }
-.combat-skill[data-card-type="triggered"], .combat-skill-passive[data-card-type="triggered"] { --tc: var(--card-triggered); --tc-rgb: 255, 203, 61; }
 
 .combat-skill-top,
 .combat-skill-bottom {
@@ -2079,6 +2072,12 @@
   box-shadow: inset 0 1px 0 var(--stroke-hi), inset 0 0 0 1px var(--tc), 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(var(--tc-rgb), 0.55);
 }
 .combat-skill[data-state="ready"] .combat-skill-status { color: var(--green); }
+.combat-skill.locked {
+  opacity: 0.72;
+  filter: saturate(0.6);
+  box-shadow: inset 0 1px 0 var(--stroke-hi), 0 3px 0 rgba(0, 0, 0, 0.45);
+}
+.combat-skill.locked .combat-skill-status { color: var(--text-2); }
 .combat-skill[data-state="held"] {
   opacity: 0.62;
   filter: saturate(0.55);
@@ -2212,7 +2211,7 @@
 }
 
 .combat-skill-popover {
-  --tc: var(--card-attack);
+  --tc: var(--card-action);
   --tc-rgb: 255, 122, 69;
   position: absolute;
   z-index: 40;
@@ -2227,12 +2226,8 @@
   line-height: 1.4;
   animation: combat-pop 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.combat-skill-popover[data-card-type="support"] { --tc: var(--card-support); --tc-rgb: 62, 224, 122; }
-.combat-skill-popover[data-card-type="enchantment"] { --tc: var(--card-enchantment); --tc-rgb: 168, 107, 255; }
 .combat-skill-popover[data-card-type="instant"] { --tc: var(--card-instant); --tc-rgb: 55, 227, 255; }
-.combat-skill-popover[data-card-type="interrupt"] { --tc: var(--card-interrupt); --tc-rgb: 255, 77, 109; }
 .combat-skill-popover[data-card-type="passive"] { --tc: var(--card-passive); --tc-rgb: 141, 153, 201; }
-.combat-skill-popover[data-card-type="triggered"] { --tc: var(--card-triggered); --tc-rgb: 255, 203, 61; }
 .combat-skill-popover-head {
   display: flex;
   align-items: center;

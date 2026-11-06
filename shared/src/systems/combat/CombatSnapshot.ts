@@ -1,4 +1,4 @@
-import { getSkillCardType, getSkillTrigger } from '../SkillTypes.js';
+import { getSkillCardType, getSkillTrigger, isTimedSkill } from '../SkillTypes.js';
 import type { SkillDefinition } from '../SkillTypes.js';
 import type {
   ClientCombatBossPhases,
@@ -17,21 +17,32 @@ import type {
   PartyCombatant,
   PartyCombatState,
 } from '../CombatEngine.js';
-import { STATUS_PULSE_MS } from '../CombatTiming.js';
-import { isUsableActive, skillCastTimeMs } from './CombatPassives.js';
-import { isInterruptFlashMode, wouldHaveEffect } from './CombatNeeds.js';
+import { paceRealMs } from '../CombatPace.js';
+import { MIN_COOLDOWN_MS, STATUS_PULSE_MS } from '../CombatTiming.js';
+import {
+  actionTimeMs,
+  baseCooldownMs,
+  baseCycleMs,
+  isUsableActive,
+  playerCastMs,
+  skillChargeMs,
+  skillRecoveryMs,
+  useCooldownMs,
+} from './CombatPassives.js';
+import { nextActionWaitMs, wouldHaveEffect } from './CombatNeeds.js';
 
-/** Client view of a combat. `full` adds the static fields (names, ids, skill metadata). */
+type RealMs = (engineMs: number) => number;
+
+/** Client view of a combat, in real milliseconds. `full` adds the static fields (names, ids, skill metadata). */
 export function buildClientCombatSnapshot(state: PartyCombatState, battleId: number, full: boolean): ClientCombatSnapshot {
-  let flashMode: boolean | undefined;
-  const isFlash = (): boolean => flashMode ??= isInterruptFlashMode(state);
+  const real: RealMs = ms => paceRealMs(state.pace, ms);
   const units: ClientCombatUnit[] = [
-    ...state.players.map(p => playerUnit(state, p, full, isFlash)),
-    ...state.monsters.map(m => monsterUnit(m, full)),
+    ...state.players.map(p => playerUnit(state, p, full, real)),
+    ...state.monsters.map(m => monsterUnit(m, full, real)),
   ];
   const snapshot: ClientCombatSnapshot = {
     battleId,
-    elapsedMs: state.elapsedMs,
+    elapsedMs: real(state.elapsedMs),
     full,
     finished: state.finished,
     result: state.result,
@@ -56,31 +67,38 @@ function playerUnit(
   state: PartyCombatState,
   player: PartyCombatant,
   full: boolean,
-  isFlash: () => boolean,
+  real: RealMs,
 ): ClientCombatUnit {
   const stunned = player.currentHp > 0 && player.stunRemainingMs > 0;
+  const actionMs = player.attack ? nextActionWaitMs(state, player) : Math.max(0, player.actionRemainingMs);
+  // Display-only, and kept: the ring must run down from a raised total, not restart at every snapshot.
+  if (player.attack) player.actionTotalMs = Math.max(player.actionTotalMs, actionMs);
   const unit: ClientCombatUnit = {
     side: 'player',
     pos: player.gridPosition,
     hp: player.currentHp,
     maxHp: player.maxHp,
-    actionMs: Math.max(0, player.actionRemainingMs),
-    actionTotalMs: player.actionTotalMs,
+    actionMs: real(actionMs),
+    actionTotalMs: real(player.actionTotalMs),
   };
   if (player.damageShield > 0) unit.shield = player.damageShield;
   if (stunned) {
-    unit.stunMs = player.stunRemainingMs;
-    unit.stunTotalMs = player.stunTotalMs;
+    unit.stunMs = real(player.stunRemainingMs);
+    unit.stunTotalMs = real(player.stunTotalMs);
   }
-  if (player.cast) unit.cast = castView(player.cast, stunned);
-  const statuses = player.currentHp > 0 ? playerStatuses(state, player) : [];
+  if (player.recoveryRemainingMs > 0) {
+    unit.recoveryMs = real(player.recoveryRemainingMs);
+    unit.recoveryTotalMs = real(player.recoveryTotalMs);
+  }
+  if (player.cast) unit.cast = castView(player.cast, stunned, real);
+  const statuses = player.currentHp > 0 ? playerStatuses(state, player, real) : [];
   if (statuses.length > 0) unit.statuses = statuses;
-  if (!player.isHenchman) unit.skills = skillViews(state, player, full, isFlash);
+  if (!player.isHenchman) unit.skills = skillViews(state, player, full, real);
 
   if (full) {
     unit.name = player.username;
     unit.level = player.level;
-    unit.actionIntervalMs = player.actionIntervalMs;
+    unit.actionIntervalMs = real(player.actionIntervalMs);
     if (player.isHenchman) {
       unit.henchman = true;
     } else {
@@ -93,25 +111,25 @@ function playerUnit(
   return unit;
 }
 
-function monsterUnit(monster: CombatMonster, full: boolean): ClientCombatUnit {
+function monsterUnit(monster: CombatMonster, full: boolean, real: RealMs): ClientCombatUnit {
   const unit: ClientCombatUnit = {
     side: 'monster',
     pos: monster.gridPosition,
     hp: monster.currentHp,
     maxHp: monster.maxHp,
-    actionMs: Math.max(0, monster.actionRemainingMs),
-    actionTotalMs: monster.actionTotalMs,
+    actionMs: real(Math.max(0, monster.actionRemainingMs)),
+    actionTotalMs: real(monster.actionTotalMs),
   };
   if (monster.currentHp > 0 && monster.stunRemainingMs > 0) {
-    unit.stunMs = monster.stunRemainingMs;
-    unit.stunTotalMs = monster.stunTotalMs;
+    unit.stunMs = real(monster.stunRemainingMs);
+    unit.stunTotalMs = real(monster.stunTotalMs);
   }
-  if (monster.cast) unit.cast = castView(monster.cast, false);
-  const statuses = monster.currentHp > 0 ? monsterStatuses(monster) : [];
+  if (monster.cast) unit.cast = castView(monster.cast, false, real);
+  const statuses = monster.currentHp > 0 ? monsterStatuses(monster, real) : [];
   if (statuses.length > 0) unit.statuses = statuses;
   if (monster.enrageState) {
     const { atMs, stacks, stepMs, stepPercent, maxStacks } = monster.enrageState;
-    unit.enrage = { atMs, stacks, stepMs, stepPercent, maxStacks };
+    unit.enrage = { atMs: real(atMs), stacks, stepMs: real(stepMs), stepPercent, maxStacks };
   }
 
   if (full) {
@@ -120,19 +138,19 @@ function monsterUnit(monster: CombatMonster, full: boolean): ClientCombatUnit {
     unit.level = monster.level ?? 1;
     unit.levelSource = monster.levelSource ?? (monster.level === undefined ? 'derived' : 'authored');
     unit.tier = monster.tier ?? 'trash';
-    if (!monster.passive) unit.actionIntervalMs = monster.actionIntervalMs;
+    if (!monster.passive) unit.actionIntervalMs = real(monster.actionIntervalMs);
     if (monster.passive) unit.passive = true;
     if (monster.description) unit.description = monster.description;
   }
   return unit;
 }
 
-function castView(cast: CombatCast, paused: boolean): ClientCombatCast {
+function castView(cast: CombatCast, paused: boolean, real: RealMs): ClientCombatCast {
   const view: ClientCombatCast = {
     skill: cast.skillName,
     skillId: cast.skillId,
-    totalMs: cast.totalMs,
-    remainingMs: Math.max(0, cast.remainingMs),
+    totalMs: real(cast.totalMs),
+    remainingMs: real(Math.max(0, cast.remainingMs)),
   };
   if (cast.target) view.target = cast.target;
   if (paused) view.paused = true;
@@ -143,7 +161,7 @@ function skillViews(
   state: PartyCombatState,
   player: PartyCombatant,
   full: boolean,
-  isFlash: () => boolean,
+  real: RealMs,
 ): ClientCombatSkill[] {
   const views: ClientCombatSkill[] = [];
   for (const skill of player.equippedSkills) {
@@ -153,35 +171,72 @@ function skillViews(
     let skillState: ClientCombatSkill['state'];
     if (player.cast?.skillId === skill.id) skillState = 'casting';
     else if (remainingMs > 0) skillState = 'cooldown';
-    else if (trigger && !(trigger === 'enemy_cast' && isFlash())) skillState = 'armed';
+    else if (trigger) skillState = 'armed';
     else if (!wouldHaveEffect(player, skill, state)) skillState = 'held';
     else skillState = 'ready';
 
     const view: ClientCombatSkill = {
       id: skill.id,
-      remainingMs,
-      cooldownMs: player.skillCooldownTotals[skill.id] ?? 0,
+      remainingMs: real(remainingMs),
+      cooldownMs: real(player.skillCooldownTotals[skill.id] ?? 0),
       state: skillState,
     };
     if (full) {
       view.name = skill.name;
       view.cardType = getSkillCardType(skill);
       if (trigger) view.trigger = trigger;
-      view.castTimeMs = skillCastTimeMs(skill);
+      view.castTimeMs = real(playerCastMs(player, skill));
+      view.baseCooldownMs = real(isTimedSkill(skill)
+        ? baseCycleMs(state.pace, player, skill)
+        : actionTimeMs(player, skill, Math.max(MIN_COOLDOWN_MS, baseCooldownMs(skill))));
+      view.useCooldownMs = real(useCooldownMs(state.pace, player, skill, state.players));
+      addTimedFields(state, skill, view, real);
     }
     views.push(view);
   }
+  if (player.attack) views.push(attackView(state, player, player.attack, full, real));
   return views;
+}
+
+function attackView(
+  state: PartyCombatState,
+  player: PartyCombatant,
+  attack: SkillDefinition,
+  full: boolean,
+  real: RealMs,
+): ClientCombatSkill {
+  const remainingMs = player.skillCooldowns[attack.id] ?? 0;
+  const view: ClientCombatSkill = {
+    id: attack.id,
+    remainingMs: real(remainingMs),
+    cooldownMs: real(player.skillCooldownTotals[attack.id] ?? 0),
+    state: remainingMs > 0 ? 'cooldown' : 'ready',
+  };
+  if (full) {
+    view.name = attack.name;
+    view.cardType = getSkillCardType(attack);
+    view.castTimeMs = 0;
+    view.baseCooldownMs = real(baseCycleMs(state.pace, player, attack));
+    view.useCooldownMs = real(useCooldownMs(state.pace, player, attack, state.players));
+    addTimedFields(state, attack, view, real);
+  }
+  return view;
+}
+
+function addTimedFields(state: PartyCombatState, skill: SkillDefinition, view: ClientCombatSkill, real: RealMs): void {
+  if (!isTimedSkill(skill)) return;
+  view.chargeMs = real(skillChargeMs(state.pace, skill));
+  view.recoveryMs = real(skillRecoveryMs(state.pace, skill));
 }
 
 function pulseRemainingMs(ticksRemaining: number, pulseRemaining: number): number {
   return Math.max(0, (ticksRemaining - 1) * STATUS_PULSE_MS + Math.max(0, pulseRemaining));
 }
 
-function dotStatuses(dots: DotEffect[], pulseRemaining: number): ClientCombatStatus[] {
+function dotStatuses(dots: DotEffect[], pulseRemaining: number, real: RealMs): ClientCombatStatus[] {
   const grouped = new Map<string, ClientCombatStatus>();
   for (const dot of dots) {
-    const remaining = dot.permanent ? undefined : pulseRemainingMs(dot.ticksRemaining, pulseRemaining);
+    const remaining = dot.permanent ? undefined : real(pulseRemainingMs(dot.ticksRemaining, pulseRemaining));
     const existing = grouped.get(dot.name);
     if (existing) {
       existing.stacks = (existing.stacks ?? 1) + 1;
@@ -197,10 +252,10 @@ function dotStatuses(dots: DotEffect[], pulseRemaining: number): ClientCombatSta
   return [...grouped.values()];
 }
 
-function hotStatuses(hots: HotEffect[], pulseRemaining: number): ClientCombatStatus[] {
+function hotStatuses(hots: HotEffect[], pulseRemaining: number, real: RealMs): ClientCombatStatus[] {
   const grouped = new Map<string, ClientCombatStatus>();
   for (const hot of hots) {
-    const remaining = pulseRemainingMs(hot.ticksRemaining, pulseRemaining);
+    const remaining = real(pulseRemainingMs(hot.ticksRemaining, pulseRemaining));
     const existing = grouped.get(hot.name);
     if (existing) {
       existing.stacks = (existing.stacks ?? 1) + 1;
@@ -212,52 +267,52 @@ function hotStatuses(hots: HotEffect[], pulseRemaining: number): ClientCombatSta
   return [...grouped.values()];
 }
 
-function debuffStatuses(debuffs: CombatDebuff[]): ClientCombatStatus[] {
+function debuffStatuses(debuffs: CombatDebuff[], real: RealMs): ClientCombatStatus[] {
   const grouped = new Map<string, ClientCombatStatus>();
   for (const debuff of debuffs) {
     const key = `${debuff.type}:${debuff.name ?? ''}`;
     const existing = grouped.get(key);
     if (existing) {
       existing.stacks = (existing.stacks ?? 1) + 1;
-      existing.remainingMs = Math.max(existing.remainingMs ?? 0, debuff.remainingMs);
+      existing.remainingMs = Math.max(existing.remainingMs ?? 0, real(debuff.remainingMs));
     } else {
       grouped.set(key, {
         kind: debuff.type === 'scorch' ? 'scorch' : 'debuff',
         name: debuff.name ?? debuff.type,
-        remainingMs: debuff.remainingMs,
+        remainingMs: real(debuff.remainingMs),
       });
     }
   }
   return [...grouped.values()];
 }
 
-function playerStatuses(state: PartyCombatState, player: PartyCombatant): ClientCombatStatus[] {
+function playerStatuses(state: PartyCombatState, player: PartyCombatant, real: RealMs): ClientCombatStatus[] {
   const statuses = [
-    ...dotStatuses(player.dots, player.pulseRemainingMs),
-    ...hotStatuses(player.hots, player.pulseRemainingMs),
-    ...debuffStatuses(player.debuffs),
+    ...dotStatuses(player.dots, player.pulseRemainingMs, real),
+    ...hotStatuses(player.hots, player.pulseRemainingMs, real),
+    ...debuffStatuses(player.debuffs, real),
   ];
   for (const buff of state.partyBuffs) {
     const status: ClientCombatStatus = { kind: 'buff', name: buff.name };
-    if (buff.stacks > 1) status.stacks = buff.stacks;
+    if (buff.stacks > 1) status.stacks = Math.round(buff.stacks);
     statuses.push(status);
   }
   return statuses;
 }
 
-function monsterStatuses(monster: CombatMonster): ClientCombatStatus[] {
+function monsterStatuses(monster: CombatMonster, real: RealMs): ClientCombatStatus[] {
   const statuses = [
-    ...dotStatuses(monster.dots, monster.pulseRemainingMs),
-    ...debuffStatuses(monster.debuffs),
+    ...dotStatuses(monster.dots, monster.pulseRemainingMs, real),
+    ...debuffStatuses(monster.debuffs, real),
   ];
   for (const buff of monster.buffs) {
     const status: ClientCombatStatus = { kind: 'buff', name: buff.name ?? buff.type };
-    if (buff.remainingMs >= 0) status.remainingMs = buff.remainingMs;
+    if (buff.remainingMs >= 0) status.remainingMs = real(buff.remainingMs);
     statuses.push(status);
   }
   if (monster.sunderMark && monster.sunderMark.stacks > 0) {
     const status: ClientCombatStatus = { kind: 'mark', name: monster.sunderMark.name ?? 'Sunder' };
-    if (monster.sunderMark.stacks > 1) status.stacks = monster.sunderMark.stacks;
+    if (monster.sunderMark.stacks > 1) status.stacks = Math.round(monster.sunderMark.stacks);
     statuses.push(status);
   }
   if (monster.chaosActive) statuses.push({ kind: 'chaos', name: monster.chaosName ?? 'Chaos' });

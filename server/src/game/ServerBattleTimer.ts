@@ -6,6 +6,8 @@ import {
   COMBAT_SNAPSHOT_MS,
   KILL_BEAT_MS,
   RUN_AVAILABLE_MS,
+  combatRealElapsedMs,
+  combatRealStepMs,
   processCombatStep,
 } from '@idle-party-rpg/shared';
 import type {
@@ -171,7 +173,7 @@ export class ServerBattleTimer {
 
   canEscape(): boolean {
     const combat = this.combatState;
-    return !!combat && !combat.finished && combat.elapsedMs >= RUN_AVAILABLE_MS;
+    return !!combat && !combat.finished && combatRealElapsedMs(combat) >= RUN_AVAILABLE_MS;
   }
 
   /** Escape the current battle — skip rewards, move like defeat (only to discovered rooms). */
@@ -197,11 +199,11 @@ export class ServerBattleTimer {
    */
   retreat(battleId: number, reason: string): boolean {
     const combat = this.combatState;
-    if (!combat || !this.isLive || !this.isFighting(battleId) || combat.elapsedMs < RUN_AVAILABLE_MS) return false;
+    if (!combat || !this.isLive || !this.isFighting(battleId) || combatRealElapsedMs(combat) < RUN_AVAILABLE_MS) return false;
     this.clearTimers();
     combat.finished = true;
     combat.result = 'retreat';
-    this.pendingEvents.push({ id: combat.nextEventId++, t: combat.elapsedMs, kind: 'battle_end', result: 'retreat' });
+    this.pendingEvents.push({ id: combat.nextEventId++, t: combatRealElapsedMs(combat), kind: 'battle_end', result: 'retreat' });
     this.pendingLog.push(reason);
     try {
       this.onRetreat?.(battleId);
@@ -224,7 +226,7 @@ export class ServerBattleTimer {
       this.retreatTimeout = undefined;
       const combat = this.combatState;
       if (!combat || !this.isFighting(battleId)) return;
-      const wait = RUN_AVAILABLE_MS - combat.elapsedMs;
+      const wait = RUN_AVAILABLE_MS - combatRealElapsedMs(combat);
       if (wait > 0) this.scheduleRetreat(battleId, Math.max(COMBAT_STEP_MS, wait), reason);
       else this.retreat(battleId, reason);
     }), Math.max(0, delayMs));
@@ -300,7 +302,7 @@ export class ServerBattleTimer {
     this.setState('battle');
     this.flush('full');
 
-    this.stepInterval = setInterval(() => this.guard(() => this.step()), COMBAT_STEP_MS);
+    this.stepInterval = setInterval(() => this.guard(() => this.step()), combatRealStepMs(this.combatState));
   }
 
   private step(): void {
@@ -308,7 +310,8 @@ export class ServerBattleTimer {
     if (!combat || combat.finished) return;
 
     const tick = processCombatStep(combat, COMBAT_STEP_MS);
-    this.battleDuration = combat.elapsedMs;
+    const elapsed = combatRealElapsedMs(combat);
+    this.battleDuration = elapsed;
     if (tick.events.length > 0) this.pendingEvents.push(...tick.events);
     if (tick.logEntries.length > 0) this.pendingLog.push(...tick.logEntries);
     this.reportPhase(combat);
@@ -321,12 +324,13 @@ export class ServerBattleTimer {
       return;
     }
 
-    if (combat.elapsedMs - this.lastFlushMs < COMBAT_SEND_MS) return;
-    const snapshotDue = combat.elapsedMs - this.lastSnapshotMs >= COMBAT_SNAPSHOT_MS;
+    // The nearest step to COMBAT_SEND_MS: rounding up would hold events past the client's playback delay.
+    if (elapsed - this.lastFlushMs + combatRealStepMs(combat) / 2 < COMBAT_SEND_MS) return;
+    const snapshotDue = elapsed - this.lastSnapshotMs >= COMBAT_SNAPSHOT_MS;
     if (snapshotDue || this.pendingEvents.length > 0 || this.pendingLog.length > 0) {
       this.flush(snapshotDue ? 'dynamic' : null);
     } else {
-      this.lastFlushMs = combat.elapsedMs;
+      this.lastFlushMs = elapsed;
     }
   }
 
@@ -352,8 +356,9 @@ export class ServerBattleTimer {
       this.liveLog.push(...log);
       if (this.liveLog.length > LIVE_LOG_RING_SIZE) this.liveLog.splice(0, this.liveLog.length - LIVE_LOG_RING_SIZE);
     }
-    this.lastFlushMs = combat.elapsedMs;
-    if (snapshot) this.lastSnapshotMs = combat.elapsedMs;
+    const elapsed = combatRealElapsedMs(combat);
+    this.lastFlushMs = elapsed;
+    if (snapshot) this.lastSnapshotMs = elapsed;
     this.onCombatFlush?.({ battleId: this.currentBattleId, combat, events, log, snapshot });
   }
 

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { buildClientCombatSnapshot, createPartyCombatState } from '../src/systems/CombatEngine';
 import type { PartyCombatState } from '../src/systems/CombatEngine';
 import type { ClientCombatUnit } from '../src/systems/CombatEvents';
-import { SEED_SKILLS } from '../src/systems/SkillTypes';
+import { LEGACY_SEED_SKILLS } from './legacySeedSkills';
 import { createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes';
 import {
   activeSkill,
@@ -26,9 +26,9 @@ function party(): PartyCombatState {
   return createPartyCombatState([
     makePlayer('K', 2, {
       className: 'Knight',
-      skills: [SEED_SKILLS.knight_guard, SEED_SKILLS.knight_bash, SEED_SKILLS.knight_intercept, SEED_SKILLS.knight_dispel],
+      skills: [LEGACY_SEED_SKILLS.knight_guard, LEGACY_SEED_SKILLS.knight_bash, LEGACY_SEED_SKILLS.knight_intercept, LEGACY_SEED_SKILLS.knight_dispel],
     }),
-    makePlayer('Grim the Bold', 5, { className: 'Knight', isHenchman: true, skills: [SEED_SKILLS.knight_bash] }),
+    makePlayer('Grim the Bold', 5, { className: 'Knight', isHenchman: true, skills: [LEGACY_SEED_SKILLS.knight_bash] }),
   ], [
     createMonsterInstance({ ...SEED_MONSTERS.goblin, description: 'A goblin.' }, 0),
     createMonsterInstance(SEED_MONSTERS.stone_wall, 3),
@@ -45,9 +45,9 @@ describe('buildClientCombatSnapshot', () => {
       side: 'player', pos: 2, hp: 1000, maxHp: 1000, actionMs: 1000, actionTotalMs: 1000, actionIntervalMs: 1000,
       name: 'K', level: 1, className: 'Knight', passives: ['knight_guard'],
       skills: [
-        { id: 'knight_bash', remainingMs: 1000, cooldownMs: 1000, state: 'cooldown', name: 'Bash', cardType: 'attack', castTimeMs: 0 },
-        { id: 'knight_intercept', remainingMs: 0, cooldownMs: 0, state: 'armed', name: 'Intercept', cardType: 'instant', trigger: 'ally_targeted', castTimeMs: 0 },
-        { id: 'knight_dispel', remainingMs: 4000, cooldownMs: 4000, state: 'cooldown', name: 'Dispel', cardType: 'interrupt', trigger: 'enemy_cast', castTimeMs: 0 },
+        { id: 'knight_bash', remainingMs: 1000, cooldownMs: 1000, state: 'cooldown', name: 'Bash', cardType: 'action', castTimeMs: 0, baseCooldownMs: 2000, useCooldownMs: 2000 },
+        { id: 'knight_intercept', remainingMs: 0, cooldownMs: 0, state: 'armed', name: 'Intercept', cardType: 'instant', trigger: 'ally_targeted', castTimeMs: 0, baseCooldownMs: 2000, useCooldownMs: 2000 },
+        { id: 'knight_dispel', remainingMs: 4000, cooldownMs: 4000, state: 'cooldown', name: 'Dispel', cardType: 'instant', trigger: 'enemy_cast', castTimeMs: 0, baseCooldownMs: 5000, useCooldownMs: 5000 },
       ],
     });
 
@@ -113,7 +113,7 @@ describe('buildClientCombatSnapshot', () => {
       const zap = activeSkill({ id: 'zap', cooldown: 2, warmup: 0 });
       const channel = activeSkill({ id: 'ch', cooldown: 5, warmup: 0, castTime: 1 });
       const state = createPartyCombatState([
-        makePlayer('P', 2, { className: 'Priest', skills: [SEED_SKILLS.priest_minor_heal, zap] }),
+        makePlayer('P', 2, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_minor_heal, zap] }),
         makePlayer('M', 5, { className: 'Mage', skills: [channel] }),
       ], [makeMonster(0)]);
       let snap = buildClientCombatSnapshot(state, 1, false);
@@ -133,10 +133,10 @@ describe('buildClientCombatSnapshot', () => {
       expect(unit(snap, 'player', 2).skills![0].state).toBe('ready');
     });
 
-    it('an interrupt is ready/held in flash mode and armed when an enemy can cast', () => {
-      const dispel = { ...SEED_SKILLS.knight_dispel, warmup: 0 };
-      const flash = createPartyCombatState([makePlayer('K', 2, { skills: [dispel] })], [makeMonster(0)]);
-      expect(unit(buildClientCombatSnapshot(flash, 1, false), 'player', 2).skills![0].state).toBe('ready');
+    it('a counter reads armed whether or not an enemy can cast', () => {
+      const dispel = { ...LEGACY_SEED_SKILLS.knight_dispel, warmup: 0 };
+      const quiet = createPartyCombatState([makePlayer('K', 2, { skills: [dispel] })], [makeMonster(0)]);
+      expect(unit(buildClientCombatSnapshot(quiet, 1, false), 'player', 2).skills![0].state).toBe('armed');
 
       const casting = createPartyCombatState([makePlayer('K', 2, { skills: [dispel] })], [
         makeMonster(0, { skills: [{ skillId: 'fireball', value: 1, cooldown: 3 }] }),
@@ -146,7 +146,7 @@ describe('buildClientCombatSnapshot', () => {
 
     it('owner stun does not change skill state but shows on the unit, with a paused cast', () => {
       const channel = activeSkill({ id: 'ch', cooldown: 5, warmup: 0, castTime: 1 });
-      const state = createPartyCombatState([makePlayer('M', 2, { skills: [channel, SEED_SKILLS.knight_intercept] })], [makeMonster(0)]);
+      const state = createPartyCombatState([makePlayer('M', 2, { skills: [channel, LEGACY_SEED_SKILLS.knight_intercept] })], [makeMonster(0)]);
       runTo(state, 1300);
       state.players[0].stunRemainingMs = 800;
       state.players[0].stunTotalMs = 1000;
@@ -197,7 +197,7 @@ describe('buildClientCombatSnapshot', () => {
   });
 
   it('reports HoTs, shields and party buffs on players, and nothing on the dead', () => {
-    const warSong = { ...SEED_SKILLS.bard_war_song, cooldown: 1 };
+    const warSong = { ...LEGACY_SEED_SKILLS.bard_war_song, cooldown: 1 };
     const state = createPartyCombatState([
       makePlayer('B', 2, { className: 'Bard', skills: [warSong] }),
       makePlayer('X', 5),

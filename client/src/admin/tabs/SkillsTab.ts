@@ -1,3 +1,4 @@
+import { COMBAT_PACE } from '@idle-party-rpg/shared';
 import type { Tab } from './Tab';
 import type { AdminContext } from '../AdminContext';
 import {
@@ -11,6 +12,7 @@ import {
   getSkillCardType,
   getSkillTrigger,
   getSlotSchedule,
+  isTimedSkill,
   validateSkillDefinition,
 } from '@idle-party-rpg/shared';
 import type {
@@ -25,6 +27,7 @@ import type {
   SkillSlot,
   SkillSlotType,
   SkillTrigger,
+  SkillType,
 } from '@idle-party-rpg/shared';
 import { escapeHtml, putAdmin, postAdmin, deleteAdmin } from '../api';
 import { openModal } from '../components/Modal';
@@ -68,8 +71,8 @@ export class SkillsTab implements Tab {
         <p class="admin-page-subtitle">
           Skills are versioned content: each is composed of one or more effect options from the catalog.
           Players learn class skills at their unlock level; grant-only skills come from items/sets.
-          Actives fire on the owner's action (or on their trigger, for Instants and Interrupts),
-          then wait out their cooldown in seconds.
+          Actives fire on the owner's action (or on their trigger, for Instants),
+          then wait out their cooldown, or their recovery and charge (charge alone, for Instants). A class's Attack skill is always in use and takes no slot.
         </p>
         <div class="skills-class-nav">${nav}</div>
         ${sections}
@@ -126,7 +129,7 @@ export class SkillsTab implements Tab {
       .filter(s => s.className === className)
       .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
     const passives = classSkills.filter(s => s.type === 'passive').length;
-    const actives = classSkills.length - passives;
+    const actives = classSkills.filter(s => s.type === 'active').length;
     // Default starting skill: the level-1 passive (tie: lowest sortOrder), matching
     // createDefaultSkillLoadout — a class with no level-1 passive starts with none equipped.
     const startId = classSkills
@@ -164,7 +167,7 @@ export class SkillsTab implements Tab {
                 <th>Skill</th>
                 <th>Description</th>
                 <th>Options</th>
-                <th>Card &middot; CD</th>
+                <th>Card &middot; Timing</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -180,7 +183,7 @@ export class SkillsTab implements Tab {
       ? '<span class="admin-pill admin-pill-grant">grant-only</span>'
       : String(skill.unlockLevel);
     const startPill = isStart ? ' <span class="admin-pill admin-pill-start">start</span>' : '';
-    const typeLabel = skill.type === 'passive' ? 'Passive' : 'Active';
+    const typeLabel = TYPE_LABELS[skill.type];
     const options = [...(skill.passiveEffects ?? []), ...(skill.activeEffects ?? [])];
     const optionsHtml = options.length > 0
       ? options.map(e => this.renderEffect(e)).join('')
@@ -208,8 +211,13 @@ export class SkillsTab implements Tab {
 
   private renderCardCell(skill: SkillDefinition): string {
     const timing: string[] = [];
+    if (skill.type !== 'passive' && isTimedSkill(skill)) {
+      timing.push(`charge ${formatSeconds(skill.charge ?? 0)}`);
+      if (!getSkillTrigger(skill)) timing.push(`recovery ${formatSeconds(skill.recovery ?? 0)}`);
+    } else if (skill.type === 'active' && skill.cooldown != null) {
+      timing.push(formatSeconds(skill.cooldown));
+    }
     if (skill.type === 'active') {
-      if (skill.cooldown != null) timing.push(formatSeconds(skill.cooldown));
       if ((skill.castTime ?? 0) > 0) timing.push(`cast ${formatSeconds(skill.castTime!)}`);
       const trigger = getSkillTrigger(skill);
       if (trigger) timing.push(`on ${SKILL_TRIGGER_INFO[trigger].label.toLowerCase()}`);
@@ -253,7 +261,7 @@ export class SkillsTab implements Tab {
     const classOptions = ALL_CLASS_NAMES.map(c =>
       `<option value="${c}" ${s.className === c ? 'selected' : ''}>${c}</option>`
     ).join('');
-    const typeOptions = (['passive', 'active'] as SkillSlotType[]).map(t =>
+    const typeOptions = (['passive', 'active', 'attack'] as SkillType[]).map(t =>
       `<option value="${t}" ${s.type === t ? 'selected' : ''}>${t}</option>`
     ).join('');
     const triggerOptions = [
@@ -262,6 +270,8 @@ export class SkillsTab implements Tab {
         `<option value="${t}" ${s.trigger === t ? 'selected' : ''}>${escapeHtml(SKILL_TRIGGER_INFO[t].label)}</option>`),
     ].join('');
     const activeOnlyStyle = s.type === 'active' ? '' : 'style="display:none"';
+    const timedOnlyStyle = s.type === 'passive' ? 'style="display:none"' : '';
+    const optionsStyle = s.type === 'attack' ? 'style="display:none"' : '';
 
     const optionRows = [...(s.passiveEffects ?? []), ...(s.activeEffects ?? [])]
       .map(e => this.optionRowHtml(e)).join('');
@@ -282,16 +292,26 @@ export class SkillsTab implements Tab {
           Grant-only (item/set) — never learned by level
         </label>
         <label>Sort order<input type="number" id="skf-sortOrder" value="${s.sortOrder}" step="1"></label>
+        <p class="admin-form-hint admin-form-fullrow skf-timed-only" ${timedOnlyStyle}>Charge and recovery are real seconds. Charge is how long until the skill can be used again, after its recovery; recovery is how long until any skill can be used on the owner's turn. A skill with a trigger is an Instant: it has charge only, and fires during recovery. Set either and cooldown is ignored. An Attack skill needs at least one, is learned at level 1, takes no slot and has no options: it is the class's basic attack.</p>
+        <label id="skf-charge-wrap" class="skf-timed-only" ${timedOnlyStyle}>
+          Charge (real s)
+          <input type="number" id="skf-charge" value="${s.charge ?? ''}" min="0" max="120" step="0.1" placeholder="not set">
+        </label>
+        <label id="skf-recovery-wrap" class="skf-timed-only" ${timedOnlyStyle}>
+          Recovery (real s)
+          <input type="number" id="skf-recovery" value="${s.recovery ?? ''}" min="0" max="120" step="0.1" placeholder="not set">
+        </label>
+        <p class="admin-form-hint admin-form-fullrow skf-active-only" ${activeOnlyStyle}>Without charge or recovery, times are authored seconds. In play, cooldown 2 on an action skill means every 2nd action, at the class's own speed; reactions run ${COMBAT_PACE.clock}x slower. Cast time is always authored. Write real times in the description.</p>
         <label id="skf-cooldown-wrap" class="skf-active-only" ${activeOnlyStyle}>
           Cooldown (seconds)
-          <input type="number" id="skf-cooldown" value="${s.cooldown ?? 2}" min="1" step="0.1">
+          <input type="number" id="skf-cooldown" value="${s.cooldown ?? (isTimedSkill(s) ? '' : 2)}" min="1" step="0.1">
         </label>
         <label id="skf-castTime-wrap" class="skf-active-only" ${activeOnlyStyle}>
           Cast time (s)
-          <input type="number" id="skf-castTime" value="${s.castTime ?? ''}" min="0" max="10" step="0.1" placeholder="0 (instant)">
+          <input type="number" id="skf-castTime" value="${s.castTime ?? ''}" min="0" max="10" step="0.1" placeholder="0 (no cast)">
         </label>
-        <label id="skf-warmup-wrap" class="skf-active-only" ${activeOnlyStyle}>
-          Warm-up (s, blank = default)
+        <label id="skf-warmup-wrap" class="skf-timed-only" ${timedOnlyStyle}>
+          Initial charge (s)
           <input type="number" id="skf-warmup" value="${s.warmup ?? ''}" min="0" max="60" step="0.1" placeholder="default">
         </label>
         <label id="skf-trigger-wrap" class="skf-active-only" ${activeOnlyStyle}>
@@ -307,7 +327,7 @@ export class SkillsTab implements Tab {
       <label class="admin-form-fullrow">Description
         <textarea id="skf-description" rows="3">${escapeHtml(s.description)}</textarea>
       </label>
-      <fieldset class="admin-form-fieldset">
+      <fieldset class="admin-form-fieldset" id="skf-options-fieldset" ${optionsStyle}>
         <legend>Options ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="skf-add-option" type="button">+ Add option</button>'}</legend>
         <div class="skills-option-picker" id="skf-option-picker" hidden>
           <div class="admin-checklist-toolbar">
@@ -356,6 +376,11 @@ export class SkillsTab implements Tab {
       root.querySelectorAll<HTMLElement>('.skf-active-only').forEach(el => {
         el.style.display = typeSelect.value === 'active' ? '' : 'none';
       });
+      root.querySelectorAll<HTMLElement>('.skf-timed-only').forEach(el => {
+        el.style.display = typeSelect.value === 'passive' ? 'none' : '';
+      });
+      const options = root.querySelector<HTMLElement>('#skf-options-fieldset');
+      if (options) options.style.display = typeSelect.value === 'attack' ? 'none' : '';
       this.applyPickerFilter(root);
     });
 
@@ -399,8 +424,15 @@ export class SkillsTab implements Tab {
     const chip = root.querySelector<HTMLElement>('#skf-card-type');
     if (chip) chip.innerHTML = cardPillHtml(getSkillCardType(def));
 
+    const recoveryWrap = root.querySelector<HTMLElement>('#skf-recovery-wrap');
+    if (recoveryWrap) recoveryWrap.style.display = def.type === 'passive' || getSkillTrigger(def) ? 'none' : '';
+
     const warmupInput = root.querySelector<HTMLInputElement>('#skf-warmup');
-    if (warmupInput) warmupInput.placeholder = `default (${formatSeconds(defaultWarmupSeconds(def))})`;
+    if (warmupInput) {
+      warmupInput.placeholder = isTimedSkill(def)
+        ? 'blank = full charge, 0 = ready immediately'
+        : `default (${formatSeconds(defaultWarmupSeconds(def))})`;
+    }
 
     const help = root.querySelector<HTMLElement>('#skf-trigger-help');
     if (help) help.innerHTML = this.triggerHelpHtml(def);
@@ -537,11 +569,13 @@ export class SkillsTab implements Tab {
     const existingId = (root.querySelector('#skf-id') as HTMLInputElement).value.trim();
     const name = (root.querySelector('#skf-name') as HTMLInputElement).value.trim();
     const className = (root.querySelector('#skf-class') as HTMLSelectElement).value as ClassName;
-    const type = (root.querySelector('#skf-type') as HTMLSelectElement).value as SkillSlotType;
+    const type = (root.querySelector('#skf-type') as HTMLSelectElement).value as SkillType;
     const grantOnly = (root.querySelector('#skf-grantOnly') as HTMLInputElement).checked;
     const unlockLevel = parseInt((root.querySelector('#skf-unlockLevel') as HTMLInputElement).value);
     const sortOrder = parseInt((root.querySelector('#skf-sortOrder') as HTMLInputElement).value) || 0;
     const cooldown = parseFloat((root.querySelector('#skf-cooldown') as HTMLInputElement).value);
+    const charge = parseFloat((root.querySelector('#skf-charge') as HTMLInputElement).value);
+    const recovery = parseFloat((root.querySelector('#skf-recovery') as HTMLInputElement).value);
     const castTime = parseFloat((root.querySelector('#skf-castTime') as HTMLInputElement).value);
     const warmup = parseFloat((root.querySelector('#skf-warmup') as HTMLInputElement).value);
     const trigger = (root.querySelector('#skf-trigger') as HTMLSelectElement).value as SkillTrigger | '';
@@ -577,13 +611,18 @@ export class SkillsTab implements Tab {
       unlockLevel: grantOnly ? null : unlockLevel,
       sortOrder,
     };
-    if (passiveEffects.length > 0) def.passiveEffects = passiveEffects;
-    if (activeEffects.length > 0) def.activeEffects = activeEffects;
-    if (type === 'active') {
-      if (Number.isFinite(cooldown)) def.cooldown = cooldown;
-      if (Number.isFinite(castTime) && castTime !== 0) def.castTime = castTime;
+    if (type !== 'attack' && passiveEffects.length > 0) def.passiveEffects = passiveEffects;
+    if (type !== 'attack' && activeEffects.length > 0) def.activeEffects = activeEffects;
+    if (type !== 'passive') {
+      if (Number.isFinite(charge)) def.charge = charge;
+      if (Number.isFinite(recovery)) def.recovery = recovery;
       if (Number.isFinite(warmup)) def.warmup = warmup;
+    }
+    if (type === 'active') {
       if (trigger) def.trigger = trigger;
+      if (getSkillTrigger(def)) delete def.recovery;
+      if (Number.isFinite(cooldown) && !isTimedSkill(def)) def.cooldown = cooldown;
+      if (Number.isFinite(castTime) && castTime !== 0) def.castTime = castTime;
     }
     return def;
   }
@@ -736,6 +775,8 @@ export class SkillsTab implements Tab {
     }
   }
 }
+
+const TYPE_LABELS: Record<SkillType, string> = { passive: 'Passive', active: 'Active', attack: 'Attack' };
 
 function formatSeconds(seconds: number): string {
   return `${Math.round(seconds * 100) / 100}s`;

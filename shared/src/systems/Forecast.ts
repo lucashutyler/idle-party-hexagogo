@@ -1,6 +1,8 @@
 import type { PartyCombatantInit, PartyCombatState } from './CombatEngine.js';
 import { cloneCombatState, createPartyCombatState, processCombatStep } from './CombatEngine.js';
 import { createRng } from './combat/CombatRng.js';
+import { AUTHORED_PACE, paceRealMs } from './CombatPace.js';
+import type { CombatPace } from './CombatPace.js';
 import { COMBAT_STEP_MS } from './CombatTiming.js';
 import { isBossTier, resolveEnrage } from './CombatScaling.js';
 import type { EncounterDefinition } from './EncounterTypes.js';
@@ -62,6 +64,7 @@ export interface RoomForecastInput {
   table: EncounterTableEntry[];
   monsters: Record<string, MonsterDefinition>;
   encounters: Record<string, EncounterDefinition>;
+  pace?: CombatPace;
 }
 
 export interface DungeonForecastStart {
@@ -81,6 +84,7 @@ export interface DungeonForecastInput {
   fallbackTable?: EncounterTableEntry[];
   /** The requester's resume point; the regroup budget restarts on each later floor. */
   start?: DungeonForecastStart;
+  pace?: CombatPace;
 }
 
 export interface BattleForecastInput {
@@ -121,6 +125,8 @@ export interface ForecastJob {
 }
 
 export interface ForecastReasonInput {
+  /** Times here are engine time; this only turns them into real time for the text. */
+  clock?: number;
   winPct: number;
   sims: number;
   stalemates: number;
@@ -181,6 +187,7 @@ interface EnemySummary {
 
 interface Sampler {
   readonly topTier: MonsterTier;
+  readonly pace: CombatPace;
   sim(budget: Budget): SimGenerator;
   converged(minSims: number, halfWidthPct: number): boolean;
   result(): Omit<ForecastResult, 'key' | 'partyKey'>;
@@ -387,6 +394,8 @@ export function partyKey(players: readonly PartyCombatantInit[]): string {
     p.equipBonuses ?? null,
     p.setBonuses ?? null,
     p.equippedSkills.map(skillFingerprint),
+    ...(p.attack ? [skillFingerprint(p.attack)] : []),
+    ...(p.actionOrder?.length ? [p.actionOrder] : []),
   ])).sort();
   return `pk${hashString(parts.join('|'))}`;
 }
@@ -438,7 +447,7 @@ export function forecastReasons(input: ForecastReasonInput): ForecastReason[] {
   }
   if (input.killEtaMs !== null && typeof input.enrageAtMs === 'number' && input.killEtaMs > input.enrageAtMs) {
     add('enrage', 'bad',
-      `They enrage at ${formatForecastClock(input.enrageAtMs)} — your party needs about ${formatForecastClock(input.killEtaMs)}`);
+      `They enrage at ${formatForecastClock(input.enrageAtMs * (input.clock ?? 1))} — your party needs about ${formatForecastClock(input.killEtaMs * (input.clock ?? 1))}`);
   }
   if (input.sims > 0 && input.stalemates / input.sims >= FORECAST_STALEMATE_REASON_FRACTION) {
     add('stalemate', 'bad', 'Your party can barely hurt them. Fights may stall out.');
@@ -555,9 +564,10 @@ function summarizeEnemies(all: readonly EnemyProfile[], common: readonly EnemyPr
   return summary;
 }
 
-function reasonsFor(stats: ForecastStats, party: PartyProfile, enemies: EnemySummary, extra: Partial<ForecastReasonInput> = {}): ForecastReason[] {
+function reasonsFor(stats: ForecastStats, party: PartyProfile, enemies: EnemySummary, clock: number, extra: Partial<ForecastReasonInput> = {}): ForecastReason[] {
   if (stats.sims === 0) return [];
   return forecastReasons({
+    clock,
     winPct: stats.winPct,
     sims: stats.sims,
     stalemates: stats.stalemates,
@@ -658,6 +668,7 @@ interface StratumTally {
 
 class RoomSampler implements Sampler {
   readonly topTier: MonsterTier;
+  readonly pace: CombatPace;
   private readonly strata: TableStratum[];
   private readonly tallies: StratumTally[];
   private readonly outcomes: SimOutcome[] = [];
@@ -665,6 +676,7 @@ class RoomSampler implements Sampler {
   private readonly enemies: EnemySummary;
 
   constructor(private readonly input: RoomForecastInput, private readonly rng: () => number, private readonly horizonMs: number | undefined) {
+    this.pace = input.pace ?? AUTHORED_PACE;
     this.strata = tableStrata(input.table ?? [], input.monsters, input.encounters);
     this.tallies = this.strata.map(() => ({ n: 0, wins: 0 }));
     this.party = partyProfile(input.players);
@@ -676,7 +688,7 @@ class RoomSampler implements Sampler {
     const index = this.nextStratum();
     const stratum = this.strata[index];
     const monsters = createEncounter(undefined, this.input.monsters, {}, this.input.encounters, stratum.table, this.rng);
-    const state = createPartyCombatState(this.input.players, monsters);
+    const state = createPartyCombatState(this.input.players, monsters, { pace: this.pace });
     const outcome = yield* fightSteps(state, this.rng, this.horizonMs ?? defaultHorizonMs(state), budget);
     this.tallies[index].n++;
     if (outcome.result === 'victory') this.tallies[index].wins++;
@@ -710,7 +722,7 @@ class RoomSampler implements Sampler {
     const out: Omit<ForecastResult, 'key' | 'partyKey'> = {
       ...stats,
       strata,
-      reasons: reasonsFor(stats, this.party, this.enemies, { worst }),
+      reasons: reasonsFor(stats, this.party, this.enemies, this.pace.clock, { worst }),
     };
     if (worst) out.worst = worst;
     applyEnemyLevels(out, this.enemies);
@@ -761,6 +773,7 @@ function allAgree(outcomes: readonly SimOutcome[]): boolean {
 
 class BattleSampler implements Sampler {
   readonly topTier: MonsterTier;
+  readonly pace: CombatPace;
   private readonly base: PartyCombatState;
   private readonly outcomes: SimOutcome[] = [];
   private readonly party: PartyProfile;
@@ -774,6 +787,7 @@ class BattleSampler implements Sampler {
     private readonly henchmenAllowed: boolean | undefined,
   ) {
     this.base = cloneCombatState(state);
+    this.pace = state.pace;
     this.party = partyProfile(this.base.players);
     const profiles = stateProfiles(this.base);
     this.enemies = summarizeEnemies(profiles, profiles);
@@ -794,7 +808,7 @@ class BattleSampler implements Sampler {
 
   result(): Omit<ForecastResult, 'key' | 'partyKey'> {
     const stats = summarize(this.outcomes, { atMs: this.base.elapsedMs });
-    const reasons = reasonsFor(stats, this.party, this.enemies, { henchmenAllowed: this.henchmenAllowed });
+    const reasons = reasonsFor(stats, this.party, this.enemies, this.pace.clock, { henchmenAllowed: this.henchmenAllowed });
     const out: Omit<ForecastResult, 'key' | 'partyKey'> = { ...stats, reasons };
     applyEnemyLevels(out, this.enemies);
     return out;
@@ -824,6 +838,7 @@ interface FloorTally {
 
 class DungeonSampler implements Sampler {
   readonly topTier: MonsterTier;
+  readonly pace: CombatPace;
   private readonly plans: FloorPlan[];
   private readonly tallies: FloorTally[];
   private readonly runs: SimOutcome[] = [];
@@ -833,6 +848,7 @@ class DungeonSampler implements Sampler {
   private readonly enemies: EnemySummary;
 
   constructor(private readonly input: DungeonForecastInput, private readonly rng: () => number, private readonly horizonMs: number | undefined) {
+    this.pace = input.pace ?? AUTHORED_PACE;
     const floors = input.dungeon.floors ?? [];
     const startIndex = Math.min(Math.max(0, Math.floor(input.start?.floorIndex ?? 0) || 0), Math.max(0, floors.length - 1));
     this.plans = floors.slice(startIndex).map((floor, i) => {
@@ -875,8 +891,8 @@ class DungeonSampler implements Sampler {
         attempts++;
         const monsters = createEncounter(undefined, this.input.monsters, {}, this.input.encounters, plan.table, this.rng);
         const setup = checkpointFloor
-          ? { bossPhases: { thresholds: plan.thresholds, resumePhase: phase > 0 ? phase : undefined } }
-          : {};
+          ? { pace: this.pace, bossPhases: { thresholds: plan.thresholds, resumePhase: phase > 0 ? phase : undefined } }
+          : { pace: this.pace };
         const state = createPartyCombatState(this.input.players, monsters, setup);
         const enrageAt = earliestEnrage(state);
         last = yield* fightSteps(state, this.rng, this.horizonMs ?? defaultHorizonMs(state), budget);
@@ -924,7 +940,7 @@ class DungeonSampler implements Sampler {
     const out: Omit<ForecastResult, 'key' | 'partyKey'> = {
       ...stats,
       floors,
-      reasons: reasonsFor(stats, this.party, this.enemies, {
+      reasons: reasonsFor(stats, this.party, this.enemies, this.pace.clock, {
         enrageAtMs: this.enrageAtMs ?? this.enemies.enrageAtMs,
         medianMs: this.longestFloorMedianMs(),
         henchmenAllowed: false,
@@ -1005,7 +1021,17 @@ class Job implements ForecastJob {
   }
 
   result(): ForecastResult {
-    return { key: this.key, partyKey: this.partyKeyValue, ...this.sampler.result() };
+    const result = this.sampler.result();
+    const real = (ms: number): number => paceRealMs(this.sampler.pace, ms);
+    return {
+      key: this.key,
+      partyKey: this.partyKeyValue,
+      ...result,
+      medianMs: result.medianMs === null ? null : real(result.medianMs),
+      p90Ms: result.p90Ms === null ? null : real(result.p90Ms),
+      atMs: real(result.atMs),
+      killEtaMs: result.killEtaMs === null ? null : real(result.killEtaMs),
+    };
   }
 
   private drive(maxSims: number): number {

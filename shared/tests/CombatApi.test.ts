@@ -6,7 +6,7 @@ describe('combat public API', () => {
   it('exports the timeline engine and drops the turn-based entry points', () => {
     for (const name of [
       'processCombatStep', 'advanceCombat', 'createPartyCombatState', 'buildClientCombatSnapshot',
-      'findTarget', 'applyMonsterResistance', 'wouldHaveEffect', 'isInterruptFlashMode', 'effectiveCooldownMs',
+      'findTarget', 'applyMonsterResistance', 'wouldHaveEffect', 'effectiveCooldownMs',
       'getSkillTrigger', 'getSkillCardType', 'getMonsterSkillCastTimeMs',
     ]) {
       expect(typeof (shared as Record<string, unknown>)[name], name).toBe('function');
@@ -14,7 +14,7 @@ describe('combat public API', () => {
     expect(shared).not.toHaveProperty('processPartyTick');
     expect(shared).not.toHaveProperty('RUN_AVAILABLE_ROUNDS');
     expect(shared.SKILL_TRIGGER_VALUES).toHaveLength(5);
-    expect(Object.keys(shared.SKILL_CARD_TYPE_INFO)).toHaveLength(7);
+    expect(Object.keys(shared.SKILL_CARD_TYPE_INFO)).toHaveLength(4);
     expect(shared.GAME_VERSION).toMatch(/^\d{4}\.\d{2}\.\d{2}\.\d+$/);
   });
 

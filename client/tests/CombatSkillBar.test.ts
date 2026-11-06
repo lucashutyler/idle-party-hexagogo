@@ -4,7 +4,7 @@ import { CombatSkillBar } from '../src/combat/CombatSkillBar';
 let root: HTMLElement;
 let bar: CombatSkillBar;
 
-const card = { id: 'bash', name: 'Bash', cardType: 'attack' as const };
+const card = { id: 'bash', name: 'Bash', cardType: 'action' as const };
 const sweep = () => root.querySelector<HTMLElement>('.combat-skill-sweep')!;
 
 function cooldown(remainingMs: number) {
@@ -28,6 +28,34 @@ describe('CombatSkillBar', () => {
     expect(sweep().style.getPropertyValue('--cd')).toBe('0.50');
     bar.update([cooldown(470)], false);
     expect(sweep().style.getPropertyValue('--cd')).toBe('0.47');
+  });
+
+  it('marks cards locked during recovery, keeping a charging card\'s countdown', () => {
+    const attack = { id: 'knight_attack', name: 'Attack', cardType: 'basic' as const };
+    bar.setLayout({ cards: [card, attack], passives: [] });
+    const el = (id: string) => root.querySelector<HTMLElement>(`[data-skill-id="${id}"]`)!;
+    const text = (id: string) => el(id).querySelector('.combat-skill-status')!.textContent;
+
+    bar.update([
+      { id: 'bash', state: 'ready', remainingMs: 0, cooldownMs: 1000, locked: true },
+      { id: 'knight_attack', state: 'cooldown', remainingMs: 1500, cooldownMs: 3000, locked: true },
+    ], false);
+    expect(el('bash').classList.contains('locked')).toBe(true);
+    expect(text('bash')).toBe('LOCKED');
+    expect(el('knight_attack').classList.contains('locked')).toBe(true);
+    expect(text('knight_attack')).toBe('1.5s');
+    expect(el('knight_attack').querySelector<HTMLElement>('.combat-skill-sweep')!.style.getPropertyValue('--cd')).toBe('0.50');
+
+    bar.update([{ id: 'bash', state: 'ready', remainingMs: 0, cooldownMs: 1000, locked: false }], false);
+    expect(el('bash').classList.contains('locked')).toBe(false);
+    expect(text('bash')).toBe('READY');
+  });
+
+  it('leaves a card without recovery unlocked', () => {
+    bar.setLayout({ cards: [card], passives: [] });
+    bar.update([cooldown(0)], false);
+    expect(root.querySelector('.combat-skill')!.classList.contains('locked')).toBe(false);
+    expect(root.querySelector('.combat-skill-status')!.textContent).toBe('READY');
   });
 
   it('always clears the sweep when the cooldown ends', () => {

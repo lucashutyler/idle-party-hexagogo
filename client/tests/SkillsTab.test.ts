@@ -23,11 +23,16 @@ const GRANT_ONLY_SKILL: SkillDefinition = {
   passiveEffects: [{ kind: 'physical_reduction', valuePerLevel: 1 }],
 };
 
+const LEGACY_BASH: SkillDefinition = (() => {
+  const { charge: _charge, recovery: _recovery, ...rest } = SEED_SKILLS.knight_bash;
+  return { ...rest, cooldown: 2 };
+})();
+
 function makeCtx(opts: { readOnly?: boolean; extraSkills?: SkillDefinition[] } = {}): AdminContext {
   const content = {
     skills: {
       knight_guard: { ...SEED_SKILLS.knight_guard },
-      knight_bash: { ...SEED_SKILLS.knight_bash },
+      knight_bash: { ...LEGACY_BASH },
       mage_zap: { ...SEED_SKILLS.mage_zap },
       test_ember_ward: { ...GRANT_ONLY_SKILL },
       ...Object.fromEntries((opts.extraSkills ?? []).map(sk => [sk.id, { ...sk }])),
@@ -244,8 +249,8 @@ describe('SkillsTab', () => {
     const bashRow = [...knight.querySelectorAll('tbody tr')].find(tr => tr.textContent!.includes('knight_bash'))!;
     const cells = bashRow.querySelectorAll('td');
     const cdCell = cells[cells.length - 2];
-    expect(cdCell.textContent).toContain(`${SEED_SKILLS.knight_bash.cooldown}s`);
-    expect(cdCell.querySelector('[data-card-type="attack"]')).not.toBeNull();
+    expect(cdCell.textContent).toContain(`${LEGACY_BASH.cooldown}s`);
+    expect(cdCell.querySelector('[data-card-type="action"]')).not.toBeNull();
 
     const guardRow = [...knight.querySelectorAll('tbody tr')].find(tr => tr.textContent!.includes('knight_guard'))!;
     expect(guardRow.querySelector('[data-card-type="passive"]')).not.toBeNull();
@@ -282,8 +287,8 @@ describe('SkillsTab', () => {
     expect([...trigger.options].map(o => o.value)).toEqual(['', ...SKILL_TRIGGER_VALUES]);
     expect(trigger.options[1].textContent).toBe(SKILL_TRIGGER_INFO[SKILL_TRIGGER_VALUES[0]].label);
 
-    expect(modal.querySelector('#skf-card-type [data-card-type="attack"]')).not.toBeNull();
-    expect(modal.querySelector<HTMLInputElement>('#skf-warmup')!.placeholder).toContain(`${SEED_SKILLS.knight_bash.cooldown! - 1}s`);
+    expect(modal.querySelector('#skf-card-type [data-card-type="action"]')).not.toBeNull();
+    expect(modal.querySelector<HTMLInputElement>('#skf-warmup')!.placeholder).toContain(`${LEGACY_BASH.cooldown! - 1}s`);
   });
 
   it('hides the active-only timing fields for passives and reveals them when switched to active', () => {
@@ -304,14 +309,61 @@ describe('SkillsTab', () => {
     const chip = () => modal.querySelector('#skf-card-type [data-card-type]')!.getAttribute('data-card-type');
 
     setValue(modal, '#skf-trigger', 'enemy_cast');
-    expect(chip()).toBe('interrupt');
+    expect(chip()).toBe('instant');
     expect(modal.querySelector('#skf-trigger-help')!.textContent).toContain(SKILL_TRIGGER_INFO.enemy_cast.description);
 
     setValue(modal, '#skf-trigger', 'ally_low_hp');
     expect(chip()).toBe('instant');
 
     setValue(modal, '#skf-trigger', '');
-    expect(chip()).toBe('attack');
+    expect(chip()).toBe('action');
+  });
+
+  it('hides Recovery and never saves it while the skill has a trigger', async () => {
+    const put = stubPut();
+    new SkillsTab().render(container, makeCtx());
+    const modal = openEdit(container, 'knight_bash');
+    const wrap = modal.querySelector<HTMLElement>('#skf-recovery-wrap')!;
+    setValue(modal, '#skf-charge', '3');
+    setValue(modal, '#skf-recovery', '1.5');
+    expect(wrap.style.display).toBe('');
+    setValue(modal, '#skf-trigger', 'enemy_cast');
+    expect(wrap.style.display).toBe('none');
+    setValue(modal, '#skf-trigger', '');
+    expect(wrap.style.display).toBe('');
+    expect(modal.querySelector<HTMLInputElement>('#skf-recovery')!.value).toBe('1.5');
+    setValue(modal, '#skf-trigger', 'enemy_cast');
+    modal.querySelector<HTMLButtonElement>('#skf-save')!.click();
+    await flush();
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(put.bodies[0]).toMatchObject({ charge: 3, trigger: 'enemy_cast' });
+    expect(put.bodies[0].recovery).toBeUndefined();
+  });
+
+  it('keeps the cooldown of a triggered skill left with only a hidden Recovery', async () => {
+    const put = stubPut();
+    new SkillsTab().render(container, makeCtx());
+    const modal = openEdit(container, 'knight_bash');
+    setValue(modal, '#skf-charge', '');
+    setValue(modal, '#skf-recovery', '2');
+    setValue(modal, '#skf-trigger', 'self_hit');
+    setValue(modal, '#skf-cooldown', '5');
+    modal.querySelector<HTMLButtonElement>('#skf-save')!.click();
+    await flush();
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(put.bodies[0]).toMatchObject({ cooldown: 5, trigger: 'self_hit' });
+    expect(put.bodies[0].recovery).toBeUndefined();
+    expect(put.bodies[0].charge).toBeUndefined();
+  });
+
+  it('hides Recovery on a skill whose trigger is inferred, and on opening a stale one', () => {
+    const stale: SkillDefinition = { ...SEED_SKILLS.knight_intercept, id: 'stale_intercept', recovery: 1.8 };
+    delete stale.trigger;
+    new SkillsTab().render(container, makeCtx({ extraSkills: [stale] }));
+    const modal = openEdit(container, 'stale_intercept');
+    expect(modal.querySelector<HTMLElement>('#skf-recovery-wrap')!.style.display).toBe('none');
   });
 
   it('shows an inferred trigger for an Intercept skill authored without one', () => {

@@ -1,5 +1,20 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.4',
+    notes: [
+      'Combat is slower and easier to follow. Knights now act about every 3.6 seconds, Archers every 2, Priests every 1.8, and Mages and Bards every 2.5. Enemies slow down too.',
+      'Slower classes hit harder to make up for it, and each class\'s cast times now run at its own speed.',
+      'Casting a spell now delays your next action, so big spells cost real time.',
+      'Fights last about 1.8 times as long and pay about 1.8 times as much, so XP and gold per hour stay about the same. Rare drops are more likely per fight to match, but drops that were already likely, and dungeon rewards, stay as they were per fight or run, so those come a little less often per hour.',
+      'Every class now has an Attack card: your basic attack, always on, shown on your skill bar with its own charge-up.',
+      'Skills now have a charge and a recovery instead of a cooldown. Charge is how long until a skill can be used again, and recovery is how long before your hero can use another skill on their turn. Only skills that use your turn have a recovery.',
+      'The circle around your hero now fills up until your next attack or skill goes off. Your skill cards read LOCKED during recovery, and Instant cards stay ready.',
+      'A new Priority list in Hero > Skills lets you choose which skill your hero reaches for first, Attack included. Instant skills still fire on their own.',
+      'Blocks, automatic heals and counters now fire on their own during recovery, whenever they are charged, and never make you wait. Counters now only ever fire to counter a spell, so they wait quietly in fights with no enemy casters.',
+      'Fewer card types: every skill is now an Action, an Instant or a Passive, alongside your Basic attack. Actions use your turn and have a charge and a recovery. Instants fire on their own and only have a charge. Instant skills you equip as actives show what sets them off.',
+    ],
+  },
+  {
     version: '2026.11.05.3',
     notes: [
       'If your party can\'t travel to another island or area, you now see a message saying why instead of nothing happening.',

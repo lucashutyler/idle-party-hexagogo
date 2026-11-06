@@ -16,12 +16,17 @@ import type {
 } from '@idle-party-rpg/shared';
 import {
   BASE_ACTION_INTERVAL_MS,
+  COMBAT_PACE,
   COMBAT_STEP_MS,
   ENRAGE_MAX_STACKS,
   ENRAGE_STEP_PERCENT,
   ENRAGE_STEP_SECONDS,
   getSkillTrigger,
+  isTimedSkill,
   MIN_COOLDOWN_MS,
+  paceEngineMs,
+  paceRealMs,
+  paceSkillSeconds,
   PLAYBACK_DELAY_MS,
 } from '@idle-party-rpg/shared';
 
@@ -32,7 +37,7 @@ export const CATCH_UP_MS = 1500;
 export const STALE_RESUME_MS = 1000;
 export const SYNC_WAIT_MS = 2500;
 /** A snapshot this little behind a local ring or cooldown (a step's actor-order skew) does not pull it back. */
-export const RING_LEAD_TOLERANCE_MS = 150;
+export const RING_LEAD_TOLERANCE_MS = 1.5 * paceRealMs(COMBAT_PACE, COMBAT_STEP_MS);
 
 export interface UnitStatics {
   name: string;
@@ -62,6 +67,10 @@ export interface SkillStatics {
   cardType?: SkillCardType;
   trigger?: SkillTrigger;
   castTimeMs?: number;
+  baseCooldownMs?: number;
+  useCooldownMs?: number;
+  chargeMs?: number;
+  recoveryMs?: number;
 }
 
 export interface PlaybackSkill {
@@ -71,8 +80,6 @@ export interface PlaybackSkill {
   snapState: ClientCombatSkill['state'];
   /** Cooldown length after a use, read from a snapshot taken after one; 0 until then. */
   useCooldownMs: number;
-  /** Cooldown at battle start (the warm-up); undefined when the fight was joined mid-way. */
-  warmupMs: number | undefined;
   usedAt: number;
 }
 
@@ -95,6 +102,9 @@ export interface PlaybackUnit {
   stunTotalMs: number;
   actionMs: number;
   actionTotalMs: number;
+  /** While above 0, nothing can be used, reactions included. */
+  recoveryMs: number;
+  recoveryTotalMs: number;
   intervalMs: number;
   /** `intervalMs` came from the server rather than being inferred from observed waits. */
   intervalKnown: boolean;
@@ -129,7 +139,7 @@ export interface PlaybackOptions {
   now?: () => number;
   delayMs?: number;
   /** Cooldown length to restart a skill with until a snapshot has reported one after a use. */
-  cooldownHint?: (skillId: string, warmupMs: number | undefined) => number | undefined;
+  cooldownHint?: (skillId: string) => number | undefined;
 }
 
 const STACKING_STATUSES = new Set(['Ignite', 'Sunder']);
@@ -165,7 +175,7 @@ export function guessStatusKind(name: string): ClientCombatStatus['kind'] {
 export class CombatPlayback {
   private readonly now: () => number;
   private readonly delayMs: number;
-  private readonly cooldownHint?: (skillId: string, warmupMs: number | undefined) => number | undefined;
+  private readonly cooldownHint?: (skillId: string) => number | undefined;
 
   private active = false;
   private currentBattleId: number | null = null;
@@ -492,6 +502,7 @@ export class CombatPlayback {
       for (const s of u.skills ?? []) {
         this.skillStaticMap.set(`${key}:${s.id}`, {
           name: s.name, cardType: s.cardType, trigger: s.trigger, castTimeMs: s.castTimeMs,
+          baseCooldownMs: s.baseCooldownMs, useCooldownMs: s.useCooldownMs, chargeMs: s.chargeMs, recoveryMs: s.recoveryMs,
         });
       }
     }
@@ -601,7 +612,7 @@ export class CombatPlayback {
           const castMs = ev.durationMs ?? 0;
           src.cast = { skill: ev.skill ?? '', skillId: ev.skillId ?? '', totalMs: castMs, remainingMs: castMs, target: ev.dst };
           src.waitIsCast = true;
-          src.actionTotalMs = Math.max(src.intervalMs, castMs);
+          src.actionTotalMs = ev.nextActionMs ?? Math.max(src.intervalMs, castMs);
           src.actionMs = src.actionTotalMs;
           this.restartCooldown(src, ev.skillId, ev.t);
         }
@@ -610,6 +621,7 @@ export class CombatPlayback {
         if (src) {
           src.cast = null;
           src.castEndedAt = ev.t;
+          if (ev.recoveryMs) startRecoveryTimer(src, ev.recoveryMs);
         }
         break;
       case 'interrupt':
@@ -617,7 +629,18 @@ export class CombatPlayback {
         break;
       case 'attack':
         if (src) {
-          if (src.castEndedAt !== ev.t) {
+          if (ev.nextActionMs !== undefined) {
+            src.attacks++;
+            src.waitIsCast = false;
+            startRecoveryTimer(src, ev.recoveryMs ?? 0);
+            src.actionMs = ev.nextActionMs;
+            src.actionTotalMs = ev.nextActionMs;
+          } else if (ev.recoveryMs !== undefined) {
+            src.attacks++;
+            src.waitIsCast = false;
+            startRecoveryTimer(src, ev.recoveryMs);
+            startRecoveryRing(src, ev.recoveryMs);
+          } else if (src.castEndedAt !== ev.t) {
             src.attacks++;
             src.waitIsCast = false;
             src.actionTotalMs = src.intervalMs;
@@ -627,7 +650,9 @@ export class CombatPlayback {
         }
         break;
       case 'reaction':
-        if (src) this.restartCooldown(src, ev.skillId, ev.t);
+        if (src) {
+          this.restartCooldown(src, ev.skillId, ev.t);
+        }
         break;
       case 'status':
         if (dst && ev.name) addStatus(dst, ev.name);
@@ -673,7 +698,7 @@ export class CombatPlayback {
     skill.usedAt = t;
     const length = skill.useCooldownMs > 0
       ? skill.useCooldownMs
-      : this.cooldownHint?.(skillId, skill.warmupMs) ?? skill.cooldownMs;
+      : this.skillStatics(unit.key, skillId)?.useCooldownMs ?? this.cooldownHint?.(skillId) ?? skill.cooldownMs;
     skill.cooldownMs = length;
     skill.remainingMs = length;
   }
@@ -692,6 +717,7 @@ export class CombatPlayback {
     const active = dt - stunned;
     if (active <= 0) return;
     unit.actionMs = Math.max(0, unit.actionMs - active);
+    unit.recoveryMs = Math.max(0, unit.recoveryMs - active);
     if (unit.cast) unit.cast.remainingMs = Math.max(0, unit.cast.remainingMs - active);
     if (unit.skills) {
       for (const skill of unit.skills) skill.remainingMs = Math.max(0, skill.remainingMs - active);
@@ -711,6 +737,8 @@ function createUnit(u: ClientCombatUnit): PlaybackUnit {
     stunTotalMs: 0,
     actionMs: u.actionMs,
     actionTotalMs: u.actionTotalMs,
+    recoveryMs: 0,
+    recoveryTotalMs: 0,
     intervalMs: u.actionIntervalMs && u.actionIntervalMs > 0 ? u.actionIntervalMs : BASE_ACTION_INTERVAL_MS,
     intervalKnown: !!u.actionIntervalMs && u.actionIntervalMs > 0,
     cast: null,
@@ -734,6 +762,10 @@ function writeSnapshotUnit(unit: PlaybackUnit, u: ClientCombatUnit, t: number): 
   const keepLead = u.hp > 0 && u.actionTotalMs === unit.actionTotalMs && lag > 0 && lag <= RING_LEAD_TOLERANCE_MS;
   if (!keepLead) unit.actionMs = u.actionMs;
   unit.actionTotalMs = u.actionTotalMs;
+  const recoveryMs = u.recoveryMs ?? 0;
+  const recoveryLag = recoveryMs - unit.recoveryMs;
+  if (u.hp <= 0 || recoveryLag <= 0 || recoveryLag > RING_LEAD_TOLERANCE_MS) unit.recoveryMs = recoveryMs;
+  if (u.recoveryTotalMs !== undefined) unit.recoveryTotalMs = u.recoveryTotalMs;
   if (u.actionIntervalMs && u.actionIntervalMs > 0) {
     unit.intervalMs = u.actionIntervalMs;
     unit.intervalKnown = true;
@@ -758,12 +790,23 @@ function writeSnapshotUnit(unit: PlaybackUnit, u: ClientCombatUnit, t: number): 
         cooldownMs: s.cooldownMs,
         snapState: s.state,
         useCooldownMs: afterUse ? s.cooldownMs : old?.useCooldownMs ?? 0,
-        warmupMs: old ? old.warmupMs : t < COMBAT_STEP_MS ? s.cooldownMs : undefined,
         usedAt,
       };
     })
     : null;
   unit.t0 = t;
+}
+
+function startRecoveryTimer(unit: PlaybackUnit, ms: number): void {
+  if (ms <= unit.recoveryMs) return;
+  unit.recoveryMs = ms;
+  unit.recoveryTotalMs = ms;
+}
+
+function startRecoveryRing(unit: PlaybackUnit, ms: number): void {
+  if (ms <= unit.actionMs) return;
+  unit.actionMs = ms;
+  unit.actionTotalMs = ms;
 }
 
 function addStatus(unit: PlaybackUnit, name: string): void {
@@ -797,16 +840,23 @@ function insertSorted<T>(list: T[], item: T, key: (item: T) => number): void {
   list.splice(i, 0, item);
 }
 
-/**
- * Cooldown to show when `def` is used before a snapshot reports one. Derived action and interrupt
- * warm-ups are the effective cooldown minus one second, so they reveal cooldown reduction.
- */
-export function guessCooldownMs(def: SkillDefinition, warmupMs: number | undefined): number {
-  const trigger = getSkillTrigger(def);
-  const derivedWarmup = def.warmup === undefined && (trigger === undefined || trigger === 'enemy_cast');
-  if (derivedWarmup && warmupMs !== undefined && warmupMs >= 0) return warmupMs + MIN_COOLDOWN_MS;
-  const base = typeof def.cooldown === 'number' && Number.isFinite(def.cooldown) ? def.cooldown * 1000 : MIN_COOLDOWN_MS;
-  return Math.max(MIN_COOLDOWN_MS, base);
+/** The cooldown `def` would have for this class in real time, for when no snapshot has reported one. */
+export function guessCooldownMs(def: SkillDefinition, ownerClass: string): number {
+  if (isTimedSkill(def)) {
+    const { chargeMs, recoveryMs } = timedSkillMs(def);
+    const castMs = Math.round(paceSkillSeconds(COMBAT_PACE, def, ownerClass, def.castTime ?? 0) * 1000);
+    return Math.max(paceRealMs(COMBAT_PACE, COMBAT_STEP_MS), chargeMs + recoveryMs + castMs);
+  }
+  const authoredMs = typeof def.cooldown === 'number' && Number.isFinite(def.cooldown) ? def.cooldown * 1000 : MIN_COOLDOWN_MS;
+  return Math.round(paceSkillSeconds(COMBAT_PACE, def, ownerClass, Math.max(MIN_COOLDOWN_MS, authoredMs) / 1000) * 1000);
+}
+
+/** A skill's charge and recovery as they play, in real time: snapped to the engine's step grid. An instant has no recovery, whatever its content holds. */
+export function timedSkillMs(def: SkillDefinition): { chargeMs: number; recoveryMs: number } {
+  return {
+    chargeMs: paceRealMs(COMBAT_PACE, paceEngineMs(COMBAT_PACE, def.charge ?? 0)),
+    recoveryMs: getSkillTrigger(def) ? 0 : paceRealMs(COMBAT_PACE, paceEngineMs(COMBAT_PACE, def.recovery ?? 0)),
+  };
 }
 
 /** The enrage countdown or current multiplier at combat time `elapsedMs`. */

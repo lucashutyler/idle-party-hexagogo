@@ -1,3 +1,6 @@
+import { COMBAT_PACE } from '../../shared/src/systems/CombatPace.js';
+import { getSkillTrigger } from '../../shared/src/systems/SkillTypes.js';
+import type { ClassName } from '../../shared/src/systems/CharacterStats.js';
 import { buildRegions } from './policy.js';
 import type { ContentSnapshot, EncounterEntry } from './types.js';
 
@@ -36,6 +39,8 @@ export interface IntervalRules {
 
 export interface SkillPatch {
   cooldown?: number;
+  charge?: number;
+  recovery?: number;
   castTime?: number;
   warmup?: number;
   trigger?: string;
@@ -256,21 +261,55 @@ function primaryEffectKind(skill: any): string | undefined {
 
 const WEAPON_SLOTS = new Set(['mainhand', 'offhand', 'twohanded']);
 const RATING_KINDS = new Set(['physical_reduction', 'magical_reduction_party']);
-const SEED_TIMING_FIELDS = ['castTime', 'warmup', 'trigger'] as const;
+const SEED_TIMING_FIELDS = ['charge', 'recovery', 'castTime', 'warmup', 'trigger'] as const;
+const MAX_WARMUP_SECONDS = 60;
+
+/** An action-counted warm-up in real seconds: the first action opens at one clock tick, then one class gap per action. */
+function legacyWarmupSeconds(skill: any): number {
+  const { clock, classSeconds } = COMBAT_PACE;
+  const seconds = getSkillTrigger(skill)
+    ? skill.warmup * clock
+    : clock + (skill.warmup - 1) * (classSeconds[skill.className as ClassName] ?? clock);
+  return Math.min(MAX_WARMUP_SECONDS, Math.round(seconds * 10) / 10);
+}
+
+/** An instant has no recovery: its time moves to the charge, so the skill keeps its rhythm. */
+function mergeInstantRecovery(skill: any, changes: string[]): void {
+  if (typeof skill.recovery !== 'number' || !getSkillTrigger(skill)) return;
+  const charge = Math.round(((skill.charge ?? 0) + skill.recovery) * 10) / 10;
+  changes.push(`recovery: ${skill.recovery} > merged into charge ${charge}`);
+  skill.charge = charge;
+  delete skill.recovery;
+}
 
 function reworkSkills(content: Record<string, any>, config: ReworkConfig, seedSkills: Record<string, any>, log: (section: string, entity: any, changes: string[]) => void): void {
   const leveled = Object.values<any>(content.skills).filter(s => typeof s.unlockLevel === 'number');
+  for (const attack of Object.values<any>(seedSkills)) {
+    if (attack.type !== 'attack' || Object.values<any>(content.skills).some(s => s.type === 'attack' && s.className === attack.className)) continue;
+    content.skills[attack.id] = { ...attack };
+    log('skills', attack, ['added from the seed']);
+  }
   for (const skill of Object.values<any>(content.skills)) {
     const changes: string[] = [];
+    mergeInstantRecovery(skill, changes);
     const parent = seedSkills[skill.id] ?? (skill.unlockLevel == null
       ? leveled.find(p => p.className === skill.className && p.type === skill.type && primaryEffectKind(p) === primaryEffectKind(skill))
       : undefined);
     const source = parent && seedSkills[parent.id] ? seedSkills[parent.id] : parent;
     if (source && skill.type === 'active') {
+      const onCooldown = typeof skill.charge !== 'number' && typeof skill.recovery !== 'number';
       for (const field of SEED_TIMING_FIELDS) {
         if (source[field] !== undefined && skill[field] !== source[field]) {
           changes.push(`${field}: ${skill[field] ?? '-'} > ${source[field]}`);
           skill[field] = source[field];
+        }
+      }
+      if (typeof source.charge === 'number' || typeof source.recovery === 'number') {
+        delete skill.cooldown;
+        if (onCooldown && source.warmup === undefined && skill.warmup) {
+          const warmup = legacyWarmupSeconds(skill);
+          changes.push(`warmup: ${skill.warmup} > ${warmup}`);
+          skill.warmup = warmup;
         }
       }
     }
@@ -282,7 +321,7 @@ function reworkSkills(content: Record<string, any>, config: ReworkConfig, seedSk
     }
     const patch = config.skills?.[skill.id];
     if (patch) {
-      for (const field of ['cooldown', 'castTime', 'warmup', 'trigger'] as const) {
+      for (const field of ['cooldown', 'charge', 'recovery', 'castTime', 'warmup', 'trigger'] as const) {
         if (patch[field] !== undefined && skill[field] !== patch[field]) {
           changes.push(`${field}: ${skill[field] ?? '-'} > ${patch[field]}`);
           skill[field] = patch[field];
@@ -303,6 +342,7 @@ function reworkSkills(content: Record<string, any>, config: ReworkConfig, seedSk
         changes.push(`gains ${added.kind}`);
       }
     }
+    mergeInstantRecovery(skill, changes);
     log('skills', skill, changes);
   }
 }

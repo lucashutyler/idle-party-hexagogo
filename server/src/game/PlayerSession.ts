@@ -28,6 +28,9 @@ import {
   getZone,
   setAppliesToClass,
   createDefaultSkillLoadout,
+  findAttackSkill,
+  isActionSkill,
+  MAX_ACTION_ORDER_LENGTH,
   reconcileSkillLoadout,
   computeGrantedSkillIds,
   getUnlockedSkillsForLevel,
@@ -78,6 +81,7 @@ import {
   nextWeeklyReopening,
   isBlockedUser,
 } from '@idle-party-rpg/shared';
+import { COMBAT_PACE, paceHitDamage } from '@idle-party-rpg/shared';
 import type {
   CombatPrefs,
   DungeonCheckpoint,
@@ -303,6 +307,10 @@ export class PlayerSession {
       level: this.character.level,
       equippedSkills,
     };
+    const attack = findAttackSkill(this.character.className, this.content.getAllSkills());
+    if (attack) info.attack = attack;
+    const actionOrder = this.character.skillLoadout.actionOrder;
+    if (actionOrder?.length) info.actionOrder = [...actionOrder];
     const mastery = masteryRanks(this.monsterKills, id => this.monsterTier(id));
     if (Object.keys(mastery).length > 0) info.mastery = mastery;
     return info;
@@ -515,7 +523,7 @@ export class PlayerSession {
         artworkUrl: def.artworkUrl,
         level: def.level,
         maxHp: def.maxHp,
-        baseDamage: def.baseDamage,
+        baseDamage: paceHitDamage(COMBAT_PACE, def.className, def.baseDamage),
       });
     }
     return offers;
@@ -1288,7 +1296,10 @@ export class PlayerSession {
       className: this.character.className,
       level: this.character.level,
       equipment: { ...this.character.equipment },
-      skillLoadout: { ...this.character.skillLoadout, equippedSkills: [...this.character.skillLoadout.equippedSkills] },
+      skillLoadout: {
+        unlockedSkills: this.character.skillLoadout.unlockedSkills,
+        equippedSkills: [...this.character.skillLoadout.equippedSkills],
+      },
     };
   }
 
@@ -1384,6 +1395,28 @@ export class PlayerSession {
     if (!this.character) return false;
     const newEquipped = unequipSkillFromSlot(slotIndex, this.character.skillLoadout.equippedSkills);
     this.character.skillLoadout.equippedSkills = newEquipped;
+    return true;
+  }
+
+  /** Replace the priority list. Every id must be the player's own attack skill or an action skill they own; empty resets it. */
+  handleSetActionOrder(actionOrder: unknown): boolean {
+    if (!this.character) return false;
+    if (!Array.isArray(actionOrder) || actionOrder.length > MAX_ACTION_ORDER_LENGTH) return false;
+    if (!actionOrder.every((id): id is string => typeof id === 'string')) return false;
+    if (new Set(actionOrder).size !== actionOrder.length) return false;
+
+    const { className, skillLoadout } = this.character;
+    const granted = this.getGrantedSkillIds();
+    const owned = (id: string): boolean => {
+      const skill = this.content.getSkill(id);
+      if (!skill) return false;
+      if (skill.type === 'attack') return skill.id === findAttackSkill(className, this.content.getAllSkills())?.id;
+      return isActionSkill(skill) && ((skill.className === className && skillLoadout.unlockedSkills.includes(id)) || granted.includes(id));
+    };
+    if (!actionOrder.every(owned)) return false;
+
+    if (actionOrder.length > 0) skillLoadout.actionOrder = actionOrder;
+    else delete skillLoadout.actionOrder;
     return true;
   }
 

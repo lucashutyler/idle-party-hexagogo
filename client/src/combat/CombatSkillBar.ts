@@ -31,9 +31,13 @@ export interface SkillBarState {
   remainingMs: number;
   cooldownMs: number;
   castProgress?: number;
+  /** The player is recovering from a skill, so none can be used yet. */
+  locked?: boolean;
 }
 
 const SWEEP_EPSILON = 0.02;
+
+const LOCKED_LABEL = 'LOCKED';
 
 const STATE_LABEL: Record<ClientCombatSkill['state'], string> = {
   ready: 'READY',
@@ -48,6 +52,7 @@ interface CardRefs {
   sweepEl: HTMLElement;
   status: HTMLElement;
   lastState: string;
+  lastLocked: boolean;
   lastSweep: number;
   lastText: string;
 }
@@ -106,6 +111,7 @@ export class CombatSkillBar {
         sweepEl: el.querySelector('.combat-skill-sweep')!,
         status: el.querySelector('.combat-skill-status')!,
         lastState: '',
+        lastLocked: false,
         lastSweep: -1,
         lastText: '',
       });
@@ -122,6 +128,12 @@ export class CombatSkillBar {
         refs.lastState = s.state;
         refs.el.dataset.state = s.state;
       }
+      const locked = !!s.locked;
+      const lockChanged = locked !== refs.lastLocked;
+      if (lockChanged) {
+        refs.lastLocked = locked;
+        refs.el.classList.toggle('locked', locked);
+      }
       const sweep = s.state === 'casting'
         ? s.castProgress ?? 0
         : s.state === 'cooldown' && s.cooldownMs > 0 ? Math.max(0, Math.min(1, s.remainingMs / s.cooldownMs)) : 0;
@@ -129,8 +141,10 @@ export class CombatSkillBar {
         refs.lastSweep = sweep;
         refs.sweepEl.style.setProperty('--cd', sweep.toFixed(2));
       }
-      if (writeText || stateChanged) {
-        const text = s.state === 'cooldown' ? `${formatSeconds(s.remainingMs)}s` : STATE_LABEL[s.state];
+      if (writeText || stateChanged || lockChanged) {
+        const text = s.state === 'cooldown'
+          ? `${formatSeconds(s.remainingMs)}s`
+          : locked && (s.state === 'ready' || s.state === 'armed') ? LOCKED_LABEL : STATE_LABEL[s.state];
         if (text !== refs.lastText) {
           refs.lastText = text;
           refs.status.textContent = text;

@@ -136,7 +136,7 @@ function forecastDungeon(ctx: LabContext, engine: EngineAdapter, parties: PartyF
   const key = `${args.seed}|${dungeon.id}|${cell.comp}`;
   const entrance = ctx.content.world.tiles.find(t => t.dungeonId === dungeon.id);
   const result = engine.module.runForecast(
-    { kind: 'dungeon', players, dungeon, monsters: ctx.content.monsters, encounters: ctx.content.encounters, fallbackTable: entrance ? ctx.content.zones[entrance.zone].encounterTable ?? [] : [] },
+    { kind: 'dungeon', players, dungeon, monsters: ctx.content.monsters, encounters: ctx.content.encounters, fallbackTable: entrance ? ctx.content.zones[entrance.zone].encounterTable ?? [] : [], pace: engine.module.COMBAT_PACE },
     { key, maxSims: FORECAST_SIMS, minSims: FORECAST_SIMS },
   );
   return {
