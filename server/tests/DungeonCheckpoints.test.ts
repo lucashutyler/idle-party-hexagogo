@@ -5,7 +5,7 @@ import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
 import type { ServerBattleTimer } from '../src/game/ServerBattleTimer.js';
-import { HexGrid, HexTile, offsetToCube, DEFAULT_MAP_ID, DUNGEON_CHECKPOINT_TTL_MS } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, COMBAT_PACE, COMBAT_STEP_MS, DEFAULT_CHECKPOINT_REWARD_FRACTION, DEFAULT_MAP_ID, DUNGEON_CHECKPOINT_TTL_MS, paceRealMs } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import type {
@@ -20,6 +20,7 @@ import WebSocket from 'ws';
 
 const DUNGEON_ID = 'chief_hall';
 const ENTRANCE_TILE_ID = 'tile-start';
+const FIRST_STEP_MS = paceRealMs(COMBAT_PACE, COMBAT_STEP_MS);
 
 const MONSTERS: Record<string, MonsterDefinition> = {
   chief: { id: 'chief', name: 'Chief', hp: 30, damage: 1, damageType: 'physical', xp: 100, goldMin: 40, goldMax: 60, tier: 'boss' },
@@ -157,20 +158,23 @@ describe('Dungeon boss checkpoints', () => {
     const { pm, partyId, session, entry, log, reachPhase } = await setup();
     pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
     const gold0 = session.getGold();
+    const share = DEFAULT_CHECKPOINT_REWARD_FRACTION * COMBAT_PACE.rewardMultiplier;
+    const gold = Math.floor(50 * share);
+    const xp = Math.floor(100 * share);
 
     reachPhase(1);
-    expect(session.getGold()).toBe(gold0 + 7);
-    expect(log()).toContain('Checkpoint 1 reward: +15 XP, +7 Gold');
+    expect(session.getGold()).toBe(gold0 + gold);
+    expect(log()).toContain(`Checkpoint 1 reward: +${xp} XP, +${gold} Gold`);
     expect(entry().dungeonRun!.rewardedPhases).toEqual(['0:1']);
 
     // A regroup resumes at checkpoint 1; crossing it again pays nothing, reaching 2 pays once.
     (pm.partyBattles as unknown as PbmInternals).handleDungeonDefeat(entry());
     entry().battleTimer.restartBattle();
     reachPhase(2);
-    expect(session.getGold()).toBe(gold0 + 14);
+    expect(session.getGold()).toBe(gold0 + 2 * gold);
     expect(entry().dungeonRun!.rewardedPhases).toEqual(['0:1', '0:2']);
     reachPhase(2);
-    expect(session.getGold()).toBe(gold0 + 14);
+    expect(session.getGold()).toBe(gold0 + 2 * gold);
   });
 
   it('ignores a phase report from a battle that is no longer current', async () => {
@@ -361,12 +365,12 @@ describe('Dungeon boss checkpoints', () => {
     const { pm, partyId, session, log, reachPhase } = await setup();
     const leaveMidFight = () => {
       expect(pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice').success).toBe(true);
-      vi.advanceTimersByTime(100);
+      vi.advanceTimersByTime(FIRST_STEP_MS);
       pm.partyBattles.leaveDungeon(partyId);
     };
     pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
     reachPhase(1);
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(FIRST_STEP_MS);
     pm.partyBattles.leaveDungeon(partyId);
     expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 1, wipes: 1 });
     expect(log()).toContain('Leaving mid-fight counts as a wipe.');
@@ -399,7 +403,7 @@ describe('Dungeon boss checkpoints', () => {
     const { pm, partyId, session, reachPhase } = await setup();
     pm.partyBattles.enterDungeon(partyId, DUNGEON_ID, 'alice');
     reachPhase(1);
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(FIRST_STEP_MS);
     pm.partyBattles.destroyEntry(partyId);
     expect(session.getDungeonCheckpoint(DUNGEON_ID)).toMatchObject({ phase: 1, wipes: 1, rewardedPhases: ['0:1'] });
   });

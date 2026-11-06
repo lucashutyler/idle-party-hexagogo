@@ -99,9 +99,16 @@ export {
   SKILL_CARD_TYPE_INFO,
   getSkillTrigger,
   getSkillCardType,
+  isTimedSkill,
+  findAttackSkill,
+  isActionSkill,
+  resolveActionOrder,
+  attackSkillsReplacedBySeed,
+  MAX_ACTION_ORDER_LENGTH,
 } from './systems/SkillTypes.js';
 export type {
   SkillSlotType,
+  SkillType,
   SkillId,
   SkillSlot,
   PassiveEffectKind,
@@ -238,12 +245,13 @@ export {
   advanceCombat,
   cloneCombatState,
   createRng,
+  combatRealElapsedMs,
+  combatRealStepMs,
   buildClientCombatSnapshot,
   findTarget,
   applyMonsterResistance,
   effectiveCooldownMs,
   wouldHaveEffect,
-  isInterruptFlashMode,
 } from './systems/CombatEngine.js';
 export type {
   TickResult,
@@ -325,6 +333,18 @@ export {
   PLAYBACK_DELAY_MS,
   STATE_LOG_TAIL,
 } from './systems/CombatTiming.js';
+export {
+  AUTHORED_PACE,
+  COMBAT_PACE,
+  paceActionSeconds,
+  paceDropChance,
+  paceEngineMs,
+  paceHitDamage,
+  paceKit,
+  paceRealMs,
+  paceSkillSeconds,
+} from './systems/CombatPace.js';
+export type { CombatPace } from './systems/CombatPace.js';
 
 // Combat events & client snapshot
 export type {
@@ -371,6 +391,7 @@ export type {
   ClientResetXpRateMessage,
   ClientEquipSkillMessage,
   ClientUnequipSkillMessage,
+  ClientSetActionOrderMessage,
   ClientViewPlayerMessage,
   ClientShopBuyMessage,
   ClientShopSellMessage,

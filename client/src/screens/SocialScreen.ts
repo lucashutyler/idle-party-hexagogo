@@ -10,7 +10,7 @@ import type { ConfirmDialogOptions } from '../ui/ConfirmDialog';
 import { bringToFront, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { renderAssetImg } from '../ui/assets';
 import { showMapToast } from '../ui/MapToast';
-import { renderSkillCardMeta } from '../ui/SkillCardChip';
+import { classAttackSkill, renderSkillCardMeta } from '../ui/SkillCardChip';
 import { partyGridCell } from '../ui/partyGridLayout';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { renderSegments, wireSegments } from '../ui/Segments';
@@ -2313,9 +2313,17 @@ export class SocialScreen implements Screen {
       return `<div class="profile-skill-slot ${skill.type}">
         <span class="profile-skill-type">${skill.type}</span>
         <span class="profile-skill-name">${this.escapeHtml(skill.name)}</span>
-        ${renderSkillCardMeta(skill)}
+        ${renderSkillCardMeta(skill, profile.className)}
       </div>`;
     }).join('');
+    const attack = classAttackSkill(profile.className, this.worldCache.getSkillContent().skills);
+    const attackHtml = attack
+      ? `<div class="profile-skill-slot attack">
+        <span class="profile-skill-type">Always on</span>
+        <span class="profile-skill-name">${this.escapeHtml(attack.name)}</span>
+        ${renderSkillCardMeta(attack, profile.className)}
+      </div>`
+      : '';
 
     // Party members section
     const partyHtml = profile.partyMembers.length > 1
@@ -2339,7 +2347,7 @@ export class SocialScreen implements Screen {
         <div class="profile-section-label">Equipment</div>
         ${equipHtml}
         <div class="profile-section-label">Skills</div>
-        <div class="profile-skills">${skillHtml}</div>
+        <div class="profile-skills">${attackHtml}${skillHtml}</div>
         <div class="profile-section-label">Party</div>
         <div class="profile-party">${partyHtml}</div>
       </div>

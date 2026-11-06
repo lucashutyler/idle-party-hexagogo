@@ -177,7 +177,7 @@ function trialRow(ctx: LabContext, engine: EngineAdapter, players: any[], floors
   };
   if (engine.name === 'new') {
     const forecast = engine.module.runForecast(
-      { kind: 'dungeon', players, dungeon, monsters: ctx.content.monsters, encounters: ctx.content.encounters, fallbackTable: ctx.content.zones[zoneId].encounterTable ?? [] },
+      { kind: 'dungeon', players, dungeon, monsters: ctx.content.monsters, encounters: ctx.content.encounters, fallbackTable: ctx.content.zones[zoneId].encounterTable ?? [], pace: engine.module.COMBAT_PACE },
       { key: `${ctx.seed}|${dungeon.id}|${comp}|${level}`, maxSims: opts.forecastSims, minSims: opts.forecastSims },
     );
     row.forecastPct = forecast.winPct;

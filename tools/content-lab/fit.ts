@@ -1,9 +1,10 @@
+import { COMBAT_PACE } from '../../shared/src/systems/CombatPace.js';
 import type { Factors, ReworkConfig } from './rework.js';
 import { collectMonsterUsage } from './rework.js';
 import type { TrialSweepRow } from './sweep.js';
 import type { Baseline, CellResult, ContentSnapshot, EncounterEntry } from './types.js';
 
-export const SPEED_TARGET = 2.3;
+export const SPEED_TARGET = 2.3 / COMBAT_PACE.clock;
 export const LENGTH_COMPS = ['K+P', 'K+P+M', 'K+A+P+M+B'] as const;
 export const ECONOMY_COMPS = ['K+P+M', 'K+A+P+M+B'] as const;
 /** Fights this short are a hit or two either way: nothing to fit. */
@@ -111,7 +112,7 @@ function killRateRatio(place: Place, oldPauseSec: number, newPauseSec: number): 
     const o = place.old.get(comp)?.medianSec;
     const n = place.cur.get(comp)?.medianSec;
     if (o == null || n == null) continue;
-    ratios.push((n + newPauseSec) / (o + oldPauseSec));
+    ratios.push((n + newPauseSec) / (o + oldPauseSec) / COMBAT_PACE.rewardMultiplier);
   }
   return ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null;
 }
@@ -238,7 +239,7 @@ function fitEnrage(config: ReworkConfig, places: readonly Place[], reworked: Con
     if (!monster || monster.passive || (monster.tier !== 'boss' && monster.tier !== 'raid')) continue;
     const times = enrageTimes(places, trials, reworked, id);
     if (!times.length) continue;
-    const afterSeconds = Math.max(ENRAGE_MIN_SECONDS, Math.ceil((Math.max(...times) * factor) / 10) * 10);
+    const afterSeconds = Math.max(ENRAGE_MIN_SECONDS, Math.ceil(((Math.max(...times) / COMBAT_PACE.clock) * factor) / 10) * 10);
     const hasCheckpoints = Object.values<any>(reworked.dungeons).some(d => (d.floors ?? []).some((f: any) => f.isBoss && tableIds(reworked, f.encounterTable).includes(id)));
     config.enrage[id] = { afterSeconds, ...(hasCheckpoints ? config.enrageSteps : {}) };
   }

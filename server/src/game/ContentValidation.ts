@@ -161,6 +161,13 @@ export function findContentProblems(snapshot: ContentSnapshot): string[] {
       problems.push(`Skill '${skill.id}': ${error}`);
     }
   }
+  const attackByClass = new Map<string, string>();
+  for (const skill of snapshot.skills ?? []) {
+    if (skill.type !== 'attack') continue;
+    const other = attackByClass.get(skill.className);
+    if (other) problems.push(`Skill '${skill.id}': ${skill.className} already has an attack skill ('${other}').`);
+    else attackByClass.set(skill.className, skill.id);
+  }
 
   // --- Dungeons ---
   const encountersById = new Map((snapshot.encounters ?? []).map(e => [e.id, e]));

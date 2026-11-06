@@ -5,7 +5,7 @@ import {
   wouldHaveEffect,
 } from '../src/systems/CombatEngine';
 import type { PartyCombatState } from '../src/systems/CombatEngine';
-import { SEED_SKILLS } from '../src/systems/SkillTypes';
+import { LEGACY_SEED_SKILLS } from './legacySeedSkills';
 import { createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes';
 import { MIN_COOLDOWN_MS } from '../src/systems/CombatTiming';
 import {
@@ -22,8 +22,8 @@ import type { PlayerOptions } from './combatTestUtils';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
-const tempo = SEED_SKILLS.bard_tempo;
-const encore = SEED_SKILLS.bard_encore;
+const tempo = LEGACY_SEED_SKILLS.bard_tempo;
+const encore = LEGACY_SEED_SKILLS.bard_encore;
 
 function skillUseTimes(events: ReturnType<typeof runTo>['events'], skillId: string): number[] {
   return events.filter(e => (e.kind === 'attack' || e.kind === 'cast_start') && e.skillId === skillId).map(e => e.t);
@@ -31,7 +31,7 @@ function skillUseTimes(events: ReturnType<typeof runTo>['events'], skillId: stri
 
 describe('cooldowns in seconds', () => {
   it('Knight Bash (2 s) fires on the first action and then every 2 seconds', () => {
-    const knight = makePlayer('Arthur', 2, { className: 'Knight', baseDamage: 1, skills: [SEED_SKILLS.knight_guard, SEED_SKILLS.knight_bash] });
+    const knight = makePlayer('Arthur', 2, { className: 'Knight', baseDamage: 1, skills: [LEGACY_SEED_SKILLS.knight_guard, LEGACY_SEED_SKILLS.knight_bash] });
     const state = createPartyCombatState([knight], [makeMonster(0)]);
     const { events, log } = runTo(state, 6000);
     expect(skillUseTimes(events, 'knight_bash')).toEqual([1000, 3000, 5000]);
@@ -82,36 +82,36 @@ describe('warm-up', () => {
   }
 
   it('action skills warm up for max(0, cooldown − 1 s)', () => {
-    expect(warmups([SEED_SKILLS.knight_bash])).toEqual({ knight_bash: 1000 });
-    expect(warmups([SEED_SKILLS.archer_snipe])).toEqual({ archer_snipe: 4000 });
-    expect(warmups([SEED_SKILLS.priest_minor_heal])).toEqual({ priest_minor_heal: 0 });
+    expect(warmups([LEGACY_SEED_SKILLS.knight_bash])).toEqual({ knight_bash: 1000 });
+    expect(warmups([LEGACY_SEED_SKILLS.archer_snipe])).toEqual({ archer_snipe: 4000 });
+    expect(warmups([LEGACY_SEED_SKILLS.priest_minor_heal])).toEqual({ priest_minor_heal: 0 });
   });
 
   it('interrupts warm up like action skills; other reactions start ready', () => {
-    expect(warmups([SEED_SKILLS.knight_dispel])).toEqual({ knight_dispel: 4000 });
-    expect(warmups([SEED_SKILLS.bard_drumroll])).toEqual({ bard_drumroll: 3000 });
-    expect(warmups([SEED_SKILLS.knight_intercept, SEED_SKILLS.knight_shield_slam, SEED_SKILLS.priest_cure, SEED_SKILLS.priest_mending]))
+    expect(warmups([LEGACY_SEED_SKILLS.knight_dispel])).toEqual({ knight_dispel: 4000 });
+    expect(warmups([LEGACY_SEED_SKILLS.bard_drumroll])).toEqual({ bard_drumroll: 3000 });
+    expect(warmups([LEGACY_SEED_SKILLS.knight_intercept, LEGACY_SEED_SKILLS.knight_shield_slam, LEGACY_SEED_SKILLS.priest_cure, LEGACY_SEED_SKILLS.priest_mending]))
       .toEqual({ knight_intercept: 0, knight_shield_slam: 0, priest_cure: 0, priest_mending: 0 });
   });
 
   it('an explicit warmup wins (Sunder 1 s, War Song 0 s)', () => {
-    expect(warmups([SEED_SKILLS.knight_sunder])).toEqual({ knight_sunder: 1000 });
-    expect(warmups([SEED_SKILLS.bard_war_song])).toEqual({ bard_war_song: 0 });
+    expect(warmups([LEGACY_SEED_SKILLS.knight_sunder])).toEqual({ knight_sunder: 1000 });
+    expect(warmups([LEGACY_SEED_SKILLS.bard_war_song])).toEqual({ bard_war_song: 0 });
     expect(warmups([activeSkill({ id: 'r', trigger: 'ally_low_hp', cooldown: 5, warmup: 2, activeEffects: [{ kind: 'hot_lowest', healMultiplier: 1 }] })]))
       .toEqual({ r: 2000 });
   });
 
   it('warm-up counts as the snapshot cooldown length', () => {
-    const state = createPartyCombatState([makePlayer('A', 2, { skills: [SEED_SKILLS.knight_bash, SEED_SKILLS.knight_intercept] })], [makeMonster(0)]);
+    const state = createPartyCombatState([makePlayer('A', 2, { skills: [LEGACY_SEED_SKILLS.knight_bash, LEGACY_SEED_SKILLS.knight_intercept] })], [makeMonster(0)]);
     expect(state.players[0].skillCooldownTotals).toEqual({ knight_bash: 1000, knight_intercept: 0 });
   });
 
   it('warm-up uses the effective (CDR-reduced) cooldown', () => {
-    expect(warmups([SEED_SKILLS.archer_snipe, tempo])).toEqual({ archer_snipe: 3000 });
+    expect(warmups([LEGACY_SEED_SKILLS.archer_snipe, tempo])).toEqual({ archer_snipe: 3000 });
   });
 
   it('War Song opens the fight on the first action and marks every living ally', () => {
-    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [SEED_SKILLS.bard_war_song] });
+    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [LEGACY_SEED_SKILLS.bard_war_song] });
     const state = createPartyCombatState([bard, makePlayer('Ally', 5), makePlayer('Fallen', 1)], [makeMonster(0)]);
     player(state, 'Fallen').currentHp = 0;
     const { events, log } = runTo(state, 1000);
@@ -165,8 +165,8 @@ describe('cooldown reduction (seconds)', () => {
   });
 
   it('never applies to enemy_cast skills', () => {
-    const state = stateWith([SEED_SKILLS.bard_drumroll, tempo, encore], [], 1);
-    expect(effectiveCooldownMs(state.players[0], SEED_SKILLS.bard_drumroll, state.players)).toBe(4000);
+    const state = stateWith([LEGACY_SEED_SKILLS.bard_drumroll, tempo, encore], [], 1);
+    expect(effectiveCooldownMs(state.players[0], LEGACY_SEED_SKILLS.bard_drumroll, state.players)).toBe(4000);
     expect(state.players[0].skillCooldowns.bard_drumroll).toBe(3000);
   });
 
@@ -212,7 +212,7 @@ describe('wouldHaveEffect (the "needed" check)', () => {
 
   it('heal_lowest ignores heal power (Devotion)', () => {
     const state = createPartyCombatState([
-      makePlayer('Healer', 2, { className: 'Priest', level: 5, hp: 100, skills: [SEED_SKILLS.priest_devotion] }),
+      makePlayer('Healer', 2, { className: 'Priest', level: 5, hp: 100, skills: [LEGACY_SEED_SKILLS.priest_devotion] }),
       makePlayer('Tank', 5, { hp: 100 }),
     ], [makeMonster(0)]);
     player(state, 'Tank').currentHp = 69;
@@ -274,7 +274,7 @@ describe('wouldHaveEffect (the "needed" check)', () => {
 
   it('shield_non_knight: needed only for an unshielded non-Knight; targets lowest %HP', () => {
     pinRandom();
-    const shield = SEED_SKILLS.priest_sanctuary;
+    const shield = LEGACY_SEED_SKILLS.priest_sanctuary;
     const state = party();
     const healer = player(state, 'Healer');
     expect(wouldHaveEffect(healer, shield, state)).toBe(true);
@@ -294,8 +294,8 @@ describe('wouldHaveEffect (the "needed" check)', () => {
   it('redirect_hit and brace_reflect never have an effect outside their trigger', () => {
     const state = party();
     const healer = player(state, 'Healer');
-    expect(wouldHaveEffect(healer, SEED_SKILLS.knight_intercept, state)).toBe(false);
-    expect(wouldHaveEffect(healer, SEED_SKILLS.knight_shield_slam, state)).toBe(false);
+    expect(wouldHaveEffect(healer, LEGACY_SEED_SKILLS.knight_intercept, state)).toBe(false);
+    expect(wouldHaveEffect(healer, LEGACY_SEED_SKILLS.knight_shield_slam, state)).toBe(false);
   });
 
   it('enemy-targeting kinds are needed while any monster (even a wall) lives; stun_aoe ignores walls', () => {
@@ -304,7 +304,7 @@ describe('wouldHaveEffect (the "needed" check)', () => {
       makeMonster(3),
     ]);
     const a = state.players[0];
-    const zap = SEED_SKILLS.mage_zap;
+    const zap = LEGACY_SEED_SKILLS.mage_zap;
     const stunAoe = activeSkill({ id: 'sa', activeEffects: [{ kind: 'stun_aoe', stunChance: 1 }] });
     expect(wouldHaveEffect(a, zap, state)).toBe(true);
     expect(wouldHaveEffect(a, stunAoe, state)).toBe(true);
@@ -316,7 +316,7 @@ describe('wouldHaveEffect (the "needed" check)', () => {
 
 describe('held skills and fizzles', () => {
   it('a support card with nobody to help is held: no cooldown, auto-attack instead', () => {
-    const priest = makePlayer('P', 2, { className: 'Priest', level: 5, hp: 100, skills: [SEED_SKILLS.priest_minor_heal] });
+    const priest = makePlayer('P', 2, { className: 'Priest', level: 5, hp: 100, skills: [LEGACY_SEED_SKILLS.priest_minor_heal] });
     const state = createPartyCombatState([priest], [makeMonster(0)]);
     const r = runTo(state, 1000);
     expect(ofKind(r.events, 'attack')[0].t).toBe(1000);
@@ -330,7 +330,7 @@ describe('held skills and fizzles', () => {
 
   it('a held skill lets the next ready skill in slot order act', () => {
     const zap = activeSkill({ id: 'zap', cooldown: 1 });
-    const priest = makePlayer('P', 2, { className: 'Priest', level: 5, skills: [SEED_SKILLS.priest_minor_heal, zap] });
+    const priest = makePlayer('P', 2, { className: 'Priest', level: 5, skills: [LEGACY_SEED_SKILLS.priest_minor_heal, zap] });
     const state = createPartyCombatState([priest], [makeMonster(0)]);
     const { events } = runTo(state, 1000);
     expect(ofKind(events, 'attack')[0].skillId).toBe('zap');
@@ -352,7 +352,7 @@ describe('held skills and fizzles', () => {
   it('a fizzle rewinds Arcane Surge so the next effective active still gets the doubled count', () => {
     pinRandom(0.9);
     const fizzler = activeSkill({ id: 'fz', cooldown: 1, warmup: 0, activeEffects: [{ kind: 'stun_aoe', stunChance: 0 }] });
-    const mage = makePlayer('M', 2, { className: 'Mage', skills: [SEED_SKILLS.mage_arcane_surge, fizzler] });
+    const mage = makePlayer('M', 2, { className: 'Mage', skills: [LEGACY_SEED_SKILLS.mage_arcane_surge, fizzler] });
     const state = createPartyCombatState([mage], [makeMonster(0)]);
     runTo(state, 3000);
     expect(state.players[0].activeSkillCount).toBe(0);
@@ -361,7 +361,7 @@ describe('held skills and fizzles', () => {
   it('Arcane Surge doubles every second effective active', () => {
     pinRandom();
     const zap = activeSkill({ id: 'zap', cooldown: 1, activeEffects: [{ kind: 'damage_percent', damagePercent: 1 }] });
-    const mage = makePlayer('M', 2, { className: 'Mage', baseDamage: 10, skills: [SEED_SKILLS.mage_arcane_surge, zap] });
+    const mage = makePlayer('M', 2, { className: 'Mage', baseDamage: 10, skills: [LEGACY_SEED_SKILLS.mage_arcane_surge, zap] });
     const state = createPartyCombatState([mage], [makeMonster(0)]);
     const { events } = runTo(state, 3000);
     expect(ofKind(events, 'damage').filter(e => e.src?.side === 'player').map(e => e.amount)).toEqual([10, 20, 10]);
@@ -370,7 +370,7 @@ describe('held skills and fizzles', () => {
   it('Intensify raises skill damage and lowers auto-attack damage', () => {
     pinRandom();
     const zap = activeSkill({ id: 'zap', cooldown: 2, warmup: 0, activeEffects: [{ kind: 'damage_percent', damagePercent: 1 }] });
-    const mage = makePlayer('M', 2, { className: 'Mage', baseDamage: 10, skills: [SEED_SKILLS.mage_intensify, zap] });
+    const mage = makePlayer('M', 2, { className: 'Mage', baseDamage: 10, skills: [LEGACY_SEED_SKILLS.mage_intensify, zap] });
     const state = createPartyCombatState([mage], [makeMonster(0)]);
     const { events } = runTo(state, 2000);
     expect(ofKind(events, 'damage').filter(e => e.src?.side === 'player').map(e => e.amount)).toEqual([15, 5]);
@@ -425,7 +425,7 @@ describe('player casts', () => {
   });
 
   it('AoE casts do not lock a target', () => {
-    const state = createPartyCombatState([makePlayer('A', 2, { skills: [SEED_SKILLS.mage_blizzard] })], [makeMonster(0)]);
+    const state = createPartyCombatState([makePlayer('A', 2, { skills: [LEGACY_SEED_SKILLS.mage_blizzard] })], [makeMonster(0)]);
     state.players[0].skillCooldowns.mage_blizzard = 0;
     const { events } = runTo(state, 1000);
     const start = ofKind(events, 'cast_start')[0];
@@ -532,7 +532,7 @@ describe('stun_single targeting', () => {
     expect(ofKind(r.events, 'interrupt')).toEqual([expect.objectContaining({
       t: 2000, src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 3 }, skill: 'Fireball', skillId: 'fireball',
     })]);
-    expect(ofKind(r.events, 'interrupt')[0].cardType).toBeUndefined();
+    expect(ofKind(r.events, 'interrupt')[0].countered).toBeUndefined();
     expect(r.log).toContain('Shaman is stunned!');
     expect(r.log).toContain('Shaman\'s Fireball is interrupted!');
     const shaman = monsterAt(state, 3);
@@ -543,7 +543,7 @@ describe('stun_single targeting', () => {
 
   it('falls back to grid targeting when nobody is casting', () => {
     pinRandom();
-    const state = createPartyCombatState([makePlayer('K', 2, { className: 'Knight', skills: [SEED_SKILLS.knight_bash] })], [
+    const state = createPartyCombatState([makePlayer('K', 2, { className: 'Knight', skills: [LEGACY_SEED_SKILLS.knight_bash] })], [
       makeMonster(0, { name: 'Front' }), makeMonster(3, { name: 'Other' }),
     ]);
     const { events, log } = runTo(state, 1000);
@@ -591,7 +591,7 @@ describe('monster casts', () => {
   it('a stun landing as the cast resolves (Shield Bash) is an ordinary stun, not an interrupt', () => {
     pinRandom(0.05);
     const state = createPartyCombatState(
-      [makePlayer('K', 2, { className: 'Knight', skills: [SEED_SKILLS.knight_shield_bash] })],
+      [makePlayer('K', 2, { className: 'Knight', skills: [LEGACY_SEED_SKILLS.knight_shield_bash] })],
       [makeMonster(0, { name: 'Rogue', skills: [{ skillId: 'assassinate', value: 30, cooldown: 6 }] })],
     );
     const r = runTo(state, 2400);

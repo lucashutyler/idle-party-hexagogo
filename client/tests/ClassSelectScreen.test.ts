@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ALL_CLASS_NAMES } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, CLASS_DEFINITIONS, COMBAT_PACE, paceActionSeconds, paceKit } from '@idle-party-rpg/shared';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import {
   CLASS_CHOICE_TIMEOUT_MS,
@@ -12,7 +12,7 @@ import type { WorldCache } from '../src/network/WorldCache';
 type StateListener = (state: ServerStateMessage) => void;
 type ErrorListener = (message: string, code?: string) => void;
 
-function mount() {
+function mount(skills: Record<string, unknown> = {}) {
   document.body.innerHTML = '<div id="screen-class-select"></div>';
   const stateListeners = new Set<StateListener>();
   const errorListeners = new Set<ErrorListener>();
@@ -22,7 +22,7 @@ function mount() {
     subscribe: (l: StateListener) => { stateListeners.add(l); return () => { stateListeners.delete(l); }; },
     onServerError: (l: ErrorListener) => { errorListeners.add(l); return () => { errorListeners.delete(l); }; },
   } as unknown as GameClient;
-  const worldCache = { getSkillContent: () => ({ skills: {} }) } as unknown as WorldCache;
+  const worldCache = { getSkillContent: () => ({ skills }) } as unknown as WorldCache;
   const onChosen = vi.fn();
   const screen = new ClassSelectScreen('screen-class-select', gameClient, worldCache, onChosen);
   screen.onActivate();
@@ -56,6 +56,29 @@ describe('ClassSelectScreen', () => {
     expect(art.querySelector('.class-card-icon')).toBeTruthy();
     expect(art.querySelector<HTMLImageElement>('img.class-card-img')!.getAttribute('src'))
       .toBe(`/class-artwork/${ALL_CLASS_NAMES[0].toLowerCase()}.png`);
+  });
+
+  it('shows each class\'s damage as it hits in play and how often it acts', () => {
+    const t = mount();
+    const oneDecimal = (value: number): number => Math.round(value * 10) / 10;
+    for (const name of ALL_CLASS_NAMES) {
+      const kit = paceKit(COMBAT_PACE, name);
+      const def = CLASS_DEFINITIONS[name];
+      const stats = [...t.card(name).querySelectorAll('.class-card-stats span')].map(s => s.textContent);
+      expect(stats).toContain(`${Math.round(def.baseDamage * kit)} ${def.damageType} damage, +${oneDecimal(def.damagePerLevel * kit)} a level`);
+      expect(stats).toContain(`Acts every ${oneDecimal(paceActionSeconds(COMBAT_PACE, name))} seconds`);
+    }
+  });
+
+  it('times a class by its Attack skill when it has one', () => {
+    const t = mount({
+      archer_attack: { id: 'archer_attack', name: 'Attack', description: '', className: 'Archer', type: 'attack', unlockLevel: 1, sortOrder: 0, charge: 0.4, recovery: 1.6 },
+      knight_attack: { id: 'knight_attack', name: 'Attack', description: '', className: 'Knight', type: 'attack', unlockLevel: 1, sortOrder: 0, recovery: 5 },
+    });
+    const stats = (name: string) => [...t.card(name).querySelectorAll('.class-card-stats span')].map(s => s.textContent);
+    expect(stats('Archer')).toContain('Acts every 2 seconds');
+    expect(stats('Knight')).toContain('Acts every 5 seconds');
+    expect(stats('Mage')).toContain(`Acts every ${Math.round(paceActionSeconds(COMBAT_PACE, 'Mage') * 10) / 10} seconds`);
   });
 
   it('enables the confirm button once a class is picked and names it', () => {

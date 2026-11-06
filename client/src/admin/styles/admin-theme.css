@@ -1036,6 +1036,11 @@ body.admin-modal-open { overflow: hidden; }
   color: var(--admin-text-muted);
   white-space: nowrap;
 }
+.admin-pill-attack {
+  color: var(--admin-dmg-physical);
+  border-color: var(--admin-dmg-physical-border);
+}
+
 .admin-pill-passive {
   background: rgba(37, 99, 235, 0.10);
   color: var(--admin-link);
@@ -1057,12 +1062,9 @@ body.admin-modal-open { overflow: hidden; }
   border-color: var(--admin-dmg-magical-border);
 }
 .skills-card-pill { white-space: nowrap; }
-.skills-card-attack { color: var(--admin-dmg-physical); border-color: var(--admin-dmg-physical-border); }
-.skills-card-support { color: var(--admin-success); border-color: var(--admin-success); background: rgba(22, 163, 74, 0.10); }
-.skills-card-enchantment { color: var(--admin-dmg-magical); border-color: var(--admin-dmg-magical-border); background: rgba(124, 58, 237, 0.10); }
+.skills-card-basic { color: var(--admin-dmg-physical); }
+.skills-card-action { color: var(--admin-dmg-physical); border-color: var(--admin-dmg-physical-border); }
 .skills-card-instant { color: var(--admin-link); border-color: var(--admin-accent); background: var(--admin-accent-bg); }
-.skills-card-interrupt { color: var(--admin-danger); border-color: var(--admin-danger); background: var(--admin-danger-bg); }
-.skills-card-triggered { color: var(--admin-warning); border-color: var(--admin-warning); background: rgba(217, 119, 6, 0.12); }
 .skills-timing { margin-top: 2px; font-size: 0.85em; white-space: nowrap; }
 .skills-card-field {
   display: flex;

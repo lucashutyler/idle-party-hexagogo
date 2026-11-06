@@ -1,5 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { ClientCombatSnapshot, ClientCombatUnit, CombatEvent, SkillDefinition } from '@idle-party-rpg/shared';
+import {
+  ALL_CLASS_NAMES,
+  buildClientCombatSnapshot,
+  COMBAT_PACE,
+  combatRealElapsedMs,
+  combatRealStepMs,
+  createRng,
+  createMonsterInstance,
+  createPartyCombatState,
+  paceActionSeconds,
+  processCombatStep,
+} from '@idle-party-rpg/shared';
+import type { ClassName, ClientCombatSnapshot, ClientCombatUnit, CombatEvent, SkillDefinition } from '@idle-party-rpg/shared';
 import {
   CATCH_UP_MS,
   CLOCK_SLEW_MS,
@@ -11,6 +23,7 @@ import {
   skillDisplayState,
   STALE_RESUME_MS,
   SYNC_WAIT_MS,
+  timedSkillMs,
 } from '../src/combat/CombatPlayback';
 import type { PlaybackSkill } from '../src/combat/CombatPlayback';
 
@@ -57,19 +70,269 @@ describe('guessCooldownMs', () => {
     id: 's', name: 'S', description: '', className: 'Knight', type: 'active', unlockLevel: 1, activeEffects: [], ...fields,
   } as SkillDefinition);
 
-  it('reads the effective cooldown back from a derived warm-up', () => {
-    expect(guessCooldownMs(skill({ cooldown: 3 }), 1000)).toBe(2000);
-    expect(guessCooldownMs(skill({ cooldown: 2 }), 0)).toBe(1000);
-    expect(guessCooldownMs(skill({ cooldown: 5, trigger: 'enemy_cast' }), 4000)).toBe(5000);
+  const actionMs = (seconds: number, className: string): number => Math.round(seconds * paceActionSeconds(COMBAT_PACE, className) * 1000);
+  const reactionMs = (seconds: number): number => Math.round(seconds * COMBAT_PACE.clock * 1000);
+
+  it.each(ALL_CLASS_NAMES)('times an action by a %s owner, whatever class the skill is from or its warm-up', className => {
+    const expected = actionMs(3, className);
+    expect(guessCooldownMs(skill({ cooldown: 3 }), className)).toBe(expected);
+    expect(guessCooldownMs(skill({ cooldown: 3, className: 'Priest' }), className)).toBe(expected);
+    expect(guessCooldownMs(skill({ cooldown: 3, warmup: 1 }), className)).toBe(expected);
   });
 
-  it('falls back to the base cooldown for explicit warm-ups, other reactions and unknown warm-ups', () => {
-    expect(guessCooldownMs(skill({ cooldown: 3, warmup: 1 }), 1000)).toBe(3000);
-    expect(guessCooldownMs(skill({ cooldown: 4, warmup: 0 }), 0)).toBe(4000);
-    expect(guessCooldownMs(skill({ cooldown: 2, trigger: 'ally_targeted' }), 0)).toBe(2000);
-    expect(guessCooldownMs(skill({ cooldown: 6 }), undefined)).toBe(6000);
-    expect(guessCooldownMs(skill({ cooldown: 0.5 }), undefined)).toBe(1000);
-    expect(guessCooldownMs(skill({}), undefined)).toBe(1000);
+  it.each(ALL_CLASS_NAMES)('times a reaction by the clock for a %s owner', className => {
+    expect(guessCooldownMs(skill({ cooldown: 5, trigger: 'enemy_cast' }), className)).toBe(reactionMs(5));
+    expect(guessCooldownMs(skill({ cooldown: 2, trigger: 'ally_targeted' }), className)).toBe(reactionMs(2));
+  });
+
+  it('floors at one authored second, which is also the default', () => {
+    expect(guessCooldownMs(skill({ cooldown: 0.5 }), 'Knight')).toBe(actionMs(1, 'Knight'));
+    expect(guessCooldownMs(skill({}), 'Knight')).toBe(actionMs(1, 'Knight'));
+    expect(guessCooldownMs(skill({ cooldown: 0.5, trigger: 'enemy_cast' }), 'Knight')).toBe(reactionMs(1));
+  });
+
+  it.each(ALL_CLASS_NAMES)('agrees with the base cooldown the engine reports for a %s', (className: ClassName) => {
+    const activeEffects = [{ kind: 'damage_percent' as const, damagePercent: 1 }];
+    const action = skill({ id: 'action', cooldown: 3, activeEffects });
+    const reaction = skill({ id: 'reaction', cooldown: 4, trigger: 'enemy_cast', activeEffects });
+    const state = createPartyCombatState(
+      [{ username: 'P', maxHp: 100, baseDamage: 1, playerDamageType: 'physical', gridPosition: 4, className, level: 1, equippedSkills: [action, reaction] }],
+      [createMonsterInstance({ id: 'm', name: 'M', hp: 100, damage: 0, damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0 }, 1)],
+      { pace: COMBAT_PACE },
+    );
+    const views = buildClientCombatSnapshot(state, 1, true).units.find(u => u.side === 'player')!.skills!;
+    expect(guessCooldownMs(action, className)).toBe(views.find(s => s.id === 'action')!.baseCooldownMs);
+    expect(guessCooldownMs(reaction, className)).toBe(views.find(s => s.id === 'reaction')!.baseCooldownMs);
+  });
+});
+
+describe('guessCooldownMs with charge and recovery', () => {
+  const activeEffects = [{ kind: 'damage_percent' as const, damagePercent: 1 }];
+  const timed = (fields: Partial<SkillDefinition>): SkillDefinition => ({
+    id: 's', name: 'S', description: '', className: 'Knight', type: 'active', unlockLevel: 1, sortOrder: 0, activeEffects, ...fields,
+  });
+
+  it('is cast, recovery and charge, on the fight\'s steps', () => {
+    expect(guessCooldownMs(timed({ charge: 6.3, recovery: 0.9, cooldown: 99 }), 'Knight')).toBe(7200);
+    expect(guessCooldownMs(timed({ recovery: 1.8 }), 'Knight')).toBe(1800);
+    expect(guessCooldownMs(timed({ charge: 7, recovery: 0.5, castTime: 1 }), 'Mage'))
+      .toBe(timedSkillMs({ charge: 7, recovery: 0.5 } as SkillDefinition).chargeMs + timedSkillMs({ charge: 7, recovery: 0.5 } as SkillDefinition).recoveryMs + Math.round(paceActionSeconds(COMBAT_PACE, 'Mage') * 1000));
+  });
+
+  it('ignores a stale recovery on an instant, explicit or inferred', () => {
+    const stale = timed({ trigger: 'enemy_cast', charge: 9, recovery: 0.9 });
+    expect(timedSkillMs(stale).recoveryMs).toBe(0);
+    expect(guessCooldownMs(stale, 'Knight')).toBe(9000);
+    expect(timedSkillMs(timed({ activeEffects: [{ kind: 'redirect_hit' }], charge: 1.8, recovery: 1.8 })).recoveryMs).toBe(0);
+  });
+
+  it.each(ALL_CLASS_NAMES)('agrees with the engine on an instant with a stale recovery for a %s', (className: ClassName) => {
+    const stale = timed({ id: 'stale', trigger: 'ally_low_hp', charge: 5.4, recovery: 3 });
+    const empty = timed({ id: 'empty', trigger: 'self_hit', charge: 0, recovery: 3 });
+    const state = createPartyCombatState(
+      [{ username: 'P', maxHp: 100, baseDamage: 1, playerDamageType: 'physical', gridPosition: 4, className, level: 1, equippedSkills: [stale, empty] }],
+      [createMonsterInstance({ id: 'm', name: 'M', hp: 100, damage: 0, damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0 }, 1)],
+      { pace: COMBAT_PACE },
+    );
+    const views = buildClientCombatSnapshot(state, 1, true).units.find(u => u.side === 'player')!.skills!;
+    expect(guessCooldownMs(stale, className)).toBe(views.find(s => s.id === 'stale')!.useCooldownMs);
+    expect(guessCooldownMs(empty, className)).toBe(views.find(s => s.id === 'empty')!.useCooldownMs);
+  });
+
+  it.each(ALL_CLASS_NAMES)('agrees with the cycle the engine reports for a %s', (className: ClassName) => {
+    const action = timed({ id: 'action', charge: 6.3, recovery: 0.9, castTime: 1 });
+    const attack = timed({ id: 'attack', type: 'attack', activeEffects: undefined, charge: 1.4, recovery: 0.4 });
+    const state = createPartyCombatState(
+      [{ username: 'P', maxHp: 100, baseDamage: 1, playerDamageType: 'physical', gridPosition: 4, className, level: 1, equippedSkills: [action], attack }],
+      [createMonsterInstance({ id: 'm', name: 'M', hp: 100, damage: 0, damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0 }, 1)],
+      { pace: COMBAT_PACE },
+    );
+    const views = buildClientCombatSnapshot(state, 1, true).units.find(u => u.side === 'player')!.skills!;
+    expect(guessCooldownMs(action, className)).toBe(views.find(s => s.id === 'action')!.baseCooldownMs);
+    expect(guessCooldownMs(attack, className)).toBe(views.find(s => s.id === 'attack')!.baseCooldownMs);
+  });
+});
+
+describe('CombatPlayback with charge and recovery', () => {
+  const ATTACK_ID = 'knight_attack';
+  const attackSkill = { id: ATTACK_ID, remainingMs: 0, cooldownMs: 3600, state: 'ready' as const, useCooldownMs: 4500, chargeMs: 3600, recoveryMs: 900 };
+
+  const setup = (overrides: Partial<ClientCombatUnit> = {}): CombatPlayback => {
+    const pb = new CombatPlayback({ now, delayMs: DELAY });
+    pb.setActive(true);
+    startBattle(pb, [player({ actionMs: 0, actionTotalMs: 0, actionIntervalMs: 3600, skills: [attackSkill], ...overrides }), monster()]);
+    clock += DELAY;
+    pb.tick();
+    return pb;
+  };
+  const play = (pb: CombatPlayback, events: CombatEvent[]): void => {
+    clock = 10_000 + Math.max(...events.map(e => e.t)) - 1000;
+    pb.ingestMessage({ battleId: 1, events }, clock);
+    clock += DELAY;
+    pb.tick();
+  };
+
+  it('runs the ring until the next action, past the end of recovery', () => {
+    const pb = setup();
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skillId: ATTACK_ID, recoveryMs: 500, nextActionMs: 3600 })]);
+    const u = pb.unit('player', 4)!;
+    expect(u).toMatchObject({ actionMs: 3600, actionTotalMs: 3600, recoveryMs: 500 });
+    clock += 1000;
+    pb.tick();
+    expect(u).toMatchObject({ actionMs: 2600, actionTotalMs: 3600, recoveryMs: 0 });
+  });
+
+  it('runs the ring with no recovery at all, and restarts it on a shorter next wait', () => {
+    const pb = setup();
+    const u = pb.unit('player', 4)!;
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skillId: ATTACK_ID, recoveryMs: 0, nextActionMs: 3600 })]);
+    expect(u).toMatchObject({ actionMs: 3600, actionTotalMs: 3600, recoveryMs: 0 });
+    play(pb, [ev(2100, 'attack', { src: P, dst: M, skill: 'Jab', skillId: 'jab', recoveryMs: 0, nextActionMs: 800 })]);
+    expect(u).toMatchObject({ actionMs: 800, actionTotalMs: 800 });
+  });
+
+  it('runs the ring on an old-style skill that carries only the next action', () => {
+    const pb = setup();
+    const u = pb.unit('player', 4)!;
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skill: 'Jab', skillId: 'jab', nextActionMs: 2400 })]);
+    expect(u).toMatchObject({ actionMs: 2400, actionTotalMs: 2400, recoveryMs: 0 });
+  });
+
+  it('runs the ring for the recovery of an Attack, not the class interval', () => {
+    const pb = setup();
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skillId: ATTACK_ID, recoveryMs: 900 })]);
+    const u = pb.unit('player', 4)!;
+    expect(u.actionTotalMs).toBe(900);
+    expect(u.actionMs).toBe(900);
+    expect(u.recoveryMs).toBe(900);
+    clock += 500;
+    pb.tick();
+    expect(u.actionMs).toBe(400);
+    expect(u.recoveryMs).toBe(400);
+  });
+
+  it('leaves the ring complete after an Attack with no recovery, and restarts the card\'s charge', () => {
+    const pb = setup();
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skillId: ATTACK_ID, recoveryMs: 0 })]);
+    const u = pb.unit('player', 4)!;
+    expect(u.actionMs).toBe(0);
+    expect(u.recoveryMs).toBe(0);
+    const card = u.skills!.find(s => s.id === ATTACK_ID)!;
+    expect(card.remainingMs).toBe(4500);
+    expect(skillDisplayState(u, card, undefined)).toBe('cooldown');
+  });
+
+  it('reads armed when a trigger skill finishes charging', () => {
+    const dispel = { id: 'dispel', remainingMs: 0, cooldownMs: 0, state: 'armed' as const };
+    const pb = setup({ skills: [dispel] });
+    pb.ingestMessage({ battleId: 1, snapshot: snap(1100, [player({ skills: [{ ...dispel, remainingMs: 100, cooldownMs: 2000, state: 'cooldown' }] }), monster()]), events: [] }, clock);
+    clock += 1000;
+    pb.tick();
+    const unit = pb.unit('player', 4)!;
+    const card = unit.skills![0];
+    expect(card.remainingMs).toBe(0);
+    expect(skillDisplayState(unit, card, 'enemy_cast')).toBe('armed');
+  });
+
+  it('holds the ring through a cast and its recovery, starting the lock only when the cast ends', () => {
+    const pb = setup();
+    play(pb, [ev(1100, 'cast_start', { src: P, dst: M, skill: 'Blast', skillId: 'blast', durationMs: 1200, nextActionMs: 2100 })]);
+    const u = pb.unit('player', 4)!;
+    expect(u.actionTotalMs).toBe(2100);
+    expect(u.recoveryMs).toBe(0);
+
+    play(pb, [ev(2300, 'cast_end', { src: P, skillId: 'blast', recoveryMs: 900 }), ev(2300, 'attack', { src: P, dst: M, skill: 'Blast' })]);
+    expect(u.actionTotalMs).toBe(2100);
+    expect(u.actionMs).toBe(900);
+    expect(u.recoveryMs).toBe(900);
+  });
+
+  it('leaves the ring and recovery alone when an instant fires', () => {
+    const pb = setup();
+    const u = pb.unit('player', 4)!;
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skillId: ATTACK_ID, recoveryMs: 900 })]);
+    play(pb, [ev(1200, 'reaction', { src: P, skillId: 'intercept', cardType: 'instant' })]);
+    expect(u.actionTotalMs).toBe(900);
+    expect(u.actionMs).toBe(800);
+    expect(u.recoveryMs).toBe(800);
+  });
+
+  it('leaves the ring alone on a skill with no recovery', () => {
+    const pb = setup();
+    const u = pb.unit('player', 4)!;
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skill: 'Jab', skillId: 'jab', recoveryMs: 0 })]);
+    expect(u.actionMs).toBe(0);
+    expect(u.actionTotalMs).toBe(0);
+    expect(u.recoveryMs).toBe(0);
+  });
+
+  it('freezes recovery during a stun', () => {
+    const pb = setup();
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skillId: ATTACK_ID, recoveryMs: 900 }), ev(1100, 'stun', { dst: P, durationMs: 1000 })]);
+    const u = pb.unit('player', 4)!;
+    clock += 500;
+    pb.tick();
+    expect(u.recoveryMs).toBe(900);
+  });
+
+  it('takes recovery from a snapshot, clearing it when the snapshot has none', () => {
+    const pb = setup({ actionMs: 700, actionTotalMs: 900, recoveryMs: 700, recoveryTotalMs: 900 });
+    const u = pb.unit('player', 4)!;
+    expect(u.recoveryMs).toBeGreaterThan(0);
+    pb.ingestMessage({ battleId: 1, snapshot: snap(5000, [player({ actionMs: 0, actionTotalMs: 900 }), monster()]), events: [] }, clock);
+    clock = 10_000 + 4000 + DELAY;
+    pb.tick();
+    expect(u.recoveryMs).toBe(0);
+  });
+
+  it('keeps a local recovery a step ahead of a snapshot', () => {
+    const pb = setup();
+    const u = pb.unit('player', 4)!;
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skillId: ATTACK_ID, recoveryMs: 900 })]);
+    clock += 500;
+    pb.tick();
+    const ahead = u.recoveryMs;
+    const t = pb.renderTime;
+    pb.ingestMessage({ battleId: 1, snapshot: snap(t, [player({ actionMs: ahead + 180, actionTotalMs: 900, recoveryMs: ahead + 180, recoveryTotalMs: 900 }), monster()]), events: [] }, clock);
+    pb.tick();
+    expect(u.recoveryMs).toBe(ahead);
+  });
+
+  it('predicts the ring and recovery of a real fight between snapshots', () => {
+    const activeEffects = [{ kind: 'damage_percent' as const, damagePercent: 1 }];
+    const bash: SkillDefinition = { id: 'bash', name: 'Bash', description: '', className: 'Knight', type: 'active', unlockLevel: 1, sortOrder: 1, charge: 2.7, recovery: 0.9, activeEffects };
+    const attack: SkillDefinition = { id: ATTACK_ID, name: 'Attack', description: '', className: 'Knight', type: 'attack', unlockLevel: 1, sortOrder: 0, charge: 1.8, recovery: 0.36 };
+    const state = createPartyCombatState(
+      [{ username: 'P', maxHp: 1000, baseDamage: 1, playerDamageType: 'physical', gridPosition: 4, className: 'Knight', level: 1, equippedSkills: [bash], attack }],
+      [createMonsterInstance({ id: 'm', name: 'M', hp: 100_000, damage: 0, damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0 }, 1)],
+      { pace: COMBAT_PACE },
+    );
+    const pb = new CombatPlayback({ now, delayMs: 0 });
+    pb.setActive(true);
+    pb.ingestMessage({ battleId: 1, snapshot: buildClientCombatSnapshot(state, 1, true), events: [] }, clock);
+    const start = clock;
+    let recoveries = 0;
+    for (let step = 0; step < 300; step++) {
+      const { events } = processCombatStep(state, undefined, createRng(step));
+      clock = start + combatRealElapsedMs(state);
+      pb.ingestMessage({ battleId: 1, events }, clock);
+      pb.tick();
+      const truth = buildClientCombatSnapshot(state, 1, false).units.find(u => u.side === 'player')!;
+      const local = pb.unit('player', 4)!;
+      expect(Math.abs(local.recoveryMs - (truth.recoveryMs ?? 0))).toBeLessThanOrEqual(combatRealStepMs(state));
+      expect(Math.abs(local.actionMs - truth.actionMs)).toBeLessThanOrEqual(combatRealStepMs(state));
+      if (truth.recoveryMs) recoveries++;
+    }
+    expect(recoveries).toBeGreaterThan(0);
+  });
+
+  it('leaves content without recovery on the class interval', () => {
+    const pb = setup({ actionMs: 500, actionTotalMs: 3600, skills: undefined });
+    play(pb, [ev(1100, 'attack', { src: P, dst: M })]);
+    const u = pb.unit('player', 4)!;
+    expect(u.actionTotalMs).toBe(3600);
+    expect(u.actionMs).toBe(3600);
+    expect(u.recoveryMs).toBe(0);
   });
 });
 
@@ -269,6 +532,52 @@ describe('CombatPlayback event model', () => {
     expect(after.attacks).toBe(0);
   });
 
+  it('keeps the ring running past the cast for the next action time on cast_start, then returns to the interval', () => {
+    const pb = ready([player({ actionIntervalMs: 2000 }), monster()]);
+    play(pb, [ev(1100, 'cast_start', { src: P, dst: M, skill: 'Blizzard', skillId: 'mage_blizzard', durationMs: 1500, nextActionMs: 3500 })]);
+    const u = pb.unit('player', 4)!;
+    expect(u.cast).toMatchObject({ totalMs: 1500 });
+    expect(u.actionTotalMs).toBe(3500);
+    expect(u.actionMs).toBeGreaterThan(3490);
+
+    play(pb, [ev(2600, 'cast_end', { src: P, skillId: 'mage_blizzard' }), ev(2600, 'attack', { src: P, dst: M, skillId: 'mage_blizzard' })]);
+    expect(u.cast).toBeNull();
+    expect(u.actionTotalMs).toBe(3500);
+    expect(u.actionMs).toBeGreaterThan(1990);
+    expect(u.actionMs).toBeLessThanOrEqual(2000);
+
+    play(pb, [ev(4600, 'attack', { src: P, dst: M })]);
+    expect(u.actionTotalMs).toBe(2000);
+  });
+
+  it('waits the longer of interval and cast on a cast_start without a next action time', () => {
+    const pb = ready([player({ actionIntervalMs: 2000 }), monster({ actionIntervalMs: 700 })]);
+    play(pb, [
+      ev(1100, 'cast_start', { src: P, dst: M, skill: 'Blizzard', skillId: 'mage_blizzard', durationMs: 1500 }),
+      ev(1100, 'cast_start', { src: M, dst: P, skill: 'Fireball', skillId: 'fireball', durationMs: 1500 }),
+    ]);
+    expect(pb.unit('player', 4)!.actionTotalMs).toBe(2000);
+    expect(pb.unit('monster', 1)!.actionTotalMs).toBe(1500);
+  });
+
+  it('resets each player\'s ring to its own class interval after an attack', () => {
+    const intervalMs = (seconds: number): number => Math.round(seconds * 1000);
+    const knightMs = intervalMs(COMBAT_PACE.classSeconds.Knight!);
+    const priestMs = intervalMs(COMBAT_PACE.classSeconds.Priest!);
+    const pb = ready([
+      player({ pos: 3, className: 'Knight', actionIntervalMs: knightMs }),
+      player({ pos: 5, className: 'Priest', actionIntervalMs: priestMs }),
+      monster(),
+    ]);
+    const knight = { side: 'player' as const, pos: 3 as const };
+    const priest = { side: 'player' as const, pos: 5 as const };
+    play(pb, [ev(1100, 'attack', { src: knight, dst: M }), ev(1100, 'attack', { src: priest, dst: M })]);
+    expect(pb.unit('player', 3)).toMatchObject({ intervalMs: knightMs, actionTotalMs: knightMs });
+    expect(pb.unit('player', 3)!.actionMs).toBeGreaterThan(knightMs - 10);
+    expect(pb.unit('player', 5)).toMatchObject({ intervalMs: priestMs, actionTotalMs: priestMs });
+    expect(pb.unit('player', 5)!.actionMs).toBeGreaterThan(priestMs - 10);
+  });
+
   it('drops a cast when its caster is revived mid-cast', () => {
     const pb = ready();
     play(pb, [ev(1100, 'cast_start', { src: P, dst: M, skill: 'Blizzard', skillId: 'mage_blizzard', durationMs: 1500 })]);
@@ -313,9 +622,19 @@ describe('CombatPlayback event model', () => {
     expect(bash().cooldownMs).toBe(2000);
   });
 
-  it('passes the battle-start warm-up to the hint and ignores warm-ups as use cooldowns', () => {
-    const seen: (number | undefined)[] = [];
-    const pb = new CombatPlayback({ now, delayMs: DELAY, cooldownHint: (_id, warmupMs) => { seen.push(warmupMs); return 5000; } });
+  it('restarts a first use from the full snapshot\'s use cooldown rather than the hint', () => {
+    const skills = [{ id: 'bash', remainingMs: 0, cooldownMs: 0, state: 'ready' as const, baseCooldownMs: 7000, useCooldownMs: 5600 }];
+    const pb = ready([player({ skills }), monster()]);
+    expect(pb.skillStatics('player:4', 'bash')).toMatchObject({ baseCooldownMs: 7000, useCooldownMs: 5600 });
+    play(pb, [ev(1100, 'attack', { src: P, dst: M, skill: 'Bash', skillId: 'bash' })]);
+    const bash = pb.unit('player', 4)!.skills![0];
+    expect(bash.cooldownMs).toBe(5600);
+    expect(bash.remainingMs).toBeGreaterThan(5590);
+  });
+
+  it('asks the hint by skill id alone and ignores warm-ups as use cooldowns', () => {
+    const seen: unknown[][] = [];
+    const pb = new CombatPlayback({ now, delayMs: DELAY, cooldownHint: (...args: unknown[]) => { seen.push(args); return 5000; } });
     pb.setActive(true);
     const skills = [{ id: 'dispel', remainingMs: 4000, cooldownMs: 4000, state: 'cooldown' as const }];
     pb.ingestMessage({ battleId: 1, snapshot: fullSnap(0, [player({ skills }), monster()]), events: [] }, clock);
@@ -323,16 +642,15 @@ describe('CombatPlayback event model', () => {
     clock += 600 + DELAY + 400;
     pb.tick();
     const dispel = pb.unit('player', 4)!.skills![0];
-    expect(dispel.warmupMs).toBe(4000);
     expect(dispel.useCooldownMs).toBe(0);
-    play(pb, [ev(4100, 'reaction', { src: P, dst: M, skill: 'Dispel', skillId: 'dispel', cardType: 'interrupt' })]);
-    expect(seen).toEqual([4000]);
+    play(pb, [ev(4100, 'reaction', { src: P, dst: M, skill: 'Dispel', skillId: 'dispel', cardType: 'instant' })]);
+    expect(seen).toEqual([['dispel']]);
     expect(pb.unit('player', 4)!.skills![0].cooldownMs).toBe(5000);
   });
 
-  it('leaves the warm-up unknown when the first snapshot is mid-fight', () => {
+  it('does not take a cooldown in a mid-fight first snapshot for a use cooldown', () => {
     const pb = ready([player({ skills: [{ id: 'bash', remainingMs: 500, cooldownMs: 2000, state: 'cooldown' }] }), monster()]);
-    expect(pb.unit('player', 4)!.skills![0].warmupMs).toBeUndefined();
+    expect(pb.unit('player', 4)!.skills![0].useCooldownMs).toBe(0);
   });
 
   it('adds statuses from events and cleanses player afflictions', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createPartyCombatState } from '../src/systems/CombatEngine';
-import { SEED_SKILLS } from '../src/systems/SkillTypes';
+import { LEGACY_SEED_SKILLS } from './legacySeedSkills';
 import { createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes';
 import { SCORCH_MS } from '../src/systems/CombatTiming';
 import {
@@ -82,7 +82,7 @@ describe('status pulses', () => {
 
   it('Ignite stacks permanently from pre-resistance damage; resistance applies at each pulse', () => {
     pinRandom();
-    const mage = makePlayer('M', 2, { className: 'Mage', baseDamage: 20, skills: [SEED_SKILLS.mage_ignite] });
+    const mage = makePlayer('M', 2, { className: 'Mage', baseDamage: 20, skills: [LEGACY_SEED_SKILLS.mage_ignite] });
     const state = createPartyCombatState([mage], [makeMonster(0, { resistances: [{ damageType: 'magical', flatReduction: 2, percentReduction: 0 }] })]);
     const r = runTo(state, 3400);
     // Flat 2 is a rating: 2 / (2 + 4 × L1) = 1/3 mitigation. Stacks store 25 % of the unresisted 20.
@@ -111,7 +111,7 @@ describe('status pulses', () => {
     const state = createPartyCombatState([
       makePlayer('A', 2, { hp: 100 }),
       makePlayer('B', 5, { hp: 100 }),
-      makePlayer('P', 1, { className: 'Priest', skills: [SEED_SKILLS.priest_resurrection] }),
+      makePlayer('P', 1, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_resurrection] }),
     ], [makeMonster(0)]);
     player(state, 'A').currentHp = 3;
     player(state, 'A').dots.push({ sourceUsername: 'm', name: 'rot', damagePerTick: 5, ticksRemaining: 3, damageType: 'magical' });
@@ -152,7 +152,7 @@ describe('debuff durations (seconds)', () => {
   });
 
   it('Lullaby refreshes rather than stacks and skips walls', () => {
-    const lullaby = { ...SEED_SKILLS.bard_lullaby, warmup: 0, cooldown: 1 };
+    const lullaby = { ...LEGACY_SEED_SKILLS.bard_lullaby, warmup: 0, cooldown: 1 };
     const state = createPartyCombatState(
       [makePlayer('B', 2, { className: 'Bard', skills: [lullaby] })],
       [createMonsterInstance(SEED_MONSTERS.stone_wall, 0), makeMonster(3, { damage: 10 })],
@@ -165,7 +165,7 @@ describe('debuff durations (seconds)', () => {
   });
 
   it('Scorch lasts 2 s and refreshes on each hit', () => {
-    const mage = makePlayer('M', 2, { className: 'Mage', skills: [SEED_SKILLS.mage_scorch] });
+    const mage = makePlayer('M', 2, { className: 'Mage', skills: [LEGACY_SEED_SKILLS.mage_scorch] });
     const state = createPartyCombatState([mage], [makeMonster(0)]);
     const r = runTo(state, 1000);
     expect(state.monsters[0].debuffs).toEqual([{ type: 'scorch', value: 0.1, remainingMs: SCORCH_MS, name: 'Scorch' }]);
@@ -193,7 +193,7 @@ describe('Iron Will', () => {
 });
 
 describe('direct monster hit pipeline', () => {
-  const bashAndSlam = [SEED_SKILLS.knight_shield_bash, SEED_SKILLS.knight_shield_slam];
+  const bashAndSlam = [LEGACY_SEED_SKILLS.knight_shield_bash, LEGACY_SEED_SKILLS.knight_shield_slam];
 
   it('order: damage → Shield Bash stun → self_hit reaction', () => {
     pinRandom(0.05);
@@ -209,8 +209,8 @@ describe('direct monster hit pipeline', () => {
   it('Shield Bash stuns even when a shield absorbs the whole hit; no Martyr and no self_hit then', () => {
     pinRandom(0.05);
     const state = createPartyCombatState([
-      makePlayer('K', 2, { className: 'Knight', level: 30, skills: [SEED_SKILLS.knight_guard, ...bashAndSlam] }),
-      makePlayer('P', 5, { className: 'Priest', skills: [SEED_SKILLS.priest_martyr] }),
+      makePlayer('K', 2, { className: 'Knight', level: 30, skills: [LEGACY_SEED_SKILLS.knight_guard, ...bashAndSlam] }),
+      makePlayer('P', 5, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_martyr] }),
     ], [makeMonster(0, { damage: 50 })]);
     player(state, 'K').damageShield = 1000;
     const r = runTo(state, 1400);
@@ -230,7 +230,7 @@ describe('direct monster hit pipeline', () => {
     pinRandom(0.05);
     const state = createPartyCombatState([
       makePlayer('K', 2, { className: 'Knight', hp: 30, skills: bashAndSlam }),
-      makePlayer('P', 5, { className: 'Priest', skills: [SEED_SKILLS.priest_resurrection] }),
+      makePlayer('P', 5, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_resurrection] }),
     ], [makeMonster(0, { damage: 50 })]);
     const r = runTo(state, 1400);
     const seq = r.events.filter(e => e.t === 1400).map(e => e.kind);
@@ -242,7 +242,7 @@ describe('direct monster hit pipeline', () => {
   it('Resurrection fires once per battle', () => {
     const state = createPartyCombatState([
       makePlayer('K', 2, { className: 'Knight', hp: 30 }),
-      makePlayer('P', 5, { className: 'Priest', skills: [SEED_SKILLS.priest_resurrection] }),
+      makePlayer('P', 5, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_resurrection] }),
     ], [makeMonster(0, { damage: 50 })]);
     const r = runTo(state, 2400);
     expect(ofKind(r.events, 'revive')).toHaveLength(1);
@@ -253,7 +253,7 @@ describe('direct monster hit pipeline', () => {
     pinRandom();
     const state = createPartyCombatState([
       makePlayer('K', 2, { className: 'Knight', hp: 200 }),
-      makePlayer('P', 5, { className: 'Priest', level: 5, skills: [SEED_SKILLS.priest_martyr, SEED_SKILLS.priest_minor_heal] }),
+      makePlayer('P', 5, { className: 'Priest', level: 5, skills: [LEGACY_SEED_SKILLS.priest_martyr, LEGACY_SEED_SKILLS.priest_minor_heal] }),
     ], [makeMonster(0, { damage: 70 }), makeMonster(3, { damage: 30 })]);
     runTo(state, 1500);
     expect(player(state, 'P').martyrBonus).toBe(0.25);
@@ -275,7 +275,7 @@ describe('direct monster hit pipeline', () => {
   it('Nimble dodge avoids the hit entirely', () => {
     pinRandom(0.01);
     const state = createPartyCombatState([
-      makePlayer('B', 2, { className: 'Bard', skills: [SEED_SKILLS.bard_nimble] }),
+      makePlayer('B', 2, { className: 'Bard', skills: [LEGACY_SEED_SKILLS.bard_nimble] }),
     ], [makeMonster(0, { damage: 50 })]);
     const r = runTo(state, 1400);
     expect(ofKind(r.events, 'dodge')).toEqual([expect.objectContaining({ dst: { side: 'player', pos: 2 } })]);
@@ -284,9 +284,9 @@ describe('direct monster hit pipeline', () => {
   });
 
   it('Unnerve and Lullaby reduce auto-attacks, never monster skills', () => {
-    const lullaby = { ...SEED_SKILLS.bard_lullaby, warmup: 0 };
+    const lullaby = { ...LEGACY_SEED_SKILLS.bard_lullaby, warmup: 0 };
     const state = createPartyCombatState([
-      makePlayer('B', 2, { className: 'Bard', skills: [SEED_SKILLS.bard_unnerve, lullaby] }),
+      makePlayer('B', 2, { className: 'Bard', skills: [LEGACY_SEED_SKILLS.bard_unnerve, lullaby] }),
     ], [makeMonster(0, { damage: 100, skills: [{ skillId: 'fireball', value: 50, cooldown: 30, castTime: 0 }] })]);
     const r = runTo(state, 2400);
     expect(ofKind(r.events, 'damage').filter(e => e.src?.side === 'monster').map(e => [e.skill, e.amount])).toEqual([
@@ -298,7 +298,7 @@ describe('direct monster hit pipeline', () => {
 describe('monster actions', () => {
   it('Chaos makes each non-wall enemy\'s next action hit a random monster, then wears off', () => {
     pinRandom(0);
-    const chaos = { ...SEED_SKILLS.bard_chaos, warmup: 0 };
+    const chaos = { ...LEGACY_SEED_SKILLS.bard_chaos, warmup: 0 };
     const state = createPartyCombatState(
       [makePlayer('B', 2, { className: 'Bard', skills: [chaos] })],
       [createMonsterInstance(SEED_MONSTERS.stone_wall, 0), makeMonster(3, { damage: 10 })],

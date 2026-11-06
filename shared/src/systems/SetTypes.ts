@@ -1,5 +1,7 @@
 import type { EquipmentBonuses, ItemDefinition } from './ItemTypes.js';
+import { isTimedSkill } from './SkillTypes.js';
 import type { SkillDefinition } from './SkillTypes.js';
+import { COMBAT_PACE } from './CombatPace.js';
 
 // --- Types ---
 
@@ -314,6 +316,12 @@ export function getSetDisplayName(set: SetDefinition): string {
   return `${set.name} (${set.classRestriction.join(', ')})`;
 }
 
+/** A catalog with no charge or recovery runs on cooldowns, where a point of reduction is one action sooner, not a fixed time. */
+function cooldownReductionText(reduction: number, skills: Record<string, SkillDefinition> | undefined): string {
+  if (skills && !Object.values(skills).some(isTimedSkill)) return `-${reduction} action${reduction === 1 ? '' : 's'} Active CD`;
+  return `-${Math.round(reduction * COMBAT_PACE.clock * 10) / 10}s skill charge`;
+}
+
 /**
  * Get a human-readable description of set bonuses.
  * Pass a `skills` record to render 'Grants skill: <name>' parts for
@@ -321,7 +329,7 @@ export function getSetDisplayName(set: SetDefinition): string {
  */
 export function getSetBonusText(bonuses: SetBonuses, skills?: Record<string, SkillDefinition>): string {
   const parts: string[] = [];
-  if (bonuses.cooldownReduction) parts.push(`-${bonuses.cooldownReduction}s Active CD`);
+  if (bonuses.cooldownReduction) parts.push(cooldownReductionText(bonuses.cooldownReduction, skills));
   if (bonuses.damagePercent) parts.push(`+${bonuses.damagePercent}% Damage`);
   if (bonuses.damageResistancePercent) parts.push(`${bonuses.damageResistancePercent}% Damage Resistance`);
   if (bonuses.damageReductionMin || bonuses.damageReductionMax) {

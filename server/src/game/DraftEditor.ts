@@ -20,7 +20,7 @@ import type {
   WorldTileDefinition,
   WorldMapMeta,
 } from '@idle-party-rpg/shared';
-import { migrateLegacySet, migrateLegacySkill, findSetConflicts, zoneMapConflict, validateSkillDefinition, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
+import { migrateLegacySet, migrateLegacySkill, findSetConflicts, zoneMapConflict, validateSkillDefinition, attackSkillsReplacedBySeed, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES } from '@idle-party-rpg/shared';
 
 /** Content types editable through the generic (MCP) draft-write surface. Single source of truth — derive z.enum(...) lists from this array, don't hand-copy the literals. */
 export const DRAFT_CONTENT_TYPES = [
@@ -609,11 +609,14 @@ export class DraftEditor {
 
   private upsertSkillCore(snapshot: ContentSnapshot, raw: SkillDefinition): string | null {
     const skill = migrateLegacySkill(raw);
-    const errors = validateSkillDefinition(skill);
-    if (errors.length > 0) return errors.join(' ');
     if (snapshot.skills === undefined) {
       snapshot.skills = Object.values(this.liveContent().getAllSkills());
     }
+    const errors = validateSkillDefinition(skill, {
+      skills: Object.fromEntries(snapshot.skills.map(s => [s.id, s])),
+      slotSchedules: {},
+    });
+    if (errors.length > 0) return errors.join(' ');
     const idx = snapshot.skills.findIndex(s => s.id === skill.id);
     if (idx >= 0) snapshot.skills[idx] = skill; else snapshot.skills.push(skill);
     return null;
@@ -669,13 +672,17 @@ export class DraftEditor {
     return { success: true, skillSlotSchedules: snapshot.skillSlotSchedules };
   }
 
-  /** Restore seed skills + slot schedules (overwrites seed ids, keeps custom skills). */
+  /** Restore seed skills + slot schedules (overwrites seed ids, keeps custom skills except an attack the seed's replaces). */
   async seedSkills(versionId: string): Promise<{ success: true; skills: SkillDefinition[]; skillSlotSchedules: { className: string; slots: SkillSlot[] }[] } | { success: false; status: 404 | 400; error: string }> {
     const draft = await this.loadDraft(versionId);
     if ('error' in draft) return { success: false, status: draft.status, error: draft.error };
     const { snapshot } = draft;
     if (snapshot.skills === undefined) {
       snapshot.skills = Object.values(this.liveContent().getAllSkills());
+    }
+    for (const id of attackSkillsReplacedBySeed(snapshot.skills, SEED_SKILLS)) {
+      const err = this.deleteSkillCore(snapshot, id);
+      if (err) return { success: false, status: 400, error: err };
     }
     for (const seed of Object.values(SEED_SKILLS)) {
       const idx = snapshot.skills.findIndex(s => s.id === seed.id);

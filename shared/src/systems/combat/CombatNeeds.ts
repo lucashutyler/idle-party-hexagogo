@@ -1,8 +1,10 @@
+import { resolveActionOrder } from '../SkillTypes.js';
 import type { ActiveEffect, SkillDefinition } from '../SkillTypes.js';
-import { MONSTER_SKILL_CATALOG, getMonsterSkillCastTimeMs } from '../MonsterSkills.js';
+import { MONSTER_SKILL_CATALOG } from '../MonsterSkills.js';
 import type { MonsterSkillDefinition } from '../MonsterSkills.js';
 import type { EffectContext, InFlightAttack, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
 import { WAR_SONG_MAX_STACKS } from '../CombatScaling.js';
+import { COMBAT_STEP_MS } from '../CombatTiming.js';
 import {
   cureTarget,
   healTarget,
@@ -10,6 +12,21 @@ import {
   monsterHealTarget,
   shieldTarget,
 } from './CombatTargeting.js';
+
+/**
+ * Engine ms until a player with an Attack skill next acts, as things stand: the action choice's walk, timed instead of
+ * taken. A skill that isn't needed yet doesn't count, so a need that appears can bring the action forward.
+ * One step at least: a player acts at most once a step, so what is ready now goes on the next.
+ */
+export function nextActionWaitMs(state: PartyCombatState, player: PartyCombatant): number {
+  let soonestMs = Infinity;
+  for (const skill of resolveActionOrder(player.equippedSkills, player.attack, player.actionOrder)) {
+    const chargeMs = player.skillCooldowns[skill.id] ?? 0;
+    if (chargeMs >= soonestMs) continue;
+    if (skill.type === 'attack' || wouldHaveEffect(player, skill, state)) soonestMs = chargeMs;
+  }
+  return Math.max(player.actionRemainingMs, player.cast?.remainingMs ?? 0, soonestMs, COMBAT_STEP_MS);
+}
 
 /**
  * Whether using the skill now would do anything (the "needed" check). Uses the same target helpers
@@ -90,23 +107,3 @@ export function monsterSkillWouldHaveEffect(
   }
 }
 
-function monsterSkillCanApplyThisFight(def: MonsterSkillDefinition, state: PartyCombatState): boolean {
-  switch (def.effect) {
-    case 'stun':
-      return !!def.targetClasses && state.players.some(p => isAlive(p) && def.targetClasses!.includes(p.className));
-    default:
-      return true;
-  }
-}
-
-/**
- * Interrupt "flash mode": no living enemy can ever cast in this fight, so enemy_cast skills
- * act as ordinary action skills instead of waiting for a cast that will never come.
- */
-export function isInterruptFlashMode(state: PartyCombatState): boolean {
-  return !state.monsters.some(m => isAlive(m) && !m.passive && m.skills.some(entry => {
-    const def = MONSTER_SKILL_CATALOG[entry.skillId];
-    if (!def || getMonsterSkillCastTimeMs(entry, def) <= 0) return false;
-    return monsterSkillCanApplyThisFight(def, state);
-  }));
-}

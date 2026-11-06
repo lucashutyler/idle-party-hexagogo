@@ -21,10 +21,24 @@ import {
 import type { SkillContent, SkillDefinition, SkillSlot } from '../src/systems/SkillTypes';
 import type { ClassName } from '../src/systems/CharacterStats';
 import { SKILL_OPTION_CATALOG } from '../src/systems/SkillOptionCatalog';
+import { COMBAT_PACE, paceActionSeconds, paceKit, paceSkillSeconds } from '../src/systems/CombatPace';
+import { IGNITE_MAX_STACKS, SUNDER_MAX_STACKS, WAR_SONG_MAX_STACKS } from '../src/systems/CombatScaling';
+import { MIN_COOLDOWN_MS, SCORCH_MS } from '../src/systems/CombatTiming';
+import { validateSkillDefinition } from '../src/systems/SkillOptionCatalog';
 
 const CONTENT: SkillContent = { skills: SEED_SKILLS, slotSchedules: SEED_SKILL_SLOT_SCHEDULES };
 
 const ALL_CLASSES = ['Knight', 'Archer', 'Priest', 'Mage', 'Bard'] as const;
+
+/** Real seconds as a card writes them: one decimal, or a whole number within a tenth of one. */
+function cardSeconds(seconds: number): number {
+  const whole = Math.round(seconds);
+  return Math.abs(seconds - whole) <= 0.1 + 1e-9 ? whole : Math.round(seconds * 10) / 10;
+}
+
+function ownSeconds(skill: SkillDefinition, authored: number): number {
+  return cardSeconds(paceSkillSeconds(COMBAT_PACE, skill, skill.className, authored));
+}
 
 /** The historical 55 skill ids — these live in player saves and must never change. */
 const HISTORICAL_SKILL_IDS: Record<string, string[]> = {
@@ -142,19 +156,19 @@ describe('SkillTypes', () => {
   });
 
   describe('getUnlockedSkillsForLevel', () => {
-    it('Knight at level 1 has only the first skill unlocked', () => {
+    it('Knight at level 1 has its Attack and first skill unlocked', () => {
       const unlocked = getUnlockedSkillsForLevel('Knight', 1, CONTENT);
-      expect(unlocked).toEqual(['knight_guard']);
+      expect(unlocked).toEqual(['knight_attack', 'knight_guard']);
     });
 
-    it('Knight at level 5 has first two skills unlocked', () => {
+    it('Knight at level 5 has its Attack and first two skills unlocked', () => {
       const unlocked = getUnlockedSkillsForLevel('Knight', 5, CONTENT);
-      expect(unlocked).toEqual(['knight_guard', 'knight_bash']);
+      expect(unlocked).toEqual(['knight_attack', 'knight_guard', 'knight_bash']);
     });
 
-    it('Knight at level 50 has all 11 skills unlocked', () => {
+    it('Knight at level 50 has all 12 skills unlocked', () => {
       const unlocked = getUnlockedSkillsForLevel('Knight', 50, CONTENT);
-      expect(unlocked).toHaveLength(11);
+      expect(unlocked).toHaveLength(12);
     });
 
     it('grant-only skills (unlockLevel null) are never included', () => {
@@ -389,13 +403,13 @@ describe('SkillTypes', () => {
 
     it('getSkillsForClass returns the class tree sorted by sortOrder', () => {
       const skills = getSkillsForClass('Knight', CONTENT);
-      expect(skills.map(s => s.id)).toEqual(HISTORICAL_SKILL_IDS.Knight);
+      expect(skills.map(s => s.id)).toEqual(['knight_attack', ...HISTORICAL_SKILL_IDS.Knight]);
     });
   });
 
   describe('SEED_SKILLS (structural invariants)', () => {
-    it('has exactly 55 skills with the historical ids preserved verbatim', () => {
-      expect(Object.keys(SEED_SKILLS)).toHaveLength(55);
+    it('has the 55 historical skills, ids preserved verbatim, and one Attack per class', () => {
+      expect(Object.keys(SEED_SKILLS)).toHaveLength(60);
       for (const cn of ALL_CLASSES) {
         for (const id of HISTORICAL_SKILL_IDS[cn]) {
           expect(SEED_SKILLS[id], `missing seed skill ${id}`).toBeDefined();
@@ -404,32 +418,67 @@ describe('SkillTypes', () => {
       }
     });
 
-    it('every class has 6 passives and 5 actives', () => {
+    it('every class has 6 passives, 5 actives and an Attack', () => {
       for (const cn of ALL_CLASSES) {
         const skills = getSkillsForClass(cn, CONTENT);
         expect(skills.filter(s => s.type === 'passive')).toHaveLength(6);
         expect(skills.filter(s => s.type === 'active')).toHaveLength(5);
+        expect(skills.filter(s => s.type === 'attack')).toHaveLength(1);
       }
     });
 
-    it('every class unlocks at levels 1, 5, 10, ..., 50', () => {
+    it('every class unlocks at levels 1 (twice), 5, 10, ..., 50', () => {
       for (const cn of ALL_CLASSES) {
         const levels = getSkillsForClass(cn, CONTENT).map(s => s.unlockLevel).sort((a, b) => (a ?? 0) - (b ?? 0));
-        expect(levels).toEqual([1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50]);
+        expect(levels).toEqual([1, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50]);
       }
     });
 
-    it('actives all have cooldown >= 1; no skill uses the legacy singular fields', () => {
+    it('actives play on charge and recovery, instants on charge alone; no skill uses cooldown or the legacy singular fields', () => {
       for (const skill of Object.values(SEED_SKILLS)) {
+        expect(skill.cooldown, skill.id).toBeUndefined();
         if (skill.type === 'active') {
-          expect(skill.cooldown).toBeGreaterThanOrEqual(1);
+          expect(typeof skill.charge, skill.id).toBe('number');
+          expect(typeof skill.recovery, skill.id).toBe(getSkillTrigger(skill) ? 'undefined' : 'number');
           expect(skill.activeEffects?.length).toBeGreaterThanOrEqual(1);
-        } else {
+        } else if (skill.type === 'passive') {
+          expect(skill.charge, skill.id).toBeUndefined();
+          expect(skill.recovery, skill.id).toBeUndefined();
           expect(skill.passiveEffects?.length).toBeGreaterThanOrEqual(1);
         }
         expect((skill as Record<string, unknown>).passiveEffect).toBeUndefined();
         expect((skill as Record<string, unknown>).activeEffect).toBeUndefined();
         expect((skill as Record<string, unknown>).treeOrder).toBeUndefined();
+      }
+    });
+
+    it('passes content validation, with every class in one world', () => {
+      for (const skill of Object.values(SEED_SKILLS)) {
+        expect(validateSkillDefinition(skill, CONTENT), skill.id).toEqual([]);
+      }
+    });
+
+    it('every Attack comes first, at level 1, and keeps the class\'s current action gap', () => {
+      const expected = { Knight: [3.6, 0], Archer: [0.4, 1.6], Priest: [1.4, 0.4], Mage: [2, 0.5], Bard: [1.8, 0.7] };
+      for (const cn of ALL_CLASSES) {
+        const attack = SEED_SKILLS[`${cn.toLowerCase()}_attack`];
+        expect(getSkillsForClass(cn, CONTENT)[0].id).toBe(attack.id);
+        expect(attack).toMatchObject({ name: 'Attack', type: 'attack', className: cn, unlockLevel: 1, charge: expected[cn][0], recovery: expected[cn][1] });
+        expect(attack.activeEffects).toBeUndefined();
+        expect(attack.passiveEffects).toBeUndefined();
+        expect(attack.charge! + attack.recovery!).toBeCloseTo(COMBAT_PACE.classSeconds[cn]!);
+      }
+    });
+
+    it('a fresh character starts on its passive and keeps the 5-slot schedule, with Attack in no slot', () => {
+      for (const cn of ALL_CLASSES) {
+        const loadout = createDefaultSkillLoadout(cn, CONTENT);
+        expect(loadout.equippedSkills).toHaveLength(5);
+        expect(loadout.equippedSkills.filter(Boolean)).toHaveLength(1);
+        expect(loadout.equippedSkills[0]).toBe(HISTORICAL_SKILL_IDS[cn][0]);
+        for (let slot = 0; slot < 5; slot++) {
+          expect(canEquipSkill(`${cn.toLowerCase()}_attack`, slot, cn, 50, getUnlockedSkillsForLevel(cn, 50, CONTENT), [], CONTENT)).toBe(false);
+        }
       }
     });
 
@@ -467,13 +516,10 @@ describe('skill cards and triggers', () => {
 
   it('has the spec card labels, icons and blurbs', () => {
     expect(SKILL_CARD_TYPE_INFO).toEqual({
-      attack: { label: 'Attack', icon: '⚔️', blurb: 'Uses your action when ready' },
-      support: { label: 'Support', icon: '✚', blurb: 'Held until someone needs it' },
-      enchantment: { label: 'Enchantment', icon: '✨', blurb: 'Lingering effect' },
-      instant: { label: 'Instant', icon: '⚡', blurb: 'Fires off-turn when its trigger happens' },
-      interrupt: { label: 'Interrupt', icon: '✋', blurb: 'Counters an enemy spell' },
+      basic: { label: 'Basic attack', icon: '🗡️', blurb: 'Always in use, whenever nothing above it is ready' },
+      action: { label: 'Action', icon: '⚔️', blurb: 'Uses your turn when ready, once it would do something' },
+      instant: { label: 'Instant', icon: '⚡', blurb: 'Fires on its own when something happens' },
       passive: { label: 'Passive', icon: '◆', blurb: 'Always on' },
-      triggered: { label: 'Triggered', icon: '↯', blurb: 'Passive that fires on an event' },
     });
   });
 
@@ -487,50 +533,51 @@ describe('skill cards and triggers', () => {
 
   it('derives the card type (first match wins)', () => {
     expect(getSkillCardType(passive({ passiveEffects: [{ kind: 'crit_chance', flatValue: 0.1 }] }))).toBe('passive');
-    expect(getSkillCardType(passive({ passiveEffects: [{ kind: 'crit_chance', flatValue: 0.1 }, { kind: 'overflow' }] }))).toBe('triggered');
-    expect(getSkillCardType(active({ trigger: 'enemy_cast', activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }] }))).toBe('interrupt');
+    expect(getSkillCardType(passive({ passiveEffects: [{ kind: 'crit_chance', flatValue: 0.1 }, { kind: 'overflow' }] }))).toBe('instant');
+    expect(getSkillCardType(active({ trigger: 'enemy_cast', activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }] }))).toBe('instant');
     expect(getSkillCardType(active({ trigger: 'ally_low_hp', activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }] }))).toBe('instant');
     expect(getSkillCardType(active({ activeEffects: [{ kind: 'redirect_hit' }] }))).toBe('instant');
-    expect(getSkillCardType(active({ activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }, { kind: 'shield_non_knight', shieldMultiplier: 2 }] }))).toBe('support');
-    expect(getSkillCardType(active({ activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }, { kind: 'damage_percent', damagePercent: 1 }] }))).toBe('attack');
-    expect(getSkillCardType(active({ activeEffects: [{ kind: 'damage_percent', damagePercent: 1 }, { kind: 'chaos' }] }))).toBe('enchantment');
-    expect(getSkillCardType(active({ activeEffects: [] }))).toBe('attack');
+    expect(getSkillCardType(active({ activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }, { kind: 'shield_non_knight', shieldMultiplier: 2 }] }))).toBe('action');
+    expect(getSkillCardType(active({ activeEffects: [{ kind: 'heal_lowest', healMultiplier: 4 }, { kind: 'damage_percent', damagePercent: 1 }] }))).toBe('action');
+    expect(getSkillCardType(active({ activeEffects: [{ kind: 'damage_percent', damagePercent: 1 }, { kind: 'chaos' }] }))).toBe('action');
+    expect(getSkillCardType(active({ activeEffects: [] }))).toBe('action');
   });
 
   it('seed skills follow the card table', () => {
-    const expected: Record<string, [string, number, { castTime?: number; warmup?: number; trigger?: string }?]> = {
-      knight_bash: ['attack', 2],
-      knight_intercept: ['instant', 2, { trigger: 'ally_targeted' }],
-      knight_shield_slam: ['instant', 1, { trigger: 'self_hit' }],
-      knight_sunder: ['attack', 3, { warmup: 1 }],
-      knight_dispel: ['interrupt', 5, { trigger: 'enemy_cast' }],
-      archer_cut_down: ['attack', 3],
-      archer_triple_shot: ['attack', 4],
-      archer_snipe: ['attack', 5, { castTime: 1 }],
-      archer_bleed: ['attack', 3],
-      archer_crippling_shot: ['attack', 3],
-      priest_minor_heal: ['support', 1],
-      priest_smite: ['attack', 2],
-      priest_cure: ['instant', 3, { trigger: 'ally_afflicted' }],
-      priest_mending: ['instant', 4, { trigger: 'ally_low_hp' }],
-      priest_sanctuary: ['support', 1],
-      mage_magic_missile: ['attack', 3],
-      mage_zap: ['attack', 1],
-      mage_chain_lightning: ['attack', 1],
-      mage_blizzard: ['attack', 6, { castTime: 1.5 }],
-      mage_arcane_blast: ['attack', 5, { castTime: 1 }],
-      bard_dissonance: ['attack', 3],
-      bard_drumroll: ['interrupt', 4, { trigger: 'enemy_cast' }],
-      bard_war_song: ['enchantment', 4, { warmup: 0 }],
-      bard_lullaby: ['enchantment', 5],
-      bard_chaos: ['enchantment', 6],
+    const expected: Record<string, [string, number, number | undefined, { castTime?: number; warmup?: number; trigger?: string }?]> = {
+      knight_bash: ['action', 6.3, 0.9],
+      knight_intercept: ['instant', 1.8, undefined, { trigger: 'ally_targeted' }],
+      knight_shield_slam: ['instant', 1.8, undefined, { trigger: 'self_hit' }],
+      knight_sunder: ['action', 9, 0.9, { warmup: 1.8 }],
+      knight_dispel: ['instant', 9.9, undefined, { trigger: 'enemy_cast' }],
+      archer_cut_down: ['action', 4.4, 1.6],
+      archer_triple_shot: ['action', 6.4, 1.6],
+      archer_snipe: ['action', 8, 2, { castTime: 1 }],
+      archer_bleed: ['action', 4.4, 1.6],
+      archer_crippling_shot: ['action', 4.4, 1.6],
+      priest_minor_heal: ['action', 0.9, 0.9],
+      priest_smite: ['action', 2.7, 0.9],
+      priest_cure: ['instant', 5.4, undefined, { trigger: 'ally_afflicted' }],
+      priest_mending: ['instant', 7.2, undefined, { trigger: 'ally_low_hp' }],
+      priest_sanctuary: ['action', 0.9, 0.9],
+      mage_magic_missile: ['action', 7, 0.5],
+      mage_zap: ['action', 2, 0.5],
+      mage_chain_lightning: ['action', 2, 0.5],
+      mage_blizzard: ['action', 14, 1, { castTime: 1.5 }],
+      mage_arcane_blast: ['action', 11.5, 1, { castTime: 1 }],
+      bard_dissonance: ['action', 6.8, 0.7],
+      bard_drumroll: ['instant', 7.2, undefined, { trigger: 'enemy_cast' }],
+      bard_war_song: ['action', 9.3, 0.7, { warmup: 0 }],
+      bard_lullaby: ['action', 11.8, 0.7],
+      bard_chaos: ['action', 14.3, 0.7],
     };
     const actives = Object.values(SEED_SKILLS).filter(s => s.type === 'active').map(s => s.id).sort();
     expect(actives).toEqual(Object.keys(expected).sort());
-    for (const [id, [cardType, cooldown, timing]] of Object.entries(expected)) {
+    for (const [id, [cardType, charge, recovery, timing]] of Object.entries(expected)) {
       const skill = SEED_SKILLS[id];
       expect(getSkillCardType(skill), id).toBe(cardType);
-      expect(skill.cooldown, id).toBe(cooldown);
+      expect(skill.charge, id).toBe(charge);
+      expect(skill.recovery, id).toBe(recovery);
       expect(skill.castTime, id).toBe(timing?.castTime);
       expect(skill.warmup, id).toBe(timing?.warmup);
       expect(skill.trigger, id).toBe(timing?.trigger);
@@ -538,12 +585,16 @@ describe('skill cards and triggers', () => {
     expect(SEED_SKILLS.archer_bleed.activeEffects![0]).toMatchObject({ dotTicks: 3 });
     expect(SEED_SKILLS.archer_crippling_shot.activeEffects![0]).toMatchObject({ debuffPercent: 0.3, debuffDuration: 3 });
     expect(SEED_SKILLS.bard_lullaby.activeEffects![0]).toMatchObject({ debuffDuration: 3 });
-    expect(SEED_SKILLS.priest_mending.description).toBe('When an ally drops below half health, heal them for level × 2 HP each second for 3 seconds.');
+    expect(SEED_SKILLS.priest_mending.description).toBe(`When an ally drops below half health, heal them for level × 2 HP every ${COMBAT_PACE.clock} seconds for ${3 * COMBAT_PACE.clock} seconds.`);
   });
 
-  it('seed passives with an event hook are triggered cards', () => {
-    const triggered = Object.values(SEED_SKILLS).filter(s => getSkillCardType(s) === 'triggered').map(s => s.id).sort();
-    expect(triggered).toEqual([
+  it('seed passives with an event hook are Instant cards, and stay passive with no charge', () => {
+    const instants = Object.values(SEED_SKILLS).filter(s => s.type === 'passive' && getSkillCardType(s) === 'instant');
+    for (const skill of instants) {
+      expect(skill.charge, skill.id).toBeUndefined();
+      expect(skill.recovery, skill.id).toBeUndefined();
+    }
+    expect(instants.map(s => s.id).sort()).toEqual([
       'archer_focus', 'knight_shield_bash', 'mage_arcane_surge', 'mage_ignite', 'mage_overflow', 'mage_scorch',
       'priest_martyr', 'priest_resurrection',
     ]);
@@ -553,9 +604,54 @@ describe('skill cards and triggers', () => {
     for (const skill of Object.values(SEED_SKILLS)) {
       expect(skill.description, skill.id).not.toMatch(/\bturns?\b|\brounds?\b|\bticks?\b/i);
     }
-    expect(SEED_SKILLS.bard_tempo.description).toContain('1 s');
-    expect(SEED_SKILLS.bard_encore.description).toContain('1 s');
-    expect(SEED_SKILLS.mage_scorch.description).toContain('2 s');
-    expect(SEED_SKILLS.knight_shield_bash.description).toContain('1 second');
+    const { clock } = COMBAT_PACE;
+    for (const id of ['bard_tempo', 'bard_encore']) {
+      expect(SEED_SKILLS[id].description, id).toContain(`charge ${clock} s faster`);
+      expect(SEED_SKILLS[id].description, id).toContain(`at least a ${MIN_COOLDOWN_MS / 1000 * clock} s cycle`);
+      expect(SEED_SKILLS[id].description, id).toContain('Attack, recovery and skills that counter enemy spells are unaffected.');
+    }
+    expect(SEED_SKILLS.mage_scorch.description).toContain(`for ${ownSeconds(SEED_SKILLS.mage_scorch, SCORCH_MS / 1000)} s`);
+    expect(SEED_SKILLS.knight_shield_bash.description).toContain(`stun the attacker for ${clock} seconds`);
+  });
+
+  it('seed cards leave how often they come round to the charge and recovery they show', () => {
+    for (const skill of Object.values(SEED_SKILLS)) {
+      if (skill.type === 'passive') continue;
+      expect(skill.description, skill.id).not.toMatch(/\bcooldown\b|^[\w ]+, (about )?every \d/i);
+      const cadenceWords = skill.description.match(/\bevery [\d.]+ seconds?\b/g) ?? [];
+      expect(cadenceWords, skill.id).toEqual(skill.id === 'priest_mending' ? [`every ${COMBAT_PACE.clock} seconds`] : []);
+    }
+  });
+
+  it('seed cards state what an action does at its class pace', () => {
+    const { clock } = COMBAT_PACE;
+    const kit = (className: ClassName) => paceKit(COMBAT_PACE, className);
+    const percent = (fraction: number) => Math.round(fraction * 100);
+    const first = (id: string) => SEED_SKILLS[id].activeEffects![0];
+
+    expect(SEED_SKILLS.knight_bash.description).toContain(`with a ${percent(Math.min(1, first('knight_bash').stunChance! * kit('Knight')))}% chance to stun it for ${clock} seconds`);
+    const mark = first('knight_sunder').markMultiplier!;
+    expect(SEED_SKILLS.knight_sunder.description).toContain(`take ${percent(mark * kit('Knight'))}% increased damage from attacks (up to ${percent(mark * SUNDER_MAX_STACKS)}%, on a second use)`);
+    expect(SEED_SKILLS.archer_snipe.description).toContain(`Take aim for ${ownSeconds(SEED_SKILLS.archer_snipe, SEED_SKILLS.archer_snipe.castTime!)} seconds`);
+    expect(SEED_SKILLS.archer_bleed.description).toContain(`over ${cardSeconds(first('archer_bleed').dotTicks! * clock)} seconds`);
+    expect(SEED_SKILLS.archer_crippling_shot.description).toContain(`by 30% for ${ownSeconds(SEED_SKILLS.archer_crippling_shot, first('archer_crippling_shot').debuffDuration!)} seconds`);
+    expect(SEED_SKILLS.mage_blizzard.description).toContain(`Channel for ${ownSeconds(SEED_SKILLS.mage_blizzard, SEED_SKILLS.mage_blizzard.castTime!)} seconds`);
+    expect(SEED_SKILLS.mage_arcane_blast.description).toContain(`Channel for ${ownSeconds(SEED_SKILLS.mage_arcane_blast, SEED_SKILLS.mage_arcane_blast.castTime!)} seconds`);
+    expect(SEED_SKILLS.bard_lullaby.description).toContain(`less damage for ${ownSeconds(SEED_SKILLS.bard_lullaby, first('bard_lullaby').debuffDuration!)} seconds`);
+    expect(SEED_SKILLS.bard_drumroll.description).toContain(`a ${percent(first('bard_drumroll').stunChance!)}% chance to stun each enemy for ${clock} seconds`);
+    const song = first('bard_war_song').buffPercent!;
+    expect(SEED_SKILLS.bard_war_song.description).toContain(`by ${percent(song * kit('Bard'))}% for the rest of combat (stacks up to ${percent(song * WAR_SONG_MAX_STACKS)}%)`);
+    const dissonance = Math.round(first('bard_dissonance').damagePerLevel! * kit('Bard') * 100) / 100;
+    expect(SEED_SKILLS.bard_dissonance.description).toContain(`Deal ${dissonance} damage per level, rounded down`);
+  });
+
+  it('seed passives state what they add at the pace of the hits they ride on', () => {
+    const kits = ALL_CLASSES.map(className => paceKit(COMBAT_PACE, className));
+    const mageKit = paceKit(COMBAT_PACE, 'Mage');
+    const burn = SEED_SKILLS.mage_burn.passiveEffects![0].valuePerLevel!;
+    expect(SEED_SKILLS.mage_burn.description).toContain(`+${Math.round(burn * mageKit * 10) / 10} magical damage per level`);
+    expect(SEED_SKILLS.mage_ignite.description).toContain(`Stacks up to ${Math.round(IGNITE_MAX_STACKS / mageKit)} times`);
+    const arms = SEED_SKILLS.priest_blessed_arms.passiveEffects![0].valuePerLevel!;
+    expect(SEED_SKILLS.priest_blessed_arms.description).toContain(`+${arms * Math.min(...kits)} to +${arms * Math.max(...kits)} holy damage per Priest level, by class`);
   });
 });

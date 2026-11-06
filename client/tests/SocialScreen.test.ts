@@ -853,6 +853,21 @@ describe('user popup', () => {
     expect(document.querySelector('.player-profile-overlay')).toBeNull();
   });
 
+  it('lists a profile\'s Attack as always on, on content that has one', () => {
+    const skills = { knight_attack: { id: 'knight_attack', name: 'Attack', description: '', className: 'Knight', type: 'attack', unlockLevel: 1, sortOrder: 0, charge: 3.6, recovery: 0 } };
+    const t = setup();
+    t.push([]);
+    const screen = t.screen as unknown as { worldCache: { getSkillContent: () => unknown }; renderPlayerProfileModal(p: unknown): void };
+    screen.worldCache.getSkillContent = () => ({ skills });
+    screen.renderPlayerProfileModal({
+      username: 'bob', className: 'Knight', level: 3, equipment: {}, itemDefinitions: {}, setDefinitions: {}, skillLoadout: { equippedSkills: [] }, partyMembers: [],
+    });
+    const row = document.querySelector('.profile-skill-slot.attack')!;
+    expect(row.textContent).toContain('Always on');
+    expect(row.textContent).toContain('Charge 3.6s');
+    dismissTop();
+  });
+
   it('shows the self popup with no actions', () => {
     const t = setup();
     t.push([]);

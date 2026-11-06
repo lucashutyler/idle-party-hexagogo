@@ -228,12 +228,18 @@ export const LOADOUT_PRIORITY: Record<ClassName, KindPriority> = {
 /** Enemies assumed when judging an AoE against the auto-attack it would replace. */
 const TRAP_AOE_ENEMIES = 3;
 
+/** A timed skill with any charge leaves its owner gaps to attack in. */
+function readyOnEveryAction(skill: any): boolean {
+  if (typeof skill.charge === 'number' || typeof skill.recovery === 'number') return (skill.charge ?? 0) === 0;
+  return (skill.cooldown ?? 1) <= 1;
+}
+
 /**
  * Ready on every action, instant, and worth less than the auto-attack it replaces, so it would
  * lock the owner out of autos (and auto-only passives) for a net loss.
  */
 export function isAutoReplacingTrap(skill: any): boolean {
-  if (skill.type !== 'active' || skill.trigger || (skill.castTime ?? 0) > 0 || (skill.cooldown ?? 1) > 1) return false;
+  if (skill.type !== 'active' || skill.trigger || (skill.castTime ?? 0) > 0 || !readyOnEveryAction(skill)) return false;
   return (skill.activeEffects ?? []).some((e: any) => {
     if (e.damagePercent === undefined) return false;
     const hits = e.kind === 'damage_aoe_all' ? TRAP_AOE_ENEMIES : e.hitCount ?? 1;

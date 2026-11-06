@@ -2548,13 +2548,10 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
 
 /* ── Player-screen polish (skill cards, party formation, inline-style replacements) ── */
 
-:is(.skill-card-chip, .skill-card-meta)[data-card-type="attack"] { --skill-card-color: var(--card-attack); }
-:is(.skill-card-chip, .skill-card-meta)[data-card-type="support"] { --skill-card-color: var(--card-support); }
-:is(.skill-card-chip, .skill-card-meta)[data-card-type="enchantment"] { --skill-card-color: var(--card-enchantment); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="basic"] { --skill-card-color: var(--card-basic); }
+:is(.skill-card-chip, .skill-card-meta)[data-card-type="action"] { --skill-card-color: var(--card-action); }
 :is(.skill-card-chip, .skill-card-meta)[data-card-type="instant"] { --skill-card-color: var(--card-instant); }
-:is(.skill-card-chip, .skill-card-meta)[data-card-type="interrupt"] { --skill-card-color: var(--card-interrupt); }
 :is(.skill-card-chip, .skill-card-meta)[data-card-type="passive"] { --skill-card-color: var(--card-passive); }
-:is(.skill-card-chip, .skill-card-meta)[data-card-type="triggered"] { --skill-card-color: var(--card-triggered); }
 
 .skill-card-meta {
   display: inline-flex;

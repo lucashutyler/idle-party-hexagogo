@@ -10,7 +10,7 @@ import { createEncounter, SEED_ENCOUNTERS } from '../src/systems/EncounterTypes'
 import { SEED_ZONES } from '../src/systems/ZoneTypes';
 import { calculateBaseDamage } from '../src/systems/CharacterStats';
 import type { PartyGridPosition } from '../src/systems/SocialTypes';
-import { SEED_SKILLS } from '../src/systems/SkillTypes';
+import { LEGACY_SEED_SKILLS } from './legacySeedSkills';
 import {
   BASE_ACTION_INTERVAL_MS,
   COMBAT_STEP_MS,
@@ -218,14 +218,14 @@ describe('createPartyCombatState', () => {
   it('applies Mage Burn bonus damage at combat start', () => {
     const mage = makePlayer('Mage', 0, {
       className: 'Mage', level: 5, baseDamage: calculateBaseDamage(5, 'Mage'),
-      skills: [SEED_SKILLS.mage_burn, null, null, null, null],
+      skills: [LEGACY_SEED_SKILLS.mage_burn, null, null, null, null],
     });
     const state = createPartyCombatState([mage], [makeMonster(0)]);
     expect(state.players[0].baseDamage).toBe(calculateBaseDamage(5, 'Mage') + 10);
   });
 
   it('computes Bard Rally multiplier (and 0 without a Bard)', () => {
-    const bard = makePlayer('Bard', 0, { className: 'Bard', skills: [SEED_SKILLS.bard_rally, null, null, null, null] });
+    const bard = makePlayer('Bard', 0, { className: 'Bard', skills: [LEGACY_SEED_SKILLS.bard_rally, null, null, null, null] });
     expect(createPartyCombatState([bard, makePlayer('Archer', 2)], [makeMonster(0)]).rallyMultiplier).toBeCloseTo(0.40);
     expect(createPartyCombatState([makePlayer('Archer', 0)], [makeMonster(0)]).rallyMultiplier).toBe(0);
   });
@@ -387,7 +387,7 @@ describe('class-aware damage', () => {
   it('Knight Guard reduces physical damage taken', () => {
     pinRandom();
     const knight = makePlayer('Arthur', 2, {
-      className: 'Knight', hp: 200, baseDamage: 1, skills: [SEED_SKILLS.knight_guard],
+      className: 'Knight', hp: 200, baseDamage: 1, skills: [LEGACY_SEED_SKILLS.knight_guard],
     });
     const state = createPartyCombatState([knight], [createMonsterInstance(SEED_MONSTERS.goblin, 4)]);
     runTo(state, 1400);
@@ -397,7 +397,7 @@ describe('class-aware damage', () => {
   it('Knight Guard scales with level: still 50 % vs a same-level attacker, never a 0-damage hit', () => {
     pinRandom();
     const knight = makePlayer('Arthur', 2, {
-      className: 'Knight', level: 5, hp: 200, baseDamage: 1, skills: [SEED_SKILLS.knight_guard],
+      className: 'Knight', level: 5, hp: 200, baseDamage: 1, skills: [LEGACY_SEED_SKILLS.knight_guard],
     });
     const state = createPartyCombatState([knight], [makeMonster(4, { damage: 4 })]);
     const { events } = runTo(state, 1400);
@@ -422,7 +422,7 @@ describe('class-aware damage', () => {
     pinRandom();
     const wolf = makeMonster(4, { hp: 1000, damage: 5, damageType: 'magical' });
     const priest = makePlayer('Cleric', 0, {
-      className: 'Priest', hp: 200, baseDamage: 3, skills: [SEED_SKILLS.priest_bless],
+      className: 'Priest', hp: 200, baseDamage: 3, skills: [LEGACY_SEED_SKILLS.priest_bless],
     });
     const archer = makePlayer('Legolas', 2, { className: 'Archer', hp: 200, baseDamage: 15 });
     const state = createPartyCombatState([priest, archer], [wolf]);
@@ -667,8 +667,8 @@ describe('stuns', () => {
   it('stuns refresh to 1 s and never stack', () => {
     pinRandom();
     const knights = [
-      makePlayer('K1', 2, { className: 'Knight', skills: [SEED_SKILLS.knight_bash] }),
-      makePlayer('K2', 5, { className: 'Knight', skills: [SEED_SKILLS.knight_bash] }),
+      makePlayer('K1', 2, { className: 'Knight', skills: [LEGACY_SEED_SKILLS.knight_bash] }),
+      makePlayer('K2', 5, { className: 'Knight', skills: [LEGACY_SEED_SKILLS.knight_bash] }),
     ];
     const state = createPartyCombatState(knights, [makeMonster(0)]);
     const r = runTo(state, 1000);

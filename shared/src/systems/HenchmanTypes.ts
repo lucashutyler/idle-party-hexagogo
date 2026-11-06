@@ -73,6 +73,7 @@ export function buildHenchmanCombatant(
   hired: HiredHenchman,
   resolveSkill: (id: string) => SkillDefinition | undefined,
   displayName: string,
+  attack?: SkillDefinition,
 ): PartyCombatantInit {
   const equippedSkills: (SkillDefinition | null)[] = def.skillIds.map(id => resolveSkill(id) ?? null);
   const maxHp = Math.max(1, Math.floor(def.maxHp));
@@ -88,6 +89,7 @@ export function buildHenchmanCombatant(
     className: def.className,
     level: def.level,
     equippedSkills,
+    ...(attack ? { attack } : {}),
     attackCount: 0,
     dots: [],
     hots: [],

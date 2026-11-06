@@ -2,9 +2,11 @@ import type { DamageType } from '../CharacterStats.js';
 import type { EquipmentBonuses } from '../ItemTypes.js';
 import type { Resistance } from '../MonsterTypes.js';
 import type { ActiveEffect, PassiveEffect, PassiveEffectKind, SkillDefinition } from '../SkillTypes.js';
-import { getSkillTrigger } from '../SkillTypes.js';
+import { getSkillTrigger, isTimedSkill } from '../SkillTypes.js';
 import type { CombatMonster, PartyCombatant, PartyCombatState } from '../CombatEngine.js';
-import { COMBAT_STEP_MS, MIN_COOLDOWN_MS } from '../CombatTiming.js';
+import { paceEngineMs } from '../CombatPace.js';
+import type { CombatPace } from '../CombatPace.js';
+import { COMBAT_STEP_MS, FIRST_ACTION_PLAYER_MS, MIN_COOLDOWN_MS } from '../CombatTiming.js';
 import {
   MAX_ENEMY_DAMAGE_REDUCTION,
   SKILL_RATING_SCALE,
@@ -15,6 +17,8 @@ import {
 
 const MAX_CAST_TIME_MS = 10000;
 const MAX_WARMUP_MS = 60000;
+const MAX_WARMUP_SECONDS = MAX_WARMUP_MS / 1000;
+const MAX_CHARGE_SECONDS = 120;
 
 // --- Passive lookups ---
 
@@ -167,14 +171,74 @@ function ceilToStep(ms: number): number {
   return Math.ceil(ms / COMBAT_STEP_MS) * COMBAT_STEP_MS;
 }
 
+/** Authored time as the owner's own time: actions run at the owner's action interval; reactions keep to the monsters' clock, as authored. */
+export function actionTimeMs(owner: PartyCombatant, skill: SkillDefinition, authoredMs: number): number {
+  return getSkillTrigger(skill) ? authoredMs : Math.round((authoredMs / 1000) * owner.actionIntervalMs);
+}
+
+export function playerCastMs(owner: PartyCombatant, skill: SkillDefinition): number {
+  return ceilToStep(actionTimeMs(owner, skill, skillCastTimeMs(skill)));
+}
+
+function timedFieldMs(pace: CombatPace, seconds: number | undefined): number {
+  return Number.isFinite(seconds) ? paceEngineMs(pace, Math.min(MAX_CHARGE_SECONDS, seconds as number)) : 0;
+}
+
+export function skillChargeMs(pace: CombatPace, skill: SkillDefinition): number {
+  return timedFieldMs(pace, skill.charge);
+}
+
+/** An instant has none, whatever stale value its content holds. */
+export function skillRecoveryMs(pace: CombatPace, skill: SkillDefinition): number {
+  return getSkillTrigger(skill) ? 0 : timedFieldMs(pace, skill.recovery);
+}
+
+function ownCastMs(owner: PartyCombatant, skill: SkillDefinition): number {
+  return skill.type === 'attack' ? 0 : playerCastMs(owner, skill);
+}
+
+/** A skill's whole cycle before CDR: cast, then recovery, then charge. */
+export function baseCycleMs(pace: CombatPace, owner: PartyCombatant, skill: SkillDefinition): number {
+  return ownCastMs(owner, skill) + skillRecoveryMs(pace, skill) + skillChargeMs(pace, skill);
+}
+
+/** Charge after CDR, which never touches recovery. Attack and Enemy-casts instants ignore CDR. */
+function reducedChargeMs(pace: CombatPace, owner: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
+  const charge = skillChargeMs(pace, skill);
+  if (skill.type === 'attack' || getSkillTrigger(skill) === 'enemy_cast') return charge;
+  const reduction = Math.round(cooldownReductionSeconds(owner, allPlayers) * 1000 / COMBAT_STEP_MS) * COMBAT_STEP_MS;
+  return Math.max(0, charge - reduction);
+}
+
+/** One step at least, so an instant with no charge can't re-trigger itself. */
+function timedCycleMs(pace: CombatPace, owner: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
+  const base = baseCycleMs(pace, owner, skill);
+  const cycle = ownCastMs(owner, skill) + skillRecoveryMs(pace, skill) + reducedChargeMs(pace, owner, skill, allPlayers);
+  return Math.max(COMBAT_STEP_MS, cycle, Math.min(base, MIN_COOLDOWN_MS));
+}
+
+/** The cooldown a use starts. */
+export function useCooldownMs(pace: CombatPace, owner: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
+  if (isTimedSkill(skill)) return timedCycleMs(pace, owner, skill, allPlayers);
+  return actionTimeMs(owner, skill, effectiveCooldownMs(owner, skill, allPlayers));
+}
+
+export function baseCooldownMs(skill: SkillDefinition): number {
+  return Number.isFinite(skill.cooldown) ? (skill.cooldown as number) * 1000 : 1000;
+}
+
 /**
  * Cooldown after use: base seconds minus own CDR (party-wide options included), other living members'
- * party-wide CDR and set CDR, floored at MIN_COOLDOWN_MS. Interrupts (enemy_cast) ignore CDR.
+ * party-wide CDR and set CDR, floored at MIN_COOLDOWN_MS. Enemy-casts instants ignore CDR.
  */
 export function effectiveCooldownMs(owner: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
-  const base = Number.isFinite(skill.cooldown) ? (skill.cooldown as number) * 1000 : 1000;
+  const base = baseCooldownMs(skill);
   if (getSkillTrigger(skill) === 'enemy_cast') return Math.max(MIN_COOLDOWN_MS, base);
 
+  return Math.max(MIN_COOLDOWN_MS, Math.round(base - cooldownReductionSeconds(owner, allPlayers) * 1000));
+}
+
+function cooldownReductionSeconds(owner: PartyCombatant, allPlayers: PartyCombatant[]): number {
   let cdrSeconds = 0;
   for (const effect of getPassiveEffects(owner, 'cooldown_reduction')) {
     cdrSeconds += effect.flatValue ?? 0;
@@ -185,19 +249,28 @@ export function effectiveCooldownMs(owner: PartyCombatant, skill: SkillDefinitio
       if (effect.partyWide) cdrSeconds += effect.flatValue ?? 0;
     }
   }
-  cdrSeconds += owner.setBonuses?.cooldownReduction ?? 0;
+  return cdrSeconds + (owner.setBonuses?.cooldownReduction ?? 0);
+}
 
-  return Math.max(MIN_COOLDOWN_MS, Math.round(base - cdrSeconds * 1000));
+/** The first action lands at the opener whatever the class's pace, so only time past it is in the owner's own time. */
+function warmupFromOpenerMs(owner: PartyCombatant, skill: SkillDefinition, authoredMs: number): number {
+  if (authoredMs <= FIRST_ACTION_PLAYER_MS) return authoredMs;
+  return FIRST_ACTION_PLAYER_MS + actionTimeMs(owner, skill, authoredMs - FIRST_ACTION_PLAYER_MS);
 }
 
 /** Cooldown remaining at battle start. */
-export function initialWarmupMs(owner: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
+export function initialWarmupMs(pace: CombatPace, owner: PartyCombatant, skill: SkillDefinition, allPlayers: PartyCombatant[]): number {
+  if (isTimedSkill(skill)) {
+    return Number.isFinite(skill.warmup)
+      ? paceEngineMs(pace, Math.min(MAX_WARMUP_SECONDS, skill.warmup as number))
+      : reducedChargeMs(pace, owner, skill, allPlayers);
+  }
   if (skill.warmup !== undefined && Number.isFinite(skill.warmup)) {
-    return secondsToMs(skill.warmup, 0, MAX_WARMUP_MS);
+    return warmupFromOpenerMs(owner, skill, secondsToMs(skill.warmup, 0, MAX_WARMUP_MS));
   }
   const trigger = getSkillTrigger(skill);
   if (trigger && trigger !== 'enemy_cast') return 0;
-  return Math.max(0, effectiveCooldownMs(owner, skill, allPlayers) - 1000);
+  return warmupFromOpenerMs(owner, skill, Math.max(0, effectiveCooldownMs(owner, skill, allPlayers) - MIN_COOLDOWN_MS));
 }
 
 // --- Damage helpers ---

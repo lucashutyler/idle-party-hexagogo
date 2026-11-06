@@ -11,6 +11,7 @@ import type {
   SetDefinition,
   SkillDefinition,
 } from '@idle-party-rpg/shared';
+import { COMBAT_PACE, paceHitDamage } from '@idle-party-rpg/shared';
 import {
   computeEquipmentBonuses,
   classIconHtml,
@@ -21,6 +22,7 @@ import {
   getEquippedItemIds,
   canClassEquipItem,
   getItemEffectText,
+  resolveActionOrder,
 } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
@@ -39,7 +41,7 @@ import { ITEM_POPUP_CLOSE_HTML, renderItemPopupContent } from '../ui/ItemPopup';
 import { renderEquipCompareBlock } from '../ui/EquipCompare';
 import { artworkUrl, missingAssetRetryCount, renderTrackedImg } from '../ui/assets';
 import { bringToFront, registerDismiss, release } from '../ui/ModalStack';
-import { renderSkillCardMeta } from '../ui/SkillCardChip';
+import { classAttackSkill, renderSkillCardChip, renderSkillCardMeta } from '../ui/SkillCardChip';
 import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { renderSegments, wireSegments } from '../ui/Segments';
@@ -61,6 +63,7 @@ type HeroTab = 'gear' | 'skills' | 'stats';
 
 const HERO_TABS: readonly HeroTab[] = ['gear', 'skills', 'stats'];
 const HERO_TAB_KEY = 'heroTab';
+const PRIORITY_PENDING_MS = 3000;
 
 function isHeroTab(value: string | null): value is HeroTab {
   return HERO_TABS.includes(value as HeroTab);
@@ -101,6 +104,9 @@ export class CharItemsScreen implements Screen {
   private equipLeftCol!: HTMLElement;
   private equipRightCol!: HTMLElement;
   private skillStripEl!: HTMLElement;
+  private priorityEl!: HTMLElement;
+  private priorityFocus: { skillId: string; move: string } | null = null;
+  private pendingPriority: { order: string[]; expiresAt: number } | null = null;
 
   private statCardEl!: HTMLElement;
   private statListEl!: HTMLElement;
@@ -279,6 +285,7 @@ export class CharItemsScreen implements Screen {
 
         <div class="hero-pane hero-pane-skills" data-pane="skills">
           <div class="charitems-skills-strip"></div>
+          <div class="hero-priority"></div>
         </div>
 
         <div class="hero-pane hero-pane-stats" data-pane="stats">
@@ -323,6 +330,7 @@ export class CharItemsScreen implements Screen {
     this.equipRightCol = slotsContainer.querySelector('.items-equip-right')!;
 
     this.skillStripEl = this.container.querySelector('.charitems-skills-strip')!;
+    this.priorityEl = this.container.querySelector('.hero-priority')!;
     this.statCardEl = this.container.querySelector('.charitems-stat-card')!;
     this.statListEl = this.container.querySelector('.hero-stat-list')!;
     this.metaRowEl = this.container.querySelector('.charitems-meta-row')!;
@@ -403,6 +411,12 @@ export class CharItemsScreen implements Screen {
       if (slot.classList.contains('locked')) return;
       const idx = parseInt(slot.getAttribute('data-slot-index')!, 10);
       this.openSkillPopup(idx);
+    });
+
+    this.priorityEl.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-priority-move]');
+      const skillId = btn?.closest<HTMLElement>('[data-skill-id]')?.dataset.skillId;
+      if (btn && skillId) this.movePriority(skillId, btn.dataset.priorityMove!);
     });
 
     this.statCardEl.addEventListener('click', (e) => {
@@ -610,7 +624,15 @@ export class CharItemsScreen implements Screen {
     const available = [...(char.skillLoadout.unlockedSkills ?? []), ...(char.grantedSkillIds ?? [])]
       .filter(id => !equipped.has(id))
       .map(id => this.worldCache.getSkill(id));
-    let html = '';
+    const attack = classAttackSkill(char.className, this.worldCache.getSkillContent().skills);
+    let html = attack
+      ? `<div class="charitems-skill-slot filled attack">
+          <span class="charitems-skill-slot-kind">Always on</span>
+          <span class="charitems-skill-slot-name">${escapeHtml(attack.name)}</span>
+          ${renderSkillCardMeta(attack, char.className)}
+          <span class="charitems-skill-slot-desc">${escapeHtml(attack.description)}</span>
+        </div>`
+      : '';
     let attention = false;
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i];
@@ -627,7 +649,7 @@ export class CharItemsScreen implements Screen {
       } else if (skill) {
         html += `<div class="charitems-skill-slot filled ${skill.type}" data-slot-index="${i}" role="button" tabindex="0">
           <span class="charitems-skill-slot-name">${escapeHtml(skill.name)}</span>
-          ${renderSkillCardMeta(skill)}
+          ${renderSkillCardMeta(skill, char.className)}
           <span class="charitems-skill-slot-desc">${escapeHtml(skill.description)}</span>
         </div>`;
       } else {
@@ -642,6 +664,69 @@ export class CharItemsScreen implements Screen {
     this.skillsNeedAttention = attention;
     setHtml(this.skillStripEl, html || '<div class="ui-empty">No skill slots yet.</div>');
     this.renderSummarySkills(char.skillLoadout.equippedSkills);
+    this.renderPriority(char);
+  }
+
+  private actionOrder(char: NonNullable<ServerStateMessage['character']>): SkillDefinition[] {
+    const equipped = char.skillLoadout.equippedSkills.map(id => (id ? this.worldCache.getSkill(id) ?? null : null));
+    const attack = classAttackSkill(char.className, this.worldCache.getSkillContent().skills);
+    return resolveActionOrder(equipped, attack, char.skillLoadout.actionOrder);
+  }
+
+  private renderPriority(char: NonNullable<ServerStateMessage['character']>): void {
+    const order = this.actionOrder(char);
+    if (order.length < 2 || !this.worldCache.hasServerSkillCatalog()) {
+      setHtml(this.priorityEl, '');
+      return;
+    }
+    const rows = order.map((skill, i) => `
+      <li class="hero-priority-row" data-skill-id="${escapeHtml(skill.id)}">
+        <span class="hero-priority-rank">${i + 1}</span>
+        <span class="hero-priority-name">${escapeHtml(skill.name)}</span>
+        ${renderSkillCardChip(skill)}
+        <button type="button" class="hero-priority-move" data-priority-move="up" aria-label="Move ${escapeHtml(skill.name)} up"${i === 0 ? ' disabled' : ''}>▲</button>
+        <button type="button" class="hero-priority-move" data-priority-move="down" aria-label="Move ${escapeHtml(skill.name)} down"${i === order.length - 1 ? ' disabled' : ''}>▼</button>
+      </li>`).join('');
+    setHtml(this.priorityEl, `
+      <div class="hero-priority-title">Priority</div>
+      <div class="hero-priority-note">Instant skills fire on their own. Changes apply from the next fight.</div>
+      <ol class="hero-priority-list">${rows}</ol>`);
+    this.restorePriorityFocus();
+  }
+
+  private movePriority(skillId: string, move: string): void {
+    const char = this.gameClient.lastState?.character;
+    if (!char) return;
+    const order = this.priorityToMove(char);
+    const from = order.indexOf(skillId);
+    const to = from + (move === 'up' ? -1 : 1);
+    if (from < 0 || to < 0 || to >= order.length) return;
+    [order[from], order[to]] = [order[to], order[from]];
+    this.priorityFocus = { skillId, move };
+    this.pendingPriority = { order: [...order], expiresAt: Date.now() + PRIORITY_PENDING_MS };
+    this.gameClient.sendSetActionOrder(order);
+  }
+
+  /** The last order sent while the server's push may still be on its way, so a quick second tap builds on the first. */
+  private priorityToMove(char: NonNullable<ServerStateMessage['character']>): string[] {
+    const current = this.actionOrder(char).map(skill => skill.id);
+    const pending = this.pendingPriority;
+    if (pending && Date.now() < pending.expiresAt && pending.order.length === current.length && pending.order.every(id => current.includes(id))) {
+      return [...pending.order];
+    }
+    this.pendingPriority = null;
+    return current;
+  }
+
+  /** Repainting the list drops focus from the button just pressed. */
+  private restorePriorityFocus(): void {
+    if (!this.priorityFocus) return;
+    const { skillId, move } = this.priorityFocus;
+    this.priorityFocus = null;
+    const rows = [...this.priorityEl.querySelectorAll<HTMLElement>('.hero-priority-row')];
+    const row = rows.find(r => r.dataset.skillId === skillId);
+    const buttons = row ? [...row.querySelectorAll<HTMLButtonElement>('[data-priority-move]')] : [];
+    (buttons.find(b => b.dataset.priorityMove === move && !b.disabled) ?? buttons.find(b => !b.disabled))?.focus({ preventScroll: true });
   }
 
   private renderSummarySkills(equippedIds: readonly (string | null)[]): void {
@@ -724,7 +809,7 @@ export class CharItemsScreen implements Screen {
             : '';
         return `<div class="${classes.join(' ')}" ${attrs}>
           <div class="charitems-skill-row-name">${escapeHtml(s.name)}${isCurrent ? ' &middot; equipped' : ''}</div>
-          <div class="charitems-skill-row-meta">${renderSkillCardMeta(s)}</div>
+          <div class="charitems-skill-row-meta">${renderSkillCardMeta(s, char.className)}</div>
           ${tagline}
           <div class="charitems-skill-row-desc">${escapeHtml(s.description)}</div>
         </div>`;
@@ -786,8 +871,8 @@ export class CharItemsScreen implements Screen {
     const bonuses = computeEquipmentBonuses(char.equipment, this.itemDefs, char.level);
 
     const baseAtk = char.baseDamage;
-    const atkLow = baseAtk + bonuses.bonusAttackMin;
-    const atkHigh = baseAtk + bonuses.bonusAttackMax;
+    const atkLow = paceHitDamage(COMBAT_PACE, char.className, baseAtk + bonuses.bonusAttackMin);
+    const atkHigh = paceHitDamage(COMBAT_PACE, char.className, baseAtk + bonuses.bonusAttackMax);
     const atkVal = atkLow === atkHigh ? `${atkLow}` : `${atkLow}-${atkHigh}`;
     const atkType = char.damageType ?? '';
 

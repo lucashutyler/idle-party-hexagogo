@@ -139,9 +139,8 @@ describe('CombatLogFormatter', () => {
 
 describe('interruptStampText', () => {
   it('stamps COUNTERED! only for interrupts the engine marks as counters', () => {
-    expect(interruptStampText({ cardType: 'interrupt' })).toBe('COUNTERED!');
+    expect(interruptStampText({ countered: true })).toBe('COUNTERED!');
     expect(interruptStampText({})).toBe('INTERRUPTED!');
-    expect(interruptStampText({ cardType: 'instant' })).toBe('INTERRUPTED!');
   });
 });
 

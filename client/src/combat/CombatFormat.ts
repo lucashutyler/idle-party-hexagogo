@@ -11,9 +11,8 @@ export interface StatusPip {
 
 export const MAX_VISIBLE_PIPS = 4;
 
-/** Stamp text for an `interrupt` event: the engine marks counters from an Interrupt reaction with cardType 'interrupt'. */
-export function interruptStampText(ev: Pick<CombatEvent, 'cardType'>): string {
-  return ev.cardType === 'interrupt' ? 'COUNTERED!' : 'INTERRUPTED!';
+export function interruptStampText(ev: Pick<CombatEvent, 'countered'>): string {
+  return ev.countered ? 'COUNTERED!' : 'INTERRUPTED!';
 }
 
 /** "0:07", "1:05", "12:00". */

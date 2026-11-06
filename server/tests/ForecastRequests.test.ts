@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { COMBAT_PACE, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
 import type { DungeonDefinition, DungeonForecastInput, HenchmanDefinition, HiredHenchman, ServerForecastMessage, PartyCombatState, CombatEvent } from '@idle-party-rpg/shared';
 import { FORECAST_REQUESTS_PER_WINDOW } from '../src/game/ForecastService.js';
 import { LIVE_FORECAST_DEBOUNCE_MS } from '../src/game/PartyBattleManager.js';
@@ -352,7 +352,7 @@ describe('live battle forecasts', () => {
     vi.advanceTimersByTime(300);
     expect(liveJobs()).toHaveLength(2);
     const at = Number(liveJobs()[1].split(':')[2]);
-    expect(at).toBeGreaterThan(2000 + LIVE_FORECAST_DEBOUNCE_MS);
+    expect(at).toBeGreaterThan((2000 + LIVE_FORECAST_DEBOUNCE_MS) / COMBAT_PACE.clock);
     expect(at).toBeLessThanOrEqual(combat.elapsedMs);
   });
 });

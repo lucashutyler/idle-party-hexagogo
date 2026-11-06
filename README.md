@@ -179,13 +179,13 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Stop here — tap your own room mid-route to stop (or walk back if you've already left it)
 
 ### Combat
-Real-time auto-battle on a timeline: every combatant acts on its own timer (about once a second), skills are cards with cooldowns and cast times in seconds, and the server streams the fight to clients as events plus periodic snapshots. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.
+Real-time auto-battle on a timeline: every combatant acts on its own timer (every few seconds, at a speed set by its class or monster), skills are cards with charge, recovery and cast times in seconds, and the server streams the fight to clients as events plus periodic snapshots. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.
 - [x] Auto-battle state machine (server-authoritative, always fighting)
 - [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
 - [x] HP-based combat (party/monster health pools)
 - [x] Real-time timeline combat (per-unit action timers, status pulses, stuns in seconds, stalemate guard)
-- [x] Skill cards — Attack / Support / Enchantment / Instant / Interrupt (+ Passive / Triggered), cooldowns and cast times in seconds, triggers (Intercept, Shield Slam, Cure, Mending react instantly)
+- [x] Skill cards — Basic attack / Action / Instant / Passive, charge, recovery and cast times in seconds, a class Attack skill, a per-player priority list, triggers (Intercept, Shield Slam, Cure, Mending react instantly)
 - [x] Telegraphed enemy spellcasts that can be interrupted (stuns, Dispel, Drumroll); seed casters (goblin shaman, bandit cutthroat)
 - [x] Monster definitions (zone-aware encounter system)
 - [x] Class-based combat (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong in party)
@@ -205,7 +205,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Individual character creation (one per player, class selection on first login)
 - [x] Character stats (HP + base damage scale linearly per class — no STR/INT/etc., no stat allocation on level-up)
 - [x] XP and leveling system (`floor(18000 * L^1.2 * 1.06^L)` XP to next level)
-- [x] Hero tab (Gear: equipped gear, inventory, mailbox and trades; Skills: skill loadout; Stats: stats, XP numbers, bestiary)
+- [x] Hero tab (Gear: equipped gear, inventory, mailbox and trades; Skills: skill loadout and priority list; Stats: stats, XP numbers, bestiary)
 - [x] Class system (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong together)
 - [x] Damage types (physical/magical/holy; Knight Guard rates against physical, Priest Bless against magical and holy)
 - [x] Henchmen (hireable NPCs for solo players; they wait at a dungeon's entrance while the party runs it)
@@ -303,7 +303,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (abou
 - [x] Back steps through overlays, then chat, then Battle, before leaving the app; Escape closes the top overlay
 - [x] Mobile-first responsive design
 - [x] Modern mobile-game visual style (Lilita One + Nunito, glossy panels, chunky buttons, design tokens)
-- [x] Real-time combat screen (action rings, cast bars with telegraphs, status pips, floating numbers, reaction cards, skill bar with cooldown sweeps, live log ticker, between-fights status chip, art that fills small boards; adapts to portrait/landscape; honours reduced motion)
+- [x] Real-time combat screen (action rings, cast bars with telegraphs, status pips, floating numbers, reaction cards, skill bar with charge sweeps, live log ticker, between-fights status chip, art that fills small boards; adapts to portrait/landscape; honours reduced motion)
 - [x] Image-everywhere convention (`<mount>/{id}.png` with placeholder fallback) across all 17 asset kinds — items, monsters, classes, rooms, room types, sets, shops, zones, NPCs, henchmen, map parchment, combat/room backdrops, the splash logo, and the class/slot/nav icon sets — all declared once in a shared registry
 - [x] Nav battle status indicators (ring while fighting, flash on victory/defeat)
 - [x] Server unavailable / offline screen with retry

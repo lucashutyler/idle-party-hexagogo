@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { HexGrid, HexTile, offsetToCube, cubeToOffset, DEFAULT_MAP_ID, RESULT_PAUSE, MOVE_DURATION, RUN_AVAILABLE_MS } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, cubeToOffset, COMBAT_PACE, COMBAT_STEP_MS, DEFAULT_MAP_ID, RESULT_PAUSE, MOVE_DURATION, RUN_AVAILABLE_MS, paceRealMs } from '@idle-party-rpg/shared';
 import type { DungeonDefinition, ForecastResult, ForecastStratum } from '@idle-party-rpg/shared';
 import type WebSocket from 'ws';
 import { ServerParty } from '../src/game/ServerParty.js';
@@ -20,6 +20,7 @@ function room(winPct: number, ci: [number, number], strata?: ForecastStratum[], 
 }
 
 const RETREAT_CYCLE_MS = RUN_AVAILABLE_MS + RESULT_PAUSE + MOVE_DURATION + 200;
+const RETREAT_LANDED_MS = RUN_AVAILABLE_MS + paceRealMs(COMBAT_PACE, COMBAT_STEP_MS);
 
 describe('auto-retreat decisions', () => {
   it('relocates only when the whole room is clearly below the threshold', () => {
@@ -294,7 +295,7 @@ describe('auto-retreat in the overworld', () => {
     expect(route.length).toBeGreaterThan(1);
 
     w.entry().battleTimer.restartBattle();
-    vi.advanceTimersByTime(RUN_AVAILABLE_MS + 100);
+    vi.advanceTimersByTime(RETREAT_LANDED_MS);
     expect(w.entry().serverParty.remainingPath.map(t => t.id)).toEqual([next.id]);
     vi.advanceTimersByTime(RESULT_PAUSE + MOVE_DURATION);
     expect(w.entry().serverParty.tile.id).toBe(next.id);
@@ -351,11 +352,11 @@ describe('auto-retreat in the overworld', () => {
     w.stub.verdicts.set(next.id, SAFE);
     w.prefill([start.id, next.id]);
     w.entry().battleTimer.restartBattle();
-    vi.advanceTimersByTime(RUN_AVAILABLE_MS + 100);
+    vi.advanceTimersByTime(RETREAT_LANDED_MS);
     expect(w.entry().serverParty.remainingPath.map(t => t.id)).toEqual([next.id]);
 
     w.pm.partyBattles.restartBattle(w.partyId);
-    vi.advanceTimersByTime(RUN_AVAILABLE_MS + 100);
+    vi.advanceTimersByTime(RETREAT_LANDED_MS);
 
     expect(w.journal().filter(l => l.startsWith('Auto-retreat moved'))).toHaveLength(1);
     const ledger = w.session.getAwayLedger()!;

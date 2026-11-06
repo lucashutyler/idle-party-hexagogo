@@ -8,13 +8,17 @@ import type {
   ServerForecastMessage,
   ServerStateMessage,
   SkillCardType,
+  SkillDefinition,
 } from '@idle-party-rpg/shared';
 import {
   CLASS_ICONS,
   getSkillCardType,
+  isTimedSkill,
   getSkillTrigger,
   henchmanDisplayNames,
   RUN_AVAILABLE_MS,
+  COMBAT_PACE,
+  paceSkillSeconds,
   SKILL_CARD_TYPE_INFO,
   SKILL_TRIGGER_INFO,
 } from '@idle-party-rpg/shared';
@@ -23,7 +27,7 @@ import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, registerDismiss, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { discoveredRoomName } from '../ui/routeSummary';
-import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, unitKey } from '../combat/CombatPlayback';
+import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, timedSkillMs, unitKey } from '../combat/CombatPlayback';
 import type { PlaybackUnit, UnitStatics } from '../combat/CombatPlayback';
 import { battleStatus, battleStatusHtml, rewardLines } from '../combat/BattleStatus';
 import type { CharacterProgress } from '../combat/BattleStatus';
@@ -33,6 +37,7 @@ import { isJournalLine } from '../combat/CombatLogBuffer';
 import { CombatLogFormatter } from '../combat/CombatLogFormatter';
 import { CombatLogView } from '../combat/CombatLogView';
 import { CombatSkillBar } from '../combat/CombatSkillBar';
+import { classAttackSkill } from '../ui/SkillCardChip';
 import type { SkillBarLayout, SkillBarState } from '../combat/CombatSkillBar';
 import { UnitCard } from '../combat/CombatUnitCard';
 import type { CardIdentity } from '../combat/CombatUnitCard';
@@ -61,6 +66,7 @@ import { OPEN_OPTIONS_ATTR, renderForecastPopover, renderForecastRing } from '..
 type Axis = 'x' | 'y';
 
 const TEXT_INTERVAL_MS = 100;
+const CHARGE_REDUCED_MIN_MS = 50;
 const RUN_HINT_MS = 3000;
 const POP_IN_STAGGER_MS = 45;
 const CAST_LABEL_EDGE_PX = 70;
@@ -222,9 +228,9 @@ export class CombatScreen implements Screen {
     this.gameClient = gameClient;
     this.worldCache = worldCache;
     this.playback = new CombatPlayback({
-      cooldownHint: (id, warmupMs) => {
+      cooldownHint: id => {
         const skill = this.worldCache.getSkill(id);
-        return skill ? guessCooldownMs(skill, warmupMs) : undefined;
+        return skill ? guessCooldownMs(skill, this.skillOwnerClass(skill)) : undefined;
       },
     });
 
@@ -942,11 +948,7 @@ export class CombatScreen implements Screen {
         }
         break;
       case 'reaction':
-        if (srcAt && ev.src) {
-          const kind = ev.cardType === 'interrupt' ? 'interrupt' : 'instant';
-          const icon = SKILL_CARD_TYPE_INFO[ev.cardType ?? 'instant']?.icon ?? '⚡';
-          this.fx.reactionCard(srcAt, ev.skill ?? '', kind, icon, this.towardEnemy(ev.src.side).dy || -1);
-        }
+        if (srcAt && ev.src) this.fx.reactionCard(srcAt, ev.skill ?? '', this.towardEnemy(ev.src.side).dy || -1);
         if (fromSelf && ev.skillId) this.skillBar.flash(ev.skillId);
         break;
       case 'redirect':
@@ -1301,7 +1303,7 @@ export class CombatScreen implements Screen {
   private skillCardType(skillId: string, fromSnapshot?: SkillCardType): SkillCardType {
     if (fromSnapshot) return fromSnapshot;
     const def = this.worldCache.getSkill(skillId);
-    return def ? getSkillCardType(def) : 'attack';
+    return def ? getSkillCardType(def) : 'action';
   }
 
   private refreshSkillLayout(): void {
@@ -1326,9 +1328,12 @@ export class CombatScreen implements Screen {
         if (def.type === 'active') layout.cards.push({ id, name: def.name, cardType: getSkillCardType(def) });
         else layout.passives.push({ id, name: def.name, cardType: getSkillCardType(def) });
       }
+      const className = state?.character?.className;
+      const attack = className ? classAttackSkill(className, this.worldCache.getSkillContent().skills) : undefined;
+      if (attack) layout.cards.push({ id: attack.id, name: attack.name, cardType: getSkillCardType(attack) });
       if (this.playback.battleId !== null && this.playback.units.length > 0 && state?.character) layout.note = 'Joining next battle';
     }
-    if (layout.cards.length === 0 && state?.character) {
+    if (layout.cards.every(card => card.cardType === 'basic') && state?.character) {
       const slot = this.worldCache.getSlotSchedule(state.character.className).find(s => s.type === 'active');
       if (slot && state.character.level < slot.unlocksAtLevel) layout.note = `Active skill unlocks at level ${slot.unlocksAtLevel}`;
       else if (!layout.note) layout.note = 'No active skill equipped';
@@ -1347,10 +1352,14 @@ export class CombatScreen implements Screen {
         const castProgress = state === 'casting' && unit.cast && unit.cast.totalMs > 0
           ? 1 - unit.cast.remainingMs / unit.cast.totalMs
           : undefined;
-        states.push({ id: s.id, state, remainingMs: s.remainingMs, cooldownMs: s.cooldownMs, castProgress });
+        states.push({ id: s.id, state, remainingMs: s.remainingMs, cooldownMs: s.cooldownMs, castProgress, locked: unit.recoveryMs > 0 && !trigger });
       }
     }
     this.skillBar.update(states, writeText);
+  }
+
+  private skillOwnerClass(skill: SkillDefinition): string {
+    return this.gameClient.lastState?.character?.className ?? skill.className;
   }
 
   private toggleSkillPopover(skillId: string, anchor: HTMLElement): void {
@@ -1366,13 +1375,22 @@ export class CombatScreen implements Screen {
     const trigger = snapStatics?.trigger ?? (def ? getSkillTrigger(def) : undefined);
     const live = this.selfUnit()?.skills?.find(s => s.id === skillId);
     const stats: string[] = [];
-    if (def?.type !== 'passive') {
-      const baseMs = def ? guessCooldownMs(def, undefined) : live?.cooldownMs ?? 0;
-      const effectiveMs = live?.useCooldownMs || (def ? guessCooldownMs(def, live?.warmupMs) : baseMs);
+    const castMs = snapStatics?.castTimeMs ?? (def?.castTime ? paceSkillSeconds(COMBAT_PACE, def, this.skillOwnerClass(def), def.castTime) * 1000 : 0);
+    const timed = snapStatics?.chargeMs !== undefined
+      ? { chargeMs: snapStatics.chargeMs, recoveryMs: snapStatics.recoveryMs ?? 0 }
+      : def && isTimedSkill(def) ? timedSkillMs(def) : null;
+    if (timed) {
+      const cycleMs = live?.useCooldownMs || snapStatics?.useCooldownMs;
+      const chargeMs = cycleMs ? Math.max(0, cycleMs - castMs - timed.recoveryMs) : timed.chargeMs;
+      const reduced = Math.abs(chargeMs - timed.chargeMs) >= CHARGE_REDUCED_MIN_MS ? ` (base ${formatDuration(timed.chargeMs)})` : '';
+      stats.push(`Charge ${formatDuration(chargeMs)}${reduced}`);
+      if (!trigger) stats.push(`Recovery ${formatDuration(timed.recoveryMs)}`);
+    } else if (def?.type !== 'passive') {
+      const baseMs = snapStatics?.baseCooldownMs ?? (def ? guessCooldownMs(def, this.skillOwnerClass(def)) : live?.cooldownMs ?? 0);
+      const effectiveMs = live?.useCooldownMs || snapStatics?.useCooldownMs || baseMs;
       const reduced = effectiveMs > 0 && effectiveMs !== baseMs ? ` (base ${formatDuration(baseMs)})` : '';
       if (effectiveMs > 0) stats.push(`Cooldown ${formatDuration(effectiveMs)}${reduced}`);
     }
-    const castMs = snapStatics?.castTimeMs ?? (def?.castTime ? def.castTime * 1000 : 0);
     if (castMs > 0) stats.push(`Cast ${formatDuration(castMs)}`);
     const triggerInfo = trigger ? SKILL_TRIGGER_INFO[trigger] : undefined;
 

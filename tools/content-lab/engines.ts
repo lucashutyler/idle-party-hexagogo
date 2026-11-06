@@ -63,7 +63,13 @@ function buildHumanCommon(mod: any, spec: HumanBuild, content: ContentSnapshot):
     className: spec.className,
     level: spec.level,
     equippedSkills: spec.skillIds.map(id => (id ? content.skills[id] ?? null : null)),
+    ...attackField(content, spec.className),
   };
+}
+
+function attackField(content: ContentSnapshot, className: string): { attack?: any } {
+  const attack = Object.values(content.skills as Record<string, any>).find(s => s.type === 'attack' && s.className === className);
+  return attack ? { attack } : {};
 }
 
 function monsterHpTotal(state: any): number {
@@ -72,7 +78,7 @@ function monsterHpTotal(state: any): number {
 
 function buildHireCommon(mod: any, hire: HireSpec, def: any, content: ContentSnapshot, displayName: string): Combatant {
   const hired = { instanceId: displayName, henchmanId: hire.henchmanId, gridPosition: hire.gridPosition, mapId: '' };
-  return mod.buildHenchmanCombatant(def, hired, (id: string) => content.skills[id], displayName);
+  return mod.buildHenchmanCombatant(def, hired, (id: string) => content.skills[id], displayName, attackField(content, def.className).attack);
 }
 
 function rollGold(monsters: MonsterInstance[], content: ContentSnapshot, rng: Rng): number {
@@ -107,7 +113,7 @@ function withSeededMathRandom<T>(rng: Rng, run: () => T): T {
 }
 
 /** The reward split of PartyBattleManager on both versions; standing walls pay too. */
-function settle(result: FightResult, ms: number, state: any, input: FightInput, baseXp: number): FightEnd {
+function settle(result: FightResult, ms: number, state: any, input: FightInput, baseXp: number, goldMultiplier = 1): FightEnd {
   const shares = input.humanCount + input.hireCount;
   const won = result === 'victory';
   return {
@@ -115,7 +121,7 @@ function settle(result: FightResult, ms: number, state: any, input: FightInput, 
     ms,
     ...partyHpLost(state.players),
     xpPerMember: won ? Math.ceil((baseXp * input.xpMultiplier) / shares) : 0,
-    goldPerMember: won ? Math.ceil(rollGold(state.monsters, input.content, input.rng) / shares) : 0,
+    goldPerMember: won ? Math.ceil((rollGold(state.monsters, input.content, input.rng) * goldMultiplier) / shares) : 0,
   };
 }
 
@@ -131,7 +137,8 @@ export async function loadNewEngine(): Promise<EngineAdapter> {
       return withSeededMathRandom(input.rng, () => {
         const { monsters, zones, encounters } = input.content;
         const instances = mod.createEncounter(input.zoneId, monsters, zones, encounters, input.table, input.rng);
-        const state = mod.createPartyCombatState(input.players, instances);
+        const pace = mod.COMBAT_PACE;
+        const state = mod.createPartyCombatState(input.players, instances, { pace });
         const outcome = mod.simulateToEnd(state, input.rng, Math.max(FIGHT_HORIZON_MS, mod.defaultHorizonMs(state)));
         const result: FightResult = outcome.result === 'victory' ? 'victory' : outcome.result === 'defeat' ? 'defeat' : 'stalemate';
         let baseXp = 0;
@@ -140,7 +147,7 @@ export async function loadNewEngine(): Promise<EngineAdapter> {
           const authored = m.levelSource === 'authored' && Number.isFinite(m.level);
           baseXp += authored ? m.xp * mod.xpConFactor(m.level, 'authored', input.memberLevel) : m.xp;
         }
-        return settle(result, outcome.elapsedMs, state, input, baseXp);
+        return settle(result, mod.paceRealMs(pace, outcome.elapsedMs), state, input, baseXp * pace.rewardMultiplier, pace.rewardMultiplier);
       });
     },
   };

@@ -41,7 +41,13 @@ export interface CombatEvent {
   skill?: string;
   skillId?: string;
   cardType?: SkillCardType;
+  /** interrupt only: an instant countered the spell, rather than a stun cancelling it. */
+  countered?: boolean;
   durationMs?: number;
+  /** The real wait until this unit's next action, as it stands: on a player's actions with an Attack skill, and on cast_start with a pace whose casts add time. */
+  nextActionMs?: number;
+  /** A use of a skill with charge and recovery on its owner's turn: the real recovery it starts now. On a cast, its cast_end carries this. A reaction never does. */
+  recoveryMs?: number;
   name?: string;
   result?: CombatResult;
 }
@@ -62,6 +68,12 @@ export interface ClientCombatSkill {
   cardType?: SkillCardType;
   trigger?: SkillTrigger;
   castTimeMs?: number;
+  /** The cooldown a use starts, before and after cooldown reduction. Full snapshots only. */
+  baseCooldownMs?: number;
+  useCooldownMs?: number;
+  /** Real times of a skill with charge and recovery. Full snapshots only. */
+  chargeMs?: number;
+  recoveryMs?: number;
 }
 
 export interface ClientCombatCast {
@@ -106,7 +118,10 @@ export interface ClientCombatUnit {
   actionIntervalMs?: number;
   cast?: ClientCombatCast;
   statuses?: ClientCombatStatus[];
-  /** Real players only (not henchmen): equipped actives in slot order. */
+  /** While recovering: nothing can be used, reactions included. `actionMs` runs alongside it for the ring. */
+  recoveryMs?: number;
+  recoveryTotalMs?: number;
+  /** Real players only (not henchmen): equipped actives in slot order, then the attack skill if any. */
   skills?: ClientCombatSkill[];
   name?: string;
   /** Monsters only: definition id (artwork key). */

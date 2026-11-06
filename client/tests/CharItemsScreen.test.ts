@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ItemDefinition, ServerStateMessage } from '@idle-party-rpg/shared';
+import { COMBAT_PACE } from '@idle-party-rpg/shared';
+import type { ClassName, ItemDefinition, ServerStateMessage } from '@idle-party-rpg/shared';
 import { CharItemsScreen } from '../src/screens/CharItemsScreen';
 import { dismissTop } from '../src/ui/ModalStack';
 import { forgetMissingAssets } from '../src/ui/assets';
@@ -25,6 +26,8 @@ const SKILLS = {
   smite: { id: 'smite', name: 'Smite', className: 'Knight', type: 'active', sortOrder: 3, unlockLevel: 50, description: 'Hit hard.' },
 };
 
+const BASE_DAMAGE = 2;
+
 function makeState(className: string, inventory: Record<string, number>, equipment: Record<string, string | null>, social: Social = {}): ServerStateMessage {
   return {
     username: 'me',
@@ -34,7 +37,7 @@ function makeState(className: string, inventory: Record<string, number>, equipme
       xp: 0,
       xpForNextLevel: 100,
       gold: 10,
-      baseDamage: 2,
+      baseDamage: BASE_DAMAGE,
       maxHp: 20,
       inventory,
       equipment,
@@ -400,6 +403,29 @@ describe('CharItemsScreen', () => {
       openPicker();
       expect(document.querySelector('.charitems-skill-popup')).toBeTruthy();
       document.querySelector<HTMLElement>('.cancel-btn')!.click();
+    });
+  });
+
+  describe('stat card', () => {
+    const hit = (className: ClassName, damage: number) => Math.round(damage * COMBAT_PACE.classSeconds[className]! / COMBAT_PACE.clock);
+    const cardAtk = () => document.querySelector('[data-tooltip="ATK"]')!.closest('.charitems-stat')!.querySelector('.charitems-stat-value')!.textContent;
+    const listAtk = () => document.querySelector('.hero-stat-row-value')!.textContent;
+
+    it('shows ATK as each class hits in play', () => {
+      setup('Knight', {}, EMPTY);
+      expect(cardAtk()).toBe(`${hit('Knight', BASE_DAMAGE)}`);
+      expect(listAtk()).toBe(`${hit('Knight', BASE_DAMAGE)}`);
+
+      setup('Priest', {}, EMPTY);
+      expect(cardAtk()).toBe(`${hit('Priest', BASE_DAMAGE)}`);
+    });
+
+    it('scales a weapon\'s range along with the base damage', () => {
+      setup('Knight', {}, { ...EMPTY, mainhand: 'rusty_sword' });
+      const { bonusAttackMin, bonusAttackMax } = ITEMS.rusty_sword;
+      const range = `${hit('Knight', BASE_DAMAGE + bonusAttackMin!)}-${hit('Knight', BASE_DAMAGE + bonusAttackMax!)}`;
+      expect(cardAtk()).toBe(range);
+      expect(listAtk()).toBe(range);
     });
   });
 

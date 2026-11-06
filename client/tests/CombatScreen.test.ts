@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  ClientCombatSkill,
   ClientCombatSnapshot,
   ClientCombatUnit,
   CombatEvent,
   CombatLogEntry,
   ServerCombatMessage,
   ServerStateMessage,
+  SkillDefinition,
 } from '@idle-party-rpg/shared';
+import { COMBAT_PACE, paceActionSeconds } from '@idle-party-rpg/shared';
 import { CombatScreen, laneTracks, usedGridTracks } from '../src/screens/CombatScreen';
+import { formatDuration } from '../src/combat/CombatFormat';
 import { CombatLogBuffer } from '../src/combat/CombatLogBuffer';
 import { dismissTop } from '../src/ui/ModalStack';
 import type { GameClient } from '../src/network/GameClient';
@@ -41,7 +45,7 @@ function makeState(battleId: number, monster: ClientCombatUnit, log: CombatLogEn
   } as unknown as ServerStateMessage;
 }
 
-function setup(initial?: ServerStateMessage) {
+function setup(initial?: ServerStateMessage, skills: Record<string, SkillDefinition> = {}) {
   document.body.innerHTML = '<div id="combat"></div>';
   const stateListeners = new Set<StateListener>();
   const combatListeners = new Set<CombatListener>();
@@ -63,7 +67,8 @@ function setup(initial?: ServerStateMessage) {
   } as unknown as GameClient;
   const worldCache = {
     getTileOn: () => ({ id: 'room-1', name: 'Old Mill', zone: 'meadow' }),
-    getSkill: () => undefined,
+    getSkill: (id: string) => skills[id],
+    getSkillContent: () => ({ skills }),
     getSlotSchedule: () => [],
   } as unknown as WorldCache;
 
@@ -105,8 +110,8 @@ const stage = () => document.querySelector('.combat-stage')!;
 
 describe('CombatScreen', () => {
   let active: CombatScreen | null = null;
-  const start = (initial?: ServerStateMessage) => {
-    const t = setup(initial);
+  const start = (initial?: ServerStateMessage, skills?: Record<string, SkillDefinition>) => {
+    const t = setup(initial, skills);
     active = t.screen;
     return t;
   };
@@ -363,6 +368,126 @@ describe('CombatScreen', () => {
     expect(note.tagName).toBe('BUTTON');
     expect(note.dataset.nav).toBe('items:skills');
     expect(document.querySelector('.combat-skillbar')!.classList.contains('empty')).toBe(true);
+  });
+
+  describe('Attack card', () => {
+    const ATTACK = { id: 'knight_attack', name: 'Attack', description: 'Swing.', className: 'Knight', type: 'attack', unlockLevel: 1, sortOrder: 0, charge: 3.6, recovery: 0.9 } as SkillDefinition;
+    const attackView: ClientCombatSkill = { id: 'knight_attack', remainingMs: 1800, cooldownMs: 3600, state: 'cooldown', name: 'Attack', cardType: 'basic', chargeMs: 3600, recoveryMs: 900, useCooldownMs: 4500, baseCooldownMs: 4500 };
+    const fightWith = (unit: ClientCombatUnit) => withBattle(makeState(1, GOBLIN, []), { combat: { ...snapshot(1, GOBLIN), units: [unit, GOBLIN] } });
+    const card = () => document.querySelector<HTMLElement>('.combat-skill[data-skill-id="knight_attack"]')!;
+
+    it('sits on the bar with its charge sweep', () => {
+      start(fightWith({ ...ALICE, skills: [attackView] }), { knight_attack: ATTACK });
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(card().dataset.cardType).toBe('basic');
+      expect(card().dataset.state).toBe('cooldown');
+      expect(card().querySelector<HTMLElement>('.combat-skill-sweep')!.style.getPropertyValue('--cd')).not.toBe('');
+    });
+
+    it('still says when the first active unlocks, beside it', () => {
+      start(fightWith({ ...ALICE, skills: [attackView] }), { knight_attack: ATTACK });
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(document.querySelector('.combat-skillbar-note')).not.toBeNull();
+      expect(document.querySelector('.combat-skillbar')!.classList.contains('empty')).toBe(false);
+    });
+
+    it('is on the bar between fights too', () => {
+      start(withBattle(makeState(1, GOBLIN, []), { combat: undefined }), { knight_attack: ATTACK });
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(card()).not.toBeNull();
+    });
+
+    it('opens the popover with charge and recovery', () => {
+      start(fightWith({ ...ALICE, skills: [attackView] }), { knight_attack: ATTACK });
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      card().click();
+      expect([...document.querySelectorAll('.combat-skill-popover-stats span')].map(s => s.textContent)).toEqual(['Charge 3.6s', 'Recovery 0.9s']);
+    });
+
+    it('marks a charge cooldown reduction took down against its base', () => {
+      const bash: ClientCombatSkill = { id: 'bash', remainingMs: 0, cooldownMs: 0, state: 'ready', chargeMs: 6300, recoveryMs: 900, useCooldownMs: 5400, baseCooldownMs: 7200, castTimeMs: 0 };
+      start(fightWith({ ...ALICE, skills: [bash] }));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      document.querySelector<HTMLElement>('.combat-skill[data-skill-id="bash"]')!.click();
+      expect([...document.querySelectorAll('.combat-skill-popover-stats span')].map(s => s.textContent)).toEqual(['Charge 4.5s (base 6.3s)', 'Recovery 0.9s']);
+    });
+
+    it('never locks an instant during recovery, and shows it no recovery', () => {
+      const dispel: ClientCombatSkill = { id: 'dispel', remainingMs: 0, cooldownMs: 0, state: 'armed', name: 'Dispel', cardType: 'instant', trigger: 'enemy_cast', chargeMs: 9900, recoveryMs: 0, useCooldownMs: 9900, baseCooldownMs: 9900, castTimeMs: 0 };
+      start(fightWith({ ...ALICE, recoveryMs: 900, recoveryTotalMs: 900, skills: [dispel, attackView] }), { knight_attack: ATTACK });
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      const dispelCard = document.querySelector<HTMLElement>('.combat-skill[data-skill-id="dispel"]')!;
+      expect(dispelCard.classList.contains('locked')).toBe(false);
+      expect(dispelCard.querySelector('.combat-skill-status')!.textContent).toBe('ARMED');
+      expect(card().classList.contains('locked')).toBe(true);
+      dispelCard.click();
+      expect([...document.querySelectorAll('.combat-skill-popover-stats span')].map(s => s.textContent)).toEqual(['Charge 9.9s']);
+      expect(document.querySelector('.combat-skill-popover-type')!.textContent).toBe('Instant');
+      expect(document.querySelector('.combat-skill-popover-trigger')!.textContent).toContain('Enemy casts');
+    });
+
+    it('locks every card that uses the turn during recovery', () => {
+      const bash: ClientCombatSkill = { id: 'bash', remainingMs: 0, cooldownMs: 0, state: 'ready' };
+      start(fightWith({ ...ALICE, recoveryMs: 900, recoveryTotalMs: 900, skills: [bash, attackView] }), { knight_attack: ATTACK });
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      const bashCard = document.querySelector<HTMLElement>('.combat-skill[data-skill-id="bash"]')!;
+      expect(bashCard.classList.contains('locked')).toBe(true);
+      expect(bashCard.querySelector('.combat-skill-status')!.textContent).toBe('LOCKED');
+      expect(card().classList.contains('locked')).toBe(true);
+    });
+  });
+
+  describe('action ring', () => {
+    const fightWith = (unit: ClientCombatUnit, foe: ClientCombatUnit = GOBLIN) => withBattle(makeState(1, foe, []), { combat: { ...snapshot(1, foe), units: [unit, foe] } });
+    const act = (el: Element) => (el.querySelector('.combat-card-ring') as HTMLElement).style.getPropertyValue('--act');
+
+    it('is complete for a player with no wait', () => {
+      const t = start(fightWith({ ...ALICE, actionMs: 0, actionTotalMs: 0 }));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(act(t.playerCard())).toBe('1.00');
+    });
+
+    it('stays empty on a passive monster, whose timer is also 0', () => {
+      const wall: ClientCombatUnit = { ...GOBLIN, actionMs: 0, actionTotalMs: 0, passive: true };
+      const t = start(fightWith(ALICE, wall));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      expect(act(t.enemyCard(1)!)).not.toBe('1.00');
+    });
+  });
+
+  describe('skill popover', () => {
+    const BASH = { id: 'bash', name: 'Bash', description: '', className: 'Knight', type: 'active', unlockLevel: 1, cooldown: 2, castTime: 1, activeEffects: [] } as unknown as SkillDefinition;
+
+    const openBash = (statics: Partial<ClientCombatSkill>, ownerClass = 'Knight') => {
+      const knight: ClientCombatUnit = { ...ALICE, skills: [{ id: 'bash', remainingMs: 0, cooldownMs: 0, state: 'ready', ...statics }] };
+      const base = makeState(1, GOBLIN, []);
+      start(withBattle(base, { combat: { ...snapshot(1, GOBLIN), units: [knight, GOBLIN] } }, { character: { ...base.character, className: ownerClass } }), { bash: BASH });
+      vi.advanceTimersByTime(FRAME_MS * 2);
+      document.querySelector<HTMLElement>('.combat-skill[data-skill-id="bash"]')!.click();
+      return [...document.querySelectorAll('.combat-skill-popover-stats span')].map(s => s.textContent);
+    };
+
+    it('reads cooldown and cast from the snapshot before the authored skill', () => {
+      expect(openBash({ baseCooldownMs: 7000, useCooldownMs: 7000, castTimeMs: 3500 })).toEqual(['Cooldown 7s', 'Cast 3.5s']);
+    });
+
+    it('marks a reduced cooldown against the snapshot\'s base', () => {
+      expect(openBash({ baseCooldownMs: 7000, useCooldownMs: 5600, castTimeMs: 3500 })).toEqual(['Cooldown 5.6s (base 7s)', 'Cast 3.5s']);
+    });
+
+    const realTimes = (className: string): string[] => {
+      const actionMs = paceActionSeconds(COMBAT_PACE, className) * 1000;
+      return [`Cooldown ${formatDuration(BASH.cooldown! * actionMs)}`, `Cast ${formatDuration(BASH.castTime! * actionMs)}`];
+    };
+
+    it('falls back to real time for the owner\'s class when the snapshot has no times', () => {
+      expect(openBash({})).toEqual(realTimes('Knight'));
+    });
+
+    it('times that fallback by the wearer\'s class, not the skill\'s', () => {
+      expect(realTimes('Priest')).not.toEqual(realTimes('Knight'));
+      expect(openBash({}, 'Priest')).toEqual(realTimes('Priest'));
+    });
   });
 
   it('ends the stage background with generated art so a missing picture still has a place', () => {

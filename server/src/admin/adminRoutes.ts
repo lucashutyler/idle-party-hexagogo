@@ -6,7 +6,7 @@ import type { AccountStore } from '../auth/AccountStore.js';
 import type { InviteListStore } from '../auth/InviteListStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
-import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID, isManagedAssetKind, isDeferredAssetKind } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, attackSkillsReplacedBySeed, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID, isManagedAssetKind, isDeferredAssetKind } from '@idle-party-rpg/shared';
 import type { ClassName, DungeonFloor, SkillDefinition, SkillSlot, SkillSlotType, RoomEntryRequirements } from '@idle-party-rpg/shared';
 import type { AdminAuth } from './adminMiddleware.js';
 import type { ApiTokenStore, ApiTokenRecord } from '../auth/ApiTokenStore.js';
@@ -1294,7 +1294,8 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       return;
     }
     const skill = migrateLegacySkill(raw);
-    const errors = validateSkillDefinition(skill);
+    const liveSkills = versionId ? undefined : { skills: getContentStore().getAllSkills(), slotSchedules: {} };
+    const errors = validateSkillDefinition(skill, liveSkills);
     if (errors.length > 0) {
       res.status(400).json({ error: errors.join(' ') });
       return;
@@ -1333,7 +1334,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     }
   });
 
-  /** Restore seed skills + slot schedules (overwrites seed ids, keeps custom skills). Supports ?versionId=. */
+  /** Restore seed skills + slot schedules (overwrites seed ids, keeps custom skills except an attack the seed's replaces). Supports ?versionId=. */
   router.post('/skills/seed', async (req, res) => {
     const versionId = req.query.versionId as string | undefined;
 
@@ -1351,7 +1352,16 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
       for (const [className, slots] of Object.entries(SEED_SKILL_SLOT_SCHEDULES)) {
         await content.setSkillSlotSchedule(className, slots);
       }
+      const refusals: string[] = [];
+      for (const id of attackSkillsReplacedBySeed(Object.values(content.getAllSkills()), SEED_SKILLS)) {
+        const removed = await content.deleteSkill(id);
+        if (!removed.success) refusals.push(`${id}: ${removed.error}`);
+      }
       for (const session of getPlayerManager().getAllSessions()) session.autoUnlockSkills();
+      if (refusals.length > 0) {
+        res.status(400).json({ error: `Skills were reset, but these attack skills could not be removed. ${refusals.join(' ')}` });
+        return;
+      }
       res.json({ success: true, skills: content.getAllSkills(), skillSlotSchedules: content.getAllSkillSlotSchedules() });
     }
   });

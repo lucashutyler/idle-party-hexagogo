@@ -1,3 +1,4 @@
+import { SKILL_CARD_TYPE_INFO } from '@idle-party-rpg/shared';
 import { fx, reducedMotion } from '../ui/motion';
 import { escapeHtml, formatAmount } from './CombatFormat';
 
@@ -130,11 +131,12 @@ export class CombatFx {
   }
 
   /** The reaction's mini card flipping out of the reacting unit. */
-  reactionCard(at: FxPoint, skillName: string, kind: 'instant' | 'interrupt', icon: string, towardsY: number): void {
+  reactionCard(at: FxPoint, skillName: string, towardsY: number): void {
     const card = document.createElement('div');
-    card.className = `combat-reaction-card ${kind}`;
-    const tag = kind === 'interrupt' ? '✋ Interrupt' : '⚡ Instant';
-    card.innerHTML = `<span class="combat-reaction-icon">${escapeHtml(icon)}</span>`
+    card.className = 'combat-reaction-card';
+    const { icon, label } = SKILL_CARD_TYPE_INFO.instant;
+    const tag = `${icon} ${label}`;
+    card.innerHTML = `<span class="combat-reaction-icon">${icon}</span>`
       + `<span class="combat-reaction-text"><span class="combat-reaction-name">${escapeHtml(skillName)}</span>`
       + `<span class="combat-reaction-tag">${tag}</span></span>`;
     this.layer.appendChild(card);

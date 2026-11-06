@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { createPartyCombatState, isInterruptFlashMode } from '../src/systems/CombatEngine';
-import { SEED_SKILLS } from '../src/systems/SkillTypes';
+import { createPartyCombatState } from '../src/systems/CombatEngine';
+import { LEGACY_SEED_SKILLS } from './legacySeedSkills';
 import { createMonsterInstance, SEED_MONSTERS } from '../src/systems/MonsterTypes';
 import { INTERRUPT_DELAY_MS } from '../src/systems/CombatTiming';
 import {
@@ -16,15 +16,15 @@ import {
 
 afterEach(() => { vi.restoreAllMocks(); });
 
-const intercept = SEED_SKILLS.knight_intercept;
-const shieldSlam = SEED_SKILLS.knight_shield_slam;
+const intercept = LEGACY_SEED_SKILLS.knight_intercept;
+const shieldSlam = LEGACY_SEED_SKILLS.knight_shield_slam;
 const caster = (pos: 0 | 3 | 6, name = 'Shaman', castTime?: number) => makeMonster(pos, {
   name, skills: [{ skillId: 'fireball', value: 5, cooldown: 3, ...(castTime !== undefined ? { castTime } : {}) }],
 });
 
 describe('Intercept (ally_targeted)', () => {
   function setup(archerHp = 200) {
-    const knight = makePlayer('Arthur', 0, { className: 'Knight', hp: 500, baseDamage: 1, skills: [SEED_SKILLS.knight_guard, intercept] });
+    const knight = makePlayer('Arthur', 0, { className: 'Knight', hp: 500, baseDamage: 1, skills: [LEGACY_SEED_SKILLS.knight_guard, intercept] });
     const archer = makePlayer('Robin', 2, { hp: archerHp, baseDamage: 1 });
     return createPartyCombatState([knight, archer], [makeMonster(1, { damage: 5 })]);
   }
@@ -201,7 +201,7 @@ describe('Shield Slam (self_hit)', () => {
 
   it('does not react to a hit fully absorbed by a shield', () => {
     const state = createPartyCombatState(
-      [makePlayer('K', 2, { className: 'Knight', level: 30, skills: [SEED_SKILLS.knight_guard, shieldSlam] })],
+      [makePlayer('K', 2, { className: 'Knight', level: 30, skills: [LEGACY_SEED_SKILLS.knight_guard, shieldSlam] })],
       [makeMonster(0, { damage: 50 })],
     );
     state.players[0].damageShield = 1000;
@@ -225,7 +225,7 @@ describe('Shield Slam (self_hit)', () => {
 describe('Cure (ally_afflicted level trigger)', () => {
   function fearFight() {
     const state = createPartyCombatState([
-      makePlayer('P', 2, { className: 'Priest', skills: [SEED_SKILLS.priest_cure] }),
+      makePlayer('P', 2, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_cure] }),
       makePlayer('A', 5, { className: 'Archer', hp: 1000 }),
       makePlayer('M', 1, { className: 'Mage', hp: 500 }),
     ], [makeMonster(0, { name: 'Horror', skills: [{ skillId: 'fear', value: 1, cooldown: 3 }] })]);
@@ -265,7 +265,7 @@ describe('Cure (ally_afflicted level trigger)', () => {
 
   it('removes DoTs and debuffs too', () => {
     const state = createPartyCombatState([
-      makePlayer('P', 2, { className: 'Priest', skills: [SEED_SKILLS.priest_cure] }),
+      makePlayer('P', 2, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_cure] }),
       makePlayer('K', 5, { className: 'Knight' }),
     ], [makeMonster(0)]);
     player(state, 'K').dots.push({ sourceUsername: 'x', name: 'rot', damagePerTick: 3, ticksRemaining: 3, damageType: 'magical' });
@@ -278,7 +278,7 @@ describe('Cure (ally_afflicted level trigger)', () => {
 
   it('a stunned priest cannot cure', () => {
     const state = createPartyCombatState([
-      makePlayer('P', 2, { className: 'Priest', skills: [SEED_SKILLS.priest_cure] }),
+      makePlayer('P', 2, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_cure] }),
       makePlayer('K', 5, { className: 'Knight' }),
     ], [makeMonster(0)]);
     player(state, 'P').stunRemainingMs = 5000;
@@ -291,7 +291,7 @@ describe('Cure (ally_afflicted level trigger)', () => {
     const channel = activeSkill({ id: 'ch', castTime: 1, cooldown: 5, warmup: 0 });
     const state = createPartyCombatState([
       makePlayer('M', 2, { className: 'Mage', skills: [channel] }),
-      makePlayer('P', 5, { className: 'Priest', skills: [SEED_SKILLS.priest_cure] }),
+      makePlayer('P', 5, { className: 'Priest', skills: [LEGACY_SEED_SKILLS.priest_cure] }),
     ], [makeMonster(0)]);
     runTo(state, 1300);
     player(state, 'M').stunRemainingMs = 1000;
@@ -304,7 +304,7 @@ describe('Cure (ally_afflicted level trigger)', () => {
 describe('Mending (ally_low_hp level trigger)', () => {
   it('lays a heal-over-time on an ally below half health, then waits 4 s', () => {
     const state = createPartyCombatState([
-      makePlayer('P', 2, { className: 'Priest', level: 5, skills: [SEED_SKILLS.priest_mending] }),
+      makePlayer('P', 2, { className: 'Priest', level: 5, skills: [LEGACY_SEED_SKILLS.priest_mending] }),
       makePlayer('T', 5, { className: 'Knight', hp: 1000 }),
     ], [makeMonster(0)]);
     player(state, 'T').currentHp = 400;
@@ -326,7 +326,7 @@ describe('Mending (ally_low_hp level trigger)', () => {
 
   it('does nothing while everyone is above half health', () => {
     const state = createPartyCombatState([
-      makePlayer('P', 2, { className: 'Priest', level: 5, skills: [SEED_SKILLS.priest_mending] }),
+      makePlayer('P', 2, { className: 'Priest', level: 5, skills: [LEGACY_SEED_SKILLS.priest_mending] }),
       makePlayer('T', 5, { hp: 1000 }),
     ], [makeMonster(0)]);
     player(state, 'T').currentHp = 600;
@@ -370,7 +370,7 @@ describe('interrupts (enemy_cast)', () => {
     const at1400 = r.events.filter(e => e.t === 1400);
     expect(at1400.map(e => e.kind)).toEqual(['cast_start', 'reaction']);
     expect(at1400[1]).toMatchObject({
-      src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 0 }, skill: 'Dispel', skillId: 'dispel', cardType: 'interrupt',
+      src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 0 }, skill: 'Dispel', skillId: 'dispel', cardType: 'instant',
     });
     expect(state.players[0].skillCooldowns.dispel).toBe(4000);
     expect(state.monsters[0].cast!.counter).toEqual({ reactorUsername: 'K', skillId: 'dispel', atMs: 1400 + INTERRUPT_DELAY_MS });
@@ -381,7 +381,7 @@ describe('interrupts (enemy_cast)', () => {
     const at1700 = r.events.filter(e => e.t === 1700);
     expect(at1700.map(e => e.kind)).toEqual(['damage', 'cleanse', 'interrupt']);
     expect(at1700[2]).toMatchObject({
-      src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 0 }, skill: 'Fireball', skillId: 'fireball', cardType: 'interrupt',
+      src: { side: 'player', pos: 2 }, dst: { side: 'monster', pos: 0 }, skill: 'Fireball', skillId: 'fireball', countered: true,
     });
     expect(r.log).toContain('K\'s Dispel counters Shaman\'s Fireball!');
     expect(state.monsters[0].cast).toBeNull();
@@ -430,8 +430,8 @@ describe('interrupts (enemy_cast)', () => {
     expect(ofKind(r.events, 'reaction')).toEqual([expect.objectContaining({ t: 1400, dst: { side: 'monster', pos: 0 } })]);
     const interrupts = ofKind(r.events, 'interrupt');
     expect(interrupts.map(e => e.dst!.pos).sort()).toEqual([0, 3]);
-    expect(interrupts.find(e => e.dst!.pos === 0)!.cardType).toBe('interrupt');
-    expect(interrupts.find(e => e.dst!.pos === 3)!.cardType).toBeUndefined();
+    expect(interrupts.find(e => e.dst!.pos === 0)!.countered).toBe(true);
+    expect(interrupts.find(e => e.dst!.pos === 3)!.countered).toBeUndefined();
     expect(r.log).toContain('Second\'s Fireball is interrupted!');
     expect(r.log).toContain('B\'s Drumroll counters First\'s Fireball!');
   });
@@ -487,75 +487,35 @@ describe('interrupts (enemy_cast)', () => {
 
   it('interrupts are never CDR-reduced', () => {
     const state = createPartyCombatState([
-      makePlayer('B', 2, { className: 'Bard', skills: [drum, SEED_SKILLS.bard_tempo, SEED_SKILLS.bard_encore] }),
+      makePlayer('B', 2, { className: 'Bard', skills: [drum, LEGACY_SEED_SKILLS.bard_tempo, LEGACY_SEED_SKILLS.bard_encore] }),
     ], [caster(0)]);
     runTo(state, 1400);
     expect(state.players[0].skillCooldowns.drum).toBe(4000);
   });
 });
 
-describe('interrupt flash mode', () => {
-  it('is on when no living enemy owns a usable cast-time skill', () => {
-    const plain = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0)]);
-    expect(isInterruptFlashMode(plain)).toBe(true);
-
-    const fire = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: [{ skillId: 'fireball', value: 1, cooldown: 3 }] })]);
-    expect(isInterruptFlashMode(fire)).toBe(false);
-    fire.monsters[0].currentHp = 0;
-    expect(isInterruptFlashMode(fire)).toBe(true);
-
-    const instantFire = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: [{ skillId: 'fireball', value: 1, cooldown: 3, castTime: 0 }] })]);
-    expect(isInterruptFlashMode(instantFire)).toBe(true);
-
-    const rot = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: [{ skillId: 'rot', value: 1, cooldown: 3 }] })]);
-    expect(isInterruptFlashMode(rot)).toBe(true);
-
-    const unknown = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: [{ skillId: 'nope', value: 1, cooldown: 3 }] })]);
-    expect(isInterruptFlashMode(unknown)).toBe(true);
-  });
-
-  it('Fear counts only while a living Archer or Mage is in the party', () => {
-    const fear = [{ skillId: 'fear', value: 1, cooldown: 3 }];
-    const knights = createPartyCombatState([makePlayer('K', 2, { className: 'Knight' })], [makeMonster(0, { skills: fear })]);
-    expect(isInterruptFlashMode(knights)).toBe(true);
-    const withMage = createPartyCombatState([makePlayer('K', 2, { className: 'Knight' }), makePlayer('M', 5, { className: 'Mage' })], [makeMonster(0, { skills: fear })]);
-    expect(isInterruptFlashMode(withMage)).toBe(false);
-    player(withMage, 'M').currentHp = 0;
-    expect(isInterruptFlashMode(withMage)).toBe(true);
-  });
-
-  it('a cast Heal counts even for a lone healer, since it can heal itself', () => {
-    const heal = [{ skillId: 'heal', value: 10, cooldown: 3 }];
-    const alone = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: heal }), createMonsterInstance(SEED_MONSTERS.stone_wall, 3)]);
-    expect(isInterruptFlashMode(alone)).toBe(false);
-    const pair = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: heal }), makeMonster(3)]);
-    expect(isInterruptFlashMode(pair)).toBe(false);
-    const instant = createPartyCombatState([makePlayer('A', 2)], [makeMonster(0, { skills: [{ ...heal[0], castTime: 0 }] })]);
-    expect(isInterruptFlashMode(instant)).toBe(true);
-  });
-
-  it('in flash mode an interrupt is an ordinary action skill', () => {
+describe('a counter with nothing to counter', () => {
+  it('stays idle in a fight with no caster, and the player auto-attacks', () => {
     pinRandom(0.1);
-    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [SEED_SKILLS.bard_drumroll] });
+    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [LEGACY_SEED_SKILLS.bard_drumroll] });
     const state = createPartyCombatState([bard], [createMonsterInstance({ ...SEED_MONSTERS.goblin, hp: 1000 }, 0)]);
-    const r = runTo(state, 3000);
-    expect(ofKind(r.events, 'attack').filter(e => e.skillId === 'bard_drumroll').map(e => e.t)).toEqual([3000]);
-    expect(r.log).toContain('Bard\'s Drumroll stuns Goblin!');
-    expect(ofKind(r.events, 'reaction')).toHaveLength(0);
+    const r = runTo(state, 5000);
+    expect(r.events.some(e => e.skillId === 'bard_drumroll')).toBe(false);
+    expect(ofKind(r.events, 'attack').filter(e => e.src?.side === 'player').length).toBeGreaterThan(0);
   });
 
-  it('in flash mode a failed interrupt roll fizzles and falls back to an auto-attack', () => {
+  it('stays idle once the last caster dies', () => {
     pinRandom(0.9);
-    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [SEED_SKILLS.bard_drumroll] });
-    const state = createPartyCombatState([bard], [createMonsterInstance({ ...SEED_MONSTERS.goblin, hp: 1000 }, 0)]);
-    const r = runTo(state, 3000);
-    expect(r.events.filter(e => e.t === 3000 && e.src?.side === 'player').map(e => e.kind)).toEqual(['attack', 'fizzle', 'attack', 'damage']);
-    expect(state.players[0].skillCooldowns.bard_drumroll).toBe(4000);
+    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [LEGACY_SEED_SKILLS.bard_drumroll] });
+    const state = createPartyCombatState([bard], [caster(0), createMonsterInstance({ ...SEED_MONSTERS.goblin, hp: 100000 }, 3)]);
+    state.monsters[0].currentHp = 0;
+    const r = runTo(state, 5000);
+    expect(r.events.some(e => e.skillId === 'bard_drumroll')).toBe(false);
   });
 
-  it('outside flash mode an interrupt never fires as an action, only on a cast', () => {
+  it('never fires as an action, only on a cast', () => {
     pinRandom(0.9);
-    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [SEED_SKILLS.bard_drumroll] });
+    const bard = makePlayer('Bard', 2, { className: 'Bard', skills: [LEGACY_SEED_SKILLS.bard_drumroll] });
     const state = createPartyCombatState([bard], [caster(0)]);
     const r = runTo(state, 5000);
     expect(ofKind(r.events, 'attack').filter(e => e.skillId === 'bard_drumroll')).toHaveLength(0);

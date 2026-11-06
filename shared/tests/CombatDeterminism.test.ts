@@ -91,7 +91,7 @@ function playOut(state: PartyCombatState, rng: () => number, maxMs = 400000): Re
 function mutableRefs(root: unknown): Map<object, string> {
   const shared = new Set([
     'equippedSkills', 'equipBonuses', 'setBonuses', 'resistances', 'skills', 'mastery', 'enrage',
-    'source', 'target', 'stunSource',
+    'source', 'target', 'stunSource', 'pace',
   ]);
   const seen = new Map<object, string>();
   const walk = (value: unknown, path: string): void => {

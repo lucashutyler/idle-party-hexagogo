@@ -1,6 +1,6 @@
 # Content lab
 
-Measures a content snapshot against the combat engine of this tree and against the engine of an older commit, using each version's real functions. It is content-agnostic: it reads the snapshot given on the command line and holds no content of its own.
+Measures a content snapshot against the combat engine of this tree, at `COMBAT_PACE`, and against the engine of an older commit, using each version's real functions. It is content-agnostic: it reads the snapshot given on the command line and holds no content of its own.
 
 **The repository is public.** Snapshots and everything derived from them stay in `data/` (gitignored). Never commit live monster, zone or item names or ids, or numbers measured from live content, under `tools/` or in docs.
 
@@ -44,9 +44,10 @@ Zones also get low-level, high-level and ungeared variants for the core composit
 - **Grid** (`CLASS_SEATS`): solo stands front-centre; parties take class seat preferences, tanks in the front column, Knight/Mage/Priest along the middle row.
 - **Hires** (`HIRE_ROLES`): up to two hires offered on the same map, completing a tank, healer and damage trio. A tank is a Knight, or a Priest hire carrying a physical-reduction skill. The highest level at or below the party, else the lowest above. Each hire takes a reward share that is lost.
 - **Sims**: stratified by table entry, `max(3, round(N × share))` per entry, statistics weighted by share. Seed = FNV-1a of base seed, cell id, entry id and sim index, fed to mulberry32. The old engine reads `Math.random`, which the adapter swaps for the seeded stream during a fight.
+- **Pace**: new-engine fights play at `COMBAT_PACE`, so fight times are real time and XP and gold include `rewardMultiplier`, as in the game. `SPEED_TARGET` (old fight length over new, `fit.ts`) is the agreed authored ratio divided by the clock. Forecasts run at it too. Fitted enrage clocks are divided by the clock, and fitted drop chances by `rewardMultiplier`, since the game applies those itself.
 - **Rates**: XP/h = E[XP per fight, 0 on anything but a win] ÷ E[fight time + pause] × 3600, per human member. Pause comes from each version's timer: old = 1 s kill delay + `RESULT_PAUSE` + `MOVE_DURATION`; new = `KILL_BEAT_MS` + `RESULT_PAUSE` + `MOVE_DURATION`.
-- **Stalemate**: new = the engine's no-progress rule, or still running after 2 h of battle time. The old engine has no such rule, so 600 ticks without a new low in monster HP, or still running after 2 h, counts as one (in the live game such a party would fight on forever).
-- **Not modelled**: auto-retreat, kill mastery (zero kills), floor checkpoint regrouping inside whole-dungeon runs, first-clear rewards, item drops.
+- **Stalemate**: new = the engine's no-progress rule, or still running after 2 h of engine time. The old engine has no such rule, so 600 ticks without a new low in monster HP, or still running after 2 h, counts as one (in the live game such a party would fight on forever).
+- **Not modelled**: auto-retreat, kill mastery (zero kills), floor checkpoint regrouping inside whole-dungeon runs, first-clear rewards, item drops (so `paceDropChance` too).
 
 Combatants are built like `PlayerSession.getCombatInfo` and `buildHenchmanCombatant` on the matching version, and rewards split like `PartyBattleManager`.
 
@@ -66,6 +67,7 @@ Combatants are built like `PlayerSession.getCombatInfo` and `buildHenchmanCombat
 Nothing is added or removed, and no id changes. Zones, encounters, world, shops, NPCs and tile types pass through; quests and recipes only for a replaced description.
 
 A pass: `fit` (from the last `measured.json`), `rework`, `measure`, `scorecard`. Fit HP and XP first, then gold, drops and enrage against the settled fight times. Win rate isn't monotonic in monster strength, so measure rather than assume.
+
 
 ## Sweeps
 

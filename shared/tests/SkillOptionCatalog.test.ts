@@ -141,7 +141,7 @@ describe('validateSkillDefinition', () => {
     expect(errors).toEqual(expect.arrayContaining([
       'Cooldown only applies to active skills.',
       'Cast time only applies to active skills.',
-      'Warm-up only applies to active skills.',
+      'Warm-up only applies to active and attack skills.',
       'Trigger only applies to active skills.',
     ]));
   });

@@ -1,5 +1,5 @@
 import { ALL_CLASS_NAMES } from './CharacterStats.js';
-import { SKILL_TRIGGER_VALUES, getSkillTrigger } from './SkillTypes.js';
+import { SKILL_TRIGGER_VALUES, getSkillTrigger, isTimedSkill } from './SkillTypes.js';
 import type {
   ActiveEffect,
   ActiveEffectKind,
@@ -48,6 +48,7 @@ export interface SkillOptionDefinition {
 
 const MAX_CAST_TIME_SECONDS = 10;
 const MAX_WARMUP_SECONDS = 60;
+const MAX_CHARGE_SECONDS = 120;
 
 /** The condition strings the engine understands for conditional_damage_bonus. */
 export const SKILL_CONDITION_VALUES = ['target_above_75_hp', 'front_column', 'target_bleeding_or_stunned'] as const;
@@ -328,7 +329,7 @@ const CATALOG = {
     kind: 'cooldown_reduction',
     slotType: 'passive',
     label: 'Cooldown reduction',
-    description: 'Reduces active skill cooldowns by this many seconds (effective cooldown never drops below 1 second). Never shortens interrupts (Enemy casts trigger). Self-only by default; with the party-wide flag it also applies to every OTHER living party member. Contributions sum.',
+    description: 'Reduces active skill cooldowns by this many seconds (effective cooldown never drops below 1 second). Never shortens skills with the Enemy casts trigger. On a skill with charge, each point takes the combat clock in real seconds off its charge, never off its recovery, and never touches Attack. Self-only by default; with the party-wide flag it also applies to every OTHER living party member. Contributions sum.',
     targeting: 'self (party with flag)',
     params: [
       { key: 'flatValue', label: 'Seconds removed', input: 'number', min: 0, step: 0.1, required: true },
@@ -639,7 +640,7 @@ export const SKILL_OPTION_CATALOG: Record<string, SkillOptionDefinition> = CATAL
  * Returns a list of human-readable errors; empty array means valid.
  * Used by server PUT routes AND the admin client pre-save.
  */
-export function validateSkillDefinition(def: SkillDefinition, _content?: SkillContent): string[] {
+export function validateSkillDefinition(def: SkillDefinition, content?: SkillContent): string[] {
   const errors: string[] = [];
 
   if (!def.id || typeof def.id !== 'string' || !def.id.trim()) {
@@ -651,8 +652,8 @@ export function validateSkillDefinition(def: SkillDefinition, _content?: SkillCo
   if (!(ALL_CLASS_NAMES as string[]).includes(def.className)) {
     errors.push(`Unknown class "${def.className}".`);
   }
-  if (def.type !== 'passive' && def.type !== 'active') {
-    errors.push('Skill type must be "passive" or "active".');
+  if (def.type !== 'passive' && def.type !== 'active' && def.type !== 'attack') {
+    errors.push('Skill type must be "passive", "active" or "attack".');
   }
 
   if (def.unlockLevel !== null) {
@@ -669,14 +670,19 @@ export function validateSkillDefinition(def: SkillDefinition, _content?: SkillCo
   } else {
     if (def.cooldown !== undefined) errors.push('Cooldown only applies to active skills.');
     if (def.castTime !== undefined) errors.push('Cast time only applies to active skills.');
-    if (def.warmup !== undefined) errors.push('Warm-up only applies to active skills.');
     if (def.trigger !== undefined) errors.push('Trigger only applies to active skills.');
   }
+  if (def.type === 'passive') {
+    if (def.warmup !== undefined) errors.push('Warm-up only applies to active and attack skills.');
+    if (def.charge !== undefined) errors.push('Charge only applies to active and attack skills.');
+    if (def.recovery !== undefined) errors.push('Recovery only applies to active and attack skills.');
+  }
+  if (def.type === 'attack') validateAttackSkill(def, content, errors);
 
   if (def.type === 'passive' && activeEffects.length > 0) {
     errors.push('Passive skills cannot have active options.');
   }
-  if (passiveEffects.length + activeEffects.length === 0) {
+  if (def.type !== 'attack' && passiveEffects.length + activeEffects.length === 0) {
     errors.push('Skill needs at least one option.');
   }
 
@@ -686,8 +692,46 @@ export function validateSkillDefinition(def: SkillDefinition, _content?: SkillCo
   return errors;
 }
 
+function validateAttackSkill(def: SkillDefinition, content: SkillContent | undefined, errors: string[]): void {
+  if ((def.activeEffects?.length ?? 0) + (def.passiveEffects?.length ?? 0) > 0) {
+    errors.push('Attack skills cannot have options: they are the class\'s basic attack.');
+  }
+  if (def.unlockLevel !== 1) errors.push('Attack skills must unlock at level 1.');
+  if (!isTimedSkill(def)) errors.push('Attack skills require a charge or a recovery.');
+  validateChargeAndRecovery(def, errors);
+  if (def.warmup !== undefined && !isNumberInRange(def.warmup, 0, MAX_WARMUP_SECONDS)) {
+    errors.push(`Initial charge must be between 0 and ${MAX_WARMUP_SECONDS} seconds.`);
+  }
+  const other = content && findAttackSkillConflict(def, content.skills);
+  if (other) errors.push(`${def.className} already has an attack skill ("${other.id}").`);
+}
+
+function findAttackSkillConflict(def: SkillDefinition, skills: Record<string, SkillDefinition>): SkillDefinition | undefined {
+  return Object.values(skills).find(s => s.type === 'attack' && s.className === def.className && s.id !== def.id);
+}
+
+function validateChargeAndRecovery(def: SkillDefinition, errors: string[]): void {
+  if (def.charge !== undefined && !isNumberInRange(def.charge, 0, MAX_CHARGE_SECONDS)) {
+    errors.push(`Charge must be between 0 and ${MAX_CHARGE_SECONDS} seconds.`);
+  }
+  if (def.recovery !== undefined && !isNumberInRange(def.recovery, 0, MAX_CHARGE_SECONDS)) {
+    errors.push(`Recovery must be between 0 and ${MAX_CHARGE_SECONDS} seconds.`);
+  }
+  if (isTimedSkill(def) && !getSkillTrigger(def) && !((def.charge ?? 0) > 0 || (def.recovery ?? 0) > 0)) {
+    errors.push('Charge and recovery cannot both be 0.');
+  }
+}
+
+function validateInstantTiming(def: SkillDefinition, errors: string[]): void {
+  if ((def.recovery ?? 0) > 0) errors.push('A skill with a trigger is an Instant and cannot have a recovery: add it to the charge instead.');
+  if (!((def.charge ?? 0) > 0)) errors.push('A skill with a trigger is an Instant and needs a charge above 0.');
+}
+
 function validateActiveTiming(def: SkillDefinition, activeEffects: ActiveEffect[], errors: string[]): void {
-  if (def.cooldown === undefined || !Number.isFinite(def.cooldown) || def.cooldown < 1) {
+  if (isTimedSkill(def)) {
+    validateChargeAndRecovery(def, errors);
+    if (getSkillTrigger(def)) validateInstantTiming(def, errors);
+  } else if (def.cooldown === undefined || !Number.isFinite(def.cooldown) || def.cooldown < 1) {
     errors.push('Active skills require a cooldown of at least 1 second.');
   }
   if (def.castTime !== undefined && !isNumberInRange(def.castTime, 0, MAX_CAST_TIME_SECONDS)) {
