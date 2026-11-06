@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.05.4',
+    notes: [
+      'The battle screen now shows which row everyone is in, and both sides line up, so you can see who is facing whom.',
+    ],
+  },
+  {
     version: '2026.11.05.3',
     notes: [
       'If your party can\'t travel to another island or area, you now see a message saying why instead of nothing happening.',

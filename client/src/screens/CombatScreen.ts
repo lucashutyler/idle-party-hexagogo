@@ -71,11 +71,14 @@ const LIVE_FORECASTS_KEPT = 4;
 const ANNOUNCED_LOG_TYPES = new Set(['retreat', 'checkpoint']);
 const BOSS_STARTS_KEPT = 3;
 const BACKGROUND_PLACEHOLDER = { w: 640, h: 360 };
-/** A side this small drops its empty tracks and scales its cards up. */
+/** A side this small drops its empty depth tracks and scales its cards up. */
 const ROOMY_SIDE_UNITS = 2;
 /** Past this many cards on the board, per-hit motion plays only on the player's own card. */
 const FULL_FX_MAX_CARDS = 6;
 const GRID_LINES = [0, 1, 2];
+const LANE_USED = 'minmax(0, 1fr)';
+const LANE_EMPTY = 'minmax(0, 0.25fr)';
+const LANE_STRIPS = '<div class="combat-lanes" aria-hidden="true"><span></span><span></span><span></span></div>';
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
@@ -87,6 +90,13 @@ export function usedGridTracks(positions: readonly number[]): { rows: boolean[];
     rows: GRID_LINES.map(line => positions.some(pos => Math.floor(pos / 3) === line)),
     cols: GRID_LINES.map(line => positions.some(pos => pos % 3 === line)),
   };
+}
+
+/** A lane is one grid row. Every unit on the board shares the tracks, so an empty lane stays visible as a strip. */
+export function laneTracks(positions: readonly number[]): string[] {
+  const { rows } = usedGridTracks(positions);
+  const anyUsed = rows.includes(true);
+  return rows.map(used => (used || !anyUsed ? LANE_USED : LANE_EMPTY));
 }
 
 function bossRunKey(dungeon: { dungeonId: string; floor: number }): string {
@@ -290,10 +300,12 @@ export class CombatScreen implements Screen {
         <svg class="combat-telegraph" aria-hidden="true"></svg>
         <div class="combat-stage-grid">
           <div class="combat-block combat-block-enemy">
+            ${LANE_STRIPS}
             <div class="combat-side combat-enemy-side"></div>
           </div>
           <div class="combat-stage-divider"><div class="combat-status"></div></div>
           <div class="combat-block combat-block-party">
+            ${LANE_STRIPS}
             <div class="combat-side combat-player-side"></div>
           </div>
         </div>
@@ -610,12 +622,27 @@ export class CombatScreen implements Screen {
   }
 
   private layoutBlocks(): void {
-    for (const side of [this.playerSide, this.enemySide]) this.layoutBlock(side);
+    const sides = [this.playerSide, this.enemySide];
+    for (const side of sides) this.layoutBlock(side);
+    this.layoutLanes(sides.flatMap(side => this.seatsOn(side)));
   }
 
-  /** Dead units keep their cards, so a side only changes shape when its roster does. */
+  private seatsOn(side: HTMLElement): number[] {
+    return [...side.children].map(el => Number((el as HTMLElement).dataset.grid));
+  }
+
+  private layoutLanes(positions: readonly number[]): void {
+    const lanes = laneTracks(positions);
+    const key = lanes.join('|');
+    if (this.stageGrid.dataset.laneKey === key) return;
+    this.stageGrid.dataset.laneKey = key;
+    this.centresDirty = true;
+    GRID_LINES.forEach(line => this.stageGrid.style.setProperty(`--lane${line}`, lanes[line]));
+  }
+
+  /** Dead units keep their cards, so a side's depth tracks only change when its roster does. */
   private layoutBlock(side: HTMLElement): void {
-    const positions = [...side.children].map(el => Number((el as HTMLElement).dataset.grid)).sort((a, b) => a - b);
+    const positions = this.seatsOn(side).sort((a, b) => a - b);
     const key = positions.join(',');
     if (side.dataset.layoutKey === key) return;
     side.dataset.layoutKey = key;
@@ -623,9 +650,8 @@ export class CombatScreen implements Screen {
     const block = side.parentElement!;
     if (positions.length > 0 && positions.length <= ROOMY_SIDE_UNITS) block.dataset.roomy = String(positions.length);
     else delete block.dataset.roomy;
-    const { rows, cols } = usedGridTracks(positions);
+    const { cols } = usedGridTracks(positions);
     GRID_LINES.forEach((line) => {
-      side.style.setProperty(`--track-row${line}`, rows[line] ? 'minmax(0, 1fr)' : '0');
       side.style.setProperty(`--track-col${line}`, cols[line] ? 'minmax(0, 1fr)' : '0');
     });
   }
