@@ -1,7 +1,6 @@
 import { getSkillCardType, getSkillTrigger, isTimedSkill } from '../SkillTypes.js';
 import type { SkillDefinition } from '../SkillTypes.js';
 import type {
-  ClientCombatBossPhases,
   ClientCombatCast,
   ClientCombatSkill,
   ClientCombatSnapshot,
@@ -40,7 +39,7 @@ export function buildClientCombatSnapshot(state: PartyCombatState, battleId: num
     ...state.players.map(p => playerUnit(state, p, full, real)),
     ...state.monsters.map(m => monsterUnit(m, full, real)),
   ];
-  const snapshot: ClientCombatSnapshot = {
+  return {
     battleId,
     elapsedMs: real(state.elapsedMs),
     full,
@@ -48,19 +47,6 @@ export function buildClientCombatSnapshot(state: PartyCombatState, battleId: num
     result: state.result,
     units,
   };
-  if (state.bossPhases) snapshot.bossPhases = bossPhasesView(state, full);
-  return snapshot;
-}
-
-function bossPhasesView(state: PartyCombatState, full: boolean): ClientCombatBossPhases {
-  const phases = state.bossPhases!;
-  const view: ClientCombatBossPhases = {
-    bossPos: phases.bossIndices.map(i => state.monsters[i]?.gridPosition).filter(pos => pos !== undefined),
-    phase: phases.phase,
-  };
-  if (full) view.thresholds = [...phases.thresholds];
-  if (phases.resumedFromPhase !== undefined) view.resumedFromPhase = phases.resumedFromPhase;
-  return view;
 }
 
 function playerUnit(

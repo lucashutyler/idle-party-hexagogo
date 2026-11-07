@@ -133,8 +133,8 @@ describe('renderForecastPopover', () => {
     expect(line.textContent).toMatch(/^Enemies . L1–5 \(some unrated\)$/);
   });
 
-  it('shows the first-try chance for checkpoint dungeons', () => {
-    const root = mount(renderForecastPopover(result({ firstTryPct: 40 }), { kind: 'dungeon' }));
-    expect(root.textContent).toContain('Boss beaten on the first try: 40 %');
+  it('shows no first-try line for dungeons', () => {
+    const root = mount(renderForecastPopover(result(), { kind: 'dungeon' }));
+    expect(root.textContent).not.toContain('first try');
   });
 });

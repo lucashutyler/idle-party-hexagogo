@@ -244,7 +244,6 @@ const PIT: DungeonDefinition = {
     gridShape: { cols: 3, rows: 3 },
     encounterTable: [{ encounterId: 'warlord_court', weight: 1 }],
     isBoss: true,
-    checkpoints: [0.66, 0.33],
   }],
 };
 
@@ -296,13 +295,12 @@ describe('COMBAT_PACE in the PartyBattleManager', () => {
       expect(combat.elapsedMs).toBe(COMBAT_STEP_MS * 9);
     });
 
-    it('reaches dungeon fights without losing their checkpoints', async () => {
+    it('reaches dungeon fights', async () => {
       const w = await forecastWorld({ dungeon: { def: PIT, at: AT_START } });
-      expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit', 'alice').success).toBe(true);
+      expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit').success).toBe(true);
       const combat = w.entry().battleTimer.currentCombat!;
 
       expect(combat.pace).toBe(COMBAT_PACE);
-      expect(combat.bossPhases!.thresholds).toEqual([0.66, 0.33]);
       expect(combat.players[0].kit).toBeCloseTo(COMBAT_PACE.classSeconds.Knight! / COMBAT_PACE.clock);
     });
   });
@@ -364,25 +362,6 @@ describe('COMBAT_PACE in the PartyBattleManager', () => {
       });
     });
 
-    it('multiplies a checkpoint payout, crossed in a real fight', async () => {
-      const def: DungeonDefinition = {
-        ...PIT,
-        floors: [{ ...PIT.floors[0], checkpoints: [0.995], checkpointRewardFraction: 0.2 }],
-      };
-      const w = await forecastWorld({ dungeon: { def, at: AT_START } });
-      stock(w, { warlord: { hp: 100, xp: 100, goldMin: 40, goldMax: 60 } });
-      const before = earned(w);
-
-      expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit', 'alice').success).toBe(true);
-      for (let i = 0; i < 100 && earned(w).gold === before.gold; i++) vi.advanceTimersByTime(COMBAT_STEP_MS);
-
-      expect(w.pm.partyBattles.getDungeonRunInfo(w.partyId)!.checkpointPhase).toBe(1);
-      expect(earnedSince(w, before)).toEqual({
-        xp: Math.floor(100 * 0.2 * REWARD_MULTIPLIER),
-        gold: Math.floor(50 * 0.2 * REWARD_MULTIPLIER),
-      });
-    });
-
     it('scales a drop chance under 0.5 only as far as 0.5, and leaves one at or above it as authored', async () => {
       const w = await forecastWorld({ defaultEncounter: 'gnats' });
       stock(w, {
@@ -425,7 +404,7 @@ describe('COMBAT_PACE in the PartyBattleManager', () => {
       };
       const w = await forecastWorld({ dungeon: { def, at: AT_START } });
       stock(w, { gnat: { xp: 0, goldMin: 0, goldMax: 0 } });
-      expect(w.pm.partyBattles.enterDungeon(w.partyId, 'vault', 'alice').success).toBe(true);
+      expect(w.pm.partyBattles.enterDungeon(w.partyId, 'vault').success).toBe(true);
       vi.spyOn(Math, 'random').mockReturnValue(ROLL_ABOVE_AUTHORED_0_4_BELOW_PACED);
 
       expect(winFight(w)).toEqual({ xp: 20, gold: 30 });

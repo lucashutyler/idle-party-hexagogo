@@ -268,14 +268,12 @@ describe('rework', () => {
     expect(isAutoReplacingTrap({ ...zap, charge: 2, recovery: 0.5 })).toBe(false);
   });
 
-  it('puts checkpoints only on boss floors that can field a boss', () => {
+  it('neither adds nor changes the leftover dungeon flag fields', () => {
     const input = snapshot();
-    input.dungeons.empty = { id: 'empty', name: 'Empty', floors: [{ isBoss: true, encounterTable: [{ encounterId: 'gate', weight: 1 }] }] };
-    input.world.tiles.push({ id: 't5', mapId: 'm2', zone: 'high', dungeonId: 'empty' });
+    input.dungeons.crypt.floors[1].checkpoints = [0.5];
     const { content } = rework(input, CONFIG, SEED_SKILLS);
     expect(content.dungeons.crypt.floors[0].checkpoints).toBeUndefined();
-    expect(content.dungeons.crypt.floors[1].checkpoints).toEqual([0.66, 0.33]);
-    expect(content.dungeons.empty.floors[0].checkpoints).toBeUndefined();
+    expect(content.dungeons.crypt.floors[1].checkpoints).toEqual([0.5]);
   });
 
   it('applies text, henchman stats and enrage, and logs them', () => {

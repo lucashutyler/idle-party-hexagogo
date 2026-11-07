@@ -67,7 +67,7 @@ function richMonsters(): MonsterInstance[] {
 }
 
 function richFight(hpScale = 1): PartyCombatState {
-  return createPartyCombatState(richParty(hpScale), richMonsters(), { bossPhases: { thresholds: [0.75, 0.5, 0.25] } });
+  return createPartyCombatState(richParty(hpScale), richMonsters());
 }
 
 interface Replay {
@@ -167,8 +167,7 @@ describe('cloneCombatState', () => {
     expect(clone.players[0].equippedSkills[0]).toBe(state.players[0].equippedSkills[0]);
   });
 
-  it('replays exactly with the same seed and never touches the original (phased, enraging boss)', () => {
-    let phaseEvents = 0;
+  it('replays exactly with the same seed and never touches the original (enraging boss)', () => {
     let enrageEvents = 0;
     let points = 0;
     for (let seed = 1; seed <= 6; seed++) {
@@ -182,7 +181,6 @@ describe('cloneCombatState', () => {
           expect(JSON.stringify(original)).toBe(before);
           const b = playOut(cloneCombatState(original), createRng(seed * 1000 + step));
           expect(b).toEqual(a);
-          phaseEvents += a.events.filter(e => e.kind === 'phase').length;
           enrageEvents += a.events.filter(e => e.kind === 'enrage').length;
         }
         processCombatStep(original, 100, main);
@@ -191,7 +189,6 @@ describe('cloneCombatState', () => {
       expect(playOut(probe, createRng(77))).toEqual(playOut(original, createRng(77)));
     }
     expect(points).toBeGreaterThan(20);
-    expect(phaseEvents).toBeGreaterThan(0);
     expect(enrageEvents).toBeGreaterThan(0);
   });
 

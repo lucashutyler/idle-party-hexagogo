@@ -60,7 +60,7 @@ describe('Dev seed content merge', () => {
     expect(store.getEncounter(DEV_MIXED_ENCOUNTER_ID)).toBeUndefined();
 
     const raid = store.getDungeon(DEV_RAID_DUNGEON_ID);
-    expect(raid?.floors.some(f => (f.checkpoints ?? []).length > 0)).toBe(true);
+    expect(raid?.floors.some(f => f.isBoss)).toBe(true);
     expect(liveTileAt(store, generatedEntrance())?.dungeonId).toBe(DEV_RAID_DUNGEON_ID);
   });
 

@@ -9,7 +9,6 @@ import {
   forecastVerdict,
   formatEnemyLevels,
   forecastRangeLine,
-  formatPct,
   formatWinPct,
   worstStratumLine,
 } from '../combat/ForecastFormat';
@@ -77,9 +76,6 @@ export function renderForecastPopover(result: ForecastResult, opts: ForecastPopo
     + `<div class="forecast-pop-headline">${escapeHtml(forecastHeadline(result, opts.kind, opts.elapsedMs))}</div>`
     + '</div></div>');
   if (range) parts.push(`<div class="forecast-pop-range">${escapeHtml(range)}</div>`);
-  if (opts.kind === 'dungeon' && result.firstTryPct !== undefined) {
-    parts.push(`<div class="forecast-pop-line">Boss beaten on the first try: ${formatPct(result.firstTryPct)}</div>`);
-  }
   if (levels && result.enemyLevels) {
     const con = opts.viewerLevel ? levelCon(result.enemyLevels[1], opts.viewerLevel) : 'even';
     parts.push('<div class="forecast-pop-line">Enemies '

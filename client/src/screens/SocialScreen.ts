@@ -34,6 +34,8 @@ const GRID_RESYNC_MS = 1500;
 const POPUP_MARGIN = 8;
 const RANK_ROWS_STEP = 100;
 const RANK_GROW_MARGIN_PX = 600;
+const PARTY_RUN_ENDS_WARNING = 'Your party\'s dungeon run will end for everyone in it.';
+const OWN_RUN_ENDS_WARNING = 'Your dungeon run will end.';
 
 function resolveSubTab(requested: string | null): SubTab | null {
   if (!requested) return null;
@@ -171,7 +173,7 @@ export class SocialScreen implements Screen {
     // A confirm rejected on a stale nonce means the partner's offer moved. The
     // re-synced state repaints the new offer; this explains why nothing happened.
     this.gameClient.onServerError((message, code) => {
-      if (code === 'gift_refused') showMapToast(document.body, message);
+      if (code === 'gift_refused' || code === 'party_refused') showMapToast(document.body, message);
       if (code !== 'trade_nonce_mismatch' || !this.tradeModalEl) return;
       this.tradeNotice = 'That offer changed before your confirmation went through. Review the updated offer below, then confirm again.';
       deferWhilePressed(this.tradeModalEl, () => this.refreshTradeModal());
@@ -292,7 +294,7 @@ export class SocialScreen implements Screen {
         return;
       }
       if (btn.matches('.social-kick-btn') && username) {
-        this.confirmThen({
+        this.confirmPartyChange({
           title: `Kick ${username}?`,
           body: 'They will be removed from this party and carry on alone.',
           confirmLabel: 'Kick',
@@ -302,7 +304,7 @@ export class SocialScreen implements Screen {
       }
       if (btn.matches('.social-party-leave-btn')) {
         const self = this.lastSocial?.party?.members.find(m => m.username === this.lastState?.username);
-        this.confirmThen({
+        this.confirmPartyChange({
           title: 'Leave this party?',
           body: self?.role === 'owner'
             ? 'You will carry on alone in a new party, and ownership passes to another member.'
@@ -324,7 +326,20 @@ export class SocialScreen implements Screen {
         }, () => this.gameClient.sendDismissHenchman(instanceId));
         return;
       }
-      if (btn.matches('.social-accept-invite') && partyId) { this.gameClient.sendAcceptPartyInvite(partyId); return; }
+      if (btn.matches('.social-accept-invite') && partyId) {
+        const accept = () => this.gameClient.sendAcceptPartyInvite(partyId);
+        if (this.gameClient.lastState?.dungeon) {
+          this.confirmPartyChange({
+            title: 'Join this party?',
+            body: 'You will leave your current party.',
+            confirmLabel: 'Join Party',
+            danger: true,
+          }, accept);
+        } else {
+          accept();
+        }
+        return;
+      }
       if (btn.matches('.social-decline-invite') && partyId) { this.gameClient.sendDeclinePartyInvite(partyId); return; }
       if (btn.matches('.social-nearby-invite') && username) { this.gameClient.sendInviteParty(username); return; }
 
@@ -452,6 +467,13 @@ export class SocialScreen implements Screen {
       const el = this.panelContainer;
       if (el.scrollHeight - el.scrollTop - el.clientHeight < RANK_GROW_MARGIN_PX) this.growRankRows();
     }, { passive: true });
+  }
+
+  /** Adds the warning while in a dungeon. */
+  private confirmPartyChange(opts: ConfirmDialogOptions, action: () => void): void {
+    const state = this.gameClient.lastState;
+    const warning = (state?.social?.party?.members.length ?? 0) > 1 ? PARTY_RUN_ENDS_WARNING : OWN_RUN_ENDS_WARNING;
+    this.confirmThen({ ...opts, body: state?.dungeon ? `${opts.body} ${warning}` : opts.body }, action);
   }
 
   private confirmThen(opts: ConfirmDialogOptions, action: () => void): void {

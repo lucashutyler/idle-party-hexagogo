@@ -93,7 +93,7 @@ function setup(initial?: ServerStateMessage, skills: Record<string, SkillDefinit
   const playerCard = () => document.querySelector('.combat-player-side .combat-card[data-grid="4"]') as HTMLElement;
   const enemyCard = (pos: number) => document.querySelector(`.combat-enemy-side .combat-card[data-grid="${pos}"]`) as HTMLElement | null;
 
-  return { screen, pushState, push, playEvents, playerCard, enemyCard };
+  return { screen, gameClient, pushState, push, playEvents, playerCard, enemyCard };
 }
 
 function press(target: Element): void {
@@ -626,6 +626,187 @@ describe('CombatScreen', () => {
       expect(enemyBody).not.toHaveBeenCalled();
       expect(ownFlash).toHaveBeenCalled();
       expect(document.querySelector('.combat-floater.live')).not.toBeNull();
+    });
+  });
+
+  describe('the boss bar', () => {
+    const ENRAGE = { atMs: 480_500, stacks: 0, stepMs: 30_000, stepPercent: 0.1, maxStacks: 30 };
+    const CHIEF: ClientCombatUnit = { ...GOBLIN, pos: 1, hp: 300, maxHp: 1000, name: 'Chieftain', id: 'chief', tier: 'boss', enrage: ENRAGE };
+    const withMonsters = (...monsters: ClientCombatUnit[]): ServerStateMessage => withBattle(makeState(1, GOBLIN, []), {
+      combat: { battleId: 1, elapsedMs: 1000, full: true, finished: false, result: null, units: [ALICE, ...monsters] },
+    });
+    const bar = () => document.querySelector<HTMLElement>('.combat-boss-bar')!;
+    const track = () => document.querySelector<HTMLElement>('.combat-boss-track')!;
+
+    it('shows the boss by name, with its HP and enrage slot', () => {
+      start(withMonsters(CHIEF));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+
+      expect(bar().style.display).toBe('');
+      expect(bar().dataset.tier).toBe('boss');
+      expect(document.querySelector('.combat-boss-name')!.textContent).toBe('Chieftain');
+      expect(document.querySelector('.combat-boss-pct')!.textContent).toBe('30%');
+      expect(track().style.getPropertyValue('--boss-hp')).toBe('0.3000');
+      expect(track().getAttribute('aria-label')).toBe('Boss health 30%');
+      const enrage = document.querySelector<HTMLElement>('.combat-boss-enrage')!;
+      expect(enrage.style.display).toBe('');
+      expect(enrage.textContent).toBe('⏱ 8:00');
+      expect(stage().classList.contains('boss-fight')).toBe(true);
+    });
+
+    it('shares one bar between several bosses, with their combined HP', () => {
+      start(withMonsters(CHIEF, { ...CHIEF, pos: 7, hp: 500, name: 'Warlord', tier: 'raid' }));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+
+      expect(document.querySelector('.combat-boss-name')!.textContent).toBe('Chieftain +1');
+      expect(document.querySelector('.combat-boss-pct')!.textContent).toBe('40%');
+      expect(track().style.getPropertyValue('--boss-hp')).toBe('0.4000');
+    });
+
+    it('has no flag ticks, retry pips or hatched section', () => {
+      start(withMonsters(CHIEF));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+
+      expect(bar().querySelector('.combat-boss-ticks, .combat-boss-tick, .combat-boss-retries, .combat-boss-skipped')).toBeNull();
+      expect(bar().textContent).not.toMatch(/checkpoint|retry|retries/i);
+    });
+
+    it.each<[string, ClientCombatUnit]>([
+      ['an ordinary monster', GOBLIN],
+      ['an elite', { ...GOBLIN, tier: 'elite' }],
+      ['a passive boss-tier wall', { ...CHIEF, passive: true }],
+    ])('stays hidden for %s', (_name, monster) => {
+      start(withMonsters(monster));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+
+      expect(bar().style.display).toBe('none');
+      expect(stage().classList.contains('boss-fight')).toBe(false);
+    });
+
+    it('opens the fight with a plain BOSS FIGHT! banner', () => {
+      const t = start(withMonsters(CHIEF));
+      vi.advanceTimersByTime(FRAME_MS * 2);
+
+      t.playEvents([{ id: 1, t: 1100, kind: 'battle_start' }]);
+
+      expect(document.querySelector('.combat-banner-text')!.textContent).toBe('BOSS FIGHT!');
+      expect(document.querySelector('.combat-banner-sub')).toBeNull();
+    });
+  });
+
+  describe('leaving a dungeon', () => {
+    const inDungeon = (role: string, battle: object = {}): ServerStateMessage => withBattle(makeState(1, GOBLIN, []), battle, {
+      dungeon: { dungeonId: 'pit', name: 'Pit', floor: 2, totalFloors: 3, isBossFloor: false },
+      social: { party: { members: [{ username: 'alice', role, gridPosition: 4 }], henchmen: [] } },
+    });
+    const leaveBtn = () => document.querySelector<HTMLElement>('.combat-dungeon-leave')!;
+    const confirm = () => document.querySelector('.combat-leave-confirm');
+
+    it.each([
+      ['a fight under way', { visual: 'fighting' }],
+      ['between fights', { state: 'result', visual: 'none' }],
+    ])('always asks first, %s, and says the party starts over', (_when, battle) => {
+      const { gameClient } = start(inDungeon('owner', battle));
+      vi.advanceTimersByTime(FRAME_MS);
+
+      leaveBtn().click();
+
+      expect(gameClient.sendLeaveDungeon).not.toHaveBeenCalled();
+      expect(confirm()!.textContent).toContain('This ends the run, and your party starts from the first floor next time.');
+      expect(confirm()!.textContent).not.toMatch(/resume|retry|checkpoint/i);
+
+      document.querySelector<HTMLElement>('.combat-leave-confirm-no')!.click();
+      expect(confirm()).toBeNull();
+      expect(gameClient.sendLeaveDungeon).not.toHaveBeenCalled();
+
+      leaveBtn().click();
+      document.querySelector<HTMLElement>('.combat-leave-confirm-yes')!.click();
+      expect(gameClient.sendLeaveDungeon).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks nothing of a plain member, who cannot leave', () => {
+      const { gameClient } = start(inDungeon('member'));
+      vi.advanceTimersByTime(FRAME_MS);
+
+      leaveBtn().click();
+
+      expect(confirm()).toBeNull();
+      expect(gameClient.sendLeaveDungeon).not.toHaveBeenCalled();
+    });
+
+    it('takes the question back when the run has ended under it', () => {
+      const t = start(inDungeon('owner'));
+      vi.advanceTimersByTime(FRAME_MS);
+      leaveBtn().click();
+      expect(confirm()).not.toBeNull();
+
+      t.push(withBattle(makeState(1, GOBLIN, []), { visual: 'fighting' }));
+      vi.advanceTimersByTime(FRAME_MS);
+
+      expect(confirm()).toBeNull();
+      expect(leaveBtn().style.display).toBe('none');
+      expect(t.gameClient.sendLeaveDungeon).not.toHaveBeenCalled();
+    });
+
+    it('takes it back at once, and asks nothing more, while the last result is still on screen', () => {
+      const t = start(inDungeon('owner', { visual: 'fighting' }));
+      vi.advanceTimersByTime(FRAME_MS);
+      leaveBtn().click();
+      expect(confirm()).not.toBeNull();
+
+      t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'defeat' }));
+
+      expect(confirm()).toBeNull();
+      expect(leaveBtn().style.display).not.toBe('none');
+      leaveBtn().click();
+      expect(confirm()).toBeNull();
+      expect(t.gameClient.sendLeaveDungeon).not.toHaveBeenCalled();
+    });
+
+    it('keeps the question up on later floors of the same run', () => {
+      const t = start(inDungeon('owner'));
+      vi.advanceTimersByTime(FRAME_MS);
+      leaveBtn().click();
+
+      t.push(inDungeon('owner', { visual: 'fighting' }));
+      vi.advanceTimersByTime(FRAME_MS);
+
+      expect(confirm()).not.toBeNull();
+    });
+
+    describe('what the status says once the fight is over', () => {
+      const onFloor = (floor: number, battle: object): ServerStateMessage => withBattle(makeState(1, GOBLIN, []), battle, {
+        dungeon: { dungeonId: 'pit', name: 'Pit', floor, totalFloors: 3, isBossFloor: floor === 3 },
+        social: { party: { members: [{ username: 'alice', role: 'owner', gridPosition: 4 }], henchmen: [] } },
+      });
+      const over = (result: 'victory' | 'defeat') => ({ ...snapshot(1, { ...GOBLIN, hp: result === 'victory' ? 0 : 5 }), finished: true, result });
+
+      it('stays on "Back to the entrance" through a wipe, even after the server has ended the run', () => {
+        const t = start(onFloor(2, { visual: 'fighting', combat: snapshot(1, GOBLIN) }));
+        vi.advanceTimersByTime(FRAME_MS);
+
+        t.push(onFloor(2, { state: 'result', visual: 'defeat', combat: over('defeat') }));
+        vi.advanceTimersByTime(PLAYBACK_DUE_MS);
+        expect(statusText()).toBe('DefeatedBack to the entrance');
+
+        t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'defeat', combat: over('defeat') }));
+        expect(statusText()).toBe('DefeatedBack to the entrance');
+      });
+
+      it('says "On to the next floor" below the last floor, and "Back to the entrance" on it', () => {
+        const t = start(onFloor(2, { visual: 'fighting', combat: snapshot(1, GOBLIN) }));
+        vi.advanceTimersByTime(FRAME_MS);
+        t.push(onFloor(2, { state: 'result', visual: 'victory', combat: over('victory') }));
+        vi.advanceTimersByTime(PLAYBACK_DUE_MS);
+        expect(statusText()).toContain('On to the next floor');
+        active?.onDeactivate();
+
+        const last = start(onFloor(3, { visual: 'fighting', combat: snapshot(1, GOBLIN) }));
+        vi.advanceTimersByTime(FRAME_MS);
+        last.push(onFloor(3, { state: 'result', visual: 'victory', combat: over('victory') }));
+        vi.advanceTimersByTime(PLAYBACK_DUE_MS);
+        expect(statusText()).toContain('Back to the entrance');
+      });
     });
   });
 

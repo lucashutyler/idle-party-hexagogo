@@ -17,8 +17,8 @@ const MOMENT_ICONS: Record<AwayMomentKind, string> = {
   level_up: '⬆️',
   first_clear: '🏆',
   rare_item: '💎',
-  checkpoint: '🚩',
   eject: '💀',
+  run_ended: '🚪',
   relocate: '🏳️',
   mastery: '⭐',
   closest_call: '❤️',
@@ -109,14 +109,12 @@ function momentPhrase(moment: AwayMoment, ledger: AwayLedger, item: RecapItemLoo
       const def = rarest ? item(rarest.itemId) : moment.itemId ? item(moment.itemId) : undefined;
       return def ? `found ${def.name}` : lowerFirst(moment.text);
     }
-    case 'checkpoint': {
-      const run = [...ledger.dungeons].reverse().find(d => (d.checkpoint ?? 0) > 0);
-      return run ? `hit Checkpoint ${run.checkpoint} in ${run.name}` : lowerFirst(moment.text);
-    }
     case 'eject': {
       const run = [...ledger.dungeons].reverse().find(d => d.outcome === 'ejected');
       return run ? `was pushed out of ${run.name}` : lowerFirst(moment.text);
     }
+    case 'run_ended':
+      return lowerFirst(moment.text);
     case 'relocate':
       return 'retreated to a safer room';
     case 'mastery': {
@@ -173,11 +171,12 @@ export function recapWarnings(
       action: 'map',
     });
   }
-  for (const run of ledger.dungeons) {
+  const latestRuns = new Map(ledger.dungeons.map(run => [run.dungeonId, run]));
+  for (const run of latestRuns.values()) {
     if (run.outcome === 'ejected') {
       warnings.push({ kind: 'ejected', text: `Your party was defeated in ${run.name}. Enter again to start a new run.` });
-    } else if (run.outcome === 'left' && (run.checkpoint ?? 0) > 0) {
-      warnings.push({ kind: 'left', text: `Your party left ${run.name} at Checkpoint ${run.checkpoint}. Enter again to resume there.` });
+    } else if (run.outcome === 'left') {
+      warnings.push({ kind: 'left', text: `Your party's run in ${run.name} ended early. Enter again to start a new run.` });
     }
   }
   if (ledger.itemsLost > 0) {

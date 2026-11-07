@@ -84,7 +84,6 @@ import {
 import { COMBAT_PACE, paceHitDamage } from '@idle-party-rpg/shared';
 import type {
   CombatPrefs,
-  DungeonCheckpoint,
   DungeonRunState,
   AwayLedger,
   AwayMoment,
@@ -172,7 +171,6 @@ export class PlayerSession {
   private partyId: string | null = null;
   /** Dungeon IDs this player has cleared at least once (for one-time first-clear rewards). */
   private clearedDungeons = new Set<string>();
-  private dungeonCheckpoints: Record<string, DungeonCheckpoint> = emptyCheckpoints();
   private monsterKills: Record<string, number> = emptyKillCounts();
   /** Monster ids by most recent kill, newest first. In memory only. */
   private recentKills: string[] = [];
@@ -1062,21 +1060,20 @@ export class PlayerSession {
   }
 
   /** {@link grantXp} for combat and dungeon rewards, which also count toward the away recap. */
-  grantRewardXp(amount: number, logText?: string, logType: CombatLogEntry['type'] = 'victory'): void {
+  grantRewardXp(amount: number, logText?: string): void {
     if (!this.character || amount <= 0) return;
     const { levelsGained } = addXp(this.character, amount);
     this.xpRateXpTotal += amount;
-    if (logText) this.addLogEntry(logText, logType);
+    if (logText) this.addLogEntry(logText, 'victory');
     this.announceLevelUps(levelsGained);
     this.updateAway(l => ({ ...l, xp: l.xp + amount }));
   }
 
-  /** Gold from combat and dungeon rewards; returns what was actually added (capped at MAX_GOLD). */
-  grantRewardGold(amount: number): number {
-    if (!this.character || amount <= 0) return 0;
+  /** Gold from combat and dungeon rewards; the recap counts what was actually added (capped at MAX_GOLD). */
+  grantRewardGold(amount: number): void {
+    if (!this.character || amount <= 0) return;
     const added = addGold(this.character, amount);
     this.updateAway(l => ({ ...l, gold: l.gold + added }));
-    return added;
   }
 
   /** One dungeon reward item; false when the stack is full (counted as lost in the away recap). */
@@ -1099,24 +1096,6 @@ export class PlayerSession {
 
   /** All dungeon IDs this player has cleared (for persistence). */
   getClearedDungeons(): string[] { return [...this.clearedDungeons]; }
-
-  getDungeonCheckpoint(dungeonId: string): DungeonCheckpoint | undefined {
-    return hasOwn(this.dungeonCheckpoints, dungeonId) ? copyCheckpoint(this.dungeonCheckpoints[dungeonId]) : undefined;
-  }
-
-  getDungeonCheckpoints(): Record<string, DungeonCheckpoint> {
-    const copy = emptyCheckpoints();
-    for (const [id, checkpoint] of Object.entries(this.dungeonCheckpoints)) copy[id] = copyCheckpoint(checkpoint);
-    return copy;
-  }
-
-  setDungeonCheckpoint(dungeonId: string, checkpoint: DungeonCheckpoint): void {
-    this.dungeonCheckpoints[dungeonId] = copyCheckpoint(checkpoint);
-  }
-
-  clearDungeonCheckpoint(dungeonId: string): void {
-    delete this.dungeonCheckpoints[dungeonId];
-  }
 
   // ── Kill mastery ──────────────────────────────────────
 
@@ -1460,7 +1439,6 @@ export class PlayerSession {
     this.unlockSystem = new UnlockSystem(this.defaultGrid(), startTile);
     this.partyId = null;
     this.clearedDungeons.clear();
-    this.dungeonCheckpoints = emptyCheckpoints();
     this.monsterKills = emptyKillCounts();
     this.recentKills = [];
     this.awayLedger = null;
@@ -1529,7 +1507,6 @@ export class PlayerSession {
       dungeonRun: dungeonRun ?? undefined,
       partyHenchmen: partyHenchmen?.length ? partyHenchmen : undefined,
       clearedDungeons: [...this.clearedDungeons],
-      dungeonCheckpoints: this.getDungeonCheckpoints(),
       monsterKills: { ...this.monsterKills },
       combatPrefs: { ...this.combatPrefs },
       autoRetreatNotified: this.autoRetreatNotified || undefined,
@@ -1566,7 +1543,7 @@ export class PlayerSession {
       weeklyCompletions: data.weeklyCompletions ?? {},
     });
     // Migrate old log entries without IDs and restore the counter
-    const restoredLog = data.combatLog.slice(-MAX_LOG_ENTRIES);
+    const restoredLog = data.combatLog.slice(-MAX_LOG_ENTRIES).map(withCurrentLogType);
     let maxId = 0;
     for (const entry of restoredLog) {
       if (!entry.id) entry.id = ++maxId;
@@ -1635,7 +1612,6 @@ export class PlayerSession {
     session['guildId'] = data.guildId ?? null;
     session['partyId'] = null; // Parties are transient, not restored across restarts
     session['clearedDungeons'] = new Set(data.clearedDungeons ?? []);
-    session['dungeonCheckpoints'] = sanitizeCheckpoints(data.dungeonCheckpoints);
     session['monsterKills'] = sanitizeKillCounts(data.monsterKills);
     session['recentKills'] = [];
     session['combatPrefs'] = sanitizeCombatPrefs(data.combatPrefs);
@@ -1794,8 +1770,9 @@ export class PlayerSession {
 
 }
 
-function copyCheckpoint(checkpoint: DungeonCheckpoint): DungeonCheckpoint {
-  return { ...checkpoint, rewardedPhases: [...checkpoint.rewardedPhases] };
+/** Older saves hold lines typed 'checkpoint'. */
+function withCurrentLogType(entry: CombatLogEntry): CombatLogEntry {
+  return (entry.type as string) === 'checkpoint' ? { ...entry, type: 'battle' } : entry;
 }
 
 /** Copies rather than mutates: every recipient's history holds the same message object. */
@@ -1834,27 +1811,6 @@ function sanitizeKillCounts(raw: unknown): Record<string, number> {
     if (isNonNegativeInteger(count) && count > 0) kills[id] = count;
   }
   return kills;
-}
-
-/** Keyed by free-form dungeon ids, like the kill counts. */
-function emptyCheckpoints(): Record<string, DungeonCheckpoint> {
-  return Object.create(null) as Record<string, DungeonCheckpoint>;
-}
-
-function sanitizeCheckpoints(raw: unknown): Record<string, DungeonCheckpoint> {
-  const checkpoints = emptyCheckpoints();
-  if (!isRecord(raw)) return checkpoints;
-  for (const [dungeonId, value] of Object.entries(raw)) {
-    if (!isRecord(value) || !isNonNegativeInteger(value.floorIndex) || typeof value.at !== 'number' || !Number.isFinite(value.at)) continue;
-    checkpoints[dungeonId] = {
-      floorIndex: value.floorIndex,
-      phase: isNonNegativeInteger(value.phase) ? value.phase : 0,
-      wipes: isNonNegativeInteger(value.wipes) ? value.wipes : 0,
-      rewardedPhases: Array.isArray(value.rewardedPhases) ? value.rewardedPhases.filter((k): k is string => typeof k === 'string') : [],
-      at: value.at,
-    };
-  }
-  return checkpoints;
 }
 
 const AWAY_DUNGEON_OUTCOMES: readonly AwayDungeonOutcome[] = ['cleared', 'ejected', 'left', 'in_progress'];
@@ -1903,9 +1859,7 @@ function sanitizeMasteryUp(v: Record<string, unknown>): AwayMasteryUp | null {
 function sanitizeDungeonEntry(v: Record<string, unknown>): AwayDungeonEntry | null {
   const outcome = AWAY_DUNGEON_OUTCOMES.find(o => o === v.outcome);
   if (typeof v.dungeonId !== 'string' || typeof v.name !== 'string' || !outcome) return null;
-  const entry: AwayDungeonEntry = { dungeonId: v.dungeonId, name: v.name, outcome, wipes: count(v.wipes) };
-  if (count(v.checkpoint) > 0) entry.checkpoint = count(v.checkpoint);
-  return entry;
+  return { dungeonId: v.dungeonId, name: v.name, outcome };
 }
 
 function sanitizeRetreatEntry(v: Record<string, unknown>): AwayRetreatEntry | null {

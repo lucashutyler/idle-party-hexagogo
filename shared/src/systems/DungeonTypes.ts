@@ -1,8 +1,5 @@
 import type { EncounterTableEntry } from './ZoneTypes.js';
 import type { ClassName } from './CharacterStats.js';
-import type { EncounterDefinition } from './EncounterTypes.js';
-import type { MonsterDefinition } from './MonsterTypes.js';
-import { isBossTier } from './CombatScaling.js';
 
 // --- Types ---
 
@@ -38,12 +35,6 @@ export interface DungeonFloor {
   isBoss?: boolean;
   /** Optional bonus drops awarded on floor clear, in addition to monster loot. */
   rewards?: DungeonReward[];
-  /** Boss HP fractions, descending in (0,1). Apply to any fight here with a non-passive boss/raid monster, placed or rolled from a pool. */
-  checkpoints?: number[];
-  /** Regroups allowed before the party is ejected. Default DEFAULT_MAX_WIPES. */
-  maxWipes?: number;
-  /** Share of the boss's xp/gold paid per checkpoint reached. Default DEFAULT_CHECKPOINT_REWARD_FRACTION. */
-  checkpointRewardFraction?: number;
 }
 
 export interface DungeonEntryRequirements {
@@ -103,8 +94,6 @@ export const SEED_DUNGEONS: Record<string, DungeonDefinition> = {
         gridShape: { cols: 3, rows: 3 },
         encounterTable: [{ encounterId: 'goblin_chieftain_court', weight: 1 }],
         isBoss: true,
-        checkpoints: [0.66, 0.33],
-        maxWipes: 3,
       },
     ],
     entryRequirements: {
@@ -131,17 +120,7 @@ export interface DungeonRunInfo {
   totalFloors: number;
   /** Whether the current floor is flagged as a boss floor. */
   isBossFloor: boolean;
-  /** The current floor's sanitised checkpoint fractions (checkpoint floors only). */
-  checkpoints?: number[];
-  /** Checkpoints reached on the current floor (0 = none). */
-  checkpointPhase?: number;
-  wipes?: number;
-  maxWipes?: number;
 }
-
-export const DEFAULT_MAX_WIPES = 3;
-export const DEFAULT_CHECKPOINT_REWARD_FRACTION = 0.15;
-export const DUNGEON_CHECKPOINT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** A party's run through a dungeon; mirrored onto every member's save. */
 export interface DungeonRunState {
@@ -150,19 +129,6 @@ export interface DungeonRunState {
   currentFloorIndex: number;
   /** Overworld room the party returns to on completion, wipe, or bail-out. */
   entrance: { col: number; row: number };
-  checkpointPhase?: number;
-  wipes?: number;
-  /** `"floorIndex:phase"` keys whose partial reward was already paid this run. */
-  rewardedPhases?: string[];
-}
-
-/** Stored per player on leaving a checkpoint floor; resumes the run on re-entry. */
-export interface DungeonCheckpoint {
-  floorIndex: number;
-  phase: number;
-  wipes: number;
-  rewardedPhases: string[];
-  at: number;
 }
 
 /** Per-member info needed to evaluate dungeon entry requirements. */
@@ -267,58 +233,4 @@ export function rollDungeonRewards(
     }
   }
   return granted;
-}
-
-/** Finite fractions in (0,1), descending, duplicates dropped. */
-export function floorCheckpoints(floor: DungeonFloor | undefined): number[] {
-  const raw = Array.isArray(floor?.checkpoints) ? floor.checkpoints : [];
-  const valid = raw.filter(f => typeof f === 'number' && Number.isFinite(f) && f > 0 && f < 1);
-  return [...new Set(valid)].sort((a, b) => b - a);
-}
-
-export function floorMaxWipes(floor: DungeonFloor | undefined): number {
-  const n = floor?.maxWipes;
-  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_MAX_WIPES;
-}
-
-export function floorCheckpointRewardFraction(floor: DungeonFloor | undefined): number {
-  const f = floor?.checkpointRewardFraction;
-  return typeof f === 'number' && Number.isFinite(f) && f >= 0 && f <= 1 ? f : DEFAULT_CHECKPOINT_REWARD_FRACTION;
-}
-
-export function clampCheckpointPhase(phase: number | undefined, floor: DungeonFloor | undefined): number {
-  if (typeof phase !== 'number' || !Number.isFinite(phase) || phase <= 0) return 0;
-  return Math.min(Math.floor(phase), floorCheckpoints(floor).length);
-}
-
-export function checkpointPhaseKey(floorIndex: number, phase: number): string {
-  return `${floorIndex}:${phase}`;
-}
-
-export function isDungeonCheckpointFresh(checkpoint: DungeonCheckpoint, now: number): boolean {
-  return Number.isFinite(checkpoint.at) && now - checkpoint.at < DUNGEON_CHECKPOINT_TTL_MS;
-}
-
-/** A non-passive boss- or raid-tier monster: what the engine tracks for boss phases. */
-export function isBossMonster(def: MonsterDefinition | undefined): boolean {
-  return !!def && !def.passive && isBossTier(def.tier);
-}
-
-export function encounterCanFieldBoss(
-  encounter: EncounterDefinition | undefined,
-  getMonster: (id: string) => MonsterDefinition | undefined,
-): boolean {
-  if (!encounter) return false;
-  const entries = encounter.type === 'explicit' ? encounter.placements : encounter.monsterPool;
-  return (entries ?? []).some(({ monsterId }) => isBossMonster(getMonster(monsterId)));
-}
-
-/** Whether any encounter on the floor's table can field a boss: what a checkpoint needs to be reached or resumed. */
-export function floorCanFieldBoss(
-  floor: DungeonFloor,
-  getEncounter: (id: string) => EncounterDefinition | undefined,
-  getMonster: (id: string) => MonsterDefinition | undefined,
-): boolean {
-  const table = Array.isArray(floor.encounterTable) ? floor.encounterTable : [];
-  return table.some(entry => encounterCanFieldBoss(getEncounter(entry.encounterId), getMonster));
 }

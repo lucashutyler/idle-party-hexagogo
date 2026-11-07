@@ -12,7 +12,6 @@ import type { MonsterDefinition, MonsterLevelSource, MonsterSkillEntry, MonsterT
 import { effectiveMonsterLevel, effectiveMonsterTier } from './MonsterLevels.js';
 import { MONSTER_SKILL_CATALOG, getMonsterSkillCastTimeMs } from './MonsterSkills.js';
 import type { DungeonDefinition } from './DungeonTypes.js';
-import { clampCheckpointPhase, floorCheckpoints, floorMaxWipes } from './DungeonTypes.js';
 import type { SkillDefinition } from './SkillTypes.js';
 import { getSkillTrigger } from './SkillTypes.js';
 import type {
@@ -67,13 +66,6 @@ export interface RoomForecastInput {
   pace?: CombatPace;
 }
 
-export interface DungeonForecastStart {
-  /** 0-based floor index. */
-  floorIndex: number;
-  phase?: number;
-  wipes?: number;
-}
-
 export interface DungeonForecastInput {
   kind: 'dungeon';
   players: PartyCombatantInit[];
@@ -82,8 +74,8 @@ export interface DungeonForecastInput {
   encounters: Record<string, EncounterDefinition>;
   /** Used by floors with an empty table, as `createEncounter` does with the zone's table. */
   fallbackTable?: EncounterTableEntry[];
-  /** The requester's resume point; the regroup budget restarts on each later floor. */
-  start?: DungeonForecastStart;
+  /** 0-based floor a party already inside the run stands on. Default 0. */
+  startFloorIndex?: number;
   pace?: CombatPace;
 }
 
@@ -226,11 +218,11 @@ function* fightSteps(state: PartyCombatState, rng: () => number, horizonMs: numb
 }
 
 function bossHp(state: PartyCombatState): number | null {
-  if (!state.bossPhases) return null;
+  const bosses = state.monsters.filter(m => !m.passive && isBossTier(m.tier));
+  if (bosses.length === 0) return null;
   let hp = 0;
-  for (const i of state.bossPhases.bossIndices) {
-    const boss = state.monsters[i];
-    if (boss && Number.isFinite(boss.currentHp)) hp += Math.max(0, boss.currentHp);
+  for (const boss of bosses) {
+    if (Number.isFinite(boss.currentHp)) hp += Math.max(0, boss.currentHp);
   }
   return hp;
 }
@@ -815,24 +807,18 @@ class BattleSampler implements Sampler {
   }
 }
 
-// --- Dungeon sampler (per-floor product; regroup loop on checkpoint floors) ---
+// --- Dungeon sampler (per-floor product) ---
 
 interface FloorPlan {
   number: number;
   strata: TableStratum[];
   table: EncounterTableEntry[];
-  thresholds: number[];
-  maxWipes: number;
-  startPhase: number;
-  startWipes: number;
   boss: boolean;
 }
 
 interface FloorTally {
   n: number;
   wins: number;
-  firstTryWins: number;
-  attempts: number[];
   winMs: number[];
 }
 
@@ -850,24 +836,18 @@ class DungeonSampler implements Sampler {
   constructor(private readonly input: DungeonForecastInput, private readonly rng: () => number, private readonly horizonMs: number | undefined) {
     this.pace = input.pace ?? AUTHORED_PACE;
     const floors = input.dungeon.floors ?? [];
-    const startIndex = Math.min(Math.max(0, Math.floor(input.start?.floorIndex ?? 0) || 0), Math.max(0, floors.length - 1));
+    const startIndex = Math.min(Math.max(0, Math.floor(input.startFloorIndex ?? 0) || 0), Math.max(0, floors.length - 1));
     this.plans = floors.slice(startIndex).map((floor, i) => {
       const table = floor.encounterTable?.length ? floor.encounterTable : input.fallbackTable ?? [];
       const strata = tableStrata(table, input.monsters, input.encounters);
-      const thresholds = floorCheckpoints(floor);
-      const isStart = i === 0;
       return {
         number: startIndex + i + 1,
         strata,
         table,
-        thresholds,
-        maxWipes: floorMaxWipes(floor),
-        startPhase: isStart ? clampCheckpointPhase(input.start?.phase, floor) : 0,
-        startWipes: isStart ? Math.max(0, Math.floor(input.start?.wipes ?? 0) || 0) : 0,
-        boss: !!floor.isBoss || thresholds.length > 0 || strata.some(s => s.enemies.some(e => !e.passive && isBossTier(e.tier))),
+        boss: !!floor.isBoss || strata.some(s => s.enemies.some(e => !e.passive && isBossTier(e.tier))),
       };
     });
-    this.tallies = this.plans.map(() => ({ n: 0, wins: 0, firstTryWins: 0, attempts: [], winMs: [] }));
+    this.tallies = this.plans.map(() => ({ n: 0, wins: 0, winMs: [] }));
     this.party = partyProfile(input.players);
     const allStrata = this.plans.flatMap(p => p.strata);
     this.enemies = summarizeEnemies(allStrata.flatMap(s => s.enemies), commonEnemies(allStrata));
@@ -882,38 +862,21 @@ class DungeonSampler implements Sampler {
     for (let f = 0; f < this.plans.length; f++) {
       const plan = this.plans[f];
       const tally = this.tallies[f];
-      const checkpointFloor = plan.thresholds.length > 0;
-      let phase = plan.startPhase;
-      let wipes = plan.startWipes;
-      let attempts = 0;
-      let last: SimOutcome;
-      for (;;) {
-        attempts++;
-        const monsters = createEncounter(undefined, this.input.monsters, {}, this.input.encounters, plan.table, this.rng);
-        const setup = checkpointFloor
-          ? { pace: this.pace, bossPhases: { thresholds: plan.thresholds, resumePhase: phase > 0 ? phase : undefined } }
-          : { pace: this.pace };
-        const state = createPartyCombatState(this.input.players, monsters, setup);
-        const enrageAt = earliestEnrage(state);
-        last = yield* fightSteps(state, this.rng, this.horizonMs ?? defaultHorizonMs(state), budget);
-        totalMs += last.elapsedMs;
-        if (!etaTaken && last.bossDamageFrac !== undefined) {
-          etaTaken = true;
-          const eta = killEtaFor(last);
-          if (eta !== null) this.killEtas.push(eta);
-          if (enrageAt !== null) this.enrageAtMs = Math.min(this.enrageAtMs ?? Infinity, enrageAt);
-        }
-        if (last.result === 'victory' || !checkpointFloor) break;
-        phase = Math.max(phase, state.bossPhases?.phase ?? 0);
-        wipes++;
-        if (wipes > plan.maxWipes) break;
+      const monsters = createEncounter(undefined, this.input.monsters, {}, this.input.encounters, plan.table, this.rng);
+      const state = createPartyCombatState(this.input.players, monsters, { pace: this.pace });
+      const enrageAt = earliestEnrage(state);
+      const last = yield* fightSteps(state, this.rng, this.horizonMs ?? defaultHorizonMs(state), budget);
+      totalMs += last.elapsedMs;
+      if (!etaTaken && last.bossDamageFrac !== undefined) {
+        etaTaken = true;
+        const eta = killEtaFor(last);
+        if (eta !== null) this.killEtas.push(eta);
+        if (enrageAt !== null) this.enrageAtMs = Math.min(this.enrageAtMs ?? Infinity, enrageAt);
       }
       tally.n++;
-      tally.attempts.push(attempts);
       if (last.result === 'victory') {
         tally.wins++;
         tally.winMs.push(last.elapsedMs);
-        if (attempts === 1) tally.firstTryWins++;
       } else if (cleared) {
         cleared = false;
         failure = last.result;
@@ -932,9 +895,6 @@ class DungeonSampler implements Sampler {
       const t = this.tallies[i];
       const floor: ForecastFloor = { floor: plan.number, winPct: t.n > 0 ? round1((100 * t.wins) / t.n) : 0 };
       if (plan.boss) floor.boss = true;
-      if (plan.thresholds.length > 0 && t.attempts.length > 0) {
-        floor.attempts = quantile([...t.attempts].sort((a, b) => a - b), 0.5);
-      }
       return floor;
     });
     const out: Omit<ForecastResult, 'key' | 'partyKey'> = {
@@ -947,11 +907,6 @@ class DungeonSampler implements Sampler {
       }),
     };
     applyEnemyLevels(out, this.enemies);
-    const checkpointFloors = this.plans.map((p, i) => ({ p, t: this.tallies[i] })).filter(x => x.p.thresholds.length > 0);
-    if (checkpointFloors.length > 0 && this.runs.length > 0) {
-      const firstTry = checkpointFloors.reduce((acc, { t }) => acc * (t.n > 0 ? t.firstTryWins / t.n : 0), 1);
-      out.firstTryPct = round1(firstTry * 100);
-    }
     return out;
   }
 

@@ -105,6 +105,14 @@ describe('SocialScreen gift refusals', () => {
     expect(document.querySelector('.map-toast')?.textContent).toBe('That player can\'t receive gifts');
   });
 
+  it('shows the reason a party action was refused', () => {
+    const t = setup();
+
+    t.serverError('That party is in a dungeon right now.', 'party_refused');
+
+    expect(document.querySelector('.map-toast')?.textContent).toBe('That party is in a dungeon right now.');
+  });
+
   it('leaves other server errors alone', () => {
     const t = setup();
 
@@ -320,6 +328,89 @@ describe('SocialScreen confirmations', () => {
     await answerConfirm(true);
     expect(t.send(sendName)).toHaveBeenCalledWith(...args);
     t.screen.onDeactivate();
+  });
+
+  describe('while the party is in a dungeon', () => {
+    const inDungeon = { dungeon: { dungeonId: 'pit', name: 'Pit', floor: 1, totalFloors: 2, isBossFloor: false } };
+    const RUN_ENDS = 'Your party\'s dungeon run will end for everyone in it.';
+    const confirmBody = () => document.querySelector('.confirm-body')!.textContent;
+
+    it.each([
+      ['.social-kick-btn[data-username="bob"]', 'sendKickPartyMember', ['bob']],
+      ['.social-party-leave-btn', 'sendLeaveParty', []],
+    ])('%s warns that the run ends for everyone', async (selector, sendName, args) => {
+      const t = setup();
+      t.push([], partyOfThree, inDungeon);
+      t.screen.onActivate();
+
+      (document.querySelector(selector) as HTMLButtonElement).click();
+      expect(confirmBody()).toContain(RUN_ENDS);
+      expect(t.send(sendName)).not.toHaveBeenCalled();
+      await answerConfirm(true);
+      expect(t.send(sendName)).toHaveBeenCalledWith(...args);
+      t.screen.onDeactivate();
+    });
+
+    it('asks before accepting an invite, with the same warning', async () => {
+      const t = setup();
+      t.push(['dave'], partyOfThree, inDungeon);
+      t.screen.onActivate();
+
+      t.acceptBtn('dave')!.click();
+      expect(confirmBody()).toContain(RUN_ENDS);
+      expect(t.send('sendAcceptPartyInvite')).not.toHaveBeenCalled();
+      await answerConfirm(false);
+      expect(t.send('sendAcceptPartyInvite')).not.toHaveBeenCalled();
+
+      t.acceptBtn('dave')!.click();
+      await answerConfirm(true);
+      expect(t.send('sendAcceptPartyInvite')).toHaveBeenCalledWith('party_dave');
+      t.screen.onDeactivate();
+    });
+
+    it('asks a lone player too', async () => {
+      const t = setup();
+      t.push(['dave'], {}, inDungeon);
+      t.screen.onActivate();
+
+      t.acceptBtn('dave')!.click();
+      expect(confirmBody()).toBe('You will leave your current party. Your dungeon run will end.');
+      expect(t.send('sendAcceptPartyInvite')).not.toHaveBeenCalled();
+      await answerConfirm(true);
+      expect(t.send('sendAcceptPartyInvite')).toHaveBeenCalledWith('party_dave');
+      t.screen.onDeactivate();
+    });
+
+  });
+
+  describe('outside a dungeon', () => {
+    it('accepts an invite in one tap', () => {
+      const t = setup();
+      t.push(['dave'], partyOfThree);
+      t.screen.onActivate();
+
+      t.acceptBtn('dave')!.click();
+
+      expect(t.send('sendAcceptPartyInvite')).toHaveBeenCalledWith('party_dave');
+      expect(document.querySelector('.confirm-ok')).toBeNull();
+      t.screen.onDeactivate();
+    });
+
+    it.each([
+      ['.social-kick-btn[data-username="bob"]', 'sendKickPartyMember'],
+      ['.social-party-leave-btn', 'sendLeaveParty'],
+    ])('%s still asks, without mentioning a run', async (selector, sendName) => {
+      const t = setup();
+      t.push([], partyOfThree);
+      t.screen.onActivate();
+
+      (document.querySelector(selector) as HTMLButtonElement).click();
+      expect(document.querySelector('.confirm-ok')).not.toBeNull();
+      expect(document.body.textContent).not.toContain('dungeon run');
+      await answerConfirm(false);
+      expect(t.send(sendName)).not.toHaveBeenCalled();
+      t.screen.onDeactivate();
+    });
   });
 
   it('asks before leaving a guild', async () => {

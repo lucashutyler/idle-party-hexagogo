@@ -23,7 +23,9 @@ export interface BattleStatusInput {
   hasFight: boolean;
   /** The fight's playback result, which arrives before the server's visual does. */
   result: CombatResult | null;
+  /** Whether this fight was in a dungeon, even if the server has since ended the run. */
   inDungeon: boolean;
+  lastFloor: boolean;
   /** True once the server has moved the party for this cycle, so "here" is already the next room. */
   walking: boolean;
   hasDestination: boolean;
@@ -49,8 +51,8 @@ function walkingText(roomName: string | null): string {
 
 function nextStep(outcome: CombatResult | null, input: BattleStatusInput): string {
   if (input.walking) return walkingText(input.roomName);
+  if (input.inDungeon) return outcome === 'victory' && !input.lastFloor ? 'On to the next floor' : 'Back to the entrance';
   if (outcome !== 'victory') return 'Regrouping';
-  if (input.inDungeon) return 'On to the next floor';
   return input.hasDestination ? walkingText(input.roomName) : 'Fighting here again';
 }
 

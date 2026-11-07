@@ -34,18 +34,16 @@ const STACK_OFFSET_PX = 20;
 const BANNER_MAX_MS = 1400;
 const LONG_BANNER_CHARS = 8;
 
-export type BannerTone = 'fight' | 'boss' | 'enrage' | 'checkpoint' | 'regroup' | 'victory' | 'defeat' | 'retreat';
+export type BannerTone = 'fight' | 'boss' | 'enrage' | 'victory' | 'defeat' | 'retreat';
 
 /** A banner never replaces a higher-priority one still showing; it waits up to BANNER_QUEUE_MS instead. */
 export const BANNER_PRIORITY: Record<BannerTone, number> = {
   fight: 0,
   boss: 1,
   enrage: 2,
-  checkpoint: 3,
-  regroup: 4,
-  victory: 5,
-  defeat: 5,
-  retreat: 5,
+  victory: 3,
+  defeat: 3,
+  retreat: 3,
 };
 export const BANNER_QUEUE_MS = 1000;
 

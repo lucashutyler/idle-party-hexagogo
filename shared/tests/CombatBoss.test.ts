@@ -1,6 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { buildClientCombatSnapshot, createPartyCombatState, processCombatStep } from '../src/systems/CombatEngine';
-import type { CombatSetup } from '../src/systems/CombatEngine';
 import { BOSS_STALEMATE_WINDOW_MS, STALEMATE_WINDOW_MS } from '../src/systems/CombatTiming';
 import { ENRAGE_MAX_STACKS, ENRAGE_STEP_PERCENT, ENRAGE_STEP_SECONDS, ENRAGE_TIER_DEFAULTS } from '../src/systems/CombatScaling';
 import type { MonsterDefinition } from '../src/systems/MonsterTypes';
@@ -12,14 +11,6 @@ afterEach(() => {
 
 const BOSS_ENRAGE_S = ENRAGE_TIER_DEFAULTS.boss!.afterSeconds;
 const HEALER_SKILLS = [{ skillId: 'heal', value: 100000, cooldown: 0, castTime: 0 }];
-
-function bossFight(boss: Partial<MonsterDefinition>, setup?: CombatSetup, baseDamage = 100) {
-  return createPartyCombatState(
-    [makePlayer('A', 2, { baseDamage, hp: 1e6 })],
-    [makeMonster(4, { hp: 1000, tier: 'boss', ...boss })],
-    setup,
-  );
-}
 
 describe('enrage', () => {
   it('uses the tier defaults for bosses and raids, never for trash, elites or passive monsters', () => {
@@ -103,87 +94,34 @@ describe('stalemate window', () => {
   });
 });
 
-describe('boss checkpoints', () => {
-  it('always tracks bosses (no thresholds without a setup) and never tracks trash', () => {
-    expect(bossFight({}).bossPhases).toEqual({ bossIndices: [0], thresholds: [], phase: 0 });
-    expect(bossFight({ tier: 'raid' }).bossPhases?.bossIndices).toEqual([0]);
-    expect(bossFight({ tier: 'elite' }).bossPhases).toBeNull();
-  });
-
-  it('advances a phase per threshold crossed, with an event and a log line', () => {
+describe('boss fights', () => {
+  it('run from full HP to the kill with no phase events or checkpoint lines', () => {
     pinRandom();
-    const state = bossFight({}, { bossPhases: { thresholds: [0.66, 0.33] } });
+    const state = createPartyCombatState(
+      [makePlayer('A', 2, { baseDamage: 100, hp: 1e6 })],
+      [makeMonster(4, { hp: 1000, tier: 'boss' })],
+    );
+    expect(state.monsters[0].currentHp).toBe(1000);
     const { events, log } = runTo(state, 20000);
-    expect(ofKind(events, 'phase').map(e => [e.t, e.amount])).toEqual([[4000, 1], [7000, 2]]);
-    expect(log).toContain('Checkpoint 1 reached!');
-    expect(log).toContain('Checkpoint 2 reached!');
-    expect(state.bossPhases?.phase).toBe(2);
     expect(state.result).toBe('victory');
+    expect(events.map(e => e.kind as string)).not.toContain('phase');
+    expect(log.filter(line => /checkpoint/i.test(line))).toEqual([]);
+    expect(state).not.toHaveProperty('bossPhases');
   });
 
-  it('crosses several thresholds in one hit', () => {
-    pinRandom();
-    const state = bossFight({}, { bossPhases: { thresholds: [0.9, 0.8, 0.7] } }, 350);
-    const { events } = runTo(state, 1000);
-    expect(ofKind(events, 'phase').map(e => e.amount)).toEqual([1, 2, 3]);
-  });
-
-  it('sanitises thresholds: finite, inside (0, 1), deduplicated, descending', () => {
-    const state = bossFight({}, { bossPhases: { thresholds: [0.33, NaN, 1, 0, 0.66, 0.66, -1, 1.5, Infinity] } });
-    expect(state.bossPhases?.thresholds).toEqual([0.66, 0.33]);
-  });
-
-  it('measures the pooled HP of every boss', () => {
-    pinRandom();
-    const state = createPartyCombatState(
-      [makePlayer('A', 2, { baseDamage: 1000, hp: 1e6 })],
-      [makeMonster(1, { hp: 1000, tier: 'boss' }), makeMonster(4, { hp: 1000, tier: 'boss' })],
-      { bossPhases: { thresholds: [0.5] } },
-    );
-    const { events } = runTo(state, 1000);
-    expect(ofKind(events, 'phase').map(e => e.amount)).toEqual([1]);
-    expect(state.result).toBeNull();
-  });
-
-  it('maps explicit boss indices from the argument order to the sorted monsters', () => {
-    const state = createPartyCombatState(
-      [makePlayer('A', 2)],
-      [makeMonster(4, { id: 'a' }), makeMonster(0, { id: 'b' })],
-      { bossPhases: { bossIndices: [0, 7, -1, 0], thresholds: [0.5] } },
-    );
-    expect(state.monsters.map(m => m.id)).toEqual(['b', 'a']);
-    expect(state.bossPhases?.bossIndices).toEqual([1]);
-  });
-
-  it('resumes at a checkpoint: bosses start at that HP share with the enrage clock scaled', () => {
-    const state = bossFight({ hp: 1000 }, { bossPhases: { thresholds: [0.66, 0.33], resumePhase: 2 } });
-    expect(state.monsters[0].currentHp).toBe(330);
-    expect(state.bossPhases).toMatchObject({ phase: 2, resumedFromPhase: 2 });
-    expect(state.monsters[0].enrageState?.atMs).toBe(Math.round(BOSS_ENRAGE_S * 0.33) * 1000);
-    expect(bossFight({ hp: 999 }, { bossPhases: { thresholds: [0.66], resumePhase: 1 } }).monsters[0].currentHp).toBe(Math.ceil(999 * 0.66));
-  });
-
-  it('shifts the enrage clock by an explicit resume offset', () => {
-    const state = bossFight({}, { bossPhases: { thresholds: [0.66, 0.33], resumePhase: 1, resumeElapsedMs: 100000 } });
-    expect(state.monsters[0].enrageState?.atMs).toBe(BOSS_ENRAGE_S * 1000 - 100000);
-  });
-
-  it('ignores a resume phase outside the thresholds', () => {
-    for (const resumePhase of [0, 3, 1.5, NaN, -1]) {
-      const state = bossFight({}, { bossPhases: { thresholds: [0.66, 0.33], resumePhase } });
-      expect(state.monsters[0].currentHp).toBe(1000);
-      expect(state.bossPhases?.phase).toBe(0);
-      expect(state.bossPhases?.resumedFromPhase).toBeUndefined();
-      expect(state.monsters[0].enrageState?.atMs).toBe(BOSS_ENRAGE_S * 1000);
-    }
-  });
-
-  it('reports phases in snapshots, with thresholds only in full ones', () => {
-    const state = bossFight({}, { bossPhases: { thresholds: [0.66, 0.33], resumePhase: 1 } });
-    expect(buildClientCombatSnapshot(state, 1, true).bossPhases).toEqual({
-      bossPos: [4], thresholds: [0.66, 0.33], phase: 1, resumedFromPhase: 1,
-    });
-    expect(buildClientCombatSnapshot(state, 1, false).bossPhases).toEqual({ bossPos: [4], phase: 1, resumedFromPhase: 1 });
+  it('give clients the tier and walls in full snapshots, and HP and the enrage clock in every one', () => {
+    const state = createPartyCombatState([makePlayer('A', 2)], [
+      makeMonster(0, { tier: 'boss', name: 'Twin', hp: 1000 }),
+      makeMonster(1, { tier: 'boss', name: 'Idol', hp: 1000, passive: true }),
+      makeMonster(4, { tier: 'raid', name: 'Twin', hp: 1000 }),
+      makeMonster(7, { tier: 'elite', name: 'Guard', hp: 1000 }),
+    ]);
+    const monsters = (full: boolean) => buildClientCombatSnapshot(state, 1, full).units.filter(u => u.side === 'monster');
+    expect(monsters(true).map(u => [u.pos, u.tier, !!u.passive])).toEqual([
+      [0, 'boss', false], [1, 'boss', true], [4, 'raid', false], [7, 'elite', false],
+    ]);
+    expect(monsters(false).find(u => u.pos === 4)).toMatchObject({ hp: 1000, maxHp: 1000, enrage: { stacks: 0 } });
+    expect(buildClientCombatSnapshot(state, 1, true)).not.toHaveProperty('bossPhases');
   });
 });
 

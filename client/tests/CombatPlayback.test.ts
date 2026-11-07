@@ -854,17 +854,15 @@ describe('CombatPlayback reconciliation', () => {
 
 describe('CombatPlayback bosses, enrage and retreat', () => {
   const B = { side: 'monster' as const, pos: 4 as const };
-  const BOSS_PHASES = { bossPos: [4 as const], thresholds: [0.66, 0.33], phase: 0 };
 
   function boss(overrides: Partial<ClientCombatUnit> = {}): ClientCombatUnit {
     return monster({ pos: 4, hp: 900, maxHp: 1000, name: 'Chieftain', id: 'goblin_chieftain', level: 6, levelSource: 'authored', tier: 'boss', ...overrides });
   }
 
-  function start(units: ClientCombatUnit[], bossPhases?: ClientCombatSnapshot['bossPhases']): CombatPlayback {
+  function start(units: ClientCombatUnit[]): CombatPlayback {
     const pb = new CombatPlayback({ now, delayMs: DELAY });
     pb.setActive(true);
-    const full = { ...fullSnap(1000, units), ...(bossPhases ? { bossPhases } : {}) };
-    pb.ingestMessage({ battleId: 1, snapshot: full, events: [] }, clock);
+    pb.ingestMessage({ battleId: 1, snapshot: fullSnap(1000, units), events: [] }, clock);
     return pb;
   }
 
@@ -891,41 +889,36 @@ describe('CombatPlayback bosses, enrage and retreat', () => {
   });
 
   it('caches level, level source and tier as statics', () => {
-    const pb = start([player({ level: 7 }), boss(), monster({ level: 3, levelSource: 'derived', tier: 'elite' })], BOSS_PHASES);
+    const pb = start([player({ level: 7 }), boss(), monster({ level: 3, levelSource: 'derived', tier: 'elite' })]);
     expect(pb.statics('monster:4')).toMatchObject({ level: 6, levelSource: 'authored', tier: 'boss' });
     expect(pb.statics('monster:1')).toMatchObject({ level: 3, levelSource: 'derived', tier: 'elite' });
     expect(pb.statics('player:4')).toMatchObject({ level: 7 });
   });
 
-  it('is not a boss fight without bossPhases', () => {
-    const pb = start([player(), monster()]);
-    expect(pb.bossPhases).toBeNull();
+  it('is not a boss fight without a boss or raid monster', () => {
+    const pb = start([player(), monster({ tier: 'elite' }), monster({ pos: 7 })]);
+    expect(pb.bossPositions).toEqual([]);
     expect(pb.bossHpFraction()).toBeNull();
   });
 
-  it('reads thresholds from the full snapshot and follows the phase from events and dynamic snapshots', () => {
-    const pb = start([player(), boss()], BOSS_PHASES);
-    expect(pb.bossPhases).toEqual({ bossPos: [4], thresholds: [0.66, 0.33], phase: 0 });
-    play(pb, [ev(1200, 'phase', { amount: 1 })]);
-    expect(pb.bossPhases!.phase).toBe(1);
-    play(pb, [], snap(1600, [player(), boss({ hp: 300 })], { bossPhases: { bossPos: [4], phase: 2 } }));
-    expect(pb.bossPhases).toMatchObject({ thresholds: [0.66, 0.33], phase: 2 });
+  it('finds the bosses in the full snapshot, counting raid tier in and passive walls out', () => {
+    const units = [player(), boss({ pos: 1 }), boss({ pos: 4, tier: 'raid' }), boss({ pos: 7, passive: true }), monster({ pos: 0, tier: 'elite' })];
+    expect(start(units).bossPositions).toEqual([1, 4]);
   });
 
-  it('recovers a checkpoint whose event was dropped from the next dynamic snapshot', () => {
-    const pb = start([player(), boss()], BOSS_PHASES);
-    play(pb, [], snap(1500, [player(), boss({ hp: 600 })], { bossPhases: { bossPos: [4], phase: 1 } }));
-    expect(pb.bossPhases!.phase).toBe(1);
-  });
+  it('keeps the bosses through dynamic snapshots, which carry no tiers, and forgets them with the battle', () => {
+    const pb = start([player(), boss()]);
+    play(pb, [], snap(1500, [player(), boss({ hp: 600, tier: undefined, name: undefined })]));
+    expect(pb.bossPositions).toEqual([4]);
+    expect(pb.bossHpFraction()).toBeCloseTo(0.6);
 
-  it('keeps the resume point and cleans up authored thresholds', () => {
-    const pb = start([player(), boss({ hp: 660 })], { bossPos: [4], thresholds: [0.33, Number.NaN, 0.66, 1.2], phase: 1, resumedFromPhase: 1 });
-    expect(pb.bossPhases).toEqual({ bossPos: [4], thresholds: [0.66, 0.33], phase: 1, resumedFromPhase: 1 });
+    pb.ingestMessage({ battleId: 2, snapshot: fullSnap(0, [player(), monster()], 2), events: [] }, clock);
+    expect(pb.bossPositions).toEqual([]);
   });
 
   it('pools boss HP across all boss units', () => {
     const units = [player(), boss({ pos: 1, hp: 300, maxHp: 1000 }), boss({ pos: 4, hp: 500, maxHp: 1000 }), monster({ pos: 7, hp: 5, maxHp: 50 })];
-    const pb = start(units, { bossPos: [1, 4], thresholds: [0.5], phase: 0 });
+    const pb = start(units);
     expect(pb.bossHpFraction()).toBeCloseTo(0.4);
     play(pb, [ev(1200, 'damage', { dst: B, amount: 500 })]);
     expect(pb.bossHpFraction()).toBeCloseTo(0.15);
@@ -933,7 +926,7 @@ describe('CombatPlayback bosses, enrage and retreat', () => {
 
   it('tracks enrage from snapshots and events and never cleanses it as a buff', () => {
     const enrage = { atMs: 2000, stacks: 0, stepMs: 1000, stepPercent: 0.1, maxStacks: 30 };
-    const pb = start([player(), boss({ enrage })], BOSS_PHASES);
+    const pb = start([player(), boss({ enrage })]);
     const unit = pb.unit('monster', 4)!;
     expect(enrageDisplay(unit.enrage, pb.elapsedMs)).toMatchObject({ state: 'soon', stacks: 0, multiplier: 1 });
     play(pb, [ev(1500, 'status', { dst: B, name: 'Rally' }), ev(2000, 'enrage', { src: B, amount: 1 })]);
@@ -948,7 +941,7 @@ describe('CombatPlayback bosses, enrage and retreat', () => {
   });
 
   it('builds an enrage clock from the event when no snapshot carried one', () => {
-    const pb = start([player(), boss()], BOSS_PHASES);
+    const pb = start([player(), boss()]);
     play(pb, [ev(1400, 'enrage', { src: B, amount: 1 })]);
     expect(pb.unit('monster', 4)!.enrage).toMatchObject({ atMs: 1400, stacks: 1 });
   });
@@ -957,7 +950,7 @@ describe('CombatPlayback bosses, enrage and retreat', () => {
     const add = monster({ pos: 1, enrage: { atMs: 1000, stacks: 0, stepMs: 1000, stepPercent: 0.1, maxStacks: 5 } });
     const late = boss({ pos: 7, enrage: { atMs: 9000, stacks: 0, stepMs: 1000, stepPercent: 0.1, maxStacks: 5 } });
     const early = boss({ enrage: { atMs: 5000, stacks: 0, stepMs: 1000, stepPercent: 0.1, maxStacks: 5 } });
-    const pb = start([player(), add, late, early], { bossPos: [4, 7], thresholds: [], phase: 0 });
+    const pb = start([player(), add, late, early]);
     expect(pb.enrageSource()?.key).toBe('monster:4');
     play(pb, [ev(1100, 'death', { dst: B })]);
     expect(pb.enrageSource()?.key).toBe('monster:7');

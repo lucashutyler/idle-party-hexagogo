@@ -46,7 +46,7 @@ const sharedComponents = {
         tier: {
           type: 'string',
           enum: ['trash', 'elite', 'boss', 'raid'],
-          description: 'Absent = trash. Boss/raid get a boss bar, a 180 s stalemate window, default enrage and can carry dungeon checkpoints. Never inferred from HP.',
+          description: 'Absent = trash. Boss/raid get a boss bar, a 180 s stalemate window and default enrage. Never inferred from HP.',
         },
         enrage: {
           type: 'object',
@@ -118,14 +118,6 @@ const sharedComponents = {
         },
         isBoss: { type: 'boolean', description: 'HUD badge only; boss behaviour comes from the monster tier' },
         rewards: { type: 'array', items: { $ref: '#/components/schemas/DungeonReward' } },
-        checkpoints: {
-          type: 'array',
-          items: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 1 },
-          example: [0.66, 0.33],
-          description: 'Boss-HP fractions in descending order. Only on floors whose encounters are explicit and place a boss/raid-tier monster. A wipe regroups the party at the last checkpoint reached.',
-        },
-        maxWipes: { type: 'integer', minimum: 0, maximum: 20, description: 'Regroups allowed on a checkpoint floor before the party is ejected (default 3)' },
-        checkpointRewardFraction: { type: 'number', minimum: 0, maximum: 1, description: 'Share of the boss xp/average gold paid per checkpoint reached, once per run (default 0.15)' },
       },
     },
     DungeonReward: {
@@ -424,7 +416,7 @@ export const adminSwaggerSpec = {
     { name: 'Overview', description: 'Server stats and content' },
     { name: 'Items', description: 'Item definition CRUD' },
     { name: 'Monsters', description: 'Monster definition CRUD' },
-    { name: 'Dungeons', description: 'Dungeon definition CRUD, including boss-floor checkpoints' },
+    { name: 'Dungeons', description: 'Dungeon definition CRUD' },
     { name: 'Zones', description: 'Zone definition CRUD' },
     { name: 'Skills', description: 'Skill definition CRUD and per-class slot schedules' },
     { name: 'World', description: 'World map tile CRUD' },
@@ -719,7 +711,7 @@ export const adminSwaggerSpec = {
         },
         responses: {
           200: { description: 'Dungeon saved, returns all dungeons' },
-          400: { description: 'Missing required fields, a malformed floor, or checkpoints/maxWipes/checkpointRewardFraction out of range' },
+          400: { description: 'Missing required fields or a malformed floor' },
         },
       },
       delete: {

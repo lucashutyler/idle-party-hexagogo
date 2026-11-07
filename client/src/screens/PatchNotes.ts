@@ -1,5 +1,14 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.07.1',
+    notes: [
+      'Dungeons are simpler: there are no more boss checkpoints, retries or saved progress. A wipe on any floor ends the run, and your party returns to the entrance room.',
+      'Leaving a dungeon ends the run, and you start from the first floor next time.',
+      'If anyone leaves or is removed from the party inside a dungeon, the run ends for everyone and the party returns to the entrance room. The game asks before you do this.',
+      'Accepting an invite from another party no longer stops the party you left, and party chat now tells those left behind when someone leaves.',
+    ],
+  },
+  {
     version: '2026.11.06.1',
     notes: [
       'Combat is slower and easier to follow. Knights now act about every 3.6 seconds, Archers every 2, Priests every 1.8, and Mages and Bards every 2.5. Enemies slow down too.',

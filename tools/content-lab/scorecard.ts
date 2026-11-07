@@ -153,9 +153,9 @@ function t6(oldB: Baseline, cur: Baseline): string[] {
     const of = oldFloors.get(`${o.dungeonId}|${o.comp}`);
     const nf = newFloors.get(`${o.dungeonId}|${o.comp}`);
     const flag = (n.forecast?.winPct ?? 0) + 5 < (o.clearPct ?? 0) ? 'WORSE' : '';
-    rows.push([o.dungeonName, o.comp, o.level, o.clearPct ?? '-', n.clearPct ?? '-', n.forecast?.winPct ?? '-', n.forecast?.firstTryPct ?? '-', `${of?.medianSec ?? '-'}>${nf?.medianSec ?? '-'}`, nf?.winPct ?? '-', flag]);
+    rows.push([o.dungeonName, o.comp, o.level, o.clearPct ?? '-', n.clearPct ?? '-', n.forecast?.winPct ?? '-', `${of?.medianSec ?? '-'}>${nf?.medianSec ?? '-'}`, nf?.winPct ?? '-', flag]);
   }
-  return ['## T6 Dungeons', table(['Dungeon', 'Comp', 'Lv', 'Old clear %', 'New single-run %', 'New forecast %', 'First try %', 'Boss median s', 'Boss fight win %', ''], rows)];
+  return ['## T6 Dungeons', table(['Dungeon', 'Comp', 'Lv', 'Old clear %', 'New single-run %', 'New forecast %', 'Boss median s', 'Boss fight win %', ''], rows)];
 }
 
 function rooms(oldB: Baseline, cur: Baseline): string[] {
@@ -209,8 +209,8 @@ function trialSweep(title: string, rows: { old: TrialSweepRow[]; cur: TrialSweep
   const compared = rows.cur.map(n => ({ n, o: oldBy.get(trialKey(n)) }));
   const worse = compared.filter(p => (p.n.forecastPct ?? 0) + 5 < (p.o?.clearPct ?? 0));
   const shown = all ? compared : worse;
-  const body = shown.map(({ n, o }) => [n.dungeonName, n.comp, n.level, o?.clearPct ?? '-', n.clearPct, Math.round(n.forecastPct ?? 0), Math.round(n.firstTryPct ?? 0), n.floorWins.map(v => Math.round(v ?? 0)).join('/'), `${o?.bossMedianSec ?? '-'}>${n.bossMedianSec ?? '-'}`]);
-  return [`## ${title}`, `- below old by more than 5 points: ${pct(worse.length, compared.length)}`, ...(body.length ? ['', table(['Dungeon', 'Party', 'Lv', 'Old clear', 'New single run', 'Forecast', 'First try', 'Floor wins', 'Boss s'], body)] : [])];
+  const body = shown.map(({ n, o }) => [n.dungeonName, n.comp, n.level, o?.clearPct ?? '-', n.clearPct, Math.round(n.forecastPct ?? 0), n.floorWins.map(v => Math.round(v ?? 0)).join('/'), `${o?.bossMedianSec ?? '-'}>${n.bossMedianSec ?? '-'}`]);
+  return [`## ${title}`, `- below old by more than 5 points: ${pct(worse.length, compared.length)}`, ...(body.length ? ['', table(['Dungeon', 'Party', 'Lv', 'Old clear', 'New single run', 'Forecast', 'Floor wins', 'Boss s'], body)] : [])];
 }
 
 function effectsSection(rows: readonly EffectSweepRow[]): string[] {

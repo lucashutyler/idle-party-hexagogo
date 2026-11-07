@@ -178,28 +178,3 @@ export function forecastAriaLabel(result: Pick<ForecastStats, 'winPct' | 'ci' | 
   const approx = isExactForecast(result) ? '' : 'about ';
   return `Win chance ${approx}${formatPct(result.winPct)}, ${label}`;
 }
-
-export interface DungeonResumePoint {
-  floorIndex: number;
-  phase: number;
-  wipes: number;
-}
-
-/** Reads the start point a dungeon forecast was computed from (`…dungeon:<id>:<floorIdx>:<phase>:<wipes>`). */
-export function parseDungeonResume(key: string | null | undefined): DungeonResumePoint | null {
-  if (!key) return null;
-  const segment = key.slice(key.lastIndexOf('|') + 1);
-  if (!segment.startsWith('dungeon:')) return null;
-  const parts = segment.split(':');
-  if (parts.length < 5) return null;
-  const [floorIndex, phase, wipes] = parts.slice(-3).map(p => Number(p));
-  if (![floorIndex, phase, wipes].every(n => Number.isInteger(n) && n >= 0)) return null;
-  return { floorIndex, phase, wipes };
-}
-
-/** "Resume: Floor 3 · Checkpoint 2"; null for a fresh start. */
-export function formatResumeMarker(point: Pick<DungeonResumePoint, 'floorIndex' | 'phase'> | null): string | null {
-  if (!point || (point.floorIndex <= 0 && point.phase <= 0)) return null;
-  const floor = `Floor ${point.floorIndex + 1}`;
-  return point.phase > 0 ? `Resume: ${floor} · Checkpoint ${point.phase}` : `Resume: ${floor}`;
-}
