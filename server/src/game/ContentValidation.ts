@@ -10,9 +10,6 @@ import {
 } from '@idle-party-rpg/shared';
 import type { RoomEntryRequirements } from '@idle-party-rpg/shared';
 import {
-  checkpointEncounterProblems,
-  checkpointEncounterWarnings,
-  floorCheckpointProblems,
   monsterScalingProblems,
 } from '../admin/contentChecks.js';
 import type { ContentSnapshot } from './VersionStore.js';
@@ -170,13 +167,8 @@ export function findContentProblems(snapshot: ContentSnapshot): string[] {
   }
 
   // --- Dungeons ---
-  const encountersById = new Map((snapshot.encounters ?? []).map(e => [e.id, e]));
-  const monstersById = new Map(snapshot.monsters.map(m => [m.id, m]));
   for (const dungeon of snapshot.dungeons ?? []) {
     dungeon.floors.forEach((floor, floorIndex) => {
-      const floorLabel = `Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber})`;
-      problems.push(...floorCheckpointProblems(floor, floorLabel));
-      problems.push(...checkpointEncounterProblems(floor, floorLabel, encountersById, monstersById));
       floor.encounterTable.forEach((entry, entryIndex) => {
         if (!encounterIds.has(entry.encounterId)) {
           problems.push(`Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber}) encounter table references unknown encounter '${entry.encounterId}' (index ${entryIndex}).`);
@@ -354,7 +346,7 @@ export function findContentProblems(snapshot: ContentSnapshot): string[] {
 
 const MAX_LISTED_IDS = 20;
 
-/** Advisory findings that don't block publishing (unauthored levels, tier hints, dungeon checkpoint caveats). */
+/** Advisory findings that don't block publishing (unauthored levels, tier hints). */
 export function findContentInfo(snapshot: ContentSnapshot): string[] {
   const info: string[] = [];
   const unleveled = snapshot.monsters.filter(m => !m.passive && !isAuthoredMonsterLevel(m.level)).map(m => m.id);
@@ -369,20 +361,6 @@ export function findContentInfo(snapshot: ContentSnapshot): string[] {
     if (suggested !== 'trash') {
       info.push(`Monster '${monster.id}' has no tier, but its HP is in the '${suggested}' range for its damage — consider tier '${suggested}' (tiers are never set automatically).`);
     }
-  }
-  const encountersById = new Map((snapshot.encounters ?? []).map(e => [e.id, e]));
-  const monstersById = new Map(snapshot.monsters.map(m => [m.id, m]));
-  for (const dungeon of snapshot.dungeons ?? []) {
-    dungeon.floors.forEach((floor, floorIndex) => {
-      const floorLabel = `Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber})`;
-      info.push(...checkpointEncounterWarnings(floor, floorLabel, encountersById, monstersById));
-      const hasCheckpoints = Array.isArray(floor.checkpoints) && floor.checkpoints.length > 0;
-      if (hasCheckpoints) return;
-      const inert = (['maxWipes', 'checkpointRewardFraction'] as const).filter(key => floor[key] !== undefined);
-      if (inert.length > 0) {
-        info.push(`${floorLabel} sets ${inert.join(' and ')} without checkpoints — they have no effect.`);
-      }
-    });
   }
   return info;
 }

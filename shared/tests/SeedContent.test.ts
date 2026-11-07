@@ -59,12 +59,10 @@ describe('seed levels, tiers and the Chieftain', () => {
     expect(chief.enrage).toEqual({ afterSeconds: 480 });
   });
 
-  it('ends the seed dungeon on an explicit Chieftain floor with checkpoints', () => {
+  it('ends the seed dungeon on an explicit Chieftain floor', () => {
     const floors = SEED_DUNGEONS.crystal_caves_trial.floors;
     const boss = floors[floors.length - 1];
     expect(boss.isBoss).toBe(true);
-    expect(boss.checkpoints).toEqual([0.66, 0.33]);
-    expect(boss.maxWipes).toBe(3);
     expect(boss.encounterTable).toEqual([{ encounterId: 'goblin_chieftain_court', weight: 1 }]);
     const court = SEED_ENCOUNTERS.goblin_chieftain_court;
     expect(court.type).toBe('explicit');
@@ -112,12 +110,11 @@ describe('dev world seed', () => {
     }
   });
 
-  it('ships a checkpointed raid linked from one Forgotten Vale room', () => {
+  it('ships a raid linked from one Forgotten Vale room', () => {
     expect(world.dungeons.map(d => d.id)).toEqual([DEV_RAID_DUNGEON_ID]);
     const raid = world.dungeons[0];
     const bossFloor = raid.floors[raid.floors.length - 1];
-    expect(bossFloor.checkpoints).toEqual([0.8, 0.6, 0.4, 0.2]);
-    expect(bossFloor.maxWipes).toBe(3);
+    expect(bossFloor.isBoss).toBe(true);
     const bossIds = bossFloor.encounterTable.flatMap(e => encounters.get(e.encounterId)!.placements!.map(p => p.monsterId));
     expect(bossIds.map(id => [monsters.get(id)!.tier, monsters.get(id)!.level])).toEqual([['raid', 25]]);
     for (const floor of raid.floors) for (const e of floor.encounterTable) expect(encounters.get(e.encounterId)?.type).toBe('explicit');

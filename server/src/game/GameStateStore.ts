@@ -1,4 +1,4 @@
-import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription, DungeonRunState, DungeonCheckpoint, CombatPrefs, AwayLedger } from '@idle-party-rpg/shared';
+import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription, DungeonRunState, CombatPrefs, AwayLedger } from '@idle-party-rpg/shared';
 
 /**
  * Serializable snapshot of a player's persistent state.
@@ -48,12 +48,10 @@ export interface PlayerSaveData {
   completedQuests?: CompletedQuestEntry[];
   /** ISO timestamp of last completion per weekly-repeatable quest ID. */
   weeklyCompletions?: Record<string, string>;
-  /** Active dungeon run (floor progress, entrance, checkpoint, wipes), restored across restarts. */
+  /** Active dungeon run (floor index, entrance), restored across restarts. */
   dungeonRun?: DungeonRunState;
   /** Dungeon IDs this player has cleared at least once (gates first-clear rewards). */
   clearedDungeons?: string[];
-  /** Resume points stored on leaving a checkpoint floor, by dungeon id. */
-  dungeonCheckpoints?: Record<string, DungeonCheckpoint>;
   /** Lifetime kills per monster definition id (kill mastery). */
   monsterKills?: Record<string, number>;
   /** Absent → DEFAULT_COMBAT_PREFS. */

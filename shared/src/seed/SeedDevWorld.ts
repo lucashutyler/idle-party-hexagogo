@@ -649,7 +649,7 @@ interface DevRaidContent {
   dungeon: DungeonDefinition;
 }
 
-/** A raid for a full party of 5 at level 25: a short antechamber, then a checkpointed ~45-minute boss. */
+/** A raid for a full party of 5 at level 25: a short antechamber, then a ~45-minute boss. */
 function devRaidContent(): DevRaidContent {
   const king = devMonster({
     id: `${DEV_ZONE_PREFIX}drowned_king`, name: 'The Drowned King', level: DEV_RAID_LEVEL, tier: 'raid', damageType: 'physical', autoShare: 0.66,
@@ -673,13 +673,10 @@ function devRaidContent(): DevRaidContent {
   const dungeon: DungeonDefinition = {
     id: DEV_RAID_DUNGEON_ID,
     name: 'The Sunken Throne',
-    description: 'A drowned hall beneath the Forgotten Vale. Built for a full party of five around level 25; falling on the throne floor regroups you at the last checkpoint.',
+    description: 'A drowned hall beneath the Forgotten Vale. Built for a full party of five around level 25.',
     floors: [
       { floorNumber: 1, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: antechamber.id, weight: 1 }] },
-      {
-        floorNumber: 2, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: throneRoom.id, weight: 1 }],
-        isBoss: true, checkpoints: [0.8, 0.6, 0.4, 0.2], maxWipes: 3,
-      },
+      { floorNumber: 2, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: throneRoom.id, weight: 1 }], isBoss: true },
     ],
     entryRequirements: { minLevel: 20, maxPartySize: 5 },
   };

@@ -240,8 +240,8 @@ function fitEnrage(config: ReworkConfig, places: readonly Place[], reworked: Con
     const times = enrageTimes(places, trials, reworked, id);
     if (!times.length) continue;
     const afterSeconds = Math.max(ENRAGE_MIN_SECONDS, Math.ceil(((Math.max(...times) / COMBAT_PACE.clock) * factor) / 10) * 10);
-    const hasCheckpoints = Object.values<any>(reworked.dungeons).some(d => (d.floors ?? []).some((f: any) => f.isBoss && tableIds(reworked, f.encounterTable).includes(id)));
-    config.enrage[id] = { afterSeconds, ...(hasCheckpoints ? config.enrageSteps : {}) };
+    const onBossFloor = Object.values<any>(reworked.dungeons).some(d => (d.floors ?? []).some((f: any) => f.isBoss && tableIds(reworked, f.encounterTable).includes(id)));
+    config.enrage[id] = { afterSeconds, ...(onBossFloor ? config.enrageSteps : {}) };
   }
 }
 

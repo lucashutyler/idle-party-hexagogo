@@ -95,11 +95,11 @@ describe('retreats, dungeons, mastery, close calls', () => {
 
   it('updates an in-progress dungeon run instead of duplicating it', () => {
     let l = fresh();
-    l = recordAwayDungeon(l, { dungeonId: 'd', name: 'D', outcome: 'in_progress', wipes: 0 });
-    l = recordAwayDungeon(l, { dungeonId: 'd', name: 'D', outcome: 'cleared', wipes: 1, checkpoint: 2 });
-    l = recordAwayDungeon(l, { dungeonId: 'd', name: 'D', outcome: 'in_progress', wipes: 0 });
+    l = recordAwayDungeon(l, { dungeonId: 'd', name: 'D', outcome: 'in_progress' });
+    l = recordAwayDungeon(l, { dungeonId: 'd', name: 'D', outcome: 'cleared' });
+    l = recordAwayDungeon(l, { dungeonId: 'd', name: 'D', outcome: 'in_progress' });
     expect(l.dungeons.map(d => d.outcome)).toEqual(['cleared', 'in_progress']);
-    for (let i = 0; i < AWAY_MAX_DUNGEONS + 2; i++) l = recordAwayDungeon(l, { dungeonId: `x${i}`, name: 'X', outcome: 'left', wipes: 0 });
+    for (let i = 0; i < AWAY_MAX_DUNGEONS + 2; i++) l = recordAwayDungeon(l, { dungeonId: `x${i}`, name: 'X', outcome: 'left' });
     expect(l.dungeons).toHaveLength(AWAY_MAX_DUNGEONS);
   });
 
@@ -141,7 +141,7 @@ describe('moments', () => {
 
   it('keeps moments in time order and ranks the top ones by priority', () => {
     let l = fresh();
-    const kinds: AwayMomentKind[] = ['mastery', 'level_up', 'rare_item', 'checkpoint'];
+    const kinds: AwayMomentKind[] = ['mastery', 'level_up', 'rare_item', 'run_ended'];
     kinds.forEach((kind, i) => { l = addAwayMoment(l, { at: 50 - i, kind, text: kind }); });
     expect(l.moments.map(m => m.at)).toEqual([47, 48, 49, 50]);
     expect(topAwayMoments(l, 2).map(m => m.kind)).toEqual(['level_up', 'rare_item']);
@@ -153,7 +153,8 @@ describe('recap style', () => {
     const l = recordAwayBattle(fresh(0), { won: true });
     expect(awayRecapStyle(l, 12 * MIN)).toBe('toast');
     expect(awayRecapStyle(l, 45 * MIN)).toBe('modal');
-    expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'checkpoint', text: 'cp' }), 12 * MIN)).toBe('modal');
+    expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'eject', text: 'e' }), 12 * MIN)).toBe('modal');
+    expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'run_ended', text: 'e' }), 12 * MIN)).toBe('modal');
     expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'relocate', text: 'r' }), 12 * MIN)).toBe('toast');
   });
 });

@@ -279,10 +279,9 @@ const trial: DungeonDefinition = {
 
 function result(overrides: Partial<ForecastResult> = {}): ForecastResult {
   return {
-    key: 'v|1|pk1|dungeon:trial:2:1:1', partyKey: 'pk1', sims: 40, wins: 28, losses: 12, stalemates: 0,
+    key: 'v|1|pk1|dungeon:trial:0', partyKey: 'pk1', sims: 40, wins: 28, losses: 12, stalemates: 0,
     winPct: 70, ci: [55, 82], medianMs: 12 * 60_000, p90Ms: null, atMs: 0, killEtaMs: null, reasons: [],
-    floors: [{ floor: 1, winPct: 100 }, { floor: 2, winPct: 100 }, { floor: 3, winPct: 70, boss: true, attempts: 2 }],
-    firstTryPct: 40,
+    floors: [{ floor: 1, winPct: 100 }, { floor: 2, winPct: 100 }, { floor: 3, winPct: 70, boss: true }],
     ...overrides,
   };
 }
@@ -355,58 +354,56 @@ describe('DungeonEntryPopup forecast and leader rules', () => {
     expect(card.dataset.state).toBe('ready');
     expect(card.querySelector('.dungeon-entry-forecast-verdict')!.textContent).toBe('Likely');
     expect(card.querySelector('.dungeon-entry-forecast-headline')!.textContent).toBe('Clears ~7 in 10 runs · ~12 min each');
-    expect(card.textContent).toContain('Boss beaten on the first try: 40 %');
+    expect(card.textContent).not.toContain('first try');
     expect(card.textContent).toContain('Win chance ~70\u202f%, likely 55–82\u202f%');
     expect(card.querySelector('.forecast-foot')!.textContent).toBe('Estimate from 40 simulated runs');
     popup.hide();
   });
 
-  it('marks the floor strip and the resume point', () => {
+  it('marks the floor strip', () => {
     const client = fakeClient(message(result()));
     const popup = new DungeonEntryPopup(client as unknown as GameClient);
     popup.show(trial, 1, 2);
     const pips = [...document.querySelectorAll<HTMLElement>('.dungeon-floor-pip')];
-    expect(pips.map(p => p.dataset.passed ?? '')).toEqual(['true', 'true', '']);
     expect(pips[2].dataset.boss).toBe('true');
-    expect(pips[2].dataset.checkpoint).toBe('true');
-    expect(pips[2].dataset.resume).toBe('true');
+    expect(pips[2].dataset.checkpoint).toBeUndefined();
+    expect(pips[2].getAttribute('aria-label')).toBe('Floor 3, boss: wins 70\u202f%');
     expect(pips[2].dataset.band).toBe('1');
-    expect(document.querySelector('.dungeon-entry-resume')!.textContent).toContain('Resume: Floor 3 · Checkpoint 1 · 2 retries left');
+    expect(pips.map(p => p.querySelector('.dungeon-floor-glyph')!.textContent)).toEqual(['1', '2', '♛']);
     popup.hide();
   });
 
-  it('keeps cleared floors plain when a resumed forecast only lists the boss floor', () => {
-    const client = fakeClient(message(result({ floors: [{ floor: 3, winPct: 0, boss: true, attempts: 3 }] })));
+  it('shows the floors the forecast lists and leaves the others plain', () => {
+    const client = fakeClient(message(result({ floors: [{ floor: 3, winPct: 0, boss: true }] })));
     const popup = new DungeonEntryPopup(client as unknown as GameClient);
     popup.show(trial, 1, 2);
     const pips = [...document.querySelectorAll<HTMLElement>('.dungeon-floor-pip')];
     expect(pips.map(p => p.dataset.boss ?? '')).toEqual(['', '', 'true']);
     expect(pips.map(p => p.dataset.band ?? '')).toEqual(['', '', '3']);
-    expect(pips.map(p => p.querySelector('.dungeon-floor-glyph')!.textContent)).toEqual(['1', '2', '♛']);
     popup.hide();
   });
 
-  it('shows no resume marker for a fresh start', () => {
-    const client = fakeClient(message(result({ key: 'v|1|pk1|dungeon:trial:0:0:0' })));
+  it('never promises a resume, even from a forecast key with a later start', () => {
+    const client = fakeClient(message(result({ key: 'v|1|pk1|dungeon:trial:2' })));
     const popup = new DungeonEntryPopup(client as unknown as GameClient);
     popup.show(trial, 1, 2);
-    expect(document.querySelector('.dungeon-entry-resume')).toBeNull();
+    expect(document.querySelector('.dungeon-entry-modal')!.textContent).not.toContain('Resume');
     expect(document.querySelector('.dungeon-floor-pip[data-resume]')).toBeNull();
+    expect(document.querySelector('.dungeon-floor-pip[data-passed]')).toBeNull();
     popup.hide();
   });
 
-  it('explains checkpoint regroups when a floor has checkpoints', () => {
+  it('warns that a defeat ends the run, whatever old fields a stored floor still carries', () => {
+    const warning = 'If your party is defeated on any floor, the run ends and you\'ll be sent back to this entrance.';
     const popup = new DungeonEntryPopup(fakeClient() as unknown as GameClient);
     popup.show(trial, 1, 2);
-    expect(document.querySelector('.dungeon-entry-warning')!.textContent).toBe(
-      'Falling on the boss floor regroups your party at its last checkpoint (up to 3 times). Falling anywhere else sends you back to this entrance.',
-    );
+    expect(document.querySelector('.dungeon-entry-warning')!.textContent).toBe(warning);
     popup.show({ ...trial, floors: [trial.floors[0]] } as DungeonDefinition, 1, 2);
-    expect(document.querySelector('.dungeon-entry-warning')!.textContent).toBe('If your party is defeated, you\'ll be sent back to this entrance.');
+    expect(document.querySelector('.dungeon-entry-warning')!.textContent).toBe(warning);
     popup.hide();
   });
 
-  it('is read-only for members, with a note on whose progress counts', () => {
+  it('is read-only for members, with a note on who can enter', () => {
     const client = fakeClient();
     const popup = new DungeonEntryPopup(client as unknown as GameClient);
     popup.show(trial, 1, 2, { canEnter: false });
@@ -414,7 +411,8 @@ describe('DungeonEntryPopup forecast and leader rules', () => {
     expect(enter.disabled).toBe(true);
     enter.click();
     expect(client.sendEnterDungeon).not.toHaveBeenCalled();
-    expect(document.querySelector('.dungeon-entry-note')!.textContent).toBe('Your party leader\'s progress decides where you start.');
+    expect(document.querySelector('.dungeon-entry-note')!.textContent).toBe('Only the party owner or a leader can enter.');
+    expect(enter.title).toBe('Only the party owner or a leader can enter.');
     popup.hide();
   });
 

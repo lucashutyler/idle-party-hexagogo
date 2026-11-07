@@ -42,7 +42,6 @@ import type { SkillBarLayout, SkillBarState } from '../combat/CombatSkillBar';
 import { UnitCard } from '../combat/CombatUnitCard';
 import type { CardIdentity } from '../combat/CombatUnitCard';
 import {
-  bossOpening,
   enrageSlotText,
   escapeHtml,
   formatAmount,
@@ -52,12 +51,10 @@ import {
   hasToughTier,
   interruptStampText,
   isBossOrRaid,
-  leaveDungeonWarning,
+  LEAVE_DUNGEON_WARNING,
   masteryLine,
   monsterLevelBadge,
   pipsKey,
-  retriesLeft,
-  retriesText,
   statusPips,
   TIER_INFO,
 } from '../combat/CombatFormat';
@@ -74,8 +71,7 @@ const SHORT_SCREEN_QUERY = '(max-height: 480px)';
 const BOSS_HP_EPSILON = 0.005;
 const ANNOUNCE_DELAY_MS = 60;
 const LIVE_FORECASTS_KEPT = 4;
-const ANNOUNCED_LOG_TYPES = new Set(['retreat', 'checkpoint']);
-const BOSS_STARTS_KEPT = 3;
+const ANNOUNCED_LOG_TYPES = new Set(['retreat']);
 const BACKGROUND_PLACEHOLDER = { w: 640, h: 360 };
 /** A side this small drops its empty depth tracks and scales its cards up. */
 const ROOMY_SIDE_UNITS = 2;
@@ -103,10 +99,6 @@ export function laneTracks(positions: readonly number[]): string[] {
   const { rows } = usedGridTracks(positions);
   const anyUsed = rows.includes(true);
   return rows.map(used => (used || !anyUsed ? LANE_USED : LANE_EMPTY));
-}
-
-function bossRunKey(dungeon: { dungeonId: string; floor: number }): string {
-  return `${dungeon.dungeonId}:${dungeon.floor}`;
 }
 
 /** The header stands in for the log ticker only on short screens, where the ticker is hidden; the chat sheet hides the log too. */
@@ -167,9 +159,7 @@ export class CombatScreen implements Screen {
   private bossBar!: HTMLElement;
   private bossName!: HTMLElement;
   private bossTrack!: HTMLElement;
-  private bossTicks!: HTMLElement;
   private bossPct!: HTMLElement;
-  private bossRetries!: HTMLElement;
   private bossEnrage!: HTMLElement;
   private announcer!: HTMLElement;
   private skillBarRoot!: HTMLElement;
@@ -211,7 +201,6 @@ export class CombatScreen implements Screen {
   private announceQueue: string[] = [];
   private announceTimer?: ReturnType<typeof setTimeout>;
   private lastJournalSeq = 0;
-  private bossStarts: { battleId: number; run: string; wipes: number }[] = [];
   private headerLatch: { battleId: number; state: ServerStateMessage } | null = null;
   private statusFinished = false;
   private statusBattleId: number | null = null;
@@ -295,12 +284,9 @@ export class CombatScreen implements Screen {
         <div class="combat-boss-bar" style="display:none" data-enrage="off">
           <span class="combat-boss-name"></span>
           <div class="combat-boss-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
-            <div class="combat-boss-skipped"></div>
             <div class="combat-boss-fill"></div>
-            <div class="combat-boss-ticks"></div>
             <span class="combat-boss-pct"></span>
           </div>
-          <span class="combat-boss-retries"></span>
           <span class="combat-boss-enrage" style="display:none"></span>
         </div>
         <svg class="combat-telegraph" aria-hidden="true"></svg>
@@ -335,9 +321,7 @@ export class CombatScreen implements Screen {
     this.bossBar = this.container.querySelector('.combat-boss-bar')!;
     this.bossName = this.container.querySelector('.combat-boss-name')!;
     this.bossTrack = this.container.querySelector('.combat-boss-track')!;
-    this.bossTicks = this.container.querySelector('.combat-boss-ticks')!;
     this.bossPct = this.container.querySelector('.combat-boss-pct')!;
-    this.bossRetries = this.container.querySelector('.combat-boss-retries')!;
     this.bossEnrage = this.container.querySelector('.combat-boss-enrage')!;
     this.announcer = this.container.querySelector('.combat-announcer')!;
     this.stage = this.container.querySelector('.combat-stage')!;
@@ -374,9 +358,8 @@ export class CombatScreen implements Screen {
         this.showRunHint();
         return;
       }
-      const warning = leaveDungeonWarning(this.lastState?.dungeon, this.fightUnderWay());
-      if (warning) this.confirmLeaveDungeon(warning);
-      else this.gameClient.sendLeaveDungeon();
+      // The header keeps showing the run while its last result is on screen.
+      if (this.lastState?.dungeon) this.confirmLeaveDungeon();
     });
     this.forecastBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -689,11 +672,13 @@ export class CombatScreen implements Screen {
     const walking = state.battle.visual === 'none' && state.battle.state === 'result';
     const nextRoom = state.party?.path?.[0];
     const target = walking ? state.party : nextRoom;
+    const fought = this.headerLatch?.battleId === this.playback.battleId ? this.headerLatch.state.dungeon : state.dungeon;
     const status = battleStatus({
       visual: state.battle.visual,
       hasFight: this.playback.battleId !== null,
       result: this.playback.result,
-      inDungeon: !!state.dungeon,
+      inDungeon: !!fought,
+      lastFloor: !!fought && fought.floor >= fought.totalFloors,
       walking,
       hasDestination: !!nextRoom,
       roomName: target ? discoveredRoomName(state, this.worldCache, target.col, target.row) : null,
@@ -865,13 +850,6 @@ export class CombatScreen implements Screen {
           this.showBanner('DEFEAT', 'defeat', 1400);
         }
         break;
-      case 'phase': {
-        const total = this.playback.bossPhases?.thresholds.length ?? 0;
-        const n = ev.amount ?? 0;
-        this.showBanner('CHECKPOINT!', 'checkpoint', 1300, total > 0 ? `Checkpoint ${n} of ${total}` : `Checkpoint ${n}`);
-        this.fx.sparkles(this.bossBarCentre(), 10);
-        break;
-      }
       case 'enrage': {
         if ((ev.amount ?? 0) !== 1) break;
         const unit = srcKey ? this.playback.unitByKey(srcKey) : undefined;
@@ -966,49 +944,14 @@ export class CombatScreen implements Screen {
     return { x: this.stage.clientWidth / 2, y: this.stage.clientHeight / 2, w: 0, h: 0 };
   }
 
-  private bossBarCentre(): FxPoint {
-    const stageRect = this.stage.getBoundingClientRect();
-    const r = this.bossTrack.getBoundingClientRect();
-    if (r.width === 0) return this.stageCentre();
-    return { x: r.left + r.width / 2 - stageRect.left, y: r.top + r.height / 2 - stageRect.top, w: r.width, h: r.height };
-  }
-
   private showStartBanner(): void {
-    const boss = this.playback.bossPhases;
-    if (!boss) {
-      this.showBanner('FIGHT!', 'fight', 950);
-      return;
-    }
-    const resumed = boss.resumedFromPhase ?? 0;
-    const d = this.lastState?.dungeon;
-    const battleId = this.playback.battleId;
-    const run = d ? bossRunKey(d) : '';
-    const wipes = d?.wipes ?? 0;
-    const previous = [...this.bossStarts].reverse().find(s => s.battleId !== battleId && s.run === run);
-    if (d && battleId !== null) this.rememberBossStart(battleId, run, wipes);
-    const left = retriesLeft(d?.wipes, d?.maxWipes);
-    const retries = left !== null ? ` · ${retriesText(left)}` : '';
-    switch (bossOpening(resumed, wipes, previous?.wipes ?? null)) {
-      case 'regroup':
-        this.showBanner('REGROUP', 'regroup', 1400, `${resumed > 0 ? `Checkpoint ${resumed}` : 'Another attempt'}${retries}`);
-        break;
-      case 'resume':
-        this.showBanner('BOSS FIGHT!', 'boss', 1300, `From checkpoint ${resumed}${retries}`);
-        break;
-      default:
-        this.showBanner('BOSS FIGHT!', 'boss', 1300);
-    }
-  }
-
-  private rememberBossStart(battleId: number, run: string, wipes: number): void {
-    this.bossStarts = this.bossStarts.filter(s => s.battleId !== battleId);
-    this.bossStarts.push({ battleId, run, wipes });
-    if (this.bossStarts.length > BOSS_STARTS_KEPT) this.bossStarts.shift();
+    if (this.playback.bossPositions.length > 0) this.showBanner('BOSS FIGHT!', 'boss', 1300);
+    else this.showBanner('FIGHT!', 'fight', 950);
   }
 
   /** Routine fights loop every few seconds, so only these get the loud banners; the status chip covers the rest. */
   private bigFight(): boolean {
-    return this.toughFight || !!this.playback.bossPhases;
+    return this.toughFight || this.playback.bossPositions.length > 0;
   }
 
   private showBanner(text: string, tone: BannerTone, holdMs: number, sub?: string): void {
@@ -1046,39 +989,28 @@ export class CombatScreen implements Screen {
   }
 
   private refreshBossBar(): void {
-    const boss = this.playback.bossPhases;
-    const bossUnits = boss ? boss.bossPos.map(pos => this.playback.statics(unitKey('monster', pos))).filter((s): s is UnitStatics => !!s) : [];
+    const positions = this.playback.bossPositions;
+    const hasBoss = positions.length > 0;
+    const bossUnits = positions.map(pos => this.playback.statics(unitKey('monster', pos))).filter((s): s is UnitStatics => !!s);
     const name = bossUnits[0]?.name ?? '';
-    const key = boss
-      ? `${this.playback.battleId}|${boss.thresholds.join(',')}|${boss.resumedFromPhase ?? 0}|${name}|${bossUnits.length}`
-      : '';
-    this.stage.classList.toggle('boss-fight', !!boss);
+    const key = hasBoss ? `${this.playback.battleId}|${name}|${bossUnits.length}` : '';
+    this.stage.classList.toggle('boss-fight', hasBoss);
     if (key === this.bossStructureKey) return;
     this.bossStructureKey = key;
     this.bossHpShown = -1;
     this.bossTextKey = '';
-    if (!boss) {
+    if (!hasBoss) {
       this.bossBar.style.display = 'none';
       this.centresDirty = true;
       return;
     }
     this.bossBar.style.display = '';
-    const d = this.lastState?.dungeon;
-    const battleId = this.playback.battleId;
-    if (d && battleId !== null && !this.bossStarts.some(s => s.battleId === battleId)) {
-      this.rememberBossStart(battleId, bossRunKey(d), d.wipes ?? 0);
-    }
     const tier = bossUnits.find(s => isBossOrRaid(s.tier))?.tier;
     if (tier) this.bossBar.dataset.tier = tier;
     else delete this.bossBar.dataset.tier;
     const label = bossUnits.length > 1 ? `${name} +${bossUnits.length - 1}` : name;
     this.bossName.textContent = label;
     this.bossName.title = label;
-    const resumedAt = (boss.resumedFromPhase ?? 0) > 0 ? boss.thresholds[(boss.resumedFromPhase ?? 0) - 1] : undefined;
-    this.bossTrack.style.setProperty('--skipped', resumedAt !== undefined ? String(1 - resumedAt) : '0');
-    setHtml(this.bossTicks, boss.thresholds
-      .map((t, i) => `<i class="combat-boss-tick" style="--at:${t.toFixed(4)}" data-checkpoint="${i + 1}" title="Checkpoint ${i + 1}"><b aria-hidden="true">🚩</b></i>`)
-      .join(''));
     this.centresDirty = true;
   }
 
@@ -1092,33 +1024,18 @@ export class CombatScreen implements Screen {
   }
 
   private updateBossText(): void {
-    const boss = this.playback.bossPhases;
-    if (!boss || !this.bossStructureKey) return;
+    if (!this.bossStructureKey) return;
     const frac = Math.max(0, this.bossHpShown);
     const pct = frac > 0 ? Math.max(1, Math.ceil(frac * 100)) : 0;
-    const d = this.lastState?.dungeon;
-    const left = d?.checkpoints?.length ? retriesLeft(d.wipes, d.maxWipes) : null;
     const enrage = enrageDisplay(this.playback.enrageSource()?.enrage, this.playback.elapsedMs);
     const enrageText = enrage ? enrageSlotText(enrage) : '';
-    const key = `${pct}|${boss.phase}|${left}|${d?.maxWipes}|${enrageText}|${enrage?.state}`;
+    const key = `${pct}|${enrageText}|${enrage?.state}`;
     if (key === this.bossTextKey) return;
     this.bossTextKey = key;
 
     this.bossPct.textContent = `${pct}%`;
     this.bossTrack.setAttribute('aria-valuenow', String(pct));
-    this.bossTrack.setAttribute('aria-label', `Boss health ${pct}%, checkpoint ${boss.phase} of ${boss.thresholds.length}`);
-    this.bossTicks.querySelectorAll<HTMLElement>('.combat-boss-tick').forEach((tick) => {
-      tick.classList.toggle('reached', Number(tick.dataset.checkpoint) <= boss.phase);
-    });
-
-    if (left === null || !d?.maxWipes) {
-      this.bossRetries.style.display = 'none';
-    } else {
-      this.bossRetries.style.display = '';
-      setHtml(this.bossRetries, Array.from({ length: d.maxWipes }, (_, i) => `<i class="${i < left ? 'left' : 'used'}"></i>`).join(''));
-      this.bossRetries.title = retriesText(left);
-      this.bossRetries.setAttribute('aria-label', retriesText(left));
-    }
+    this.bossTrack.setAttribute('aria-label', `Boss health ${pct}%`);
 
     this.bossBar.dataset.enrage = enrage?.state === 'on' ? 'on' : enrage?.state === 'soon' ? 'soon' : 'off';
     if (!enrage) {
@@ -1442,6 +1359,7 @@ export class CombatScreen implements Screen {
   }
 
   private updateHeader(latest: ServerStateMessage): void {
+    if (!latest.dungeon) this.closeLeaveConfirm();
     const state = this.headerSource(latest);
     const d = state.dungeon;
     if (d) {
@@ -1508,22 +1426,14 @@ export class CombatScreen implements Screen {
     this.runHint.textContent = hint;
   }
 
-  /** The server's mid-attempt rule: an undecided fight that has started. */
-  private fightUnderWay(): boolean {
-    return this.lastState?.battle.visual === 'fighting'
-      && this.playback.battleId !== null
-      && !this.playback.finished
-      && this.playback.elapsedMs > 0;
-  }
-
-  private confirmLeaveDungeon(message: string): void {
+  private confirmLeaveDungeon(): void {
     this.closeLeaveConfirm();
     const overlay = document.createElement('div');
     overlay.className = 'item-popup-overlay combat-leave-confirm';
     overlay.innerHTML = `
       <div class="item-popup" role="alertdialog" aria-modal="true" aria-labelledby="combat-leave-confirm-title">
         <div class="item-popup-name" id="combat-leave-confirm-title">Leave the dungeon?</div>
-        <div class="item-popup-stats">${escapeHtml(message)}</div>
+        <div class="item-popup-stats">${escapeHtml(LEAVE_DUNGEON_WARNING)}</div>
         <div class="item-popup-actions">
           <button type="button" class="item-popup-btn item-popup-btn-danger combat-leave-confirm-yes">Leave</button>
           <button type="button" class="item-popup-btn item-popup-btn-secondary combat-leave-confirm-no">Stay</button>

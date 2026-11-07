@@ -46,7 +46,7 @@ export interface TrialSweepRow {
   level: number;
   minLevel: number;
   label?: string;
-  /** Sequential floors, no regroups. */
+  /** Sequential floors. */
   clearPct: number;
   medianRunSec: number | null;
   bossMedianSec: number | null;
@@ -55,7 +55,6 @@ export interface TrialSweepRow {
   floorSecs: (number | null)[];
   /** New engine only. */
   forecastPct?: number;
-  firstTryPct?: number;
 }
 
 /** What a boss's enrage and a monster's skills are worth: the same fight with each switched off. */
@@ -181,7 +180,6 @@ function trialRow(ctx: LabContext, engine: EngineAdapter, players: any[], floors
       { key: `${ctx.seed}|${dungeon.id}|${comp}|${level}`, maxSims: opts.forecastSims, minSims: opts.forecastSims },
     );
     row.forecastPct = forecast.winPct;
-    row.firstTryPct = forecast.firstTryPct;
   }
   return row;
 }

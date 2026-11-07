@@ -313,6 +313,8 @@ export class GameLoop {
   rebuildGridAndRelocate(): number {
     this.grids.rebuild();
     this.playerManager.partyBattles.refreshAllPartyTiles(this.grids);
-    return this.playerManager.relocateDisplacedParties(this.grids, this.contentStore);
+    const relocated = this.playerManager.relocateDisplacedParties(this.grids, this.contentStore);
+    this.playerManager.partyBattles.endOrphanedRuns();
+    return relocated;
   }
 }

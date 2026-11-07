@@ -1,6 +1,5 @@
 import { OFFLINE_NOTICE, type GameClient } from '../network/GameClient';
 import type { DungeonDefinition, ForecastResult, ServerForecastMessage, ServerStateMessage } from '@idle-party-rpg/shared';
-import { floorCheckpoints, floorMaxWipes } from '@idle-party-rpg/shared';
 import { dungeonItemName, previewDungeonEntry } from './DungeonEntryCheck';
 import { renderForecastRing } from './ForecastChip';
 import { escapeHtml } from './ItemIcon';
@@ -13,19 +12,18 @@ import {
   forecastVerdict,
   formatPct,
   forecastRangeLine,
-  formatResumeMarker,
   isForecastStale,
-  parseDungeonResume,
 } from '../combat/ForecastFormat';
-import type { DungeonResumePoint } from '../combat/ForecastFormat';
 
 const ANSWER_TIMEOUT_MS = 5000;
 const NO_ANSWER_MESSAGE = 'No answer from the server. Please try again.';
 const HENCHMEN_WAIT_MESSAGE = 'Your henchmen will wait at the entrance until you return.';
 const BLOCKED_LINE_ID = 'dungeon-entry-blocked';
+const DEFEAT_WARNING = 'If your party is defeated on any floor, the run ends and you\'ll be sent back to this entrance.';
+const LEADERS_ONLY_MESSAGE = 'Only the party owner or a leader can enter.';
 
 export interface DungeonEntryOptions {
-  /** False for plain members: the popup is read-only and explains whose progress counts. */
+  /** False for plain members: the popup is read-only and says who can enter. */
   canEnter?: boolean;
 }
 
@@ -40,8 +38,8 @@ type ForecastView = { message: ServerForecastMessage; stale: boolean } | 'loadin
 
 /**
  * Confirmation popup for entering a dungeon: flavor, requirements, and a run forecast with a floor
- * strip and resume marker. Enter is disabled with a visible reason when the party can't enter, and a
- * server refusal shows inline. See docs/architecture/client.md.
+ * strip. Enter is disabled with a visible reason when the party can't enter, and a server refusal
+ * shows inline. See docs/architecture/client.md.
  */
 export class DungeonEntryPopup {
   private overlay: HTMLElement;
@@ -195,7 +193,7 @@ export class DungeonEntryPopup {
       : '';
     const leaderNote = canEnter
       ? ''
-      : '<div class="dungeon-entry-note">Your party leader\'s progress decides where you start.</div>';
+      : `<div class="dungeon-entry-note">${LEADERS_ONLY_MESSAGE}</div>`;
     return `
       <div class="dungeon-entry-modal" role="dialog" aria-modal="true" aria-labelledby="dungeon-entry-title">
         <div class="dungeon-entry-header">
@@ -207,13 +205,13 @@ export class DungeonEntryPopup {
           <div class="dungeon-entry-meta">${floors} floor${floors === 1 ? '' : 's'} · clear the final floor to complete the run</div>
           <div class="dungeon-entry-forecast" data-state="loading" aria-live="polite"></div>
           <div class="dungeon-entry-reqs-slot"></div>
-          <div class="dungeon-entry-warning">${this.warningText(dungeon)}</div>
+          <div class="dungeon-entry-warning">${DEFEAT_WARNING}</div>
           ${leaderNote}
         </div>
         <div class="dungeon-entry-foot">
           <div class="dungeon-entry-status" aria-live="polite"></div>
           <div class="dungeon-entry-actions">
-            <button class="dungeon-entry-btn dungeon-entry-enter" type="button"${canEnter ? '' : ' disabled title="Only the party owner or a leader can enter"'}>Enter</button>
+            <button class="dungeon-entry-btn dungeon-entry-enter" type="button"${canEnter ? '' : ` disabled title="${LEADERS_ONLY_MESSAGE}"`}>Enter</button>
             <button class="dungeon-entry-btn dungeon-entry-cancel" type="button">Cancel</button>
           </div>
         </div>
@@ -232,14 +230,6 @@ export class DungeonEntryPopup {
     return { message, stale: forceStale || isForecastStale(message.result, forecastKey) };
   }
 
-  private warningText(dungeon: DungeonDefinition): string {
-    const checkpointFloor = dungeon.floors.find(f => floorCheckpoints(f).length > 0);
-    if (!checkpointFloor) return 'If your party is defeated, you\'ll be sent back to this entrance.';
-    const retries = floorMaxWipes(checkpointFloor);
-    return `Falling on the boss floor regroups your party at its last checkpoint (up to ${retries} ${retries === 1 ? 'time' : 'times'}). `
-      + 'Falling anywhere else sends you back to this entrance.';
-  }
-
   private renderForecast(dungeon: DungeonDefinition, view: ForecastView): void {
     const slot = this.overlay.querySelector<HTMLElement>('.dungeon-entry-forecast');
     if (!slot) return;
@@ -252,11 +242,10 @@ export class DungeonEntryPopup {
       slot.dataset.state = 'loading';
       setHtml(slot, `<div class="dungeon-entry-forecast-head">${renderForecastRing('loading', { kind: 'dungeon', compact: true })}`
         + '<div class="dungeon-entry-forecast-titles"><div class="dungeon-entry-forecast-headline">Estimating your chances…</div></div></div>'
-        + this.renderFloorStrip(dungeon, null, null));
+        + this.renderFloorStrip(dungeon, null));
       return;
     }
     const result = view.message.result!;
-    const resume = parseDungeonResume(view.message.key || result.key);
     const verdict = forecastVerdict(result, 'dungeon');
     const range = forecastRangeLine(result);
     const reasons = (result.reasons ?? []).slice(0, 3);
@@ -266,54 +255,32 @@ export class DungeonEntryPopup {
       + `<div class="dungeon-entry-forecast-verdict" data-band="${verdict.band}">${verdict.label}</div>`
       + `<div class="dungeon-entry-forecast-headline">${escapeHtml(forecastHeadline(result, 'dungeon'))}</div>`
       + '</div></div>'
-      + this.renderFloorStrip(dungeon, result, resume)
-      + this.renderResume(dungeon, resume)
+      + this.renderFloorStrip(dungeon, result)
       + (range ? `<div class="dungeon-entry-forecast-line">${escapeHtml(range)}</div>` : '')
-      + (result.firstTryPct !== undefined ? `<div class="dungeon-entry-forecast-line">Boss beaten on the first try: ${formatPct(result.firstTryPct)}</div>` : '')
       + (reasons.length > 0
         ? `<ul class="forecast-reasons">${reasons.map(r => `<li class="forecast-reason" data-tone="${r.tone}" data-code="${escapeHtml(r.code)}">${escapeHtml(r.text)}</li>`).join('')}</ul>`
         : '')
       + `<div class="forecast-foot">${forecastSampleLine(result, 'dungeon')}${view.stale ? ' · updating…' : ''}</div>`);
   }
 
-  private renderFloorStrip(dungeon: DungeonDefinition, result: ForecastResult | null, resume: DungeonResumePoint | null): string {
+  private renderFloorStrip(dungeon: DungeonDefinition, result: ForecastResult | null): string {
     const pips = dungeon.floors.map((floor, index) => {
       const info = result?.floors?.find(f => f.floor === index + 1);
       const boss = floor.isBoss || info?.boss;
-      const checkpoints = floorCheckpoints(floor).length > 0;
-      const isResume = !!resume && resume.floorIndex === index && (resume.floorIndex > 0 || resume.phase > 0);
-      const passed = !!resume && index < resume.floorIndex;
       const attrs = [
         `data-floor="${index + 1}"`,
         boss ? 'data-boss="true"' : '',
-        checkpoints ? 'data-checkpoint="true"' : '',
-        isResume ? 'data-resume="true"' : '',
-        passed ? 'data-passed="true"' : '',
         info ? `data-band="${forecastBand(info.winPct)}"` : '',
       ].filter(Boolean).join(' ');
       const labelParts = [`Floor ${index + 1}`];
       if (boss) labelParts.push('boss');
-      if (checkpoints) labelParts.push('checkpoints');
-      if (passed) labelParts.push('already cleared');
       const winText = info ? `: wins ${formatPct(info.winPct)}` : '';
       const glyph = boss ? '♛' : String(index + 1);
-      const pct = info && !passed ? `<span class="dungeon-floor-pct">${formatPct(info.winPct)}</span>` : '';
+      const pct = info ? `<span class="dungeon-floor-pct">${formatPct(info.winPct)}</span>` : '';
       return `<li class="dungeon-floor-pip" ${attrs} aria-label="${escapeHtml(labelParts.join(', ') + winText)}">`
-        + `<span class="dungeon-floor-glyph" aria-hidden="true">${glyph}</span>${pct}`
-        + (isResume ? '<span class="dungeon-floor-flag" aria-hidden="true">🚩</span>' : '')
-        + '</li>';
+        + `<span class="dungeon-floor-glyph" aria-hidden="true">${glyph}</span>${pct}</li>`;
     }).join('');
     return `<ol class="dungeon-entry-floors" aria-label="Floors">${pips}</ol>`;
-  }
-
-  private renderResume(dungeon: DungeonDefinition, resume: DungeonResumePoint | null): string {
-    const marker = formatResumeMarker(resume);
-    if (!marker || !resume) return '';
-    const floor = dungeon.floors[resume.floorIndex];
-    const hasBudget = floor && floorCheckpoints(floor).length > 0;
-    const left = hasBudget ? Math.max(0, floorMaxWipes(floor) - resume.wipes) : null;
-    const retries = left === null ? '' : ` · ${left === 0 ? 'no retries left' : `${left} ${left === 1 ? 'retry' : 'retries'} left`}`;
-    return `<div class="dungeon-entry-resume"><span aria-hidden="true">🚩</span> ${escapeHtml(marker)}${retries}</div>`;
   }
 
   private renderStatus(state: ServerStateMessage | null, reason: string | null): string {

@@ -4,8 +4,8 @@ export type AwayMomentKind =
   | 'level_up'
   | 'first_clear'
   | 'rare_item'
-  | 'checkpoint'
   | 'eject'
+  | 'run_ended'
   | 'relocate'
   | 'mastery'
   | 'closest_call';
@@ -24,8 +24,6 @@ export interface AwayDungeonEntry {
   dungeonId: string;
   name: string;
   outcome: AwayDungeonOutcome;
-  wipes: number;
-  checkpoint?: number;
 }
 
 export interface AwayRetreatEntry {
@@ -103,8 +101,8 @@ export const AWAY_MOMENT_PRIORITY: Record<AwayMomentKind, number> = {
   level_up: 7,
   first_clear: 6,
   rare_item: 5,
-  checkpoint: 4,
   eject: 4,
+  run_ended: 4,
   relocate: 3,
   mastery: 2,
   closest_call: 1,
@@ -153,7 +151,7 @@ export function isAwayLedgerWorthRecap(ledger: AwayLedger, now: number): boolean
 
 export function awayRecapStyle(ledger: AwayLedger, now: number): AwayRecapStyle {
   const awayMs = (ledger.until ?? now) - ledger.since;
-  const notable = ledger.moments.some(m => AWAY_MOMENT_PRIORITY[m.kind] >= AWAY_MOMENT_PRIORITY.checkpoint);
+  const notable = ledger.moments.some(m => AWAY_MOMENT_PRIORITY[m.kind] >= AWAY_MOMENT_PRIORITY.eject);
   return awayMs < AWAY_TOAST_MAX_MS && !notable ? 'toast' : 'modal';
 }
 

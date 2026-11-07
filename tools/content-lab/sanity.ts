@@ -100,16 +100,16 @@ function chieftainLines(engine: EngineAdapter): SanityLine[] {
       dungeon,
       monsters: content.monsters,
       encounters: content.encounters,
-      start: { floorIndex: dungeon.floors.length - 1 },
+      startFloorIndex: dungeon.floors.length - 1,
     },
     { key: 'content-lab-chieftain', maxSims: CHIEFTAIN_N, minSims: CHIEFTAIN_N },
   );
   return [
     {
-      name: 'new: Goblin Chieftain floor, K+P+M L6, starter gear, with the floor\'s checkpoints and wipe budget (runForecast)',
-      expected: '100 %',
-      measured: `${bossRun.winPct} % (first try ${bossRun.firstTryPct} %)`,
-      ok: bossRun.winPct >= 95,
+      name: 'new: Goblin Chieftain floor, K+P+M L6, starter gear, one attempt (runForecast)',
+      expected: 'within 10 points of the harness',
+      measured: `${bossRun.winPct} % against ${trio.winPct.toFixed(1)} %`,
+      ok: Math.abs(bossRun.winPct - trio.winPct) <= 10,
     },
     {
       name: 'new: Goblin Chieftain, K+P+M L6, starter gear, one attempt through the harness',

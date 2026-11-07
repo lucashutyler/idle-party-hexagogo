@@ -1087,7 +1087,7 @@ describe('forecasts', () => {
         name: 'Den',
         floors: [
           { floorNumber: 1, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: 'small', weight: 1 }] },
-          { floorNumber: 2, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: 'big', weight: 1 }], isBoss: true, checkpoints: [0.5], maxWipes: 3 },
+          { floorNumber: 2, gridShape: { cols: 3, rows: 3 }, encounterTable: [{ encounterId: 'big', weight: 1 }], isBoss: true },
         ],
       },
       monsters: {

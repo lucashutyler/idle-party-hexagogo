@@ -539,12 +539,12 @@ describe('mixed and legacy content', () => {
 
   it('plays legacy content exactly as the engine did before charge and recovery existed', () => {
     expect(legacyFightDigests()).toEqual({
-      'authored-1': 'victory@72600:bef3afca',
-      'paced-1': 'victory@79100:9a51b44d',
-      'authored-2': 'victory@74700:30863c27',
-      'paced-2': 'victory@84600:bcf72ee2',
-      'authored-3': 'victory@74100:585e7b1a',
-      'paced-3': 'victory@80600:f53d5968',
+      'authored-1': 'victory@72600:d8633a6b',
+      'paced-1': 'victory@79100:e74dde0b',
+      'authored-2': 'victory@74700:c4452afb',
+      'paced-2': 'victory@84600:3de0b1e1',
+      'authored-3': 'victory@74100:d8ecdf1d',
+      'paced-3': 'victory@80600:15836699',
     });
   });
 });

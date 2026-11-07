@@ -18,12 +18,8 @@ interface PendingBatch {
 
 type Listener = () => void;
 
-const CHECKPOINT_LINE_RE = /^Checkpoint \d+ reached!$/;
-
-/** Live lines carry no type; the engine's checkpoint line is styled like the journal's. */
-export function liveLineType(text: string): CombatLogType {
-  return CHECKPOINT_LINE_RE.test(text) ? 'checkpoint' : 'damage';
-}
+/** Live lines carry no type. */
+const LIVE_LINE_TYPE: CombatLogType = 'damage';
 
 /** Journal lines come from state messages; live lines are keyed `c:` by the battle they belong to. */
 export function isJournalLine(line: Pick<CombatLogLine, 'key'>): boolean {
@@ -99,7 +95,7 @@ export class CombatLogBuffer {
     const lines = texts.map((text, i) => ({ key: `c:${battleId}:${seq}:${i}`, text }));
     if (!this.holdLive || releaseAt === undefined) {
       this.flushPending(() => true);
-      for (const line of lines) this.append(line.key, line.text, liveLineType(line.text));
+      for (const line of lines) this.append(line.key, line.text, LIVE_LINE_TYPE);
       this.commit();
       return;
     }
@@ -113,7 +109,7 @@ export class CombatLogBuffer {
     this.flushPending(() => true);
     this.removeWhere(line => line.key.startsWith(prefix));
     const seq = ++this.liveMessageSeq;
-    texts.forEach((text, i) => this.append(`c:${battleId}:${seq}:${i}`, text, liveLineType(text)));
+    texts.forEach((text, i) => this.append(`c:${battleId}:${seq}:${i}`, text, LIVE_LINE_TYPE));
     this.commit();
   }
 
@@ -136,7 +132,7 @@ export class CombatLogBuffer {
     let released = false;
     while (this.pending.length > 0 && due(this.pending[0])) {
       const batch = this.pending.shift()!;
-      for (const line of batch.lines) this.append(line.key, line.text, liveLineType(line.text));
+      for (const line of batch.lines) this.append(line.key, line.text, LIVE_LINE_TYPE);
       released = true;
     }
     return released;

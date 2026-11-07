@@ -80,7 +80,7 @@ function dungeon(floors: DungeonFloor[], extra: Partial<DungeonForecastInput> = 
   return { kind: 'dungeon', players: [hero()], dungeon: def, monsters: MONSTERS, encounters: ENCOUNTERS, ...extra };
 }
 
-const CHIEF_FLOOR = floor(2, [entry('chief_room')], { isBoss: true, checkpoints: [0.66, 0.33], maxWipes: 3 });
+const CHIEF_FLOOR = floor(2, [entry('chief_room')], { isBoss: true });
 
 describe('simulateToEnd', () => {
   const fight = (monster: Partial<MonsterDefinition>) => createPartyCombatState([hero()], [makeMonster(4, monster)]);
@@ -370,20 +370,22 @@ describe('room forecasts', () => {
 });
 
 describe('dungeon forecasts', () => {
-  it('regroup at the highest checkpoint reached until the boss falls', () => {
+  it('are a plain per-floor product: one attempt at each floor, and a lost boss floor loses the run', () => {
     const r = runForecast(dungeon([floor(1, [entry('easy')]), CHIEF_FLOOR]), { key: 'd' });
     expect(r.sims).toBe(FORECAST_MIN_SIMS);
-    expect(r.winPct).toBe(100);
-    expect(r.firstTryPct).toBe(0);
+    expect(r.winPct).toBe(0);
+    expect(r.losses).toBe(r.sims);
     expect(r.floors).toEqual([
       { floor: 1, winPct: 100 },
-      { floor: 2, winPct: 100, boss: true, attempts: 3 },
+      { floor: 2, winPct: 0, boss: true },
     ]);
-    expect(r.medianMs).toBeGreaterThan(25000);
+    expect(r).not.toHaveProperty('firstTryPct');
+    expect(r.medianMs).toBeNull();
     expect(r.killEtaMs).toBeGreaterThan(20000);
+    expect(r.reasons[0]).toEqual({ code: 'needs_group', tone: 'bad', text: 'Bosses are built for groups. Invite friends.' });
   });
 
-  it('are deterministic when sliced across attempts and floors', () => {
+  it('are deterministic when sliced across floors', () => {
     const input = dungeon([floor(1, [entry('easy'), entry('deadly')]), CHIEF_FLOOR]);
     const whole = runForecast(input, { key: 'd' });
     const job = createForecastJob(input, { key: 'd' });
@@ -391,36 +393,62 @@ describe('dungeon forecasts', () => {
     expect(job.result()).toEqual(whole);
   });
 
-  it('fail the run once the regroup budget is spent', () => {
-    const r = runForecast(dungeon([floor(1, [entry('easy')]), { ...CHIEF_FLOOR, maxWipes: 1 }]), { key: 'd' });
-    expect(r.winPct).toBe(0);
-    expect(r.losses).toBe(r.sims);
-    expect(r.floors?.[1]).toEqual({ floor: 2, winPct: 0, boss: true, attempts: 2 });
-    expect(r.reasons[0]).toEqual({ code: 'needs_group', tone: 'bad', text: 'Bosses are built for groups. Invite friends.' });
+  it('ignore floors that still carry the old flag fields', () => {
+    const old = { ...CHIEF_FLOOR, checkpoints: [0.66, 0.33], maxWipes: 3, checkpointRewardFraction: 0.5 } as DungeonFloor;
+    const plain = runForecast(dungeon([floor(1, [entry('easy')]), CHIEF_FLOOR]), { key: 'd' });
+    expect(runForecast(dungeon([floor(1, [entry('easy')]), old]), { key: 'd' })).toEqual(plain);
   });
 
-  it('start from the requester\'s resume point', () => {
-    const floors = [floor(1, [entry('deadly')]), CHIEF_FLOOR];
-    const fromPhase2 = runForecast(dungeon(floors, { start: { floorIndex: 1, phase: 2 } }), { key: 'd' });
-    expect(fromPhase2.floors).toEqual([{ floor: 2, winPct: 100, boss: true, attempts: 1 }]);
-    expect(fromPhase2.firstTryPct).toBe(100);
+  it('give a boss floor it can lose only its one-attempt win rate', () => {
+    const monsters = { ...MONSTERS, frail_boss: monsterDef({ id: 'frail_boss', name: 'Frail', hp: 10, damage: 1, tier: 'boss' }) };
+    const encounters = { ...ENCOUNTERS, frail_court: { id: 'frail_court', name: 'Frail Court', type: 'explicit' as const, placements: [{ monsterId: 'frail_boss', gridPosition: 4 }] } };
+    const coinFlip = floor(1, [entry('frail_court'), entry('boss_deadly')], { isBoss: true });
 
-    const spent = runForecast(dungeon(floors, { start: { floorIndex: 1, phase: 1, wipes: 2 } }), { key: 'd' });
-    expect(spent.floors?.[0].attempts).toBe(2);
-    expect(spent.winPct).toBe(100);
+    const r = runForecast({ ...dungeon([coinFlip]), monsters, encounters }, { key: 'd', maxSims: 200 });
 
-    const broke = runForecast(dungeon(floors, { start: { floorIndex: 1, phase: 0, wipes: 3 } }), { key: 'd' });
-    expect(broke.winPct).toBe(0);
-    expect(broke.floors?.[0].attempts).toBe(1);
+    expect(r.winPct).toBeGreaterThan(30);
+    expect(r.winPct).toBeLessThan(68);
+    expect(r.floors?.[0].winPct).toBe(r.winPct);
+    expect(r.floors?.[0]).not.toHaveProperty('attempts');
+  });
 
-    const clamped = runForecast(dungeon(floors, { start: { floorIndex: 9, phase: 99 } }), { key: 'd' });
-    expect(clamped.floors).toEqual([{ floor: 2, winPct: 100, boss: true, attempts: 1 }]);
+  it('flag a floor as a boss floor by its tier, not only by isBoss, and not for a passive wall', () => {
+    const monsters = { ...MONSTERS, wall: monsterDef({ id: 'wall', name: 'Wall', hp: 10, damage: 0, tier: 'boss', passive: true }) };
+    const encounters = { ...ENCOUNTERS, walled: { id: 'walled', name: 'Walled', type: 'explicit' as const, placements: [{ monsterId: 'wall', gridPosition: 4 }, { monsterId: 'weakling', gridPosition: 5 }] } };
+    const r = runForecast({
+      ...dungeon([floor(1, [entry('easy')]), floor(2, [entry('chief_room')]), floor(3, [entry('walled')])]),
+      monsters,
+      encounters,
+    }, { key: 'd' });
+
+    expect(r.floors?.map(f => !!f.boss)).toEqual([false, true, false]);
+  });
+
+  it('measure a kill ETA by the bosses that fight, not by a passive boss-tier wall', () => {
+    const wall = makeMonster(5, { hp: 1e6, tier: 'boss', passive: true });
+    const chief = makeMonster(4, { hp: 1000, tier: 'boss' });
+
+    const outcome = simulateToEnd(createPartyCombatState([hero()], [chief, wall]), () => 0.4, 3000);
+
+    expect(outcome.bossDamageFrac).toBe(0.3);
+  });
+
+  it('start from the floor a party inside the run stands on', () => {
+    const floors = [floor(1, [entry('deadly')]), floor(2, [entry('easy')])];
+    const later = runForecast(dungeon(floors, { startFloorIndex: 1 }), { key: 'd' });
+    expect(later.floors).toEqual([{ floor: 2, winPct: 100 }]);
+    expect(later.winPct).toBe(100);
+
+    const clamped = runForecast(dungeon(floors, { startFloorIndex: 9 }), { key: 'd' });
+    expect(clamped.floors).toEqual([{ floor: 2, winPct: 100 }]);
+
+    expect(runForecast(dungeon(floors), { key: 'd' }).floors?.map(f => f.floor)).toEqual([1, 2]);
   });
 
   it('number floors by position, whatever the authored floor numbers', () => {
     const floors = [floor(1, [entry('easy')]), floor(3, [entry('easy')]), floor(7, [entry('easy')])];
     expect(runForecast(dungeon(floors), { key: 'd' }).floors?.map(f => f.floor)).toEqual([1, 2, 3]);
-    expect(runForecast(dungeon(floors, { start: { floorIndex: 1 } }), { key: 'd' }).floors?.map(f => f.floor)).toEqual([2, 3]);
+    expect(runForecast(dungeon(floors, { startFloorIndex: 1 }), { key: 'd' }).floors?.map(f => f.floor)).toEqual([2, 3]);
   });
 
   it('judge fight length by the slowest floor\'s fights, not the whole run', () => {
@@ -449,7 +477,6 @@ describe('dungeon forecasts', () => {
     expect(r.winPct).toBeCloseTo(f1.winPct * f2.winPct / 100, 0);
     expect(f1.winPct).toBeGreaterThan(30);
     expect(f1.winPct).toBeLessThan(70);
-    expect(r.firstTryPct).toBeUndefined();
     expect(r.wins).toBeLessThanOrEqual(r.sims);
   });
 

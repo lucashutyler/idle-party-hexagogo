@@ -457,7 +457,7 @@ describe('auto-retreat in the overworld', () => {
     const w = await forecastWorld({ dungeon: { def: dungeon, at: `${START.col},${START.row}` } });
     w.pm.partyBattles.setForecaster(w.svc);
     w.stub.fallback.verdict = DEADLY;
-    expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit', 'alice').success).toBe(true);
+    expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit').success).toBe(true);
     const before = w.stub.jobs.filter(j => j.key.includes('room:')).length;
 
     vi.advanceTimersByTime(3 * RETREAT_CYCLE_MS);

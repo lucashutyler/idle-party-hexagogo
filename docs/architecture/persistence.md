@@ -12,8 +12,8 @@ Saved state per player (`PlayerSaveData`):
 - `chatHistory` (last 1000 messages), `chatSendChannel`, `chatDmTarget`
 - `mailbox` (only in saves from before `MailboxStore`: read on load and never written)
 - `activeQuests`, `completedQuests`, `weeklyCompletions` — quest state (see `docs/architecture/content.md` Quest system)
-- `dungeonRun` (`DungeonRunState`: `{ dungeonId, currentFloorIndex, entrance, checkpointPhase?, wipes?, rewardedPhases? }`) — active dungeon run, so an in-progress dive (and its boss checkpoint and wipe budget) continues offline and across restarts; `clearedDungeons` (string[]) — dungeons this player has cleared at least once, gating one-time first-clear rewards (see `docs/architecture/content.md` Dungeon system). `dungeonRun` is sourced from the `PartyBattleManager` entry at save time (spread copy) and re-applied via `restoreDungeonRun` (floor index validated, phase clamped) after the party's battle entry is rebuilt on restore.
-- `dungeonCheckpoints` (`Record<dungeonId, DungeonCheckpoint { floorIndex, phase, wipes, rewardedPhases, at }>`) — resume points; kept equal to the live run while the party is on a checkpoint floor and stored when a party or member leaves one; expire after 7 days (see `combat.md` → Boss checkpoints and `content.md` → Dungeon system)
+- `dungeonRun` (`DungeonRunState`: `{ dungeonId, currentFloorIndex, entrance }`) — active dungeon run, so an in-progress dive continues offline and across restarts, on the same floor, and nothing outlives the run once it ends; `clearedDungeons` (string[]) — dungeons this player has cleared at least once, gating one-time first-clear rewards (see `docs/architecture/content.md` Dungeon system). `dungeonRun` is sourced from the `PartyBattleManager` entry at save time (copied) and re-applied via `restoreDungeonRun` (floor index validated) after the party's battle entry is rebuilt on restore.
+- Older saves may hold `dungeonCheckpoints`, a `dungeonRun` with `checkpointPhase`, `wipes` or `rewardedPhases`, away ledgers with `checkpoint` moments or dungeon records with `checkpoint` or `wipes`, and log lines typed `checkpoint`. All load cleanly and none is written back; see `combat.md` → Dungeon runs.
 - `monsterKills` (`Record<monsterDefId, number>`) — lifetime kills for kill mastery; held in a null-prototype object so monster ids such as `constructor` or `__proto__` count like any other
 - `combatPrefs` (`{ autoRetreatBelowPct: 0 | 25 | 40 | 60 }`) — sanitised on load; absent → `DEFAULT_COMBAT_PREFS` (25)
 - `autoRetreatNotified` — the one-time auto-retreat notification was sent
@@ -22,7 +22,7 @@ Saved state per player (`PlayerSaveData`):
 
 The `inventory` and `equipment` fields are optional within `character` — old saves default to empty inventory and all-null equipment.
 
-All of the fields above are optional. `PlayerSession.fromSaveData` bypasses the constructor, so every new field is assigned explicitly there (and cleaned — malformed values fall back to their defaults). **Master reset** (`resetForMasterReset`) clears `monsterKills`, `dungeonCheckpoints`, `awayLedger` and `pendingRecap` along with the character, but keeps `combatPrefs` and `autoRetreatNotified`; presence is then re-evaluated for every session, so offline players get a fresh ledger.
+All of the fields above are optional. `PlayerSession.fromSaveData` bypasses the constructor, so every new field is assigned explicitly there (and cleaned — malformed values fall back to their defaults). **Master reset** (`resetForMasterReset`) clears `monsterKills`, `awayLedger` and `pendingRecap` along with the character, but keeps `combatPrefs` and `autoRetreatNotified`; presence is then re-evaluated for every session, so offline players get a fresh ledger.
 
 Guild data is saved separately in `data/guilds.json`. Active async trades are saved separately in `data/trades.json` via `TradeStore`. Game content is saved separately via `ContentStore`.
 

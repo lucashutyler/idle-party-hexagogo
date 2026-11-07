@@ -24,7 +24,7 @@ export function registerValidateTools(server: McpServer, deps: McpToolDeps): voi
   server.registerTool(
     'validate_draft',
     {
-      description: "Run referential-integrity and range checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc, unknown monster skills, monster attackInterval/cooldown/castTime ranges, monster level (whole number 1-200)/tier/enrage ranges, dungeon checkpoints (descending fractions in (0,1)), maxWipes and checkpointRewardFraction ranges, checkpoint floors where no encounter on the table can field a non-passive boss/raid monster, invalid skill definitions). Returns `problems` (human-readable, empty if the draft is clean) and `info` (advisory, never blocking: monsters with no level set and therefore no level scaling, tier hints from HP, checkpoint-floor encounters that can come without a boss and so get no checkpoints, dungeon fields that have no effect).",
+      description: "Run referential-integrity and range checks against a draft content version (broken references between monsters/items/quests/zones/tiles/etc, unknown monster skills, monster attackInterval/cooldown/castTime ranges, monster level (whole number 1-200)/tier/enrage ranges, invalid skill definitions). Returns `problems` (human-readable, empty if the draft is clean) and `info` (advisory, never blocking: monsters with no level set and therefore no level scaling, tier hints from HP).",
       inputSchema: {
         versionId: z.string(),
       },

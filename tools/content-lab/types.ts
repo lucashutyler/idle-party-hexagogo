@@ -116,9 +116,8 @@ export interface CellResult extends Omit<Cell, 'table' | 'sims'>, Partial<CellMe
 export interface DungeonForecast {
   sims: number;
   winPct: number;
-  firstTryPct?: number;
   medianMs: number | null;
-  floors: { floor: number; winPct: number; attempts?: number; medianMs?: number | null }[];
+  floors: { floor: number; winPct: number; medianMs?: number | null }[];
 }
 
 export interface DungeonRunResult {
@@ -136,7 +135,7 @@ export interface DungeonRunResult {
   xpPerHour?: number;
   goldPerHour?: number;
   meanDeaths?: number;
-  /** New engine only: runForecast with checkpoints and regroups. */
+  /** New engine only: runForecast. */
   forecast?: DungeonForecast;
 }
 

@@ -318,7 +318,7 @@ describe('ForecastService cache', () => {
     expect(roomForecastKey(4, 'pkA', 'room-1')).toBe(`${GAME_VERSION}|4|pkA|room:room-1`);
     expect(roomForecastKey(5, 'pkA', 'room-1')).not.toBe(roomForecastKey(4, 'pkA', 'room-1'));
     expect(roomForecastKey(4, 'pkB', 'room-1')).not.toBe(roomForecastKey(4, 'pkA', 'room-1'));
-    expect(dungeonForecastKey(4, 'pkA', 'caves', { floorIndex: 2, phase: 1, wipes: 3 })).toBe(`${GAME_VERSION}|4|pkA|dungeon:caves:2:1:3`);
+    expect(dungeonForecastKey(4, 'pkA', 'caves', 2)).toBe(`${GAME_VERSION}|4|pkA|dungeon:caves:2`);
     expect(liveForecastKey(12, 4500)).toBe('battle:12:4500');
   });
 });

@@ -22,6 +22,7 @@ import {
   ENRAGE_STEP_PERCENT,
   ENRAGE_STEP_SECONDS,
   getSkillTrigger,
+  isBossTier,
   isTimedSkill,
   MIN_COOLDOWN_MS,
   paceEngineMs,
@@ -52,14 +53,6 @@ export interface UnitStatics {
   levelSource?: MonsterLevelSource;
   /** Monsters only. */
   tier?: MonsterTier;
-}
-
-/** Boss checkpoint progress: thresholds and resume point are static per battle, `phase` follows playback. */
-export interface PlaybackBossPhases {
-  bossPos: number[];
-  thresholds: number[];
-  phase: number;
-  resumedFromPhase?: number;
 }
 
 export interface SkillStatics {
@@ -193,7 +186,7 @@ export class CombatPlayback {
   private endT = Infinity;
   private isFinished = false;
   private battleResult: CombatResult | null = null;
-  private boss: PlaybackBossPhases | null = null;
+  private bossPos: number[] = [];
   private structureVersion = 0;
   private newestEventT = -Infinity;
   private syncUntil = 0;
@@ -230,17 +223,16 @@ export class CombatPlayback {
     return this.battleResult;
   }
 
-  /** Null unless the fight has a boss or raid monster. */
-  get bossPhases(): PlaybackBossPhases | null {
-    return this.boss;
+  /** Grid positions of the fight's non-passive boss and raid monsters; empty without any. */
+  get bossPositions(): readonly number[] {
+    return this.bossPos;
   }
 
   /** Pooled HP fraction of the boss units, or null without bosses. */
   bossHpFraction(): number | null {
-    if (!this.boss) return null;
     let hp = 0;
     let max = 0;
-    for (const pos of this.boss.bossPos) {
+    for (const pos of this.bossPos) {
       const unit = this.unit('monster', pos);
       if (!unit) continue;
       hp += Math.max(0, unit.hp);
@@ -251,7 +243,7 @@ export class CombatPlayback {
 
   /** The living monster that enrages first (bosses before adds), for the boss bar's enrage slot. */
   enrageSource(): PlaybackUnit | undefined {
-    const bossKeys = new Set((this.boss?.bossPos ?? []).map(pos => unitKey('monster', pos)));
+    const bossKeys = new Set(this.bossPos.map(pos => unitKey('monster', pos)));
     let best: PlaybackUnit | undefined;
     for (const unit of this.unitOrder) {
       if (unit.side !== 'monster' || unit.hp <= 0 || !unit.enrage) continue;
@@ -444,7 +436,7 @@ export class CombatPlayback {
     this.endT = Infinity;
     this.isFinished = false;
     this.battleResult = null;
-    this.boss = null;
+    this.bossPos = [];
     this.newestEventT = -Infinity;
     this.syncUntil = 0;
     this.structureVersion++;
@@ -485,6 +477,7 @@ export class CombatPlayback {
   }
 
   private cacheStatics(snapshot: ClientCombatSnapshot): void {
+    this.bossPos = snapshot.units.filter(u => u.side === 'monster' && !u.passive && isBossTier(u.tier)).map(u => u.pos);
     for (const u of snapshot.units) {
       const key = unitKey(u.side, u.pos);
       this.staticMap.set(key, {
@@ -506,17 +499,6 @@ export class CombatPlayback {
         });
       }
     }
-    const bp = snapshot.bossPhases;
-    if (bp) {
-      const boss = this.ensureBoss(bp.bossPos, bp.resumedFromPhase ?? 0);
-      if (bp.thresholds) boss.thresholds = bp.thresholds.filter(t => Number.isFinite(t) && t > 0 && t < 1).sort((a, b) => b - a);
-      if (bp.resumedFromPhase !== undefined) boss.resumedFromPhase = bp.resumedFromPhase;
-    }
-  }
-
-  private ensureBoss(bossPos: readonly number[], phase: number): PlaybackBossPhases {
-    this.boss ??= { bossPos: [...bossPos], thresholds: [], phase };
-    return this.boss;
   }
 
   private applySnapshot(snapshot: ClientCombatSnapshot): void {
@@ -542,13 +524,6 @@ export class CombatPlayback {
     }
     this.unitOrder = nextOrder;
     this.lastAppliedT = Math.max(this.lastAppliedT, snapshot.elapsedMs);
-    const bp = snapshot.bossPhases;
-    if (bp) {
-      const boss = this.ensureBoss(bp.bossPos, bp.phase);
-      boss.bossPos = [...bp.bossPos];
-      boss.phase = bp.phase;
-      if (bp.resumedFromPhase !== undefined) boss.resumedFromPhase = bp.resumedFromPhase;
-    }
     if (snapshot.finished) {
       this.isFinished = true;
       this.battleResult = snapshot.result;
@@ -656,12 +631,6 @@ export class CombatPlayback {
         break;
       case 'status':
         if (dst && ev.name) addStatus(dst, ev.name);
-        break;
-      case 'phase':
-        if (amount > 0) {
-          const boss = this.ensureBoss([], 0);
-          boss.phase = Math.max(boss.phase, amount);
-        }
         break;
       case 'enrage':
         if (src && amount > 0) {

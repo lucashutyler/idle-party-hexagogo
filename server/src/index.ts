@@ -66,6 +66,10 @@ function dungeonEntryRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'dungeon_entry_refused' };
 }
 
+function partyRefusal(message: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'party_refused' };
+}
+
 function travelRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'travel_refused' };
 }
@@ -415,7 +419,7 @@ wss.on('connection', (ws, req) => {
           }
         }
 
-        if (playerManager.partyBattles.getDungeonRunInfo(partyId)) return;
+        if (playerManager.partyBattles.isInDungeonRun(partyId)) return;
         if (!playerManager.partyBattles.canEscape(partyId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Run becomes available 5 seconds into a fight' }));
           return;
@@ -1207,46 +1211,10 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'accept_party_invite' && typeof msg.partyId === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        const oldPartyId = session?.getPartyId() ?? null;
-
-        // Can't join a party mid-dungeon — entry requirements are validated for
-        // the whole party at entry time, and all members must be present.
-        if (playerManager.partyBattles.getDungeonRunInfo(msg.partyId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'That party is in a dungeon right now.' }));
-          return;
-        }
-
-        const result = playerManager.parties.acceptInvite(
-          username,
-          msg.partyId,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-          (u, id) => playerManager.getSessionByUsername(u)?.setPartyId(id ?? null),
-          (a, b) => playerManager.areSameTile(a, b),
-        );
-        if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
-          return;
-        }
-        // Wire party battle join
-        playerManager.handlePartyJoin(username, msg.partyId, oldPartyId);
-        // Announce the join in party chat
-        playerManager.broadcastPartyEvent(
-          msg.partyId,
-          username,
-          'You joined the party.',
-          `${username} joined the party.`,
-        );
-        // Notify all members of the joined party
-        for (const m of result.joined.members) {
-          playerManager.sendStateToPlayer(m.username);
-          if (m.username !== username) {
-            playerManager.notify.notify(m.username, 'party_member_joined', {
-              title: 'Party',
-              body: `${username} joined your party.`,
-              payload: { joinedUsername: username },
-            });
-          }
+        const error = playerManager.acceptPartyInvite(username, msg.partyId);
+        if (error) {
+          ws.send(JSON.stringify(partyRefusal(error)));
+          playerManager.sendStateToPlayer(username);
         }
         return;
       }
@@ -1258,96 +1226,14 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'leave_party') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-        const partyId = session.getPartyId();
-        // Get other members before leaving (to notify them)
-        const party = partyId ? playerManager.parties.getParty(partyId) : null;
-        const otherMembers = party ? party.members.filter(m => m.username !== username) : [];
-        const wasOwner = party?.members.find(m => m.username === username)?.role === 'owner';
-
-        const result = playerManager.parties.leaveParty(
-          username,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-          (u, id) => playerManager.getSessionByUsername(u)?.setPartyId(id ?? null),
-        );
-        if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
-          return;
-        }
-        // If the owner left and the party still has members, ownership auto-transferred
-        if (wasOwner && partyId && otherMembers.length > 0) {
-          const partyAfter = playerManager.parties.getParty(partyId);
-          const newOwner = partyAfter?.members.find(m => m.role === 'owner');
-          if (newOwner) {
-            playerManager.broadcastPartyEvent(
-              partyId,
-              newOwner.username,
-              'You became the new party owner.',
-              `${newOwner.username} became the new party owner.`,
-            );
-            playerManager.notify.notify(newOwner.username, 'party_ownership_transferred', {
-              title: 'Party ownership',
-              body: 'You became the new party owner.',
-              payload: {},
-            });
-          }
-        }
-        // Handle party battle leave (removes from shared combat, creates solo party)
-        if (partyId) {
-          playerManager.handlePartyLeave(username, partyId);
-        } else {
-          playerManager.ensureParty(username);
-        }
-        playerManager.sendStateToPlayer(username);
-        for (const m of otherMembers) {
-          playerManager.sendStateToPlayer(m.username);
-          playerManager.notify.notify(m.username, 'party_member_left', {
-            title: 'Party',
-            body: `${username} left your party.`,
-            payload: { leftUsername: username },
-          });
-        }
+        const error = playerManager.leaveParty(username);
+        if (error) ws.send(JSON.stringify(partyRefusal(error)));
         return;
       }
 
       if (msg.type === 'kick_party_member' && typeof msg.username === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-        const partyId = session.getPartyId();
-
-        const result = playerManager.parties.kickMember(
-          username,
-          msg.username,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-          (u, id) => playerManager.getSessionByUsername(u)?.setPartyId(id ?? null),
-        );
-        if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
-          return;
-        }
-        // Announce the kick in party chat (subject no longer in party → gets a server message)
-        if (partyId) {
-          playerManager.broadcastPartyEvent(
-            partyId,
-            msg.username,
-            'You were kicked from the party.',
-            `${msg.username} was kicked from the party.`,
-          );
-        }
-        // Handle party battle leave for the kicked player
-        if (partyId) {
-          playerManager.handlePartyLeave(msg.username, partyId);
-        } else {
-          playerManager.ensureParty(msg.username);
-        }
-        playerManager.sendStateToPlayer(username);
-        playerManager.sendStateToPlayer(msg.username);
-        playerManager.notify.notify(msg.username, 'party_kicked', {
-          title: 'Party',
-          body: 'You were removed from your party.',
-          payload: {},
-        });
+        const error = playerManager.kickPartyMember(username, msg.username);
+        if (error) ws.send(JSON.stringify(partyRefusal(error)));
         return;
       }
 

@@ -308,7 +308,7 @@ export class MonstersTab implements Tab {
             <span class="admin-form-hint" id="mf-tier-hint"></span>
           </label>
         </div>
-        <div class="admin-form-hint">A level (${MONSTER_LEVEL_MIN}–${MONSTER_LEVEL_MAX}) turns on level scaling against players and shows players a level badge. Blank = ${LEVEL_NOT_SET}: the monster fights on its raw stats and players see no level. Boss and raid tiers get a boss bar, dungeon checkpoints and enrage.</div>
+        <div class="admin-form-hint">A level (${MONSTER_LEVEL_MIN}–${MONSTER_LEVEL_MAX}) turns on level scaling against players and shows players a level badge. Blank = ${LEVEL_NOT_SET}: the monster fights on its raw stats and players see no level. Boss and raid tiers get a boss bar and enrage.</div>
         <div class="admin-form-row">
           <label>Role<select id="mf-role">${roleOptions}</select></label>
           <button class="admin-btn admin-btn-sm" id="mf-suggest" type="button">Suggest stats</button>
