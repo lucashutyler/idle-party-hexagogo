@@ -1467,7 +1467,7 @@ export class PlayerSession {
   }, partyInfo?: {
     role: 'owner' | 'leader' | 'member';
     gridPosition: number;
-  }, dungeonRun?: DungeonRunState | null, partyHenchmen?: HiredHenchman[]): PlayerSaveData {
+  }, dungeonRun?: DungeonRunState | null, partyHenchmen?: HiredHenchman[], partyAutoRun?: boolean): PlayerSaveData {
     const pos = movementData?.position ?? this.getPosition();
 
     return {
@@ -1506,6 +1506,7 @@ export class PlayerSession {
       weeklyCompletions: this.quests.toSaveData().weeklyCompletions,
       dungeonRun: dungeonRun ?? undefined,
       partyHenchmen: partyHenchmen?.length ? partyHenchmen : undefined,
+      partyAutoRun: partyAutoRun || undefined,
       clearedDungeons: [...this.clearedDungeons],
       monsterKills: { ...this.monsterKills },
       combatPrefs: { ...this.combatPrefs },

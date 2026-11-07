@@ -46,6 +46,10 @@ export interface ServerBattleCallbacks {
   onCombatFlush?: (flush: CombatFlush) => void;
   /** A retreat is ending battle `battleId`; runs before the party moves on, so it may still set the route. */
   onRetreat?: (battleId: number) => void;
+  /** Whether the party should run from a fight the moment Run opens. */
+  isAutoRun?: () => boolean;
+  /** Run now: the timer found auto run due. */
+  onAutoRun?: () => void;
 }
 
 /** Drives one party's battle loop. See docs/architecture/combat.md (battle state machine). */
@@ -69,6 +73,7 @@ export class ServerBattleTimer {
   private moveTimeout?: ReturnType<typeof setTimeout>;
   private retryTimeout?: ReturnType<typeof setTimeout>;
   private retreatTimeout?: ReturnType<typeof setTimeout>;
+  private autoRunTimeout?: ReturnType<typeof setTimeout>;
 
   private combatState: PartyCombatState | null = null;
   private createCombat: () => PartyCombatState;
@@ -88,6 +93,8 @@ export class ServerBattleTimer {
   canMoveToNextTile?: () => boolean;
   onCombatFlush?: (flush: CombatFlush) => void;
   onRetreat?: (battleId: number) => void;
+  isAutoRun?: () => boolean;
+  onAutoRun?: () => void;
 
   constructor(
     party: ServerParty,
@@ -107,6 +114,8 @@ export class ServerBattleTimer {
       this.canMoveToNextTile = callbacks.canMoveToNextTile;
       this.onCombatFlush = callbacks.onCombatFlush;
       this.onRetreat = callbacks.onRetreat;
+      this.isAutoRun = callbacks.isAutoRun;
+      this.onAutoRun = callbacks.onAutoRun;
     }
   }
 
@@ -233,6 +242,29 @@ export class ServerBattleTimer {
     this.retreatTimeout = undefined;
   }
 
+  /**
+   * Arm (or disarm) the auto run for the current fight: with auto run on and a walkable next room,
+   * the party runs once Run opens. Call whenever auto run or the route changes mid-fight.
+   */
+  syncAutoRun(): void {
+    if (this.autoRunTimeout) clearTimeout(this.autoRunTimeout);
+    this.autoRunTimeout = undefined;
+    const combat = this.combatState;
+    if (this.destroyed || !combat || !this.isFighting(this.currentBattleId)) return;
+    if (!this.isAutoRun?.() || !this.party.hasDestination || !(this.canMoveToNextTile?.() ?? false)) return;
+    const battleId = this.currentBattleId;
+    const wait = Math.max(0, RUN_AVAILABLE_MS - combatRealElapsedMs(combat));
+    this.autoRunTimeout = setTimeout(() => this.guard(() => {
+      this.autoRunTimeout = undefined;
+      if (!this.isFighting(battleId)) return;
+      if (!this.canEscape()) {
+        this.syncAutoRun();
+        return;
+      }
+      this.onAutoRun?.();
+    }), wait);
+  }
+
   /** After a fight ends early: walk on if the next room is open (after the result pause), else fight again here at once. */
   private moveOnOrFightHere(): void {
     const canMove = this.party.hasDestination && (this.canMoveToNextTile?.() ?? false);
@@ -297,6 +329,7 @@ export class ServerBattleTimer {
     this.flush('full');
 
     this.stepInterval = setInterval(() => this.guard(() => this.step()), combatRealStepMs(this.combatState));
+    this.syncAutoRun();
   }
 
   private step(): void {
@@ -430,7 +463,7 @@ export class ServerBattleTimer {
 
   private clearTimers(): void {
     this.stopStepping();
-    for (const t of [this.killBeatTimeout, this.resultTimeout, this.moveTimeout, this.retryTimeout, this.retreatTimeout]) {
+    for (const t of [this.killBeatTimeout, this.resultTimeout, this.moveTimeout, this.retryTimeout, this.retreatTimeout, this.autoRunTimeout]) {
       if (t) clearTimeout(t);
     }
     this.killBeatTimeout = undefined;
@@ -438,6 +471,7 @@ export class ServerBattleTimer {
     this.moveTimeout = undefined;
     this.retryTimeout = undefined;
     this.retreatTimeout = undefined;
+    this.autoRunTimeout = undefined;
   }
 
   private setState(newState: BattleTimerState): void {

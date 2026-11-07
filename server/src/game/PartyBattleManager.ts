@@ -157,6 +157,7 @@ export class PartyBattleManager {
   private delivery: CombatDelivery = { isWatching: () => false, sendRaw: () => {} };
   private forecaster: ForecastService | null = null;
   private autoRetreatPolicy: (partyId: string) => PartyAutoRetreatInfo | null = () => null;
+  private autoRunPolicy: (partyId: string) => boolean = () => false;
   private notify: Notifier = () => {};
   private keyingParty = false;
 
@@ -203,6 +204,16 @@ export class PartyBattleManager {
     this.autoRetreatPolicy = policy;
   }
 
+  /** Wire whether a party has auto run on. Unwired, auto run is off. */
+  setAutoRunPolicy(policy: (partyId: string) => boolean): void {
+    this.autoRunPolicy = policy;
+  }
+
+  /** Call when a party's auto run setting changes: arms or disarms the fight under way. */
+  autoRunChanged(partyId: string): void {
+    this.entries.get(partyId)?.battleTimer.syncAutoRun();
+  }
+
   setNotifier(notify: Notifier): void {
     this.notify = notify;
   }
@@ -236,6 +247,8 @@ export class PartyBattleManager {
           this.handleBattleEnd(partyId, result);
         },
         onRetreat: (battleId) => this.applyRetreat(partyId, battleId),
+        isAutoRun: () => !this.entries.get(partyId)?.dungeonRun && this.autoRunPolicy(partyId),
+        onAutoRun: () => { this.escapeBattle(partyId); },
         onMove: () => {
           const allQuests = this.content.getQuestCatalog();
           const tileId = serverParty.tile.id;
@@ -459,6 +472,7 @@ export class PartyBattleManager {
     }
 
     this.clearRetreatHold(partyId);
+    entry.battleTimer.syncAutoRun();
     for (const m of entry.members) {
       this.broadcastToMember(m);
     }

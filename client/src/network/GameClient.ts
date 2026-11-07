@@ -492,6 +492,10 @@ export class GameClient {
     this.sendRaw({ type: 'run' });
   }
 
+  sendSetAutoRun(enabled: boolean): void {
+    this.sendRaw({ type: 'set_auto_run', enabled });
+  }
+
   /**
    * Whether the active screen shows the live combat view. The server only streams combat messages
    * while this is true and the page is visible; every new socket is told the current value.

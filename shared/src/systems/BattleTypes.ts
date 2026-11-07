@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.07.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.07.2'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -414,6 +414,12 @@ export interface ClientRunMessage {
   type: 'run';
 }
 
+/** Owners and leaders turn the party's auto run on or off. */
+export interface ClientSetAutoRunMessage {
+  type: 'set_auto_run';
+  enabled: boolean;
+}
+
 export interface ClientShopBuyMessage {
   type: 'shop_buy';
   itemId: string;
@@ -508,6 +514,7 @@ export type ClientMessage =
   | ClientUnequipSkillMessage
   | ClientSetActionOrderMessage
   | ClientRunMessage
+  | ClientSetAutoRunMessage
   | ClientViewPlayerMessage
   | ClientShopBuyMessage
   | ClientShopSellMessage

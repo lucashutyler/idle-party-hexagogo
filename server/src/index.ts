@@ -429,6 +429,25 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'set_auto_run') {
+        const session = playerManager.getSessionByUsername(username);
+        const partyId = session?.getPartyId();
+        if (!session || !partyId) return;
+        if (typeof msg.enabled !== 'boolean') {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid auto run setting' }));
+          return;
+        }
+
+        const member = playerManager.parties.getParty(partyId)?.members.find(m => m.username === username);
+        if (!member || !canMove(member.role)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can change auto run' }));
+          return;
+        }
+
+        playerManager.handleSetAutoRun(username, msg.enabled);
+        return;
+      }
+
       if (msg.type === 'enter_dungeon' && typeof msg.col === 'number' && typeof msg.row === 'number' && typeof msg.dungeonId === 'string') {
         const error = playerManager.handleEnterDungeon(username, msg.col, msg.row, msg.dungeonId);
         if (error) ws.send(JSON.stringify(dungeonEntryRefusal(error)));

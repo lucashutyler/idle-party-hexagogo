@@ -12,6 +12,7 @@ Saved state per player (`PlayerSaveData`):
 - `chatHistory` (last 1000 messages), `chatSendChannel`, `chatDmTarget`
 - `mailbox` (only in saves from before `MailboxStore`: read on load and never written)
 - `activeQuests`, `completedQuests`, `weeklyCompletions` — quest state (see `docs/architecture/content.md` Quest system)
+- `partyAutoRun` (boolean) — the party's auto run switch, mirrored onto every member's save like `partyHenchmen`; the owner's save is read on restore.
 - `dungeonRun` (`DungeonRunState`: `{ dungeonId, currentFloorIndex, entrance }`) — active dungeon run, so an in-progress dive continues offline and across restarts, on the same floor, and nothing outlives the run once it ends; `clearedDungeons` (string[]) — dungeons this player has cleared at least once, gating one-time first-clear rewards (see `docs/architecture/content.md` Dungeon system). `dungeonRun` is sourced from the `PartyBattleManager` entry at save time (copied) and re-applied via `restoreDungeonRun` (floor index validated) after the party's battle entry is rebuilt on restore.
 - Older saves may hold `dungeonCheckpoints`, a `dungeonRun` with `checkpointPhase`, `wipes` or `rewardedPhases`, away ledgers with `checkpoint` moments or dungeon records with `checkpoint` or `wipes`, and log lines typed `checkpoint`. All load cleanly and none is written back; see `combat.md` → Dungeon runs.
 - `monsterKills` (`Record<monsterDefId, number>`) — lifetime kills for kill mastery; held in a null-prototype object so monster ids such as `constructor` or `__proto__` count like any other

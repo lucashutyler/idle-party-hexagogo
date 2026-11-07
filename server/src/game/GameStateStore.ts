@@ -64,6 +64,8 @@ export interface PlayerSaveData {
   pendingRecap?: AwayLedger | null;
   /** Henchmen the party holds, mirrored onto every member's save like `dungeonRun`. */
   partyHenchmen?: HiredHenchman[];
+  /** The party's auto run setting, mirrored onto every member's save like `partyHenchmen`. */
+  partyAutoRun?: boolean;
   /** Capped notification inbox (most recent last). */
   notifications?: NotificationEntry[];
   /** Per-category/channel notification opt-ins. Absent → registry defaults apply. */
