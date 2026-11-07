@@ -160,6 +160,7 @@ export class CombatScreen implements Screen {
   private floorBadge!: HTMLElement;
   private clockEl!: HTMLElement;
   private runBtn!: HTMLButtonElement;
+  private autoRunBtn!: HTMLButtonElement;
   private runHint!: HTMLElement;
   private dungeonLeaveBtn!: HTMLButtonElement;
   private runLabel!: HTMLElement;
@@ -285,6 +286,7 @@ export class CombatScreen implements Screen {
         <span class="combat-dungeon-floor" style="display:none"></span>
         <button class="combat-forecast" type="button" style="display:none"></button>
         <span class="combat-clock">–:––</span>
+        <button class="combat-auto-run" type="button" aria-pressed="false" style="display:none">Auto</button>
         <button class="combat-run-btn combat-run-locked" type="button"><span class="combat-run-label">Run</span><span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <button class="combat-dungeon-leave" type="button" style="display:none">Leave<span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <span class="combat-run-hint" style="display:none"></span>
@@ -328,6 +330,7 @@ export class CombatScreen implements Screen {
     this.floorBadge = this.container.querySelector('.combat-dungeon-floor')!;
     this.clockEl = this.container.querySelector('.combat-clock')!;
     this.runBtn = this.container.querySelector('.combat-run-btn')!;
+    this.autoRunBtn = this.container.querySelector('.combat-auto-run')!;
     this.runHint = this.container.querySelector('.combat-run-hint')!;
     this.dungeonLeaveBtn = this.container.querySelector('.combat-dungeon-leave')!;
     this.runLabel = this.container.querySelector('.combat-run-label')!;
@@ -367,6 +370,14 @@ export class CombatScreen implements Screen {
       e.stopPropagation();
       if (this.runBtn.classList.contains('combat-run-locked')) this.showRunHint();
       else this.gameClient.sendRun();
+    });
+    this.autoRunBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.autoRunBtn.classList.contains('locked')) {
+        this.showRunHint();
+        return;
+      }
+      this.gameClient.sendSetAutoRun(this.autoRunBtn.getAttribute('aria-pressed') !== 'true');
     });
     this.dungeonLeaveBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1450,6 +1461,7 @@ export class CombatScreen implements Screen {
       this.floorBadge.textContent = d.isBossFloor ? `BOSS ${d.floor}/${d.totalFloors}` : `F${d.floor}/${d.totalFloors}`;
       this.floorBadge.classList.toggle('boss', d.isBossFloor);
       this.runBtn.style.display = 'none';
+      this.autoRunBtn.style.display = 'none';
       this.dungeonLeaveBtn.style.display = '';
       const role = state.social?.party?.members.find(m => m.username === state.username)?.role;
       const canLeave = role === 'owner' || role === 'leader';
@@ -1463,10 +1475,12 @@ export class CombatScreen implements Screen {
       this.locationLabel.textContent = zone && room ? `${zone} · ${room}` : (zone || room);
       this.floorBadge.style.display = 'none';
       this.runBtn.style.display = '';
+      this.autoRunBtn.style.display = '';
       this.dungeonLeaveBtn.style.display = 'none';
     }
     this.locationLabel.title = this.locationLabel.textContent ?? '';
     this.updateAutoRetreatFlag(state);
+    this.updateAutoRunButton(state);
     this.lastRunKey = '';
     this.updateRunButton(state);
   }
@@ -1482,6 +1496,19 @@ export class CombatScreen implements Screen {
       else delete btn.dataset.autoRetreat;
     }
     this.runBtn.title = below > 0 ? `Auto-retreat is on (below ${below} %)` : '';
+  }
+
+  private updateAutoRunButton(state: ServerStateMessage): void {
+    const party = state.social?.party;
+    const role = party?.members.find(m => m.username === state.username)?.role;
+    const canToggle = role === 'owner' || role === 'leader';
+    const on = party?.autoRun === true;
+    this.autoRunBtn.setAttribute('aria-pressed', String(on));
+    this.autoRunBtn.classList.toggle('on', on);
+    this.autoRunBtn.classList.toggle('locked', !canToggle);
+    this.autoRunBtn.title = !canToggle
+      ? 'Only the party owner or a leader can change auto run'
+      : on ? 'Auto run is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Auto run: run as soon as Run opens while traveling';
   }
 
   private updateRunButton(state: ServerStateMessage): void {

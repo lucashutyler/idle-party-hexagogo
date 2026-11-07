@@ -56,6 +56,8 @@ export interface GamePartyInfo {
   henchmen?: HiredHenchman[];
   /** Auto-retreat policy in effect: the party owner's setting. */
   autoRetreat?: PartyAutoRetreatInfo;
+  /** While on, the party runs from each fight as soon as Run opens whenever it has a route to walk. */
+  autoRun?: boolean;
   /** Digest of the party's forecast inputs; a forecast whose `partyKey` differs is stale. */
   forecastKey?: string;
 }

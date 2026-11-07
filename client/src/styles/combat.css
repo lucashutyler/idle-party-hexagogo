@@ -69,6 +69,32 @@
   font-variant-numeric: tabular-nums;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
+.combat-auto-run {
+  flex: none;
+  height: 30px;
+  margin-bottom: 2px;
+  padding: 0 10px;
+  border: 1.5px solid var(--outline);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, #3a4680 0%, #273262 100%);
+  box-shadow: 0 2px 0 #151c3f, inset 0 1px 0 var(--stroke-hi);
+  color: var(--text-3);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.combat-auto-run.on {
+  background: var(--grad-danger);
+  box-shadow: 0 2px 0 var(--edge-danger), inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 10px rgba(255, 77, 109, 0.55);
+  color: var(--text-1);
+}
+.combat-auto-run.locked {
+  opacity: 0.6;
+}
 .combat-run-btn,
 .combat-dungeon-leave {
   position: relative;

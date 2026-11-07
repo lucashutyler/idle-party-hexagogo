@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.07.1',
+    notes: [
+      'New Auto button on the battle screen. While it is on and your party is traveling, it runs from each fight as soon as Run is available, until you reach your destination or something stops you. Running skips that fight for no rewards.',
+      'Auto is shared by the whole party. Only the owner or a leader can switch it on or off.',
+    ],
+  },
+  {
     version: '2026.11.06.1',
     notes: [
       'Combat is slower and easier to follow. Knights now act about every 3.6 seconds, Archers every 2, Priests every 1.8, and Mages and Bards every 2.5. Enemies slow down too.',

@@ -494,6 +494,18 @@ export class PartySystem {
     }
   }
 
+  setAutoRun(partyId: string, enabled: boolean): boolean {
+    const party = this.parties.get(partyId);
+    if (!party) return false;
+    const changed = (party.autoRun === true) !== enabled;
+    party.autoRun = enabled || undefined;
+    return changed;
+  }
+
+  isAutoRun(partyId: string): boolean {
+    return this.parties.get(partyId)?.autoRun === true;
+  }
+
   /** Promote a member to leader (owner or leader). */
   promoteLeader(
     callerUsername: string,

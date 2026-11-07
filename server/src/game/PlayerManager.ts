@@ -127,6 +127,7 @@ export class PlayerManager {
       (partyId, username) => this.parties.getParty(partyId)?.members.find(m => m.username === username)?.gridPosition,
     );
     this.partyBattles.setAutoRetreatPolicy((partyId) => this.autoRetreatPolicy(partyId));
+    this.partyBattles.setAutoRunPolicy((partyId) => this.parties.isAutoRun(partyId));
     this.partyBattles.setNotifier((username, eventKey, vars) => this.notify.notify(username, eventKey, vars));
   }
 
@@ -675,6 +676,16 @@ export class PlayerManager {
     return changed;
   }
 
+  /** Turn the party's auto run on or off (the caller has checked the role). */
+  handleSetAutoRun(username: string, enabled: boolean): boolean {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    if (!partyId) return false;
+    const changed = this.parties.setAutoRun(partyId, enabled);
+    if (changed) this.partyBattles.autoRunChanged(partyId);
+    this.sendStateToParty(username);
+    return changed;
+  }
+
   /** State to every socket of the player and of their party members (whose forecast key follows the player's build). */
   sendStateToParty(username: string): void {
     const partyId = this.sessions.get(username)?.getPartyId();
@@ -1119,7 +1130,8 @@ export class PlayerManager {
     }
 
     const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
-    return session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen);
+    const autoRun = partyId ? this.parties.isAutoRun(partyId) : false;
+    return session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen, autoRun);
   }
 
   /**
@@ -1261,6 +1273,8 @@ export class PlayerManager {
         this.parties.restoreHenchmen(party.id, this.validHenchmen(ownerData.partyHenchmen, partyMapId));
       }
 
+      this.parties.setAutoRun(party.id, ownerData.partyAutoRun === true);
+
       // After the henchmen, so a run dropped for vanished content can announce them rejoining.
       if (ownerData.dungeonRun) {
         this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
@@ -1302,6 +1316,7 @@ export class PlayerManager {
       if (data.partyHenchmen?.length) {
         this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
       }
+      this.parties.setAutoRun(partyId, data.partyAutoRun === true);
       // After the henchmen, so a run dropped for vanished content can announce them rejoining.
       if (data.dungeonRun) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
       this.partyBattles.startEntry(partyId);

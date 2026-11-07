@@ -810,6 +810,7 @@ export type {
   ServerBestiaryMessage,
   ClientRequestForecastMessage,
   ClientSetCombatPrefsMessage,
+  ClientSetAutoRunMessage,
   ClientRequestBestiaryMessage,
   ClientAckRecapMessage,
   ClientPresenceMessage,
