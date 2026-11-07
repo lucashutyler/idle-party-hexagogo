@@ -47,7 +47,6 @@ export interface ForecastFloor {
   floor: number;
   winPct: number;
   boss?: boolean;
-  attempts?: number;
 }
 
 export interface ForecastStratum {
@@ -60,8 +59,6 @@ export interface ForecastStratum {
 export interface ForecastResult extends ForecastStats {
   key: string;
   partyKey: string;
-  /** Dungeons with checkpoints: boss won on the first attempt. */
-  firstTryPct?: number;
   floors?: ForecastFloor[];
   strata?: ForecastStratum[];
   /** Lowest stratum with a share ≥ 10 %. */

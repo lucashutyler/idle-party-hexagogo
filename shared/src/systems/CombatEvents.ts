@@ -25,7 +25,7 @@ export type CombatEventKind =
   | 'redirect'
   | 'status'
   | 'cleanse' | 'death' | 'revive' | 'buff' | 'fizzle'
-  | 'phase' | 'enrage';
+  | 'enrage';
 
 /** One timestamped combat happening. See docs/architecture/combat.md for per-kind fields. */
 export interface CombatEvent {
@@ -94,14 +94,6 @@ export interface ClientCombatEnrage {
   maxStacks: number;
 }
 
-/** Boss checkpoint progress. `thresholds` (descending HP fractions) is static: full snapshots only. */
-export interface ClientCombatBossPhases {
-  bossPos: PartyGridPosition[];
-  thresholds?: number[];
-  phase: number;
-  resumedFromPhase?: number;
-}
-
 export interface ClientCombatUnit {
   side: CombatSide;
   pos: PartyGridPosition;
@@ -150,6 +142,4 @@ export interface ClientCombatSnapshot {
   finished: boolean;
   result: CombatResult | null;
   units: ClientCombatUnit[];
-  /** Present when the fight has a boss; `phase` is in every snapshot. */
-  bossPhases?: ClientCombatBossPhases;
 }

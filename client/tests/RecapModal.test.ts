@@ -57,7 +57,7 @@ describe('recap helpers', () => {
   it('builds the headline from the top two moments of different kinds', () => {
     const l = ledger({
       levelTo: 4,
-      dungeons: [{ dungeonId: 'gw', name: 'Goblin Warren', outcome: 'cleared', wipes: 0 }],
+      dungeons: [{ dungeonId: 'gw', name: 'Goblin Warren', outcome: 'cleared' }],
       moments: [
         moment('rare_item', NOW - 3 * MIN, 'Found a sword', { itemId: 'sword' }),
         moment('first_clear', NOW - 2 * MIN),
@@ -95,12 +95,12 @@ describe('recap helpers', () => {
   it('keeps at most six timeline moments, highest priority, in time order', () => {
     const moments = [
       moment('closest_call', NOW - 9 * MIN), moment('mastery', NOW - 8 * MIN), moment('relocate', NOW - 7 * MIN),
-      moment('checkpoint', NOW - 6 * MIN), moment('rare_item', NOW - 5 * MIN), moment('first_clear', NOW - 4 * MIN),
+      moment('run_ended', NOW - 6 * MIN), moment('rare_item', NOW - 5 * MIN), moment('first_clear', NOW - 4 * MIN),
       moment('level_up', NOW - 3 * MIN), moment('closest_call', NOW - 2 * MIN),
     ];
     const timeline = recapTimeline(ledger({ moments }));
     expect(timeline).toHaveLength(6);
-    expect(timeline.map(m => m.kind)).toEqual(['mastery', 'relocate', 'checkpoint', 'rare_item', 'first_clear', 'level_up']);
+    expect(timeline.map(m => m.kind)).toEqual(['mastery', 'relocate', 'run_ended', 'rare_item', 'first_clear', 'level_up']);
   });
 
   it('counts items below rare as commons', () => {
@@ -128,16 +128,44 @@ describe('recap helpers', () => {
     const warnings = recapWarnings(ledger({
       routeStopped: { at: NOW, where: 'Old Mill' },
       dungeons: [
-        { dungeonId: 'a', name: 'Crystal Trial', outcome: 'ejected', wipes: 4 },
-        { dungeonId: 'b', name: 'Sunken Throne', outcome: 'left', wipes: 1, checkpoint: 2 },
-        { dungeonId: 'c', name: 'Goblin Warren', outcome: 'cleared', wipes: 0 },
+        { dungeonId: 'a', name: 'Crystal Trial', outcome: 'ejected' },
+        { dungeonId: 'b', name: 'Sunken Throne', outcome: 'left' },
+        { dungeonId: 'c', name: 'Goblin Warren', outcome: 'cleared' },
       ],
       itemsLost: 3,
     }), () => '14:05');
     expect(warnings.map(w => w.kind)).toEqual(['route', 'ejected', 'left', 'items_lost']);
     expect(warnings[0]).toMatchObject({ action: 'map', text: 'Your party stopped traveling at Old Mill (14:05). Pick a new destination on the map.' });
-    expect(warnings[2].text).toBe('Your party left Sunken Throne at Checkpoint 2. Enter again to resume there.');
+    expect(warnings[1].text).toBe('Your party was defeated in Crystal Trial. Enter again to start a new run.');
+    expect(warnings[2].text).toBe('Your party\'s run in Sunken Throne ended early. Enter again to start a new run.');
     expect(warnings[3].text).toBe('Your bags were full: 3 items were left behind.');
+  });
+
+  it('warns only about how each dungeon stands now', () => {
+    const left = { dungeonId: 'a', name: 'Crystal Trial', outcome: 'left' as const };
+    const wiped = { dungeonId: 'a', name: 'Crystal Trial', outcome: 'ejected' as const };
+    const cleared = { dungeonId: 'a', name: 'Crystal Trial', outcome: 'cleared' as const };
+    const entered = { dungeonId: 'a', name: 'Crystal Trial', outcome: 'in_progress' as const };
+    const kinds = (dungeons: AwayLedger['dungeons']) => recapWarnings(ledger({ dungeons })).map(w => w.kind);
+
+    expect(kinds([left, wiped, left])).toEqual(['left']);
+    expect(kinds([left, wiped])).toEqual(['ejected']);
+    expect(kinds([left, left, cleared])).toEqual([]);
+    expect(kinds([wiped, entered])).toEqual([]);
+    expect(kinds([entered])).toEqual([]);
+    expect(kinds([left, { ...wiped, dungeonId: 'b' }])).toEqual(['left', 'ejected']);
+  });
+
+  it('never promises a resume, whatever an old dungeon record still carries', () => {
+    const old = { dungeonId: 'b', name: 'Sunken Throne', outcome: 'left', wipes: 1, checkpoint: 2 } as AwayLedger['dungeons'][number];
+    const [warning] = recapWarnings(ledger({ dungeons: [old] }));
+    expect(warning.text).toBe('Your party\'s run in Sunken Throne ended early. Enter again to start a new run.');
+    expect(warning.text).not.toMatch(/resume|checkpoint/i);
+  });
+
+  it('words a broken-up run neutrally in the headline', () => {
+    const l = ledger({ moments: [moment('run_ended', NOW - MIN, 'Left Sunken Throne when the party changed')] });
+    expect(recapHeadline(l, undefined)).toBe('Your party left Sunken Throne when the party changed.');
   });
 
   it('summarises a short absence for the toast', () => {
@@ -191,6 +219,23 @@ describe('RecapModal', () => {
     (overlay.querySelector('.recap-continue') as HTMLButtonElement).click();
     expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
     expect(document.querySelector('.recap-overlay')).toBeNull();
+    modal.destroy();
+  });
+
+  it('renders a recap whose dungeon records still carry old fields, and a run that ended with the party', () => {
+    const client = fakeClient();
+    const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW });
+    const old = { dungeonId: 'b', name: 'Sunken Throne', outcome: 'left', wipes: 2, checkpoint: 1 } as AwayLedger['dungeons'][number];
+    client.recapListener!(ledger({
+      battles: 120, wins: 120, losses: 0,
+      dungeons: [old],
+      moments: [moment('run_ended', NOW - MIN, 'Left Sunken Throne when the party changed')],
+    }));
+    const overlay = document.querySelector('.recap-overlay') as HTMLElement;
+    expect(overlay.querySelector('.recap-headline')!.textContent).toBe('Your party left Sunken Throne when the party changed.');
+    expect(overlay.querySelector('.recap-moment[data-kind="run_ended"] .recap-moment-icon')!.textContent).toBe('🚪');
+    expect(overlay.querySelector('.recap-warning[data-kind="left"]')!.textContent).toBe('Your party\'s run in Sunken Throne ended early. Enter again to start a new run.');
+    expect(overlay.textContent).not.toMatch(/resume|checkpoint/i);
     modal.destroy();
   });
 

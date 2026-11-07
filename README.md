@@ -274,7 +274,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Entry preview (the Enter button is disabled with the reason shown when the party can't go in; refusals are always shown)
 - [x] Dungeon-specific loot (per-floor bonus rewards + one-time first-clear rewards per player)
 - [ ] Non-3×3 grid shapes (arbitrary combat rectangles)
-- [x] Boss checkpoints (regroup at the last checkpoint up to a wipe budget, checkpoint rewards, resume after leaving for 7 days) + a seed boss (Goblin Chieftain) and a dev raid (The Sunken Throne)
+- [x] Runs are floors in order: a wipe on any floor or any party change ends the run, and every entry starts at floor 1 + a seed boss (Goblin Chieftain) and a dev raid (The Sunken Throne)
 - [ ] Dungeon time limits, lockouts/cooldowns
 - [ ] Dungeon tokens + rotating vendor, leaderboards, roguelike variant
 
@@ -311,8 +311,8 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Desktop font scaling (token font scale, larger on desktop via media query)
 - [x] Map controls (recentre and +/- buttons, 2-finger pinch zoom, keyboard pan and zoom)
 - [x] RoomView — current room (background art, one button per room action, Stop here while travelling), or another explored room behind the room sheet's Details (the room's actions, Go button)
-- [x] Dungeon entry popup + in-combat dungeon header (floor / BOSS badge + Leave); entry popup shows the run forecast, per-floor strip and resume point
-- [x] Boss fight UI (pooled boss HP bar with checkpoint flags, retry pips, enrage timer; banner queue with a screen-reader live region; level badges and tier frames on cards)
+- [x] Dungeon entry popup + in-combat dungeon header (floor / BOSS badge + Leave); entry popup shows the run forecast and per-floor strip
+- [x] Boss fight UI (pooled boss HP bar with enrage timer; banner queue with a screen-reader live region; level badges and tier frames on cards)
 - [x] Forecast chips (rooms, dungeons, live elite/boss fights) with verdict, likely range and reasons
 - [x] Docked chat (strip preview and in-flow sheet with a full layout on phones, collapsible column on desktop)
 - [x] Persistent XP hairline under the HUD, visible on every screen

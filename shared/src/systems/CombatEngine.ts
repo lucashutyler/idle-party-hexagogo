@@ -287,26 +287,7 @@ export interface CombatEnrage {
   stacks: number;
 }
 
-export interface CombatBossPhases {
-  /** Indices into `state.monsters`. */
-  bossIndices: number[];
-  /** Descending boss-HP fractions in (0, 1). */
-  thresholds: number[];
-  /** Thresholds crossed so far (resumed fights start at `resumedFromPhase`). */
-  phase: number;
-  resumedFromPhase?: number;
-}
-
 export interface CombatSetup {
-  bossPhases?: {
-    /** Indices into the `monsters` argument; default = every boss/raid-tier monster. */
-    bossIndices?: number[];
-    thresholds: number[];
-    /** Start at checkpoint k: bosses at `thresholds[k − 1]` of max HP. */
-    resumePhase?: number;
-    /** Enrage clock offset on resume; default `(1 − thresholds[k − 1]) × afterSeconds`. */
-    resumeElapsedMs?: number;
-  };
   /** Default AUTHORED_PACE. Real fights pass COMBAT_PACE. */
   pace?: CombatPace;
 }
@@ -333,7 +314,6 @@ export interface PartyCombatState {
   nimbleDodge: number;
   unnerveReduction: number;
   blessedArmsDamage: number;
-  bossPhases: CombatBossPhases | null;
   /** Lowest Σ player HP / Σ max HP seen at a step boundary. */
   minPartyHpFrac: number;
 }
@@ -476,7 +456,6 @@ export function createPartyCombatState(
     if (colDiff !== 0) return colDiff;
     return getRow(a.gridPosition) - getRow(b.gridPosition);
   });
-  const bossPhases = setupBossPhases(builtMonsters, sortedMonsters, setup.bossPhases);
 
   sortedMonsters.forEach((m, i) => {
     const offset = FIRST_ACTION_MONSTER_MS + FIRST_ACTION_STAGGER_MS * Math.min(i, MONSTER_STAGGER_CAP);
@@ -505,7 +484,6 @@ export function createPartyCombatState(
     nimbleDodge: Math.min(MAX_DODGE, computeNimbleDodge(sortedPlayers)),
     unnerveReduction: computeUnnerveReduction(sortedPlayers),
     blessedArmsDamage: computeBlessedArmsDamage(sortedPlayers),
-    bossPhases,
     minPartyHpFrac: partyHpFraction(sortedPlayers),
   };
   for (const p of sortedPlayers) {
@@ -566,9 +544,6 @@ export function cloneCombatState(state: PartyCombatState): PartyCombatState {
     monsters: state.monsters.map(cloneMonster),
     pendingCounters: state.pendingCounters.map(c => ({ ...c })),
     partyBuffs: state.partyBuffs.map(b => ({ ...b })),
-    bossPhases: state.bossPhases
-      ? { ...state.bossPhases, bossIndices: [...state.bossPhases.bossIndices], thresholds: [...state.bossPhases.thresholds] }
-      : null,
   };
 }
 
@@ -579,45 +554,6 @@ function initialEnrage(monster: MonsterInstance): CombatEnrage | null {
   if (!resolved) return null;
   const { afterMs, stepMs, stepPercent, maxStacks } = resolved;
   return { atMs: afterMs, stepMs, stepPercent, maxStacks, stacks: 0 };
-}
-
-function setupBossPhases(
-  built: CombatMonster[],
-  sorted: CombatMonster[],
-  opts: CombatSetup['bossPhases'],
-): CombatBossPhases | null {
-  const bosses = opts?.bossIndices
-    ? [...new Set(opts.bossIndices)].filter(i => Number.isInteger(i) && i >= 0 && i < built.length).map(i => built[i])
-    : built.filter(m => !m.passive && isBossTier(m.tier));
-  if (bosses.length === 0) return null;
-  const thresholds = [...new Set((opts?.thresholds ?? []).filter(isPhaseThreshold))].sort((a, b) => b - a);
-  const phases: CombatBossPhases = {
-    bossIndices: bosses.map(b => sorted.indexOf(b)).sort((a, b) => a - b),
-    thresholds,
-    phase: 0,
-  };
-  const k = opts?.resumePhase;
-  if (typeof k !== 'number' || !Number.isInteger(k) || k < 1 || k > thresholds.length) return phases;
-
-  const fraction = thresholds[k - 1];
-  for (const boss of bosses) {
-    if (Number.isFinite(boss.maxHp) && boss.maxHp > 0) boss.currentHp = Math.max(1, Math.ceil(boss.maxHp * fraction));
-  }
-  const offsetMs = opts?.resumeElapsedMs;
-  for (const monster of built) {
-    const enrage = monster.enrageState;
-    if (!enrage) continue;
-    enrage.atMs = typeof offsetMs === 'number' && Number.isFinite(offsetMs) && offsetMs >= 0
-      ? Math.max(0, enrage.atMs - offsetMs)
-      : Math.round(enrage.atMs / 1000 * fraction) * 1000;
-  }
-  phases.phase = k;
-  phases.resumedFromPhase = k;
-  return phases;
-}
-
-function isPhaseThreshold(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 1;
 }
 
 function partyHpFraction(players: PartyCombatant[]): number {
@@ -720,7 +656,6 @@ function checkEnd(step: Step): boolean {
     finish(step, 'victory');
     return true;
   }
-  updateBossPhase(step);
   if (state.players.every(p => !isAlive(p))) {
     finish(step, 'defeat');
     return true;
@@ -760,33 +695,6 @@ function slowAttackGraceMs(state: PartyCombatState): number {
     slowest = Math.max(slowest, initialWarmupMs(state.pace, p, p.attack, state.players), baseCycleMs(state.pace, p, p.attack));
   }
   return slowest * STALEMATE_ATTACK_CHANCES;
-}
-
-function updateBossPhase(step: Step): void {
-  const { state } = step;
-  const phases = state.bossPhases;
-  if (!phases || phases.phase >= phases.thresholds.length) return;
-  let hp = 0;
-  let max = 0;
-  for (const i of phases.bossIndices) {
-    const boss = state.monsters[i];
-    if (!boss) continue;
-    hp += Math.max(0, boss.currentHp);
-    max += boss.maxHp;
-  }
-  if (!(max > 0)) return;
-  const fraction = hp / max;
-  let advanced = false;
-  while (phases.phase < phases.thresholds.length && fraction <= phases.thresholds[phases.phase]) {
-    phases.phase++;
-    advanced = true;
-    emit(step, 'phase', { amount: phases.phase });
-    step.log.push(`Checkpoint ${phases.phase} reached!`);
-  }
-  if (advanced) {
-    state.lowestMonsterHp = livingMonsterHp(state.monsters);
-    state.lastProgressMs = state.elapsedMs;
-  }
 }
 
 function enragePass(step: Step): void {

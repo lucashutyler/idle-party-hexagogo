@@ -362,11 +362,10 @@ describe('Persistence of the new player state', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  it('round-trips kills, combat prefs, checkpoints, the open ledger and the pending recap', async () => {
+  it('round-trips kills, combat prefs, the open ledger and the pending recap', async () => {
     const { pm, ws, session, win, grids, content } = await setup();
     for (let i = 0; i < 3; i++) win(['goblin']);
     pm.handleSetCombatPrefs('alice', 40);
-    session.setDungeonCheckpoint('hall', { floorIndex: 2, phase: 1, wipes: 2, rewardedPhases: ['2:1'], at: 1234 });
     pm.setPresence(ws, false);
     win(['goblin']);
     vi.setSystemTime(Date.now() + AWAY_MIN_MS);
@@ -380,7 +379,6 @@ describe('Persistence of the new player state', () => {
     expect(restored.getMonsterKills()).toEqual({ goblin: 5 });
     expect(restored.getCombatInfo(4).mastery).toBeUndefined();
     expect(restored.getCombatPrefs()).toEqual({ autoRetreatBelowPct: 40 });
-    expect(restored.getDungeonCheckpoint('hall')).toEqual({ floorIndex: 2, phase: 1, wipes: 2, rewardedPhases: ['2:1'], at: 1234 });
     expect(restored.getPendingRecap()).toEqual(session.getPendingRecap());
     expect(restored.isAway()).toBe(true);
     expect(restored.getAwayLedger()).toEqual(session.getAwayLedger());
@@ -393,14 +391,12 @@ describe('Persistence of the new player state', () => {
       ...saved,
       monsterKills: { goblin: -3, wolf: 2.5, bandit: 4 } as Record<string, number>,
       combatPrefs: { autoRetreatBelowPct: 33 } as unknown as { autoRetreatBelowPct: 25 },
-      dungeonCheckpoints: { hall: { floorIndex: -1 } } as never,
       awayLedger: { nonsense: true } as never,
       pendingRecap: undefined,
     }, grids, content);
 
     expect(restored.getMonsterKills()).toEqual({ bandit: 4 });
     expect(restored.getCombatPrefs()).toEqual({ autoRetreatBelowPct: 25 });
-    expect(restored.getDungeonCheckpoints()).toEqual({});
     expect(restored.isAway()).toBe(false);
     expect(restored.getPendingRecap()).toBeNull();
   });
@@ -414,7 +410,7 @@ describe('Persistence of the new player state', () => {
       pendingRecap: {
         id: 'y', since: 1, battles: 'many', wins: -2, xp: Number.NaN, items: { rare: 2, bogus: 5, epic: 'x' },
         notableItems: [{ itemId: 'blade', count: 1, rarity: 'rare' }, { itemId: 7 }, null],
-        masteryUps: 'nope', dungeons: [{ dungeonId: 'd', name: 'D', outcome: 'exploded', wipes: 1 }],
+        masteryUps: 'nope', dungeons: [{ dungeonId: 'd', name: 'D', outcome: 'exploded' }],
         retreatLog: [{ at: 5, kind: 'skip', from: 'Here', winPct: 250 }], moments: [{ at: 1, kind: 'party', text: 'x' }],
         routeStopped: { at: 'soon' }, closestCall: { hpPct: 3, vs: 'Ogre', where: 'Den' },
       } as never,
@@ -466,11 +462,10 @@ describe('Persistence of the new player state', () => {
     expect(pm.handleSetCombatPrefs('alice', 60)).toBe(false);
   });
 
-  it('master reset clears kills, checkpoints and recaps but keeps combat prefs', async () => {
+  it('master reset clears kills and recaps but keeps combat prefs', async () => {
     const { pm, ws, session, win } = await setup();
     win(['goblin']);
     pm.handleSetCombatPrefs('alice', 0);
-    session.setDungeonCheckpoint('hall', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
     pm.setPresence(ws, false);
     win(['goblin']);
     vi.setSystemTime(Date.now() + AWAY_MIN_MS);
@@ -481,7 +476,6 @@ describe('Persistence of the new player state', () => {
     pm.masterReset();
 
     expect(session.getMonsterKills()).toEqual({});
-    expect(session.getDungeonCheckpoints()).toEqual({});
     expect(session.getPendingRecap()).toBeNull();
     expect(session.getAwayLedger()?.battles ?? 0).toBe(0);
     expect(session.getCombatPrefs()).toEqual({ autoRetreatBelowPct: 0 });

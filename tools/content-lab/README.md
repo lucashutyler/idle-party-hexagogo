@@ -47,7 +47,7 @@ Zones also get low-level, high-level and ungeared variants for the core composit
 - **Pace**: new-engine fights play at `COMBAT_PACE`, so fight times are real time and XP and gold include `rewardMultiplier`, as in the game. `SPEED_TARGET` (old fight length over new, `fit.ts`) is the agreed authored ratio divided by the clock. Forecasts run at it too. Fitted enrage clocks are divided by the clock, and fitted drop chances by `rewardMultiplier`, since the game applies those itself.
 - **Rates**: XP/h = E[XP per fight, 0 on anything but a win] ÷ E[fight time + pause] × 3600, per human member. Pause comes from each version's timer: old = 1 s kill delay + `RESULT_PAUSE` + `MOVE_DURATION`; new = `KILL_BEAT_MS` + `RESULT_PAUSE` + `MOVE_DURATION`.
 - **Stalemate**: new = the engine's no-progress rule, or still running after 2 h of engine time. The old engine has no such rule, so 600 ticks without a new low in monster HP, or still running after 2 h, counts as one (in the live game such a party would fight on forever).
-- **Not modelled**: auto-retreat, kill mastery (zero kills), floor checkpoint regrouping inside whole-dungeon runs, first-clear rewards, item drops (so `paceDropChance` too).
+- **Not modelled**: auto-retreat, kill mastery (zero kills), first-clear rewards, item drops (so `paceDropChance` too).
 
 Combatants are built like `PlayerSession.getCombatInfo` and `buildHenchmanCombatant` on the matching version, and rewards split like `PartyBattleManager`.
 
@@ -61,7 +61,7 @@ Combatants are built like `PlayerSession.getCombatInfo` and `buildHenchmanCombat
 - **Drops** scale by the kill-rate ratio, except chances of 0.5 and up. Quest-collect drops scale too, so collecting keeps its time cost, down to `questDropFloor`.
 - **Items** and set bonuses scale DR and MR into rating. `weaponAtkByClass` scales weapons only those classes can equip; shared items and percent bonuses stay.
 - **Skills** adopt the seed's `castTime`, `warmup` and `trigger`; rating passives adopt `ratingValuePerLevel`; grant-only variants follow the leveled skill with the same class, type and effect kind. `skills` patches the rest.
-- **Boss floors** that can field a boss get `checkpoints`. `fit --modes enrage` sets `enrage`: for a trial boss, the slowest eligible full-size party with a tank and a healer (a duo counts as under-built only where more than two may enter); for an open-world capstone, the slowest winner of any party size, plus what hires took on the old engine over the speed target. `enrageSteps` steepens only bosses on checkpointed floors, since a wipe there costs a regroup rather than the run.
+- **Boss floors**: `fit --modes enrage` sets `enrage`: for a trial boss, the slowest eligible full-size party with a tank and a healer (a duo counts as under-built only where more than two may enter); for an open-world capstone, the slowest winner of any party size, plus what hires took on the old engine over the speed target. `enrageSteps` steepens only bosses on boss floors.
 - **Text**: `text` replaces descriptions by id, recipes included. `staleDescriptions` lists any in any section that still say round, turn or tick; expect false positives ("turns up"). It can't catch a claim that is merely false, such as text saying a skill stops a hit it now only halves: check those against a measured fight.
 
 Nothing is added or removed, and no id changes. Zones, encounters, world, shops, NPCs and tile types pass through; quests and recipes only for a replaced description.

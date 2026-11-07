@@ -83,9 +83,7 @@ export interface ReworkConfig {
   /** Rating passives (Guard, Bless and their grant-only variants) adopt this valuePerLevel. */
   ratingValuePerLevel: number;
   skills?: Record<string, SkillPatch>;
-  /** Descending thresholds for boss floors. */
-  checkpoints: number[];
-  /** Copied onto fitted enrages of bosses on checkpointed floors: a wipe there costs a regroup, not the run. */
+  /** Copied onto fitted enrages of bosses on boss floors. */
   enrageSteps?: { stepSeconds?: number; stepPercent?: number; maxStacks?: number };
   /** Explicit enrage per boss; absent keeps the tier default. */
   enrage?: Record<string, { afterSeconds: number; stepSeconds?: number; stepPercent?: number; maxStacks?: number }>;
@@ -106,7 +104,6 @@ export const DEFAULT_REWORK_CONFIG: ReworkConfig = {
   intervals: { boss: 3, elite: 2.5, heavy: 2.5, normal: 1.5, skirmisher: 1, heavyRatio: 1.4, skirmisherRatio: 0.7, minActionsPerSkill: 2 },
   items: { drFactor: 3, mrFactor: 5 },
   ratingValuePerLevel: 2,
-  checkpoints: [0.66, 0.33],
 };
 
 export interface ChangeEntry {
@@ -485,27 +482,6 @@ function reworkItems(content: Record<string, any>, config: ReworkConfig, log: (s
   }
 }
 
-function reworkBossFloors(content: Record<string, any>, config: ReworkConfig, log: (section: string, entity: any, changes: string[]) => void): void {
-  for (const dungeon of Object.values<any>(content.dungeons)) {
-    const changes: string[] = [];
-    (dungeon.floors ?? []).forEach((floor: any, index: number) => {
-      if (!floor.isBoss) return;
-      const canField = (floor.encounterTable ?? []).some((e: EncounterEntry) =>
-        encounterMonsterIds(content.encounters[e.encounterId]).some(id => {
-          const m = content.monsters[id];
-          return m && !m.passive && (m.tier === 'boss' || m.tier === 'raid');
-        }));
-      if (!canField) {
-        changes.push(`floor ${index + 1}: no boss to checkpoint`);
-        return;
-      }
-      floor.checkpoints = [...config.checkpoints];
-      changes.push(`floor ${index + 1}: checkpoints ${config.checkpoints.join(', ')}`);
-    });
-    log('dungeons', dungeon, changes);
-  }
-}
-
 /** Share of referenced monsters already carrying the authored fields above which an input counts as reworked. */
 const ALREADY_REWORKED_SHARE = 0.5;
 
@@ -529,7 +505,6 @@ export function rework(snapshot: ContentSnapshot, config: ReworkConfig, seedSkil
   reworkSkills(content, config, seedSkills, log);
   reworkItems(content, config, log);
   reworkMonsters(content, config, collectMonsterUsage(content), questItemIds(content), log);
-  reworkBossFloors(content, config, log);
   for (const [id, patch] of Object.entries(config.henchmen ?? {})) {
     const hire = content.henchmen[id];
     if (!hire) continue;

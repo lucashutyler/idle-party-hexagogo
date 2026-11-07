@@ -130,7 +130,7 @@ async function runShard(args: Args): Promise<void> {
   writeFileSync(args.shardOut!, JSON.stringify({ results, dungeons }));
 }
 
-/** The real forecast, so checkpoints and regroups count the way the game counts them. */
+/** The real forecast, counted the way the game counts it. */
 function forecastDungeon(ctx: LabContext, engine: EngineAdapter, parties: PartyFactory, cell: CellResult, dungeon: any, args: Args): DungeonForecast {
   const { players } = parties.get(cell);
   const key = `${args.seed}|${dungeon.id}|${cell.comp}`;
@@ -142,9 +142,8 @@ function forecastDungeon(ctx: LabContext, engine: EngineAdapter, parties: PartyF
   return {
     sims: result.sims,
     winPct: result.winPct,
-    firstTryPct: result.firstTryPct,
     medianMs: result.medianMs,
-    floors: (result.floors ?? []).map((f: any) => ({ floor: f.floor, winPct: f.winPct, attempts: f.attempts, medianMs: f.medianMs })),
+    floors: (result.floors ?? []).map((f: any) => ({ floor: f.floor, winPct: f.winPct, medianMs: f.medianMs })),
   };
 }
 

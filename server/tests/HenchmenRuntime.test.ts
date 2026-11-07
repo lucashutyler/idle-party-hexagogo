@@ -453,6 +453,18 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       expect(combat.players.some(p => p.isHenchman)).toBe(true);
     });
 
+    it('brings hires back when a party change ends the run', async () => {
+      const { pm, partyId } = await setupInDungeon();
+      pm.partyBattles.addMember(partyId, 'latecomer');
+
+      pm.partyBattles.removeMember(partyId, 'latecomer');
+
+      expect(pm.partyBattles.getDungeonRunInfo(partyId)).toBeNull();
+      expect(logLines(pm)).toContain(REJOINS);
+      const combat = entryOf(pm, partyId).battleTimer.currentCombat as { players: PartyCombatant[] };
+      expect(combat.players.some(p => p.isHenchman)).toBe(true);
+    });
+
     it('brings hires into the very fight that replaces a dungeon a deploy removed', async () => {
       const { pm, partyId, content } = await setupInDungeon();
       (content as unknown as { getDungeon: () => undefined }).getDungeon = () => undefined;

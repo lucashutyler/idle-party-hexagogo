@@ -11,12 +11,10 @@ import {
   forecastVerdict,
   formatApproxDuration,
   formatEnemyLevels,
-  formatResumeMarker,
   formatWinPct,
   formatWinRange,
   isExactForecast,
   isForecastStale,
-  parseDungeonResume,
   worstStratumLine,
 } from '../src/combat/ForecastFormat';
 
@@ -165,27 +163,5 @@ describe('secondary lines', () => {
     expect(isForecastStale({ partyKey: 'pk1' }, 'pk2')).toBe(true);
     expect(isForecastStale({ partyKey: 'pk1' }, 'pk1')).toBe(false);
     expect(isForecastStale({ partyKey: 'pk1' }, undefined)).toBe(false);
-  });
-});
-
-describe('dungeon resume point', () => {
-  it('reads floor, checkpoint and wipes from the forecast key', () => {
-    expect(parseDungeonResume('2026.09.27.1|4|pkabc|dungeon:crystal_trial:2:1:1')).toEqual({ floorIndex: 2, phase: 1, wipes: 1 });
-    expect(parseDungeonResume('dungeon:odd:id:with:colons:0:0:0')).toEqual({ floorIndex: 0, phase: 0, wipes: 0 });
-  });
-
-  it('rejects other targets and malformed keys', () => {
-    expect(parseDungeonResume('v|1|pk|room:abc')).toBeNull();
-    expect(parseDungeonResume('v|1|pk|dungeon:x:a:b:c')).toBeNull();
-    expect(parseDungeonResume('v|1|pk|dungeon:x:1')).toBeNull();
-    expect(parseDungeonResume('')).toBeNull();
-    expect(parseDungeonResume(undefined)).toBeNull();
-  });
-
-  it('formats the resume marker, or nothing for a fresh start', () => {
-    expect(formatResumeMarker({ floorIndex: 2, phase: 2 })).toBe('Resume: Floor 3 · Checkpoint 2');
-    expect(formatResumeMarker({ floorIndex: 2, phase: 0 })).toBe('Resume: Floor 3');
-    expect(formatResumeMarker({ floorIndex: 0, phase: 0 })).toBeNull();
-    expect(formatResumeMarker(null)).toBeNull();
   });
 });

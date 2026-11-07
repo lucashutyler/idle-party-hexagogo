@@ -131,8 +131,8 @@ function play(seed: number, setup: CombatSetup): string {
 export function legacyFightDigests(): Record<string, string> {
   const digests: Record<string, string> = {};
   for (const seed of [1, 2, 3]) {
-    digests[`authored-${seed}`] = play(seed, { pace: AUTHORED_PACE, bossPhases: { thresholds: [0.75, 0.5, 0.25] } });
-    digests[`paced-${seed}`] = play(seed, { pace: COMBAT_PACE, bossPhases: { thresholds: [0.75, 0.5, 0.25] } });
+    digests[`authored-${seed}`] = play(seed, { pace: AUTHORED_PACE });
+    digests[`paced-${seed}`] = play(seed, { pace: COMBAT_PACE });
   }
   return digests;
 }

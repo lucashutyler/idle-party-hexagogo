@@ -25,9 +25,9 @@ export function dungeonForecastKey(
   contentEpoch: number,
   partyKey: string,
   dungeonId: string,
-  start: { floorIndex: number; phase: number; wipes: number },
+  startFloorIndex: number,
 ): string {
-  return `${GAME_VERSION}|${contentEpoch}|${partyKey}|dungeon:${dungeonId}:${start.floorIndex}:${start.phase}:${start.wipes}`;
+  return `${GAME_VERSION}|${contentEpoch}|${partyKey}|dungeon:${dungeonId}:${startFloorIndex}`;
 }
 
 export function liveForecastKey(battleId: number, elapsedMs: number): string {

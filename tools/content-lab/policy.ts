@@ -358,5 +358,5 @@ export const POLICY_SUMMARY = {
   stalemate: 'new: the no-progress rule of the engine, or still running after 2 h; old: the engine has no such rule, so 600 ticks without a new low in monster HP, or still running after 2 h',
   autoRetreat: 'not modelled',
   mastery: 'zero kills on both engines',
-  dungeons: 'whole-dungeon runs resample each floor\'s fights in order until a loss; floor checkpoints are not modelled (none exist in a content with no boss tiers); first-clear XP and gold are excluded',
+  dungeons: 'whole-dungeon runs resample each floor\'s fights in order until a loss; first-clear XP and gold are excluded',
 };

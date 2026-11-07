@@ -260,7 +260,6 @@ export type {
   CombatMonster,
   PartyCombatState,
   CombatSetup,
-  CombatBossPhases,
   CombatEnrage,
   CombatCast,
   PendingCounter,
@@ -354,7 +353,6 @@ export type {
   CombatEventKind,
   CombatEvent,
   ClientCombatEnrage,
-  ClientCombatBossPhases,
   ClientCombatStatus,
   ClientCombatSkill,
   ClientCombatCast,
@@ -654,7 +652,7 @@ export type {
   AssetFallback,
 } from './assets/AssetKinds.js';
 
-// Monster levels, templates, mastery, away recap, forecasts, dungeon checkpoints
+// Monster levels, templates, mastery, away recap, forecasts, dungeon runs
 export {
   AOE_DPS_WEIGHT,
   TIER_HP_RATIOS,
@@ -790,21 +788,7 @@ export type {
   CombatPrefs,
   PartyAutoRetreatInfo,
 } from './systems/ForecastTypes.js';
-export {
-  DEFAULT_MAX_WIPES,
-  DEFAULT_CHECKPOINT_REWARD_FRACTION,
-  DUNGEON_CHECKPOINT_TTL_MS,
-  floorCheckpoints,
-  floorMaxWipes,
-  floorCheckpointRewardFraction,
-  clampCheckpointPhase,
-  checkpointPhaseKey,
-  isDungeonCheckpointFresh,
-  isBossMonster,
-  encounterCanFieldBoss,
-  floorCanFieldBoss,
-} from './systems/DungeonTypes.js';
-export type { DungeonRunState, DungeonCheckpoint } from './systems/DungeonTypes.js';
+export type { DungeonRunState } from './systems/DungeonTypes.js';
 export type {
   ServerForecastMessage,
   ServerBestiaryMessage,
@@ -851,7 +835,6 @@ export type {
   SimResult,
   SimOutcome,
   RoomForecastInput,
-  DungeonForecastStart,
   DungeonForecastInput,
   BattleForecastInput,
   ForecastInput,

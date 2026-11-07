@@ -44,8 +44,6 @@ export interface ServerBattleCallbacks {
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
   onCombatFlush?: (flush: CombatFlush) => void;
-  /** The boss crossed checkpoint `phase` this step (never for the phase a resumed fight starts at). */
-  onPhase?: (battleId: number, phase: number) => void;
   /** A retreat is ending battle `battleId`; runs before the party moves on, so it may still set the route. */
   onRetreat?: (battleId: number) => void;
   /** Whether the party should run from a fight the moment Run opens. */
@@ -63,7 +61,6 @@ export class ServerBattleTimer {
   private currentResult?: BattleResult;
   private battleDuration = 0;
   private currentBattleId = 0;
-  private lastPhase = 0;
 
   private started = false;
   private destroyed = false;
@@ -95,7 +92,6 @@ export class ServerBattleTimer {
   onMove?: () => void;
   canMoveToNextTile?: () => boolean;
   onCombatFlush?: (flush: CombatFlush) => void;
-  onPhase?: (battleId: number, phase: number) => void;
   onRetreat?: (battleId: number) => void;
   isAutoRun?: () => boolean;
   onAutoRun?: () => void;
@@ -117,7 +113,6 @@ export class ServerBattleTimer {
       this.onMove = callbacks.onMove;
       this.canMoveToNextTile = callbacks.canMoveToNextTile;
       this.onCombatFlush = callbacks.onCombatFlush;
-      this.onPhase = callbacks.onPhase;
       this.onRetreat = callbacks.onRetreat;
       this.isAutoRun = callbacks.isAutoRun;
       this.onAutoRun = callbacks.onAutoRun;
@@ -326,7 +321,6 @@ export class ServerBattleTimer {
     this.battleDuration = 0;
 
     this.combatState = this.createCombat();
-    this.lastPhase = this.combatState.bossPhases?.phase ?? 0;
     this.currentVisual = 'fighting';
     this.party.enterBattle();
 
@@ -347,7 +341,6 @@ export class ServerBattleTimer {
     this.battleDuration = elapsed;
     if (tick.events.length > 0) this.pendingEvents.push(...tick.events);
     if (tick.logEntries.length > 0) this.pendingLog.push(...tick.logEntries);
-    this.reportPhase(combat);
 
     if (tick.finished) {
       this.stopStepping();
@@ -364,17 +357,6 @@ export class ServerBattleTimer {
       this.flush(snapshotDue ? 'dynamic' : null);
     } else {
       this.lastFlushMs = elapsed;
-    }
-  }
-
-  private reportPhase(combat: PartyCombatState): void {
-    const phase = combat.bossPhases?.phase ?? 0;
-    if (phase <= this.lastPhase) return;
-    this.lastPhase = phase;
-    try {
-      this.onPhase?.(this.currentBattleId, phase);
-    } catch (err) {
-      console.error(`[ServerBattleTimer] ${this.label} battle ${this.currentBattleId}: recording checkpoint ${phase} failed:`, err);
     }
   }
 

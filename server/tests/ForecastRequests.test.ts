@@ -15,7 +15,6 @@ const PIT: DungeonDefinition = {
       gridShape: { cols: 3, rows: 3 },
       encounterTable: [{ encounterId: 'warlord_court', weight: 1 }],
       isBoss: true,
-      checkpoints: [0.66, 0.33],
     },
   ],
 };
@@ -77,46 +76,57 @@ describe('request_forecast', () => {
     expect(sent.map(m => m.status)).toEqual(['denied', 'denied']);
   });
 
-  it("starts a dungeon forecast from the requester's checkpoint", async () => {
-    const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
+  it("starts a dungeon forecast from floor 1, or from the party's own run when it is inside one", async () => {
+    const twoFloors = { ...PIT, floors: [...PIT.floors, { ...PIT.floors[0], floorNumber: 2 }] };
+    const w = await forecastWorld({ dungeon: { def: twoFloors, at: `${START.col},${START.row}` } });
     w.pm.partyBattles.setForecaster(w.svc);
     const { sent, reply } = replies();
     w.pm.handleForecastRequest('alice', { kind: 'dungeon', dungeonId: 'pit' }, reply);
     expect(sent[0].status).toBe('pending');
-    expect(sent[0].key.endsWith('|dungeon:pit:0:0:0')).toBe(true);
+    expect(sent[0].key.endsWith('|dungeon:pit:0')).toBe(true);
 
-    w.session.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 2, wipes: 1, rewardedPhases: [], at: Date.now() });
-    const resumed = replies();
-    w.pm.handleForecastRequest('alice', { kind: 'dungeon', dungeonId: 'pit' }, resumed.reply);
-    expect(resumed.sent[0].key.endsWith('|dungeon:pit:0:2:1')).toBe(true);
-    const job = w.stub.jobs.find(j => j.key === resumed.sent[0].key)!;
+    w.pm.partyBattles.restoreDungeonRun(w.partyId, { dungeonId: 'pit', currentFloorIndex: 1, entrance: { col: START.col, row: START.row } });
+    const inRun = replies();
+    w.pm.handleForecastRequest('alice', { kind: 'dungeon', dungeonId: 'pit' }, inRun.reply);
+    expect(inRun.sent[0].key.endsWith('|dungeon:pit:1')).toBe(true);
+    const job = w.stub.jobs.find(j => j.key === inRun.sent[0].key)!;
     const input = job.input as DungeonForecastInput;
-    expect(input.start).toEqual({ floorIndex: 0, phase: 2, wipes: 1 });
+    expect(input.startFloorIndex).toBe(1);
     expect(input.fallbackTable).toEqual([{ encounterId: 'ogres', weight: 1 }]);
     vi.advanceTimersByTime(50);
-    expect(resumed.sent[1]).toMatchObject({ status: 'ok', target: { kind: 'dungeon', dungeonId: 'pit' } });
+    expect(inRun.sent[1]).toMatchObject({ status: 'ok', target: { kind: 'dungeon', dungeonId: 'pit' } });
   });
 
-  it("starts a member's dungeon forecast from the owner's progress, since the owner or a leader takes the party in", async () => {
+  it('starts from floor 1 when the party is inside another dungeon, or its floor has gone', async () => {
+    const twoFloors = { ...PIT, floors: [...PIT.floors, { ...PIT.floors[0], floorNumber: 2 }] };
+    const w = await forecastWorld({ dungeon: { def: twoFloors, at: `${START.col},${START.row}` } });
+    w.pm.partyBattles.setForecaster(w.svc);
+    const ask = () => {
+      const { sent, reply } = replies();
+      w.pm.handleForecastRequest('alice', { kind: 'dungeon', dungeonId: 'pit' }, reply);
+      return sent[0].key;
+    };
+    const entry = (w.pm.partyBattles as unknown as { entries: Map<string, { dungeonRun?: unknown }> }).entries.get(w.partyId)!;
+
+    entry.dungeonRun = { dungeonId: 'elsewhere', currentFloorIndex: 1, entrance: { col: START.col, row: START.row } };
+    expect(ask().endsWith('|dungeon:pit:0')).toBe(true);
+
+    entry.dungeonRun = { dungeonId: 'pit', currentFloorIndex: 5, entrance: { col: START.col, row: START.row } };
+    expect(ask().endsWith('|dungeon:pit:0')).toBe(true);
+  });
+
+  it('gives every member the same dungeon forecast, whatever their role', async () => {
     const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
     w.pm.partyBattles.setForecaster(w.svc);
     await joinAlice(w, 'bob', 'Priest');
-    const bob = w.pm.getSessionByUsername('bob')!;
-    bob.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 2, wipes: 1, rewardedPhases: [], at: Date.now() });
     const ask = (username: string): string => {
       const { sent, reply } = replies();
       w.pm.handleForecastRequest(username, { kind: 'dungeon', dungeonId: 'pit' }, reply);
       return sent[0].key;
     };
 
-    expect(ask('bob').endsWith('|dungeon:pit:0:0:0')).toBe(true);
-    w.session.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
-    expect(ask('bob').endsWith('|dungeon:pit:0:1:0')).toBe(true);
-    expect(ask('alice').endsWith('|dungeon:pit:0:1:0')).toBe(true);
-
-    const getPartyId = (u: string) => w.pm.getSessionByUsername(u)?.getPartyId() ?? null;
-    expect(w.pm.parties.promoteLeader('alice', 'bob', getPartyId)).toBe(true);
-    expect(ask('bob').endsWith('|dungeon:pit:0:2:1')).toBe(true);
+    expect(ask('bob').endsWith('|dungeon:pit:0')).toBe(true);
+    expect(ask('alice')).toBe(ask('bob'));
   });
 
   it('forecasts a dungeon without hired henchmen, since they cannot go in', async () => {
@@ -329,7 +339,7 @@ describe('live battle forecasts', () => {
     expect(statuses(second)).toEqual(['pending', 'ok']);
   });
 
-  it('re-forecasts a few seconds after a party member falls or a checkpoint is reached', async () => {
+  it('re-forecasts a few seconds after a party member falls', async () => {
     const w = await forecastWorld({ defaultEncounter: 'brutes' });
     w.pm.partyBattles.setForecaster(w.svc);
     w.entry().battleTimer.restartBattle();
@@ -346,7 +356,7 @@ describe('live battle forecasts', () => {
     expect(liveJobs()).toEqual([`battle:${battleId}:0`]);
 
     watch([{ id: 2, t: 0, kind: 'death', dst: { side: 'player', pos: 4 } }]);
-    watch([{ id: 3, t: 0, kind: 'phase', amount: 1 }]);
+    watch([{ id: 3, t: 0, kind: 'death', dst: { side: 'player', pos: 1 } }]);
     vi.advanceTimersByTime(LIVE_FORECAST_DEBOUNCE_MS - 200);
     expect(liveJobs()).toHaveLength(1);
     vi.advanceTimersByTime(300);
@@ -389,7 +399,7 @@ describe('live forecasts for viewers who arrive mid-fight', () => {
     w.stub.gated.add('battle:');
     const combat = w.entry().battleTimer.currentCombat as PartyCombatState;
     (w.pm.partyBattles as unknown as { watchLiveForecastTriggers(partyId: string, flush: CombatFlush): void })
-      .watchLiveForecastTriggers(w.partyId, { battleId, combat, events: [{ id: 1, t: 0, kind: 'phase', amount: 1 }] as CombatEvent[], log: [], snapshot: null });
+      .watchLiveForecastTriggers(w.partyId, { battleId, combat, events: [{ id: 1, t: 0, kind: 'death', dst: { side: 'player', pos: 4 } }] as CombatEvent[], log: [], snapshot: null });
     vi.advanceTimersByTime(LIVE_FORECAST_DEBOUNCE_MS + 100);
 
     const late = createWs();
@@ -428,24 +438,21 @@ describe('live forecasts for viewers who arrive mid-fight', () => {
     expect(w.pm.partyBattles.liveForecastResync('no-such-party')).toEqual([]);
   });
 
-  it('forecasts a boss fight entered from a saved checkpoint', async () => {
+  it('forecasts a restored boss fight', async () => {
     const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
     w.pm.partyBattles.setForecaster(w.svc);
-    w.session.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
-    expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit', 'alice').success).toBe(true);
+    w.pm.partyBattles.restoreDungeonRun(w.partyId, { dungeonId: 'pit', currentFloorIndex: 0, entrance: { col: START.col, row: START.row } });
     const battleId = w.entry().battleTimer.battleId;
-    expect(w.entry().battleTimer.currentCombat?.bossPhases?.phase).toBe(1);
     vi.advanceTimersByTime(50);
     expect(forecastMessages(w.ws).filter(m => m.target.battleId === battleId).map(m => m.status)).toEqual(['pending', 'ok']);
     expect(w.stub.jobs.find(j => j.key.startsWith(`battle:${battleId}:`))?.input).toMatchObject({ kind: 'battle', henchmenAllowed: false });
   });
 
-  it('forecasts a resumed boss fight entered from the map once the player opens the battle', async () => {
+  it('forecasts a restored boss fight once the player opens the battle', async () => {
     const w = await forecastWorld({ dungeon: { def: PIT, at: `${START.col},${START.row}` } });
     w.pm.partyBattles.setForecaster(w.svc);
-    w.session.setDungeonCheckpoint('pit', { floorIndex: 0, phase: 1, wipes: 0, rewardedPhases: [], at: Date.now() });
     w.pm.setCombatView(w.ws as never, false);
-    expect(w.pm.partyBattles.enterDungeon(w.partyId, 'pit', 'alice').success).toBe(true);
+    w.pm.partyBattles.restoreDungeonRun(w.partyId, { dungeonId: 'pit', currentFloorIndex: 0, entrance: { col: START.col, row: START.row } });
     const battleId = w.entry().battleTimer.battleId;
     vi.advanceTimersByTime(500);
     expect(forecastMessages(w.ws)).toEqual([]);

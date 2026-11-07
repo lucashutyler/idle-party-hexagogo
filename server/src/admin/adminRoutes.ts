@@ -7,7 +7,7 @@ import type { InviteListStore } from '../auth/InviteListStore.js';
 import type { ContentStore } from '../game/ContentStore.js';
 import type { VersionStore } from '../game/VersionStore.js';
 import { ALL_CLASS_NAMES, SEED_TILE_TYPES, SEED_SKILLS, attackSkillsReplacedBySeed, SEED_SKILL_SLOT_SCHEDULES, migrateLegacySet, migrateLegacySkill, validateSkillDefinition, DEFAULT_MAP_ID, isManagedAssetKind, isDeferredAssetKind } from '@idle-party-rpg/shared';
-import type { ClassName, DungeonFloor, SkillDefinition, SkillSlot, SkillSlotType, RoomEntryRequirements } from '@idle-party-rpg/shared';
+import type { ClassName, SkillDefinition, SkillSlot, SkillSlotType, RoomEntryRequirements } from '@idle-party-rpg/shared';
 import type { AdminAuth } from './adminMiddleware.js';
 import type { ApiTokenStore, ApiTokenRecord } from '../auth/ApiTokenStore.js';
 import { isApiTokenExpired } from '../auth/ApiTokenStore.js';
@@ -17,7 +17,7 @@ import { findContentProblems, formatPublishRefusal } from '../game/ContentValida
 import { AssetValidationError, MAX_ASSET_BYTES } from '../game/AssetStore.js';
 import type { AssetStore } from '../game/AssetStore.js';
 import { registerAssetRoutes, assetUploadErrorHandler } from './assetRoutes.js';
-import { floorCheckpointProblems, monsterScalingProblems } from './contentChecks.js';
+import { monsterScalingProblems } from './contentChecks.js';
 
 /**
  * Coerce an untrusted room/transition entry gate from a request body, dropping
@@ -1057,12 +1057,6 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         return;
       }
     }
-    const floorProblems = dungeon.floors.flatMap((floor: DungeonFloor, index: number) =>
-      floorCheckpointProblems(floor, `Floor ${index + 1}`));
-    if (floorProblems.length > 0) {
-      res.status(400).json({ error: floorProblems.join(' ') });
-      return;
-    }
 
     if (versionId) {
       const result = await draftEditor.upsertDungeon(versionId, dungeon);
@@ -1071,6 +1065,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     } else {
       const content = getContentStore();
       await content.addOrUpdateDungeon(dungeon);
+      getPlayerManager().partyBattles.endOrphanedRuns();
       res.json({ success: true, dungeons: content.getAllDungeons() });
     }
   });
@@ -1091,6 +1086,7 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         res.status(400).json({ error: result.error });
         return;
       }
+      getPlayerManager().partyBattles.endOrphanedRuns();
       res.json({ success: true, dungeons: content.getAllDungeons() });
     }
   });

@@ -1,5 +1,5 @@
-import type { ClientCombatStatus, CombatEvent, DungeonRunInfo, LevelCon, MasteryEntry, MonsterLevelSource, MonsterTier } from '@idle-party-rpg/shared';
-import { DEFAULT_MAX_WIPES, LEVEL_CON_INFO, levelCon } from '@idle-party-rpg/shared';
+import type { ClientCombatStatus, CombatEvent, LevelCon, MasteryEntry, MonsterLevelSource, MonsterTier } from '@idle-party-rpg/shared';
+import { LEVEL_CON_INFO, levelCon } from '@idle-party-rpg/shared';
 import type { EnrageDisplay } from './CombatPlayback';
 
 export interface StatusPip {
@@ -122,40 +122,7 @@ export function enrageSlotText(display: Pick<EnrageDisplay, 'state' | 'remaining
   return `⏱ ${formatClock(Math.ceil(display.remainingMs / 1000) * 1000)}`;
 }
 
-/** Regroups left on a checkpoint floor; null when the floor has no budget. */
-export function retriesLeft(wipes: number | undefined, maxWipes: number | undefined): number | null {
-  if (maxWipes === undefined || !(maxWipes > 0)) return null;
-  return Math.max(0, maxWipes - Math.max(0, wipes ?? 0));
-}
-
-export function retriesText(left: number): string {
-  if (left === 0) return 'No retries left';
-  return `${left} ${left === 1 ? 'retry' : 'retries'} left`;
-}
-
-/**
- * What Leave should confirm first: walking out of a fight under way on a checkpoint floor counts as a
- * wipe, and past the retry budget it loses the checkpoint. Null when Leave costs nothing.
- */
-export function leaveDungeonWarning(
-  dungeon: Pick<DungeonRunInfo, 'checkpoints' | 'wipes' | 'maxWipes'> | null | undefined,
-  fightUnderWay: boolean,
-): string | null {
-  if (!fightUnderWay || !dungeon?.checkpoints?.length) return null;
-  const wipes = Math.max(0, dungeon.wipes ?? 0);
-  if (wipes >= (dungeon.maxWipes ?? DEFAULT_MAX_WIPES)) {
-    return 'Leaving now counts as a defeat, and with no retries left your checkpoint will be lost. Leave anyway?';
-  }
-  return 'Leaving now counts as a defeat and uses up one retry. Leave anyway?';
-}
-
-export type BossOpening = 'boss' | 'regroup' | 'resume';
-
-/** A boss fight after a wipe on the same floor regroups; one that starts at a checkpoint without a new wipe resumes a saved run. */
-export function bossOpening(resumedFromPhase: number, wipes: number, previousWipes: number | null): BossOpening {
-  if (previousWipes !== null && wipes > previousWipes) return 'regroup';
-  return resumedFromPhase > 0 ? 'resume' : 'boss';
-}
+export const LEAVE_DUNGEON_WARNING = 'This ends the run, and your party starts from the first floor next time. Leave anyway?';
 
 export interface MonsterLevelBadge {
   level: number;

@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.07.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.07.2'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -114,7 +114,7 @@ export interface OtherPlayerState {
   dungeonName?: string;
 }
 
-export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'checkpoint' | 'mastery';
+export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'mastery';
 
 export interface CombatLogEntry {
   id: number;
@@ -351,7 +351,7 @@ export interface ClientSetActionOrderMessage {
  * Machine-readable tag on an `error` message, for the cases a screen needs to react
  * to rather than just log. Most errors carry no code.
  */
-export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused' | 'travel_refused';
+export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused' | 'travel_refused' | 'party_refused';
 
 export interface ServerForecastMessage {
   type: 'forecast';

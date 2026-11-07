@@ -1,9 +1,18 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.11.07.1',
+    version: '2026.11.07.2',
     notes: [
       'New Auto button on the battle screen. While it is on and your party is traveling, it runs from each fight as soon as Run is available, until you reach your destination or something stops you. Running skips that fight for no rewards.',
       'Auto is shared by the whole party. Only the owner or a leader can switch it on or off.',
+    ],
+  },
+  {
+    version: '2026.11.07.1',
+    notes: [
+      'Dungeons are simpler: there are no more boss checkpoints, retries or saved progress. A wipe on any floor ends the run, and your party returns to the entrance room.',
+      'Leaving a dungeon ends the run, and you start from the first floor next time.',
+      'If anyone leaves or is removed from the party inside a dungeon, the run ends for everyone and the party returns to the entrance room. The game asks before you do this.',
+      'Accepting an invite from another party no longer stops the party you left, and party chat now tells those left behind when someone leaves.',
     ],
   },
   {

@@ -48,6 +48,12 @@ function isPlayerChatChannel(value: unknown): value is PlayerChatChannel {
 /** What a double tap gets once the first tap has gone through. */
 export const GIFT_NOT_FOUND = 'Gift not found';
 
+export interface PartyDeparture {
+  partyId: string;
+  others: string[];
+  wasOwner: boolean;
+}
+
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private connections = new Map<WebSocket, string>();
@@ -260,6 +266,7 @@ export class PlayerManager {
 
     // Remove from party (and its battle entry)
     const partyId = session?.getPartyId();
+    const departure = this.partyDeparture(username);
     if (partyId) {
       // leaveParty handles both solo (deletes party) and multi-player (transfers ownership)
       this.parties.leaveParty(
@@ -278,6 +285,11 @@ export class PlayerManager {
 
     // Close all WebSocket connections
     this.kickPlayer(username);
+
+    if (departure) this.announcePartyDeparture(username, departure);
+
+    // The others' files still hold the run this just ended, which a crash would restore.
+    if (session) await this.saveAll(saveStore);
 
     console.log(`[PlayerManager] Banned "${username}" — session removed, state saved`);
   }
@@ -700,15 +712,7 @@ export class PlayerManager {
       reply({ type: 'forecast', target, key: '', result: null, status: 'unavailable' });
       return;
     }
-    this.partyBattles.requestForecast(partyId, username, target, reply, this.dungeonEntrant(partyId, username));
-  }
-
-  /** Whose saved dungeon progress an entry would use: the requester's when they may lead the party in, else the owner's. */
-  private dungeonEntrant(partyId: string, username: string): string {
-    const members = this.parties.getParty(partyId)?.members;
-    const me = members?.find(m => m.username === username);
-    if (!members || !me || canMove(me.role)) return username;
-    return members.find(m => m.role === 'owner')?.username ?? username;
+    this.partyBattles.requestForecast(partyId, username, target, reply);
   }
 
   /** The player's full kill-mastery list for the bestiary. */
@@ -949,14 +953,128 @@ export class PlayerManager {
     if (partyId) this.partyBattles.settlePendingResult(partyId);
   }
 
+  /** Who a player's departure from their current party concerns. Read it before they leave. */
+  partyDeparture(username: string): PartyDeparture | null {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    const members = partyId ? this.parties.getParty(partyId)?.members : undefined;
+    if (!partyId || !members) return null;
+    const others = members.filter(m => m.username !== username).map(m => m.username);
+    if (others.length === 0) return null;
+    return { partyId, others, wasOwner: members.find(m => m.username === username)?.role === 'owner' };
+  }
+
+  /** Tell the members left behind that a player has gone, and who owns the party now if that changed. */
+  announcePartyDeparture(username: string, { partyId, others, wasOwner }: PartyDeparture): void {
+    this.broadcastPartyEvent(partyId, username, 'You left your old party.', `${username} left the party.`);
+    const newOwner = wasOwner ? this.parties.getParty(partyId)?.members.find(m => m.role === 'owner') : undefined;
+    if (newOwner) {
+      this.broadcastPartyEvent(partyId, newOwner.username, 'You became the new party owner.', `${newOwner.username} became the new party owner.`);
+      this.notify.notify(newOwner.username, 'party_ownership_transferred', {
+        title: 'Party ownership',
+        body: 'You became the new party owner.',
+        payload: {},
+      });
+    }
+    for (const member of others) {
+      this.sendStateToPlayer(member);
+      this.notify.notify(member, 'party_member_left', {
+        title: 'Party',
+        body: `${username} left your party.`,
+        payload: { leftUsername: username },
+      });
+    }
+  }
+
+  /** Accept a party invite, leaving the current party. Returns why it was refused, or null. */
+  acceptPartyInvite(username: string, partyId: string): string | null {
+    const oldPartyId = this.sessions.get(username)?.getPartyId() ?? null;
+    if (oldPartyId === partyId) return null;
+    if (this.partyBattles.isInDungeonRun(partyId)) return 'That party is in a dungeon right now.';
+
+    const departure = this.partyDeparture(username);
+    const result = this.parties.acceptInvite(
+      username,
+      partyId,
+      (u) => this.sessions.get(u)?.getPartyId() ?? null,
+      (u, id) => this.sessions.get(u)?.setPartyId(id),
+      (a, b) => this.areSameTile(a, b),
+    );
+    if (typeof result === 'string') return result;
+
+    this.handlePartyJoin(username, partyId, oldPartyId);
+    this.broadcastPartyEvent(partyId, username, 'You joined the party.', `${username} joined the party.`);
+    for (const m of result.joined.members) {
+      this.sendStateToPlayer(m.username);
+      if (m.username !== username) {
+        this.notify.notify(m.username, 'party_member_joined', {
+          title: 'Party',
+          body: `${username} joined your party.`,
+          payload: { joinedUsername: username },
+        });
+      }
+    }
+    // A joiner arrives mid-fight, and only full snapshots carry what the board and boss bar need.
+    for (const ws of this.playerConnections.get(username) ?? []) this.sendCombatResync(ws);
+    if (departure) this.announcePartyDeparture(username, departure);
+    return null;
+  }
+
+  /** Leave the party for a new solo one. Returns why it was refused, or null. */
+  leaveParty(username: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return null;
+    const partyId = session.getPartyId();
+    const departure = this.partyDeparture(username);
+
+    const result = this.parties.leaveParty(
+      username,
+      (u) => this.sessions.get(u)?.getPartyId() ?? null,
+      (u, id) => this.sessions.get(u)?.setPartyId(id),
+    );
+    if (typeof result === 'string') return result;
+
+    if (partyId) this.handlePartyLeave(username, partyId);
+    else this.ensureParty(username);
+    this.sendStateToPlayer(username);
+    if (departure) this.announcePartyDeparture(username, departure);
+    return null;
+  }
+
+  /** Kick a member into a new solo party. Returns why it was refused, or null. */
+  kickPartyMember(username: string, target: string): string | null {
+    const session = this.sessions.get(username);
+    if (!session) return null;
+    const partyId = session.getPartyId();
+
+    const result = this.parties.kickMember(
+      username,
+      target,
+      (u) => this.sessions.get(u)?.getPartyId() ?? null,
+      (u, id) => this.sessions.get(u)?.setPartyId(id),
+    );
+    if (typeof result === 'string') return result;
+
+    if (partyId) {
+      this.broadcastPartyEvent(partyId, target, 'You were kicked from the party.', `${target} was kicked from the party.`);
+      this.handlePartyLeave(target, partyId);
+      for (const m of this.parties.getParty(partyId)?.members ?? []) this.sendStateToPlayer(m.username);
+    } else {
+      this.ensureParty(target);
+      this.sendStateToPlayer(username);
+    }
+    this.sendStateToPlayer(target);
+    this.notify.notify(target, 'party_kicked', {
+      title: 'Party',
+      body: 'You were removed from your party.',
+      payload: {},
+    });
+    return null;
+  }
+
   /** Handle a player joining a party (after accept invite). */
   handlePartyJoin(username: string, partyId: string, oldPartyId: string | null): void {
-    // Destroy old solo party battle entry
-    if (oldPartyId) {
-      this.partyBattles.destroyEntry(oldPartyId);
-    }
+    if (oldPartyId) this.partyBattles.removeMember(oldPartyId, username);
 
-    // Add to new party's battle
     this.partyBattles.addMember(partyId, username);
 
     const joiner = this.sessions.get(username);
@@ -1010,7 +1128,7 @@ export class PlayerManager {
       return 'You must be at the dungeon entrance.';
     }
 
-    const result = this.partyBattles.enterDungeon(partyId, dungeonId, username);
+    const result = this.partyBattles.enterDungeon(partyId, dungeonId);
     if (!result.success) return result.error;
 
     // State for every member is pushed by enterDungeon's broadcast.
@@ -1473,6 +1591,7 @@ export class PlayerManager {
           body: logMessage,
         });
       }
+      this.sendStateToPlayer(username);
     }
   }
 

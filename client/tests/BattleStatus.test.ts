@@ -6,7 +6,7 @@ import type { BattleStatusInput } from '../src/combat/BattleStatus';
 
 function input(overrides: Partial<BattleStatusInput> = {}): BattleStatusInput {
   return {
-    visual: 'fighting', hasFight: true, result: null, inDungeon: false, walking: false,
+    visual: 'fighting', hasFight: true, result: null, inDungeon: false, lastFloor: false, walking: false,
     hasDestination: false, roomName: null, rewards: [], ...overrides,
   };
 }
@@ -46,6 +46,16 @@ describe('battleStatus', () => {
 
   it('heads for the next floor inside a dungeon', () => {
     expect(battleStatus(input({ visual: 'victory', inDungeon: true }))?.next).toBe('On to the next floor');
+  });
+
+  it('heads back to the entrance after the last floor of a dungeon', () => {
+    expect(battleStatus(input({ visual: 'victory', inDungeon: true, lastFloor: true }))?.next).toBe('Back to the entrance');
+  });
+
+  it('heads back to the entrance after a wipe on any floor of a dungeon, and never says regrouping', () => {
+    for (const lastFloor of [false, true]) {
+      expect(battleStatus(input({ visual: 'defeat', result: 'defeat', inDungeon: true, lastFloor }))).toMatchObject({ title: 'Defeated', next: 'Back to the entrance' });
+    }
   });
 
   it('says the party is regrouping when there is no fight on the board', () => {
