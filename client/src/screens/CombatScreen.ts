@@ -205,6 +205,8 @@ export class CombatScreen implements Screen {
   private headerLatch: { battleId: number; state: ServerStateMessage } | null = null;
   private statusFinished = false;
   private statusBattleId: number | null = null;
+  private regroupEndsAt = 0;
+  private regroupTimer?: ReturnType<typeof setTimeout>;
   private rewardBaseline: CharacterProgress | null = null;
   private rewards: string[] = [];
   private rewardsCounted = false;
@@ -415,6 +417,7 @@ export class CombatScreen implements Screen {
 
   private handleState(state: ServerStateMessage): void {
     this.lastState = state;
+    this.regroupEndsAt = state.battle.regroupMs ? performance.now() + state.battle.regroupMs : 0;
     this.playback.ingestState(state.battle.combat, performance.now());
     this.trackRewards(state);
     if (!this.isActive) return;
@@ -680,6 +683,9 @@ export class CombatScreen implements Screen {
     this.statusBattleId = this.playback.battleId;
     const state = this.lastState;
     if (!state) return;
+    const regroupLeftMs = this.regroupEndsAt - performance.now();
+    const regroupSeconds = regroupLeftMs > 0 ? Math.ceil(regroupLeftMs / 1000) : 0;
+    this.bookRegroupRepaint(regroupLeftMs);
     const walking = state.battle.visual === 'none' && state.battle.state === 'result';
     const nextRoom = state.party?.path?.[0];
     const target = walking ? state.party : nextRoom;
@@ -694,12 +700,24 @@ export class CombatScreen implements Screen {
       hasDestination: !!nextRoom,
       roomName: target ? discoveredRoomName(state, this.worldCache, target.col, target.row) : null,
       rewards: this.rewards,
+      regroupSeconds,
     });
     this.statusEl.classList.toggle('show', !!status);
     this.stage.classList.toggle('status-shown', !!status);
     if (!status) return;
     this.statusEl.dataset.tone = status.tone;
     setHtml(this.statusEl, battleStatusHtml(status));
+  }
+
+  /** While a wipe wait runs, the status chip repaints on each whole second left. */
+  private bookRegroupRepaint(leftMs: number): void {
+    if (this.regroupTimer) clearTimeout(this.regroupTimer);
+    this.regroupTimer = undefined;
+    if (leftMs <= 0) return;
+    this.regroupTimer = setTimeout(() => {
+      this.regroupTimer = undefined;
+      if (this.isActive) this.paintStatus();
+    }, leftMs % 1000 || 1000);
   }
 
   private refreshIdentities(): void {
@@ -1439,9 +1457,11 @@ export class CombatScreen implements Screen {
     const progress = fighting && canRun ? Math.min(1, elapsed / RUN_AVAILABLE_MS) : 0;
     const below = state.social?.party?.autoRetreat?.belowPct ?? 0;
     const retreatNote = below > 0 ? `Auto-retreat is on (below ${below} %)` : '';
+    const regrouping = this.regroupEndsAt > performance.now();
     const lockedHint = !canRun
       ? 'Only the party owner or a leader can run'
-      : fighting ? `Run becomes available ${RUN_AVAILABLE_MS / 1000} seconds into a fight` : 'The next fight is about to start';
+      : fighting ? `Run becomes available ${RUN_AVAILABLE_MS / 1000} seconds into a fight`
+        : regrouping ? 'The party is regrouping' : 'The next fight is about to start';
     const hint = [lockedHint, retreatNote].filter(Boolean).join('. ');
     const key = `${available}|${progress.toFixed(2)}|${hint}`;
     if (key === this.lastRunKey) return;

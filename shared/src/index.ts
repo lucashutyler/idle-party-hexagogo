@@ -409,6 +409,7 @@ export type {
 export {
   RESULT_PAUSE,
   MOVE_DURATION,
+  WIPE_WAIT_MS,
   GAME_VERSION,
   PARTIAL_STATE_PARAM,
   restoreElidedState,
@@ -450,6 +451,9 @@ export type {
 } from './systems/HenchmanTypes.js';
 export {
   SEED_HENCHMEN,
+  HIRE_LEVEL_LIMIT,
+  isHireWithinLevelLimit,
+  hireLevelLimitText,
   henchmanDisplayNames,
   buildHenchmanCombatant,
 } from './systems/HenchmanTypes.js';
@@ -518,6 +522,7 @@ export type {
 export {
   SEED_DUNGEONS,
   getDungeon,
+  isValidFloorFactor,
   validateDungeonEntry,
   rollDungeonRewards,
   rewardAppliesToClass,
@@ -658,7 +663,6 @@ export {
   TIER_HP_RATIOS,
   LEVEL_CONS,
   LEVEL_CON_INFO,
-  XP_CON_FACTOR,
   clampMonsterLevel,
   monsterDamagePerSecond,
   deriveMonsterLevel,
@@ -668,10 +672,22 @@ export {
   suggestTierFromHp,
   levelCon,
   monsterLevelCon,
-  xpConFactor,
   formatMonsterLevel,
 } from './systems/MonsterLevels.js';
 export type { LevelCon, LevelConInfo, EffectiveMonsterLevel } from './systems/MonsterLevels.js';
+export {
+  PARTY_XP_SHARE,
+  STARTER_ZONE_LONE_XP_SHARE,
+  XP_LEVEL_GAP,
+  isHarmlessMonster,
+  levelGapXpFactor,
+  floorPayFactor,
+  floorMonsterXp,
+  partyXpShare,
+  partyXpBonus,
+  fightXp,
+} from './systems/XpRules.js';
+export type { FightXpInput, XpMonster } from './systems/XpRules.js';
 export {
   XP_INCOME_SOLO_L1_PER_DAY,
   XP_INCOME_PARTY_L10_PER_DAY,

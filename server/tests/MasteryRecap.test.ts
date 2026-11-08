@@ -182,11 +182,11 @@ describe('Kill mastery', () => {
   });
 });
 
-describe('XP by level con', () => {
+describe('XP by level gap', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  it('scales each member\'s share of an authored-level monster by their own con', async () => {
+  it('scales each member\'s pay from an authored-level monster by their own gap', async () => {
     const { pm, session, partyId, win, setLevel } = await setup(['alice', 'bob']);
     const bob = await pm.login(createFakeWs(), 'bob');
     bob.setClass('Mage');
@@ -196,19 +196,19 @@ describe('XP by level con', () => {
     const [alice0, bob0] = [xpOf(session), xpOf(bob)];
 
     win(['elder']);
-    expect(xpOf(session) - alice0).toBe(pacedXp(100 * 0.25, 2));
-    expect(xpOf(bob) - bob0).toBe(pacedXp(100, 2));
+    expect(xpOf(session) - alice0).toBe(pacedXp(100 * 0.91 * 0.2));
+    expect(xpOf(bob) - bob0).toBe(pacedXp(100 * 0.91));
 
     win(['brute']);
-    expect(xpOf(session) - alice0).toBe(pacedXp(100 * 0.25, 2) + pacedXp(100, 2));
+    expect(xpOf(session) - alice0).toBe(pacedXp(100 * 0.91 * 0.2) + pacedXp(100 * 0.91));
   });
 
-  it('pays easy monsters three quarters', async () => {
+  it('decays past the even band on the member\'s own level', async () => {
     const { session, win, setLevel } = await setup();
     setLevel(session, 5);
     const xp0 = session.toSaveData().character!.xp;
     win(['elder']);
-    expect(session.toSaveData().character!.xp - xp0).toBe(pacedXp(100 * 0.75));
+    expect(session.toSaveData().character!.xp - xp0).toBe(pacedXp(100 * Math.exp(-0.8)));
   });
 });
 

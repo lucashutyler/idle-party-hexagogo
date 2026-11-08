@@ -81,7 +81,7 @@ import {
   nextWeeklyReopening,
   isBlockedUser,
 } from '@idle-party-rpg/shared';
-import { COMBAT_PACE, paceHitDamage } from '@idle-party-rpg/shared';
+import { COMBAT_PACE, hireLevelLimitText, isHireWithinLevelLimit, paceHitDamage } from '@idle-party-rpg/shared';
 import type {
   CombatPrefs,
   DungeonRunState,
@@ -222,6 +222,9 @@ export class PlayerSession {
 
   /** Callback to get the remaining movement path — set by PlayerManager. */
   getCurrentPath?: () => HexTile[];
+
+  /** Callback to get the highest human level in the party — set by PlayerManager. */
+  getPartyTopLevel?: () => number;
 
   /** Callback to get the active dungeon run state — set by PlayerManager. */
   getDungeonState?: () => import('@idle-party-rpg/shared').DungeonRunInfo | null;
@@ -509,6 +512,7 @@ export class PlayerSession {
   getHenchmanOffers(): HenchmanOffer[] {
     const shop = this.getCurrentShop();
     if (!shop?.henchmanIds?.length) return [];
+    const topLevel = this.getPartyTopLevel?.() ?? this.getLevel();
     const offers: HenchmanOffer[] = [];
     for (const id of shop.henchmanIds) {
       const def = this.content.getHenchman(id);
@@ -522,6 +526,7 @@ export class PlayerSession {
         level: def.level,
         maxHp: def.maxHp,
         baseDamage: paceHitDamage(COMBAT_PACE, def.className, def.baseDamage),
+        ...(isHireWithinLevelLimit(def.level, topLevel) ? {} : { levelLimitReason: hireLevelLimitText(def.level, topLevel) }),
       });
     }
     return offers;

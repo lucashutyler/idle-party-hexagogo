@@ -118,6 +118,8 @@ const sharedComponents = {
         },
         isBoss: { type: 'boolean', description: 'HUD badge only; boss behaviour comes from the monster tier' },
         rewards: { type: 'array', items: { $ref: '#/components/schemas/DungeonReward' } },
+        xpFactor: { type: 'number', minimum: 0, maximum: 1, description: "What this floor's monsters pay in XP: a monster that pays pays max(1, round(xp x factor)) before the level gap. Absent pays in full. First-clear rewards are untouched." },
+        coinFactor: { type: 'number', minimum: 0, maximum: 1, description: "What this floor's monsters pay in coin. Absent pays in full. First-clear rewards are untouched." },
       },
     },
     DungeonReward: {
@@ -163,6 +165,7 @@ const sharedComponents = {
         id: { type: 'string', example: 'darkwood' },
         displayName: { type: 'string', example: 'Darkwood' },
         levelRange: { type: 'array', items: { type: 'number' }, example: [2, 3] },
+        starterZone: { type: 'boolean', description: 'Rooms here take no XP share cut, and a player with no party and no hire keeps 80 %. Dungeon floors are unaffected. Absent: not a starter zone.' },
         encounterTable: {
           type: 'array',
           items: {

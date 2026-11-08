@@ -40,11 +40,11 @@ function makePassive(overrides: Partial<SkillDefinition> = {}): SkillDefinition 
 }
 
 describe('SKILL_OPTION_CATALOG', () => {
-  it('covers all 27 passive and 23 active kinds exactly once (50 total)', () => {
-    expect(ALL_PASSIVE_EFFECT_KINDS).toHaveLength(27);
+  it('covers all 28 passive and 23 active kinds exactly once (51 total)', () => {
+    expect(ALL_PASSIVE_EFFECT_KINDS).toHaveLength(28);
     expect(ALL_ACTIVE_EFFECT_KINDS).toHaveLength(23);
-    expect(new Set([...ALL_PASSIVE_EFFECT_KINDS, ...ALL_ACTIVE_EFFECT_KINDS]).size).toBe(50);
-    expect(Object.keys(SKILL_OPTION_CATALOG)).toHaveLength(50);
+    expect(new Set([...ALL_PASSIVE_EFFECT_KINDS, ...ALL_ACTIVE_EFFECT_KINDS]).size).toBe(51);
+    expect(Object.keys(SKILL_OPTION_CATALOG)).toHaveLength(51);
     for (const kind of ALL_PASSIVE_EFFECT_KINDS) {
       expect(SKILL_OPTION_CATALOG[kind], `missing catalog entry for ${kind}`).toBeDefined();
       expect(SKILL_OPTION_CATALOG[kind].kind).toBe(kind);
@@ -191,6 +191,26 @@ describe('validateSkillDefinition', () => {
     const def = makeActive({ activeEffects: [{ kind: 'stun_single', stunChance: 1.5 }] });
     const errors = validateSkillDefinition(def);
     expect(errors.some(e => e.includes('at most'))).toBe(true);
+  });
+
+  it('checks the stack params on every party buff that takes them, and the per-class switch on the per-member ones', () => {
+    const buffs: Record<string, object> = {
+      party_damage_mult: { flatValue: 0.1, perPartyMember: true },
+      dodge_party: { flatValue: 0.02, perPartyMember: true },
+      enemy_damage_reduction_party: { flatValue: 0.02, perPartyMember: true },
+      holy_damage_party: { valuePerLevel: 1 },
+      cooldown_reduction: { flatValue: 1, partyWide: true },
+    };
+    for (const [kind, base] of Object.entries(buffs)) {
+      const skill = (extra: object) => makePassive({ className: 'Bard', passiveEffects: [{ kind, ...base, ...extra } as never] });
+      expect(validateSkillDefinition(skill({ stackGroup: 'rally', stackFactor: 0 })), kind).toEqual([]);
+      expect(validateSkillDefinition(skill({ stackFactor: 2 })).some(e => e.includes('at most')), kind).toBe(true);
+      expect(validateSkillDefinition(skill({ stackGroup: ' ' })).some(e => e.includes('must be text')), kind).toBe(true);
+    }
+    for (const kind of ['party_damage_mult', 'dodge_party', 'enemy_damage_reduction_party'] as const) {
+      const skill = makePassive({ className: 'Bard', passiveEffects: [{ kind, ...buffs[kind], perDistinctClass: 'yes' } as never] });
+      expect(validateSkillDefinition(skill).some(e => e.includes('must be a boolean')), kind).toBe(true);
+    }
   });
 
   it('rejects a missing required param', () => {

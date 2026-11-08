@@ -44,6 +44,20 @@ describe('battleStatus', () => {
     expect(battleStatus(input({ visual: 'none', result: 'defeat', walking: true, roomName: 'Old Mill' }))?.next).toBe('Walking to Old Mill');
   });
 
+  it('counts down a wipe wait, and never promises a walk during one', () => {
+    expect(battleStatus(input({ visual: 'defeat', result: 'defeat', regroupSeconds: 42 }))).toMatchObject({ title: 'Defeated', next: 'Regrouping, 42s' });
+    expect(battleStatus(input({ visual: 'defeat', result: 'defeat', hasDestination: true, roomName: 'Old Mill', regroupSeconds: 1 }))?.next).toBe('Regrouping, 1s');
+  });
+
+  it('shows the wait with no fight on the board', () => {
+    expect(battleStatus(input({ hasFight: false, visual: 'none', regroupSeconds: 9 }))).toMatchObject({ title: '', next: 'Regrouping, 9s' });
+    expect(battleStatus(input({ visual: 'none', regroupSeconds: 9 }))).toMatchObject({ title: '', next: 'Regrouping, 9s' });
+  });
+
+  it('goes back to the plain line when no time is left', () => {
+    expect(battleStatus(input({ visual: 'defeat', result: 'defeat', regroupSeconds: 0 }))?.next).toBe('Regrouping');
+  });
+
   it('heads for the next floor inside a dungeon', () => {
     expect(battleStatus(input({ visual: 'victory', inDungeon: true }))?.next).toBe('On to the next floor');
   });

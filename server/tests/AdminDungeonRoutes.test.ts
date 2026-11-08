@@ -25,6 +25,7 @@ const OLD_FLOOR: DungeonFloor & Record<string, unknown> = {
 };
 
 describe('live dungeon routes', () => {
+  const floor = (extra: object) => ({ floorNumber: 1, gridShape: { cols: 3, rows: 3 }, encounterTable: [], ...extra });
   const dungeons = new Map<string, DungeonDefinition>();
   const endOrphanedRuns = vi.fn();
   let server: Server;
@@ -38,6 +39,8 @@ describe('live dungeon routes', () => {
       getAllDungeons: () => Object.fromEntries(dungeons),
       addOrUpdateDungeon: async (dungeon: DungeonDefinition) => { dungeons.set(dungeon.id, dungeon); },
       deleteDungeon: async (id: string) => (dungeons.delete(id) ? { success: true } : { success: false, error: 'Dungeon not found.' }),
+      getAllZones: () => ({}),
+      addOrUpdateZone: async () => {},
     } as unknown as ContentStore;
     const app = express();
     app.use(express.json());
@@ -72,6 +75,36 @@ describe('live dungeon routes', () => {
 
     expect(res.status).toBe(200);
     expect(dungeons.get('hall')!.floors[0]).toMatchObject({ isBoss: true, maxWipes: -1.5 });
+  });
+
+  it('saves floor factors from 0 to 1, and leaves them out when absent', async () => {
+    const res = await put({ id: 'hall', name: 'Hall', floors: [floor({ xpFactor: 0, coinFactor: 1 }), floor({ xpFactor: 0.03 }), floor({})] });
+
+    expect(res.status).toBe(200);
+    expect(dungeons.get('hall')!.floors.map(f => f.xpFactor)).toEqual([0, 0.03, undefined]);
+  });
+
+  it.each([1.5, -0.1, 'half', null])('refuses a floor factor of %s', async (bad) => {
+    for (const key of ['xpFactor', 'coinFactor']) {
+      const res = await put({ id: 'hall', name: 'Hall', floors: [floor({ [key]: bad })] });
+
+      expect(res.status).toBe(400);
+      expect((await res.json() as { error: string }).error).toContain(key);
+    }
+    expect(dungeons.has('hall')).toBe(false);
+  });
+
+  it('refuses a starter zone flag that is not a boolean, and saves one that is', async () => {
+    const zone = { id: 'isle', displayName: 'Isle', levelRange: [1, 2], encounterTable: [] };
+    const putZone = (body: object) => fetch(`${base}/zones/isle`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    expect((await putZone({ ...zone, starterZone: 'yes' })).status).toBe(400);
+    expect((await putZone({ ...zone, starterZone: true })).status).toBe(200);
+    expect((await putZone(zone)).status).toBe(200);
   });
 
   it('still refuses a floor with no shape', async () => {

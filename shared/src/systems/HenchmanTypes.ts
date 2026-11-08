@@ -47,6 +47,20 @@ export interface HenchmanOffer {
   level: number;
   maxHp: number;
   baseDamage: number;
+  /** Why this hire can't join the player's party or fight for it right now. */
+  levelLimitReason?: string;
+}
+
+/** A hire may stand at most this many levels above the highest human in the party. */
+export const HIRE_LEVEL_LIMIT = 5;
+
+export function isHireWithinLevelLimit(hireLevel: number, highestHumanLevel: number): boolean {
+  return !(hireLevel > highestHumanLevel + HIRE_LEVEL_LIMIT);
+}
+
+/** The player-facing reason for a hire over the line. */
+export function hireLevelLimitText(hireLevel: number, highestHumanLevel: number): string {
+  return `Level ${hireLevel} is more than ${HIRE_LEVEL_LIMIT} levels above your party's highest member (level ${highestHumanLevel}).`;
 }
 
 /**

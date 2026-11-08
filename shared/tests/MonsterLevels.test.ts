@@ -7,7 +7,6 @@ import {
   monsterDamagePerSecond,
   levelCon,
   monsterLevelCon,
-  xpConFactor,
   formatMonsterLevel,
   LEVEL_CON_INFO,
   LEVEL_CONS,
@@ -152,13 +151,9 @@ describe('levelCon', () => {
     expect(levelCon(21, 30)).toBe('trivial');
   });
 
-  it('shows derived levels as even and never scales their XP', () => {
+  it('shows derived levels as even', () => {
     expect(monsterLevelCon(90, 'derived', 5)).toBe('even');
     expect(monsterLevelCon(90, 'authored', 5)).toBe('deadly');
-    expect(xpConFactor(1, 'derived', 60)).toBe(1);
-    expect(xpConFactor(1, 'authored', 60)).toBe(0.25);
-    expect(xpConFactor(25, 'authored', 30)).toBe(0.75);
-    expect(xpConFactor(40, 'authored', 30)).toBe(1);
   });
 
   it('has a label and a distinct glyph for every con', () => {

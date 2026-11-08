@@ -257,6 +257,41 @@ describe('CombatScreen', () => {
     expect(t.enemyCard(2)).not.toBeNull();
   });
 
+  it('counts down the wait after a wipe, then says nothing more about it', () => {
+    const t = start();
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'defeat', regroupMs: 3500 }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(statusText()).toContain('Regrouping, 4s');
+
+    vi.advanceTimersByTime(1000);
+    expect(statusText()).toContain('Regrouping, 3s');
+
+    vi.advanceTimersByTime(3000);
+    expect(statusText()).toContain('Regrouping');
+    expect(statusText()).not.toContain('Regrouping,');
+  });
+
+  it('says on the Run button that the party is regrouping while it waits', () => {
+    const t = start();
+    const runHint = () => document.querySelector('.combat-run-hint')!.textContent;
+    const lost = { state: 'result', visual: 'defeat', combat: { ...snapshot(2, GOBLIN), finished: true, result: 'defeat' } };
+    t.push(withBattle(makeState(2, GOBLIN, []), { ...lost, regroupMs: 2000 }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(runHint()).toBe('The party is regrouping');
+
+    t.push(withBattle(makeState(2, GOBLIN, []), lost));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(runHint()).toBe('The next fight is about to start');
+  });
+
+  it('does not say the party is walking while it waits after a Run that stays in the room', () => {
+    const t = start();
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, regroupMs: 2000 }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(statusText()).toBe('Regrouping, 2s');
+    expect(document.querySelector('.combat-run-hint')!.textContent).toBe('The party is regrouping');
+  });
+
   it('draws the party from the roster on a first load with no fight', () => {
     const base = withBattle(makeState(1, GOBLIN, []), { visual: 'none', combat: undefined }, {
       social: {

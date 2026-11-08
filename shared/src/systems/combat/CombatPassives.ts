@@ -98,15 +98,40 @@ export function getCritMultiplier(player: PartyCombatant): number {
   return mult;
 }
 
-function sumPerMemberPassive(players: PartyCombatant[], kind: PassiveEffectKind): number {
-  const partySize = players.length;
+/** Ungrouped values add; a stack group counts strongest first, each further copy `stackFactor` of the one before. */
+function stackedTotal(entries: { value: number; effect: PassiveEffect }[]): number {
   let total = 0;
-  for (const p of players) {
-    for (const effect of getPassiveEffects(p, kind)) {
-      if (effect.perPartyMember) total += (effect.flatValue ?? 0) * partySize;
+  const groups = new Map<string, { value: number; factor: number }[]>();
+  for (const { value, effect } of entries) {
+    if (!effect.stackGroup) {
+      total += value;
+      continue;
+    }
+    const group = groups.get(effect.stackGroup) ?? [];
+    group.push({ value, factor: effect.stackFactor ?? 1 });
+    groups.set(effect.stackGroup, group);
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => b.value - a.value);
+    let weight = 1;
+    for (const copy of group) {
+      total += copy.value * weight;
+      weight *= group[0].factor;
     }
   }
   return total;
+}
+
+function sumPerMemberPassive(players: PartyCombatant[], kind: PassiveEffectKind): number {
+  const partySize = players.length;
+  const distinctClasses = new Set(players.map(p => p.className)).size;
+  const entries: { value: number; effect: PassiveEffect }[] = [];
+  for (const p of players) {
+    for (const effect of getPassiveEffects(p, kind)) {
+      if (effect.perPartyMember) entries.push({ value: (effect.flatValue ?? 0) * (effect.perDistinctClass ? distinctClasses : partySize), effect });
+    }
+  }
+  return stackedTotal(entries);
 }
 
 export function computeRallyMultiplier(players: PartyCombatant[]): number {
@@ -122,14 +147,19 @@ export function computeUnnerveReduction(players: PartyCombatant[]): number {
 }
 
 export function computeBlessedArmsDamage(players: PartyCombatant[]): number {
-  let totalDamage = 0;
+  const entries: { value: number; effect: PassiveEffect }[] = [];
   for (const p of players) {
     if (p.currentHp <= 0) continue;
     for (const effect of getPassiveEffects(p, 'holy_damage_party')) {
-      totalDamage += (effect.valuePerLevel ?? 0) * p.level;
+      entries.push({ value: (effect.valuePerLevel ?? 0) * p.level, effect });
     }
   }
-  return totalDamage;
+  return stackedTotal(entries);
+}
+
+/** Other living humans of the owner's class; hires never count. */
+export function sameClassHumanAllies(owner: PartyCombatant, players: PartyCombatant[]): number {
+  return players.filter(p => p !== owner && !p.isHenchman && p.className === owner.className && p.currentHp > 0).length;
 }
 
 export function getHealPowerMultiplier(player: PartyCombatant): number {
@@ -241,15 +271,16 @@ export function effectiveCooldownMs(owner: PartyCombatant, skill: SkillDefinitio
 function cooldownReductionSeconds(owner: PartyCombatant, allPlayers: PartyCombatant[]): number {
   let cdrSeconds = 0;
   for (const effect of getPassiveEffects(owner, 'cooldown_reduction')) {
-    cdrSeconds += effect.flatValue ?? 0;
+    if (!(effect.partyWide && effect.stackGroup)) cdrSeconds += effect.flatValue ?? 0;
   }
+  const partyWide: { value: number; effect: PassiveEffect }[] = [];
   for (const p of allPlayers) {
-    if (p === owner || p.currentHp <= 0) continue;
+    if (p.currentHp <= 0 && p !== owner) continue;
     for (const effect of getPassiveEffects(p, 'cooldown_reduction')) {
-      if (effect.partyWide) cdrSeconds += effect.flatValue ?? 0;
+      if (effect.partyWide && (p !== owner || effect.stackGroup)) partyWide.push({ value: effect.flatValue ?? 0, effect });
     }
   }
-  return cdrSeconds + (owner.setBonuses?.cooldownReduction ?? 0);
+  return cdrSeconds + stackedTotal(partyWide) + (owner.setBonuses?.cooldownReduction ?? 0);
 }
 
 /** The first action lands at the opener whatever the class's pace, so only time past it is in the owner's own time. */

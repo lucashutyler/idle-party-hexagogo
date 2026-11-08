@@ -541,6 +541,9 @@ export class SkillsTab implements Tab {
         `<option value="${c}" ${value === c ? 'selected' : ''}>${c}</option>`).join('');
       return `<label${title}>${label}<select ${attrs}>${options}</select></label>`;
     }
+    if (spec.input === 'text') {
+      return `<label${title}>${label}<input type="text" ${attrs} value="${escapeHtml(typeof value === 'string' ? value : '')}"></label>`;
+    }
     if (spec.input === 'percent') {
       // Stored as a 0-1 fraction; displayed ×100 (monster drop-chance precedent).
       const display = typeof value === 'number' ? String(Math.round(value * 100 * 1000) / 1000) : '';

@@ -67,6 +67,7 @@ import {
   computeNimbleDodge,
   computeRallyMultiplier,
   computeUnnerveReduction,
+  sameClassHumanAllies,
   enrageMultiplier,
   getCritChance,
   getCritMultiplier,
@@ -1226,6 +1227,11 @@ function computePlayerDamage(
   if (setDmgPct > 0) {
     damage = Math.max(1, Math.floor(damage * (1 + setDmgPct / 100)));
   }
+  const sameClassBonus = getPassiveValue(player, 'same_class_damage');
+  if (sameClassBonus > 0) {
+    const allies = sameClassHumanAllies(player, state.players);
+    if (allies > 0) damage = Math.max(1, Math.floor(damage * (1 + sameClassBonus * allies)));
+  }
 
   if (target) {
     for (const effect of getPassiveEffects(player, 'conditional_damage_bonus')) {
@@ -1714,7 +1720,8 @@ function executeEffect(
     case 'damage_aoe_all': {
       let any = false;
       if (effect.damagePerLevel) {
-        const damage = Math.max(1, Math.floor(effect.damagePerLevel * player.level * step.kit)) * arcaneMult;
+        const sameClassFactor = effect.sameClassBonus ? 1 + effect.sameClassBonus * sameClassHumanAllies(player, state.players) : 1;
+        const damage = Math.max(1, Math.floor(effect.damagePerLevel * player.level * step.kit * sameClassFactor)) * arcaneMult;
         for (const monster of state.monsters) {
           if (!isAlive(monster)) continue;
           any = true;

@@ -1,5 +1,19 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.07.3',
+    notes: [
+      'Parties keep far more XP per member. Each extra member or hire now costs everyone only a small cut, so a party that takes on harder rooms earns more than going alone. Gold and loot are still split evenly, and a hire\'s share of those is still lost.',
+      'Going back to easy rooms now pays little, and harder rooms pay more, up to a point.',
+      'Most towns now have real fights that pay XP.',
+      'Dungeon floors now pay little XP and gold on every run. First-clear rewards are unchanged.',
+      'Rally now rewards different classes in your party instead of more Bards. There are also new Knight and Archer skills and changes to other party skills, so you may want to re-slot your skills in Hero > Skills.',
+      'A wipe in a room now costs a minute before your party\'s next fight. Moving or changing party doesn\'t shorten it. A wipe in a dungeon ends the run as before.',
+      'Running from a fight and staying in the same room now also costs a minute before the next fight. Running while your party walks on to the next room stays free.',
+      'Hires now have a level limit. A hire more than 5 levels above your party\'s highest member can\'t be hired, and one left over that line sits out until your party is back within it. The shop and the log tell you why.',
+      'Only those in a fight are paid for it. If someone leaves during a fight in a room, the party starts a fresh fight and nobody is paid for the old one. Anyone who joins waits for the next fight.',
+    ],
+  },
+  {
     version: '2026.11.07.2',
     notes: [
       'New Auto button on the battle screen. While it is on and your party is traveling, it runs from each fight as soon as Run is available, until you reach your destination or something stops you. Running skips that fight for no rewards.',

@@ -39,7 +39,8 @@ export type PassiveEffectKind =
   | 'cooldown_reduction'        // Bard Tempo/Encore: reduce active cooldowns by N seconds
   | 'dodge_party'               // Bard Nimble: +% dodge per party member, party-wide
   | 'xp_bonus'                  // Bard Inspiration: +% XP for party
-  | 'enemy_damage_reduction_party'; // Bard Unnerve: -% enemy damage per party member
+  | 'enemy_damage_reduction_party' // Bard Unnerve: -% enemy damage per party member
+  | 'same_class_damage';        // +% own damage per other living human of the same class
 
 export interface PassiveEffect {
   kind: PassiveEffectKind;
@@ -61,6 +62,11 @@ export interface PassiveEffect {
   dotTicks?: number;
   /** For cooldown_reduction: if true, the reduction applies to the whole party. Defaults to self-only. */
   partyWide?: boolean;
+  /** Effects in one group don't simply add across the party: strongest first, each further copy counts `stackFactor` of the one before (0: strongest only). */
+  stackGroup?: string;
+  stackFactor?: number;
+  /** With perPartyMember: scale by the distinct classes in the fight, hires included, not by head count. */
+  perDistinctClass?: boolean;
 }
 
 export type ActiveEffectKind =
@@ -100,6 +106,8 @@ export interface ActiveEffect {
   damagePercent?: number;
   /** Flat damage per level (for Dissonance). */
   damagePerLevel?: number;
+  /** With damagePerLevel: +this share per other living human of the owner's class. */
+  sameClassBonus?: number;
   /** Mark damage multiplier per stack (e.g., 0.25 = +25% per stack). */
   markMultiplier?: number;
   /** Reflect percent (for brace_reflect, e.g., 0.10 = 10%). */

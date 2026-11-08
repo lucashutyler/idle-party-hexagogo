@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { offsetToCube, cubeDistance, cubeToKey, isBlockedUser } from '@idle-party-rpg/shared';
+import { offsetToCube, cubeDistance, cubeToKey, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit } from '@idle-party-rpg/shared';
 import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
@@ -47,6 +47,7 @@ function isPlayerChatChannel(value: unknown): value is PlayerChatChannel {
 
 /** What a double tap gets once the first tap has gone through. */
 export const GIFT_NOT_FOUND = 'Gift not found';
+export const LONE_LEAVE_REFUSAL = 'You can\'t leave: you\'re the only player in your party.';
 
 export interface PartyDeparture {
   partyId: string;
@@ -877,6 +878,7 @@ export class PlayerManager {
       if (!partyId) return null;
       return this.partyBattles.getTile(partyId);
     };
+    session.getPartyTopLevel = () => this.partyTopLevel(session.username);
     session.getCurrentPath = () => {
       const partyId = session.getPartyId();
       if (!partyId) return [];
@@ -937,6 +939,9 @@ export class PlayerManager {
   /** Hire into the player's party, or swap out `replaceInstanceId`. Returns the hire or an error string. */
   hireHenchman(username: string, henchmanId: string, mapId: string, replaceInstanceId?: string): HiredHenchman | string {
     this.settleBeforeRosterChange(username);
+    const hireLevel = this.content.getHenchman(henchmanId)?.level ?? 0;
+    const topLevel = this.partyTopLevel(username);
+    if (!isHireWithinLevelLimit(hireLevel, topLevel)) return hireLevelLimitText(hireLevel, topLevel);
     const getPartyId = (u: string) => this.sessions.get(u)?.getPartyId() ?? null;
     return this.parties.hireHenchman(username, henchmanId, mapId, getPartyId, replaceInstanceId);
   }
@@ -945,6 +950,14 @@ export class PlayerManager {
   dismissHenchman(username: string, instanceId: string): HiredHenchman | string {
     this.settleBeforeRosterChange(username);
     return this.parties.dismissHenchman(username, instanceId, u => this.sessions.get(u)?.getPartyId() ?? null);
+  }
+
+  /** The highest human level in a player's party. */
+  private partyTopLevel(username: string): number {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    const members = partyId ? this.parties.getParty(partyId)?.members : undefined;
+    const names = members?.map(m => m.username) ?? [username];
+    return Math.max(0, ...names.map(name => this.sessions.get(name)?.getLevel() ?? 0));
   }
 
   /** A win still in its kill beat is shared among the roster that fought it. */
@@ -1024,6 +1037,7 @@ export class PlayerManager {
     const session = this.sessions.get(username);
     if (!session) return null;
     const partyId = session.getPartyId();
+    if (partyId && this.parties.getParty(partyId)?.members.length === 1) return LONE_LEAVE_REFUSAL;
     const departure = this.partyDeparture(username);
 
     const result = this.parties.leaveParty(
@@ -1431,6 +1445,9 @@ export class PlayerManager {
       const partyId = this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
       if (!partyId) continue;
 
+      if (data.partyGridPosition !== undefined) {
+        this.parties.setGridPosition(data.username, data.partyGridPosition as PartyGridPosition, () => partyId);
+      }
       if (data.partyHenchmen?.length) {
         this.parties.restoreHenchmen(partyId, this.validHenchmen(data.partyHenchmen, soloMapId));
       }

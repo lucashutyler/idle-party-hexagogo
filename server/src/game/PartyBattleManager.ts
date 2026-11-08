@@ -17,16 +17,21 @@ import {
   findAttackSkill,
   henchmanDisplayNames,
   buildClientCombatSnapshot,
-  xpConFactor,
+  fightXp,
+  floorPayFactor,
+  hireLevelLimitText,
+  isHireWithinLevelLimit,
+  partyXpBonus,
   recordAwayBattle,
   recordAwayDungeon,
   pickWeightedEncounter,
   partyKey as partyKeyOf,
   RUN_AVAILABLE_MS,
+  WIPE_WAIT_MS,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
-  CombatMonster,
+  PartyCombatant,
   PartyCombatantInit,
   PartyCombatState,
   PartyGridPosition,
@@ -70,8 +75,6 @@ import type { WorldGrids } from './WorldGrids.js';
 
 export type { DungeonRunState } from '@idle-party-rpg/shared';
 
-/** XP a victory pays when the finished fight is no longer available to total up. */
-const FALLBACK_VICTORY_XP = 10;
 /** A live forecast re-runs at most this long after a party member falls. */
 export const LIVE_FORECAST_DEBOUNCE_MS = 3000;
 const AUTO_RETREAT_NOTICE = 'Auto-retreat kept your party out of a losing fight. Change it in Options.';
@@ -125,6 +128,8 @@ interface PartyBattleEntry {
   precheckKey?: string;
   liveForecastTimer?: ReturnType<typeof setTimeout>;
   live?: LiveForecastState;
+  /** Instance ids of the hires over the level limit at the last fight, for the log. */
+  sidelinedHires: Set<string>;
 }
 
 type Notifier = (username: string, eventKey: string, vars: { title: string; body: string }) => void;
@@ -160,6 +165,8 @@ export class PartyBattleManager {
   private autoRunPolicy: (partyId: string) => boolean = () => false;
   private notify: Notifier = () => {};
   private keyingParty = false;
+  /** When each character's own wipe wait ends. */
+  private wipeWaits = new Map<string, number>();
 
   constructor(
     grids: WorldGrids,
@@ -282,7 +289,7 @@ export class PartyBattleManager {
       partyId,
     );
 
-    this.entries.set(partyId, { partyId, serverParty, battleTimer, members, recentSkips: [] });
+    this.entries.set(partyId, { partyId, serverParty, battleTimer, members, recentSkips: [], sidelinedHires: new Set() });
   }
 
   /** Create a party battle entry and start fighting. */
@@ -291,6 +298,7 @@ export class PartyBattleManager {
 
     const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
     this.registerEntry(partyId, serverParty, new Set([username]));
+    this.carryWipeWait(partyId, username);
     this.startEntry(partyId);
   }
 
@@ -320,18 +328,21 @@ export class PartyBattleManager {
     if (!entry) return;
     entry.battleTimer.settlePendingResult();
     entry.members.add(username);
+    this.carryWipeWait(partyId, username);
     this.clearRetreatHold(partyId);
   }
 
   /**
    * Remove a member from a party battle. Does not create a new solo entry — caller should do that.
-   * A dungeon run ends with them, for the whole party. See docs/architecture/combat.md → Dungeon runs.
+   * A dungeon run ends with them, for the whole party, and an undecided room fight they are in restarts
+   * for those left. See docs/architecture/combat.md → Dungeon runs and XP pay.
    */
   removeMember(partyId: string, username: string): void {
     const entry = this.entries.get(partyId);
     if (!entry?.members.has(username)) return;
     const wasInRun = !!entry.dungeonRun;
     entry.battleTimer.settlePendingResult();
+    const wasFighting = this.isInUndecidedFight(entry, username);
 
     // Settling can finish or fail the run on its own (last floor cleared, wipe).
     const run = entry.dungeonRun;
@@ -346,7 +357,7 @@ export class PartyBattleManager {
       this.destroyEntry(partyId);
       return;
     }
-    if (!wasInRun) return;
+    if (!wasInRun && !wasFighting) return;
     if (run) this.exitDungeon(entry, this.resolveEntranceTile(entry));
     entry.battleTimer.restartBattle();
     for (const m of entry.members) this.broadcastToMember(m);
@@ -400,7 +411,7 @@ export class PartyBattleManager {
     this.restartBattle(partyId);
   }
 
-  /** Escape the current battle for a party. No rewards given. */
+  /** Escape the current battle for a party. No rewards given; a party still in the room when it would step waits as after a wipe. */
   escapeBattle(partyId: string): boolean {
     const entry = this.entries.get(partyId);
     if (!entry) return false;
@@ -411,7 +422,9 @@ export class PartyBattleManager {
       if (s) s.addLogEntry('Escaped the battle!', 'battle');
     }
 
-    entry.battleTimer.escapeBattle();
+    const combat = entry.battleTimer.currentCombat;
+    const fighters = combat ? humansIn(combat) : [];
+    entry.battleTimer.escapeBattle(() => this.startWipeWait(entry, fighters));
     this.cancelLiveForecast(entry);
 
     for (const m of entry.members) {
@@ -652,11 +665,13 @@ export class PartyBattleManager {
 
     const timer = entry.battleTimer;
     const combat = timer.currentCombat;
+    const regroupMs = timer.regroupRemainingMs;
     return {
       state: timer.currentState,
       result: timer.lastResult,
       visual: timer.visual,
       duration: timer.currentDuration,
+      ...(regroupMs > 0 && !timer.isLive ? { regroupMs } : {}),
       combat: combat ? buildClientCombatSnapshot(combat, timer.battleId, true) : undefined,
     };
   }
@@ -769,9 +784,10 @@ export class PartyBattleManager {
       players.push(session.getCombatInfo(this.getGridPosition(partyId, username)));
     }
 
+    const topLevel = highestLevel(players);
     const hires = this.getPartyHenchmen(partyId)
       .map(hired => ({ hired, def: this.content.getHenchman(hired.henchmanId) }))
-      .filter((h): h is { hired: HiredHenchman; def: HenchmanDefinition } => !!h.def);
+      .filter((h): h is { hired: HiredHenchman; def: HenchmanDefinition } => !!h.def && isHireWithinLevelLimit(h.def.level, topLevel));
     const names = henchmanDisplayNames(hires.map(h => h.def.name), players.map(p => p.username));
     hires.forEach(({ hired, def }, i) => {
       const attack = findAttackSkill(def.className, this.content.getAllSkills());
@@ -861,6 +877,7 @@ export class PartyBattleManager {
     }
 
     const tileId = entry.serverParty.tile.id;
+    this.logSidelinedHires(entry, highestLevel(roster.filter(p => !p.isHenchman)));
     const table = this.resolveEncounterTable(tileId, zone);
     const rolled = rollEncounter(zone, allMonsters, allZones, allEncounters, table);
     entry.battle = { battleId: entry.battleTimer.battleId, tileId, entryId: rolled.entryId, players };
@@ -873,80 +890,124 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry || entry.members.size === 0) return;
     this.cancelLiveForecast(entry);
+    const combat = entry.battleTimer.currentCombat;
+    if (!combat) return;
 
     if (result === 'victory') {
-      this.payVictory(entry);
-    } else {
-      for (const username of entry.members) {
-        const session = this.getSession(username);
-        if (!session) continue;
-        session.addLogEntry('Defeat...', 'defeat');
-        session.recordAway(l => recordAwayBattle(l, { won: false }));
-      }
-
-      if (entry.dungeonRun) {
-        this.handleDungeonDefeat(entry);
-      }
+      this.payVictory(entry, combat);
+      return;
     }
+    const humans = humansIn(combat);
+    for (const { username } of humans) {
+      const session = this.getSession(username);
+      if (!session) continue;
+      session.addLogEntry('Defeat...', 'defeat');
+      session.recordAway(l => recordAwayBattle(l, { won: false }));
+    }
+    if (entry.dungeonRun) this.handleDungeonDefeat(entry);
+    else this.startWipeWait(entry, humans);
   }
 
-  private payVictory(entry: PartyBattleEntry): void {
-    const combat = entry.battleTimer.currentCombat;
-    const members = Array.from(entry.members);
-    // Hired henchmen take a share of XP, gold and drops, and that share is lost.
-    const hires = this.fightingHireDefs(entry);
-    const shareCount = members.length + hires.length;
+  private startWipeWait(entry: PartyBattleEntry, humans: readonly PartyCombatant[]): void {
+    const until = Date.now() + WIPE_WAIT_MS;
+    for (const { username } of humans) this.wipeWaits.set(username, until);
+    entry.battleTimer.holdNextFightUntil(until);
+  }
+
+  /** A character still waiting out a wipe holds up the party they land in. */
+  private carryWipeWait(partyId: string, username: string): void {
+    const until = this.wipeWaits.get(username);
+    if (until !== undefined) this.entries.get(partyId)?.battleTimer.holdNextFightUntil(until);
+  }
+
+  private isInUndecidedFight(entry: PartyBattleEntry, username: string): boolean {
+    const timer = entry.battleTimer;
+    const combat = timer.currentCombat;
+    return !!combat && timer.isFighting(timer.battleId) && humansIn(combat).some(p => p.username === username);
+  }
+
+  /** One log line each time a hire drops under or comes back within the level limit. */
+  private logSidelinedHires(entry: PartyBattleEntry, topLevel: number): void {
+    const before = entry.sidelinedHires;
+    const hires = this.getPartyHenchmen(entry.partyId);
+    entry.sidelinedHires = new Set();
+    for (const hired of hires) {
+      const def = this.content.getHenchman(hired.henchmanId);
+      if (def && !isHireWithinLevelLimit(def.level, topLevel)) entry.sidelinedHires.add(hired.instanceId);
+    }
+    const out = hires.filter(h => entry.sidelinedHires.has(h.instanceId) && !before.has(h.instanceId));
+    const back = hires.filter(h => before.has(h.instanceId) && !entry.sidelinedHires.has(h.instanceId));
+    for (const hired of out) {
+      const level = this.content.getHenchman(hired.henchmanId)?.level ?? 0;
+      this.logHenchmen(entry, [hired], name => `${name} sits out. ${hireLevelLimitText(level, topLevel)}`);
+    }
+    this.logHenchmen(entry, back, name => `${name} is back in the fight.`);
+  }
+
+  /** Everything here reads the fight's own roster: a joiner waits for the next fight. See docs/architecture/combat.md → XP pay. */
+  private payVictory(entry: PartyBattleEntry, combat: PartyCombatState): void {
+    const humans = humansIn(combat);
+    const hires = combat.players.filter(p => p.isHenchman);
+    const bodies = Math.max(1, humans.length + hires.length);
+    const floor = entry.dungeonRun ? this.floorOfRun(entry.dungeonRun) : undefined;
+    const starterZone = !entry.dungeonRun && this.content.getAllZones()[entry.serverParty.tile.zone]?.starterZone === true;
 
     let totalGold = 0;
-    if (combat) {
-      for (const m of combat.monsters) {
-        const def = this.content.getMonster(m.id);
-        if (def) {
-          totalGold += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
-        }
+    for (const m of combat.monsters) {
+      const def = this.content.getMonster(m.id);
+      if (def) {
+        totalGold += def.goldMin + Math.floor(Math.random() * (def.goldMax - def.goldMin + 1));
       }
     }
-    const xpMultiplier = this.partyXpMultiplier(entry);
-    const splitGold = Math.ceil((totalGold * COMBAT_PACE.rewardMultiplier) / shareCount);
+    const splitGold = Math.ceil((totalGold * COMBAT_PACE.rewardMultiplier * floorPayFactor(floor?.coinFactor)) / bodies);
 
     // Roll item drops once and give each to one random share; a henchman's share is discarded.
     const memberItems: Map<string, string[]> = new Map();
-    for (const u of members) memberItems.set(u, []);
-    const shares: { username: string | null; className: string | undefined }[] = [
-      ...members.map(u => ({ username: u, className: this.getSession(u)?.getClassName() ?? undefined })),
-      ...hires.map(def => ({ username: null, className: def.className })),
+    for (const { username } of humans) memberItems.set(username, []);
+    const shares: { username: string | null; className: string }[] = [
+      ...humans.map(p => ({ username: p.username, className: p.className })),
+      ...hires.map(p => ({ username: null, className: p.className })),
     ];
 
-    if (combat) {
-      for (const m of combat.monsters) {
-        const def = this.content.getMonster(m.id);
-        if (def?.drops) {
-          const dropped = rollDrops(def.drops.map(drop => ({ ...drop, chance: paceDropChance(COMBAT_PACE, drop.chance) })));
-          for (const itemId of dropped) {
-            const itemDef = this.content.getItem(itemId);
-            let eligible = shares;
-            if (itemDef?.classRestriction && itemDef.classRestriction.length > 0) {
-              const matching = shares.filter(sh => sh.className && itemDef.classRestriction!.includes(sh.className));
-              if (matching.length > 0) eligible = matching;
-            }
-            const recipient = eligible[Math.floor(Math.random() * eligible.length)];
-            if (recipient.username) memberItems.get(recipient.username)!.push(itemId);
+    for (const m of combat.monsters) {
+      const def = this.content.getMonster(m.id);
+      if (def?.drops) {
+        const dropped = rollDrops(def.drops.map(drop => ({ ...drop, chance: paceDropChance(COMBAT_PACE, drop.chance) })));
+        for (const itemId of dropped) {
+          const itemDef = this.content.getItem(itemId);
+          let eligible = shares;
+          if (itemDef?.classRestriction && itemDef.classRestriction.length > 0) {
+            const matching = shares.filter(sh => itemDef.classRestriction!.includes(sh.className));
+            if (matching.length > 0) eligible = matching;
           }
+          const recipient = eligible[Math.floor(Math.random() * eligible.length)];
+          if (recipient.username) memberItems.get(recipient.username)!.push(itemId);
         }
       }
     }
 
     // Mastery and the recap count monsters actually killed; XP/gold/drops/quests still cover every monster.
-    const killed = combat ? combat.monsters.filter(m => !m.passive && !(m.currentHp > 0)) : [];
-    const anyoneAway = members.some(u => this.getSession(u)?.isAway());
-    const closeCall = combat && anyoneAway ? this.closeCall(entry, combat) : null;
+    const killed = combat.monsters.filter(m => !m.passive && !(m.currentHp > 0));
+    const anyoneAway = humans.some(p => this.getSession(p.username)?.isAway());
+    const closeCall = anyoneAway ? this.closeCall(entry, combat) : null;
+    const topHumanLevel = highestLevel(humans);
+    const xpBonus = partyXpBonus(combat.players);
 
-    for (const username of members) {
-      const session = this.getSession(username);
+    for (const fighter of humans) {
+      const session = this.getSession(fighter.username);
       if (!session) continue;
-      const baseXp = combat ? this.memberXp(combat.monsters, session.getLevel()) : FALLBACK_VICTORY_XP;
+      const xp = fightXp({
+        monsters: combat.monsters,
+        memberLevel: fighter.level,
+        topHumanLevel,
+        bodies,
+        starterZone,
+        floorXpFactor: floor?.xpFactor,
+        xpBonus,
+        rewardMultiplier: COMBAT_PACE.rewardMultiplier,
+      });
       session.handleVictory(
-        { xp: Math.ceil((baseXp * xpMultiplier * COMBAT_PACE.rewardMultiplier) / shareCount), gold: splitGold, items: memberItems.get(username)! },
+        { xp, gold: splitGold, items: memberItems.get(fighter.username)! },
         entry.serverParty.tile,
         // Dungeon floors aren't overworld tiles — don't unlock neighbours mid-run.
         { unlockTiles: !entry.dungeonRun, kills: killed.length },
@@ -955,15 +1016,10 @@ export class PartyBattleManager {
       if (closeCall) session.recordCloseCall(closeCall);
     }
 
-    // Quest hooks: credit every monster to every party member with active kill objectives.
-    if (combat) {
-      const allQuests = this.content.getQuestCatalog();
-      for (const m of combat.monsters) {
-        for (const username of members) {
-          const session = this.getSession(username);
-          if (!session) continue;
-          session.quests.applyKill(m.id, allQuests);
-        }
+    const allQuests = this.content.getQuestCatalog();
+    for (const m of combat.monsters) {
+      for (const { username } of humans) {
+        this.getSession(username)?.quests.applyKill(m.id, allQuests);
       }
     }
 
@@ -971,34 +1027,6 @@ export class PartyBattleManager {
     if (entry.dungeonRun) {
       this.handleDungeonFloorCleared(entry);
     }
-  }
-
-  /** XP a member earns from these monsters before the split: authored-level monsters pay by con. */
-  private memberXp(monsters: readonly CombatMonster[], memberLevel: number): number {
-    let xp = 0;
-    for (const m of monsters) {
-      if (!Number.isFinite(m.xp)) continue;
-      const level = m.level;
-      const authored = m.levelSource === 'authored' && typeof level === 'number' && Number.isFinite(level);
-      xp += authored ? m.xp * xpConFactor(level, 'authored', memberLevel) : m.xp;
-    }
-    return xp;
-  }
-
-  /** 1 + every equipped `xp_bonus` passive's flat value across the party, fighting henchmen included (e.g. Bard Inspiration). */
-  private partyXpMultiplier(entry: PartyBattleEntry): number {
-    const partySkillIds = [
-      ...[...entry.members].flatMap(u => this.getSession(u)?.getSkillLoadout()?.equippedSkills ?? []),
-      ...this.fightingHireDefs(entry).flatMap(def => def.skillIds),
-    ];
-    let xpMultiplier = 1;
-    for (const skillId of partySkillIds) {
-      if (!skillId) continue;
-      for (const effect of this.content.getSkill(skillId)?.passiveEffects ?? []) {
-        if (effect.kind === 'xp_bonus') xpMultiplier += effect.flatValue ?? 0;
-      }
-    }
-    return xpMultiplier;
   }
 
   private closeCall(entry: PartyBattleEntry, combat: PartyCombatState): { hpPct: number; vs: string; where: string } | null {
@@ -1563,18 +1591,6 @@ export class PartyBattleManager {
     this.logHenchmen(entry, this.getPartyHenchmen(entry.partyId), name => `${name} rejoins the party.`);
   }
 
-  /** Hires wait at the entrance during a dungeon run, out of combat and reward shares. */
-  private fightingHenchmen(entry: PartyBattleEntry): HiredHenchman[] {
-    return entry.dungeonRun ? [] : this.getPartyHenchmen(entry.partyId);
-  }
-
-  private fightingHireDefs(entry: PartyBattleEntry): HenchmanDefinition[] {
-    return this.fightingHenchmen(entry).flatMap(h => {
-      const def = this.content.getHenchman(h.henchmanId);
-      return def ? [def] : [];
-    });
-  }
-
   /** The floor a dungeon run is on; ends the run when its dungeon or floor no longer exists. */
   private currentDungeonFloor(entry: PartyBattleEntry): DungeonFloor | undefined {
     const run = entry.dungeonRun;
@@ -1724,6 +1740,14 @@ function copyRun(run: DungeonRunState): DungeonRunState {
     currentFloorIndex: run.currentFloorIndex,
     entrance: { ...run.entrance },
   };
+}
+
+function humansIn(combat: PartyCombatState): PartyCombatant[] {
+  return combat.players.filter(p => !p.isHenchman);
+}
+
+function highestLevel(humans: readonly { level: number }[]): number {
+  return Math.max(0, ...humans.map(p => p.level));
 }
 
 /** A fight worth a live forecast: it has an elite, boss or raid monster. */

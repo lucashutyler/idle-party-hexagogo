@@ -3,7 +3,7 @@ import { PlayerManager } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
 import type { AccountStore, Account } from '../src/auth/AccountStore.js';
-import { HexGrid, HexTile, offsetToCube, COMBAT_PACE, COMBAT_STEP_MS, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, offsetToCube, COMBAT_PACE, COMBAT_STEP_MS, DEFAULT_MAP_ID, createMonsterInstance, createPartyCombatState } from '@idle-party-rpg/shared';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
 import type { HenchmanDefinition, WorldTileDefinition, DungeonDefinition, PartyCombatant } from '@idle-party-rpg/shared';
@@ -13,6 +13,8 @@ const SHOP_TILE_ID = 'tile-start';
 const DUNGEON_ID = 'test_dungeon';
 const HENCH_ID = 'hench_sellsword';
 const pacedShare = (amount: number, shares = 1): number => Math.ceil((amount * COMBAT_PACE.rewardMultiplier) / shares);
+const TWO_BODY_XP_SHARE = 0.91;
+const pacedDuoXp = (amount: number): number => Math.ceil(amount * COMBAT_PACE.rewardMultiplier * TWO_BODY_XP_SHARE);
 
 function makeHenchman(over: Partial<HenchmanDefinition> = {}): HenchmanDefinition {
   return {
@@ -201,13 +203,13 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       entries: Map<string, { battleTimer: { combatState: unknown } }>;
       handleBattleEnd: (id: string, result: 'victory') => void;
     };
-    battles.entries.get(partyId)!.battleTimer.combatState = {
-      pace: COMBAT_PACE,
-      players: [],
-      monsters: [{ id: 'goblin', name: 'Goblin', xp: 40, currentHp: 0, maxHp: 10, gridPosition: 4, damageType: 'physical' }],
-      finished: true,
-      result: 'victory',
-    };
+    const roster = pm.partyBattles.buildPartyCombatants(partyId);
+    const goblin = createMonsterInstance({ id: 'goblin', name: 'Goblin', hp: 10, damage: 2, damageType: 'physical', xp: 40, goldMin: 100, goldMax: 100 }, 4);
+    const combat = createPartyCombatState(pm.partyBattles.getDungeonRunInfo(partyId) ? roster.filter(p => !p.isHenchman) : roster, [goblin], { pace: COMBAT_PACE });
+    combat.monsters[0].currentHp = 0;
+    combat.finished = true;
+    combat.result = 'victory';
+    battles.entries.get(partyId)!.battleTimer.combatState = combat;
     battles.handleBattleEnd(partyId, 'victory');
   }
 
@@ -243,8 +245,8 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     const bardBefore = xpOf(bard.pm);
     winBattle(bard.pm, bard.partyId);
 
-    expect(xpOf(plain.pm) - plainBefore).toBe(pacedShare(40, 2));
-    expect(xpOf(bard.pm) - bardBefore).toBe(pacedShare(40 * 1.2, 2));
+    expect(xpOf(plain.pm) - plainBefore).toBe(pacedDuoXp(40));
+    expect(xpOf(bard.pm) - bardBefore).toBe(pacedDuoXp(40 * 1.2));
   });
 
   it('discards a drop that lands on a henchman\'s share', async () => {
@@ -323,7 +325,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       pm.partyBattles.henchmenChanged(partyId);
 
       expect(session.getGold() - before.gold).toBe(pacedShare(100, 2));
-      expect(xpOf(pm) - before.xp).toBe(pacedShare(40 * 1.2, 2));
+      expect(xpOf(pm) - before.xp).toBe(pacedDuoXp(40 * 1.2));
     });
 
     it('pays a replacement\'s win on the outgoing hire, not the incoming one', async () => {
@@ -336,7 +338,7 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
       pm.partyBattles.henchmenChanged(partyId, [incoming]);
 
       expect(session.getGold() - before.gold).toBe(pacedShare(100, 2));
-      expect(xpOf(pm) - before.xp).toBe(pacedShare(40 * 1.2, 2));
+      expect(xpOf(pm) - before.xp).toBe(pacedDuoXp(40 * 1.2));
     });
 
     it('pays the fighters before a joining player can dilute their win', async () => {
@@ -614,6 +616,22 @@ describe('Henchmen runtime (PartyBattleManager via PlayerManager)', () => {
     // Ids only: a persisted display name would go stale when the definition is renamed.
     expect(saved[0].partyHenchmen![0].name).toBeUndefined();
     expect(pm.parties.getHenchmen(partyId)).toHaveLength(1);
+  });
+
+  it('restores a lone player\'s seat before their hires, so neither moves', async () => {
+    const { pm, partyId, content } = await setup();
+    const getPartyId = (u: string) => pm.getSessionByUsername(u)?.getPartyId() ?? null;
+    expect(pm.parties.setGridPosition('alice', 0, getPartyId)).toBe(true);
+    const hired = hire(pm);
+    expect(pm.parties.setHenchmanGridPosition('alice', hired.instanceId, 4, getPartyId)).toBe(true);
+    expect(pm.parties.getParty(partyId)!.members[0].gridPosition).toBe(0);
+
+    const restored = new PlayerManager(wrapGrids(createFakeGrid()), content, createFakeGuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    restored.restoreFromSaveData(JSON.parse(JSON.stringify(pm.getAllSaveData())));
+    const party = restored.parties.getParty(restored.getSessionByUsername('alice')!.getPartyId()!)!;
+
+    expect(party.members.map(m => m.gridPosition)).toEqual([0]);
+    expect(restored.parties.getHenchmen(party.id).map(h => h.gridPosition)).toEqual([4]);
   });
 
   it('omits partyHenchmen from the save when the party holds none', async () => {

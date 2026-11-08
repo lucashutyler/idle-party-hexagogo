@@ -1,5 +1,5 @@
-import { MONSTER_TIERS } from '@idle-party-rpg/shared';
-import type { MonsterDefinition } from '@idle-party-rpg/shared';
+import { MONSTER_TIERS, isValidFloorFactor } from '@idle-party-rpg/shared';
+import type { DungeonDefinition, MonsterDefinition, ZoneDefinition } from '@idle-party-rpg/shared';
 
 /** Range checks for level/tier/enrage, shared by the admin routes and validate_draft. */
 
@@ -22,6 +22,24 @@ export function monsterScalingProblems(monster: MonsterDefinition): string[] {
     problems.push(`${label} tier must be one of ${MONSTER_TIERS.join(', ')} (got ${String(monster.tier)}).`);
   }
   if (monster.enrage !== undefined) problems.push(...enrageProblems(monster.enrage, label));
+  return problems;
+}
+
+export function zoneProblems(zone: ZoneDefinition): string[] {
+  if (zone.starterZone === undefined || typeof zone.starterZone === 'boolean') return [];
+  return [`Zone '${zone.id}' starterZone must be true or false, or omitted (got ${String(zone.starterZone)}).`];
+}
+
+export function dungeonFactorProblems(dungeon: DungeonDefinition): string[] {
+  const problems: string[] = [];
+  dungeon.floors.forEach((floor, floorIndex) => {
+    for (const key of ['xpFactor', 'coinFactor'] as const) {
+      const value = floor[key];
+      if (value !== undefined && !isValidFloorFactor(value)) {
+        problems.push(`Dungeon '${dungeon.id}' floor ${floorIndex} (floorNumber ${floor.floorNumber}) ${key} must be a number from 0 to 1, or omitted to pay in full (got ${String(value)}).`);
+      }
+    }
+  });
   return problems;
 }
 

@@ -204,6 +204,29 @@ describe('SkillsTab', () => {
     expect(cooldownWrap.style.display).not.toBe('none');
   });
 
+  it('edits the stack and per-class fields of a party option', async () => {
+    const put = stubPut();
+    const rally: SkillDefinition = {
+      id: 'test_rally', name: 'Rally', description: '', className: 'Bard', type: 'passive', unlockLevel: 1, sortOrder: 0,
+      passiveEffects: [{ kind: 'party_damage_mult', flatValue: 0.1, perPartyMember: true, perDistinctClass: true, stackGroup: 'rally', stackFactor: 0 }],
+    };
+    new SkillsTab().render(container, makeCtx({ extraSkills: [rally] }));
+    const modal = openEdit(container, 'test_rally');
+    const row = modal.querySelector<HTMLElement>('#skf-options-list .skills-option-row')!;
+    const group = row.querySelector<HTMLInputElement>('[data-key="stackGroup"]')!;
+    expect(group.type).toBe('text');
+    expect(group.value).toBe('rally');
+    expect(row.querySelector<HTMLInputElement>('[data-key="stackFactor"]')!.value).toBe('0');
+    expect(row.querySelector<HTMLInputElement>('[data-key="perDistinctClass"]')!.checked).toBe(true);
+
+    group.value = 'songs';
+    row.querySelector<HTMLInputElement>('[data-key="stackFactor"]')!.value = '50';
+    modal.querySelector<HTMLButtonElement>('#skf-save')!.click();
+    await flush();
+
+    expect(put.bodies[0].passiveEffects![0]).toMatchObject({ perDistinctClass: true, stackGroup: 'songs', stackFactor: 0.5 });
+  });
+
   it('checking grant-only disables the unlock level input', () => {
     new SkillsTab().render(container, makeCtx());
     container.querySelector<HTMLButtonElement>('#skill-add-btn')!.click();

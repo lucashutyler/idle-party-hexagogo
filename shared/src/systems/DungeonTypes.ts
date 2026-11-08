@@ -35,6 +35,14 @@ export interface DungeonFloor {
   isBoss?: boolean;
   /** Optional bonus drops awarded on floor clear, in addition to monster loot. */
   rewards?: DungeonReward[];
+  /** 0 to 1: what this floor's monsters pay in XP. Absent pays in full. See `floorMonsterXp`. */
+  xpFactor?: number;
+  /** 0 to 1: what this floor's monsters pay in coin. Absent pays in full. */
+  coinFactor?: number;
+}
+
+export function isValidFloorFactor(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
 export interface DungeonEntryRequirements {

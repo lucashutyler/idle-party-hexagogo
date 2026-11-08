@@ -445,4 +445,27 @@ describe('MCP getContentSchema', () => {
       expect(await getContentSchema({ type })).toMatchObject({ combatPace: { ...COMBAT_PACE, note: expect.any(String) } });
     }
   });
+
+  it('describes the pay rule and its content fields', async () => {
+    const monsters = await getContentSchema({ type: 'monsters' }) as { levelScaling: { xpPay: { share: { byBodies: number[] }; levelGap: Record<string, unknown>; wipeWaitSeconds: number } } };
+    expect(monsters.levelScaling.xpPay.share.byBodies).toEqual([1, 0.91, 0.82, 0.76, 0.72]);
+    expect(monsters.levelScaling.xpPay.levelGap).toMatchObject({ evenBand: 2, decay: 0.4, floor: 0.2, challengePerLevel: 0.12, challengeLevels: 5, pastChallengeFactor: 0.93 });
+    expect(monsters.levelScaling.xpPay.wipeWaitSeconds).toBe(60);
+    expect(JSON.stringify(monsters)).not.toContain('x0.25');
+
+    const describes = async (type: 'zones' | 'dungeons'): Promise<string> => JSON.stringify(await getContentSchema({ type }));
+    expect(await describes('zones')).toContain('starterZone');
+    expect(await describes('dungeons')).toContain('xpFactor');
+    expect(await describes('dungeons')).toContain('coinFactor');
+  });
+
+  it('lists the new skill options', async () => {
+    const skills = await getContentSchema({ type: 'skills' }) as { skillOptionCatalog: Record<string, { params: { key: string }[] }> };
+    expect(skills.skillOptionCatalog.same_class_damage).toBeDefined();
+    const keys = (kind: string) => skills.skillOptionCatalog[kind].params.map(p => p.key);
+    expect(keys('party_damage_mult')).toEqual(expect.arrayContaining(['perDistinctClass', 'stackGroup', 'stackFactor']));
+    expect(keys('holy_damage_party')).toEqual(expect.arrayContaining(['stackGroup', 'stackFactor']));
+    expect(keys('cooldown_reduction')).toEqual(expect.arrayContaining(['stackGroup', 'stackFactor']));
+    expect(keys('damage_aoe_all')).toContain('sameClassBonus');
+  });
 });

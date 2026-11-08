@@ -117,7 +117,7 @@ export const CLASS_DEFINITIONS: Record<ClassName, ClassDefinition> = {
   },
   Bard: {
     displayName: 'Bard',
-    description: 'Low stats, but Rally boosts party damage by 20% per member.',
+    description: 'Low stats, but Rally makes the whole party hit harder.',
     baseHp: 10,
     hpPerLevel: 1,
     baseDamage: 1,

@@ -34,7 +34,7 @@ export class ZonesTab implements Tab {
 
       return `
         <tr>
-          <td>${escapeHtml(z.displayName)}</td>
+          <td>${escapeHtml(z.displayName)}${z.starterZone ? ' <span class="admin-pill">Starter</span>' : ''}</td>
           <td>${z.levelRange[0]}-${z.levelRange[1]}</td>
           <td>${escapeHtml(encounterDescs)}</td>
           ${actions}
@@ -85,7 +85,7 @@ export class ZonesTab implements Tab {
 
     const isNew = !zone;
     const readOnly = ctx.isReadOnly();
-    const z = zone ?? { id: '', displayName: '', levelRange: [1, 1] as [number, number], encounterTable: [] };
+    const z: ZoneDefinition = zone ?? { id: '', displayName: '', levelRange: [1, 1], encounterTable: [] };
     const encounterDefs = Object.values(content.encounters);
     const encRows = z.encounterTable.map((e, i) => this.encounterRowHtml(i, e, encounterDefs)).join('');
 
@@ -95,6 +95,10 @@ export class ZonesTab implements Tab {
         <label>Display Name<input type="text" id="zf-name" value="${escapeHtml(z.displayName)}"></label>
         <label>Level Min<input type="number" id="zf-levelMin" value="${z.levelRange[0]}" min="1"></label>
         <label>Level Max<input type="number" id="zf-levelMax" value="${z.levelRange[1]}" min="1"></label>
+        <label class="admin-checkbox" title="Rooms here take no XP share cut, and a player with no party and no hire keeps 80 %. Dungeon floors are unaffected.">
+          <input type="checkbox" id="zf-starter" ${z.starterZone ? 'checked' : ''}>
+          Starter zone
+        </label>
       </div>
       <fieldset class="admin-form-fieldset">
         <legend>Encounter Table ${readOnly ? '' : '<button class="admin-btn admin-btn-sm" id="zf-add-encounter" type="button">+ Encounter</button>'}</legend>
@@ -182,6 +186,7 @@ export class ZonesTab implements Tab {
     });
 
     const zone: ZoneDefinition = { id, displayName, levelRange: [levelMin, levelMax], encounterTable };
+    if ((root.querySelector('#zf-starter') as HTMLInputElement).checked) zone.starterZone = true;
     try {
       const data = await putAdmin<{ zones: Record<string, ZoneDefinition> }>(
         `/api/admin/zones/${encodeURIComponent(id)}${ctx.versionQueryParam()}`, zone);
