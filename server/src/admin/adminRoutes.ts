@@ -17,7 +17,7 @@ import { findContentProblems, formatPublishRefusal } from '../game/ContentValida
 import { AssetValidationError, MAX_ASSET_BYTES } from '../game/AssetStore.js';
 import type { AssetStore } from '../game/AssetStore.js';
 import { registerAssetRoutes, assetUploadErrorHandler } from './assetRoutes.js';
-import { monsterScalingProblems } from './contentChecks.js';
+import { dungeonFactorProblems, monsterScalingProblems, zoneProblems } from './contentChecks.js';
 
 /**
  * Coerce an untrusted room/transition entry gate from a request body, dropping
@@ -1057,6 +1057,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
         return;
       }
     }
+    const factorProblems = dungeonFactorProblems(dungeon);
+    if (factorProblems.length > 0) {
+      res.status(400).json({ error: factorProblems.join(' ') });
+      return;
+    }
 
     if (versionId) {
       const result = await draftEditor.upsertDungeon(versionId, dungeon);
@@ -1105,6 +1110,11 @@ export function createAdminRoutes({ playerManager: getPlayerManager, accountStor
     const zone = req.body;
     if (!zone.id || !zone.displayName || !zone.levelRange || !zone.encounterTable) {
       res.status(400).json({ error: 'Missing required fields: id, displayName, levelRange, encounterTable' });
+      return;
+    }
+    const problems = zoneProblems(zone);
+    if (problems.length > 0) {
+      res.status(400).json({ error: problems.join(' ') });
       return;
     }
 

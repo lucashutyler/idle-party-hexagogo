@@ -135,6 +135,27 @@ describe('DungeonsTab', () => {
     expect(put.bodies).toEqual([JSON.parse(JSON.stringify(DUNGEON))]);
   });
 
+  it('edits a floor\'s XP and coin factors, blank meaning absent and 0 kept', async () => {
+    const put = stubPut();
+    const withFactors = structuredClone(DUNGEON);
+    withFactors.floors[0].xpFactor = 0.25;
+    new DungeonsTab().render(container, makeCtx(withFactors));
+    const root = openEdit(container);
+    const floors = root.querySelectorAll<HTMLElement>('.df-floor');
+    expect(floors[0].querySelector<HTMLInputElement>('.df-floor-xp-factor')!.value).toBe('0.25');
+    expect(floors[1].querySelector<HTMLInputElement>('.df-floor-xp-factor')!.value).toBe('');
+    floors[0].querySelector<HTMLInputElement>('.df-floor-xp-factor')!.value = '';
+    floors[0].querySelector<HTMLInputElement>('.df-floor-coin-factor')!.value = '0';
+    floors[1].querySelector<HTMLInputElement>('.df-floor-coin-factor')!.value = '0.05';
+
+    await save(root);
+
+    const body = put.bodies[0] as unknown as DungeonDefinition;
+    expect(body.floors[0].xpFactor).toBeUndefined();
+    expect(body.floors[0].coinFactor).toBe(0);
+    expect(body.floors[1].coinFactor).toBe(0.05);
+  });
+
   it('offers no boss flag or retry fields, in the table or the form', () => {
     new DungeonsTab().render(container, makeCtx());
     expect(container.querySelector('tbody tr td:nth-child(2)')!.textContent).toBe('2');

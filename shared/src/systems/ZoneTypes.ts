@@ -10,6 +10,8 @@ export interface ZoneDefinition {
   displayName: string;
   encounterTable: EncounterTableEntry[];
   levelRange: [number, number];
+  /** Rooms here take no XP share cut, and a lone player keeps 80 %. Dungeon floors are unaffected. */
+  starterZone?: boolean;
 }
 
 // --- Seed data (used as defaults when data files don't exist) ---

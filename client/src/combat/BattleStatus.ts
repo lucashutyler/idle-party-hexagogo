@@ -32,6 +32,8 @@ export interface BattleStatusInput {
   /** The room being walked to, when the player has discovered it. */
   roomName: string | null;
   rewards: string[];
+  /** Whole seconds left of a wipe wait, when one is running. */
+  regroupSeconds?: number;
 }
 
 const OUTCOME_TITLES: Record<CombatResult, string> = {
@@ -49,18 +51,23 @@ function walkingText(roomName: string | null): string {
   return roomName ? `Walking to ${roomName}` : 'Walking on';
 }
 
+function regroupText(input: BattleStatusInput): string {
+  return input.regroupSeconds ? `Regrouping, ${input.regroupSeconds}s` : 'Regrouping';
+}
+
 function nextStep(outcome: CombatResult | null, input: BattleStatusInput): string {
+  if (input.regroupSeconds) return regroupText(input);
   if (input.walking) return walkingText(input.roomName);
   if (input.inDungeon) return outcome === 'victory' && !input.lastFloor ? 'On to the next floor' : 'Back to the entrance';
-  if (outcome !== 'victory') return 'Regrouping';
+  if (outcome !== 'victory') return regroupText(input);
   return input.hasDestination ? walkingText(input.roomName) : 'Fighting here again';
 }
 
 /** What the party is doing between fights, or null while a fight is running. */
 export function battleStatus(input: BattleStatusInput): BattleStatus | null {
-  if (!input.hasFight) return { tone: 'idle', title: '', rewards: [], next: 'Regrouping' };
+  if (!input.hasFight) return { tone: 'idle', title: '', rewards: [], next: regroupText(input) };
   const outcome = outcomeOf(input);
-  if (!outcome && !input.walking) return null;
+  if (!outcome && !input.walking && !input.regroupSeconds) return null;
   return {
     tone: outcome ?? 'idle',
     title: outcome ? OUTCOME_TITLES[outcome] : '',

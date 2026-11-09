@@ -312,6 +312,7 @@ describe('live battle forecasts', () => {
 
     for (const t of w.tiles) t.encounterTable = [{ encounterId: 'brutes', weight: 1 }];
     w.entry().battleTimer.restartBattle();
+    vi.advanceTimersByTime(w.entry().battleTimer.regroupRemainingMs);
     expect(w.svc.queued).toBe(1);
     for (const t of w.tiles) t.encounterTable = [{ encounterId: 'ogres', weight: 1 }];
     w.entry().battleTimer.restartBattle();

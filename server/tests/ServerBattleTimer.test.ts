@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   createPartyCombatState,
   createMonsterInstance,
+  COMBAT_PACE,
   COMBAT_STEP_MS,
   COMBAT_SEND_MS,
   COMBAT_SNAPSHOT_MS,
@@ -408,15 +409,34 @@ describe('ServerBattleTimer', () => {
       h.timer.destroy();
     });
 
-    it('is applied by restartBattle, which then fights again at once with no move', () => {
+    it('is applied by restartBattle, whose next fight still waits out the usual pause', () => {
       const h = harness('win', { hasDestination: true });
       h.timer.start();
       vi.advanceTimersByTime(1000);
       h.timer.restartBattle();
       expect(h.ends.map(e => e.result)).toEqual(['victory']);
+      expect(h.createCombat).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(KILL_BEAT_MS + RESULT_PAUSE + MOVE_DURATION - 1);
+      expect(h.createCombat).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
       expect(h.createCombat).toHaveBeenCalledTimes(2);
+      expect(h.ends).toHaveLength(1);
       expect(h.moves).toHaveLength(0);
-      vi.advanceTimersByTime(KILL_BEAT_MS - 1);
+      h.timer.destroy();
+    });
+
+    it('keeps what is left of the pause when restarted during it', () => {
+      const h = harness('win');
+      h.timer.start();
+      vi.advanceTimersByTime(1000 + KILL_BEAT_MS);
+      expect(h.ends).toHaveLength(1);
+
+      h.timer.restartBattle();
+      vi.advanceTimersByTime(RESULT_PAUSE + MOVE_DURATION - 1);
+      expect(h.createCombat).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(h.createCombat).toHaveBeenCalledTimes(2);
       expect(h.ends).toHaveLength(1);
       h.timer.destroy();
     });
@@ -609,5 +629,109 @@ describe('ServerBattleTimer', () => {
       expect(h.flushes.some(f => f.events.some(e => e.result === 'retreat'))).toBe(false);
       h.timer.destroy();
     });
+  });
+});
+
+describe('holding the next fight', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  function holdHarness(opts: { destination?: boolean; canMove?: boolean } = {}) {
+    const state = { destination: opts.destination ?? false };
+    const party = {
+      get hasDestination() { return state.destination; },
+      enterBattle: vi.fn(),
+      exitBattle: vi.fn(),
+      moveToNextTile: vi.fn(() => true),
+    };
+    const fight = vi.fn(() => createPartyCombatState([{
+      username: 'alice', maxHp: 1_000_000, baseDamage: 1, playerDamageType: 'physical', gridPosition: 4, className: 'Knight', level: 1, equippedSkills: [null],
+    }], [createMonsterInstance({ id: 'dummy', name: 'Dummy', hp: 1_000_000, damage: 1, damageType: 'physical', xp: 0, goldMin: 0, goldMax: 0 }, 4)], { pace: COMBAT_PACE }));
+    const onMove = vi.fn();
+    const canMove = opts.canMove ?? true;
+    const timer = new ServerBattleTimer(party as unknown as ServerParty, fight, { canMoveToNextTile: () => canMove, onMove }, 'test-party');
+    return { timer, state, party, onMove, fight };
+  }
+
+  it('starts no fight until the time, whatever asks for one, and only ever moves later', () => {
+    const { timer, party, fight } = holdHarness();
+    timer.start();
+    const first = timer.battleId;
+    timer.holdNextFightUntil(Date.now() + 10_000);
+    timer.holdNextFightUntil(Date.now() + 2_000);
+    expect(timer.regroupRemainingMs).toBe(10_000);
+    expect(timer.battleId).toBe(first);
+
+    timer.restartBattle();
+    expect(timer.currentCombat).toBeNull();
+    expect(timer.currentState).toBe('result');
+    expect(timer.visual).toBe('none');
+    expect(party.exitBattle).toHaveBeenCalled();
+    expect(timer.canEscape()).toBe(false);
+    vi.advanceTimersByTime(5_000);
+    timer.restartBattle();
+    vi.advanceTimersByTime(4_999);
+    expect(timer.battleId).toBe(first);
+
+    vi.advanceTimersByTime(1);
+    expect(timer.battleId).not.toBe(first);
+    expect(timer.isLive).toBe(true);
+    vi.advanceTimersByTime(5_000);
+    expect(fight).toHaveBeenCalledTimes(2);
+    timer.destroy();
+  });
+
+  it('fights where it stands at the end of the hold when the next room is not open', () => {
+    const { timer, state, party, onMove } = holdHarness({ canMove: false });
+    timer.start();
+    timer.holdNextFightUntil(Date.now() + 1_000);
+    timer.restartBattle();
+    state.destination = true;
+
+    vi.advanceTimersByTime(1_000);
+
+    expect(party.moveToNextTile).not.toHaveBeenCalled();
+    expect(onMove).not.toHaveBeenCalled();
+    expect(timer.isLive).toBe(true);
+    timer.destroy();
+  });
+
+  it('holds a timer that has not started yet', () => {
+    const { timer } = holdHarness();
+    timer.holdNextFightUntil(Date.now() + 1_000);
+    timer.start();
+    expect(timer.currentCombat).toBeNull();
+    expect(timer.isStarted).toBe(true);
+    vi.advanceTimersByTime(1_000);
+    expect(timer.isLive).toBe(true);
+    timer.destroy();
+  });
+
+  it('walks one room at the end of the hold when there is a route, then fights', () => {
+    const { timer, state, party, onMove } = holdHarness();
+    timer.start();
+    timer.holdNextFightUntil(Date.now() + 1_000);
+    timer.restartBattle();
+    state.destination = true;
+    expect(party.moveToNextTile).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1_000);
+    expect(party.moveToNextTile).toHaveBeenCalledTimes(1);
+    expect(onMove).toHaveBeenCalledTimes(1);
+    expect(timer.isLive).toBe(false);
+    vi.advanceTimersByTime(MOVE_DURATION);
+    expect(timer.isLive).toBe(true);
+    timer.destroy();
+  });
+
+  it('dies with the timer', () => {
+    const { timer, party } = holdHarness();
+    timer.start();
+    timer.holdNextFightUntil(Date.now() + 1_000);
+    timer.restartBattle();
+    party.enterBattle.mockClear();
+    timer.destroy();
+    vi.advanceTimersByTime(5_000);
+    expect(party.enterBattle).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,11 @@ const ENTRY_REQUIREMENT_KEYS: readonly (keyof DungeonEntryRequirements)[] = [
   'minLevel', 'maxLevel', 'requiredItemId', 'consumeRequiredItem', 'requiredClasses', 'minPartySize', 'maxPartySize',
 ];
 
+function parseFloorFactor(input: HTMLInputElement): number | undefined {
+  const value = parseFloat(input.value);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 export class DungeonsTab implements Tab {
   render(container: HTMLElement, ctx: AdminContext): void {
     const content = ctx.getDisplayContent();
@@ -243,6 +248,8 @@ export class DungeonsTab implements Tab {
             <input type="checkbox" class="df-floor-boss" ${floor.isBoss ? 'checked' : ''}>
             Boss floor
           </label>
+          <label title="0 to 1: what this floor's monsters pay in XP. Blank pays in full. First-clear rewards are untouched.">XP factor<input type="number" class="df-floor-xp-factor" value="${escapeValue(floor.xpFactor)}" min="0" max="1" step="any"></label>
+          <label title="0 to 1: what this floor's monsters pay in coin. Blank pays in full. First-clear rewards are untouched.">Coin factor<input type="number" class="df-floor-coin-factor" value="${escapeValue(floor.coinFactor)}" min="0" max="1" step="any"></label>
         </div>
         <div class="df-floor-grid-wrap">
           <div class="admin-form-hint">Floor layout (${floor.gridShape.cols}×${floor.gridShape.rows}). Cells are placeholders — content tools coming soon.</div>
@@ -418,6 +425,8 @@ export class DungeonsTab implements Tab {
       const cols = parseInt((floorEl.querySelector('.df-floor-cols') as HTMLInputElement).value) || 3;
       const rows = parseInt((floorEl.querySelector('.df-floor-rows') as HTMLInputElement).value) || 3;
       const isBoss = (floorEl.querySelector('.df-floor-boss') as HTMLInputElement).checked;
+      const xpFactor = parseFloorFactor(floorEl.querySelector('.df-floor-xp-factor') as HTMLInputElement);
+      const coinFactor = parseFloorFactor(floorEl.querySelector('.df-floor-coin-factor') as HTMLInputElement);
       const encounterTable: EncounterTableEntry[] = [];
       floorEl.querySelectorAll<HTMLElement>('.df-enc-row').forEach(row => {
         const encounterId = (row.querySelector('.df-enc-id') as HTMLSelectElement).value;
@@ -436,6 +445,8 @@ export class DungeonsTab implements Tab {
         encounterTable,
         isBoss: isBoss ? true : undefined,
         rewards: rewards.length ? rewards : undefined,
+        xpFactor,
+        coinFactor,
       });
     });
 

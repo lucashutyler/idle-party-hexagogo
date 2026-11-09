@@ -436,6 +436,21 @@ describe('ShopPopup', () => {
       expect(t.gameClient.sendHireHenchman).toHaveBeenCalledWith('h_bob');
     });
 
+    it('says why a hire over the level limit cannot be hired, and offers no button', () => {
+      const reason = 'Level 9 is more than 5 levels above your party\'s highest member (level 3).';
+      const t = setup({ stock: [], offers: [{ ...OFFER, level: 9, levelLimitReason: reason }] });
+      expect(t.q('.shop-hire-limit')?.textContent).toBe(reason);
+      expect(t.q('.shop-hire-btn')).toBeNull();
+      expect(t.q<HTMLButtonElement>('.shop-hire-row .item-popup-btn')?.disabled).toBe(true);
+    });
+
+    it('still says why for a hire already in the party', () => {
+      const reason = 'Level 9 is more than 5 levels above your party\'s highest member (level 3).';
+      const t = setup({ stock: [], offers: [{ ...OFFER, level: 9, levelLimitReason: reason }], hired: [{ henchmanId: 'h_bob', instanceId: 'i1' }] });
+      expect(t.q('.shop-hire-limit')?.textContent).toBe(reason);
+      expect(t.q('.shop-hire-row .item-popup-btn')?.textContent).toBe('In party');
+    });
+
     it('shows a hire refusal', () => {
       const t = setup({ stock: [], offers: [OFFER] });
       t.q<HTMLButtonElement>('.shop-hire-btn')!.click();

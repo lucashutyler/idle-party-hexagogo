@@ -10,7 +10,9 @@ import {
 } from '@idle-party-rpg/shared';
 import type { RoomEntryRequirements } from '@idle-party-rpg/shared';
 import {
+  dungeonFactorProblems,
   monsterScalingProblems,
+  zoneProblems,
 } from '../admin/contentChecks.js';
 import type { ContentSnapshot } from './VersionStore.js';
 
@@ -64,6 +66,7 @@ export function findContentProblems(snapshot: ContentSnapshot): string[] {
 
   // --- Zones ---
   for (const zone of snapshot.zones) {
+    problems.push(...zoneProblems(zone));
     zone.encounterTable.forEach((entry, index) => {
       if (!encounterIds.has(entry.encounterId)) {
         problems.push(`Zone '${zone.id}' encounter table references unknown encounter '${entry.encounterId}' (index ${index}).`);
@@ -168,6 +171,7 @@ export function findContentProblems(snapshot: ContentSnapshot): string[] {
 
   // --- Dungeons ---
   for (const dungeon of snapshot.dungeons ?? []) {
+    problems.push(...dungeonFactorProblems(dungeon));
     dungeon.floors.forEach((floor, floorIndex) => {
       floor.encounterTable.forEach((entry, entryIndex) => {
         if (!encounterIds.has(entry.encounterId)) {

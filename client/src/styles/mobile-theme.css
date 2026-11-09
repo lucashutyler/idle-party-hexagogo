@@ -2769,6 +2769,12 @@ button:is(.notif-mark-all-btn, .notif-clear-all-btn) {
   font-variant-numeric: tabular-nums;
 }
 
+.shop-hire-limit {
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
 .shop-hire-desc {
   font-size: var(--fs-xs);
   line-height: 1.4;

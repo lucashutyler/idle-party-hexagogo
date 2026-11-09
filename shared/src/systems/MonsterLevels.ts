@@ -38,15 +38,6 @@ export const LEVEL_CON_INFO: Record<LevelCon, LevelConInfo> = {
   deadly: { label: 'Deadly', glyph: '☠' },
 };
 
-/** XP multiplier by con for monsters with an authored level; derived levels always get 1. */
-export const XP_CON_FACTOR: Record<LevelCon, number> = {
-  trivial: 0.25,
-  easy: 0.75,
-  even: 1,
-  hard: 1,
-  deadly: 1,
-};
-
 const SUGGESTED_TIERS: readonly Exclude<MonsterTier, 'trash'>[] = ['raid', 'boss', 'elite'];
 const MONSTER_TIER_SET: ReadonlySet<string> = new Set<MonsterTier>(['trash', 'elite', 'boss', 'raid']);
 const derivedCache = new WeakMap<MonsterDefinition, { signature: string; level: number }>();
@@ -129,10 +120,6 @@ export function levelCon(target: number, viewer: number): LevelCon {
 /** Derived levels are estimates, so they always read as even. */
 export function monsterLevelCon(level: number, source: MonsterLevelSource, viewer: number): LevelCon {
   return source === 'derived' ? 'even' : levelCon(level, viewer);
-}
-
-export function xpConFactor(level: number, source: MonsterLevelSource, viewer: number): number {
-  return source === 'derived' ? 1 : XP_CON_FACTOR[levelCon(level, viewer)];
 }
 
 export function formatMonsterLevel(level: number, source: MonsterLevelSource): string {

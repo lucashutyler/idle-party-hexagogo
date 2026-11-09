@@ -22,7 +22,7 @@ export interface SkillOptionParamSpec {
   key: string;
   label: string;
   help?: string;
-  input: 'number' | 'percent' | 'boolean' | 'class' | 'condition';
+  input: 'number' | 'percent' | 'boolean' | 'class' | 'condition' | 'text';
   min?: number;
   max?: number;
   step?: number;
@@ -53,7 +53,7 @@ const MAX_CHARGE_SECONDS = 120;
 /** The condition strings the engine understands for conditional_damage_bonus. */
 export const SKILL_CONDITION_VALUES = ['target_above_75_hp', 'front_column', 'target_bleeding_or_stunned'] as const;
 
-/** Every passive effect kind the engine supports (27). */
+/** Every passive effect kind the engine supports (28). */
 export const ALL_PASSIVE_EFFECT_KINDS: PassiveEffectKind[] = [
   'physical_reduction', 'party_damage_mult', 'magical_reduction_party', 'crit_chance',
   'bonus_damage', 'max_hp_percent', 'stun_on_phys_hit', 'stun_immune',
@@ -61,7 +61,7 @@ export const ALL_PASSIVE_EFFECT_KINDS: PassiveEffectKind[] = [
   'crit_damage_bonus', 'stacking_same_target', 'heal_power', 'holy_damage_party',
   'consecrate', 'martyr', 'resurrection', 'intensify', 'dot_on_auto', 'arcane_surge',
   'overflow', 'scorch', 'cooldown_reduction', 'dodge_party', 'xp_bonus',
-  'enemy_damage_reduction_party',
+  'enemy_damage_reduction_party', 'same_class_damage',
 ];
 
 /** Every active effect kind the engine supports (23). */
@@ -72,6 +72,17 @@ export const ALL_ACTIVE_EFFECT_KINDS: ActiveEffectKind[] = [
   'hot_lowest', 'shield_non_knight', 'damage_percent', 'damage_aoe_all',
   'high_damage_single', 'party_buff_permanent', 'enemy_debuff_aoe', 'chaos',
 ];
+
+const STACK_PARAMS: SkillOptionParamSpec[] = [
+  { key: 'stackGroup', label: 'Stack group', help: 'Copies in one group across the party don\'t simply add: strongest first, each further copy counts the factor of the one before. Blank: copies add.', input: 'text' },
+  { key: 'stackFactor', label: 'Each further copy counts', help: 'Of the copy before it. 0 means the strongest copy only. Blank counts in full.', input: 'percent', min: 0, max: 1, step: 0.01 },
+];
+const DISTINCT_CLASS_PARAM: SkillOptionParamSpec = {
+  key: 'perDistinctClass',
+  label: 'Per different class',
+  help: 'Scale by the different classes in the fight, hires included, not by head count.',
+  input: 'boolean',
+};
 
 // Typed against the full kind union so the compiler enforces one entry per kind.
 const CATALOG = {
@@ -91,11 +102,13 @@ const CATALOG = {
     kind: 'party_damage_mult',
     slotType: 'passive',
     label: 'Party damage per member',
-    description: 'At combat start, adds (value × party size) to the party-wide damage multiplier applied to every player attack. Only counted when "scales per party member" is enabled. Contributions from multiple owners sum.',
+    description: 'At combat start, adds (value × party size, or × different classes in the fight with "per different class") to the party-wide damage multiplier applied to every player attack. Only counted when "scales per party member" is enabled. Contributions from multiple owners sum, unless they share a stack group.',
     targeting: 'party',
     params: [
       { key: 'flatValue', label: 'Damage bonus per member', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
       { key: 'perPartyMember', label: 'Scales per party member', help: 'Must be enabled — the engine only counts per-member scaling for this option.', input: 'boolean', required: true },
+      DISTINCT_CLASS_PARAM,
+      ...STACK_PARAMS,
     ],
     seedExample: 'Bard — Rally',
   },
@@ -236,10 +249,11 @@ const CATALOG = {
     kind: 'holy_damage_party',
     slotType: 'passive',
     label: 'Party holy damage',
-    description: 'While the owner is alive at combat start, every party member\'s attack adds (value × owner level) holy damage, reduced only by monster holy resistance. Contributions sum across owners.',
+    description: 'While the owner is alive at combat start, every party member\'s attack adds (value × owner level) holy damage, reduced only by monster holy resistance. Contributions sum across owners, unless they share a stack group.',
     targeting: 'party',
     params: [
       { key: 'valuePerLevel', label: 'Holy damage per level', input: 'number', min: 0, step: 1, required: true },
+      ...STACK_PARAMS,
     ],
     seedExample: 'Priest — Blessed Arms',
   },
@@ -329,11 +343,12 @@ const CATALOG = {
     kind: 'cooldown_reduction',
     slotType: 'passive',
     label: 'Cooldown reduction',
-    description: 'Reduces active skill cooldowns by this many seconds (effective cooldown never drops below 1 second). Never shortens skills with the Enemy casts trigger. On a skill with charge, each point takes the combat clock in real seconds off its charge, never off its recovery, and never touches Attack. Self-only by default; with the party-wide flag it also applies to every OTHER living party member. Contributions sum.',
+    description: 'Reduces active skill cooldowns by this many seconds (effective cooldown never drops below 1 second). Never shortens skills with the Enemy casts trigger. On a skill with charge, each point takes the combat clock in real seconds off its charge, never off its recovery, and never touches Attack. Self-only by default; with the party-wide flag it also applies to every OTHER living party member. Contributions sum, unless party-wide copies share a stack group.',
     targeting: 'self (party with flag)',
     params: [
       { key: 'flatValue', label: 'Seconds removed', input: 'number', min: 0, step: 0.1, required: true },
       { key: 'partyWide', label: 'Party-wide', help: 'Off = affects only the owner (Tempo). On = also reduces every other living member\'s cooldowns (Encore).', input: 'boolean' },
+      ...STACK_PARAMS,
     ],
     seedExample: 'Bard — Tempo / Encore',
   },
@@ -341,11 +356,13 @@ const CATALOG = {
     kind: 'dodge_party',
     slotType: 'passive',
     label: 'Party dodge per member',
-    description: 'At combat start, grants the whole party (value × party size) chance to dodge monster attacks and direct-damage spells (AoE spells roll dodge per player). Only counted when "scales per party member" is enabled. Contributions sum.',
+    description: 'At combat start, grants the whole party (value × party size, or × different classes in the fight with "per different class") chance to dodge monster attacks and direct-damage spells (AoE spells roll dodge per player). Only counted when "scales per party member" is enabled. Contributions sum, unless they share a stack group.',
     targeting: 'party',
     params: [
       { key: 'flatValue', label: 'Dodge per member', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
       { key: 'perPartyMember', label: 'Scales per party member', help: 'Must be enabled — the engine only counts per-member scaling for this option.', input: 'boolean', required: true },
+      DISTINCT_CLASS_PARAM,
+      ...STACK_PARAMS,
     ],
     seedExample: 'Bard — Nimble',
   },
@@ -364,13 +381,26 @@ const CATALOG = {
     kind: 'enemy_damage_reduction_party',
     slotType: 'passive',
     label: 'Enemy damage reduction per member',
-    description: 'At combat start, reduces all enemy attack damage by (value × party size). Only counted when "scales per party member" is enabled. Contributions sum.',
+    description: 'At combat start, reduces all enemy attack damage by (value × party size, or × different classes in the fight with "per different class"). Only counted when "scales per party member" is enabled. Contributions sum, unless they share a stack group.',
     targeting: 'all enemies',
     params: [
       { key: 'flatValue', label: 'Reduction per member', input: 'percent', min: 0, max: 1, step: 0.01, required: true },
       { key: 'perPartyMember', label: 'Scales per party member', help: 'Must be enabled — the engine only counts per-member scaling for this option.', input: 'boolean', required: true },
+      DISTINCT_CLASS_PARAM,
+      ...STACK_PARAMS,
     ],
     seedExample: 'Bard — Unnerve',
+  },
+  same_class_damage: {
+    kind: 'same_class_damage',
+    slotType: 'passive',
+    label: 'Damage per same-class ally',
+    description: 'The owner\'s attacks and skills deal +value damage for each OTHER living human in the party of the owner\'s class, read on every hit. Hires never count. First-match: only the first equipped skill with this option counts.',
+    targeting: 'self',
+    params: [
+      { key: 'flatValue', label: 'Damage per ally', input: 'percent', min: 0, max: 5, step: 0.01, required: true },
+    ],
+    seedExample: 'None yet in the seed skills',
   },
 
   // ===== ACTIVE OPTIONS =====
@@ -578,6 +608,7 @@ const CATALOG = {
     params: [
       { key: 'damagePercent', label: 'Damage multiplier', help: 'Percent mode — ignored when flat damage per level is set.', input: 'percent', min: 0, max: 10, step: 0.01 },
       { key: 'damagePerLevel', label: 'Flat damage per level', help: 'Flat mode: value × caster level true damage; overrides percent mode when set.', input: 'number', min: 0, step: 0.1 },
+      { key: 'sameClassBonus', label: 'Bonus per same-class ally', help: 'Flat mode only: + this share for each other living human of the caster\'s class. Hires never count.', input: 'percent', min: 0, max: 5, step: 0.01 },
     ],
     seedExample: 'Mage — Blizzard / Bard — Dissonance',
   },
@@ -627,7 +658,7 @@ const CATALOG = {
 } satisfies Record<PassiveEffectKind | ActiveEffectKind, SkillOptionDefinition>;
 
 /**
- * One entry per engine-supported effect kind (27 passive + 23 active).
+ * One entry per engine-supported effect kind (28 passive + 23 active).
  * Modeled on MONSTER_SKILL_CATALOG. The `satisfies` check above guarantees
  * exactly one entry per kind at compile time.
  */
@@ -811,6 +842,10 @@ function validateOption(
     } else if (spec.input === 'condition') {
       if (typeof value !== 'string' || !(SKILL_CONDITION_VALUES as readonly string[]).includes(value)) {
         errors.push(`Option "${option.label}" parameter "${spec.label}" must be one of: ${SKILL_CONDITION_VALUES.join(', ')}.`);
+      }
+    } else if (spec.input === 'text') {
+      if (typeof value !== 'string' || !value.trim()) {
+        errors.push(`Option "${option.label}" parameter "${spec.label}" must be text.`);
       }
     }
   }

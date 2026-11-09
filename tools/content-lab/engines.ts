@@ -112,15 +112,15 @@ function withSeededMathRandom<T>(rng: Rng, run: () => T): T {
   }
 }
 
-/** The reward split of PartyBattleManager on both versions; standing walls pay too. */
-function settle(result: FightResult, ms: number, state: any, input: FightInput, baseXp: number, goldMultiplier = 1): FightEnd {
+/** The coin split of PartyBattleManager on both versions; standing walls pay too. */
+function settle(result: FightResult, ms: number, state: any, input: FightInput, xpPerMember: number, goldMultiplier = 1): FightEnd {
   const shares = input.humanCount + input.hireCount;
   const won = result === 'victory';
   return {
     result,
     ms,
     ...partyHpLost(state.players),
-    xpPerMember: won ? Math.ceil((baseXp * input.xpMultiplier) / shares) : 0,
+    xpPerMember: won ? xpPerMember : 0,
     goldPerMember: won ? Math.ceil((rollGold(state.monsters, input.content, input.rng) * goldMultiplier) / shares) : 0,
   };
 }
@@ -141,13 +141,16 @@ export async function loadNewEngine(): Promise<EngineAdapter> {
         const state = mod.createPartyCombatState(input.players, instances, { pace });
         const outcome = mod.simulateToEnd(state, input.rng, Math.max(FIGHT_HORIZON_MS, mod.defaultHorizonMs(state)));
         const result: FightResult = outcome.result === 'victory' ? 'victory' : outcome.result === 'defeat' ? 'defeat' : 'stalemate';
-        let baseXp = 0;
-        for (const m of state.monsters) {
-          if (!Number.isFinite(m.xp)) continue;
-          const authored = m.levelSource === 'authored' && Number.isFinite(m.level);
-          baseXp += authored ? m.xp * mod.xpConFactor(m.level, 'authored', input.memberLevel) : m.xp;
-        }
-        return settle(result, mod.paceRealMs(pace, outcome.elapsedMs), state, input, baseXp * pace.rewardMultiplier, pace.rewardMultiplier);
+        const humanLevels = input.players.filter(p => !p.isHenchman).map(p => p.level);
+        const xpPerMember = mod.fightXp({
+          monsters: state.monsters,
+          memberLevel: input.memberLevel,
+          topHumanLevel: Math.max(input.memberLevel, ...humanLevels),
+          bodies: input.humanCount + input.hireCount,
+          xpBonus: input.xpMultiplier,
+          rewardMultiplier: pace.rewardMultiplier,
+        });
+        return settle(result, mod.paceRealMs(pace, outcome.elapsedMs), state, input, xpPerMember, pace.rewardMultiplier);
       });
     },
   };
@@ -198,7 +201,8 @@ export async function loadOldEngine(bundlePath: string): Promise<EngineAdapter> 
         }
         const result: FightResult = !state.finished ? 'stalemate' : state.result === 'victory' ? 'victory' : 'defeat';
         const baseXp = state.monsters.reduce((sum: number, m: MonsterInstance) => sum + m.xp, 0);
-        return settle(result, state.tickCount * OLD_TICK_MS, state, input, baseXp);
+        const xpPerMember = Math.ceil((baseXp * input.xpMultiplier) / (input.humanCount + input.hireCount));
+        return settle(result, state.tickCount * OLD_TICK_MS, state, input, xpPerMember);
       });
     },
   };

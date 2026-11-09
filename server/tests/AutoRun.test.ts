@@ -70,6 +70,20 @@ describe('auto run', () => {
     }
   });
 
+  it('never runs in place: it stands down when the next room shuts before it fires', () => {
+    const h = harness({ autoRun: false, destination: true });
+    h.timer.start();
+    vi.advanceTimersByTime(RUN_AVAILABLE_MS + 1000);
+    expect(h.timer.canEscape()).toBe(true);
+    h.state.autoRun = true;
+    h.timer.syncAutoRun();
+    h.state.walkable = false;
+    vi.advanceTimersByTime(RUN_AVAILABLE_MS);
+    expect(h.onAutoRun).not.toHaveBeenCalled();
+    expect(h.timer.isLive).toBe(true);
+    h.timer.destroy();
+  });
+
   it('arms mid-fight when auto run is turned on and disarms when it is turned off', () => {
     const h = harness({ autoRun: false, destination: true });
     h.timer.start();

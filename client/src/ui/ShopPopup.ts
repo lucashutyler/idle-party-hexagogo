@@ -581,6 +581,9 @@ export class ShopPopup {
       const descriptionHtml = description
         ? `<div class="shop-hire-desc">${escapeHtml(description)}</div>`
         : '';
+      const limitHtml = o.levelLimitReason
+        ? `<div class="shop-hire-limit">${escapeHtml(o.levelLimitReason)}</div>`
+        : '';
       return `
         <div class="shop-hire-row">
           <div class="shop-hire-portrait">
@@ -590,12 +593,15 @@ export class ShopPopup {
             <div class="shop-hire-name">${escapeHtml(o.name)}</div>
             ${descriptionHtml}
             <div class="shop-hire-stats">Lv ${o.level} · ${o.maxHp} HP · ${o.baseDamage} DMG</div>
+            ${limitHtml}
           </div>
           ${hiredIds.has(o.henchmanId)
             ? '<button class="item-popup-btn item-popup-btn-secondary" disabled>In party</button>'
-            : partyFull
-              ? '<button class="item-popup-btn item-popup-btn-secondary" disabled title="Your party is full of players">Party full</button>'
-              : `<button class="item-popup-btn item-popup-btn-primary shop-hire-btn" data-henchman-id="${escapeHtml(o.henchmanId)}">${hasRoom ? 'Hire' : 'Replace'}</button>`}
+            : o.levelLimitReason
+              ? '<button class="item-popup-btn item-popup-btn-secondary" disabled>Level too high</button>'
+              : partyFull
+                ? '<button class="item-popup-btn item-popup-btn-secondary" disabled title="Your party is full of players">Party full</button>'
+                : `<button class="item-popup-btn item-popup-btn-primary shop-hire-btn" data-henchman-id="${escapeHtml(o.henchmanId)}">${hasRoom ? 'Hire' : 'Replace'}</button>`}
         </div>
       `;
     }).join('');

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PlayerManager } from '../src/game/PlayerManager.js';
+import { LONE_LEAVE_REFUSAL, PlayerManager } from '../src/game/PlayerManager.js';
 import { PlayerSession } from '../src/game/PlayerSession.js';
 import { GameLoop } from '../src/game/GameLoop.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
@@ -596,6 +596,7 @@ describe('A content change that removes the run ends it', () => {
     expect(earned(session).gold).toBeGreaterThan(goldBefore);
     expect(log()).toContain(WORLD_ENDED);
     expect(pm.partyBattles.isInDungeonRun(partyId)).toBe(false);
+    vi.advanceTimersByTime(entry().battleTimer.regroupRemainingMs);
     expect(entry().battleTimer.isFighting(entry().battleTimer.battleId)).toBe(true);
   });
 
@@ -781,6 +782,7 @@ describe('A run lasts only while the party stays together', () => {
     const log = logOf(w.session);
     expect(log.indexOf('Descending to floor 2 of 2...')).toBeGreaterThan(-1);
     expect(log.indexOf('Descending to floor 2 of 2...')).toBeLessThan(log.indexOf(RUN_ENDED));
+    vi.advanceTimersByTime(w.entry().battleTimer.regroupRemainingMs);
     expect(w.entry().battleTimer.isFighting(w.entry().battleTimer.battleId)).toBe(true);
     expect(fighters(w.entry())).toEqual(['alice']);
 
@@ -806,6 +808,7 @@ describe('A run lasts only while the party stays together', () => {
       expect(player.hasDungeonCleared(DUNGEON_ID)).toBe(true);
     }
     expect(w.runOf(w.partyId)).toBeNull();
+    vi.advanceTimersByTime(w.entry().battleTimer.regroupRemainingMs);
     expect(w.entry().battleTimer.isFighting(w.entry().battleTimer.battleId)).toBe(true);
     expect(fighters(w.entry())).toEqual(['alice']);
   });
@@ -822,27 +825,19 @@ describe('A run lasts only while the party stays together', () => {
     expect(logOf(w.bob)).toContain(WIPED);
     expect(logOf(w.session)).not.toContain(RUN_ENDED);
     expect(w.runOf(w.partyId)).toBeNull();
+    vi.advanceTimersByTime(w.entry().battleTimer.regroupRemainingMs);
     expect(fighters(w.entry())).toEqual(['alice']);
   });
 
-  it('gives a lone player leaving the ordinary left line', async () => {
+  it('refuses a lone player leaving their party, and the run goes on', async () => {
     const { pm, session, partyId, log, enter } = await setup();
-    session.beginAway();
     enter();
 
-    expect(pm.leaveParty('alice')).toBeNull();
+    expect(pm.leaveParty('alice')).toBe(LONE_LEAVE_REFUSAL);
 
-    expect(log()).toContain('Left Chief Hall.');
-    expect(log()).not.toContain(RUN_ENDED);
-    expect(session.getAwayLedger()!.moments.map(m => m.kind)).not.toContain('run_ended');
-    expect(session.getAwayLedger()!.dungeons.at(-1)).toMatchObject({ outcome: 'left' });
-    expect(pm.partyBattles.getAllPartyIds()).not.toContain(partyId);
-    const newParty = session.getPartyId()!;
-    expect(pm.partyBattles.getDungeonRunInfo(newParty)).toBeNull();
-    expect(pm.partyBattles.getPosition(newParty)).toEqual(ENTRANCE);
-
-    expect(pm.partyBattles.enterDungeon(newParty, DUNGEON_ID).success).toBe(true);
-    expect(pm.partyBattles.getDungeonRunInfo(newParty)).toMatchObject({ floor: 1 });
+    expect(session.getPartyId()).toBe(partyId);
+    expect(log()).not.toContain('Left Chief Hall.');
+    expect(pm.partyBattles.getDungeonRunInfo(partyId)).toMatchObject({ floor: 1 });
   });
 
   it('gives a lone player accepting an invite the left line too, and takes them into the new party', async () => {

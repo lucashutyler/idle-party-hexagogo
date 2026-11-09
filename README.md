@@ -179,7 +179,7 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Stop here — tap your own room mid-route to stop (or walk back if you've already left it)
 
 ### Combat
-Real-time auto-battle on a timeline: every combatant acts on its own timer (every few seconds, at a speed set by its class or monster), skills are cards with charge, recovery and cast times in seconds, and the server streams the fight to clients as events plus periodic snapshots. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat). Encounters are zone-aware — each zone defines its own encounter table.
+Real-time auto-battle on a timeline: every combatant acts on its own timer (every few seconds, at a speed set by its class or monster), skills are cards with charge, recovery and cast times in seconds, and the server streams the fight to clients as events plus periodic snapshots. Party combat is shared — all members fight the same monsters together on a 3x3 grid with position-based targeting. Combat ends when all monsters die (victory) or all players reach 0 HP (defeat), and a wipe in a room, or a Run that stays in it, costs a minute before the party's next fight. Encounters are zone-aware — each zone defines its own encounter table.
 - [x] Auto-battle state machine (server-authoritative, always fighting)
 - [x] Victory/defeat outcomes with brief result/celebration pause
 - [x] Server-side combat resolution (clients receive updates)
@@ -193,6 +193,9 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Loot/rewards system (item drops, inventory, equipment with combat bonuses)
 - [x] Level-relative scaling (armour/resist ratings against the attacker's level, level-gap multiplier, every hit ≥ 1, ramp caps) — only for monsters with an authored level
 - [x] Monster levels and tiers (trash / elite / boss / raid), boss enrage, level-difference XP, stat templates (`suggestMonsterStats`)
+- [x] XP pay rule in one shared function: party share by bodies, level gap read on the member and the highest human, starter zones, dungeon floor XP and coin factors, and only the roster in a fight is paid
+- [x] 60-second wait after a wipe in a room, or a Run that stays in it, that nothing a player does can shorten
+- [x] Party buffs that count different classes or the strongest copy, and same-class damage skills
 - [x] Win forecasts (Monte Carlo sims on the server, time-sliced; rooms, dungeons and live boss fights, with reasons)
 - [x] Overworld auto-retreat (skip or leave rooms the forecast says you'll lose; off / 25 / 40 / 60 %, default 25 %)
 - [x] Auto run (party-wide toggle: runs from each fight as soon as Run opens while traveling; owners and leaders switch it)
@@ -209,7 +212,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Hero tab (Gear: equipped gear, inventory, mailbox and trades; Skills: skill loadout and priority list; Stats: stats, XP numbers, bestiary)
 - [x] Class system (5 classes: Knight, Archer, Priest, Mage, Bard — weak solo, strong together)
 - [x] Damage types (physical/magical/holy; Knight Guard rates against physical, Priest Bless against magical and holy)
-- [x] Henchmen (hireable NPCs for solo players; they wait at a dungeon's entrance while the party runs it)
+- [x] Henchmen (hireable NPCs for solo players; they wait at a dungeon's entrance while the party runs it, and have a level limit against the party's highest human)
 - [x] Party formation and management (always in a party, join, leave, kick, 3x3 grid, max 5 members)
 - [x] Party roles (owner > leader > member, promote/demote, transfer ownership)
 - [x] Party movement (owner/leader controls unified group movement)
