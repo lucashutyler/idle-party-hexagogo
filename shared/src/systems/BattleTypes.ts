@@ -31,7 +31,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
 export const WIPE_WAIT_MS = 60_000;   // ms before a party's next fight after a wipe in a room
-export const GAME_VERSION = '2026.11.07.3'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.09.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 

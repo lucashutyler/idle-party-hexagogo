@@ -1,6 +1,6 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.11.07.3',
+    version: '2026.11.09.1',
     notes: [
       'Parties keep far more XP per member. Each extra member or hire now costs everyone only a small cut, so a party that takes on harder rooms earns more than going alone. Gold and loot are still split evenly, and a hire\'s share of those is still lost.',
       'Going back to easy rooms now pays little, and harder rooms pay more, up to a point.',
