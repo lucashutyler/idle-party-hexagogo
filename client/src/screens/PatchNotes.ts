@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.09.3',
+    notes: [
+      'The Auto button is now called Autorun, on both the battle screen and the map, so it is clearer what it does.',
+      'Losing a fight no longer makes your party wait a minute. After a defeat, or after running from a fight and staying in the same room, the party fights again after the usual short pause.',
+    ],
+  },
+  {
     version: '2026.11.09.2',
     notes: [
       'The Auto button is now on the map too. While your party is traveling, it sits next to Stop on the route bar, so you can switch Auto on or off without opening the battle screen.',

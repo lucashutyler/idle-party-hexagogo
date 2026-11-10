@@ -257,7 +257,7 @@ describe('CombatScreen', () => {
     expect(t.enemyCard(2)).not.toBeNull();
   });
 
-  it('counts down the wait after a wipe, then says nothing more about it', () => {
+  it('counts down the wait before the next fight, then says nothing more about it', () => {
     const t = start();
     t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'defeat', regroupMs: 3500 }));
     vi.advanceTimersByTime(FRAME_MS * 2);
@@ -284,7 +284,7 @@ describe('CombatScreen', () => {
     expect(runHint()).toBe('The next fight is about to start');
   });
 
-  it('does not say the party is walking while it waits after a Run that stays in the room', () => {
+  it('does not say the party is walking while it waits to fight again', () => {
     const t = start();
     t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, regroupMs: 2000 }));
     vi.advanceTimersByTime(FRAME_MS * 2);

@@ -47,7 +47,7 @@ Zones also get low-level, high-level and ungeared variants for the core composit
 - **Pace**: new-engine fights play at `COMBAT_PACE`, so fight times are real time and XP and gold include `rewardMultiplier`, as in the game. `SPEED_TARGET` (old fight length over new, `fit.ts`) is the agreed authored ratio divided by the clock. Forecasts run at it too. Fitted enrage clocks are divided by the clock, and fitted drop chances by `rewardMultiplier`, since the game applies those itself.
 - **Rates**: XP/h = E[XP per fight, 0 on anything but a win] ÷ E[fight time + pause] × 3600, per human member. Pause comes from each version's timer: old = 1 s kill delay + `RESULT_PAUSE` + `MOVE_DURATION`; new = `KILL_BEAT_MS` + `RESULT_PAUSE` + `MOVE_DURATION`.
 - **Stalemate**: new = the engine's no-progress rule, or still running after 2 h of engine time. The old engine has no such rule, so 600 ticks without a new low in monster HP, or still running after 2 h, counts as one (in the live game such a party would fight on forever).
-- **Not modelled**: auto-retreat, kill mastery (zero kills), first-clear rewards, item drops (so `paceDropChance` too), the wait after a wipe in a room (`WIPE_WAIT_MS`), so rates for cells that lose read high.
+- **Not modelled**: auto-retreat, kill mastery (zero kills), first-clear rewards, item drops (so `paceDropChance` too).
 
 Combatants are built like `PlayerSession.getCombatInfo` and `buildHenchmanCombatant` on the matching version, and rewards pay like `PartyBattleManager`: XP through the game's `fightXp`, coin split per body.
 

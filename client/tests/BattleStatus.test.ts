@@ -44,7 +44,7 @@ describe('battleStatus', () => {
     expect(battleStatus(input({ visual: 'none', result: 'defeat', walking: true, roomName: 'Old Mill' }))?.next).toBe('Walking to Old Mill');
   });
 
-  it('counts down a wipe wait, and never promises a walk during one', () => {
+  it('counts down a hold on the next fight, and never promises a walk during one', () => {
     expect(battleStatus(input({ visual: 'defeat', result: 'defeat', regroupSeconds: 42 }))).toMatchObject({ title: 'Defeated', next: 'Regrouping, 42s' });
     expect(battleStatus(input({ visual: 'defeat', result: 'defeat', hasDestination: true, roomName: 'Old Mill', regroupSeconds: 1 }))?.next).toBe('Regrouping, 1s');
   });

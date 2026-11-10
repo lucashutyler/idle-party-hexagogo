@@ -27,7 +27,6 @@ import {
   pickWeightedEncounter,
   partyKey as partyKeyOf,
   RUN_AVAILABLE_MS,
-  WIPE_WAIT_MS,
 } from '@idle-party-rpg/shared';
 import type {
   BattleResult,
@@ -165,8 +164,6 @@ export class PartyBattleManager {
   private autoRunPolicy: (partyId: string) => boolean = () => false;
   private notify: Notifier = () => {};
   private keyingParty = false;
-  /** When each character's own wipe wait ends. */
-  private wipeWaits = new Map<string, number>();
 
   constructor(
     grids: WorldGrids,
@@ -298,7 +295,6 @@ export class PartyBattleManager {
 
     const serverParty = new ServerParty(this.grids.getOrThrow(mapId), startTile, mapId);
     this.registerEntry(partyId, serverParty, new Set([username]));
-    this.carryWipeWait(partyId, username);
     this.startEntry(partyId);
   }
 
@@ -328,7 +324,6 @@ export class PartyBattleManager {
     if (!entry) return;
     entry.battleTimer.settlePendingResult();
     entry.members.add(username);
-    this.carryWipeWait(partyId, username);
     this.clearRetreatHold(partyId);
   }
 
@@ -411,7 +406,7 @@ export class PartyBattleManager {
     this.restartBattle(partyId);
   }
 
-  /** Escape the current battle for a party. No rewards given; a party still in the room when it would step waits as after a wipe. */
+  /** Escape the current battle for a party. No rewards given. */
   escapeBattle(partyId: string): boolean {
     const entry = this.entries.get(partyId);
     if (!entry) return false;
@@ -422,9 +417,7 @@ export class PartyBattleManager {
       if (s) s.addLogEntry('Escaped the battle!', 'battle');
     }
 
-    const combat = entry.battleTimer.currentCombat;
-    const fighters = combat ? humansIn(combat) : [];
-    entry.battleTimer.escapeBattle(() => this.startWipeWait(entry, fighters));
+    entry.battleTimer.escapeBattle();
     this.cancelLiveForecast(entry);
 
     for (const m of entry.members) {
@@ -897,27 +890,13 @@ export class PartyBattleManager {
       this.payVictory(entry, combat);
       return;
     }
-    const humans = humansIn(combat);
-    for (const { username } of humans) {
+    for (const { username } of humansIn(combat)) {
       const session = this.getSession(username);
       if (!session) continue;
       session.addLogEntry('Defeat...', 'defeat');
       session.recordAway(l => recordAwayBattle(l, { won: false }));
     }
     if (entry.dungeonRun) this.handleDungeonDefeat(entry);
-    else this.startWipeWait(entry, humans);
-  }
-
-  private startWipeWait(entry: PartyBattleEntry, humans: readonly PartyCombatant[]): void {
-    const until = Date.now() + WIPE_WAIT_MS;
-    for (const { username } of humans) this.wipeWaits.set(username, until);
-    entry.battleTimer.holdNextFightUntil(until);
-  }
-
-  /** A character still waiting out a wipe holds up the party they land in. */
-  private carryWipeWait(partyId: string, username: string): void {
-    const until = this.wipeWaits.get(username);
-    if (until !== undefined) this.entries.get(partyId)?.battleTimer.holdNextFightUntil(until);
   }
 
   private isInUndecidedFight(entry: PartyBattleEntry, username: string): boolean {

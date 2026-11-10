@@ -15,7 +15,6 @@ import type {
   BattleResult,
   BattleVisual,
   CombatEvent,
-  HexTile,
   PartyCombatState,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
@@ -80,8 +79,6 @@ export class ServerBattleTimer {
   private regroupUntil = 0;
   /** When the usual pause after the last finished fight ends. */
   private pauseEndsAt = 0;
-  /** The room the last Run left from, until the party steps or fights again. */
-  private runFrom: { tile: HexTile; onStay: () => void } | null = null;
 
   private combatState: PartyCombatState | null = null;
   private createCombat: () => PartyCombatState;
@@ -159,7 +156,7 @@ export class ServerBattleTimer {
     return this.destroyed;
   }
 
-  /** Time left before the next fight may start, while a hold runs: a wipe wait, or the pause kept by a restart. */
+  /** Time left before the next fight may start, while a hold runs: the pause kept by a restart. */
   get regroupRemainingMs(): number {
     return Math.max(0, this.regroupUntil - Date.now());
   }
@@ -203,17 +200,13 @@ export class ServerBattleTimer {
     return !!combat && !combat.finished && combatRealElapsedMs(combat) >= RUN_AVAILABLE_MS;
   }
 
-  /**
-   * Escape the current battle — skip rewards, move like defeat (only to discovered rooms).
-   * `onStay` runs if the party is still in this room when it would step or fight again.
-   */
-  escapeBattle(onStay: () => void = () => {}): boolean {
+  /** Escape the current battle — skip rewards, move like defeat (only to discovered rooms). */
+  escapeBattle(): boolean {
     if (this.destroyed || !this.canEscape()) return false;
     this.clearTimers();
     this.combatState = null;
     this.currentVisual = 'none';
     this.party.exitBattle();
-    this.runFrom = { tile: this.party.tile, onStay };
     this.moveOnOrFightHere();
     return true;
   }
@@ -338,7 +331,6 @@ export class ServerBattleTimer {
 
   private triggerBattle(): void {
     this.clearTimers();
-    this.chargeRunInPlace();
     if (this.holdForRegroup()) return;
     this.currentBattleId = ++nextBattleId;
     this.combatState = null;
@@ -474,16 +466,9 @@ export class ServerBattleTimer {
   private moveThenFight(): void {
     this.resultTimeout = undefined;
     if (this.party.moveToNextTile()) this.onMove?.();
-    this.chargeRunInPlace();
     this.currentVisual = 'none';
     this.onStateChange?.(this.state);
     this.moveTimeout = setTimeout(() => this.guard(() => this.triggerBattle()), MOVE_DURATION);
-  }
-
-  private chargeRunInPlace(): void {
-    const run = this.runFrom;
-    this.runFrom = null;
-    if (run && run.tile === this.party.tile) run.onStay();
   }
 
   private guard(fn: () => void): void {

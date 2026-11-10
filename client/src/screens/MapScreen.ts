@@ -589,19 +589,19 @@ export class MapScreen implements Screen {
     const on = state.social?.party?.autoRun === true;
     const locked = !this.canMove();
     const autoTitle = locked
-      ? 'Only the party owner or a leader can change auto run'
-      : on ? 'Auto run is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Auto run: run as soon as Run opens while traveling';
+      ? 'Only the party owner or a leader can change Autorun'
+      : on ? 'Autorun is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Autorun: run as soon as Run opens while traveling';
     chip.hidden = false;
     deferWhilePressed(chip, () => {
       setHtml(chip, `<span class="map-route-text"><span class="map-route-arrow">→</span>${nameHtml}<span class="map-route-count">${count}</span></span>`
-        + `<button type="button" class="map-route-auto${on ? ' on' : ''}${locked ? ' locked' : ''}" aria-pressed="${on}" title="${autoTitle}">Auto</button>`
+        + `<button type="button" class="map-route-auto${on ? ' on' : ''}${locked ? ' locked' : ''}" aria-pressed="${on}" title="${autoTitle}">Autorun</button>`
         + '<button type="button" class="map-route-stop">Stop</button>');
     });
   }
 
   private toggleAutoRun(button: HTMLElement): void {
     if (button.classList.contains('locked')) {
-      this.showMoveToast('Only the party owner or a leader can change auto run');
+      this.showMoveToast('Only the party owner or a leader can change Autorun');
       return;
     }
     if (!this.gameClient.sendSetAutoRun(button.getAttribute('aria-pressed') !== 'true')) this.showMoveToast(OFFLINE_NOTICE);
