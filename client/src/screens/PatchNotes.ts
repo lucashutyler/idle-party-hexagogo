@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.09.4',
+    notes: [
+      'The Auto button is now called Autorun, on both the battle screen and the map, so it is clearer what it does.',
+      'Losing a fight no longer makes your party wait a minute. After a defeat, or after running from a fight and staying in the same room, the party fights again after the usual short pause.',
+    ],
+  },
+  {
     version: '2026.11.09.3',
     notes: [
       'Hero > Stats now shows the XP per hour you earn in the room your party is in, from what its fights pay and how often your party wins them. A figure shows soon after you arrive, with no need to reset anything first, and has "about" in front until enough fights have been seen.',

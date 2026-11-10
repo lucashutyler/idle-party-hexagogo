@@ -447,10 +447,9 @@ describe('MCP getContentSchema', () => {
   });
 
   it('describes the pay rule and its content fields', async () => {
-    const monsters = await getContentSchema({ type: 'monsters' }) as { levelScaling: { xpPay: { share: { byBodies: number[] }; levelGap: Record<string, unknown>; wipeWaitSeconds: number } } };
+    const monsters = await getContentSchema({ type: 'monsters' }) as { levelScaling: { xpPay: { share: { byBodies: number[] }; levelGap: Record<string, unknown> } } };
     expect(monsters.levelScaling.xpPay.share.byBodies).toEqual([1, 0.91, 0.82, 0.76, 0.72]);
     expect(monsters.levelScaling.xpPay.levelGap).toMatchObject({ evenBand: 2, decay: 0.4, floor: 0.2, challengePerLevel: 0.12, challengeLevels: 5, pastChallengeFactor: 0.93 });
-    expect(monsters.levelScaling.xpPay.wipeWaitSeconds).toBe(60);
     expect(JSON.stringify(monsters)).not.toContain('x0.25');
 
     const describes = async (type: 'zones' | 'dungeons'): Promise<string> => JSON.stringify(await getContentSchema({ type }));

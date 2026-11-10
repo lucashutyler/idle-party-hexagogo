@@ -66,6 +66,7 @@ function combat(w: ForecastWorld): PartyCombatState {
 function waitOutPause(w: ForecastWorld): void {
   const timer = w.entry().battleTimer;
   if (!timer.isLive) vi.advanceTimersByTime(timer.regroupRemainingMs);
+  for (let i = 0; i < 200 && !timer.isLive; i++) vi.advanceTimersByTime(10);
 }
 
 /** Waits out the pause after a fight, up to the next fight's start. */
@@ -257,7 +258,7 @@ describe('XP gauge, read from what a win pays', () => {
     expect(gauge(w)!.losing).toBe(true);
   });
 
-  it('charges a lost fight the wipe wait', async () => {
+  it('charges a lost fight the usual pause', async () => {
     const w = await forecastWorld();
     w.stub.fallback.verdict = verdict('ogres', 50, 10_000);
     w.pm.partyBattles.setForecaster(w.svc);

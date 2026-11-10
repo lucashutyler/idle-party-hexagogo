@@ -35,7 +35,6 @@ import {
   HIRE_LEVEL_LIMIT,
   PARTY_XP_SHARE,
   STARTER_ZONE_LONE_XP_SHARE,
-  WIPE_WAIT_MS,
   XP_LEVEL_GAP,
   XP_INCOME_DOUBLING_LEVELS,
   XP_INCOME_PARTY_L10_PER_DAY,
@@ -112,7 +111,6 @@ const LEVEL_SCALING_REFERENCE = {
     },
     rosterAndRounding: 'Only the bodies in the fight are paid or counted. XP is rounded up per member, so monster xp may be fractional.',
     hires: `A hire more than ${HIRE_LEVEL_LIMIT} levels above the highest human can't be hired and doesn't fight.`,
-    wipeWaitSeconds: WIPE_WAIT_MS / 1000,
   },
   mastery: {
     killThresholdsByTier: MASTERY_THRESHOLDS,

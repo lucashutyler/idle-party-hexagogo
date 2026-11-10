@@ -410,7 +410,6 @@ export type {
 export {
   RESULT_PAUSE,
   MOVE_DURATION,
-  WIPE_WAIT_MS,
   GAME_VERSION,
   PARTIAL_STATE_PARAM,
   restoreElidedState,

@@ -32,7 +32,7 @@ export interface BattleStatusInput {
   /** The room being walked to, when the player has discovered it. */
   roomName: string | null;
   rewards: string[];
-  /** Whole seconds left of a wipe wait, when one is running. */
+  /** Whole seconds left of a hold on the next fight, when one is running. */
   regroupSeconds?: number;
 }
 

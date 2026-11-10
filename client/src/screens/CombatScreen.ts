@@ -277,7 +277,7 @@ export class CombatScreen implements Screen {
         <span class="combat-dungeon-floor" style="display:none"></span>
         <button class="combat-forecast" type="button" style="display:none"></button>
         <span class="combat-clock">–:––</span>
-        <button class="combat-auto-run" type="button" aria-pressed="false" style="display:none">Auto</button>
+        <button class="combat-auto-run" type="button" aria-pressed="false" style="display:none">Autorun</button>
         <button class="combat-run-btn combat-run-locked" type="button"><span class="combat-run-label">Run</span><span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <button class="combat-dungeon-leave" type="button" style="display:none">Leave<span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <span class="combat-run-hint" style="display:none"></span>
@@ -709,7 +709,7 @@ export class CombatScreen implements Screen {
     setHtml(this.statusEl, battleStatusHtml(status));
   }
 
-  /** While a wipe wait runs, the status chip repaints on each whole second left. */
+  /** While a hold on the next fight runs, the status chip repaints on each whole second left. */
   private bookRegroupRepaint(leftMs: number): void {
     if (this.regroupTimer) clearTimeout(this.regroupTimer);
     this.regroupTimer = undefined;
@@ -1443,8 +1443,8 @@ export class CombatScreen implements Screen {
     this.autoRunBtn.classList.toggle('on', on);
     this.autoRunBtn.classList.toggle('locked', !canToggle);
     this.autoRunBtn.title = !canToggle
-      ? 'Only the party owner or a leader can change auto run'
-      : on ? 'Auto run is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Auto run: run as soon as Run opens while traveling';
+      ? 'Only the party owner or a leader can change Autorun'
+      : on ? 'Autorun is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Autorun: run as soon as Run opens while traveling';
   }
 
   private updateRunButton(state: ServerStateMessage): void {

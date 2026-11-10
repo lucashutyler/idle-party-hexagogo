@@ -61,7 +61,7 @@ const ENCOUNTERS: Record<string, EncounterDefinition> = {
 };
 
 describe('readRoomGauge', () => {
-  it('sums pay over time across the table, and a lost fight costs the wipe wait', () => {
+  it('sums pay over time across the table, and a lost fight costs the same pause as a win', () => {
     const entries = [
       entry('pack', 0.9, 100, { win: 1, meanMs: 18_200 }),
       entry('boss', 0.1, 2000, { win: 0.8, meanMs: 118_200 }),
@@ -72,7 +72,7 @@ describe('readRoomGauge', () => {
     expect(reading.perHour).toBeCloseTo((pay / time) * HOUR, 6);
     expect(reading.basis).toBe('estimate');
     expect(reading.winChance).toBeCloseTo(0.98, 9);
-    expect(LOSS_PAUSE).toBeGreaterThan(60_000);
+    expect(LOSS_PAUSE).toBe(WIN_PAUSE);
   });
 
   it.each([

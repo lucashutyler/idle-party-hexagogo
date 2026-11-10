@@ -1,4 +1,4 @@
-import { MOVE_DURATION, RESULT_PAUSE, WIPE_WAIT_MS } from './BattleTypes.js';
+import { MOVE_DURATION, RESULT_PAUSE } from './BattleTypes.js';
 import { KILL_BEAT_MS, RUN_AVAILABLE_MS } from './CombatTiming.js';
 import { createRng } from './combat/CombatRng.js';
 import { createEncounter } from './EncounterTypes.js';
@@ -27,10 +27,10 @@ export interface GaugeTiming {
   skipMs: number;
 }
 
-/** The battle loop's own gaps, as `ServerBattleTimer` and the wipe wait run them. */
+/** The battle loop's own gaps, as `ServerBattleTimer` runs them. */
 export const GAUGE_TIMING: Readonly<GaugeTiming> = {
   winPauseMs: KILL_BEAT_MS + RESULT_PAUSE + MOVE_DURATION,
-  lossPauseMs: KILL_BEAT_MS + WIPE_WAIT_MS,
+  lossPauseMs: KILL_BEAT_MS + RESULT_PAUSE + MOVE_DURATION,
   skipMs: RUN_AVAILABLE_MS + RESULT_PAUSE + MOVE_DURATION,
 };
 
