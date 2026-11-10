@@ -303,6 +303,31 @@ button.map-route-stop {
   color: var(--text-1);
   cursor: pointer;
 }
+button.map-route-auto {
+  position: relative;
+  flex: none;
+  height: 32px;
+  margin-left: -4px;
+  padding: 0 12px;
+  background: var(--surface-2, #233);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-pill);
+  box-shadow: none;
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  color: var(--text-3);
+  cursor: pointer;
+}
+button.map-route-auto.on {
+  background: var(--grad-danger);
+  border-color: var(--outline);
+  color: var(--text-1);
+}
+button.map-route-auto.locked {
+  opacity: 0.6;
+}
+button.map-route-auto::before,
 button.map-route-stop::before {
   content: '';
   position: absolute;

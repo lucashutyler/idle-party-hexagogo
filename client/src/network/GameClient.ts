@@ -496,8 +496,8 @@ export class GameClient {
     this.sendRaw({ type: 'run' });
   }
 
-  sendSetAutoRun(enabled: boolean): void {
-    this.sendRaw({ type: 'set_auto_run', enabled });
+  sendSetAutoRun(enabled: boolean): boolean {
+    return this.sendRaw({ type: 'set_auto_run', enabled });
   }
 
   /**

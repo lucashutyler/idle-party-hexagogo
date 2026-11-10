@@ -1,12 +1,18 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.11.09.2',
+    version: '2026.11.09.3',
     notes: [
       'Hero > Stats now shows the XP per hour you earn in the room your party is in, from what its fights pay and how often your party wins them. A figure shows soon after you arrive, with no need to reset anything first, and has "about" in front until enough fights have been seen.',
       'Under it, Hero > Stats shows roughly how long until your next level at that rate.',
       'A room whose fights pay no XP now says so on Hero > Stats and when you select it on the map.',
       'Inside a dungeon, the figure is the XP per hour this run has paid so far, with no time to the next level.',
       'The old counter stays as a small line with its reset button. It counts everything you earn, quest rewards included.',
+    ],
+  },
+  {
+    version: '2026.11.09.2',
+    notes: [
+      'The Auto button is now on the map too. While your party is traveling, it sits next to Stop on the route bar, so you can switch Auto on or off without opening the battle screen.',
     ],
   },
   {
