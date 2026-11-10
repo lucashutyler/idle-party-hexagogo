@@ -229,7 +229,8 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Social badge notifications (nav dot + segment counts for friend requests and party invites; unread count on the chat strip and rail)
 - [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Gift, Block; a bottom sheet on phones)
 - [x] Class icons next to usernames everywhere
-- [x] XP rate calculator (trip counter on Hero › Stats)
+- [x] XP gauge on Hero › Stats: XP/hr in the current room from what its fights pay and the room forecast blended with fights seen, time to the next level, "this run so far" in a dungeon, plus the reset counter
+- [x] Rooms whose fights pay no XP say so in the room sheet
 
 ### Notifications
 - [x] Pluggable notification framework (category registry, per-user channel preferences, capped persisted inbox, save/restore)

@@ -105,6 +105,9 @@ export class GameClient {
   /** Most recent state from the server (null until first message). */
   lastState: ServerStateMessage | null = null;
 
+  /** When `lastState` arrived (`Date.now()`); 0 before the first. */
+  lastStateAt = 0;
+
   /** Most recent `combat` message (null until one arrives). */
   lastCombat: ServerCombatMessage | null = null;
 
@@ -242,6 +245,7 @@ export class GameClient {
         }
         restoreElidedState(msg, this.lastState);
         this.lastState = msg;
+        this.lastStateAt = Date.now();
         this.combatLog.ingestJournal(msg.combatLog ?? []);
         this.updateRecap(msg as ServerStateMessage);
 

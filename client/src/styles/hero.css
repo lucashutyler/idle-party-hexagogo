@@ -552,6 +552,30 @@
   transform-origin: left center;
   transition: transform 200ms ease-out;
 }
+.charitems-xp-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+.charitems-xp-gauge-rate {
+  font-size: var(--fs-md);
+  font-weight: 800;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.charitems-xp-gauge-level {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-2);
+}
+.charitems-xp-rate-row {
+  font-size: var(--fs-2xs);
+}
+.charitems-xp-rate-since {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
 .charitems-xp-rate-reset {
   position: relative;
   margin-left: auto;

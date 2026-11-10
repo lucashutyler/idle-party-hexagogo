@@ -27,8 +27,23 @@ import {
   pickWeightedEncounter,
   partyKey as partyKeyOf,
   RUN_AVAILABLE_MS,
+  GAUGE_LONG_FIGHT_FACTOR,
+  RoomTally,
+  gaugeStrata,
+  holdShownGauge,
+  meanPackXp,
+  meanWinPay,
+  packRawXp,
+  readRoomGauge,
+  roundToTwoFigures,
+  usualFightMs,
 } from '@idle-party-rpg/shared';
 import type {
+  ClientXpGauge,
+  GaugeEntry,
+  GaugePayInput,
+  GaugeStratum,
+  ShownGauge,
   BattleResult,
   PartyCombatant,
   PartyCombatantInit,
@@ -66,7 +81,7 @@ import { ServerBattleTimer } from './ServerBattleTimer.js';
 import type { CombatFlush } from './ServerBattleTimer.js';
 import { dungeonForecastKey, liveForecastKey, roomForecastKey } from './ForecastService.js';
 import type { ForecastService, ForecastWork } from './ForecastService.js';
-import { AUTO_RETREAT_SKIP_WINDOW, decideAutoRetreat, pickRetreatTarget } from './AutoRetreat.js';
+import { AUTO_RETREAT_SKIP_WINDOW, decideAutoRetreat, pickRetreatTarget, stratumUpperPct } from './AutoRetreat.js';
 import type { RelocateCause, RetreatCandidate } from './AutoRetreat.js';
 import type { PlayerSession } from './PlayerSession.js';
 import type { ContentStore } from './ContentStore.js';
@@ -110,6 +125,36 @@ interface LiveForecastState {
   pendingKey: string | null;
 }
 
+/** What the XP gauge knows about one room's table, the same for every party. */
+interface GaugeRoom {
+  strata: GaugeStratum[];
+  packXp: number[];
+  paysXp: boolean;
+}
+
+/** What the XP gauge knows about one room for one party key. */
+interface GaugeContext {
+  key: string;
+  room: GaugeRoom;
+  /** Kept for the whole stay, past the forecast cache's life. */
+  forecast: ForecastResult | null;
+  requested: boolean;
+  winPay: Map<string, number[]>;
+  /** What each member was last sent, by username. */
+  shown: Map<string, ShownGauge>;
+}
+
+interface GaugeRoster {
+  players: PartyCombatantInit[];
+  pk: string;
+}
+
+interface RunGauge {
+  startedAt: number;
+  floorsCleared: number;
+  xp: Map<string, number>;
+}
+
 interface PartyBattleEntry {
   partyId: string;
   serverParty: ServerParty;
@@ -129,6 +174,10 @@ interface PartyBattleEntry {
   live?: LiveForecastState;
   /** Instance ids of the hires over the level limit at the last fight, for the log. */
   sidelinedHires: Set<string>;
+  /** Overworld fights in the current room under its forecast key. */
+  tally?: { key: string; fights: RoomTally };
+  gauge?: GaugeContext;
+  runGauge?: RunGauge;
 }
 
 type Notifier = (username: string, eventKey: string, vars: { title: string; body: string }) => void;
@@ -164,6 +213,8 @@ export class PartyBattleManager {
   private autoRunPolicy: (partyId: string) => boolean = () => false;
   private notify: Notifier = () => {};
   private keyingParty = false;
+  private gaugeRooms = new Map<string, GaugeRoom>();
+  private gaugeRoomsEpoch = -1;
 
   constructor(
     grids: WorldGrids,
@@ -196,6 +247,14 @@ export class PartyBattleManager {
   /** Wire the party roster's grid positions. Unwired, each session reads its own from social state. */
   setGridPositionLookup(lookup: (partyId: string, username: string) => PartyGridPosition | undefined): void {
     this.getGridPosition = lookup;
+  }
+
+  /** One member's XP gauge for the Hero screen. See docs/architecture/combat.md → XP gauge. */
+  getXpGauge(partyId: string, username: string): ClientXpGauge | null {
+    const entry = this.entries.get(partyId);
+    if (!entry?.members.has(username)) return null;
+    const gauge = this.guardForecast('XP gauge', () => (entry.dungeonRun ? runGaugeOf(entry, username) : this.roomGaugeOf(entry, username)));
+    return gauge ?? null;
   }
 
   /** Wire the forecaster. Without one, forecasts are unavailable and auto-retreat never acts. */
@@ -886,6 +945,7 @@ export class PartyBattleManager {
     const combat = entry.battleTimer.currentCombat;
     if (!combat) return;
 
+    if (!entry.dungeonRun) this.noteGaugeFight(entry, combat, result);
     if (result === 'victory') {
       this.payVictory(entry, combat);
       return;
@@ -985,6 +1045,8 @@ export class PartyBattleManager {
         xpBonus,
         rewardMultiplier: COMBAT_PACE.rewardMultiplier,
       });
+      const run = entry.runGauge;
+      if (run) run.xp.set(fighter.username, (run.xp.get(fighter.username) ?? 0) + xp);
       session.handleVictory(
         { xp, gold: splitGold, items: memberItems.get(fighter.username)! },
         entry.serverParty.tile,
@@ -1004,6 +1066,7 @@ export class PartyBattleManager {
 
     // Dungeon: grant floor rewards, then advance to the next floor or complete the run.
     if (entry.dungeonRun) {
+      if (entry.runGauge) entry.runGauge.floorsCleared++;
       this.handleDungeonFloorCleared(entry);
     }
   }
@@ -1055,6 +1118,152 @@ export class PartyBattleManager {
     const payload = JSON.stringify(message);
     const opts: CombatSendOptions = { droppable: flush.snapshot !== 'full' };
     for (const m of recipients) this.delivery.sendRaw(m, payload, opts);
+  }
+
+  // --- XP gauge ---
+
+  /** Every finished overworld fight joins its room's tally; a new room or party key starts a new one. */
+  private noteGaugeFight(entry: PartyBattleEntry, combat: PartyCombatState, result: BattleResult): void {
+    const battle = entry.battle;
+    if (!battle || battle.battleId !== entry.battleTimer.battleId || battle.players.length === 0) return;
+    const key = roomForecastKey(this.content.contentEpoch, battle.partyKey ?? partyKeyOf(battle.players), battle.tileId);
+    if (entry.tally?.key !== key) entry.tally = { key, fights: new RoomTally() };
+    entry.tally.fights.record(battle.entryId, result === 'victory', combatRealElapsedMs(combat), packRawXp(combat.monsters));
+  }
+
+  private roomGaugeOf(entry: PartyBattleEntry, username: string): ClientXpGauge | null {
+    const tile = entry.serverParty.tile;
+    const room = this.gaugeRoom(tile.id, tile.zone);
+    if (!room.paysXp) return { basis: 'steady', perHour: 0, noXp: true };
+    const roster = this.gaugeRoster(entry);
+    const member = roster.players.find(p => !p.isHenchman && p.username === username);
+    if (!member) return null;
+    const context = this.gaugeContext(entry, roomForecastKey(this.content.contentEpoch, roster.pk, tile.id), room);
+    this.attachGaugeForecast(entry, context, roster, tile.id);
+    const tally = entry.tally?.key === context.key ? entry.tally.fights : new RoomTally();
+    const gaugeEntries = this.gaugeEntries(entry, context, roster.players, member);
+    const reading = readRoomGauge(gaugeEntries, tally);
+    if (reading.perHour === null) return { basis: 'measuring' };
+    const shown = holdShownGauge(context.shown.get(username), reading.perHour, reading.winChance);
+    context.shown.set(username, shown);
+    const gauge: ClientXpGauge = { basis: reading.basis, perHour: shown.perHour };
+    if (shown.losing) gauge.losing = true;
+    const longFightInMs = this.longFightInMs(entry, tile.id, gaugeEntries, tally);
+    if (longFightInMs !== null) gauge.longFightInMs = longFightInMs;
+    return gauge;
+  }
+
+  /** A room's packs depend only on content, so every party shares them until it changes. */
+  private gaugeRoom(tileId: string, zoneId: string): GaugeRoom {
+    const epoch = this.content.contentEpoch;
+    if (this.gaugeRoomsEpoch !== epoch) {
+      this.gaugeRooms.clear();
+      this.gaugeRoomsEpoch = epoch;
+    }
+    const known = this.gaugeRooms.get(tileId);
+    if (known) return known;
+    const strata = gaugeStrata(this.resolveEncounterTable(tileId, zoneId), this.content.getAllMonsters(), this.content.getAllEncounters());
+    const packXp = strata.map(meanPackXp);
+    const room: GaugeRoom = { strata, packXp, paysXp: packXp.some(xp => xp > 0) };
+    this.gaugeRooms.set(tileId, room);
+    return room;
+  }
+
+  /** The roster of the fight under way in this room when every member is in it, else the next fight's. */
+  private gaugeRoster(entry: PartyBattleEntry): GaugeRoster {
+    const battle = entry.battle;
+    const here = battle?.tileId === entry.serverParty.tile.id;
+    if (battle && here && entry.battleTimer.isFighting(battle.battleId) && this.fightsEveryMember(entry, battle.players)) {
+      battle.partyKey ??= partyKeyOf(battle.players);
+      return { players: battle.players, pk: battle.partyKey };
+    }
+    const players = this.buildPartyCombatants(entry.partyId);
+    return { players, pk: partyKeyOf(players) };
+  }
+
+  private fightsEveryMember(entry: PartyBattleEntry, players: readonly PartyCombatantInit[]): boolean {
+    let humans = 0;
+    for (const p of players) {
+      if (p.isHenchman) continue;
+      if (!entry.members.has(p.username)) return false;
+      humans++;
+    }
+    let members = 0;
+    for (const username of entry.members) {
+      if (this.getSession(username)?.hasCharacter()) members++;
+    }
+    return humans === members;
+  }
+
+  private gaugeContext(entry: PartyBattleEntry, key: string, room: GaugeRoom): GaugeContext {
+    if (entry.gauge?.key === key) return entry.gauge;
+    entry.gauge = { key, room, forecast: null, requested: false, winPay: new Map(), shown: new Map() };
+    return entry.gauge;
+  }
+
+  /** The room forecast auto-retreat already caches, else one request per stay once the party stops walking. */
+  private attachGaugeForecast(entry: PartyBattleEntry, context: GaugeContext, roster: GaugeRoster, tileId: string): void {
+    const svc = this.forecaster;
+    if (!svc || context.forecast) return;
+    context.forecast = svc.get(context.key);
+    if (context.forecast || context.requested || entry.serverParty.hasDestination) return;
+    const answer = svc.request({
+      key: context.key,
+      priority: 'precheck',
+      build: () => this.roomWork(roster.players, roster.pk, tileId),
+      onDone: (result) => this.guardForecast('XP gauge', () => {
+        if (!result || entry.gauge !== context || this.entries.get(entry.partyId) !== entry) return;
+        context.forecast = result;
+        for (const m of entry.members) this.broadcastToMember(m);
+      }),
+    });
+    context.requested = answer.status === 'pending';
+  }
+
+  private gaugeEntries(entry: PartyBattleEntry, context: GaugeContext, players: PartyCombatantInit[], member: PartyCombatantInit): GaugeEntry[] {
+    const pay = this.memberWinPay(entry, context, players, member);
+    const forecast = context.forecast;
+    const belowPct = this.retreatThreshold(entry);
+    const held = entry.retreatHold?.tileId === entry.serverParty.tile.id;
+    return context.room.strata.map((stratum, i) => {
+      const gaugeEntry: GaugeEntry = { entryId: stratum.entryId, share: stratum.share, winPay: pay[i], packXp: context.room.packXp[i] };
+      const forecastEntry = forecast?.strata?.find(s => s.entryId === stratum.entryId);
+      if (forecast && forecastEntry?.meanMs !== undefined) {
+        gaugeEntry.forecast = {
+          win: forecastEntry.winPct / 100,
+          meanMs: forecastEntry.meanMs,
+          packFactor: forecastEntry.packFactor ?? 1,
+          skip: belowPct > 0 && !held && stratumUpperPct(forecastEntry, forecast.sims) < belowPct,
+        };
+      }
+      return gaugeEntry;
+    });
+  }
+
+  /** Built as payVictory builds it, from the gauge's roster. */
+  private memberWinPay(entry: PartyBattleEntry, context: GaugeContext, players: PartyCombatantInit[], member: PartyCombatantInit): number[] {
+    const known = context.winPay.get(member.username);
+    if (known) return known;
+    const input: GaugePayInput = {
+      memberLevel: member.level,
+      topHumanLevel: highestLevel(players.filter(p => !p.isHenchman)),
+      bodies: Math.max(1, players.length),
+      starterZone: this.content.getAllZones()[entry.serverParty.tile.zone]?.starterZone === true,
+      xpBonus: partyXpBonus(players),
+      rewardMultiplier: COMBAT_PACE.rewardMultiplier,
+    };
+    const winPay = context.room.strata.map(stratum => meanWinPay(stratum, input));
+    context.winPay.set(member.username, winPay);
+    return winPay;
+  }
+
+  private longFightInMs(entry: PartyBattleEntry, tileId: string, gaugeEntries: GaugeEntry[], tally: RoomTally): number | null {
+    const battle = entry.battle;
+    const combat = entry.battleTimer.currentCombat;
+    if (!battle || !combat || battle.tileId !== tileId || !entry.battleTimer.isFighting(battle.battleId)) return null;
+    const usual = usualFightMs(gaugeEntries, tally, battle.entryId);
+    if (usual === null) return null;
+    return Math.max(0, Math.round(GAUGE_LONG_FIGHT_FACTOR * usual - combatRealElapsedMs(combat)));
   }
 
   // --- Forecasts & auto-retreat ---
@@ -1449,6 +1658,7 @@ export class PartyBattleManager {
     entry.serverParty.clearDestination();
 
     entry.dungeonRun = { dungeonId, currentFloorIndex: 0, entrance: cubeToOffset(entry.serverParty.position) };
+    entry.runGauge = newRunGauge();
 
     const text = `Entered ${dungeon.name} — floor 1 of ${dungeon.floors.length}!`;
     for (const username of entry.members) {
@@ -1535,6 +1745,7 @@ export class PartyBattleManager {
     const entry = this.entries.get(partyId);
     if (!entry) return;
     entry.dungeonRun = copyRun(run);
+    entry.runGauge = newRunGauge();
     if (!this.currentDungeonFloor(entry)) return;
     entry.serverParty.clearDestination();
     if (entry.battleTimer.isStarted) entry.battleTimer.restartBattle();
@@ -1567,6 +1778,7 @@ export class PartyBattleManager {
   private endDungeonRun(entry: PartyBattleEntry): void {
     if (!entry.dungeonRun) return;
     entry.dungeonRun = undefined;
+    entry.runGauge = undefined;
     this.logHenchmen(entry, this.getPartyHenchmen(entry.partyId), name => `${name} rejoins the party.`);
   }
 
@@ -1711,6 +1923,18 @@ export class PartyBattleManager {
       }
     }
   }
+}
+
+function newRunGauge(): RunGauge {
+  return { startedAt: Date.now(), floorsCleared: 0, xp: new Map() };
+}
+
+/** Inside a dungeon the gauge is the XP per hour this run has paid so far. */
+function runGaugeOf(entry: PartyBattleEntry, username: string): ClientXpGauge {
+  const run = entry.runGauge;
+  if (!run || run.floorsCleared === 0) return { basis: 'run' };
+  const hours = Math.max(1, Date.now() - run.startedAt) / 3_600_000;
+  return { basis: 'run', perHour: roundToTwoFigures((run.xp.get(username) ?? 0) / hours) };
 }
 
 function copyRun(run: DungeonRunState): DungeonRunState {

@@ -371,6 +371,7 @@ export type {
   ServerCombatMessage,
   ClientCombatViewMessage,
   ClientCharacterState,
+  ClientXpGauge,
   OtherPlayerState,
   RosterChange,
   RosterChanges,
@@ -684,9 +685,24 @@ export {
   floorMonsterXp,
   partyXpShare,
   partyXpBonus,
+  packRawXp,
   fightXp,
 } from './systems/XpRules.js';
 export type { FightXpInput, XpMonster } from './systems/XpRules.js';
+export {
+  GAUGE_LONG_FIGHT_FACTOR,
+  GAUGE_TIMING,
+  RoomTally,
+  gaugeStrata,
+  meanWinPay,
+  meanPackXp,
+  createPaysXpCheck,
+  readRoomGauge,
+  usualFightMs,
+  roundToTwoFigures,
+  holdShownGauge,
+} from './systems/XpGauge.js';
+export type { GaugeStratum, GaugePayInput, GaugeEntry, ShownGauge } from './systems/XpGauge.js';
 export {
   XP_INCOME_SOLO_L1_PER_DAY,
   XP_INCOME_PARTY_L10_PER_DAY,

@@ -403,6 +403,7 @@ export class MapScreen implements Screen {
       typeId: tileDef?.type ?? null,
       forecastTileId: tileDef?.id && info.isUnlocked && info.isTraversable ? tileDef.id : null,
       inDungeon: !!state?.dungeon,
+      paysNoXp: !!tileDef?.noXp,
     };
   }
 

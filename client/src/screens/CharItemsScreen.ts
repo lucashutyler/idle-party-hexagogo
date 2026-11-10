@@ -45,6 +45,7 @@ import { classAttackSkill, renderSkillCardChip, renderSkillCardMeta } from '../u
 import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { renderSegments, wireSegments } from '../ui/Segments';
+import { xpGaugeLines, xpSinceLine } from '../ui/XpGaugeText';
 
 /** First row of the gear grid. */
 const LEFT_SLOTS: EquipSlot[] = ['head', 'shoulders', 'chest', 'gloves', 'foot', 'mainhand'];
@@ -113,8 +114,9 @@ export class CharItemsScreen implements Screen {
   private metaRowEl!: HTMLElement;
   private xpFill!: HTMLElement;
   private xpLabelEl!: HTMLElement;
-  private xpRateEl!: HTMLElement;
-  private xpRateFromEl!: HTMLElement;
+  private xpGaugeEl!: HTMLElement;
+  private xpSinceEl!: HTMLElement;
+  private longFightTimer: ReturnType<typeof setTimeout> | undefined;
   private summaryXpLabelEl!: HTMLElement;
   private summaryXpFill!: HTMLElement;
   private summarySkillsEl!: HTMLElement;
@@ -219,6 +221,7 @@ export class CharItemsScreen implements Screen {
     this.unsubEquipBlocked = undefined;
     this.unsubBestiary?.();
     this.unsubBestiary = undefined;
+    clearTimeout(this.longFightTimer);
     this.bestiaryModal.close();
     this.hideModal();
     this.closeSkillPopup();
@@ -299,11 +302,10 @@ export class CharItemsScreen implements Screen {
               <div class="charitems-xp-bar">
                 <div class="charitems-xp-fill"></div>
               </div>
+              <div class="charitems-xp-gauge"></div>
               <div class="charitems-xp-rate-row">
-                <span>XP Rate</span>
-                <span class="charitems-xp-rate-value">0/hr</span>
-                <span class="charitems-xp-rate-from"></span>
-                <button type="button" class="charitems-xp-rate-reset" aria-label="Reset XP rate counter">&#x21bb;</button>
+                <span class="charitems-xp-rate-since"></span>
+                <button type="button" class="charitems-xp-rate-reset" aria-label="Reset the XP counter">&#x21bb;</button>
               </div>
             </div>
             <div class="hero-stat-list"></div>
@@ -339,8 +341,8 @@ export class CharItemsScreen implements Screen {
     this.summaryXpFill = this.container.querySelector('.hero-summary .charitems-xp-fill')!;
     this.summarySkillsEl = this.container.querySelector('.hero-summary-skills')!;
     this.xpLabelEl = this.container.querySelector('.charitems-xp-numbers')!;
-    this.xpRateEl = this.container.querySelector('.charitems-xp-rate-value')!;
-    this.xpRateFromEl = this.container.querySelector('.charitems-xp-rate-from')!;
+    this.xpGaugeEl = this.container.querySelector('.charitems-xp-gauge')!;
+    this.xpSinceEl = this.container.querySelector('.charitems-xp-rate-since')!;
     this.classPassiveEl = this.container.querySelector('.charitems-passive-info')!;
     const bestiaryEl = this.container.querySelector<HTMLElement>('.charitems-bestiary')!;
     this.bestiaryCard = new BestiaryCard(bestiaryEl);
@@ -358,7 +360,7 @@ export class CharItemsScreen implements Screen {
     this.sortSelect = this.container.querySelector('.items-sort-select')!;
 
     this.container.querySelector('.charitems-xp-rate-reset')!.addEventListener('click', async () => {
-      if (!await confirmDialog({ title: 'Reset XP rate counter?', confirmLabel: 'Reset' })) return;
+      if (!await confirmDialog({ title: 'Reset the XP counter?', confirmLabel: 'Reset' })) return;
       this.gameClient.resetXpRate();
     });
 
@@ -551,7 +553,7 @@ export class CharItemsScreen implements Screen {
       this.renderXpBar(char.xp, char.xpForNextLevel);
     }
 
-    this.renderXpRate(char.xpRate);
+    this.renderXpGauge(state);
 
     this.bestiaryCard.update(char.mastery, this.gameClient.lastBestiary?.entries ?? [], char.level);
 
@@ -933,29 +935,25 @@ export class CharItemsScreen implements Screen {
     this.summaryXpFill.style.transform = `scaleX(${ratio})`;
   }
 
-  private renderXpRate(xpRate: { startTime: number; totalXp: number }): void {
-    const elapsedHours = (Date.now() - xpRate.startTime) / 3_600_000;
-    const rate = elapsedHours > 0 ? xpRate.totalXp / elapsedHours : 0;
-    this.xpRateEl.textContent = CharItemsScreen.formatXpRate(rate);
-    this.xpRateFromEl.textContent = `from ${CharItemsScreen.formatDateTime(xpRate.startTime)}`;
-  }
-
-  private static formatXpRate(rate: number): string {
-    if (rate < 1000) return `${Math.round(rate)}/hr`;
-    if (rate < 1_000_000) return `${(rate / 1_000).toFixed(1)}k/hr`;
-    if (rate < 1_000_000_000) return `${(rate / 1_000_000).toFixed(1)}m/hr`;
-    if (rate < 1_000_000_000_000) return `${(rate / 1_000_000_000).toFixed(1)}b/hr`;
-    if (rate < 1_000_000_000_000_000) return `${(rate / 1_000_000_000_000).toFixed(1)}t/hr`;
-    return '?/hr';
-  }
-
-  private static formatDateTime(ts: number): string {
-    const d = new Date(ts);
-    const h = d.getHours().toString().padStart(2, '0');
-    const m = d.getMinutes().toString().padStart(2, '0');
-    const mon = (d.getMonth() + 1).toString().padStart(2, '0');
-    const day = d.getDate().toString().padStart(2, '0');
-    return `${mon}/${day} ${h}:${m}`;
+  private renderXpGauge(state: ServerStateMessage): void {
+    const char = state.character;
+    if (!char) return;
+    const gauge = state.xpGauge;
+    clearTimeout(this.longFightTimer);
+    const longAt = gauge?.longFightInMs === undefined ? null : this.gameClient.lastStateAt + gauge.longFightInMs;
+    const longFight = longAt !== null && Date.now() >= longAt;
+    if (longAt !== null && !longFight && this.isActive) {
+      this.longFightTimer = setTimeout(() => {
+        deferWhilePressed(this.container, () => {
+          const current = this.gameClient.lastState;
+          if (this.isActive && current) this.renderXpGauge(current);
+        });
+      }, longAt - Date.now());
+    }
+    const lines = xpGaugeLines(gauge, char, longFight);
+    setHtml(this.xpGaugeEl, `<div class="charitems-xp-gauge-rate">${escapeHtml(lines.rate)}</div>`
+      + (lines.level === null ? '' : `<div class="charitems-xp-gauge-level">${escapeHtml(lines.level)}</div>`));
+    setHtml(this.xpSinceEl, escapeHtml(xpSinceLine(char.xpRate.startTime, char.xpRate.totalXp)));
   }
 
   private showStatTooltip(anchor: HTMLElement): void {

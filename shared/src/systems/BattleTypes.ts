@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.09.3'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.09.4'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -92,6 +92,20 @@ export interface ClientCharacterState {
   craftXp: number;
   combatPrefs?: CombatPrefs;
   mastery?: MasterySummary;
+}
+
+/** The Hero screen's XP gauge. See docs/architecture/combat.md → XP gauge. */
+export interface ClientXpGauge {
+  /** `run`: measured since this dungeon run began. */
+  basis: 'measuring' | 'estimate' | 'settling' | 'steady' | 'run';
+  /** Two significant figures; absent while measuring, and in a run until its first floor is cleared. */
+  perHour?: number;
+  /** No pack this room can roll pays anyone XP. */
+  noXp?: true;
+  /** The party wins under half its fights here. */
+  losing?: true;
+  /** Real ms from this push until the fight under way counts as long; 0 once it does. */
+  longFightInMs?: number;
 }
 
 export interface ClientResetXpRateMessage {
@@ -176,6 +190,8 @@ export interface ServerStateMessage {
   };
   /** Active dungeon run state (floor progress) — present only while the party is inside a dungeon. */
   dungeon?: DungeonRunInfo;
+  /** In memory only: a restart starts it over. */
+  xpGauge?: ClientXpGauge;
   /** Server version identifier — changes on restart/deploy, triggers client reload on mismatch. */
   serverVersion: string;
   /** Sent on every state until the client acks it with `ack_recap`. */

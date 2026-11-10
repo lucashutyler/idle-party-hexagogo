@@ -55,8 +55,10 @@ function setup(className: string, inventory: Record<string, number>, equipment: 
   const listeners = new Set<StateListener>();
   let bestiaryListener = () => {};
   let lastState = makeState(className, inventory, equipment, social);
+  let lastStateAt = Date.now();
   const gameClient = {
     get lastState() { return lastState; },
+    get lastStateAt() { return lastStateAt; },
     subscribe: (l: StateListener) => { listeners.add(l); return () => { listeners.delete(l); }; },
     onEquipBlocked: () => () => {},
     onBestiary: (l: () => void) => { bestiaryListener = l; return () => {}; },
@@ -80,6 +82,7 @@ function setup(className: string, inventory: Record<string, number>, equipment: 
 
   const push = (state: ServerStateMessage) => {
     lastState = state;
+    lastStateAt = Date.now();
     for (const l of listeners) l(lastState);
   };
   const openInventoryItem = (itemId: string) => {
@@ -426,6 +429,68 @@ describe('CharItemsScreen', () => {
       const range = `${hit('Knight', BASE_DAMAGE + bonusAttackMin!)}-${hit('Knight', BASE_DAMAGE + bonusAttackMax!)}`;
       expect(cardAtk()).toBe(range);
       expect(listAtk()).toBe(range);
+    });
+  });
+
+  describe('XP gauge', () => {
+    const rate = () => document.querySelector('.charitems-xp-gauge-rate')!.textContent;
+    const level = () => document.querySelector('.charitems-xp-gauge-level')!.textContent;
+    const since = () => document.querySelector('.charitems-xp-rate-since')!.textContent;
+    const withGauge = (xpGauge: ServerStateMessage['xpGauge']) => ({ ...makeState('Knight', {}, EMPTY), xpGauge }) as ServerStateMessage;
+
+    it('shows the rate, the time to the next level and the reset counter on Stats', () => {
+      const t = setup('Knight', {}, EMPTY);
+      expect(rate()).toBe('Measuring');
+      expect(since()).toMatch(/^Since \d\d:\d\d: 0 XP in 0 min$/);
+
+      t.push(withGauge({ basis: 'steady', perHour: 50 }));
+      expect(rate()).toBe('50 XP/hr');
+      expect(level()).toBe('Level 6 in about 2 h');
+      expect(document.querySelector('.charitems-xp-rate-reset')).toBeTruthy();
+    });
+
+    it('adds the long-fight note when the fight under way gets long, without a push', () => {
+      vi.useFakeTimers();
+      const t = setup('Knight', {}, EMPTY);
+      t.push(withGauge({ basis: 'steady', perHour: 50, longFightInMs: 4000 }));
+      expect(rate()).toBe('50 XP/hr');
+      vi.advanceTimersByTime(3999);
+      expect(rate()).toBe('50 XP/hr');
+      vi.advanceTimersByTime(1);
+      expect(rate()).toBe('50 XP/hr (long fight under way)');
+      t.push(withGauge({ basis: 'steady', perHour: 50 }));
+      expect(rate()).toBe('50 XP/hr');
+    });
+
+    it('times a long fight from when the push arrived, even if the screen opens later', () => {
+      vi.useFakeTimers();
+      const t = setup('Knight', {}, EMPTY);
+      t.screen.onDeactivate();
+      t.push(withGauge({ basis: 'steady', perHour: 50, longFightInMs: 4000 }));
+      vi.advanceTimersByTime(3000);
+      t.screen.onActivate();
+      expect(rate()).toBe('50 XP/hr');
+      vi.advanceTimersByTime(1000);
+      expect(rate()).toBe('50 XP/hr (long fight under way)');
+    });
+
+    it('gives no time to level inside a dungeon', () => {
+      const t = setup('Knight', {}, EMPTY);
+      t.push(withGauge({ basis: 'run', perHour: 50 }));
+      expect(rate()).toBe('50 XP/hr this run so far');
+      expect(document.querySelector('.charitems-xp-gauge-level')).toBeNull();
+      t.push(withGauge({ basis: 'run' }));
+      expect(rate()).toBe('Measuring');
+      expect(document.querySelector('.charitems-xp-gauge-level')).toBeNull();
+    });
+
+    it('stops its long-fight timer when the screen is left', () => {
+      vi.useFakeTimers();
+      const t = setup('Knight', {}, EMPTY);
+      t.push(withGauge({ basis: 'steady', perHour: 50, longFightInMs: 4000 }));
+      t.screen.onDeactivate();
+      vi.advanceTimersByTime(5000);
+      expect(rate()).toBe('50 XP/hr');
     });
   });
 
