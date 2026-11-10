@@ -561,7 +561,13 @@ export class MapScreen implements Screen {
       this.routeChip.addEventListener(ev, stop);
     }
     this.routeChip.addEventListener('click', (e) => {
-      if (!(e.target as HTMLElement).closest('.map-route-stop')) return;
+      const target = e.target as HTMLElement;
+      const auto = target.closest<HTMLElement>('.map-route-auto');
+      if (auto) {
+        this.toggleAutoRun(auto);
+        return;
+      }
+      if (!target.closest('.map-route-stop')) return;
       const party = this.gameClient.lastState?.party;
       if (party) this.tryMove(party.col, party.row);
     });
@@ -580,11 +586,25 @@ export class MapScreen implements Screen {
     const name = discoveredRoomName(state, this.worldCache, last.col, last.row);
     const nameHtml = name ? `<span class="map-route-name">${escapeHtml(name)}</span><span class="map-route-dot">·</span>` : '';
     const count = `${path.length} ${path.length === 1 ? 'room' : 'rooms'}`;
+    const on = state.social?.party?.autoRun === true;
+    const locked = !this.canMove();
+    const autoTitle = locked
+      ? 'Only the party owner or a leader can change auto run'
+      : on ? 'Auto run is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Auto run: run as soon as Run opens while traveling';
     chip.hidden = false;
     deferWhilePressed(chip, () => {
       setHtml(chip, `<span class="map-route-text"><span class="map-route-arrow">→</span>${nameHtml}<span class="map-route-count">${count}</span></span>`
+        + `<button type="button" class="map-route-auto${on ? ' on' : ''}${locked ? ' locked' : ''}" aria-pressed="${on}" title="${autoTitle}">Auto</button>`
         + '<button type="button" class="map-route-stop">Stop</button>');
     });
+  }
+
+  private toggleAutoRun(button: HTMLElement): void {
+    if (button.classList.contains('locked')) {
+      this.showMoveToast('Only the party owner or a leader can change auto run');
+      return;
+    }
+    if (!this.gameClient.sendSetAutoRun(button.getAttribute('aria-pressed') !== 'true')) this.showMoveToast(OFFLINE_NOTICE);
   }
 
   private createZoomControls(): void {
