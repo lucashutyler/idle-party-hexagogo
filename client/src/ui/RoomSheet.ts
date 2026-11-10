@@ -23,6 +23,8 @@ export interface RoomSheetModel {
   /** Room to forecast; null hides the chip. */
   forecastTileId: string | null;
   inDungeon: boolean;
+  /** No pack this room can roll pays anyone XP. */
+  paysNoXp: boolean;
 }
 
 export interface RoomSheetHandlers {
@@ -172,9 +174,10 @@ export class RoomSheet {
     return `<div class="room-sheet-name">${escapeHtml(info.roomName || 'Unexplored Room')}</div>`;
   }
 
-  private exploredHead({ info, actions, othersHere }: RoomSheetModel): string {
+  private exploredHead({ info, actions, othersHere, paysNoXp }: RoomSheetModel): string {
     const count = othersHere > 0 ? ` · ${othersHere} ${othersHere === 1 ? 'player' : 'players'}` : '';
     const first = actions[0] ? `<span class="room-sheet-sub-action">${escapeHtml(actionLabel(actions[0]))}</span>` : '';
+    const noXp = paysNoXp ? '<span class="room-sheet-sub-noxp">Fights here pay no XP</span>' : '';
     const icons = actions.map(action => {
       const pip = questPipClass(action);
       const detail = action.detail ? ` · ${action.detail}` : '';
@@ -183,7 +186,7 @@ export class RoomSheet {
         + `<span class="room-sheet-action-name">${escapeHtml(action.name)}</span></span>`;
     }).join('');
     return `<div class="room-sheet-name">${escapeHtml(info.roomName || 'Unnamed Room')}</div>`
-      + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span></div>`
+      + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span>${noXp}</div>`
       + (icons ? `<div class="room-sheet-actions">${icons}</div>` : '');
   }
 

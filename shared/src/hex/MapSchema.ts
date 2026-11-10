@@ -34,6 +34,8 @@ export interface WorldTileDefinition {
   name: string;
   /** Zone display name — populated by server when sending to clients, not stored in world.json. */
   zoneName?: string;
+  /** No pack this room can roll pays anyone XP — populated by server when sending to clients. */
+  noXp?: boolean;
   /** Optional per-room encounter table — overrides the zone's default encounters. */
   encounterTable?: EncounterTableEntry[];
   /** Optional shop assigned to this room. */

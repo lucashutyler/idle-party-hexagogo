@@ -92,6 +92,15 @@ export function partyXpBonus(players: readonly { equippedSkills: readonly (Skill
   return bonus;
 }
 
+/** A pack's monster XP before the level gap, share and multipliers. */
+export function packRawXp(monsters: readonly Pick<XpMonster, 'xp'>[]): number {
+  let xp = 0;
+  for (const monster of monsters) {
+    if (Number.isFinite(monster.xp) && monster.xp > 0) xp += monster.xp;
+  }
+  return xp;
+}
+
 /** XP one member earns from a won fight. See docs/architecture/combat.md → XP pay. */
 export function fightXp(input: FightXpInput): number {
   const floorFactor = floorPayFactor(input.floorXpFactor);

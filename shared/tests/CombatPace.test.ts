@@ -1029,6 +1029,7 @@ describe('forecasts', () => {
         ...plain,
         medianMs: real(plain.medianMs!),
         p90Ms: real(plain.p90Ms!),
+        strata: plain.strata!.map(s => ({ ...s, meanMs: real(s.meanMs!) })),
       });
     });
 

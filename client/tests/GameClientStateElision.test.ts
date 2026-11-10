@@ -66,6 +66,20 @@ describe('GameClient state elision', () => {
     expect(client.lastState?.unchangedFields).toBeUndefined();
   });
 
+  it('stamps when the latest state arrived', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      socket.receive({ battleCount: 1 });
+      expect(client.lastStateAt).toBe(1_000_000);
+      vi.setSystemTime(1_004_000);
+      socket.receive({ battleCount: 2 });
+      expect(client.lastStateAt).toBe(1_004_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('replays the whole state to a late subscriber', () => {
     socket.receive({ battleCount: 1, craftingCatalog: CATALOG });
     socket.receive({ battleCount: 2, unchangedFields: ['craftingCatalog'] });

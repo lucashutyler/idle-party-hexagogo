@@ -889,6 +889,10 @@ export class PlayerManager {
       if (!partyId) return null;
       return this.partyBattles.getDungeonRunInfo(partyId);
     };
+    session.getXpGauge = () => {
+      const partyId = session.getPartyId();
+      return partyId ? this.partyBattles.getXpGauge(partyId, session.username) : null;
+    };
   }
 
   /** Ensure a player is in a party. Auto-creates a solo party if needed. */
