@@ -1,5 +1,11 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.09.2',
+    notes: [
+      'The Auto button is now on the map too. While your party is traveling, it sits next to Stop on the route bar, so you can switch Auto on or off without opening the battle screen.',
+    ],
+  },
+  {
     version: '2026.11.09.1',
     notes: [
       'Parties keep far more XP per member. Each extra member or hire now costs everyone only a small cut, so a party that takes on harder rooms earns more than going alone. Gold and loot are still split evenly, and a hire\'s share of those is still lost.',
