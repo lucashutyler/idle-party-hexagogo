@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.09.2',
+    notes: [
+      'Hero > Stats now shows the XP per hour you earn in the room your party is in, from what its fights pay and how often your party wins them. A figure shows soon after you arrive, with no need to reset anything first, and has "about" in front until enough fights have been seen.',
+      'Under it, Hero > Stats shows roughly how long until your next level at that rate.',
+      'A room whose fights pay no XP now says so on Hero > Stats and when you select it on the map.',
+      'Inside a dungeon, the figure is the XP per hour this run has paid so far, with no time to the next level.',
+      'The old counter stays as a small line with its reset button. It counts everything you earn, quest rewards included.',
+    ],
+  },
+  {
     version: '2026.11.09.1',
     notes: [
       'Parties keep far more XP per member. Each extra member or hire now costs everyone only a small cut, so a party that takes on harder rooms earns more than going alone. Gold and loot are still split evenly, and a hire\'s share of those is still lost.',

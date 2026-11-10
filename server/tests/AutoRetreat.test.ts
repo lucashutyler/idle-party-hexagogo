@@ -444,7 +444,8 @@ describe('auto-retreat in the overworld', () => {
     w.pm.handleSetCombatPrefs('alice', 0);
     w.entry().battleTimer.restartBattle();
     vi.advanceTimersByTime(3 * RETREAT_CYCLE_MS);
-    expect(w.stub.jobs.filter(j => j.key.includes('room:'))).toEqual([]);
+    // The XP gauge forecasts the party's own room once for a connected player; nothing else is forecast.
+    expect(w.stub.jobs.filter(j => j.key.includes('room:')).map(j => j.key)).toEqual([w.roomKey(tileId(START.col, START.row))]);
     expect(w.entry().serverParty.tile.id).toBe(tileId(START.col, START.row));
   });
 

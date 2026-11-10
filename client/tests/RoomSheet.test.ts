@@ -23,6 +23,7 @@ function makeModel(overrides: Partial<RoomSheetModel> = {}): RoomSheetModel {
     typeId: 'plains',
     forecastTileId: 'room-1',
     inDungeon: false,
+    paysNoXp: false,
     ...overrides,
   };
 }
@@ -68,6 +69,23 @@ describe('RoomSheet', () => {
     expect(q('.room-sheet-sub-action').textContent).toBe('Talk to Mira');
     expect(q('.room-sheet-action-icon').textContent).toBe('🧙');
     expect(q('.room-sheet-action-icon').classList.contains('quest-ready-pip')).toBe(true);
+  });
+
+  it('says when a room pays no XP, after its zone and players, and only for an explored room', () => {
+    sheet.show(makeModel());
+    expect(parent.querySelector('.room-sheet-sub-noxp')).toBeNull();
+
+    sheet.show(makeModel({ info: makeInfo({ col: 5 }), paysNoXp: true, othersHere: 2 }));
+    expect(q('.room-sheet-sub-noxp').textContent).toBe('Fights here pay no XP');
+    expect(q('.room-sheet-sub').textContent).toBe('Talk to MiraHatchetmill · 2 playersFights here pay no XP');
+
+    const den = { kind: 'dungeon' as const, icon: 'D', name: 'Old Den', targetId: 'den' };
+    sheet.show(makeModel({ info: makeInfo({ col: 7 }), actions: [den], paysNoXp: true }));
+    const parts = [...q('.room-sheet-sub').children].map(child => child.textContent);
+    expect(parts).toEqual(['Enter Old Den', 'Hatchetmill', 'Fights here pay no XP']);
+
+    sheet.show(makeModel({ info: makeInfo({ col: 6, isUnlocked: false }), actions: [], paysNoXp: true }));
+    expect(parent.querySelector('.room-sheet-sub-noxp')).toBeNull();
   });
 
   it('shows only the name and Go for an unexplored room', () => {

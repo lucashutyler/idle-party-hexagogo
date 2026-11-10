@@ -54,6 +54,10 @@ export interface ForecastStratum {
   entryId: string;
   winPct: number;
   sharePct: number;
+  /** Mean length of this entry's fights, won or not, in real ms. */
+  meanMs?: number;
+  /** Mean raw pack XP of the won fights over that of all fights; 1 with no wins. */
+  packFactor?: number;
 }
 
 export interface ForecastResult extends ForecastStats {

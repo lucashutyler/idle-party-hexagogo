@@ -268,10 +268,11 @@ describe('room forecasts', () => {
     expect(r.sims).toBe(FORECAST_SIM_BUDGET.trash);
     expect(r.wins).toBe(50);
     expect(r.winPct).toBe(25);
-    expect(r.strata).toEqual([
-      { label: 'Weaklings', entryId: 'easy', winPct: 100, sharePct: 25 },
-      { label: 'Killers', entryId: 'deadly', winPct: 0, sharePct: 75 },
+    expect(r.strata).toMatchObject([
+      { label: 'Weaklings', entryId: 'easy', winPct: 100, sharePct: 25, meanMs: 1000, packFactor: 1 },
+      { label: 'Killers', entryId: 'deadly', winPct: 0, sharePct: 75, packFactor: 1 },
     ]);
+    expect(r.strata![1].meanMs).toBeGreaterThan(0);
     expect(r.worst).toEqual({ label: 'Killers', winPct: 0, sharePct: 75 });
     expect(r.partyKey).toBe(partyKey([hero()]));
     expect(r.medianMs).toBe(1000);
@@ -292,8 +293,27 @@ describe('room forecasts', () => {
   it('merges duplicate entries and falls back like createEncounter', () => {
     expect(runForecast(room([entry('easy'), entry('easy'), entry('deadly', 2)]), { key: 'k' }).strata?.map(s => s.sharePct)).toEqual([50, 50]);
     const fallback = runForecast(room([]), { key: 'k' });
-    expect(fallback.strata).toEqual([{ label: 'Weakling', entryId: '', winPct: 100, sharePct: 100 }]);
+    expect(fallback.strata).toMatchObject([{ label: 'Weakling', entryId: '', winPct: 100, sharePct: 100 }]);
     expect(runForecast(room([entry('missing')]), { key: 'k' }).strata?.[0]).toMatchObject({ label: 'missing', winPct: 100 });
+  });
+
+  it('reports each entry\'s mean fight length and how much smaller its won packs are', () => {
+    const monsters = {
+      ...MONSTERS,
+      imp: monsterDef({ id: 'imp', name: 'Imp', hp: 10, damage: 1, xp: 1 }),
+      brute: monsterDef({ id: 'brute', name: 'Brute', hp: 1e9, damage: 100000, xp: 100 }),
+    };
+    const encounters: Record<string, EncounterDefinition> = {
+      ...ENCOUNTERS,
+      mixed: { id: 'mixed', name: 'Mixed', type: 'random', monsterPool: [{ monsterId: 'imp', min: 1, max: 1 }, { monsterId: 'brute', min: 0, max: 1 }] },
+    };
+    const r = runForecast({ kind: 'room', players: [hero()], table: [entry('mixed')], monsters, encounters }, { key: 'k' });
+    const mixed = r.strata![0];
+    expect(mixed.winPct).toBeGreaterThan(20);
+    expect(mixed.winPct).toBeLessThan(80);
+    expect(mixed.packFactor).toBeGreaterThan(0);
+    expect(mixed.packFactor).toBeLessThan(0.1);
+    expect(mixed.meanMs).toBeGreaterThan(0);
   });
 
   it('stops early once every sim agrees', () => {

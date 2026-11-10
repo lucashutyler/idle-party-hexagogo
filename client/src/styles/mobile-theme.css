@@ -44,7 +44,7 @@
 }
 
 :is(
-  .charitems-stat-value, .charitems-xp-numbers, .charitems-xp-rate-value, .craft-skill-xptext,
+  .charitems-stat-value, .charitems-xp-numbers, .craft-skill-xptext,
   .craft-queue-status, .trade-qty-val, .shop-qty-value, .items-modal-count-value, .shop-gold,
   .shop-detail-total, .shop-item-price, .item-square-qty, .social-user-level, .chat-msg-time,
   .notif-row-time, .compare-row, .profile-level, .user-popup-level, .craft-skill-level,
@@ -1039,10 +1039,6 @@ button.notif-prefs-bulk-btn {
   font-size: var(--fs-xs);
   font-weight: 700;
   color: var(--text-3);
-}
-
-.charitems-xp-rate-value {
-  color: var(--text-2);
 }
 
 .charitems-xp-rate-reset {

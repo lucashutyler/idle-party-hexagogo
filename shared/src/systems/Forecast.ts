@@ -14,6 +14,7 @@ import { MONSTER_SKILL_CATALOG, getMonsterSkillCastTimeMs } from './MonsterSkill
 import type { DungeonDefinition } from './DungeonTypes.js';
 import type { SkillDefinition } from './SkillTypes.js';
 import { getSkillTrigger } from './SkillTypes.js';
+import { packRawXp } from './XpRules.js';
 import type {
   ForecastFloor,
   ForecastReason,
@@ -587,12 +588,8 @@ function applyEnemyLevels(target: Pick<ForecastResult, 'enemyLevels' | 'someUnra
 
 // --- Encounter tables ---
 
-interface TableStratum {
-  entryId: string;
+interface TableStratum extends TableShare {
   label: string;
-  share: number;
-  /** One-entry table that forces `createEncounter` onto this stratum (empty = the fallback). */
-  table: EncounterTableEntry[];
   enemies: EnemyProfile[];
 }
 
@@ -615,36 +612,48 @@ function encounterMonsterDefs(
   return fallback ? [fallback] : [];
 }
 
-/** Strata of a weighted table (duplicate ids merged), mirroring `pickWeightedEncounter`. */
-function tableStrata(
-  table: readonly EncounterTableEntry[],
-  monsters: Record<string, MonsterDefinition>,
-  encounters: Record<string, EncounterDefinition>,
-): TableStratum[] {
+export interface TableShare {
+  entryId: string;
+  share: number;
+  /** One-entry table that forces `createEncounter` onto this entry (empty = the fallback). */
+  table: EncounterTableEntry[];
+}
+
+/** A weighted table's entries and shares (duplicate ids merged), mirroring `pickWeightedEncounter`. */
+export function tableShares(table: readonly EncounterTableEntry[]): TableShare[] {
   const weights = new Map<string, number>();
   for (const entry of table) {
     const w = typeof entry.weight === 'number' && Number.isFinite(entry.weight) && entry.weight > 0 ? entry.weight : 0;
     if (w > 0) weights.set(entry.encounterId, (weights.get(entry.encounterId) ?? 0) + w);
   }
   if (weights.size === 0 && table.length > 0) weights.set(table[0].encounterId, 1);
-  if (weights.size === 0) {
-    const fallback = fallbackMonster(monsters);
-    return [{
-      entryId: '',
-      label: fallback?.name ?? 'Nothing',
-      share: 1,
-      table: [],
-      enemies: fallback ? [defProfile(fallback)] : [],
-    }];
-  }
+  if (weights.size === 0) return [{ entryId: '', share: 1, table: [] }];
   const total = [...weights.values()].reduce((a, b) => a + b, 0);
   return [...weights].map(([entryId, weight]) => ({
     entryId,
-    label: encounters[entryId]?.name ?? entryId,
     share: weight / total,
     table: [{ encounterId: entryId, weight: 1 }],
-    enemies: encounterMonsterDefs(entryId, monsters, encounters).map(defProfile),
   }));
+}
+
+function tableStrata(
+  table: readonly EncounterTableEntry[],
+  monsters: Record<string, MonsterDefinition>,
+  encounters: Record<string, EncounterDefinition>,
+): TableStratum[] {
+  return tableShares(table).map(({ entryId, share, table: one }) => {
+    if (one.length === 0) {
+      const fallback = fallbackMonster(monsters);
+      return { entryId, label: fallback?.name ?? 'Nothing', share, table: one, enemies: fallback ? [defProfile(fallback)] : [] };
+    }
+    return {
+      entryId,
+      label: encounters[entryId]?.name ?? entryId,
+      share,
+      table: one,
+      enemies: encounterMonsterDefs(entryId, monsters, encounters).map(defProfile),
+    };
+  });
 }
 
 function commonEnemies(strata: readonly TableStratum[]): EnemyProfile[] {
@@ -656,6 +665,9 @@ function commonEnemies(strata: readonly TableStratum[]): EnemyProfile[] {
 interface StratumTally {
   n: number;
   wins: number;
+  ms: number;
+  packXp: number;
+  winPackXp: number;
 }
 
 class RoomSampler implements Sampler {
@@ -670,7 +682,7 @@ class RoomSampler implements Sampler {
   constructor(private readonly input: RoomForecastInput, private readonly rng: () => number, private readonly horizonMs: number | undefined) {
     this.pace = input.pace ?? AUTHORED_PACE;
     this.strata = tableStrata(input.table ?? [], input.monsters, input.encounters);
-    this.tallies = this.strata.map(() => ({ n: 0, wins: 0 }));
+    this.tallies = this.strata.map(() => ({ n: 0, wins: 0, ms: 0, packXp: 0, winPackXp: 0 }));
     this.party = partyProfile(input.players);
     this.enemies = summarizeEnemies(this.strata.flatMap(s => s.enemies), commonEnemies(this.strata));
     this.topTier = this.enemies.topTier;
@@ -682,8 +694,15 @@ class RoomSampler implements Sampler {
     const monsters = createEncounter(undefined, this.input.monsters, {}, this.input.encounters, stratum.table, this.rng);
     const state = createPartyCombatState(this.input.players, monsters, { pace: this.pace });
     const outcome = yield* fightSteps(state, this.rng, this.horizonMs ?? defaultHorizonMs(state), budget);
-    this.tallies[index].n++;
-    if (outcome.result === 'victory') this.tallies[index].wins++;
+    const tally = this.tallies[index];
+    const packXp = packRawXp(monsters);
+    tally.n++;
+    tally.ms += outcome.elapsedMs;
+    tally.packXp += packXp;
+    if (outcome.result === 'victory') {
+      tally.wins++;
+      tally.winPackXp += packXp;
+    }
     this.outcomes.push(outcome);
   }
 
@@ -702,7 +721,8 @@ class RoomSampler implements Sampler {
     this.strata.forEach((s, i) => {
       const t = this.tallies[i];
       if (t.n === 0) return;
-      strata.push({ label: s.label, entryId: s.entryId, winPct: round1((100 * t.wins) / t.n), sharePct: round1(s.share * 100) });
+      const packFactor = t.wins > 0 && t.packXp > 0 ? (t.winPackXp / t.wins) / (t.packXp / t.n) : 1;
+      strata.push({ label: s.label, entryId: s.entryId, winPct: round1((100 * t.wins) / t.n), sharePct: round1(s.share * 100), meanMs: t.ms / t.n, packFactor });
     });
     let worst: ForecastResult['worst'];
     if (strata.length >= 2) {
@@ -986,6 +1006,7 @@ class Job implements ForecastJob {
       p90Ms: result.p90Ms === null ? null : real(result.p90Ms),
       atMs: real(result.atMs),
       killEtaMs: result.killEtaMs === null ? null : real(result.killEtaMs),
+      ...(result.strata ? { strata: result.strata.map(s => (s.meanMs === undefined ? s : { ...s, meanMs: real(s.meanMs) })) } : {}),
     };
   }
 

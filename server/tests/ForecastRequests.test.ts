@@ -302,6 +302,7 @@ describe('live battle forecasts', () => {
     const w = await forecastWorld({ defaultEncounter: 'frail_brutes' });
     w.pm.partyBattles.setForecaster(w.svc);
     w.pm.handleSetCombatPrefs('alice', 0);
+    vi.advanceTimersByTime(50); // the XP gauge's own room forecast finishes first
     w.stub.gated.add('battle:');
     w.entry().battleTimer.restartBattle();
     const battleId = w.entry().battleTimer.battleId;

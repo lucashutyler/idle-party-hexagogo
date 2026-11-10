@@ -449,8 +449,13 @@ button.map-status-retry {
   font-weight: 700;
   color: var(--text-2);
 }
-.room-sheet-sub-action::after {
+.room-sheet-sub-action::after,
+.room-sheet-sub-noxp::before {
   content: ' · ';
+  color: var(--text-2);
+}
+.room-sheet-sub-noxp {
+  color: var(--text-1);
 }
 .room-sheet-actions {
   position: absolute;

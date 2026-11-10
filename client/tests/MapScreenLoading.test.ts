@@ -53,7 +53,7 @@ function info(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
 
 let stateListeners: ((state: unknown) => void)[] = [];
 
-function mount(lastState: unknown = null) {
+function mount(lastState: unknown = null, tile: Record<string, unknown> = { id: 'room-1', type: 'plains' }) {
   stateListeners = [];
   document.body.innerHTML = '<div id="map-screen"></div><div id="game-container"></div>';
   const gameClient = {
@@ -70,7 +70,7 @@ function mount(lastState: unknown = null) {
   } as unknown as GameClient;
   const worldCache = {
     isLoaded: true,
-    getTile: () => ({ id: 'room-1', type: 'plains' }),
+    getTile: () => tile,
     getTileOn: () => undefined,
     getTileByGuid: (id: string) => (id === 'room-1' ? { col: 3, row: 4, mapId: 'here' } : id === 'far' ? { col: 1, row: 1, mapId: 'there' } : undefined),
     getCurrentMapId: () => 'here',
@@ -199,8 +199,8 @@ describe('MapScreen room selection', () => {
   beforeEach(() => { mapStub.instances.length = 0; mapStub.failNext = false; });
   afterEach(() => dismissMapToast());
 
-  async function opened(lastState: unknown = { party: { col: 0, row: 0 }, unlocked: [], social: null }) {
-    const mounted = mount(lastState);
+  async function opened(lastState: unknown = { party: { col: 0, row: 0 }, unlocked: [], social: null }, tile?: Record<string, unknown>) {
+    const mounted = mount(lastState, tile);
     mounted.screen.onActivate();
     await tick();
     return { ...mounted, map: latestMap() };
@@ -220,6 +220,16 @@ describe('MapScreen room selection', () => {
     expect(gameClient.sendMove).toHaveBeenCalledWith(3, 4);
     expect(sheet().hidden).toBe(true);
     expect(map.setSelectedRoom).toHaveBeenLastCalledWith(null);
+  });
+
+  it('says on the sheet when fights in the room pay no XP', async () => {
+    const { map } = await opened(undefined, { id: 'room-1', type: 'plains', noXp: true });
+    map.tap(info());
+    expect(document.querySelector('.room-sheet-sub-noxp')?.textContent).toBe('Fights here pay no XP');
+
+    const paying = await opened();
+    paying.map.tap(info());
+    expect(document.querySelector('.room-sheet-sub-noxp')).toBeNull();
   });
 
   it('your own room opens the room card, not the sheet', async () => {

@@ -148,7 +148,7 @@ Stats are **fixed**: no levelling, no equipment, no inventory, so the definition
 
 ## World map & room names
 
-The world map is defined in `data/world.json` (`WorldData`) as an array of `WorldTileDefinition` objects, each with `id` (GUID), `mapId`, `col`, `row`, `type` (TileType), `zone` (zone ID), and `name` (room name, required). Each tile has a stable GUID (`id`) that persists across admin saves but changes when a tile is deleted and re-created. Every tile has an evocative room name (e.g., "Town Square", "Blacksmith", "Thick Trees"). The client receives ALL tiles via `GET /api/world` (auth'd) on login; fog of war rendering is determined client-side from `state.unlocked`.
+The world map is defined in `data/world.json` (`WorldData`) as an array of `WorldTileDefinition` objects, each with `id` (GUID), `mapId`, `col`, `row`, `type` (TileType), `zone` (zone ID), and `name` (room name, required). Each tile has a stable GUID (`id`) that persists across admin saves but changes when a tile is deleted and re-created. Every tile has an evocative room name (e.g., "Town Square", "Blacksmith", "Thick Trees"). The client receives ALL tiles via `GET /api/world` (auth'd) on login; fog of war rendering is determined client-side from `state.unlocked`. The server adds `zoneName` and, for a room whose table (its own, else its zone's) can roll no pack that pays anyone XP, `noXp: true` (`createPaysXpCheck`, see `combat.md` → XP gauge); neither is stored in `world.json`.
 
 ### Multi-map / interior maps
 

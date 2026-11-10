@@ -80,9 +80,11 @@ import {
   acceptableQuestIds,
   nextWeeklyReopening,
   isBlockedUser,
+  createPaysXpCheck,
 } from '@idle-party-rpg/shared';
 import { COMBAT_PACE, hireLevelLimitText, isHireWithinLevelLimit, paceHitDamage } from '@idle-party-rpg/shared';
 import type {
+  ClientXpGauge,
   CombatPrefs,
   DungeonRunState,
   AwayLedger,
@@ -228,6 +230,9 @@ export class PlayerSession {
 
   /** Callback to get the active dungeon run state — set by PlayerManager. */
   getDungeonState?: () => import('@idle-party-rpg/shared').DungeonRunInfo | null;
+
+  /** Callback to get this member's XP gauge — set by PlayerManager. */
+  getXpGauge?: () => ClientXpGauge | null;
 
   constructor(username: string, grids: WorldGrids, content: ContentStore, onQuestEvent?: (event: QuestEvent) => void) {
     this.username = username;
@@ -428,6 +433,7 @@ export class PlayerSession {
   } {
     const world = this.content.getWorld();
     const allZones = this.content.getAllZones();
+    const noXp = noXpTileIds(this.content);
 
     return {
       startTile: world.startTile,
@@ -435,7 +441,7 @@ export class PlayerSession {
       maps: world.maps,
       tiles: world.tiles.map(wt => {
         const zone = getZone(wt.zone, allZones);
-        return { ...wt, zoneName: zone?.displayName ?? wt.zone };
+        return { ...wt, zoneName: zone?.displayName ?? wt.zone, noXp: noXp.has(wt.id) ? true : undefined };
       }),
     };
   }
@@ -781,6 +787,7 @@ export class PlayerSession {
       availableQuestIds: questBlock.availableQuestIds,
       questResolutions: questBlock.questResolutions,
       dungeon: this.getDungeonState?.() ?? undefined,
+      xpGauge: this.character ? this.getXpGauge?.() ?? undefined : undefined,
     };
   }
 
@@ -1774,6 +1781,23 @@ export class PlayerSession {
     return result.success;
   }
 
+}
+
+const noXpTiles = new WeakMap<ContentStore, { epoch: number; ids: ReadonlySet<string> }>();
+
+/** Rooms whose table (their own, else their zone's) can roll no pack that pays anyone XP, once per content change. */
+function noXpTileIds(content: ContentStore): ReadonlySet<string> {
+  const known = noXpTiles.get(content);
+  if (known?.epoch === content.contentEpoch) return known.ids;
+  const paysXp = createPaysXpCheck(content.getAllMonsters(), content.getAllEncounters());
+  const zones = content.getAllZones();
+  const ids = new Set<string>();
+  for (const wt of content.getWorld().tiles) {
+    const table = wt.encounterTable?.length ? wt.encounterTable : zones[wt.zone]?.encounterTable ?? [];
+    if (!paysXp(table)) ids.add(wt.id);
+  }
+  noXpTiles.set(content, { epoch: content.contentEpoch, ids });
+  return ids;
 }
 
 /** Older saves hold lines typed 'checkpoint'. */
