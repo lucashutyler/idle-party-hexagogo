@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { isStoreFileName } from '../auth/reservedUsernames.js';
-import { UnreadableDataFileError, moveAside, readJsonFile, writeJsonFileAtomic } from './JsonFiles.js';
+import { isDamagedDataFileError, moveAside, readJsonFile, writeJsonFileAtomic } from './JsonFiles.js';
 
 const SAVE_DIR = 'data';
 /** Saves written before the save pass yields to the event loop, so fight timers aren't held up by the whole pass. */
@@ -47,14 +47,14 @@ export class JsonFileStore implements GameStateStore {
     if (firstFailure) throw firstFailure.error;
   }
 
-  /** An unreadable save is moved aside, so the fresh player that replaces it can't write over it. */
+  /** A damaged save is moved aside, so the fresh player that replaces it can't write over it. A failed read throws. */
   async load(username: string): Promise<PlayerSaveData | null> {
     if (isStoreFileName(username)) return null;
     const path = this.filePath(username);
     try {
       return await readJsonFile<PlayerSaveData>(path) ?? null;
     } catch (err) {
-      if (!(err instanceof UnreadableDataFileError)) throw err;
+      if (!isDamagedDataFileError(err)) throw err;
       try {
         const aside = await moveAside(path);
         console.error(`[JsonFileStore] Moved the unreadable save for "${username}" to ${aside}:`, err.cause);

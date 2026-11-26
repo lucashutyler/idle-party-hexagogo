@@ -94,6 +94,14 @@ describe('GuildStore', () => {
     expect(store.getAll()).toEqual([]);
     expect(await fs.readdir(dataDir)).toEqual([]);
   });
+
+  it('throws on a read that fails and moves nothing, since the file may be fine', async () => {
+    await fs.mkdir(file());
+
+    await expect(new GuildStore().load()).rejects.toThrow('guilds.json');
+
+    expect(await asideFiles('guilds.json')).toEqual([]);
+  });
 });
 
 describe('TradeStore', () => {
@@ -121,6 +129,14 @@ describe('TradeStore', () => {
     expect(await fs.readFile(path.join(dataDir, aside), 'utf-8')).toBe(content);
     expect(JSON.parse(await fs.readFile(file(), 'utf-8'))).toEqual([TRADE]);
   });
+
+  it('throws on a read that fails and moves nothing', async () => {
+    await fs.mkdir(file());
+
+    await expect(new TradeStore().load()).rejects.toThrow('trades.json');
+
+    expect(await asideFiles('trades.json')).toEqual([]);
+  });
 });
 
 describe('JsonFileStore unreadable saves', () => {
@@ -139,6 +155,14 @@ describe('JsonFileStore unreadable saves', () => {
     const [aside] = await asideFiles('alice.json');
     expect(await fs.readFile(path.join(dataDir, aside), 'utf-8')).toBe(content);
     expect(await store.load('alice')).toEqual(save('alice'));
+  });
+
+  it('throws on a read that fails rather than start the player fresh', async () => {
+    await fs.mkdir(path.join(dataDir, 'alice.json'));
+
+    await expect(new JsonFileStore(dataDir).load('alice')).rejects.toThrow('alice.json');
+
+    expect(await asideFiles('alice.json')).toEqual([]);
   });
 
   it('skips an unreadable save at boot and never reads the copy set aside', async () => {

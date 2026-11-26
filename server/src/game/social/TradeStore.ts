@@ -1,6 +1,6 @@
 import path from 'path';
 import type { TradeState } from '@idle-party-rpg/shared';
-import { UnreadableDataFileError, isJsonObject, moveAside, readJsonFile, writeJsonFileAtomic } from '../JsonFiles.js';
+import { UnreadableDataFileError, isDamagedDataFileError, isJsonObject, moveAside, readJsonFile, writeJsonFileAtomic } from '../JsonFiles.js';
 
 const TRADE_FILE = path.resolve('data', 'trades.json');
 
@@ -13,12 +13,12 @@ const TRADE_FILE = path.resolve('data', 'trades.json');
  * already removed from TradeSystem.
  */
 export class TradeStore {
-  /** An unreadable file is moved aside and no trades are restored, so the next save can't write over it. */
+  /** A damaged file is moved aside and no trades are restored, so the next save can't write over it. A failed read throws. */
   async load(): Promise<TradeState[]> {
     try {
       return await readTrades() ?? [];
     } catch (err) {
-      if (!(err instanceof UnreadableDataFileError)) throw err;
+      if (!isDamagedDataFileError(err)) throw err;
       const aside = await moveAside(TRADE_FILE);
       console.error(`[TradeStore] Moved an unreadable file to ${aside}; starting with no trades:`, err.cause);
       return [];

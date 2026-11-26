@@ -1,6 +1,6 @@
 import path from 'path';
 import type { GuildInfo, GuildMemberEntry } from '@idle-party-rpg/shared';
-import { UnreadableDataFileError, isJsonObject, moveAside, readJsonFile, writeJsonFileAtomic } from '../JsonFiles.js';
+import { UnreadableDataFileError, isDamagedDataFileError, isJsonObject, moveAside, readJsonFile, writeJsonFileAtomic } from '../JsonFiles.js';
 
 export interface GuildData {
   info: GuildInfo;
@@ -16,13 +16,13 @@ const GUILD_FILE = path.resolve('data', 'guilds.json');
 export class GuildStore {
   private guilds = new Map<string, GuildData>();
 
-  /** An unreadable file is moved aside and the store starts empty, so the next save can't write over it. */
+  /** A damaged file is moved aside and the store starts empty, so the next save can't write over it. A failed read throws. */
   async load(): Promise<void> {
     let saved: GuildData[] | undefined;
     try {
       saved = await readGuilds();
     } catch (err) {
-      if (!(err instanceof UnreadableDataFileError)) throw err;
+      if (!isDamagedDataFileError(err)) throw err;
       const aside = await moveAside(GUILD_FILE);
       console.error(`[GuildStore] Moved an unreadable file to ${aside}; starting with no guilds:`, err.cause);
       return;

@@ -14,13 +14,21 @@ export interface JsonWriteOptions extends AtomicWriteOptions {
 export class UnreadableDataFileError extends Error {
   readonly file: string;
   readonly cause: unknown;
+  /** The read itself failed (permissions, too many open files…), so the bytes on disk may be fine. */
+  readonly readFailed: boolean;
 
-  constructor(file: string, cause: unknown) {
+  constructor(file: string, cause: unknown, readFailed = false) {
     super(`${file} is unreadable: ${cause instanceof Error ? cause.message : String(cause)}`);
     this.name = 'UnreadableDataFileError';
     this.file = file;
     this.cause = cause;
+    this.readFailed = readFailed;
   }
+}
+
+/** Damaged bytes on disk, as opposed to a read that failed: the case where moving the file aside and starting fresh is safe. */
+export function isDamagedDataFileError(err: unknown): err is UnreadableDataFileError {
+  return err instanceof UnreadableDataFileError && !err.readFailed;
 }
 
 const UTF8_BOM = '﻿';
@@ -60,7 +68,7 @@ export async function readJsonFile<T>(file: string): Promise<T | undefined> {
     raw = await readFile(file, 'utf-8');
   } catch (err) {
     if (isMissingFileError(err)) return undefined;
-    throw new UnreadableDataFileError(file, err);
+    throw new UnreadableDataFileError(file, err, true);
   }
   if (raw.startsWith(UTF8_BOM)) raw = raw.slice(UTF8_BOM.length);
   if (raw.trim() === '') throw new UnreadableDataFileError(file, new Error('the file is empty'));
