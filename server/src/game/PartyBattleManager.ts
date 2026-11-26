@@ -606,7 +606,8 @@ export class PartyBattleManager {
 
     const party = entry.serverParty;
     const hereArea = index.areaOf(party.tile.id);
-    if (mapId === party.currentMapId && hereArea !== undefined && hereArea === index.areaOf(target.id)) {
+    // A room that can't be walked into has no area: only a walk leaves it, as a col/row move does.
+    if (mapId === party.currentMapId && (hereArea === undefined || hereArea === index.areaOf(target.id))) {
       const walked = this.walkTo(entry, target);
       return walked.success || walked.blocked ? walked : { success: false, reason: 'no_route' };
     }

@@ -157,6 +157,20 @@ describe('planRouteDoors', () => {
     expect(planRouteDoors(index, 'a0', 'z0', ALL)).toBeNull();
   });
 
+  it('asks canUse about each door once, however many arrival rooms share its area', () => {
+    const spokes = 30;
+    const rooms: RouteRoom[] = [];
+    for (let k = 0; k < spokes; k++) {
+      rooms.push(r(`h${k}`, 'hub', k, { links: [[`s${k}`, `s${k}`]] }));
+      rooms.push(r(`s${k}`, `s${k}`, 0, { links: [['hub', `h${k}`]] }));
+    }
+    rooms.push(r('z0', 'z', 0));
+    const index = buildRouteIndex(rooms);
+    let asked = 0;
+    expect(planRouteDoors(index, 'h0', 'z0', () => { asked++; return true; })).toBeNull();
+    expect(asked).toBeLessThanOrEqual(spokes * 2);
+  });
+
   it('gives the same answer every time', () => {
     const runs = Array.from({ length: 5 }, () => path(planRouteDoors(world, 'a0', 'b1', ALL)));
     expect(new Set(runs.map(run => JSON.stringify(run))).size).toBe(1);

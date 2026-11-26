@@ -202,6 +202,15 @@ describe('route refusals', () => {
     expect(party(w)).toEqual(before);
   });
 
+  it('walks out of a room that cannot be walked into, as a col and row move does', async () => {
+    const w = await alice();
+    w.placeParty('alice', 'x3');
+    expect(moveTo(w, ROOM.w2)).toEqual({ success: true });
+    expect(pathCols(w)).toEqual([2]);
+    expect(moveTo(w, ROOM.e1)).toEqual({ success: true });
+    expect(pathCols(w)).toEqual([4, 5]);
+  });
+
   it('keeps col and row moves to the party\'s area, refusing another area as before', async () => {
     const w = await alice();
     expect(w.pm.partyBattles.handleMove(w.partyOf('alice'), 5, 0)).toEqual({ success: false });

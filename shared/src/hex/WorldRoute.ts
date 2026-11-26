@@ -97,6 +97,7 @@ export function buildRouteIndex(rooms: Iterable<RouteRoom>): RouteIndex {
 /**
  * The doors to take from one room to another, cheapest first by map changes, then doors, then the estimated walk.
  * [] when one walk reaches it, null when no route of usable doors does. Ties go to the earlier authored door.
+ * `canUse` is asked at most once per door.
  */
 export function planRouteDoors(
   index: RouteIndex,
@@ -117,6 +118,15 @@ export function planRouteDoors(
       cubes.set(id, cube);
     }
     return cube;
+  };
+  const usable = new Map<RouteDoor, boolean>();
+  const usableDoor = (door: RouteDoor): boolean => {
+    let ok = usable.get(door);
+    if (ok === undefined) {
+      ok = canUse(door);
+      usable.set(door, ok);
+    }
+    return ok;
   };
 
   const start: RouteNode = { tileId: fromTileId, cost: [0, 0, 0], via: null, prev: null, done: false };
@@ -142,7 +152,7 @@ export function planRouteDoors(
     if (node.cost[1] >= MAX_ROUTE_DOORS) continue;
 
     for (const door of index.doorsOfArea(area)) {
-      if (!canUse(door)) continue;
+      if (!usableDoor(door)) continue;
       const walk = cubeDistance(cubeOf(node.tileId), cubeOf(door.fromTileId)) + 1;
       const cost = addCost(node.cost, [door.toMapId !== door.fromMapId ? 1 : 0, 1, walk]);
       const known = nodes.get(door.toTileId);

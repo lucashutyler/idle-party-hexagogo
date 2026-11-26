@@ -62,6 +62,22 @@ describe('a saved route', () => {
     expect(partyState(pm).route?.doors).toBe(2);
   });
 
+  it('survives a restart in the door room and steps through after the next fight', async () => {
+    const w = await setupTravel(['alice']);
+    w.reveal('alice', 'w1', 'w2', 'e0', 'e1');
+    w.placeParty('alice', 'w2');
+    expect(w.pm.partyBattles.handleMoveToRoom(w.partyOf('alice'), ROOM.e1)).toEqual({ success: true });
+    const saves = JSON.parse(JSON.stringify(w.pm.getAllSaveData())) as PlayerSaveData[];
+    const { pm, stopped } = restored(w, saves);
+    expect(partyState(pm).path).toEqual([]);
+    expect(partyState(pm).route?.doors).toBe(1);
+
+    vi.advanceTimersByTime(30_000);
+    expect(pm.partyBattles.getTile(pm.getSessionByUsername('alice')!.getPartyId()!)?.id).toBe(ROOM.e1);
+    expect(partyState(pm).route).toBeUndefined();
+    expect(stopped).not.toHaveBeenCalled();
+  });
+
   it.each<[string, (w: TravelWorld) => void]>([
     ['its door is taken away', w => { w.world.tiles.find(t => t.id === ROOM.e2)!.transitions = []; }],
     ['its destination is gone', w => { w.world.tiles = w.world.tiles.filter(t => t.id !== ROOM.b1); }],
