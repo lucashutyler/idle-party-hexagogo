@@ -332,7 +332,7 @@ The rules are in [`social.md`](social.md); this is the rendering. `.social-panel
 
 ## Login and class pick
 
-`LoginScreen` is a real form and label with an "Email me a sign-in link" button, a `role=alert` error and the logo from tracked art (the wordmark shows without art); the keyboard auto-opens only on fine pointers. The flow is in [`auth.md`](auth.md). Username, Approve and Verify share `.login-form`. `ClassSelectScreen` shows class art over the class icon in a radio group with arrow keys and a sticky "Play as X". Each card gives damage as it hits in play, with the per-level gain to one decimal, and "Acts every N seconds" to one decimal. `CLASS_CHOICE_TIMEOUT_MS` (10 s) shows a no-answer error, with server refusal and offline paths; a reply that arrives after the timeout still enters the game.
+`LoginScreen` is a real form and label with an "Email me a sign-in code" button, a `role=alert` error and the logo from tracked art (the wordmark shows without art); after sending, the same form shows a labelled sign-in code field. The keyboard auto-opens only on fine pointers. The flow is in [`auth.md`](auth.md). Username, Approve and Verify share `.login-form`. `ClassSelectScreen` shows class art over the class icon in a radio group with arrow keys and a sticky "Play as X". Each card gives damage as it hits in play, with the per-level gain to one decimal, and "Acts every N seconds" to one decimal. `CLASS_CHOICE_TIMEOUT_MS` (10 s) shows a no-answer error, with server refusal and offline paths; a reply that arrives after the timeout still enters the game.
 
 ## Combat screen
 

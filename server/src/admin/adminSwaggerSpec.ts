@@ -1321,14 +1321,14 @@ export const gameSwaggerSpec = {
           } } },
         },
         responses: {
-          200: { description: 'Login initiated. Dev: returns token directly. Prod: sends magic link email.' },
+          200: { description: 'Login initiated. Dev: returns token directly. Prod: emails a 6-digit code and a link, returns { mode, loginId, sent }; or { error } when the sign-in email limit is reached.' },
         },
       },
     },
     '/auth/verify': {
       get: {
         tags: ['Auth'],
-        summary: 'Verify magic link token (dev flow)',
+        summary: 'Verify magic link token (dev flow only)',
         security: [],
         parameters: [
           { name: 'token', in: 'query', required: true, schema: { type: 'string' } },
@@ -1336,13 +1336,14 @@ export const gameSwaggerSpec = {
         responses: {
           200: { description: 'Session created, returns username' },
           401: { description: 'Invalid or expired token' },
+          404: { description: 'Production: not available' },
         },
       },
     },
     '/auth/approve': {
       post: {
         tags: ['Auth'],
-        summary: 'Approve a login from magic link (prod flow)',
+        summary: 'Open the emailed sign-in link (prod flow)',
         security: [],
         requestBody: {
           required: true,
@@ -1353,7 +1354,28 @@ export const gameSwaggerSpec = {
           } } },
         },
         responses: {
-          200: { description: 'Login approved (no session created on this device)' },
+          200: { description: '{ success: true } on the browser that asked (its next poll gets the session); { needsCode: true } anywhere else' },
+          401: { description: 'Invalid or expired link' },
+        },
+      },
+    },
+    '/auth/login-code': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Sign in with the emailed 6-digit code (prod flow)',
+        security: [],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['loginId', 'code'],
+            properties: { loginId: { type: 'string' }, code: { type: 'string', example: '123456' } },
+          } } },
+        },
+        responses: {
+          200: { description: '{ status: approved, email, username } with the session created on this response; { status: pending, error } for a wrong code; { status: expired } once the sign-in is gone' },
+          400: { description: 'Missing fields or not 6 digits' },
+          403: { description: 'Account suspended' },
         },
       },
     },

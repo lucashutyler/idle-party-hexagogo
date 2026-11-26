@@ -1,6 +1,8 @@
 import { GameClient } from './network/GameClient';
 import { WorldCache } from './network/WorldCache';
-import { getSession, loginWithEmail, verifyToken, pollLoginStatus, setUsername } from './network/AuthClient';
+import { getSession, loginWithEmail, verifyToken, setUsername } from './network/AuthClient';
+import type { LoginStatusResult } from './network/AuthClient';
+import { EmailSignIn } from './network/EmailSignIn';
 import { ScreenManager } from './screens/ScreenManager';
 import { LoginScreen } from './screens/LoginScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
@@ -72,7 +74,11 @@ export class App {
   private topHud?: TopHud;
   private xpBar?: PersistentXpBar;
   private chatPopout?: ChatPopout;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private emailSignIn = new EmailSignIn({
+    approved: (result) => this.enterAfterSignIn(result),
+    expired: () => this.loginScreen.showExpired(),
+    suspended: (email) => this.showSuspensionScreen(email),
+  });
   private recapModal?: RecapModal;
   private masteryToasts?: MasteryToasts;
   private openOptionsDelegate?: (e: MouseEvent) => void;
@@ -131,6 +137,8 @@ export class App {
     // Login screen (now email-based)
     this.loginScreen = new LoginScreen('screen-login', (email) => {
       this.handleEmailLogin(email);
+    }, (code) => {
+      this.handleLoginCode(code);
     });
     this.screenManager.register('login', document.getElementById('screen-login')!, this.loginScreen);
 
@@ -221,14 +229,27 @@ export class App {
       // Production mode: email sent, poll for approval
       if (result.loginId) {
         this.loginScreen.showCheckEmail(() => {
-          this.stopPolling();
+          this.emailSignIn.stop();
           this.loginScreen.onActivate();
         });
-        this.startPolling(result.loginId);
+        this.emailSignIn.start(result.loginId);
       }
     } catch {
       this.loginScreen.showError('Could not connect to server');
       this.loginScreen.setLoading(false);
+    }
+  }
+
+  private async handleLoginCode(code: string): Promise<void> {
+    const refusal = await this.emailSignIn.submitCode(code);
+    if (refusal) this.loginScreen.showCodeError(refusal);
+  }
+
+  private async enterAfterSignIn(result: LoginStatusResult): Promise<void> {
+    if (result.username) {
+      await this.connectAndEnterGame();
+    } else {
+      this.screenManager.switchTo('username');
     }
   }
 
@@ -352,41 +373,6 @@ export class App {
       await this.connectAndEnterGame();
     } catch {
       this.offlineScreen.setRetrying(false);
-    }
-  }
-
-  private startPolling(loginId: string): void {
-    this.stopPolling();
-
-    this.pollTimer = setInterval(async () => {
-      try {
-        const result = await pollLoginStatus(loginId);
-
-        if (result.status === 'approved') {
-          this.stopPolling();
-          if (result.username) {
-            await this.connectAndEnterGame();
-          } else {
-            this.screenManager.switchTo('username');
-          }
-          return;
-        }
-
-        if (result.status === 'expired') {
-          this.stopPolling();
-          this.loginScreen.showExpired();
-          return;
-        }
-      } catch {
-        // Network error during poll: keep trying silently
-      }
-    }, 2000);
-  }
-
-  private stopPolling(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
     }
   }
 

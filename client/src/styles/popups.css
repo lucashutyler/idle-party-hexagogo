@@ -250,10 +250,20 @@ button.notif-prefs-bulk-btn {
   padding: 16px;
 }
 .login-form > .login-input,
-.login-fields .login-input {
+.login-fields .login-input,
+.login-sent .login-input {
   width: 100%;
   min-height: 48px;
   font-size: 16px;
+}
+.login-sent .login-code-input {
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+.login-sent .login-code-input::placeholder {
+  letter-spacing: 0.3em;
 }
 .login-fields,
 .login-sent {

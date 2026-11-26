@@ -1,12 +1,27 @@
 import { Router } from 'express';
-import type { AccountStore } from './AccountStore.js';
+import type { Request, Response } from 'express';
+import type { Account, AccountStore } from './AccountStore.js';
 import type { TokenStore } from './TokenStore.js';
 import type { InviteListStore } from './InviteListStore.js';
 import { sendMagicLinkEmail } from './EmailService.js';
 import { grantedAdminRole } from './AdminRoles.js';
+import { SlidingWindowLimiter } from '../RateLimiter.js';
 
 const isProd = process.env.NODE_ENV === 'production';
 const isInviteOnly = process.env.INVITE_ONLY === 'true';
+
+const MINUTE_MS = 60 * 1000;
+const SIGN_IN_EMAIL_LIMITS = {
+  perEmailAndIp: { limit: 3, windowMs: 10 * MINUTE_MS },
+  perEmail: { limit: 8, windowMs: 60 * MINUTE_MS },
+  perIp: { limit: 100, windowMs: 10 * MINUTE_MS },
+};
+const LOGIN_CODE_LIMIT_PER_IP = { limit: 100, windowMs: 10 * MINUTE_MS };
+
+export const TOO_MANY_SIGN_IN_EMAILS = 'Too many sign-in emails. Use the last one we sent, or try again in a few minutes.';
+export const WRONG_LOGIN_CODE = 'That code doesn\'t match the newest sign-in email.';
+const MALFORMED_LOGIN_CODE = 'Enter the 6-digit code from the email.';
+const TOO_MANY_CODE_TRIES = 'Too many tries from here. Wait a few minutes, then try again.';
 
 interface AuthRouteOptions {
   accountStore: AccountStore;
@@ -14,13 +29,79 @@ interface AuthRouteOptions {
   inviteListStore: InviteListStore;
 }
 
+function limiterFor({ limit, windowMs }: { limit: number; windowMs: number }): SlidingWindowLimiter {
+  return new SlidingWindowLimiter(limit, windowMs);
+}
+
+function requestIp(req: Request): string {
+  return req.ip ?? 'unknown';
+}
+
 export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: AuthRouteOptions): Router {
   const router = Router();
+
+  const emailIpLimiter = limiterFor(SIGN_IN_EMAIL_LIMITS.perEmailAndIp);
+  const emailLimiter = limiterFor(SIGN_IN_EMAIL_LIMITS.perEmail);
+  const ipLimiter = limiterFor(SIGN_IN_EMAIL_LIMITS.perIp);
+  const codeIpLimiter = limiterFor(LOGIN_CODE_LIMIT_PER_IP);
+  for (const limiter of [emailIpLimiter, emailLimiter, ipLimiter, codeIpLimiter]) {
+    tokenStore.pruneWithCleanup(limiter);
+  }
+
+  /** Counts one sign-in email against every limit, or none when any limit is reached. */
+  function takeSignInEmail(email: string, ip: string): boolean {
+    const checks: [SlidingWindowLimiter, string, string][] = [
+      [emailIpLimiter, `${email}|${ip}`, 'email+ip'],
+      [emailLimiter, email, 'email'],
+      [ipLimiter, ip, 'ip'],
+    ];
+    const blocked = checks.find(([limiter, key]) => !limiter.allows(key));
+    if (blocked) {
+      console.warn(`[Auth] Sign-in email refused (${blocked[2]} limit) for ${email} from ${ip}`);
+      return false;
+    }
+    for (const [limiter, key] of checks) limiter.tryTake(key);
+    return true;
+  }
+
+  function startSession(req: Request, res: Response, email: string, account: Account | null | undefined): void {
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error('[Auth] Session regenerate error:', err);
+        res.status(500).json({ error: 'Session error' });
+        return;
+      }
+
+      req.session.email = email;
+      req.session.username = account?.username || undefined;
+
+      req.session.save((err) => {
+        if (err) {
+          console.error('[Auth] Session save error:', err);
+          res.status(500).json({ error: 'Session error' });
+          return;
+        }
+
+        accountStore.addSessionRecord(email, {
+          deviceToken: res.locals.deviceToken ?? 'unknown',
+          ip: req.ip ?? (req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()) ?? 'unknown',
+          userAgent: req.headers['user-agent'] ?? 'unknown',
+          timestamp: new Date().toISOString(),
+        });
+
+        res.json({
+          status: 'approved',
+          email,
+          username: account?.username ?? null,
+        });
+      });
+    });
+  }
 
   /**
    * POST /auth/login — { email }
    * Dev: auto-verifies, returns token for client to call /auth/verify
-   * Prod: sends magic link email
+   * Prod: emails a sign-in code and link; the asking browser polls /auth/login-status
    */
   router.post('/login', async (req, res) => {
     const { email } = req.body;
@@ -46,6 +127,11 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: 
       }
     }
 
+    if (isProd && !takeSignInEmail(trimmed, requestIp(req))) {
+      res.json({ error: TOO_MANY_SIGN_IN_EMAILS });
+      return;
+    }
+
     // Create account if it doesn't exist
     const loginAccount = await accountStore.createAccount(trimmed);
 
@@ -55,19 +141,15 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: 
       return;
     }
 
-    // Generate magic link token
-    const token = tokenStore.create(trimmed);
-
     if (!isProd) {
       // Dev mode: return token directly so client can auto-verify
-      res.json({ mode: 'dev', token });
+      res.json({ mode: 'dev', token: tokenStore.create(trimmed) });
       return;
     }
 
-    // Production: create login + send magic link email
-    const { token: loginToken, loginId } = tokenStore.createLogin(trimmed);
+    const { token, loginId, code } = tokenStore.createLogin(trimmed, res.locals.deviceToken ?? '');
     try {
-      await sendMagicLinkEmail(trimmed, loginToken);
+      await sendMagicLinkEmail(trimmed, token, code);
       res.json({ mode: 'prod', loginId, sent: true });
     } catch (err) {
       console.error('[Auth] Failed to send magic link:', err);
@@ -77,9 +159,14 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: 
 
   /**
    * GET /auth/verify?token=...
-   * Verifies the magic link token, creates a session, returns JSON.
+   * Dev only: verifies the magic link token, creates a session, returns JSON.
    */
   router.get('/verify', async (req, res) => {
+    if (isProd) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
     const { token } = req.query;
 
     if (!token || typeof token !== 'string') {
@@ -142,7 +229,8 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: 
 
   /**
    * POST /auth/approve — { token }
-   * Approves a pending login via magic link token. No session is created on this device.
+   * The emailed link. Approves the pending login only on the browser that asked for it, whose
+   * next poll then gets the session; anywhere else it answers needsCode and approves nothing.
    */
   router.post('/approve', async (req, res) => {
     const { token } = req.body;
@@ -152,14 +240,63 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: 
       return;
     }
 
-    const email = tokenStore.approve(token);
-    if (!email) {
+    const approval = tokenStore.approveFromLink(token, res.locals.deviceToken);
+    if (approval.status === 'invalid') {
       res.status(401).json({ error: 'Invalid or expired sign-in link. Please request a new one.' });
       return;
     }
+    if (approval.status === 'needs_code') {
+      res.json({ needsCode: true });
+      return;
+    }
 
-    await accountStore.setVerified(email);
+    await accountStore.setVerified(approval.email);
     res.json({ success: true });
+  });
+
+  /**
+   * POST /auth/login-code — { loginId, code }
+   * Signs the asking browser in with the 6-digit code from its sign-in email.
+   */
+  router.post('/login-code', async (req, res) => {
+    const { loginId, code } = req.body;
+
+    if (!loginId || typeof loginId !== 'string' || typeof code !== 'string') {
+      res.status(400).json({ error: 'loginId and code are required' });
+      return;
+    }
+
+    const digits = code.replace(/\s+/g, '');
+    if (!/^\d{6}$/.test(digits)) {
+      res.status(400).json({ status: 'pending', error: MALFORMED_LOGIN_CODE });
+      return;
+    }
+
+    const ip = requestIp(req);
+    if (!codeIpLimiter.tryTake(ip)) {
+      console.warn(`[Auth] Sign-in code refused (ip limit) from ${ip}`);
+      res.json({ status: 'pending', error: TOO_MANY_CODE_TRIES });
+      return;
+    }
+
+    const result = tokenStore.submitCode(loginId, digits);
+    if (result === 'wrong_code') {
+      res.json({ status: 'pending', error: WRONG_LOGIN_CODE });
+      return;
+    }
+    if (result === 'expired') {
+      res.json({ status: 'expired' });
+      return;
+    }
+
+    await accountStore.setVerified(result.email);
+    const account = accountStore.findByEmail(result.email);
+    if (account?.deactivated) {
+      res.status(403).json({ error: 'Account suspended', deactivated: true, email: result.email });
+      return;
+    }
+
+    startSession(req, res, result.email, account);
   });
 
   /**
@@ -201,38 +338,7 @@ export function createAuthRoutes({ accountStore, tokenStore, inviteListStore }: 
       return;
     }
 
-    req.session.regenerate((err) => {
-      if (err) {
-        console.error('[Auth] Session regenerate error:', err);
-        res.status(500).json({ error: 'Session error' });
-        return;
-      }
-
-      req.session.email = email;
-      req.session.username = account?.username || undefined;
-
-      req.session.save((err) => {
-        if (err) {
-          console.error('[Auth] Session save error:', err);
-          res.status(500).json({ error: 'Session error' });
-          return;
-        }
-
-        // Record session fingerprint for duplicate detection
-        accountStore.addSessionRecord(email, {
-          deviceToken: res.locals.deviceToken ?? 'unknown',
-          ip: req.ip ?? (req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()) ?? 'unknown',
-          userAgent: req.headers['user-agent'] ?? 'unknown',
-          timestamp: new Date().toISOString(),
-        });
-
-        res.json({
-          status: 'approved',
-          email,
-          username: account?.username ?? null,
-        });
-      });
-    });
+    startSession(req, res, email, account);
   });
 
   /**
