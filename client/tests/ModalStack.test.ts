@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { bringToFront, dismissModals, dismissTop, registerDismiss, release, setRaised, suspendDismiss, wireFocusOnInteract } from '../src/ui/ModalStack';
 
 function makeEl(): HTMLElement {
@@ -318,6 +318,50 @@ describe('ModalStack', () => {
       dismissModals();
       expect(closed).toEqual(['b', 'a']);
       release(docked);
+    });
+  });
+
+  describe('stepping back inside an overlay', () => {
+    it('keeps the overlay open while its back steps back, and dismisses it once back has nowhere to go', () => {
+      const el = makeEl();
+      let views = 3;
+      let closed = 0;
+      const back = (): boolean => {
+        if (views <= 1) return false;
+        views--;
+        return true;
+      };
+      bringToFront(el, () => { closed++; release(el); }, { back });
+
+      expect(dismissTop()).toBe(true);
+      expect(dismissTop()).toBe(true);
+      expect([views, closed]).toEqual([1, 0]);
+      expect(dismissTop()).toBe(true);
+      expect(closed).toBe(1);
+      expect(dismissTop()).toBe(false);
+    });
+
+    it('keeps back through a bare re-promotion', () => {
+      const el = makeEl();
+      const back = vi.fn(() => true);
+      bringToFront(el, () => release(el), { back });
+      wireFocusOnInteract(el);
+      el.dispatchEvent(new MouseEvent('mousedown'));
+
+      expect(dismissTop()).toBe(true);
+      expect(back).toHaveBeenCalledOnce();
+      release(el);
+    });
+
+    it('is ignored by dismissModals, which closes the overlay outright', () => {
+      const el = makeEl();
+      const back = vi.fn(() => true);
+      let closed = 0;
+      bringToFront(el, () => { closed++; release(el); }, { back });
+
+      dismissModals();
+      expect(closed).toBe(1);
+      expect(back).not.toHaveBeenCalled();
     });
   });
 });

@@ -10,6 +10,7 @@ let counter = 0;
 interface StackEntry {
   order: number;
   dismiss?: () => void;
+  back?: () => boolean;
   holdsFocus: boolean;
   returnFocus: HTMLElement | null;
 }
@@ -17,6 +18,8 @@ interface StackEntry {
 export interface BringToFrontOptions {
   /** False for a panel that opens with a dismiss but must not take keyboard focus. */
   holdFocus?: boolean;
+  /** Back and Escape call this first; true means it stepped back inside the overlay, which stays open. */
+  back?: () => boolean;
 }
 
 const tracked = new Map<HTMLElement, StackEntry>();
@@ -90,6 +93,7 @@ export function bringToFront(el: HTMLElement, dismiss?: () => void, options: Bri
   tracked.set(el, {
     order: counter,
     dismiss: dismiss ?? existing?.dismiss,
+    back: options.back ?? existing?.back,
     holdsFocus: existing?.holdsFocus || opensModal,
     returnFocus: opensModal ? (opener && !el.contains(opener) ? opener : null) : existing?.returnFocus ?? null,
   });
@@ -134,7 +138,7 @@ export function release(el: HTMLElement): void {
   if (entry?.holdsFocus) restoreFocus(el, entry.returnFocus);
 }
 
-/** Dismiss the most recently promoted overlay that can be dismissed. Returns whether there was one. */
+/** Step back inside, or else dismiss, the most recently promoted overlay that can be dismissed. Returns whether there was one. */
 export function dismissTop(): boolean {
   pruneDetached();
   let top: StackEntry | null = null;
@@ -142,6 +146,7 @@ export function dismissTop(): boolean {
     if (entry.dismiss && (!top || entry.order > top.order)) top = entry;
   }
   if (!top?.dismiss) return false;
+  if (top.back?.()) return true;
   top.dismiss();
   return true;
 }
