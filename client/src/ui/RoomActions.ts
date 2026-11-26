@@ -19,6 +19,8 @@ export interface RoomAction {
   targetId: string;
   questReady?: boolean;
   questAvailable?: boolean;
+  /** Travel only: the client's preview says this exit would refuse the party. */
+  locked?: boolean;
 }
 
 export interface QuestMarks {
@@ -42,7 +44,10 @@ export const ROOM_ICONS = {
   dungeon: '🗝️',
   travel: '🌀',
   players: '👥',
+  lock: '🔒',
 } as const;
+
+export const LOCKED_DETAIL = 'Locked';
 
 export const QUEST_READY_DETAIL = 'Quest ready to turn in';
 export const QUEST_AVAILABLE_DETAIL = 'New quest available';
@@ -74,6 +79,21 @@ export function getRoomActions(
   }
 
   return actions;
+}
+
+/** Marks each travel action whose exit `isLocked` refuses; other actions pass through untouched. */
+export function lockTravel(
+  actions: RoomAction[],
+  room: Pick<RoomContents, 'transitions'>,
+  isLocked: (link: MapTransitionLink) => boolean,
+): RoomAction[] {
+  const links = room.transitions ?? [];
+  if (links.length === 0) return actions;
+  return actions.map(action => {
+    if (action.kind !== 'travel') return action;
+    const link = links.find(l => l.tileId === action.targetId);
+    return link && isLocked(link) ? { ...action, locked: true } : action;
+  });
 }
 
 /** Button/chip text for acting on a room action. */

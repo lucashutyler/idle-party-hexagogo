@@ -5,13 +5,15 @@ import { renderForecastRing } from './ForecastChip';
 import { registerDismiss, release } from './ModalStack';
 import { escapeHtml } from './ItemIcon';
 import { deferWhilePressed, setHtml } from './render';
-import { actionLabel, questPipClass } from './RoomActions';
+import { LOCKED_DETAIL, ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
+import { NO_WALKING_ROUTE_TEXT } from './RoomEntryCheck';
 import type { RoomForecastProvider, RoomForecastState } from './RoomView';
 import type { TileClickInfo } from './ThreeWorldMap';
 
 export const ROOM_SHEET_FORECAST_DEBOUNCE_MS = 250;
 export const DUNGEON_TRAVEL_LOCK_TEXT = 'Leave the dungeon before traveling';
+const LOCK_PULSE_CLASS = 'room-sheet-lock-pulse';
 
 export interface RoomSheetModel {
   info: TileClickInfo;
@@ -25,6 +27,10 @@ export interface RoomSheetModel {
   inDungeon: boolean;
   /** No pack this room can roll pays anyone XP. */
   paysNoXp: boolean;
+  /** Why the party can't go in, one line per unmet requirement; null when nothing the client can see stops it. */
+  lock: string[] | null;
+  /** No walk from the party's room reaches this one. */
+  unreachable: boolean;
 }
 
 export interface RoomSheetHandlers {
@@ -38,6 +44,10 @@ function isExplored(info: TileClickInfo): boolean {
   return info.isUnlocked || info.isCurrentTile;
 }
 
+function blockedLines(model: RoomSheetModel): string[] {
+  return [...(model.lock ?? []), ...(model.unreachable ? [NO_WALKING_ROUTE_TEXT] : [])];
+}
+
 /** Non-modal panel for the selected room, docked in the map screen so the map keeps panning behind it. */
 export class RoomSheet {
   private el: HTMLElement;
@@ -45,6 +55,7 @@ export class RoomSheet {
   private headEl: HTMLElement;
   private forecastEl: HTMLElement;
   private playersEl: HTMLElement;
+  private lockEl: HTMLElement;
   private goEl: HTMLButtonElement;
   private detailsEl: HTMLButtonElement;
   private handlers: RoomSheetHandlers;
@@ -68,6 +79,7 @@ export class RoomSheet {
       <div class="room-sheet-forecast" hidden></div>
       <div class="room-sheet-players"></div>
       <div class="room-sheet-buttons">
+        <div class="room-sheet-lock" hidden></div>
         <button type="button" class="room-sheet-go">Go</button>
         <button type="button" class="room-sheet-details">Details</button>
       </div>
@@ -76,6 +88,8 @@ export class RoomSheet {
     this.headEl = this.el.querySelector('.room-sheet-head')!;
     this.forecastEl = this.el.querySelector('.room-sheet-forecast')!;
     this.playersEl = this.el.querySelector('.room-sheet-players')!;
+    this.lockEl = this.el.querySelector('.room-sheet-lock')!;
+    this.lockEl.addEventListener('animationend', () => this.lockEl.classList.remove(LOCK_PULSE_CLASS));
     this.goEl = this.el.querySelector('.room-sheet-go')!;
     this.detailsEl = this.el.querySelector('.room-sheet-details')!;
 
@@ -107,8 +121,22 @@ export class RoomSheet {
     return this.shownForecastTileId;
   }
 
+  /** The shown room is locked or out of walking reach, so Go is withheld. */
+  get isBlocked(): boolean {
+    return this.model !== null && blockedLines(this.model).length > 0;
+  }
+
+  /** Draws the eye back to why the room can't be entered. */
+  pulseLock(): void {
+    if (this.lockEl.hidden) return;
+    this.lockEl.classList.remove(LOCK_PULSE_CLASS);
+    void this.lockEl.offsetWidth; // the reflow between remove and add is what restarts the animation
+    this.lockEl.classList.add(LOCK_PULSE_CLASS);
+  }
+
   show(model: RoomSheetModel): void {
     const sameRoom = this.model !== null && this.isShowing(model.info.col, model.info.row);
+    if (!sameRoom) this.lockEl.classList.remove(LOCK_PULSE_CLASS);
     this.model = model;
     this.el.hidden = false;
     this.el.dataset.explored = isExplored(model.info) ? '1' : '0';
@@ -160,9 +188,10 @@ export class RoomSheet {
   private paint(model: RoomSheetModel): void {
     const { info } = model;
     const explored = isExplored(info);
-    setHtml(this.headEl, explored ? this.exploredHead(model) : this.unexploredHead(info));
+    setHtml(this.headEl, explored ? this.exploredHead(model) : this.unexploredHead(model));
     setHtml(this.playersEl, explored ? this.playerList(info) : '');
     this.paintArt(model, explored);
+    this.paintLock(model);
     this.detailsEl.hidden = !explored;
     this.goEl.disabled = model.inDungeon;
     const goText = model.inDungeon ? DUNGEON_TRAVEL_LOCK_TEXT : 'Go';
@@ -170,22 +199,37 @@ export class RoomSheet {
     this.goEl.dataset.locked = model.inDungeon ? '1' : '0';
   }
 
-  private unexploredHead(info: TileClickInfo): string {
-    return `<div class="room-sheet-name">${escapeHtml(info.roomName || 'Unexplored Room')}</div>`;
+  private paintLock(model: RoomSheetModel): void {
+    const lines = blockedLines(model);
+    const blocked = lines.length > 0;
+    this.el.dataset.blocked = blocked ? '1' : '0';
+    this.lockEl.hidden = !blocked;
+    this.goEl.hidden = blocked;
+    setHtml(this.lockEl, lines.map(line => `<div class="room-sheet-lock-line">${escapeHtml(line)}</div>`).join(''));
   }
 
-  private exploredHead({ info, actions, othersHere, paysNoXp }: RoomSheetModel): string {
+  private nameHtml(name: string, locked: boolean): string {
+    const padlock = locked ? `<span class="room-sheet-name-lock" aria-hidden="true">${ROOM_ICONS.lock}</span>` : '';
+    return `<div class="room-sheet-name">${padlock}${escapeHtml(name)}</div>`;
+  }
+
+  private unexploredHead({ info, lock }: RoomSheetModel): string {
+    return this.nameHtml(info.roomName || 'Unexplored Room', lock !== null);
+  }
+
+  private exploredHead({ info, actions, othersHere, paysNoXp, lock }: RoomSheetModel): string {
     const count = othersHere > 0 ? ` · ${othersHere} ${othersHere === 1 ? 'player' : 'players'}` : '';
     const first = actions[0] ? `<span class="room-sheet-sub-action">${escapeHtml(actionLabel(actions[0]))}</span>` : '';
     const noXp = paysNoXp ? '<span class="room-sheet-sub-noxp">Fights here pay no XP</span>' : '';
     const icons = actions.map(action => {
       const pip = questPipClass(action);
-      const detail = action.detail ? ` · ${action.detail}` : '';
-      return `<span class="room-sheet-action" title="${escapeHtml(action.name + detail)}">`
+      const detail = action.locked ? ` · ${LOCKED_DETAIL}` : action.detail ? ` · ${action.detail}` : '';
+      const classes = ['room-sheet-action', action.locked ? 'room-sheet-action-locked' : ''].filter(Boolean).join(' ');
+      return `<span class="${classes}" title="${escapeHtml(action.name + detail)}">`
         + `<span class="room-sheet-action-icon${pip ? ` ${pip}` : ''}">${escapeHtml(action.icon)}</span>`
         + `<span class="room-sheet-action-name">${escapeHtml(action.name)}</span></span>`;
     }).join('');
-    return `<div class="room-sheet-name">${escapeHtml(info.roomName || 'Unnamed Room')}</div>`
+    return this.nameHtml(info.roomName || 'Unnamed Room', lock !== null)
       + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span>${noXp}</div>`
       + (icons ? `<div class="room-sheet-actions">${icons}</div>` : '');
   }

@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.7',
+    notes: [
+      'Locked rooms show a padlock on the map, and the room card says what you need before you try to go there.',
+      'Travel buttons for locked doors show a padlock.',
+      'Hero > Stats shows how many rooms you\'ve found in each region.',
+    ],
+  },
+  {
     version: '2026.11.25.6',
     notes: [
       'The Quest Log now shows your main story in gold at the top, with your next step even before you can take it.',

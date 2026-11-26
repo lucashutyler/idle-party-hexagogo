@@ -24,6 +24,8 @@ function makeModel(overrides: Partial<RoomSheetModel> = {}): RoomSheetModel {
     forecastTileId: 'room-1',
     inDungeon: false,
     paysNoXp: false,
+    lock: null,
+    unreachable: false,
     ...overrides,
   };
 }
@@ -102,6 +104,69 @@ describe('RoomSheet', () => {
     expect(q('.room-sheet-details').hidden).toBe(true);
     expect(q<HTMLButtonElement>('.room-sheet-go').disabled).toBe(false);
     expect(provider).not.toHaveBeenCalled();
+  });
+
+  describe('a room the party cannot enter', () => {
+    const lockLines = () => [...parent.querySelectorAll('.room-sheet-lock-line')].map(line => line.textContent);
+
+    it('puts a padlock on the name, says why on visible lines, and offers Details but no Go', () => {
+      sheet.show(makeModel({ lock: ["Needs level 3 (you're level 1)", 'Bob needs level 6'] }));
+      expect(q('.room-sheet-name').textContent).toBe('🔒Town Square');
+      expect(q('.room-sheet-lock').hidden).toBe(false);
+      expect(lockLines()).toEqual(["Needs level 3 (you're level 1)", 'Bob needs level 6']);
+      expect(q('.room-sheet-go').hidden).toBe(true);
+      expect(q('.room-sheet-details').hidden).toBe(false);
+      expect(sheet.isBlocked).toBe(true);
+    });
+
+    it('shows the lock on an unexplored room too, under its unexplored name', () => {
+      sheet.show(makeModel({
+        info: makeInfo({ isUnlocked: false, roomName: 'Unexplored Room' }),
+        actions: [],
+        forecastTileId: null,
+        lock: ['Opens later in the story'],
+      }));
+      expect(q('.room-sheet-name').textContent).toBe('🔒Unexplored Room');
+      expect(lockLines()).toEqual(['Opens later in the story']);
+      expect(q('.room-sheet-go').hidden).toBe(true);
+      expect(q('.room-sheet-details').hidden).toBe(true);
+    });
+
+    it('says only a door leads to a room out of walking reach', () => {
+      sheet.show(makeModel({ unreachable: true }));
+      expect(lockLines()).toEqual(['No walking route from here. This area is reached through a door.']);
+      expect(q('.room-sheet-name').textContent).toBe('Town Square');
+      expect(q('.room-sheet-go').hidden).toBe(true);
+    });
+
+    it('gives Go back once a push says the room opened', () => {
+      sheet.show(makeModel({ lock: ['Opens later in the story'] }));
+      sheet.update(makeModel());
+      expect(q('.room-sheet-lock').hidden).toBe(true);
+      expect(q('.room-sheet-go').hidden).toBe(false);
+      expect(q('.room-sheet-name').textContent).toBe('Town Square');
+      expect(sheet.isBlocked).toBe(false);
+    });
+
+    it('pulses the lock block on request, and only while one is shown', () => {
+      sheet.show(makeModel());
+      sheet.pulseLock();
+      expect(q('.room-sheet-lock').classList.contains('room-sheet-lock-pulse')).toBe(false);
+
+      sheet.show(makeModel({ info: makeInfo({ col: 8 }), lock: ['Opens later in the story'] }));
+      sheet.pulseLock();
+      expect(q('.room-sheet-lock').classList.contains('room-sheet-lock-pulse')).toBe(true);
+      q('.room-sheet-lock').dispatchEvent(new Event('animationend'));
+      expect(q('.room-sheet-lock').classList.contains('room-sheet-lock-pulse')).toBe(false);
+    });
+
+    it('marks a locked exit among the action icons', () => {
+      const door = { kind: 'travel' as const, icon: '🌀', name: 'Cellar', targetId: 'cellar', locked: true };
+      sheet.show(makeModel({ actions: [door] }));
+      const action = q('.room-sheet-action');
+      expect(action.classList.contains('room-sheet-action-locked')).toBe(true);
+      expect(action.title).toBe('Cellar · Locked');
+    });
   });
 
   it('routes Go and Details to its handlers', () => {

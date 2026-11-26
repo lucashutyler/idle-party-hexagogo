@@ -120,6 +120,27 @@ export function mergeRoomRequirements(
   return merged;
 }
 
+/** Anything that carries a room gate: a room or a tile type, with the legacy scalar item gate beside it. */
+export interface RoomGateSource {
+  entryRequirements?: RoomEntryRequirements;
+  requiredItemId?: string;
+}
+
+/**
+ * The gate a party must satisfy to enter a room: its tile type's gate, overridden
+ * field by field by the room's own, with the legacy `requiredItemId` folded in at
+ * both levels. Undefined when the room is ungated.
+ */
+export function resolveTileRequirements(
+  tile: RoomGateSource | undefined,
+  tileType: RoomGateSource | undefined,
+): RoomEntryRequirements | undefined {
+  return mergeRoomRequirements(
+    toRoomRequirements(tileType?.entryRequirements, tileType?.requiredItemId),
+    toRoomRequirements(tile?.entryRequirements, tile?.requiredItemId),
+  );
+}
+
 /**
  * Validate whether a party may enter a gated room or take a gated transition.
  * Returns the first unmet requirement, or `null` if entry is allowed.
@@ -136,20 +157,34 @@ export function validateRoomEntry(
   members: RoomEntryMemberInfo[],
   labels?: RoomEntryLabels,
 ): RoomEntryFailure | null {
-  if (!reqs) return null;
+  return validateRoomEntryAll(reqs, members, labels)[0] ?? null;
+}
+
+/**
+ * Every unmet requirement, in the order {@link validateRoomEntry} checks them
+ * (item → level → each quest in list order), so its first entry is exactly
+ * what `validateRoomEntry` returns. Empty when entry is allowed.
+ */
+export function validateRoomEntryAll(
+  reqs: RoomEntryRequirements | undefined,
+  members: RoomEntryMemberInfo[],
+  labels?: RoomEntryLabels,
+): RoomEntryFailure[] {
+  const failures: RoomEntryFailure[] = [];
+  if (!reqs) return failures;
 
   const itemId = reqs.requiredItemId;
   if (itemId) {
     const missingPlayers = members.filter(m => !m.equippedItemIds.has(itemId)).map(m => m.username);
     if (missingPlayers.length > 0) {
       const itemName = labels?.itemName?.(itemId) ?? itemId;
-      return {
+      failures.push({
         kind: 'item',
         itemId,
         itemName,
         missingPlayers,
         reason: `${itemName} is required to enter this room.`,
-      };
+      });
     }
   }
 
@@ -157,12 +192,12 @@ export function validateRoomEntry(
   if (minLevel !== undefined) {
     const missingPlayers = members.filter(m => m.level < minLevel).map(m => m.username);
     if (missingPlayers.length > 0) {
-      return {
+      failures.push({
         kind: 'level',
         minLevel,
         missingPlayers,
         reason: `Level ${minLevel} is required to enter this room.`,
-      };
+      });
     }
   }
 
@@ -170,15 +205,15 @@ export function validateRoomEntry(
     const missingPlayers = members.filter(m => !m.completedQuestIds.has(questId)).map(m => m.username);
     if (missingPlayers.length > 0) {
       const questName = labels?.questName?.(questId) ?? questId;
-      return {
+      failures.push({
         kind: 'quest',
         questId,
         questName,
         missingPlayers,
         reason: `"${questName}" must be completed to enter this room.`,
-      };
+      });
     }
   }
 
-  return null;
+  return failures;
 }

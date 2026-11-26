@@ -282,6 +282,36 @@ describe('RoomView room actions', () => {
     expect(parent.textContent).not.toContain('🕳️');
   });
 
+  it('padlocks a locked exit on its button and in the remote list, and still runs it', () => {
+    const onAction = vi.fn();
+    const view = new RoomView(parent, () => {}, undefined, onAction);
+    const door: RoomAction = { ...ACTIONS[3], locked: true };
+    view.actions = [door];
+    view.show(makeInfo({ isCurrentTile: true }));
+    const button = parent.querySelector<HTMLElement>('.room-view-action-travel')!;
+    expect(button.classList.contains('room-view-action-locked')).toBe(true);
+    expect(button.textContent).toBe('🌀Travel to Darkwood Gate🔒');
+    button.click();
+    expect(onAction).toHaveBeenCalledWith(door);
+
+    view.show(makeInfo());
+    expect(parent.querySelector('.room-view-contents-item')!.textContent).toBe('🌀Darkwood Gate🔒 Locked');
+  });
+
+  it('says why a remote room is out of reach and offers no Go to room', () => {
+    const view = new RoomView(parent, () => {});
+    view.blockedLines = ['Opens later in the story', 'No walking route from here. This area is reached through a door.'];
+    view.show(makeInfo());
+    const lines = [...parent.querySelectorAll('.room-view-lock-line')].map(el => el.textContent);
+    expect(lines).toEqual(['Opens later in the story', 'No walking route from here. This area is reached through a door.']);
+    expect(parent.querySelector('.room-view-action-go')).toBeNull();
+
+    view.blockedLines = [];
+    view.show(makeInfo());
+    expect(parent.querySelector('.room-view-lock')).toBeNull();
+    expect(parent.querySelector('.room-view-action-go')).not.toBeNull();
+  });
+
   it("shows the shop's own artwork, keyed by shop id rather than zone", () => {
     const view = new RoomView(parent, () => {});
     view.actions = ACTIONS;

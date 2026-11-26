@@ -8,6 +8,7 @@ import {
   offsetToCube,
   cubeToPixel,
   cubeToOffset,
+  cubeToKey,
 } from '@idle-party-rpg/shared';
 import type {
   ServerStateMessage,
@@ -15,6 +16,7 @@ import type {
   BattleVisual,
   OtherPlayerState,
   WorldTileDefinition,
+  MapTransitionLink,
 } from '@idle-party-rpg/shared';
 import { classIconHtml } from '@idle-party-rpg/shared';
 import type { WorldCache } from '../network/WorldCache';
@@ -26,9 +28,10 @@ import type { LabelObstacle, ZoneLabelAnchor } from './mapTerrain';
 import { reducedMotion } from './motion';
 import { escapeHtml } from './ItemIcon';
 import { setHtml } from './render';
-import { ROOM_ICONS, getRoomActions, questMarks, questPipClass } from './RoomActions';
+import { LOCKED_DETAIL, ROOM_ICONS, getRoomActions, lockTravel, questMarks, questPipClass } from './RoomActions';
 import type { QuestMarks, RoomAction } from './RoomActions';
 import { pendingVisitTargets, questMarkerKey } from './QuestTargets';
+import { lockPreviewKey } from './RoomEntryCheck';
 
 export interface TileClickInfo {
   col: number;
@@ -44,6 +47,12 @@ export interface TileClickInfo {
   playersHere: { username: string; className?: string; partyId?: string; dungeonName?: string }[];
   partyMemberUsernames: string[];
   dungeonId?: string;
+}
+
+/** Whether the party would be refused, as far as the client can tell. Asked again only when `lockPreviewKey` moves. */
+export interface MapLockChecks {
+  room(tile: HexTile, state: ServerStateMessage): boolean;
+  travel(link: MapTransitionLink, state: ServerStateMessage): boolean;
 }
 
 const MIN_ZOOM = 0.4;
@@ -120,6 +129,26 @@ function revealNudge(pos: number, span: number, margin: number): number {
   return pos < margin ? pos - margin : 0;
 }
 
+/** A component id per walkable room, keyed by cube key: rooms share one when a walk links them. */
+function walkableAreas(grid: HexGrid): Map<string, number> {
+  const areas = new Map<string, number>();
+  let nextArea = 0;
+  for (const start of grid.getAllTiles()) {
+    if (!start.isTraversable || areas.has(start.key)) continue;
+    const area = nextArea++;
+    areas.set(start.key, area);
+    const stack = [start];
+    while (stack.length > 0) {
+      for (const next of grid.getTraversableNeighbors(stack.pop()!.coord)) {
+        if (areas.has(next.key)) continue;
+        areas.set(next.key, area);
+        stack.push(next);
+      }
+    }
+  }
+  return areas;
+}
+
 function hexOutlineSvg(strokeAttrs = ''): string {
   return `<svg viewBox="-40 -35 80 70" width="80" height="70" preserveAspectRatio="xMidYMid meet">
     <polygon points="40,0 20,34.64 -20,34.64 -40,0 -20,-34.64 20,-34.64" fill="none" stroke="currentColor" stroke-width="3"${strokeAttrs} />
@@ -138,6 +167,7 @@ export class ThreeWorldMap {
   private selectedEl: HTMLDivElement;
   private pathEl: HTMLDivElement;
   private questTargetsEl: HTMLDivElement;
+  private locksEl: HTMLDivElement;
   private markersEl: HTMLDivElement;
   private flagsEl: HTMLDivElement;
   private labelsEl: HTMLDivElement;
@@ -184,6 +214,8 @@ export class ThreeWorldMap {
 
   private grid: HexGrid = new HexGrid();
   private worldTileDefs = new Map<string, WorldTileDefinition>();
+  /** Walk-connected area per walkable room, keyed by cube key. */
+  private walkableAreaByKey = new Map<string, number>();
 
   /** World point at screen centre. Maps to camera.position (x, -y) and camera.zoom. */
   private camWorldX = 0;
@@ -214,6 +246,11 @@ export class ThreeWorldMap {
   private questTargetsByRoom = new Map<string, string[]>();
   private questMarkerKey = '';
   private markersDirty = true;
+  private lockChecks: MapLockChecks | null = null;
+  private lockKey = '';
+  private locksDirty = true;
+  /** Rooms with a padlock drawn, keyed by "col,row". */
+  private lockedRooms = new Set<string>();
   private zoneAnchors: ZoneLabelAnchor[] = [];
   private markerSpots: { x: number; y: number; icons: number }[] = [];
 
@@ -283,6 +320,8 @@ export class ThreeWorldMap {
 
     this.pathEl = this.addOverlayLayer('three-map-path');
     this.questTargetsEl = this.addOverlayLayer('three-map-quest-targets');
+    this.locksEl = this.addOverlayLayer('three-map-locks');
+    this.locksEl.setAttribute('aria-hidden', 'true');
     this.labelsEl = this.addOverlayLayer('three-map-zone-labels');
     this.markersEl = this.addOverlayLayer('three-map-markers');
     this.flagsEl = this.addOverlayLayer('three-map-flags');
@@ -368,6 +407,17 @@ export class ThreeWorldMap {
     this.onBackgroundClickFn = fn;
   }
 
+  /** Padlocks rooms and exits these checks refuse, from the next state on. */
+  setLockCheck(checks: MapLockChecks | null): void {
+    this.lockChecks = checks;
+    this.locksDirty = true;
+  }
+
+  /** Which walk-connected area a walkable room belongs to; null for a room that can't be walked into. */
+  getWalkableArea(col: number, row: number): number | null {
+    return this.walkableAreaByKey.get(cubeToKey(offsetToCube({ col, row }))) ?? null;
+  }
+
   /** Told whenever the camera starts or stops following the party. */
   setOnFollowChange(fn: (following: boolean) => void): void {
     this.onFollowChangeFn = fn;
@@ -440,6 +490,7 @@ export class ThreeWorldMap {
     if (unlockedChanged) {
       this.fogDirty = true;
       this.markersDirty = true;
+      this.locksDirty = true;
       if (this.terrainReady) this.requestViewArt();
     }
 
@@ -470,6 +521,11 @@ export class ThreeWorldMap {
       this.questTargets = targets;
       this.markersDirty = true;
     }
+    const lockKey = lockPreviewKey(state);
+    if (lockKey !== this.lockKey) {
+      this.lockKey = lockKey;
+      this.locksDirty = true;
+    }
 
     const viewChanged = firstState || mapChanged;
     if (viewChanged) this.setFollowing(true);
@@ -483,8 +539,9 @@ export class ThreeWorldMap {
 
     this.updatePartyOverlay();
     this.updatePathOverlay();
+    if (this.locksDirty) this.updateLocksOverlay(state);
     const markersRebuilt = this.markersDirty;
-    if (markersRebuilt) this.updateMarkersOverlay();
+    if (markersRebuilt) this.updateMarkersOverlay(state);
     if (markersRebuilt || zoneChanged || partyMoved) this.refreshZoneLabels();
     this.updateFlagsOverlay();
     this.updateBattleVisualClass();
@@ -618,6 +675,7 @@ export class ThreeWorldMap {
       grid.addTile(tile);
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }
+    this.walkableAreaByKey = walkableAreas(grid);
 
     const { rooms, landmarks } = this.buildBakeRooms(grid);
     this.baker.setRooms(rooms, landmarks, room => this.worldCache.isUnlocked(room.col, room.row), mapChanged);
@@ -626,6 +684,7 @@ export class ThreeWorldMap {
     this.coastDirty = true;
     this.fogDirty = true;
     this.markersDirty = true;
+    this.locksDirty = true;
 
     return grid;
   }
@@ -1133,12 +1192,14 @@ export class ThreeWorldMap {
     const key = `${off.col},${off.row}`;
     const def = this.worldTileDefs.get(key);
     const zoneName = def?.zoneName ?? def?.zone ?? tile.zone;
-    if (!this.worldCache.isUnlocked(off.col, off.row)) return [`${zoneName}: Unexplored Room`];
+    const lockLine = this.lockedRooms.has(key) ? [`${ROOM_ICONS.lock} ${LOCKED_DETAIL}`] : [];
+    if (!this.worldCache.isUnlocked(off.col, off.row)) return [`${zoneName}: Unexplored Room`, ...lockLine];
 
     const questLines = (this.questTargetsByRoom.get(key) ?? []).map(name => `${QUEST_TARGET_ICON} ${name}`);
-    const lines = [`${zoneName}: ${def?.name || 'Unexplored Room'}`];
+    const lines = [`${zoneName}: ${def?.name || 'Unexplored Room'}`, ...lockLine];
     for (const action of this.roomActions.get(key) ?? []) {
-      lines.push(`${action.icon} ${action.name}${action.detail ? ` · ${action.detail}` : ''}`);
+      const detail = action.locked ? LOCKED_DETAIL : action.detail;
+      lines.push(`${action.icon} ${action.name}${detail ? ` · ${detail}` : ''}`);
     }
     lines.push(...questLines);
     const others = this.countOthersAt(off.col, off.row);
@@ -1504,8 +1565,9 @@ export class ThreeWorldMap {
     const explored = [];
     for (const room of this.baker.rooms) {
       if (!room.traversable || !this.worldCache.isUnlocked(room.col, room.row)) continue;
-      const def = this.worldTileDefs.get(`${room.col},${room.row}`);
-      const busy = this.roomActions.has(`${room.col},${room.row}`) || this.nearPartyToken(room.x, room.y);
+      const key = `${room.col},${room.row}`;
+      const def = this.worldTileDefs.get(key);
+      const busy = this.roomActions.has(key) || this.lockedRooms.has(key) || this.nearPartyToken(room.x, room.y);
       explored.push({ zone: room.zone, zoneName: def?.zoneName ?? def?.zone ?? room.zone, x: room.x, y: room.y, busy });
     }
     this.zoneAnchors = zoneLabelAnchors(explored);
@@ -1635,20 +1697,57 @@ export class ThreeWorldMap {
     setHtml(this.flagsEl, html.join(''));
   }
 
-  private updateMarkersOverlay(): void {
+  private updateMarkersOverlay(state: ServerStateMessage): void {
     this.markersDirty = false;
     this.roomActions.clear();
     this.markerSpots = [];
     const markers = document.createDocumentFragment();
     for (const [key, def] of this.worldTileDefs) {
       if (!this.worldCache.isUnlocked(def.col, def.row)) continue;
-      const actions = getRoomActions(def, this.worldCache, this.questMarks);
+      const actions = this.markerActions(key, def, state);
       if (actions.length === 0) continue;
       this.roomActions.set(key, actions);
       markers.appendChild(this.buildMarker(def.col, def.row, actions));
     }
     this.markersEl.replaceChildren(markers);
     this.updateQuestTargetsOverlay();
+  }
+
+  /** The padlock stands in for what a locked room holds; only its exits still show. */
+  private markerActions(key: string, def: WorldTileDefinition, state: ServerStateMessage): RoomAction[] {
+    const actions = getRoomActions(def, this.worldCache, this.questMarks);
+    const checks = this.lockChecks;
+    const withLocks = checks ? lockTravel(actions, def, link => checks.travel(link, state)) : actions;
+    return this.lockedRooms.has(key) ? withLocks.filter(action => action.kind === 'travel') : withLocks;
+  }
+
+  /** One padlock per walkable room the checks refuse, in zones the player knows. Rebuilt only when `locksDirty`. */
+  private updateLocksOverlay(state: ServerStateMessage): void {
+    this.locksDirty = false;
+    this.markersDirty = true;
+    this.lockedRooms.clear();
+    const padlocks = document.createDocumentFragment();
+    const checks = this.lockChecks;
+    if (checks) {
+      for (const tile of this.grid.getAllTiles()) {
+        if (!tile.isTraversable || !this.worldCache.isZoneUnlocked(tile.zone)) continue;
+        if (!checks.room(tile, state)) continue;
+        const { col, row } = cubeToOffset(tile.coord);
+        this.lockedRooms.add(`${col},${row}`);
+        padlocks.appendChild(this.buildPadlock(tile));
+      }
+    }
+    this.locksEl.replaceChildren(padlocks);
+  }
+
+  private buildPadlock(tile: HexTile): HTMLElement {
+    const p = tile.pixelPosition;
+    const el = document.createElement('div');
+    el.className = 'three-map-lock';
+    el.style.left = `${p.x}px`;
+    el.style.top = `${p.y}px`;
+    el.textContent = ROOM_ICONS.lock;
+    return el;
   }
 
   /** Outlines every explored room on this map that an active quest still sends the party to. */
@@ -1682,12 +1781,13 @@ export class ThreeWorldMap {
     marker.style.left = `${p.x}px`;
     marker.style.top = `${p.y + HEX_SIZE * 0.55}px`;
 
-    const firstExit = actions.find(a => a.kind === 'travel');
+    const exits = actions.filter(a => a.kind === 'travel');
+    const firstExit = exits.find(a => !a.locked) ?? exits[0];
     const icons = [...actions.filter(a => a.kind !== 'travel'), ...(firstExit ? [firstExit] : [])];
     this.markerSpots.push({ x: p.x, y: p.y + HEX_SIZE * 0.55, icons: Math.min(icons.length, MAX_MARKER_ICONS + 1) });
     for (const action of icons.slice(0, MAX_MARKER_ICONS)) {
       const icon = document.createElement('span');
-      icon.className = ['three-map-marker-icon', questPipClass(action)].filter(Boolean).join(' ');
+      icon.className = ['three-map-marker-icon', questPipClass(action), action.locked ? 'travel-lock-pip' : ''].filter(Boolean).join(' ');
       icon.textContent = action.icon;
       marker.appendChild(icon);
     }
