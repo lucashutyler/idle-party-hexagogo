@@ -94,8 +94,9 @@ function objectiveLine(
   if (objective.kind !== 'visit') return { kind: 'main', title, detail, action: { type: 'log' } };
 
   const room = lookups.getTileByGuid(objective.tileId);
-  if (room?.mapId === state.currentMapId) return { kind: 'main', title, detail, action: { type: 'room', roomId: objective.tileId } };
-  return { kind: 'main', title, detail: `${detail}${onMapText(room?.mapId, lookups)}`, action: { type: 'log' } };
+  if (room?.mapId !== state.currentMapId) return { kind: 'main', title, detail: `${detail}${onMapText(room?.mapId, lookups)}`, action: { type: 'log' } };
+  const explored = state.unlocked?.includes(objective.tileId) ?? false;
+  return { kind: 'main', title, detail, action: explored ? { type: 'room', roomId: objective.tileId } : { type: 'log' } };
 }
 
 function talkLine(step: MainStoryStep, state: TrackerState, lookups: TrackerLookups): TrackerLine {

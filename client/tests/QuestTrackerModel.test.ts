@@ -119,14 +119,25 @@ describe('trackerLine', () => {
     expect(trackerLine(s, LOOKUPS)).toEqual({ kind: 'main', title: 'Title m1', detail: 'Pelt 0/1', action: { type: 'log' } });
   });
 
-  it('opens a visit room on this map, and names the map of one elsewhere', () => {
-    const visit = (tileId: string) => state({
+  it('opens an explored visit room on this map, and names the map of one elsewhere', () => {
+    const visit = (tileId: string, unlocked: string[] = ['r-mill', 'r-deep']) => state({
       activeQuests: [active('m1', 'accepted', [0])],
       questDefinitions: { m1: quest('m1', { objectives: [{ kind: 'visit', tileId }] }) },
       questGuide: guide([step('m1', { status: 'active' })], ['m1']),
+      unlocked,
     });
     expect(trackerLine(visit('r-mill'), LOOKUPS)).toEqual({ kind: 'main', title: 'Title m1', detail: 'Visit Mill', action: { type: 'room', roomId: 'r-mill' } });
     expect(trackerLine(visit('r-deep'), LOOKUPS)).toEqual({ kind: 'main', title: 'Title m1', detail: 'Visit Deep Hall on the Cellar map', action: { type: 'log' } });
+  });
+
+  it('keeps an unexplored visit destination off the map, as the map itself does', () => {
+    const s = state({
+      activeQuests: [active('m1', 'accepted', [0])],
+      questDefinitions: { m1: quest('m1', { objectives: [{ kind: 'visit', tileId: 'r-mill' }] }) },
+      questGuide: guide([step('m1', { status: 'active' })], ['m1']),
+      unlocked: [],
+    });
+    expect(trackerLine(s, LOOKUPS)).toEqual({ kind: 'main', title: 'Title m1', detail: 'Visit Mill', action: { type: 'log' } });
   });
 
   it('skips a main quest whose definition is missing', () => {

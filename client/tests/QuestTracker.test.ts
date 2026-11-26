@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NpcDefinition, QuestDefinition, QuestGuide, QuestProgressEntry, ServerStateMessage, WorldMapMeta } from '@idle-party-rpg/shared';
 import { QuestTracker, type QuestTrackerLookups } from '../src/ui/QuestTracker';
@@ -99,6 +101,7 @@ describe('QuestTracker', () => {
       activeQuests: [active('m1', [0])],
       questDefinitions: { m1: quest('m1', { objectives: [{ kind: 'visit', tileId: 'r-mill' }] }) },
       questGuide: mainGuide('m1'),
+      unlocked: ['r-mill'],
     });
     t.button()!.click();
     expect(t.actions.showRoom).toHaveBeenCalledWith('r-mill');
@@ -140,5 +143,36 @@ describe('QuestTracker', () => {
       vi.advanceTimersByTime(0);
       expect(t.button()!.textContent).toContain('Rat 3/5');
     });
+  });
+});
+
+describe('quest line hit areas', () => {
+  const css = readFileSync(resolve(__dirname, '../src/styles/combat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector.trim(), body }));
+  const px = (body: string, prop: string) => {
+    const match = new RegExp(`(?:^|;|\\s)${prop}:\\s*(-?\\d+(?:\\.\\d+)?)px`).exec(body);
+    return match ? Number(match[1]) : undefined;
+  };
+  const insetBottom = (body: string) => {
+    const parts = /inset:\s*([^;]+);/.exec(body)?.[1].trim().split(/\s+/).map(v => Number.parseFloat(v));
+    if (!parts) return px(body, 'bottom');
+    return parts.length === 1 ? parts[0] : parts[2] ?? parts[0];
+  };
+
+  it('keeps the header buttons from taking taps meant for a shown quest line', () => {
+    const slop = rules.find(r => r.selector.includes('.combat-run-btn::after') && !r.selector.includes('quest-tracker'));
+    expect(slop && insetBottom(slop.body)).toBeLessThan(-4);
+
+    for (const button of ['.combat-run-btn', '.combat-dungeon-leave', '.combat-forecast']) {
+      const trimmed = rules.find(r => r.selector.includes('.combat-quest-tracker:not([hidden])') && r.selector.includes(button) && r.selector.includes('::after'));
+      expect(trimmed, button).toBeDefined();
+      expect(px(trimmed!.body, 'bottom')).toBeGreaterThanOrEqual(-4);
+    }
+  });
+
+  it('gives the 24px line hit-slop into the stage', () => {
+    const slop = rules.find(r => r.selector === '.quest-tracker::before');
+    expect(slop).toBeDefined();
+    expect(insetBottom(slop!.body)).toBeLessThanOrEqual(-10);
   });
 });

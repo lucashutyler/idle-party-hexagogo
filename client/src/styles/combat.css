@@ -310,6 +310,7 @@
   display: none;
 }
 .quest-tracker {
+  position: relative;
   appearance: none;
   display: flex;
   align-items: center;
@@ -329,6 +330,11 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+}
+.quest-tracker::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 -12px;
 }
 .quest-tracker::after {
   content: '›';
@@ -381,6 +387,14 @@
 @media (max-height: 500px) {
   .combat-quest-tracker {
     display: none;
+  }
+}
+/* A shown quest line sits where the Run / Leave / forecast hit-slop would reach. */
+@media not all and (max-height: 500px) {
+  .combat-header:has(+ .combat-quest-tracker:not([hidden])) .combat-run-btn::after,
+  .combat-header:has(+ .combat-quest-tracker:not([hidden])) .combat-dungeon-leave::after,
+  .combat-header:has(+ .combat-quest-tracker:not([hidden])) .combat-forecast::after {
+    bottom: -4px;
   }
 }
 

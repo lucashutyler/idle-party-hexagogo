@@ -329,17 +329,31 @@ Without `questGuide` (an older server mid-deploy) the log keeps its earlier layo
 
 ## Battle tracker
 
-`client/src/ui/QuestTracker.ts` renders one `<button class="quest-tracker">` into `.combat-quest-tracker`, a 24px line that `CombatScreen.buildDOM` puts between `.combat-header` and `.combat-stage` (Battle only). It subscribes with `{ replay: true }` and paints through `setHtml` under `deferWhilePressed`; with nothing to say the line is `hidden` and the stage keeps its height. It is one line with an ellipsis and a gold "Main" label, uses tokens only and never animates, and it is hidden under 500px tall (short landscape), where the stage needs every pixel. `.combat-stage` is a size container, so a shown line takes 24px from the stage. In the 1500px grid it has its own `auto` row.
+`client/src/ui/QuestTracker.ts` renders one `<button class="quest-tracker">` into `.combat-quest-tracker`, a 24px line that `CombatScreen.buildDOM` puts between `.combat-header` and `.combat-stage` (Battle only). It subscribes with `{ replay: true }` and paints through `setHtml` under `deferWhilePressed`; with nothing to say the line is `hidden` and the stage keeps its height. It is one line with an ellipsis and a gold "Main" label, uses tokens only and never animates, and it is hidden under 500px tall (short landscape), where the stage needs every pixel. `.combat-stage` is a size container, so a shown line takes 24px from the stage. In the 1500px grid it has its own `auto` row. Its hit-slop reaches 12px into the stage (whose cards start below the lane-label gutter). While the line shows, the Run, Leave and forecast hit-slop stops at the header's bottom edge (`:has()` on the header), so a tap on the line can never send Run.
 
 What it says comes from `trackerLine(state, lookups)` (`client/src/ui/QuestTrackerModel.ts`, DOM-free and exported for reuse); the first match wins:
 
 1. A main quest ready to turn in: "Turn in to {npc}" — the NPC here when `questGiverNpcId` offers it, else a room from `turnInLocations` on this map, else the Quest Log with "on the {map} map".
-2. The first active main quest in guide order with an unfinished objective, in short form ("{monster} 9/15", "Visit {room}", "{item} 0/1"): a visit room on this map opens that room; anything else opens the Quest Log (a visit on another map adds "on the {map} map"). A quest whose definition is missing is skipped.
+2. The first active main quest in guide order with an unfinished objective, in short form ("{monster} 9/15", "Visit {room}", "{item} 0/1"): an explored visit room on this map opens that room; anything else opens the Quest Log (a visit on another map adds "on the {map} map"). An unexplored destination stays off the map, as in [Quest destinations](#quest-destinations). A quest whose definition is missing is skipped.
 3. The first available step: "Talk to {npc}" — the NPC here, else the giver's room on this map, else the Quest Log with the map name.
 4. A level-locked step: "Reach level {N}" (opens the Quest Log).
 5. With no main step, someone here has a quest the player can take (`offeredQuestIds` ∩ `availableQuestIds`): "{npc} has work for you", green, without the Main label.
 
 A tap runs the line's action through `CombatScreen.setQuestTrackerActions`, which `App` wires to `questLog.open()` and to `navigate('map')` + `MapScreen.focusRoom(roomId)`. An `npc` action resolves to the party's own room when the NPC stands there (else one of its rooms on this map) and shows it; the room card there carries the Talk action.
+
+## Social screen
+
+The rules are in [`social.md`](social.md); this is the rendering. `.social-panel` is a container named `social-panel`, and the party view goes two-column from 700px of panel width.
+
+**Party grid.** The grid is compact: 48px rows, faint dashed spots instead of "Empty" text, a gold border on your own cell, keyboard-operable cells and a one-line hint. Member actions wrap only when they don't fit, and Leave Party is a quiet button at the bottom. While `lastState.dungeon` is set, the Leave Party and Kick confirms add that the party's dungeon run will end for everyone (or that your own will, when you are alone), and Accept on an invite asks first with the same warning; outside a dungeon Accept stays one tap. A refused party action shows its reason as a toast.
+
+**Party grid drag.** Drag starts on the panel; document `touchmove`, `touchend`, `touchcancel` and mouse listeners exist only for the drag's lifetime, so scrolling is never blocked otherwise. The ghost moves by transform. A drop swaps the cells optimistically ahead of the server's answer, and `scheduleGridResync` re-renders after 1.5 s, because a refused move produces no state change that would undo the swap. A timer finishes the 200 ms move animation if `animationend` never fires, which would otherwise freeze the panel. Enter on a cell keeps focus through the repaint.
+
+**Ranks windowing.** The list shows 100 rows plus your own, and grows by 100 on scroll or Show more. `patchRankRows` writes only the rows whose markup changed, so a level-up elsewhere doesn't rebuild the list, and the panel empties when you leave the screen. Rows use `content-visibility: auto`, search is debounced 120 ms, and status dots update only when someone comes or goes (`syncStatusDots`).
+
+## Login and class pick
+
+`LoginScreen` is a real form and label with an "Email me a sign-in code" button, a `role=alert` error and the logo from tracked art (the wordmark shows without art); after sending, the same form shows a labelled sign-in code field. The keyboard auto-opens only on fine pointers. The flow is in [`auth.md`](auth.md). Username, Approve and Verify share `.login-form`. `ClassSelectScreen` shows class art over the class icon in a radio group with arrow keys and a sticky "Play as X". Each card gives damage as it hits in play, with the per-level gain to one decimal, and "Acts every N seconds" to one decimal. `CLASS_CHOICE_TIMEOUT_MS` (10 s) shows a no-answer error, with server refusal and offline paths; a reply that arrives after the timeout still enters the game.
 
 ## Combat screen
 
