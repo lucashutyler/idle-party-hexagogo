@@ -1953,12 +1953,17 @@ export class PartyBattleManager {
     return !!candidate && isKnownSafe(candidate, belowPct);
   }
 
-  /** Whether the room behind a scheduled door retreat is still one it would take: open, with a way back, known to win. */
+  /**
+   * Whether the room behind a scheduled door retreat is still one it would take: open, with a way back, known to win,
+   * and the route's own door not now safe instead.
+   */
   private retreatDoorStillSafe(entry: PartyBattleEntry, tileId: string): boolean {
     const battle = entry.battle;
     const belowPct = this.retreatThreshold(entry);
     if (!battle || belowPct <= 0) return false;
-    const candidate = this.doorRetreatCandidates(entry, battle.partyKey ?? partyKeyOf(battle.players)).find(c => c.tile.id === tileId);
+    const doors = this.doorRetreatCandidates(entry, battle.partyKey ?? partyKeyOf(battle.players));
+    if (this.routeDoorIsSafe(entry, doors, belowPct)) return false;
+    const candidate = doors.find(c => c.tile.id === tileId);
     return !!candidate && isKnownSafe(candidate, belowPct);
   }
 

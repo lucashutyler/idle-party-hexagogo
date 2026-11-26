@@ -426,4 +426,65 @@ describe('auto-retreat when the next step of the route is a door', () => {
     expect(w.journal().some(l => l.startsWith('Your party stopped at Room e2:'))).toBe(true);
     expect(w.journal()).not.toContain('Traveled to Room b0.');
   });
+
+  it('keeps the later doors of a longer route once it has crossed the first', async () => {
+    const w = await doorWorld();
+    w.placeParty('alice', 'e2');
+    w.reveal('alice', 'e1', 'e2', 'b0', 'b1', 'b2', 'p0', 'p1');
+    w.verdicts({ e2: LOSING, e1: LOSING, b0: SAFE });
+    w.prefill('e2', 'e1', 'b0');
+    expect(w.pm.partyBattles.handleMoveToRoom(w.partyId(), ROOM.p1, ['no_way_back'])).toEqual({ success: true });
+    w.pm.partyBattles.restartBattle(w.partyId());
+    vi.advanceTimersByTime(CROSSED_MS);
+    expect(w.roomOf('alice')).toBe(ROOM.b0);
+    expect(route(w)).toMatchObject({ destinationId: ROOM.p1, doors: 1 });
+
+    w.pm.handleSetAutoRun('alice', true);
+    vi.advanceTimersByTime(10_000);
+    expect(w.roomOf('alice')).toBe(ROOM.p1);
+    expect(w.retreatLines()).toEqual([]);
+  });
+
+  it('lets the route cross when its door opens while a retreat through another door waits out the grace', async () => {
+    const w = await doorWorld(['alice'], { extraDoors: { w2: ['e2'], e2: ['w2'] } });
+    w.placeParty('alice', 'w2');
+    w.reveal('alice', 'e1', 'e2', 'b0', 'b1', 'b2');
+    w.verdicts({ e2: LOSING, e1: LOSING, w2: SAFE, b0: SAFE });
+    w.prefill('e2', 'e1', 'w2', 'b0');
+    expect(w.pm.partyBattles.enterTransition(w.partyId(), ROOM.e2)).toEqual({ success: true });
+    expect(w.pm.partyBattles.handleMoveToRoom(w.partyId(), ROOM.b2)).toEqual({ success: true });
+    w.world.tiles.find(t => t.id === ROOM.e2)!.transitions![0].entryRequirements = { minLevel: 2 };
+    w.pm.partyBattles.restartBattle(w.partyId());
+    expect(w.entry().pendingRetreat?.kind).toBe('door');
+    const stopped = vi.spyOn(w.pm.partyBattles, 'recordRouteStopped');
+
+    vi.advanceTimersByTime(DOOR_RETREAT_GRACE_MS / 2);
+    w.levelTo('alice', 2);
+    vi.advanceTimersByTime(DOOR_RETREAT_GRACE_MS / 2 + CROSSED_MS);
+    expect(w.roomOf('alice')).toBe(ROOM.b0);
+    expect(path(w)).toEqual([ROOM.b1, ROOM.b2]);
+    expect(stopped).not.toHaveBeenCalled();
+    expect(avoided(w)).toHaveLength(1);
+    expect(w.retreatLines()).toEqual([]);
+  });
+
+  it('decides afresh, with no loop, once the route\'s door step refuses the crossing', async () => {
+    const w = await doorWorld(['alice'], { gates: { b1: {} } });
+    w.placeParty('alice', 'e2');
+    w.reveal('alice', 'e1', 'e2', 'b0', 'b1', 'b2');
+    w.verdicts({ e2: LOSING, e1: LOSING, b0: SAFE });
+    w.prefill('e2', 'e1', 'b0');
+    expect(w.pm.partyBattles.handleMoveToRoom(w.partyId(), ROOM.b2)).toEqual({ success: true });
+    w.pm.partyBattles.restartBattle(w.partyId());
+    expect(w.entry().pendingRetreat?.kind).toBe('skip');
+    w.world.tiles.find(t => t.id === ROOM.b1)!.entryRequirements!.minLevel = 5;
+
+    vi.advanceTimersByTime(CROSSED_MS);
+    expect(w.roomOf('alice')).toBe(ROOM.e2);
+    expect(route(w)).toBeUndefined();
+    vi.advanceTimersByTime(120_000);
+    expect(w.roomOf('alice')).toBe(ROOM.b0);
+    expect(w.journal().filter(l => l.startsWith('Your party stopped at'))).toEqual([expect.stringMatching(/^Your party stopped at Room e2: /)]);
+    expect(w.retreatLines()).toEqual(['Auto-retreat took your party through the door from Room e2 to Room b0 — Room e2 was too dangerous (win chance 0%)']);
+  });
 });
