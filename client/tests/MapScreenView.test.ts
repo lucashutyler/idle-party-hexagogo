@@ -485,6 +485,17 @@ describe('Go to a room by id', () => {
     expect(document.querySelector('.room-sheet-go')!.textContent).toBe('Setting off…');
   });
 
+  it('drops a waiting Go when the player leaves the Map before it is built', async () => {
+    const m = await mount(partyState(), screen => {
+      screen.goToRoomById('v2');
+      screen.onDeactivate();
+    });
+    m.screen.onActivate();
+    await tick();
+    expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
+    expect(sheetOpen()).toBe(true);
+  });
+
   it('lets a later focus on the first visit replace a waiting Go', async () => {
     const m = await mount(partyState(), screen => {
       screen.goToRoomById('v2');

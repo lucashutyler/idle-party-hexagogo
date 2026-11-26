@@ -297,6 +297,7 @@ export class MapScreen implements Screen {
     this.dismissSheet();
     this.closeLockDialog();
     this.pendingTravel = null;
+    this.pendingGoRoomId = null;
     this.roomView?.hide();
     this.mapList?.close();
     if (this.viewBanner) release(this.viewBanner);
