@@ -44,6 +44,8 @@ export {
   validateRoomEntry,
   validateRoomEntryAll,
 } from './systems/RoomRequirements.js';
+export { collectGates } from './systems/GateIndex.js';
+export type { GateRef } from './systems/GateIndex.js';
 export type {
   RoomGateSource,
   RoomEntryRequirements,

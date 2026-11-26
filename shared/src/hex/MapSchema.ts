@@ -36,6 +36,8 @@ export interface WorldTileDefinition {
   zoneName?: string;
   /** No pack this room can roll pays anyone XP — populated by server when sending to clients. */
   noXp?: boolean;
+  /** Authored monster levels of this room's own encounter table, [min, max] — populated by server when sending to clients. */
+  levels?: [number, number];
   /** Optional per-room encounter table — overrides the zone's default encounters. */
   encounterTable?: EncounterTableEntry[];
   /** Optional shop assigned to this room. */

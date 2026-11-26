@@ -146,6 +146,19 @@ describe('moments', () => {
     expect(l.moments.map(m => m.at)).toEqual([47, 48, 49, 50]);
     expect(topAwayMoments(l, 2).map(m => m.kind)).toEqual(['level_up', 'rare_item']);
   });
+
+  it('ranks a lock opening with first clears and a quest ready with rare finds', () => {
+    let l = fresh();
+    const kinds: AwayMomentKind[] = ['mastery', 'quest_ready', 'eject', 'opened', 'level_up'];
+    kinds.forEach((kind, i) => { l = addAwayMoment(l, { at: i, kind, text: kind }); });
+    expect(topAwayMoments(l, 5).map(m => m.kind)).toEqual(['level_up', 'opened', 'quest_ready', 'eject', 'mastery']);
+
+    l = addAwayMoment(fresh(), { at: 1, kind: 'first_clear', text: 'first' });
+    l = addAwayMoment(l, { at: 2, kind: 'opened', text: 'opened' });
+    l = addAwayMoment(l, { at: 3, kind: 'rare_item', text: 'rare' });
+    l = addAwayMoment(l, { at: 4, kind: 'quest_ready', text: 'ready' });
+    expect(topAwayMoments(l, 4).map(m => m.kind)).toEqual(['opened', 'first_clear', 'quest_ready', 'rare_item']);
+  });
 });
 
 describe('recap style', () => {
@@ -156,6 +169,12 @@ describe('recap style', () => {
     expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'eject', text: 'e' }), 12 * MIN)).toBe('modal');
     expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'run_ended', text: 'e' }), 12 * MIN)).toBe('modal');
     expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'relocate', text: 'r' }), 12 * MIN)).toBe('toast');
+  });
+
+  it('shows the modal for a quest ready to turn in or a lock that opened', () => {
+    const l = recordAwayBattle(fresh(0), { won: true });
+    expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'quest_ready', text: 'q' }), 12 * MIN)).toBe('modal');
+    expect(awayRecapStyle(addAwayMoment(l, { at: 1, kind: 'opened', text: 'o' }), 12 * MIN)).toBe('modal');
   });
 });
 
@@ -191,5 +210,11 @@ describe('mergeAwayLedgers', () => {
     const m = mergeAwayLedgers(a, b);
     expect(m.moments).toHaveLength(AWAY_MAX_MOMENTS);
     expect(m.moments.every(x => x.kind === 'level_up')).toBe(true);
+  });
+
+  it('sums items left behind', () => {
+    const a = recordAwayItemsLost(fresh(0), 2);
+    const b = recordAwayItemsLost(fresh(0), 3);
+    expect(mergeAwayLedgers(a, b).itemsLost).toBe(5);
   });
 });

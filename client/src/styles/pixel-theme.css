@@ -239,6 +239,11 @@ button, input, select, textarea {
   color: var(--accent-gold);
 }
 
+.log-entry.opened {
+  color: var(--accent-gold);
+  font-weight: 800;
+}
+
 /* Damage type color coding */
 .dmg-physical { color: var(--accent-orange); }
 .dmg-magical { color: var(--dmg-magical); }

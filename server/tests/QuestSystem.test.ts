@@ -376,5 +376,33 @@ describe('QuestSystem', () => {
       expect(events).toContain('ready');
       expect(events).toContain('turned_in');
     });
+
+    it('fires ready from recomputeCollect once per transition, not again while still ready', () => {
+      const ready: string[] = [];
+      const local = new QuestSystem('bob', (e) => { if (e.type === 'ready') ready.push(e.questId); });
+      local.accept(collectPelts, { playerLevel: 1, partySize: 1 });
+
+      local.recomputeCollect(allQuests, () => 4);
+      expect(ready).toEqual([]);
+      local.recomputeCollect(allQuests, () => 5);
+      local.recomputeCollect(allQuests, () => 7);
+      expect(ready).toEqual(['collect_pelts']);
+
+      local.recomputeCollect(allQuests, () => 2);
+      local.recomputeCollect(allQuests, () => 5);
+      expect(ready).toEqual(['collect_pelts', 'collect_pelts']);
+    });
+
+    it('does not fire ready for a restored quest that was already ready', () => {
+      const ready: string[] = [];
+      const local = new QuestSystem('bob', (e) => { if (e.type === 'ready') ready.push(e.questId); });
+      local.loadFromSaveData({
+        active: [{ questId: 'collect_pelts', status: 'ready', progress: [5], acceptedAt: '2026-01-01T00:00:00.000Z' }],
+        completed: [],
+        weeklyCompletions: {},
+      }, allQuests);
+      local.recomputeCollect(allQuests, () => 5);
+      expect(ready).toEqual([]);
+    });
   });
 });

@@ -1,5 +1,16 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.7',
+    notes: [
+      'When your bags are full, the log now says how many items couldn\'t be carried, from fights, crafting and quest rewards. The summary when you come back counts them too, with a Hero button to sell some.',
+      'Coming back after time away now shows the quests you can turn in and your next main-story step.',
+      'The log tells you when a quest is ready to turn in.',
+      'When a locked room or door opens for you, you get a Now open message.',
+      'The log now says new rooms were "discovered" instead of "unlocked".',
+      'Fights that pay no XP no longer write +0 XP in the log.',
+    ],
+  },
+  {
     version: '2026.11.25.5',
     notes: [
       'Party invites now stay on screen with Join and Decline buttons, wherever you are.',
