@@ -569,15 +569,20 @@ export class SocialScreen implements Screen {
       leader: social.guild?.leaderUsername ?? null,
       self: this.lastState?.username ?? null,
       members: (social.guildMembers ?? []).map(m => `${m.username}:${m.role}:${onlineSet.has(m.username) ? 1 : 0}:${this.playerEntry(m.username)?.level ?? ''}`),
-      invites: (social.guildInvites ?? []).map(i => `${i.guildId}:${i.guildName}:${i.inviterUsername}`),
-      canCreate: this.selfLevel() >= MIN_GUILD_LEVEL,
     });
   }
 
+  /** Without a guild the panel holds the name field, so invites and the level reason are patched in place. */
   private updateGuildPanel(): void {
     const social = this.lastSocial;
     if (!social) return;
-    if (this.guildPanelKey(social) !== this.lastRenderedGuildKey) this.renderGuildPanel();
+    if (this.guildPanelKey(social) !== this.lastRenderedGuildKey) {
+      this.renderGuildPanel();
+      return;
+    }
+    if (social.guild) return;
+    this.renderGuildInvites();
+    this.syncGuildCreateButton();
   }
 
   private updatePartyPanel(): void {
@@ -1219,6 +1224,7 @@ export class SocialScreen implements Screen {
     const guild = social.guild;
     if (!guild) {
       setHtml(this.panelContainer, this.guildCreateHtml());
+      this.renderGuildInvites();
       this.syncGuildCreateButton();
       return;
     }
@@ -1258,12 +1264,8 @@ export class SocialScreen implements Screen {
   }
 
   private guildCreateHtml(): string {
-    const level = this.selfLevel();
-    const note = level >= MIN_GUILD_LEVEL
-      ? 'Pick a name to start your guild.'
-      : `Starting a guild needs level ${MIN_GUILD_LEVEL}. You are level ${level}.`;
     return `
-      ${this.guildInvitesHtml(this.lastSocial?.guildInvites ?? [])}
+      <div class="social-guild-invites"></div>
       <div class="social-guild-create">
         <div class="social-guild-create-title">You are not in a guild</div>
         <div class="social-guild-note">Ask any guild member to invite you, or start your own.</div>
@@ -1271,9 +1273,14 @@ export class SocialScreen implements Screen {
           <input class="social-search social-guild-name-input" type="text" placeholder="Guild name..." aria-label="Guild name" maxlength="20" autocomplete="off" value="${this.escapeHtml(this.guildNameDraft)}" />
           <button type="button" class="social-action-btn add-friend social-guild-create-btn">Create Guild</button>
         </div>
-        <div class="social-guild-note social-guild-reason">${note}</div>
+        <div class="social-guild-note social-guild-reason"></div>
       </div>
     `;
+  }
+
+  private renderGuildInvites(): void {
+    const list = this.panelContainer.querySelector('.social-guild-invites');
+    if (list) setHtml(list, this.guildInvitesHtml(this.lastSocial?.guildInvites ?? []));
   }
 
   private guildInvitesHtml(invites: readonly GuildInviteInfo[]): string {
@@ -1298,11 +1305,17 @@ export class SocialScreen implements Screen {
 
   private syncGuildCreateButton(): void {
     const btn = this.panelContainer.querySelector<HTMLButtonElement>('.social-guild-create-btn');
-    const eligible = this.selfLevel() >= MIN_GUILD_LEVEL;
+    const level = this.selfLevel();
+    const eligible = level >= MIN_GUILD_LEVEL;
     const named = !!this.guildNameDraft.trim();
     if (btn) btn.disabled = !eligible || !named;
     const reason = this.panelContainer.querySelector<HTMLElement>('.social-guild-reason');
-    if (reason) reason.hidden = eligible && named;
+    if (!reason) return;
+    const text = eligible
+      ? 'Pick a name to start your guild.'
+      : `Starting a guild needs level ${MIN_GUILD_LEVEL}. You are level ${level}.`;
+    if (reason.textContent !== text) reason.textContent = text;
+    reason.hidden = eligible && named;
   }
 
   // ── Party panel ──────────────────────────────────────────────

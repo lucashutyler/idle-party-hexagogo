@@ -33,13 +33,13 @@ describe('GuildSystem', () => {
       expect(typeof guilds.createGuild('Mira', 'Just Right', 5)).not.toBe('string');
     });
 
-    it.each(['‮snretnaL', 'Lan⁦terns', '‪‬'])('refuses a name with text direction controls: %j', (name) => {
+    it.each(['\u{202E}snretnaL', 'Lan\u{2066}terns', '\u{202A}\u{202C}'])('refuses a name with text direction controls: %j', (name) => {
       expect(guilds.createGuild('Mira', name, MIN_GUILD_LEVEL)).toBe('Guild name has characters that can\'t be used');
       expect(guilds.getPlayerGuild('Mira')).toBeNull();
     });
 
     it('keeps a name with a zero-width joiner', () => {
-      expect(typeof guilds.createGuild('Mira', 'Fox‍Hall', MIN_GUILD_LEVEL)).not.toBe('string');
+      expect(typeof guilds.createGuild('Mira', 'Fox\u{200D}Hall', MIN_GUILD_LEVEL)).not.toBe('string');
     });
 
     it('closes the founder\'s invites', () => {

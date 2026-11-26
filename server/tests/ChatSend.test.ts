@@ -732,28 +732,28 @@ describe('chat text', () => {
   });
 
   it('removes text direction controls before delivering', () => {
-    expect(t.pm.sendPlayerChat('alice', 'tile', '', 'abc‮def⁦g⁩')).toBeNull();
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', 'abc\u{202E}def\u{2066}g\u{2069}')).toBeNull();
     expect(t.historyOf('bob').map(m => m.text)).toEqual(['abcdefg']);
   });
 
   it('drops a message made only of text direction controls', () => {
-    expect(t.pm.sendPlayerChat('alice', 'tile', '', '‪‫‬‭‮⁦⁧⁨⁩')).toBeNull();
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', '\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}')).toBeNull();
     expect(t.historyOf('bob')).toEqual([]);
     expect(t.historyOf('alice')).toEqual([]);
   });
 
   it('keeps zero-width joiners', () => {
-    t.pm.sendPlayerChat('alice', 'tile', '', 'a‍b');
-    expect(t.historyOf('bob').map(m => m.text)).toEqual(['a‍b']);
+    t.pm.sendPlayerChat('alice', 'tile', '', 'a\u{200D}b');
+    expect(t.historyOf('bob').map(m => m.text)).toEqual(['a\u{200D}b']);
   });
 
   it('measures the length after removing them', () => {
-    expect(t.pm.sendPlayerChat('alice', 'tile', '', `${'x'.repeat(500)}‮`)).toBeNull();
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', `${'x'.repeat(500)}\u{202E}`)).toBeNull();
     expect(t.historyOf('bob').map(m => m.text.length)).toEqual([500]);
   });
 
   it('leaves them out of the DM notice too', () => {
-    t.pm.sendPlayerChat('alice', 'dm', 'bob', '‮hello');
+    t.pm.sendPlayerChat('alice', 'dm', 'bob', '\u{202E}hello');
     expect(t.notify).toHaveBeenCalledWith('bob', 'dm_received', expect.objectContaining({ body: 'hello' }));
   });
 });

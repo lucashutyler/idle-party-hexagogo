@@ -1,7 +1,6 @@
-import { GUILD_INVITE_TTL_MS, MIN_GUILD_LEVEL } from '@idle-party-rpg/shared';
+import { GUILD_INVITE_TTL_MS, MIN_GUILD_LEVEL, hasTextDirectionControls } from '@idle-party-rpg/shared';
 import type { GuildInfo, GuildInviteInfo, GuildMemberEntry } from '@idle-party-rpg/shared';
 import type { GuildStore, GuildData, GuildInvite } from './GuildStore.js';
-import { hasTextDirectionControls } from './textDirection.js';
 
 let guildIdCounter = 0;
 

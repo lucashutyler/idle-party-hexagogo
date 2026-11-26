@@ -666,6 +666,26 @@ describe('SocialScreen guild creation', () => {
     expect(create().disabled).toBe(true);
     expect(reason().hidden).toBe(false);
   });
+
+  it('follows the player\'s level without leaving the name field', () => {
+    const t = setup();
+    t.push([], {}, { character: { level: 3 } });
+    t.screen.onActivate();
+    t.screen.setSubTab('guild');
+    const field = document.querySelector('.social-guild-name-input') as HTMLInputElement;
+    field.focus();
+    typeName('Hexers');
+
+    t.push([], {}, { character: { level: 4 } });
+    expect(reason().textContent).toBe('Starting a guild needs level 5. You are level 4.');
+    expect(create().disabled).toBe(true);
+
+    t.push([], {}, { character: { level: 5 } });
+    expect(create().disabled).toBe(false);
+    expect(reason().hidden).toBe(true);
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('Hexers');
+  });
 });
 
 describe('SocialScreen guild invites and members', () => {
@@ -720,6 +740,27 @@ describe('SocialScreen guild invites and members', () => {
     t.push([], { guild: null, guildInvites: [lanterns] });
 
     expect(inviteRow('g1')).not.toBeNull();
+    t.screen.onDeactivate();
+  });
+
+  it('keeps a guild name being typed, and its focus, while invites come and go', () => {
+    const t = setup();
+    t.push([], { guild: null });
+    t.screen.setSubTab('guild');
+    t.screen.onActivate();
+    const field = document.querySelector('.social-guild-name-input') as HTMLInputElement;
+    field.focus();
+    field.value = 'Hexers';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+
+    t.push([], { guild: null, guildInvites: [lanterns] });
+    expect(inviteRow('g1')).not.toBeNull();
+    expect(document.activeElement).toBe(field);
+
+    t.push([], { guild: null, guildInvites: [] });
+    expect(inviteRow('g1')).toBeNull();
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('Hexers');
     t.screen.onDeactivate();
   });
 

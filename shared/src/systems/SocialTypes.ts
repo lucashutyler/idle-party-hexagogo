@@ -199,6 +199,18 @@ export function trimChatHistory<T extends Pick<ChatMessage, 'channelType'>>(mess
   });
 }
 
+/** Bidirectional embedding, override and isolate controls; joiners are not among them. */
+const TEXT_DIRECTION_CONTROL = /[\u{202A}-\u{202E}\u{2066}-\u{2069}]/u;
+const TEXT_DIRECTION_CONTROLS = new RegExp(TEXT_DIRECTION_CONTROL.source, 'gu');
+
+export function hasTextDirectionControls(text: string): boolean {
+  return TEXT_DIRECTION_CONTROL.test(text);
+}
+
+export function stripTextDirectionControls(text: string): string {
+  return text.replace(TEXT_DIRECTION_CONTROLS, '');
+}
+
 // --- Block System ---
 export type BlockLevel = 'dm' | 'all';
 

@@ -686,6 +686,30 @@ describe('ChatPopout sending', () => {
     expect(t.gameClient.sendChat).toHaveBeenLastCalledWith('dm', 'Mira', 'slow down');
   });
 
+  it('sends text without direction controls, so a later refusal puts back the send it answers', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'meet \u{2066}Mira\u{2069} here\u{202E}';
+    t.clickSend();
+    t.receive(message('m1', 'me', 'meet Mira here', { channelType: 'global', channelId: '' }));
+    t.input().value = 'one more';
+    t.clickSend();
+
+    t.serverError('You\'re sending messages too fast. Wait a few seconds.', 'chat_refused', { sendLimited: true });
+
+    expect(t.input().value).toBe('one more');
+    expect(unsent().hidden).toBe(true);
+    expect(t.gameClient.sendChat).toHaveBeenNthCalledWith(1, 'global', '', 'meet Mira here');
+  });
+
+  it('sends nothing for a message made only of direction controls', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = '\u{202A}\u{202E}\u{2066}\u{2069}';
+    t.clickSend();
+    expect(t.gameClient.sendChat).not.toHaveBeenCalled();
+  });
+
   it('puts a refused channel send back and says why', () => {
     const t = setup();
     t.chat.open();

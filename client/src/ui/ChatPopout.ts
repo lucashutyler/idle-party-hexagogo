@@ -1,4 +1,5 @@
 import type { ChatChannelType, ChatMessage, ServerErrorCode, ServerStateMessage } from '@idle-party-rpg/shared';
+import { stripTextDirectionControls } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { chatFocusTracker } from '../network/ChatFocusTracker';
 import { artworkUrl, placeholderInitials, renderTrackedImg } from './assets';
@@ -622,8 +623,9 @@ export class ChatPopout {
     this.gameClient.sendSetChatPreferences(this.allChannel, this.dmInput.value.trim());
   }
 
+  /** Sends the text the server would keep, so its echo matches the pending send. */
   private send(): void {
-    const text = this.inputEl.value.trim();
+    const text = stripTextDirectionControls(this.inputEl.value).trim();
     if (!text) return;
     const channel = this.currentChannel();
     const dmTarget = this.thread ?? this.dmInput.value;

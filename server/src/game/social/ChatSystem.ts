@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
-import { stripTextDirectionControls } from './textDirection.js';
+import { stripTextDirectionControls } from '@idle-party-rpg/shared';
 
 export interface ChatRecipient {
   username: string;

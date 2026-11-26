@@ -31,7 +31,7 @@ Party events (join, leave, kick, promotion, demotion, ownership change) post per
 
 ### Guild
 
-Create guild (level `MIN_GUILD_LEVEL`, 5, or higher; 2-20 char name), leave guild (confirmed). Create is disabled with a visible reason below the level, and the typed name survives repaints. A name holding a text direction control (U+202A–U+202E, U+2066–U+2069) is refused: "Guild name has characters that can't be used". Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.
+Create guild (level `MIN_GUILD_LEVEL`, 5, or higher; 2-20 char name), leave guild (confirmed). Create is disabled with a visible reason below the level. Without a guild the panel is built once and state pushes patch only the invite list (`.social-guild-invites`) and the level reason, so the name field keeps its text and focus. A name holding a text direction control (U+202A–U+202E, U+2066–U+2069) is refused: "Guild name has characters that can't be used". Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.
 
 **Invites ask first.** "Invite to Guild" in the user popup sends `invite_guild`; `PlayerManager.inviteToGuild` calls `GuildSystem.inviteToGuild`, which stores a `GuildInvite` (`username`, `inviterUsername`, `createdAt`) on the guild's `GuildData.invites` and adds no one. It refuses an inviter with no guild, a target already in a guild, and a second invite to the same guild while one is open. A block in either direction, at either level, and a target with no character get one refusal ("That player can't be invited."), so it doesn't reveal a block. The target gets a `guild_invite_received` notification and the invite in `ClientSocialState.guildInvites` (`{ guildId, guildName, inviterUsername }`, oldest first, only while they are in no guild, leaving out any whose inviter they have blocked or been blocked by). The guild's members get the target in `outgoingGuildInvites`, and the popup then reads "Invited to Guild" (disabled, "Waiting for their answer").
 
@@ -77,7 +77,7 @@ History is capped per bucket, so DMs and party or guild lines keep their own roo
 
 ### Chat text
 
-`ChatSystem.sendMessage` removes text direction controls (U+202A–U+202E, U+2066–U+2069) before the 500-character check, so a message made only of them is dropped. Zero-width joiners stay. The DM notification uses the cleaned text.
+`ChatSystem.sendMessage` removes text direction controls (U+202A–U+202E, U+2066–U+2069) before the 500-character check, so a message made only of them is dropped. Zero-width joiners stay. The DM notification uses the cleaned text. `stripTextDirectionControls` and `hasTextDirectionControls` live in `shared/src/systems/SocialTypes.ts`; `ChatPopout` strips the same characters before sending, so the echo matches the send it answers and a message made only of them is never sent.
 
 `send_chat` goes through `PlayerManager.sendPlayerChat`, which validates `channelId` against the channel type and refuses anything else with a `chat_refused` error:
 

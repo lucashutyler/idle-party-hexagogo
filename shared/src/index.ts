@@ -560,7 +560,7 @@ export type {
 
 // Social types
 export { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY, MIN_GUILD_LEVEL, PARTY_INVITE_TTL_MS, isBlockedUser, partyInviteExpiresAt } from './systems/SocialTypes.js';
-export { GUILD_INVITE_TTL_MS, CHAT_BUCKETS, SERVER_CHAT_CAPS, CLIENT_CHAT_CAPS, chatBucket, countChatBuckets, trimChatHistory } from './systems/SocialTypes.js';
+export { GUILD_INVITE_TTL_MS, CHAT_BUCKETS, SERVER_CHAT_CAPS, CLIENT_CHAT_CAPS, chatBucket, countChatBuckets, trimChatHistory, hasTextDirectionControls, stripTextDirectionControls } from './systems/SocialTypes.js';
 export type {
   PlayerListEntry,
   FriendEntry,
