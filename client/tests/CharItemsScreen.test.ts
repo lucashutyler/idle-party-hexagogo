@@ -67,6 +67,7 @@ function setup(className: string, inventory: Record<string, number>, equipment: 
     sendUnequipItem: vi.fn(),
     sendCancelTrade: vi.fn(),
     sendDestroyItems: vi.fn(),
+    sendShopSell: vi.fn(() => true),
     sendEquipSkill: vi.fn(),
     sendUnequipSkill: vi.fn(),
   };
@@ -584,6 +585,92 @@ describe('CharItemsScreen', () => {
       expect(document.querySelector('.item-popup-name b')).toBeNull();
       delete defs.tagged;
     });
+  });
+
+  describe('selling and quest items', () => {
+    const withKept = (state: ServerStateMessage, kept: string[]): ServerStateMessage => ({
+      ...state,
+      character: { ...state.character!, questKeptItemIds: kept },
+    });
+    const q = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector);
+
+    it('offers Sell at the item\'s price next to Destroy', () => {
+      const t = setup('Knight', { gem: 2 }, EMPTY);
+      t.push({ ...makeState('Knight', { gem: 2 }, EMPTY), itemDefinitions: { ...ITEMS, gem: { id: 'gem', name: 'Gem', rarity: 'rare', value: 7 } } });
+      t.openInventoryItem('gem');
+      expect(q('.popup-action-sell')!.textContent).toBe('Sell (7g each)');
+      expect(q('.popup-action-destroy')).toBeTruthy();
+    });
+
+    it('picks between 1 and the stack, shows the total, and sends the sale', () => {
+      const t = setup('Knight', { old_boot: 3 }, EMPTY);
+      t.openInventoryItem('old_boot');
+      q('.popup-action-sell')!.click();
+      expect(q('.item-popup-name')!.textContent).toBe('Sell Old Boot');
+      expect(q('.items-modal-confirm')!.classList.contains('danger')).toBe(false);
+
+      q('.items-modal-minus')!.click();
+      expect(q('.items-modal-count-value')!.textContent).toBe('1');
+      for (let i = 0; i < 5; i++) q('.items-modal-plus')!.click();
+      expect(q('.items-modal-count-value')!.textContent).toBe('3');
+      expect(q('.items-modal-total')!.textContent).toBe('Total: 3 gold');
+
+      q('.items-modal-confirm')!.click();
+      expect(t.gameClient.sendShopSell).toHaveBeenCalledWith('old_boot', 3);
+      expect(q('.item-popup')).toBeNull();
+    });
+
+    it('sells a single item from a short prompt', () => {
+      const t = setup('Knight', { rusty_sword: 1 }, EMPTY);
+      t.openInventoryItem('rusty_sword');
+      q('.popup-action-sell')!.click();
+      expect(q('.items-modal-count-row')).toBeNull();
+      expect(q('.items-modal-total')!.textContent).toBe('Total: 1 gold');
+      q('.items-modal-confirm')!.click();
+      expect(t.gameClient.sendShopSell).toHaveBeenCalledWith('rusty_sword', 1);
+    });
+
+    it('goes back to the item when a sale is cancelled', () => {
+      const t = setup('Knight', { old_boot: 3 }, EMPTY);
+      t.openInventoryItem('old_boot');
+      q('.popup-action-sell')!.click();
+      q('.items-modal-cancel')!.click();
+      expect(q('.popup-action-sell')).toBeTruthy();
+      expect(t.gameClient.sendShopSell).not.toHaveBeenCalled();
+    });
+
+    it('never offers Sell on an equipped item', () => {
+      const t = setup('Knight', {}, { mainhand: 'rusty_sword', offhand: null });
+      t.slot('mainhand').click();
+      expect(q('.popup-action-unequip')).toBeTruthy();
+      expect(q('.popup-action-sell')).toBeNull();
+    });
+
+    it('says an item a quest needs is kept, with no Sell or Destroy', () => {
+      const t = setup('Knight', { old_boot: 2 }, EMPTY);
+      t.push(withKept(makeState('Knight', { old_boot: 2 }, EMPTY), ['old_boot']));
+      t.openInventoryItem('old_boot');
+      expect(q('.popup-action-kept')!.textContent).toBe('Needed for a quest');
+      expect(q('.popup-action-sell')).toBeNull();
+      expect(q('.popup-action-destroy')).toBeNull();
+    });
+
+    it('sends nothing when the item turns out to be needed for a quest while the prompt is open', () => {
+      const t = setup('Knight', { old_boot: 2 }, EMPTY);
+      t.openInventoryItem('old_boot');
+      q('.popup-action-destroy')!.click();
+      t.push(withKept(makeState('Knight', { old_boot: 2 }, EMPTY), ['old_boot']));
+      q('.items-modal-confirm')!.click();
+      expect(t.gameClient.sendDestroyItems).not.toHaveBeenCalled();
+      expect(q('.popup-action-kept')).toBeTruthy();
+    });
+  });
+
+  it('names a gift in the mailbox the player does not own', () => {
+    const gift = { id: 'g1', itemId: 'small_shield', quantity: 2, fromUsername: 'friend' };
+    setup('Knight', {}, EMPTY, { mailbox: [gift] });
+    expect(document.querySelector('.mailbox-item-name')!.textContent).toBe('Small Shield');
+    expect(document.querySelector('.mailbox-row .item-square')).toBeTruthy();
   });
 
   it('holds a bestiary repaint while a press inside the screen is in flight', () => {

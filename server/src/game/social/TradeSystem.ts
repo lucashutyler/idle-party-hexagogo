@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { TradeState, TradeOffer, TradeOfferItem } from '@idle-party-rpg/shared';
-import { MAX_STACK } from '@idle-party-rpg/shared';
+import { MAX_STACK, isWholeItemCount } from '@idle-party-rpg/shared';
 
 /**
  * TradeSystem manages asynchronous peer-to-peer item trades.
@@ -39,6 +39,76 @@ export type ConfirmTradeFailure = { success: false; reason: string; affectedPlay
  */
 export const TRADE_NONCE_MISMATCH = 'This trade changed — review the updated offer before confirming';
 
+export const INVALID_TRADE_ITEMS = 'Invalid trade items';
+
+/** Returned by `confirmTrade` when a stored offer no longer passes `parseOfferItems`; the trade is cancelled. */
+export const TRADE_NO_LONGER_VALID = 'This trade is no longer valid';
+
+/**
+ * An offer as whole-number lines, one per item (repeated items are summed).
+ * Null when it is empty, any line is malformed, or a summed line is above MAX_STACK.
+ */
+export function parseOfferItems(raw: unknown): TradeOfferItem[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const merged = new Map<string, number>();
+  for (const line of raw) {
+    if (typeof line !== 'object' || line === null) return null;
+    const { itemId, quantity } = line as Record<string, unknown>;
+    if (typeof itemId !== 'string' || itemId === '' || !isWholeItemCount(quantity)) return null;
+    merged.set(itemId, (merged.get(itemId) ?? 0) + quantity);
+  }
+  const items: TradeOfferItem[] = [];
+  for (const [itemId, quantity] of merged) {
+    if (quantity > MAX_STACK) return null;
+    items.push({ itemId, quantity });
+  }
+  return items;
+}
+
+export interface TradeInventory {
+  removeFromInventory(itemId: string, quantity: number): boolean;
+  addToInventory(itemId: string, quantity: number): boolean;
+}
+
+export type TradeSwapFailure = 'item_missing' | 'inventory_full';
+
+/** Hand each offer to the other side. On any refusal every step already taken is undone, newest first. */
+export function swapTradeItems(
+  initiator: TradeInventory,
+  initiatorItems: readonly TradeOfferItem[],
+  target: TradeInventory,
+  targetItems: readonly TradeOfferItem[],
+): TradeSwapFailure | null {
+  const undo: (() => void)[] = [];
+  const rollback = () => {
+    for (const step of undo.reverse()) step();
+  };
+  const take = (from: TradeInventory, items: readonly TradeOfferItem[]): boolean => {
+    for (const { itemId, quantity } of items) {
+      if (!from.removeFromInventory(itemId, quantity)) return false;
+      undo.push(() => from.addToInventory(itemId, quantity));
+    }
+    return true;
+  };
+  const give = (to: TradeInventory, items: readonly TradeOfferItem[]): boolean => {
+    for (const { itemId, quantity } of items) {
+      if (!to.addToInventory(itemId, quantity)) return false;
+      undo.push(() => to.removeFromInventory(itemId, quantity));
+    }
+    return true;
+  };
+
+  if (!take(initiator, initiatorItems) || !take(target, targetItems)) {
+    rollback();
+    return 'item_missing';
+  }
+  if (!give(target, initiatorItems) || !give(initiator, targetItems)) {
+    rollback();
+    return 'inventory_full';
+  }
+  return null;
+}
+
 export class TradeSystem {
   /** All active trades by trade ID. */
   private trades = new Map<string, TradeState>();
@@ -53,6 +123,14 @@ export class TradeSystem {
     for (const trade of saved) {
       // Only restore unfinished trades
       if (trade.status === 'cancelled' || trade.status === 'confirmed') continue;
+      const initiatorItems = storedOfferItems(trade.initiator?.items);
+      const targetItems = trade.target ? storedOfferItems(trade.target.items) : [];
+      if (!initiatorItems || !targetItems) {
+        console.warn(`[TradeSystem] Dropped saved trade ${trade.id}: invalid items`);
+        continue;
+      }
+      trade.initiator.items = initiatorItems;
+      if (trade.target) trade.target.items = targetItems;
       // Trades persisted before nonces existed have none — mint one so they stay
       // confirmable. Clients pick it up from the next state push.
       if (!trade.nonce) trade.nonce = TradeSystem.generateNonce();
@@ -147,14 +225,15 @@ export class TradeSystem {
     hasItemInInventory: (u: string, itemId: string, quantity: number) => boolean,
     isBlocked: (a: string, b: string) => boolean,
   ): TradeState | string {
+    const offer = parseOfferItems(items);
+    if (!offer) return INVALID_TRADE_ITEMS;
     if (initiatorUsername === targetUsername) return 'Cannot trade with yourself';
     if (isBlocked(initiatorUsername, targetUsername)) return 'Cannot trade with a blocked user';
     if (this.findTradeBetween(initiatorUsername, targetUsername)) {
       return 'You already have a pending trade with that player';
     }
 
-    if (!Array.isArray(items) || items.length === 0) return 'Must offer at least one item';
-    for (const { itemId, quantity } of items) {
+    for (const { itemId, quantity } of offer) {
       if (!hasItemInInventory(initiatorUsername, itemId, quantity)) {
         return 'Item not found in your inventory';
       }
@@ -164,7 +243,7 @@ export class TradeSystem {
     const trade: TradeState = {
       id,
       status: 'pending',
-      initiator: { username: initiatorUsername, items },
+      initiator: { username: initiatorUsername, items: offer },
       // Target slot is created upfront with the intended counterparty so they can find it.
       target: { username: targetUsername, items: [] },
       timestamp: Date.now(),
@@ -190,6 +269,8 @@ export class TradeSystem {
     items: TradeOfferItem[],
     hasItemInInventory: (u: string, itemId: string, quantity: number) => boolean,
   ): TradeState | string {
+    const offer = parseOfferItems(items);
+    if (!offer) return INVALID_TRADE_ITEMS;
     const trade = this.trades.get(tradeId);
     if (!trade) return 'Trade not found';
     if (trade.status === 'cancelled' || trade.status === 'confirmed') return 'Trade is no longer active';
@@ -198,17 +279,16 @@ export class TradeSystem {
     const isTarget = trade.target?.username === actingUsername;
     if (!isInitiator && !isTarget) return 'Not your trade';
 
-    if (!Array.isArray(items) || items.length === 0) return 'Must offer at least one item';
-    for (const { itemId, quantity } of items) {
+    for (const { itemId, quantity } of offer) {
       if (!hasItemInInventory(actingUsername, itemId, quantity)) {
         return 'Item not found in your inventory';
       }
     }
 
     if (isInitiator) {
-      trade.initiator = { username: actingUsername, items };
+      trade.initiator = { username: actingUsername, items: offer };
     } else if (trade.target) {
-      trade.target = { username: actingUsername, items };
+      trade.target = { username: actingUsername, items: offer };
     }
 
     // Status: 'countered' once both have offered; otherwise 'pending'
@@ -257,6 +337,13 @@ export class TradeSystem {
     const isTarget = trade.target.username === actingUsername;
     if (!isInitiator && !isTarget) return 'Not your trade';
 
+    const initiatorItems = parseOfferItems(trade.initiator.items);
+    const targetItems = parseOfferItems(trade.target.items);
+    if (!initiatorItems || !targetItems) {
+      this.cancelTrade(tradeId, actingUsername, TRADE_NO_LONGER_VALID);
+      return TRADE_NO_LONGER_VALID;
+    }
+
     // Checked after participation so a non-participant can't probe nonces.
     if (typeof nonce !== 'string' || nonce !== trade.nonce) {
       return TRADE_NONCE_MISMATCH;
@@ -266,19 +353,19 @@ export class TradeSystem {
       return 'Waiting for the other player to confirm';
     }
 
-    for (const { itemId, quantity } of trade.initiator.items) {
+    for (const { itemId, quantity } of initiatorItems) {
       if (!hasItemInInventory(trade.initiator.username, itemId, quantity)) {
         return 'An offered item is no longer in inventory';
       }
     }
-    for (const { itemId, quantity } of trade.target.items) {
+    for (const { itemId, quantity } of targetItems) {
       if (!hasItemInInventory(trade.target.username, itemId, quantity)) {
         return 'An offered item is no longer in inventory';
       }
     }
 
-    const initiatorOffer: TradeOffer = { ...trade.initiator };
-    const targetOffer: TradeOffer = { ...trade.target };
+    const initiatorOffer: TradeOffer = { username: trade.initiator.username, items: initiatorItems };
+    const targetOffer: TradeOffer = { username: trade.target.username, items: targetItems };
 
     const checkStackCapacity = (
       receiver: string,
@@ -367,4 +454,9 @@ export class TradeSystem {
     }
     this.trades.delete(tradeId);
   }
+}
+
+/** A saved side of a trade; the target's side stays empty until they counter. */
+function storedOfferItems(raw: unknown): TradeOfferItem[] | null {
+  return Array.isArray(raw) && raw.length === 0 ? [] : parseOfferItems(raw);
 }

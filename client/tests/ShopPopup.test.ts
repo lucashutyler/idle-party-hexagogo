@@ -34,6 +34,7 @@ interface StateParts {
   offers?: HenchmanOffer[];
   hired?: { henchmanId: string; instanceId: string }[];
   sets?: Record<string, SetDefinition>;
+  kept?: string[];
 }
 
 function makeState(parts: StateParts = {}): ServerStateMessage {
@@ -43,6 +44,7 @@ function makeState(parts: StateParts = {}): ServerStateMessage {
       gold: parts.gold ?? 100,
       inventory: parts.inventory ?? {},
       equipment: parts.equipment ?? { mainhand: 'oak_staff', offhand: null },
+      questKeptItemIds: parts.kept,
     },
     shopDefinition: { id: 'smithy', name: 'Smithy', inventory: parts.stock ?? STOCK },
     henchmanOffers: parts.offers ?? [],
@@ -184,6 +186,23 @@ describe('ShopPopup', () => {
       const grid = t.q('.shop-items-grid');
       t.push({ inventory: { gem: 2 } });
       expect(t.q('.shop-items-grid')).toBe(grid);
+    });
+
+    it('lists what the class can use first, keeping the authored order within each group', () => {
+      const order = () => [...document.querySelectorAll<HTMLElement>('.shop-items-grid .shop-item-square')].map(el => el.dataset.itemId);
+      const stock: ShopItem[] = [
+        { itemId: 'iron_battleaxe', price: 50 },
+        { itemId: 'gem', price: 1 },
+        { itemId: 'hunter_bow', price: 500 },
+        { itemId: 'oak_staff', price: 20 },
+        { itemId: 'potion', price: 5 },
+      ];
+      const mage = setup({ className: 'Mage', stock });
+      expect(order()).toEqual(['gem', 'oak_staff', 'potion', 'iron_battleaxe', 'hunter_bow']);
+      mage.popup.hide();
+
+      setup({ className: 'Knight', stock });
+      expect(order()).toEqual(['iron_battleaxe', 'gem', 'hunter_bow', 'oak_staff', 'potion']);
     });
   });
 
@@ -399,6 +418,32 @@ describe('ShopPopup', () => {
       t.gameClient.sendShopSell.mockReturnValueOnce(false);
       sellGems(t, 1);
       expect(t.q('.shop-notice')?.textContent).toBe(OFFLINE_NOTICE);
+    });
+
+    it('leaves out items a quest still needs', () => {
+      const t = setup({ inventory: { gem: 3, potion: 1 }, kept: ['gem'] });
+      t.q<HTMLElement>('.shop-toggle-btn[data-mode="sell"]')!.click();
+      expect(t.q('.shop-item-square[data-item-id="gem"]')).toBeNull();
+      expect(t.square('potion')).toBeTruthy();
+    });
+
+    it('drops back to the grid when the item on show turns out to be needed for a quest', () => {
+      const t = setup({ inventory: { gem: 3, potion: 1 } });
+      t.q<HTMLElement>('.shop-toggle-btn[data-mode="sell"]')!.click();
+      t.square('gem').click();
+      expect(t.q('.shop-detail-view')).toBeTruthy();
+      t.push({ kept: ['gem'] });
+      expect(t.q('.shop-detail-view')).toBeNull();
+      expect(t.q('.shop-item-square[data-item-id="gem"]')).toBeNull();
+    });
+
+    it('stops waiting on a sale the server keeps for a quest, without a notice of its own', () => {
+      const t = setup({ inventory: { gem: 3 } });
+      sellGems(t, 1);
+      t.serverError('Gem is needed for a quest.', 'item_protected');
+      expect(t.q('.shop-notice')).toBeNull();
+      t.serverError('Stray error');
+      expect(t.q('.shop-notice')).toBeNull();
     });
   });
 

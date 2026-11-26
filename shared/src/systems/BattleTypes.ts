@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.25.3'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.25.4'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -98,6 +98,8 @@ export interface ClientCharacterState {
   craftXp: number;
   combatPrefs?: CombatPrefs;
   mastery?: MasterySummary;
+  /** Inventory items a quest still needs: they can't be destroyed, sold, gifted or traded. Absent when none. */
+  questKeptItemIds?: string[];
 }
 
 /** The Hero screen's XP gauge. See docs/architecture/combat.md → XP gauge. */
@@ -375,7 +377,7 @@ export interface ClientSetActionOrderMessage {
  * Machine-readable tag on an `error` message, for the cases a screen needs to react
  * to rather than just log. Most errors carry no code.
  */
-export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused' | 'travel_refused' | 'party_refused';
+export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused' | 'travel_refused' | 'party_refused' | 'item_protected';
 
 export interface ServerForecastMessage {
   type: 'forecast';

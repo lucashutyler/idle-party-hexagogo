@@ -11,6 +11,8 @@ import {
   getItemEffectText,
   canClassEquipItem,
   getItemsDisplacedByEquip,
+  isWholeItemCount,
+  itemSellValue,
 } from '../src/systems/ItemTypes';
 import type { EquipSlot, ItemDefinition } from '../src/systems/ItemTypes';
 
@@ -522,5 +524,61 @@ describe('getItemsDisplacedByEquip', () => {
     const inv: Record<string, number> = { big_axe: 1 };
     expect(equipItem(inv, equip, 'big_axe', testItems).success).toBe(true);
     expect(Object.keys(inv).sort()).toEqual([...displaced].sort());
+  });
+});
+
+describe('isWholeItemCount', () => {
+  it.each([
+    [1, true],
+    [99, true],
+    [0, false],
+    [-1, false],
+    [1.5, false],
+    [1e-20, false],
+    [NaN, false],
+    [Infinity, false],
+    ['1', false],
+  ])('%s is %s', (value, expected) => {
+    expect(isWholeItemCount(value)).toBe(expected);
+  });
+});
+
+describe('item amounts below one', () => {
+  const empty = (): Record<string, string | null> => ({ mainhand: null, head: null, chest: null, foot: null });
+
+  it.each([1e-20, 0.5])('equipItem refuses a stack of %s', (stack) => {
+    const inv: Record<string, number> = { rusty_dagger: stack };
+    const equip = empty();
+    expect(equipItem(inv, equip, 'rusty_dagger', SEED_ITEMS)).toEqual({ success: false });
+    expect(equip.mainhand).toBeNull();
+    expect(inv.rusty_dagger).toBe(stack);
+  });
+
+  it.each([1e-20, 0.5])('equipItemForceDestroy refuses a stack of %s', (stack) => {
+    const inv: Record<string, number> = { rusty_dagger: stack };
+    const equip = empty();
+    expect(equipItemForceDestroy(inv, equip, 'rusty_dagger', SEED_ITEMS)).toEqual({ success: false });
+    expect(equip.mainhand).toBeNull();
+  });
+
+  it.each([0.25, 1.5])('destroyItems refuses a count of %s', (count) => {
+    const inv: Record<string, number> = { mangy_pelt: 3 };
+    expect(destroyItems(inv, 'mangy_pelt', count)).toEqual({ success: false, removed: 0 });
+    expect(inv.mangy_pelt).toBe(3);
+  });
+});
+
+describe('itemSellValue', () => {
+  const pelt = (value?: number): ItemDefinition => ({ id: 'pelt', name: 'Pelt', rarity: 'common', value });
+
+  it('pays the item value, 1 when it has none', () => {
+    expect(itemSellValue(pelt(5))).toBe(5);
+    expect(itemSellValue(pelt())).toBe(1);
+  });
+
+  it('rounds a fractional value down and never pays below zero', () => {
+    expect(itemSellValue(pelt(2.7))).toBe(2);
+    expect(itemSellValue(pelt(0))).toBe(0);
+    expect(itemSellValue(pelt(-3))).toBe(0);
   });
 });

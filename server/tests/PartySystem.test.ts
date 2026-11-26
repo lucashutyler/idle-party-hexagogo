@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { PartyGridPosition } from '@idle-party-rpg/shared';
 import { PartySystem } from '../src/game/social/PartySystem.js';
 
 // Simple helpers to simulate player state
@@ -363,6 +364,14 @@ describe('PartySystem', () => {
 
       const moveResult = system.setGridPosition('bob', alicePos, state.getPartyId);
       expect(moveResult).toBe('Position is taken');
+    });
+
+    it('rejects a square that is not a whole number', () => {
+      const result = system.createParty('alice', state.getPartyId, state.setPartyId);
+      if (typeof result === 'string') throw new Error(result);
+
+      expect(system.setGridPosition('alice', 1.5 as PartyGridPosition, state.getPartyId)).toBe('Invalid position');
+      expect(system.getParty(result.id)!.members[0].gridPosition).toBe(4);
     });
   });
 

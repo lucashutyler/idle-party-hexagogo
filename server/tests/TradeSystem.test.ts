@@ -1,5 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { TradeSystem, TRADE_NONCE_MISMATCH } from '../src/game/social/TradeSystem.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import {
+  TradeSystem,
+  TRADE_NONCE_MISMATCH,
+  INVALID_TRADE_ITEMS,
+  TRADE_NO_LONGER_VALID,
+  parseOfferItems,
+  swapTradeItems,
+} from '../src/game/social/TradeSystem.js';
+import type { TradeInventory } from '../src/game/social/TradeSystem.js';
+import { MAX_STACK } from '@idle-party-rpg/shared';
 import type { TradeOfferItem, TradeState } from '@idle-party-rpg/shared';
 
 /**
@@ -156,7 +165,166 @@ describe('TradeSystem (async)', () => {
       setupReadyPair(state);
       const result = system.proposeTrade('alice', 'bob', [],
         state.hasItemInInventory, state.isBlocked);
-      expect(result).toBe('Must offer at least one item');
+      expect(result).toBe(INVALID_TRADE_ITEMS);
+    });
+  });
+
+  describe('whole-number offers', () => {
+    const lines = (quantity: unknown) => [{ itemId: 'sword', quantity }] as unknown as TradeOfferItem[];
+    const badQuantities: unknown[] = [1e-20, 1.5, 0, -1, '1'];
+
+    it.each(badQuantities)('propose refuses a quantity of %s', (quantity) => {
+      setupReadyPair(state);
+      const result = system.proposeTrade('alice', 'bob', lines(quantity), state.hasItemInInventory, state.isBlocked);
+      expect(result).toBe(INVALID_TRADE_ITEMS);
+      expect(system.findTradeBetween('alice', 'bob')).toBeNull();
+    });
+
+    it.each(badQuantities)('counter refuses a quantity of %s', (quantity) => {
+      setupReadyPair(state);
+      state.giveItem('bob', 'sword');
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'), state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
+      const result = system.counterTrade(proposed.id, 'bob', lines(quantity), state.hasItemInInventory);
+      expect(result).toBe(INVALID_TRADE_ITEMS);
+      expect(system.getTrade(proposed.id)?.target?.items).toEqual([]);
+    });
+
+    it('merges two lines of one item into one', () => {
+      state.giveItem('alice', 'gem', 3);
+      const result = system.proposeTrade('alice', 'bob',
+        [{ itemId: 'gem', quantity: 1 }, { itemId: 'gem', quantity: 2 }], state.hasItemInInventory, state.isBlocked);
+      if (typeof result === 'string') throw new Error(result);
+      expect(result.initiator.items).toEqual([{ itemId: 'gem', quantity: 3 }]);
+    });
+
+    it('refuses lines of one item that add up to more than the player has', () => {
+      state.giveItem('alice', 'gem', 3);
+      const result = system.proposeTrade('alice', 'bob',
+        [{ itemId: 'gem', quantity: 2 }, { itemId: 'gem', quantity: 2 }], state.hasItemInInventory, state.isBlocked);
+      expect(result).toBe('Item not found in your inventory');
+    });
+
+    it('refuses lines of one item that add up to more than a stack', () => {
+      state.setItemCount('alice', 'gem', MAX_STACK);
+      const result = system.proposeTrade('alice', 'bob',
+        [{ itemId: 'gem', quantity: 60 }, { itemId: 'gem', quantity: 60 }], state.hasItemInInventory, state.isBlocked);
+      expect(result).toBe(INVALID_TRADE_ITEMS);
+    });
+
+    it('refuses malformed lines', () => {
+      expect(parseOfferItems('gem')).toBeNull();
+      expect(parseOfferItems([null])).toBeNull();
+      expect(parseOfferItems([{ itemId: '', quantity: 1 }])).toBeNull();
+      expect(parseOfferItems([{ itemId: 7, quantity: 1 }])).toBeNull();
+      expect(parseOfferItems([{ itemId: 'gem', quantity: MAX_STACK }])).toEqual([{ itemId: 'gem', quantity: MAX_STACK }]);
+    });
+
+    it('drops a saved trade with a fractional line on restore, and logs its id', () => {
+      const trade = setupCounteredTrade(system, state);
+      const saved = JSON.parse(JSON.stringify(trade)) as TradeState;
+      saved.target!.items = [{ itemId: 'shield', quantity: 0.5 }];
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const fresh = new TradeSystem();
+      fresh.restoreFromSaveData([saved]);
+
+      expect(fresh.getTrade(trade.id)).toBeNull();
+      expect(fresh.getPlayerTrades('alice')).toHaveLength(0);
+      expect(fresh.getPlayerTrades('bob')).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(trade.id));
+      warn.mockRestore();
+    });
+
+    it('keeps a saved trade the target has not countered yet', () => {
+      setupReadyPair(state);
+      const proposed = system.proposeTrade('alice', 'bob', offer('sword'), state.hasItemInInventory, state.isBlocked);
+      if (typeof proposed === 'string') throw new Error(proposed);
+
+      const fresh = new TradeSystem();
+      fresh.restoreFromSaveData(JSON.parse(JSON.stringify(system.getAllTrades())));
+
+      expect(fresh.getTrade(proposed.id)?.target?.items).toEqual([]);
+      expect(fresh.getPlayerTrades('bob')).toHaveLength(1);
+    });
+
+    it('cancels a stored trade whose line turned fractional when it is confirmed', () => {
+      const trade = setupCounteredTrade(system, state);
+      system.getTrade(trade.id)!.target!.items = [{ itemId: 'shield', quantity: 1e-20 }];
+
+      const result = system.confirmTrade(trade.id, 'alice', trade.nonce, state.hasItemInInventory, state.getInventoryCount);
+
+      expect(result).toBe(TRADE_NO_LONGER_VALID);
+      expect(system.getTrade(trade.id)).toBeNull();
+      expect(system.getPlayerTrades('alice')).toHaveLength(0);
+      expect(system.getPlayerTrades('bob')).toHaveLength(0);
+    });
+
+    it('hands the merged offers to the swap on confirm', () => {
+      const trade = setupCounteredTrade(system, state);
+      state.giveItem('bob', 'shield');
+      system.getTrade(trade.id)!.target!.items = [{ itemId: 'shield', quantity: 1 }, { itemId: 'shield', quantity: 1 }];
+
+      const result = system.confirmTrade(trade.id, 'alice', trade.nonce, state.hasItemInInventory, state.getInventoryCount);
+
+      if (typeof result === 'string' || 'success' in result) throw new Error(String(result));
+      expect(result.targetOffer.items).toEqual([{ itemId: 'shield', quantity: 2 }]);
+    });
+  });
+
+  describe('swapTradeItems', () => {
+    function inventory(start: Record<string, number>): TradeInventory & { items: Record<string, number> } {
+      const items = { ...start };
+      return {
+        items,
+        removeFromInventory(itemId, quantity) {
+          if ((items[itemId] ?? 0) < quantity) return false;
+          items[itemId] -= quantity;
+          if (items[itemId] === 0) delete items[itemId];
+          return true;
+        },
+        addToInventory(itemId, quantity) {
+          if ((items[itemId] ?? 0) + quantity > MAX_STACK) return false;
+          items[itemId] = (items[itemId] ?? 0) + quantity;
+          return true;
+        },
+      };
+    }
+
+    it('hands each offer to the other side', () => {
+      const alice = inventory({ sword: 1, gem: 5 });
+      const bob = inventory({ shield: 2 });
+      expect(swapTradeItems(alice, [{ itemId: 'gem', quantity: 3 }], bob, [{ itemId: 'shield', quantity: 2 }])).toBeNull();
+      expect(alice.items).toEqual({ sword: 1, gem: 2, shield: 2 });
+      expect(bob.items).toEqual({ gem: 3 });
+    });
+
+    it('undoes every removal and hand-over when the partner\'s stack is full', () => {
+      const alice = inventory({ sword: 1, gem: 2 });
+      const bob = inventory({ shield: 1, gem: MAX_STACK });
+      const result = swapTradeItems(alice,
+        [{ itemId: 'sword', quantity: 1 }, { itemId: 'gem', quantity: 2 }], bob, [{ itemId: 'shield', quantity: 1 }]);
+      expect(result).toBe('inventory_full');
+      expect(alice.items).toEqual({ sword: 1, gem: 2 });
+      expect(bob.items).toEqual({ shield: 1, gem: MAX_STACK });
+    });
+
+    it('takes back what the partner already received when the confirming side is full', () => {
+      const alice = inventory({ sword: 1, shield: MAX_STACK });
+      const bob = inventory({ shield: 1 });
+      const result = swapTradeItems(alice, [{ itemId: 'sword', quantity: 1 }], bob, [{ itemId: 'shield', quantity: 1 }]);
+      expect(result).toBe('inventory_full');
+      expect(alice.items).toEqual({ sword: 1, shield: MAX_STACK });
+      expect(bob.items).toEqual({ shield: 1 });
+    });
+
+    it('puts items back when an offered item is gone', () => {
+      const alice = inventory({ sword: 1 });
+      const bob = inventory({});
+      const result = swapTradeItems(alice, [{ itemId: 'sword', quantity: 1 }], bob, [{ itemId: 'shield', quantity: 1 }]);
+      expect(result).toBe('item_missing');
+      expect(alice.items).toEqual({ sword: 1 });
+      expect(bob.items).toEqual({});
     });
   });
 

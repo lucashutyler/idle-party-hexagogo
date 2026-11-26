@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.4',
+    notes: [
+      'Fixed a bug with item amounts in trades and shop sales.',
+      'Items a quest still needs can no longer be destroyed, sold, gifted or traded away by mistake.',
+      'You can sell items straight from the Hero screen.',
+      'Gifts and trade offers now show item names and pictures.',
+      'Shops list the gear your class can use first.',
+    ],
+  },
+  {
     version: '2026.11.25.3',
     notes: [
       'Signing in on a new device now uses a 6-digit code from your sign-in email.',
