@@ -140,16 +140,32 @@ function rowButton(ref: CodexRef, art: string, title: string, sub: string, tags 
     + '</span><span class="codex-row-chevron" aria-hidden="true">›</span></button>';
 }
 
+/** A row's record; empty for a passive monster. */
+export function monsterKillsText(monster: Pick<CodexMonster, 'passive'>, kills: number): string {
+  if (monster.passive) return '';
+  return kills > 0 ? `${n(kills)} defeated` : 'Not defeated yet';
+}
+
+/** Rows carry the snapshot's kills so their HTML holds still between victories; this sets the live count in place. */
+export function patchMonsterKills(root: ParentNode, index: CodexIndex, state: ServerStateMessage | null): void {
+  for (const el of root.querySelectorAll<HTMLElement>('[data-codex-kills]')) {
+    const monster = index.monsters.get(el.dataset.codexKills ?? '');
+    if (!monster) continue;
+    const live = monsterKillsText(monster, monsterKills(monster, state));
+    if (el.textContent !== live) el.textContent = live;
+  }
+}
+
 function monsterRow(monster: CodexMonster, ctx: CodexViewContext, tags = ''): string {
   const art = `<span class="codex-row-art" aria-hidden="true">${renderAssetImg('monster', monster.id, { label: monster.name, width: 80, height: 80, alt: '' })}</span>`;
-  const kills = monsterKills(monster, ctx.state);
+  const record = monsterKillsText(monster, monster.kills);
   const drops = dropCounts(monster);
   const parts = [
-    monster.passive ? '' : kills > 0 ? `${n(kills)} defeated` : 'Not defeated yet',
-    drops.kinds > 0 ? `${n(drops.found)} of ${n(drops.kinds)} drops found` : '',
+    record ? `<span class="codex-kills" data-codex-kills="${escapeHtml(monster.id)}">${escapeHtml(record)}</span>` : '',
+    drops.kinds > 0 ? escapeHtml(`${n(drops.found)} of ${n(drops.kinds)} drops found`) : '',
   ].filter(Boolean);
   const title = `<span class="codex-row-name">${escapeHtml(monster.name)}</span>${monsterLevel(monster, ctx.state)}${tierChip(monster)}`;
-  return rowButton({ kind: 'monster', id: monster.id }, art, title, escapeHtml(parts.join(' · ')), tags);
+  return rowButton({ kind: 'monster', id: monster.id }, art, title, parts.join(' · '), tags);
 }
 
 function itemRow(entry: CodexItemEntry, ctx: CodexViewContext, tags = ''): string {
@@ -250,7 +266,7 @@ export function codexMissingHtml(kind: CodexKind): string {
 }
 
 function searchResultsHtml(ctx: CodexViewContext, query: string): string {
-  const found = searchCodex(ctx.index, query);
+  const found = memoised(ctx.index, `search:all:${query.trim().toLowerCase()}`, () => searchCodex(ctx.index, query));
   const groups = LIST_ORDER.filter(kind => found[kind].length > 0).map(kind => {
     const refs = found[kind];
     const rows = refs.slice(0, CODEX_SEARCH_PREVIEW).map(ref => refRow(ref, ctx)).join('');
@@ -287,9 +303,24 @@ export function codexHomeHtml(ctx: CodexViewContext, opts: CodexHomeOptions): st
     + '<p class="codex-footnote">Drops, fights and shop visits are added as you play.</p>';
 }
 
-function pagedRows(rows: readonly string[], shown: number, key: string): string {
-  const left = rows.length - shown;
-  return `<div class="codex-rows">${rows.slice(0, shown).join('')}</div>${left > 0 ? moreButton(left, key) : ''}`;
+/** Builds row HTML for the shown slice only. */
+function pagedRows<T>(items: readonly T[], shown: number, key: string, row: (item: T) => string): string {
+  const left = items.length - shown;
+  return `<div class="codex-rows">${items.slice(0, shown).map(row).join('')}</div>${left > 0 ? moreButton(left, key) : ''}`;
+}
+
+const MEMO_KEYS_PER_INDEX = 64;
+const memos = new WeakMap<CodexIndex, Map<string, unknown>>();
+
+/** Sorted and grouped lists, kept per index so a repaint with the same inputs sorts nothing. */
+function memoised<T>(index: CodexIndex, key: string, build: () => T): T {
+  let perIndex = memos.get(index);
+  if (!perIndex) memos.set(index, perIndex = new Map());
+  if (perIndex.has(key)) return perIndex.get(key) as T;
+  if (perIndex.size >= MEMO_KEYS_PER_INDEX) perIndex.clear();
+  const value = build();
+  perIndex.set(key, value);
+  return value;
 }
 
 function matches(name: string, query: string): boolean {
@@ -302,15 +333,16 @@ function noMatchHtml(query: string): string {
 }
 
 function roomListHtml(ctx: CodexViewContext, opts: CodexListOptions): string {
-  const rooms = [...ctx.index.rooms.values()];
+  const { index } = ctx;
   if (opts.query.trim()) {
-    const refs = searchCodex(ctx.index, opts.query, 'room').room;
+    const q = opts.query.trim().toLowerCase();
+    const refs = memoised(index, `search:room:${q}`, () => searchCodex(index, opts.query, 'room').room);
     if (refs.length === 0) return noMatchHtml(opts.query);
-    return pagedRows(refs.map(ref => roomRow(ctx.index.rooms.get(ref.id)!, ctx, true)), opts.shown, 'list');
+    return pagedRows(refs, opts.shown, 'list', ref => roomRow(index.rooms.get(ref.id)!, ctx, true));
   }
   const here = partyRoom(ctx.state, ctx.world);
   const hereKey = here ? codexZoneKey(here.mapId, here.zone) : '';
-  return roomGroups(rooms, ctx.world).map(map => {
+  return memoised(index, 'rooms:groups', () => roomGroups(index.rooms.values(), ctx.world)).map(map => {
     const zones = map.zones.map(zone => {
       const key = codexZoneKey(map.mapId, zone.zoneId);
       const open = opts.zones.get(key) ?? key === hereKey;
@@ -320,7 +352,7 @@ function roomListHtml(ctx: CodexViewContext, opts: CodexListOptions): string {
         + `<span class="codex-zone-count">${plural(zone.rooms.length, 'room', 'rooms')}</span></button>`;
       if (!open) return toggle;
       const shown = opts.zoneShown.get(key) ?? CODEX_PAGE;
-      return toggle + pagedRows(zone.rooms.map(tile => roomRow(tile, ctx, false)), shown, `zone:${key}`);
+      return toggle + pagedRows(zone.rooms, shown, `zone:${key}`, tile => roomRow(tile, ctx, false));
     }).join('');
     return `<div class="codex-map"><h3 class="codex-map-title">${escapeHtml(map.mapName)} · ${plural(map.count, 'room', 'rooms')}</h3>${zones}</div>`;
   }).join('');
@@ -331,18 +363,22 @@ export function codexListHtml(kind: CodexKind, ctx: CodexViewContext, opts: Code
   if (kind === 'room') {
     return index.rooms.size === 0 ? emptyLine(NOTHING_YET) : roomListHtml(ctx, opts);
   }
-  let rows: string[];
+  const key = `list:${kind}:${opts.sort}:${opts.query.trim().toLowerCase()}`;
+  let html: string | null;
   if (kind === 'monster') {
-    rows = sortMonsters([...index.monsters.values()].filter(m => matches(m.name, opts.query)), opts.sort).map(m => monsterRow(m, ctx));
+    const list = memoised(index, key, () => sortMonsters([...index.monsters.values()].filter(m => matches(m.name, opts.query)), opts.sort));
+    html = list.length > 0 ? pagedRows(list, opts.shown, 'list', m => monsterRow(m, ctx)) : null;
   } else if (kind === 'item') {
-    rows = sortItems([...index.items.values()].filter(i => matches(i.def.name, opts.query)), opts.sort).map(i => itemRow(i, ctx));
+    const list = memoised(index, key, () => sortItems([...index.items.values()].filter(i => matches(i.def.name, opts.query)), opts.sort));
+    html = list.length > 0 ? pagedRows(list, opts.shown, 'list', i => itemRow(i, ctx)) : null;
   } else {
-    rows = sortShops([...index.shops.values()].filter(s => matches(s.name, opts.query)), opts.sort).map(s => shopRow(s, ctx));
+    const list = memoised(index, key, () => sortShops([...index.shops.values()].filter(s => matches(s.name, opts.query)), opts.sort));
+    html = list.length > 0 ? pagedRows(list, opts.shown, 'list', s => shopRow(s, ctx)) : null;
   }
-  if (rows.length === 0) {
+  if (html === null) {
     return opts.query.trim() ? noMatchHtml(opts.query) : emptyLine(NOTHING_YET);
   }
-  return pagedRows(rows, opts.shown, 'list');
+  return html;
 }
 
 function heroHtml(art: string, name: string, tags = ''): string {

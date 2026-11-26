@@ -211,6 +211,22 @@ describe('CodexModal', () => {
     expect(body().querySelectorAll('.codex-row')).toHaveLength(120);
   });
 
+  it('keeps the monster list\'s rows in place when a push only raises a kill count, and updates the count', () => {
+    mount();
+    modal.open({ kind: 'list', list: 'monster' });
+    const goblinRow = body().querySelector('[data-codex="monster:goblin"]')!;
+    const art = goblinRow.querySelector('img');
+    const kills = () => body().querySelector('[data-codex-kills="goblin"]')!.textContent;
+    expect(kills()).toBe('15 defeated');
+
+    const recent = [{ monsterId: 'goblin', name: 'Goblin', kills: 16, rank: 0, maxRank: 5, nextAt: 25, prevAt: 0, bonusPct: 0 }];
+    client.push(codexState({ character: { ...codexState().character!, mastery: { discovered: 2, mastered: 0, version: 2, recent } } }));
+
+    expect(body().querySelector('[data-codex="monster:goblin"]')).toBe(goblinRow);
+    expect(goblinRow.querySelector('img')).toBe(art);
+    expect(kills()).toBe('16 defeated');
+  });
+
   it('opens and closes zones in the room list', () => {
     mount();
     modal.open({ kind: 'list', list: 'room' });

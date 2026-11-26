@@ -10,6 +10,8 @@ import {
   codexListHtml,
   codexMissingHtml,
   codexZoneKey,
+  monsterKillsText,
+  patchMonsterKills,
 } from '../src/ui/codex/codexViews';
 import { CODEX_WORLD, codexReply, codexState, loadCodexWorld } from './codexFixture';
 
@@ -241,9 +243,22 @@ describe('home', () => {
 });
 
 describe('lists', () => {
-  it('shows monster rows with their record and drops found', () => {
-    const el = render(codexListHtml('monster', ctx(), LIST));
-    expect([...el.querySelectorAll('.codex-row')].map(r => text(r.querySelector('.codex-row-sub')))).toEqual(['', 'Not defeated yet · 0 of 2 drops found', '15 defeated · 2 of 3 drops found']);
+  it('shows monster rows with their record and drops found, the record patched in place to the live count', () => {
+    const view = ctx();
+    const el = render(codexListHtml('monster', view, LIST));
+    const subs = () => [...el.querySelectorAll('.codex-row')].map(r => text(r.querySelector('.codex-row-sub')));
+    expect(subs()).toEqual(['', 'Not defeated yet · 0 of 2 drops found', '12 defeated · 2 of 3 drops found']);
+    expect(el.querySelector('[data-codex-kills="goblin"]')).not.toBeNull();
+    expect(el.querySelector('[data-codex-kills="wall"]')).toBeNull();
+
+    patchMonsterKills(el, view.index, view.state);
+    expect(subs()).toEqual(['', 'Not defeated yet · 0 of 2 drops found', '15 defeated · 2 of 3 drops found']);
+  });
+
+  it('gives a row the same record text from the snapshot as from the live count', () => {
+    expect(monsterKillsText({}, 0)).toBe('Not defeated yet');
+    expect(monsterKillsText({}, 1200)).toBe('1,200 defeated');
+    expect(monsterKillsText({ passive: true }, 9)).toBe('');
   });
 
   it('shows items with their kind and whether they are held, found or only seen', () => {

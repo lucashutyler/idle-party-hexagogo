@@ -19,6 +19,7 @@ import {
   codexHomeHtml,
   codexListHtml,
   codexLoadingHtml,
+  patchMonsterKills,
 } from './codexViews';
 
 export const CODEX_REFRESH_MS = 30_000;
@@ -375,6 +376,7 @@ export class CodexModal {
     const loaded = !!this.host.gameClient.lastCodex;
     const scrollTop = this.bodyEl.scrollTop;
     const wrote = setHtml(this.bodyEl, loaded ? this.bodyHtml(view, state) : codexLoadingHtml());
+    if (loaded) patchMonsterKills(this.bodyEl, this.index(state), state);
     if (switched) this.bodyEl.scrollTop = view.scrollTop;
     else if (wrote) this.bodyEl.scrollTop = scrollTop;
     this.paintedView = view;
