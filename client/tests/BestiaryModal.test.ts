@@ -139,6 +139,26 @@ describe('BestiaryModal', () => {
     expect(client.subscribed).toBe(false);
   });
 
+  it('holds push-driven repaints while a press inside is in flight, so a tap on a row\'s Codex link lands', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const client = fakeClient([goblin, wolf]);
+    const modal = new BestiaryModal(client as unknown as GameClient);
+    modal.open();
+    const link = document.querySelector('.bestiary-row[data-monster-id="goblin"] .bestiary-codex')!;
+    link.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+
+    vi.setSystemTime(1_000_000 + BESTIARY_REFRESH_MS);
+    client.kill([{ ...goblin, kills: 213 }], 2);
+    client.deliver([{ ...goblin, kills: 213 }, wolf]);
+    expect(killsShown('goblin')).toBe('212 defeated');
+    expect(link.isConnected).toBe(true);
+
+    document.dispatchEvent(new PointerEvent('pointercancel'));
+    expect(killsShown('goblin')).toBe('213 defeated');
+    modal.close();
+  });
+
   it('opens on the modal stack, requests the list and renders it when it arrives', () => {
     const client = fakeClient(null);
     const modal = new BestiaryModal(client as unknown as GameClient);

@@ -4,6 +4,7 @@ import type { GameClient } from '../network/GameClient';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderAssetImg } from './assets';
 import { codexTargetAttr } from './codexLinks';
+import { deferWhilePressed } from './render';
 
 export type BestiarySort = 'closest' | 'kills' | 'name' | 'rank';
 
@@ -272,7 +273,7 @@ export class BestiaryModal {
     });
     document.addEventListener('keydown', this.keyHandler);
 
-    this.unsubBestiary = this.gameClient.onBestiary(() => this.renderList());
+    this.unsubBestiary = this.gameClient.onBestiary(() => this.repaint());
     this.unsubState = this.gameClient.subscribe(state => this.onMasteryVersion(state.character?.mastery?.version));
     this.gameClient.requestBestiary();
     this.renderList();
@@ -308,13 +309,17 @@ export class BestiaryModal {
     if (version === this.shownVersion || this.refreshTimer) return;
     const wait = this.renderedAt + BESTIARY_REFRESH_MS - Date.now();
     if (wait <= 0) {
-      this.renderList();
+      this.repaint();
       return;
     }
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      this.renderList();
+      this.repaint();
     }, wait);
+  }
+
+  private repaint(): void {
+    if (this.overlay) deferWhilePressed(this.overlay, () => this.renderList());
   }
 
   private renderList(): void {
