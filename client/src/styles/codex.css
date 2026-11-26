@@ -172,6 +172,7 @@ button.codex-head-btn:focus-visible {
 .codex-empty,
 .codex-footnote {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--fs-sm);
   line-height: 1.45;
   color: var(--text-2);

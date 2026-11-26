@@ -22,6 +22,10 @@ describe('codex.css', () => {
     expect(order.indexOf('codex')).toBeLessThan(order.indexOf('popups'));
   });
 
+  it('wraps a long unbroken search query instead of scrolling the window sideways', () => {
+    expect(css).toMatch(/\.codex-status,\s*\.codex-empty,\s*\.codex-footnote\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+
   it('keeps hidden rows hidden although .ui-row is a flex box', () => {
     expect(css).toMatch(/\.settings-row\[hidden\][^{]*\{\s*display:\s*none/);
   });
