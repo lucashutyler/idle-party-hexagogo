@@ -62,6 +62,8 @@ const OWN_TRAVEL_FOLLOW_MS = 5000;
 export const ORDER_ANSWER_MS = 5000;
 /** Quick taps across the map shouldn't each ask the server about a lock. */
 export const LOCK_INSPECT_DEBOUNCE_MS = 250;
+/** A card waiting on another member asks again this often: their quest turn-ins never reach this player's state. */
+export const LOCK_REFRESH_MS = 10_000;
 const MAP_KEY_PAN_PX = 80;
 const MAP_KEY_PAN: Readonly<Record<string, readonly [number, number]>> = {
   ArrowLeft: [-1, 0],
@@ -114,7 +116,9 @@ export class MapScreen implements Screen {
   /** The sheet's room the lock card was asked for, and the lock preview key it was asked under. */
   private lockRequest: { tileId: string; key: string } | null = null;
   private lockTimer: ReturnType<typeof setTimeout> | undefined;
-  private lockDialog: { dialog: LockDialog; target: Extract<LockTarget, { kind: 'door' }>; key: string } | null = null;
+  private lockRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  /** `lock` is the server's card on show: null until it arrives, and once the server finds the door open. */
+  private lockDialog: { dialog: LockDialog; target: Extract<LockTarget, { kind: 'door' }>; key: string; lock: RoomLockInfo | null } | null = null;
   private openQuestLog?: () => void;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
@@ -149,6 +153,10 @@ export class MapScreen implements Screen {
     if (typeof ResizeObserver !== 'undefined') {
       new ResizeObserver(() => this.onScreenResize()).observe(this.container);
     }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.syncLockRefresh();
+      else this.refreshWaitingCards();
+    });
     this.preloadMapCode();
   }
 
@@ -390,13 +398,16 @@ export class MapScreen implements Screen {
   private onLockInfo(msg: ServerLockInfoMessage): void {
     const door = this.lockDialog;
     if (door?.dialog.isOpen && sameLockTarget(door.target, msg.target)) {
+      door.lock = msg.lock;
       door.dialog.setLock(msg.lock);
+      this.syncLockRefresh();
       return;
     }
     const request = this.lockRequest;
     if (msg.target.kind !== 'room' || request?.tileId !== msg.target.tileId) return;
     if (this.roomSheet?.selectedRoomId !== msg.target.tileId) return;
     this.roomSheet.setLock(msg.lock);
+    this.syncLockRefresh();
   }
 
   /** A card from a refusal is asked for again, like one the sheet asked for, once the party or the viewer changes. */
@@ -406,6 +417,44 @@ export class MapScreen implements Screen {
     this.roomSheet!.setLock(lock);
     clearTimeout(this.lockTimer);
     this.lockRequest = { tileId: roomId, key: lockCardKey(this.gameClient.lastState) };
+    this.syncLockRefresh();
+  }
+
+  /** Runs while a card on screen waits on another member, and the map is shown in a visible page. */
+  private syncLockRefresh(): void {
+    const waiting = this.cardsWaitingOnOthers();
+    if (!waiting.roomId && !waiting.door) {
+      clearTimeout(this.lockRefreshTimer);
+      this.lockRefreshTimer = undefined;
+      return;
+    }
+    this.lockRefreshTimer ??= setTimeout(() => this.refreshWaitingCards(), LOCK_REFRESH_MS);
+  }
+
+  private refreshWaitingCards(): void {
+    clearTimeout(this.lockRefreshTimer);
+    this.lockRefreshTimer = undefined;
+    const { roomId, door } = this.cardsWaitingOnOthers();
+    if (roomId) this.requestLockInfo(roomId);
+    if (door) this.gameClient.sendInspectLock(door);
+    this.syncLockRefresh();
+  }
+
+  /** The sheet's room and the door whose cards on screen wait on another member. */
+  private cardsWaitingOnOthers(): { roomId: string | null; door: LockTarget | null } {
+    if (!this.active || document.visibilityState === 'hidden') return { roomId: null, door: null };
+    const sheet = this.roomSheet;
+    const open = this.lockDialog;
+    return {
+      roomId: sheet?.isOpen && this.waitsOnOthers(sheet.shownLock) ? sheet.selectedRoomId : null,
+      door: open?.dialog.isOpen && this.waitsOnOthers(open.lock) ? open.target : null,
+    };
+  }
+
+  private waitsOnOthers(lock: RoomLockInfo | null): boolean {
+    const state = this.gameClient.lastState;
+    if (!lock || !state || !this.partyHasOthers(state)) return false;
+    return lock.requirements.some(req => req.members.some(m => !m.met && m.username !== state.username));
   }
 
   /** Whether Go was waiting on the room the sheet still shows, and in time; ends the wait either way. */
@@ -589,6 +638,7 @@ export class MapScreen implements Screen {
     const tileDef = this.worldCache.getTileOn(info.mapId, info.col, info.row);
     if (tileDef && this.wantsLockInfo(model, tileDef, state)) this.requestLockInfo(tileDef.id);
     else this.dropLockRequest();
+    this.syncLockRefresh();
   }
 
   /** The client's preview can't see other members' quests and gear, so with others along any gate on the way is asked about. */
@@ -681,6 +731,7 @@ export class MapScreen implements Screen {
     this.roomSheet?.hide();
     this.map?.setSelectedRoom(null);
     this.syncScreenLayout();
+    this.syncLockRefresh();
   }
 
   private sheetModel(info: TileClickInfo): RoomSheetModel {
@@ -902,10 +953,12 @@ export class MapScreen implements Screen {
       context: () => this.lockContext(this.gameClient.lastState),
       onAction: (picked) => { this.runLockAction(picked); },
       onOpen: () => { void this.travelThrough({ ...action, locked: false }, false); },
+      onClose: () => { this.syncLockRefresh(); },
     });
-    this.lockDialog = { dialog, target, key: lockCardKey(state) };
+    this.lockDialog = { dialog, target, key: lockCardKey(state), lock: lock ?? null };
     if (lock) dialog.setLock(lock);
     else this.gameClient.sendInspectLock(target);
+    this.syncLockRefresh();
   }
 
   /** The dialog is about a door of the room the party stands in: it closes once the party leaves, and asks again when the lock may have changed. */
@@ -1241,6 +1294,7 @@ export class MapScreen implements Screen {
       if (this.arrivedOrOnTheWay(state)) this.dismissSheet();
       this.refreshSheet();
       this.refreshDoorLock(state);
+      this.syncLockRefresh();
     });
     this.refreshOpenRoomForecast();
   }

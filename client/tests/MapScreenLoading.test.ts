@@ -46,7 +46,7 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
   return { ThreeWorldMap };
 });
 
-import { LOCK_INSPECT_DEBOUNCE_MS, MapScreen, ORDER_ANSWER_MS } from '../src/screens/MapScreen';
+import { LOCK_INSPECT_DEBOUNCE_MS, LOCK_REFRESH_MS, MapScreen, ORDER_ANSWER_MS } from '../src/screens/MapScreen';
 import { SETTING_OFF_TEXT } from '../src/ui/RoomSheet';
 import { NO_KNOWN_WAY_TEXT } from '../src/ui/routePreview';
 
@@ -546,6 +546,165 @@ describe('MapScreen room selection', () => {
       await tick();
       expect((gameClient as unknown as { sendKickPartyMember: ReturnType<typeof vi.fn> }).sendKickPartyMember).toHaveBeenCalledWith('Bryn');
     });
+
+    describe('while it waits on another member', () => {
+      const questGate = { id: 'room-1', type: 'plains', entryRequirements: { requiredQuestIds: ['q-gate'] } };
+      const mates = (forecastKey: string, others = ['Bryn']) => ({
+        ...solo,
+        character: { level: 9, equipment: {} },
+        completedQuests: [{ questId: 'q-gate', completedAt: '' }],
+        social: {
+          party: { forecastKey, members: [{ username: 'me', role: 'owner', level: 9 }, ...others.map(username => ({ username, role: 'member', level: 9 }))] },
+          onlinePlayers: ['me', ...others],
+        },
+      });
+      const gate = (met: Record<string, boolean>) => ({
+        roomId: 'room-1',
+        requirements: [{ kind: 'quest', questId: 'q-gate', questName: 'The Gate', members: Object.entries(met).map(([username, has]) => ({ username, met: has })) }],
+      });
+      const rows = () => [...document.querySelectorAll('.lock-card-member')].map(row => row.textContent);
+      const asked = (gameClient: GameClient) => vi.mocked(gameClient.sendInspectLock).mock.calls.length;
+
+      async function waiting(lastState: unknown = mates('k1'), first: Record<string, boolean> = { me: true, Bryn: false }) {
+        const mounted = await opened(lastState, questGate);
+        vi.useFakeTimers();
+        const push = (state: unknown) => {
+          (mounted.gameClient as unknown as { lastState: unknown }).lastState = state;
+          for (const listener of stateListeners) listener(state);
+        };
+        mounted.map.getTileInfo.mockReturnValue(info());
+        mounted.map.tap(info());
+        vi.advanceTimersByTime(LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(mounted.gameClient)).toBe(1);
+        reply(gate(first));
+        return { ...mounted, push };
+      }
+
+      afterEach(() => {
+        vi.useRealTimers();
+        Reflect.deleteProperty(document, 'visibilityState');
+      });
+
+      it('asks again when the party\'s forecast key moves, and Go comes back once the server finds the room open', async () => {
+        const { gameClient, push, map } = await waiting();
+        expect(rows()).toEqual(['✓You', '✗Bryn']);
+        push(mates('k1'));
+        vi.advanceTimersByTime(LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(gameClient)).toBe(1);
+
+        push(mates('k2'));
+        vi.advanceTimersByTime(LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(gameClient)).toBe(2);
+        reply(null);
+        expect(document.querySelector('.lock-card')).toBeNull();
+        expect(document.querySelector<HTMLButtonElement>('.room-sheet-go')!.hidden).toBe(false);
+        map.tap(info());
+        expect(gameClient.sendMoveTo).toHaveBeenCalledWith('room-1', { col: 3, row: 4 });
+      });
+
+      it('asks again every so often, since other members\' quest turn-ins never reach this player, until the room opens', async () => {
+        const { gameClient } = await waiting();
+        vi.advanceTimersByTime(LOCK_REFRESH_MS - 1);
+        expect(asked(gameClient)).toBe(1);
+        vi.advanceTimersByTime(1 + LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(gameClient)).toBe(2);
+        expect(gameClient.sendInspectLock).toHaveBeenLastCalledWith({ kind: 'room', tileId: 'room-1' });
+
+        const card = document.querySelector('.lock-card');
+        reply(gate({ me: true, Bryn: false }));
+        expect(document.querySelector('.lock-card')).toBe(card);
+
+        vi.advanceTimersByTime(LOCK_REFRESH_MS + LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(gameClient)).toBe(3);
+        reply(null);
+        expect(document.querySelector('.lock-card')).toBeNull();
+        expect(document.querySelector<HTMLButtonElement>('.room-sheet-go')!.hidden).toBe(false);
+
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(asked(gameClient)).toBe(3);
+      });
+
+      it('updates the card in place as each member does their part', async () => {
+        const { gameClient } = await waiting(mates('k1', ['Bryn', 'Cy']), { me: true, Bryn: false, Cy: false });
+        expect(rows()).toEqual(['✓You', '✗Bryn', '✗Cy']);
+        vi.advanceTimersByTime(LOCK_REFRESH_MS + LOCK_INSPECT_DEBOUNCE_MS);
+        reply(gate({ me: true, Bryn: false, Cy: true }));
+        expect(rows()).toEqual(['✓You', '✗Bryn', '✓Cy']);
+        expect(document.querySelector<HTMLButtonElement>('.room-sheet-go')!.hidden).toBe(true);
+
+        vi.advanceTimersByTime(LOCK_REFRESH_MS + LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(gameClient)).toBe(3);
+      });
+
+      it('keeps a tap on the card working when an answer lands under the finger', async () => {
+        const { gameClient } = await waiting();
+        vi.advanceTimersByTime(LOCK_REFRESH_MS + LOCK_INSPECT_DEBOUNCE_MS);
+        const remove = document.querySelector<HTMLElement>('[data-lock-action="remove"]')!;
+        remove.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+        reply(gate({ me: true, Bryn: true }));
+        expect(document.querySelector('[data-lock-action="remove"]')).toBe(remove);
+        remove.click();
+        expect(document.querySelector('.confirm-title')!.textContent).toBe('Kick Bryn?');
+        vi.advanceTimersByTime(0);
+        expect(rows()).toEqual(['✓You', '✓Bryn']);
+        expect(asked(gameClient)).toBe(2);
+        while (dismissTop()) { /* drain */ }
+      });
+
+      it('stops once the sheet closes or shows another room', async () => {
+        const closed = await waiting();
+        closed.map.background();
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(asked(closed.gameClient)).toBe(1);
+
+        vi.useRealTimers();
+        const other = await waiting();
+        const cache = (other.screen as unknown as { worldCache: { getTileOn: (mapId: string, col: number, row: number) => unknown } }).worldCache;
+        const getTileOn = cache.getTileOn;
+        cache.getTileOn = (mapId, col, row) => (col === 5 ? { id: 'room-2', type: 'plains' } : getTileOn(mapId, col, row));
+        other.map.tap(info({ col: 5, tileId: 'room-2' }));
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(asked(other.gameClient)).toBe(1);
+      });
+
+      it('stops once the viewer is on their own, or the card waits only on the viewer', async () => {
+        const left = await waiting();
+        left.push({ ...mates('k1'), social: { party: { forecastKey: 'k1', members: [{ username: 'me', role: 'owner', level: 9 }] } } });
+        vi.advanceTimersByTime(LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(left.gameClient)).toBe(2);
+        reply(gate({ me: false }));
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(asked(left.gameClient)).toBe(2);
+
+        vi.useRealTimers();
+        const mine = await waiting({ ...mates('k1'), completedQuests: [] }, { me: false, Bryn: true });
+        expect(rows()).toEqual(['✗You', '✓Bryn']);
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(asked(mine.gameClient)).toBe(1);
+      });
+
+      it('stops when the map screen is left', async () => {
+        const { screen, gameClient } = await waiting();
+        screen.onDeactivate();
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(asked(gameClient)).toBe(1);
+      });
+
+      it('rests while the page is hidden and asks at once on return', async () => {
+        const { gameClient } = await waiting();
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(asked(gameClient)).toBe(1);
+
+        Reflect.deleteProperty(document, 'visibilityState');
+        document.dispatchEvent(new Event('visibilitychange'));
+        vi.advanceTimersByTime(LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(gameClient)).toBe(2);
+        vi.advanceTimersByTime(LOCK_REFRESH_MS + LOCK_INSPECT_DEBOUNCE_MS);
+        expect(asked(gameClient)).toBe(3);
+      });
+    });
   });
 
   it('focusRoom pans to the room and selects it, even before the map has loaded', async () => {
@@ -747,13 +906,13 @@ describe('MapScreen status chips', () => {
       requirements: [{ kind: 'level', minLevel: 5, members: [{ username: 'me', met: false, level: 1 }] }],
     };
 
-    async function withLockedExit(wide: boolean) {
+    async function withLockedExit(wide: boolean, lastState: unknown = { ...state, username: 'me', character: { level: 1, equipment: {} } }) {
       vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
         matches: query.includes('min-width: 768px') && wide,
         addEventListener: () => {},
         removeEventListener: () => {},
       }) as unknown as MediaQueryList);
-      const mounted = mount({ ...state, username: 'me', character: { level: 1, equipment: {} } });
+      const mounted = mount(lastState);
       Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
         getTileOn: () => ({ ...transitionTile, transitions: [{ tileId: 'far', mapId: 'there', entryRequirements: { minLevel: 5 } }] }),
         getTileByGuid: () => ({ name: 'Harbour', mapId: 'there' }),
@@ -789,6 +948,32 @@ describe('MapScreen status chips', () => {
       document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
       await tick();
       expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+
+    it('asks again every so often while its card waits on another member, and stops once it is closed', async () => {
+      const members = [{ username: 'me', role: 'owner', level: 9 }, { username: 'Bryn', role: 'member', level: 3 }];
+      const { gameClient } = await withLockedExit(true, { ...state, username: 'me', character: { level: 9, equipment: {} }, social: { party: { members }, onlinePlayers: ['me', 'Bryn'] } });
+      vi.useFakeTimers();
+      try {
+        const door = { kind: 'door', fromTileId: 'room-1', tileId: 'far' };
+        const waitingLock = { ...doorLock, requirements: [{ kind: 'level', minLevel: 5, members: [{ username: 'me', met: true, level: 9 }, { username: 'Bryn', met: false, level: 3 }] }] };
+        document.querySelector<HTMLElement>('.room-status-chip')!.click();
+        expect(gameClient.sendInspectLock).toHaveBeenCalledOnce();
+        for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: door, lock: waitingLock });
+        const card = document.querySelector('.lock-dialog .lock-card');
+
+        vi.advanceTimersByTime(LOCK_REFRESH_MS);
+        expect(gameClient.sendInspectLock).toHaveBeenCalledTimes(2);
+        expect(gameClient.sendInspectLock).toHaveBeenLastCalledWith(door);
+        for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: door, lock: waitingLock });
+        expect(document.querySelector('.lock-dialog .lock-card')).toBe(card);
+
+        document.querySelector<HTMLElement>('.lock-dialog-close')!.click();
+        vi.advanceTimersByTime(LOCK_REFRESH_MS * 3);
+        expect(gameClient.sendInspectLock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

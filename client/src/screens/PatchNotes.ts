@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.26.4',
+    notes: [
+      'If you leave or are removed from your party or guild while typing to it, your message now waits above the chat box as not sent.',
+      'A locked room\'s card updates by itself once the member it waits on has done their part, and Go comes back.',
+      'Tapping Now open shows the room, even while you are looking at another map.',
+    ],
+  },
+  {
     version: '2026.11.26.3',
     notes: [
       'Every refused trip now tells you why, and solo players no longer see themselves listed as missing something.',

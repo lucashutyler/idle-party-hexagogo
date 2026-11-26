@@ -51,6 +51,8 @@ const SEND_REPLY_WINDOW_MS = 30_000;
 const TYPING_EXIT_DELAY_MS = 150;
 const KEYBOARD_SHOWN_MIN_SHRINK_PX = 120;
 const KEYBOARD_GONE_MAX_SHRINK_PX = 60;
+const PARTY_LOST_TEXT = 'You\'re no longer in that party. Your message wasn\'t sent.';
+const GUILD_LOST_TEXT = 'You\'re no longer in that guild. Your message wasn\'t sent.';
 
 const ICON_FILTER = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 2.5h13a.5.5 0 0 1 .4.8L10 9.2v4.3a.5.5 0 0 1-.8.4l-3-2a.5.5 0 0 1-.2-.4V9.2L1.1 3.3a.5.5 0 0 1 .4-.8z"/></svg>';
 const ICON_EXPAND = '<svg class="chat-icon-expand" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 7.5 8 3l5 4.5M3 13l5-4.5 5 4.5"/></svg>';
@@ -117,7 +119,7 @@ export class ChatPopout {
   private tab: ChatTab = 'all';
   private thread: string | null = null;
   private allChannel: ChatChannelType = 'global';
-  private membership: ChatMembership = { inParty: false, guildId: null };
+  private membership: ChatMembership = { inParty: false, partyId: null, guildId: null };
   private blockedKey = '{}';
 
   private lastSeenAt: number;
@@ -761,7 +763,10 @@ export class ChatPopout {
 
   private syncMembership(state: ServerStateMessage): void {
     const next = chatMembership(state);
-    if (next.inParty === this.membership.inParty && next.guildId === this.membership.guildId) return;
+    const previous = this.membership;
+    if (next.inParty === previous.inParty && next.partyId === previous.partyId && next.guildId === previous.guildId) return;
+    const lost = this.lostChannel(next);
+    const held = lost !== null && this.holdComposerText();
     this.membership = next;
     deferWhilePressed(this.composerEl, () => {
       this.syncChannelOptions();
@@ -773,6 +778,24 @@ export class ChatPopout {
     } else {
       this.syncTabs();
     }
+    if (held) this.showStatus(lost === 'guild' ? GUILD_LOST_TEXT : PARTY_LOST_TEXT);
+  }
+
+  /** The party or guild the composer addresses, when this change takes it away or points it at other people. */
+  private lostChannel(next: ChatMembership): 'party' | 'guild' | null {
+    const addressed = this.currentChannel();
+    if (addressed === 'party' && (!next.inParty || next.partyId !== this.membership.partyId)) return 'party';
+    if (addressed === 'guild' && next.guildId !== this.membership.guildId) return 'guild';
+    return null;
+  }
+
+  /** Text typed for a lost audience goes to the "Not sent" line, never to whoever the composer reaches next. */
+  private holdComposerText(): boolean {
+    const text = stripTextDirectionControls(this.inputEl.value).trim();
+    if (!text) return false;
+    this.inputEl.value = '';
+    this.keepUnsent(text);
+    return true;
   }
 
   private restorePreferences(state: ServerStateMessage): void {

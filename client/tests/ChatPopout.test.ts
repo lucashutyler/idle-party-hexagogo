@@ -1261,6 +1261,153 @@ describe('ChatPopout and overlays opened since', () => {
   });
 });
 
+describe('ChatPopout when the party or guild being typed to goes away', () => {
+  const unsent = () => document.querySelector('.chat-unsent') as HTMLElement;
+  const pressEnter = (t: ReturnType<typeof setup>) => t.input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+  function member(over: { party?: unknown; guild?: unknown } = {}): ServerStateMessage {
+    const base = stateWith();
+    return { ...base, social: { ...base.social!, ...over } } as ServerStateMessage;
+  }
+  const inGuild = (id = 'guild-id') => member({ guild: { id, name: 'G', leaderUsername: 'boss', createdAt: 0 } });
+  const inParty = (id = 'p1', others = ['bob']) => member({ party: { id, members: [{ username: 'me' }, ...others.map(username => ({ username }))] } });
+
+  function expectHeld(t: ReturnType<typeof setup>, text: string, status: string): void {
+    expect(t.gameClient.sendChat).not.toHaveBeenCalled();
+    expect(t.input().value).toBe('');
+    expect(unsent().hidden).toBe(false);
+    expect(unsent().textContent).toContain(text);
+    expect(t.status().hidden).toBe(false);
+    expect(t.status().textContent).toBe(status);
+  }
+
+  it('holds guild text instead of sending it to Global once the player is removed from the guild', () => {
+    const t = setup(inGuild());
+    t.chat.open();
+    t.tab('guild').click();
+    t.input().value = 'guild only: raid plan';
+
+    t.pushState(stateWith());
+    pressEnter(t);
+    t.clickSend();
+
+    expect(t.tab('all').classList.contains('active')).toBe(true);
+    expectHeld(t, 'guild only: raid plan', 'You\'re no longer in that guild. Your message wasn\'t sent.');
+  });
+
+  it('holds party text instead of sending it to Global once the player is removed from the party', () => {
+    const t = setup(inParty());
+    t.chat.open();
+    t.tab('party').click();
+    t.input().value = 'one sec, equipping the key';
+
+    t.pushState(stateWith());
+    pressEnter(t);
+
+    expect(t.tab('all').classList.contains('active')).toBe(true);
+    expectHeld(t, 'one sec, equipping the key', 'You\'re no longer in that party. Your message wasn\'t sent.');
+  });
+
+  it.each([
+    ['guild', inGuild(), 'You\'re no longer in that guild. Your message wasn\'t sent.'],
+    ['party', inParty(), 'You\'re no longer in that party. Your message wasn\'t sent.'],
+  ])('holds text on All once the %s picked in the channel list goes away', (channel, before, status) => {
+    const t = setup(before);
+    t.chat.open();
+    t.select().value = channel;
+    t.select().dispatchEvent(new Event('change'));
+    t.input().value = 'for us only';
+
+    t.pushState(stateWith());
+    pressEnter(t);
+
+    expect(t.select().value).toBe('global');
+    expectHeld(t, 'for us only', status);
+  });
+
+  it('holds party text when the player moves to another party, which would reach other people', () => {
+    const t = setup(inParty('p1', ['bob']));
+    t.chat.open();
+    t.tab('party').click();
+    t.input().value = 'bob, you hold the gate';
+
+    t.pushState(inParty('p2', ['carol']));
+    pressEnter(t);
+
+    expect(t.tab('party').classList.contains('active')).toBe(true);
+    expectHeld(t, 'bob, you hold the gate', 'You\'re no longer in that party. Your message wasn\'t sent.');
+
+    t.input().value = 'hi carol';
+    pressEnter(t);
+    expect(t.gameClient.sendChat).toHaveBeenCalledWith('party', '', 'hi carol');
+  });
+
+  it('holds guild text when the guild changes under it', () => {
+    const t = setup(inGuild('g1'));
+    t.chat.open();
+    t.tab('guild').click();
+    t.input().value = 'old friends only';
+
+    t.pushState(inGuild('g2'));
+    pressEnter(t);
+
+    expectHeld(t, 'old friends only', 'You\'re no longer in that guild. Your message wasn\'t sent.');
+  });
+
+  it('holds the text while Send is held down, as the push lands', () => {
+    const t = setup(inGuild());
+    t.chat.open();
+    t.tab('guild').click();
+    t.input().value = 'mid-tap';
+
+    press(document.querySelector('.chat-popout-send')!);
+    t.pushState(stateWith());
+    t.clickSend();
+    vi.advanceTimersByTime(0);
+
+    expectHeld(t, 'mid-tap', 'You\'re no longer in that guild. Your message wasn\'t sent.');
+  });
+
+  it('keeps the text where the change leaves its audience alone', () => {
+    const t = setup(member({ party: { id: 'p1', members: [{ username: 'me' }, { username: 'bob' }] }, guild: { id: 'guild-id' } }));
+    t.chat.open();
+    t.input().value = 'hello world';
+    t.pushState(stateWith());
+    expect(t.input().value).toBe('hello world');
+    expect(unsent().hidden).toBe(true);
+    pressEnter(t);
+    expect(t.gameClient.sendChat).toHaveBeenCalledWith('global', '', 'hello world');
+
+    const party = setup(inParty('p1', ['bob']));
+    party.chat.open();
+    party.tab('party').click();
+    party.input().value = 'welcome';
+    party.pushState(inParty('p1', ['bob', 'carol']));
+    expect(party.input().value).toBe('welcome');
+    pressEnter(party);
+    expect(party.gameClient.sendChat).toHaveBeenCalledWith('party', '', 'welcome');
+  });
+
+  it('keeps a DM addressed to its player through party and guild changes', () => {
+    const t = setup(member({ party: { id: 'p1', members: [{ username: 'me' }, { username: 'bob' }] }, guild: { id: 'guild-id' } }));
+    t.chat.openDm('Mira');
+    t.input().value = 'just us';
+    t.pushState(stateWith());
+    expect(t.input().value).toBe('just us');
+    pressEnter(t);
+    expect(t.gameClient.sendChat).toHaveBeenCalledWith('dm', 'Mira', 'just us');
+  });
+
+  it('says nothing when the composer was empty', () => {
+    const t = setup(inGuild());
+    t.chat.open();
+    t.tab('guild').click();
+    t.pushState(stateWith());
+    expect(unsent().hidden).toBe(true);
+    expect(t.status().hidden).toBe(true);
+  });
+});
+
 describe('ChatPopout state-driven view changes', () => {
   it('holds the rebuild while a row is pressed when the party goes away', () => {
     const t = setup(stateWith({ social: { ...stateWith().social, party: { id: 'p1', members: [{ username: 'me' }, { username: 'bob' }] } } }));

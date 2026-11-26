@@ -194,13 +194,17 @@ export function buildDmThreads(
 
 export interface ChatMembership {
   inParty: boolean;
+  /** The party that party chat reaches; null when solo. */
+  partyId: string | null;
   guildId: string | null;
 }
 
 export function chatMembership(state: Pick<ServerStateMessage, 'social'> | null | undefined): ChatMembership {
   const social = state?.social;
+  const inParty = (social?.party?.members.length ?? 0) > 1;
   return {
-    inParty: (social?.party?.members.length ?? 0) > 1,
+    inParty,
+    partyId: inParty ? social?.party?.id ?? null : null,
     guildId: social?.guild?.id ?? null,
   };
 }
