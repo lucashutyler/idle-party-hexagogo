@@ -250,7 +250,7 @@ export class CombatScreen implements Screen {
     this.isActive = true;
     const visible = document.visibilityState !== 'hidden';
     this.playback.setActive(visible);
-    this.gameClient.combatLog.setHoldLive(true);
+    this.gameClient.combatLog.setHoldLive(visible);
     this.gameClient.sendCombatView(true);
     this.logView.setActive(true);
     this.lastJournalSeq = this.newestJournalSeq();
@@ -414,6 +414,7 @@ export class CombatScreen implements Screen {
       if (!this.isActive) return;
       const visible = document.visibilityState !== 'hidden';
       this.playback.setActive(visible);
+      this.gameClient.combatLog.setHoldLive(visible);
       if (visible) this.startLoop();
       else this.stopLoop();
     });

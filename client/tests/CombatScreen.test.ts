@@ -197,6 +197,31 @@ describe('CombatScreen', () => {
     expect(entry.querySelector('.log-name-self')?.textContent).toBe('you');
   });
 
+  it('lets journal lines straight into the log while the page is hidden, and holds them again once it is back', () => {
+    const t = start();
+    const log = t.gameClient.combatLog;
+    const entry = (id: number) => ({ id, text: `entry ${id}`, type: 'victory' }) as CombatLogEntry;
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+    try {
+      log.pushLive(1, ['Goblin is defeated!'], 60_000);
+      visibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      for (let id = 1; id <= 3; id++) t.pushState(1, GOBLIN, [entry(id)]);
+      expect(log.pendingCount).toBe(0);
+      expect(log.entries.map(e => e.text)).toEqual(['Goblin is defeated!', 'entry 1', 'entry 2', 'entry 3']);
+
+      visibility = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      log.pushLive(1, ['Goblin hits alice'], 60_000);
+      t.pushState(1, GOBLIN, [entry(4)]);
+      expect(log.entries.at(-1)?.text).toBe('entry 3');
+      expect(log.pendingCount).toBe(2);
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+    }
+  });
+
   it('draws no placeholder slots: an empty seat is just the plate', () => {
     start();
     expect(document.querySelectorAll('.combat-grid-empty')).toHaveLength(0);
