@@ -105,6 +105,8 @@ export interface TravelOptions {
   dungeonAt?: RoomKey;
   /** Adds a second, shorter door w1 → e1 with this gate. */
   shortcutGate?: RoomEntryRequirements;
+  /** More doors, each one way, after the usual ones. */
+  extraDoors?: Partial<Record<RoomKey, RoomKey[]>>;
   gates?: Partial<Record<RoomKey, RoomEntryRequirements>>;
   walls?: RoomKey[];
   /** Without one every fight is won at once, so the party walks on after every fight. */
@@ -124,6 +126,9 @@ function makeWorld(opts: TravelOptions): WorldData {
     b0: [{ mapId: DELL, tileId: ROOM.e2 }],
     b1: [{ mapId: PIT, tileId: ROOM.p0 }],
   };
+  for (const [from, rooms] of Object.entries(opts.extraDoors ?? {}) as [RoomKey, RoomKey[]][]) {
+    links[from] = [...(links[from] ?? []), ...rooms.map(to => ({ mapId: PLACE[to].mapId, tileId: ROOM[to] }))];
+  }
   const tiles = (Object.keys(ROOM) as RoomKey[]).map((key): WorldTileDefinition => ({
     id: ROOM[key],
     ...PLACE[key],

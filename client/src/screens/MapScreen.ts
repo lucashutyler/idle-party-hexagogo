@@ -928,9 +928,9 @@ export class MapScreen implements Screen {
 
   /**
    * A locked exit shows what it needs instead; every other way through a door asks first when the party's hires would
-   * stay behind on this map, or when the monsters there are far above the party and no dialog has said so yet.
+   * stay behind on this map, or when the monsters there are far above the party and `shownNote` is not that same warning.
    */
-  private async travelThrough(action: RoomAction, askFirst: boolean, levelShown = false): Promise<void> {
+  private async travelThrough(action: RoomAction, askFirst: boolean, shownNote: LevelNote | null = null): Promise<void> {
     const state = this.gameClient.lastState;
     if (!state) return;
     if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
@@ -941,7 +941,8 @@ export class MapScreen implements Screen {
     if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can travel'); return; }
     const hires = doorHiresText(state, this.worldCache.getMaps(), this.exitMapId(state, action.targetId));
     const note = this.exitLevelNote(action.targetId, state);
-    if (hires || askFirst || (note?.danger && !levelShown)) {
+    const warned = shownNote?.danger === true && shownNote.text === note?.text;
+    if (hires || askFirst || (note?.danger && !warned)) {
       const go = await confirmDialog({
         title: `${actionLabel(action)}?`,
         body: hires ?? 'Your party will go there right away.',
@@ -973,7 +974,7 @@ export class MapScreen implements Screen {
       note: this.exitLevelNote(action.targetId, state),
       context: () => this.lockContext(this.gameClient.lastState),
       onAction: (picked) => { this.runLockAction(picked); },
-      onOpen: () => { void this.travelThrough({ ...action, locked: false }, false, true); },
+      onOpen: (shownNote) => { void this.travelThrough({ ...action, locked: false }, false, shownNote); },
       onClose: () => { this.syncLockRefresh(); },
     });
     this.lockDialog = { dialog, target, key: lockCardKey(state), lock: lock ?? null };
@@ -994,6 +995,7 @@ export class MapScreen implements Screen {
     const key = lockCardKey(state);
     if (key === open.key) return;
     open.key = key;
+    open.dialog.setNote(this.exitLevelNote(open.target.tileId, state));
     this.gameClient.sendInspectLock(open.target);
   }
 

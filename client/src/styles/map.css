@@ -935,6 +935,9 @@ button.lock-card-btn-primary {
   line-height: 1.35;
   color: var(--text-1);
 }
+.lock-dialog-note:empty {
+  display: none;
+}
 
 button.room-sheet-close {
   grid-area: close;

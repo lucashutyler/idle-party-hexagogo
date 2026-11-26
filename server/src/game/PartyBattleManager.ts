@@ -1870,7 +1870,7 @@ export class PartyBattleManager {
         this.holdHere(entry);
         return;
       }
-      if (target !== 'wait') {
+      if (target !== 'wait' && target !== 'route') {
         pending = { ...pending, kind: target.door ? 'door' : 'relocate', cause: decision.cause, target: target.tile, link: target.door };
         if (target.door) delayMs = doorRetreatDelayMs(delayMs, entry.doorArrival?.at, Date.now());
       }
@@ -1881,9 +1881,10 @@ export class PartyBattleManager {
 
   /**
    * An adjacent room on this map that a member has found, the party may enter, and whose forecast is
-   * known to clear the threshold; with none, the same through a door of this room. 'wait' while rooms are still being forecast.
+   * known to clear the threshold; with none, the same through a door of this room. 'wait' while rooms are still being forecast;
+   * 'route' when the route's own next door leads to such a room, so the party only slips away and the route's door step crosses.
    */
-  private findRetreatTarget(entry: PartyBattleEntry, battle: OverworldBattle, belowPct: number): RetreatTarget | 'wait' | null {
+  private findRetreatTarget(entry: PartyBattleEntry, battle: OverworldBattle, belowPct: number): RetreatTarget | 'route' | 'wait' | null {
     const svc = this.forecaster;
     const grid = this.grids.get(entry.serverParty.currentMapId);
     if (!svc || !grid) return null;
@@ -1903,6 +1904,7 @@ export class PartyBattleManager {
     if (pick.kind === 'wait') return this.forecastRetreatRooms(pick.unknown, battle, pk) ? 'wait' : null;
 
     const doors = this.doorRetreatCandidates(entry, pk);
+    if (this.routeDoorIsSafe(entry, doors, belowPct)) return 'route';
     const doorPick = pickRetreatTarget(doors, belowPct);
     if (doorPick.kind === 'target') return { tile: doorPick.tile, door: doors.find(c => c.tile === doorPick.tile)?.door };
     if (doorPick.kind === 'none') return null;
@@ -1941,6 +1943,14 @@ export class PartyBattleManager {
       candidates.push({ tile, door: door.link, forecast: svc.get(roomForecastKey(epoch, pk, tile.id)), previous: tile.id === arrival?.fromTileId });
     }
     return candidates;
+  }
+
+  /** Whether the party's next step is its route's door, into one of these rooms known to clear the threshold. */
+  private routeDoorIsSafe(entry: PartyBattleEntry, doors: readonly RetreatCandidate[], belowPct: number): boolean {
+    const party = entry.serverParty;
+    const next = party.doorStepDue ? party.plannedRoute?.doors[0] : undefined;
+    const candidate = next && doors.find(c => c.tile.id === next.toTileId);
+    return !!candidate && isKnownSafe(candidate, belowPct);
   }
 
   /** Whether the room behind a scheduled door retreat is still one it would take: open, with a way back, known to win. */

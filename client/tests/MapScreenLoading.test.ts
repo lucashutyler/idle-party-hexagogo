@@ -1056,6 +1056,51 @@ describe('MapScreen status chips', () => {
       expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
     });
 
+    it('keeps the note under the title true once the strongest member leaves, and travels on the warning it then shows', async () => {
+      const door = { kind: 'door', fromTileId: 'room-1', tileId: 'far' };
+      const me = { username: 'me', role: 'owner', level: 6 };
+      const pair = { ...state, username: 'me', character: { level: 6, equipment: {} }, social: { party: { members: [me, { username: 'Bryn', role: 'member', level: 20 }] }, onlinePlayers: ['me', 'Bryn'] } };
+      const solo = { ...pair, social: { party: { members: [me] }, onlinePlayers: ['me'] } };
+      const { gameClient } = await withTravelChip(true, pair, transitionTile.transitions[0], { levels: [16, 16] });
+      const note = () => document.querySelector<HTMLElement>('.lock-dialog .confirm-note');
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledTimes(1);
+      const lock = { roomId: 'room-1', door: true, doorTileId: 'far', requirements: [{ kind: 'item', itemName: 'Tide Charm', members: [{ username: 'me', met: true }, { username: 'Bryn', met: false }] }] };
+      for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'item', reason: 'Tide Charm is required to enter this room.', missingPlayers: ['Bryn'], lock });
+      expect(note()!.textContent).toBe("Monsters there are level 16. Your party's best is level 20.");
+      expect(note()!.dataset.danger).toBe('0');
+
+      (gameClient as unknown as { lastState: unknown }).lastState = solo;
+      for (const listener of stateListeners) listener(solo);
+      expect(gameClient.sendInspectLock).toHaveBeenLastCalledWith(door);
+      expect(note()!.textContent).toBe("Monsters there are level 16. You're level 6.");
+      expect(note()!.dataset.danger).toBe('1');
+
+      for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: door, lock: null });
+      document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
+      await tick();
+      expect(document.querySelector('.confirm-dialog')).toBeNull();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledTimes(2);
+    });
+
+    it('asks first from its Travel button when the warning on show no longer matches what is behind the door', async () => {
+      const mounted = await withLockedExit(true, [12, 12]);
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(document.querySelector('.lock-dialog .confirm-note')!.textContent).toBe("Monsters there are level 12. You're level 1.");
+      Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
+        getTileByGuid: () => ({ name: 'Harbour', mapId: 'there', levels: [16, 16] }),
+      });
+      for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: { kind: 'door', fromTileId: 'room-1', tileId: 'far' }, lock: null });
+      document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
+      await tick();
+      expect(mounted.gameClient.sendEnterTransition).not.toHaveBeenCalled();
+      expect(document.querySelector('.confirm-title')!.textContent).toBe('Travel to Harbour?');
+      expect(document.querySelector<HTMLElement>('.confirm-note')!.textContent).toBe("Monsters there are level 16. You're level 1.");
+      document.querySelector<HTMLElement>('.confirm-ok')!.click();
+      await tick();
+      expect(mounted.gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+
     it('asks again every so often while its card waits on another member, and stops once it is closed', async () => {
       const members = [{ username: 'me', role: 'owner', level: 9 }, { username: 'Bryn', role: 'member', level: 3 }];
       const { gameClient } = await withLockedExit(true, undefined, { ...state, username: 'me', character: { level: 9, equipment: {} }, social: { party: { members }, onlinePlayers: ['me', 'Bryn'] } });
