@@ -258,9 +258,10 @@ export async function joinAlice(w: ForecastWorld, username: string, className: C
   const getPartyId = (u: string) => w.pm.getSessionByUsername(u)?.getPartyId() ?? null;
   const setPartyId = (u: string, id: string | null) => { w.pm.getSessionByUsername(u)?.setPartyId(id); };
   const oldParty = getPartyId(username);
-  const sameTile = (a: string, b: string) => w.pm.areSameTile(a, b);
-  if (w.pm.parties.inviteToParty('alice', username, getPartyId, sameTile) !== true) throw new Error('invite failed');
-  const accepted = w.pm.parties.acceptInvite(username, w.partyId, getPartyId, setPartyId, sameTile);
+  const mayInvite = (a: string, b: string) => w.pm.invitePolicy(a, b);
+  const mayJoin = (u: string, id: string) => w.pm.joinPolicy(u, id);
+  if (w.pm.parties.inviteToParty('alice', username, getPartyId, mayInvite) !== true) throw new Error('invite failed');
+  const accepted = w.pm.parties.acceptInvite(username, w.partyId, getPartyId, setPartyId, mayJoin);
   if (typeof accepted === 'string') throw new Error(accepted);
   w.pm.handlePartyJoin(username, w.partyId, oldParty);
   return ws;

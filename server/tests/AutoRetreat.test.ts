@@ -486,8 +486,8 @@ describe('party auto-retreat policy', () => {
     const getPartyId = (u: string) => w.pm.getSessionByUsername(u)?.getPartyId() ?? null;
     const setPartyId = (u: string, id: string | null) => { w.pm.getSessionByUsername(u)?.setPartyId(id); };
     const oldParty = getPartyId('bob');
-    expect(w.pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => w.pm.areSameTile(a, b))).toBe(true);
-    expect(typeof w.pm.parties.acceptInvite('bob', w.partyId, getPartyId, setPartyId, (a, b) => w.pm.areSameTile(a, b))).not.toBe('string');
+    expect(w.pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => w.pm.invitePolicy(a, b))).toBe(true);
+    expect(typeof w.pm.parties.acceptInvite('bob', w.partyId, getPartyId, setPartyId, (u, id) => w.pm.joinPolicy(u, id))).not.toBe('string');
     w.pm.handlePartyJoin('bob', w.partyId, oldParty);
 
     w.pm.handleSetCombatPrefs('bob', 60);

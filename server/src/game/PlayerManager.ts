@@ -1,15 +1,15 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { offsetToCube, cubeDistance, cubeToKey, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit, isWholeItemCount } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem } from '@idle-party-rpg/shared';
+import { offsetToCube, cubeDistance, cubeToKey, getZone, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit, isWholeItemCount, partyInviteExpiresAt, PARTY_INVITE_TTL_MS } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem, PartyInvite } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
-import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
+import type { GameStateStore, PlayerSaveData, SavedPartyInvite } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
 import { GuildSystem } from './social/GuildSystem.js';
 import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
-import { PartySystem, canMove } from './social/PartySystem.js';
+import { PartySystem, INVITE_NO_LONGER_VALID, canMove } from './social/PartySystem.js';
 import { TradeSystem, INVALID_TRADE_ITEMS, parseOfferItems } from './social/TradeSystem.js';
 import { MailboxSystem, mailboxesWithEntriesFrom } from './social/MailboxSystem.js';
 import type { MailboxStore, Mailboxes } from './social/MailboxStore.js';
@@ -45,9 +45,19 @@ function isPlayerChatChannel(value: unknown): value is PlayerChatChannel {
   return PLAYER_CHAT_CHANNELS.includes(value);
 }
 
+function isSavedPartyInvite(value: unknown): value is SavedPartyInvite {
+  const v = value as Partial<SavedPartyInvite> | null;
+  return typeof v?.inviterUsername === 'string'
+    && Number.isFinite(v.timestamp)
+    && Number.isFinite(v.expiresAt);
+}
+
 /** What a double tap gets once the first tap has gone through. */
 export const GIFT_NOT_FOUND = 'Gift not found';
 export const LONE_LEAVE_REFUSAL = 'You can\'t leave: you\'re the only player in your party.';
+/** One message for a block and a missing character, so a refusal doesn't reveal a block. */
+export const INVITE_REFUSED = 'That player can\'t be invited.';
+export const NOT_INVITABLE_FROM_HERE = 'You can invite friends from anywhere, and anyone else in your room.';
 
 export interface PartyDeparture {
   partyId: string;
@@ -118,9 +128,7 @@ export class PlayerManager {
       content,
       (username) => this.sessions.get(username),
       (username) => this.sendStateToPlayer(username),
-      (members) => {
-        this.cancelInvitesOnMove(members);
-      },
+      () => {},
     );
     this.partyBattles.setHenchmenCallbacks(
       (partyId) => this.parties.getHenchmen(partyId),
@@ -812,7 +820,9 @@ export class PlayerManager {
         autoRetreat: this.autoRetreatPolicy(partyData.id) ?? undefined,
         forecastKey: this.partyBattles.forecastKey(partyData.id),
       },
-      pendingInvites: this.parties.getPendingInvites(username),
+      pendingInvites: this.parties.getPendingInvites(username)
+        .filter(invite => !this.isTradeBlocked(username, invite.inviterUsername))
+        .map(invite => this.inviteWithPlace(invite, session)),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: withRosters ? this.getOnlinePlayers() : [],
       allPlayers: withRosters ? this.listedPlayers() : [],
@@ -825,6 +835,22 @@ export class PlayerManager {
       mailbox: this.mailboxes.getMailbox(username),
       notifications: this.notifications.getInbox(username),
       notificationPreferences: session?.getNotificationPreferences(),
+    };
+  }
+
+  /** A copy of the invite carrying where the inviting party is, as `viewer` would read it. */
+  private inviteWithPlace(invite: PartyInvite, viewer: PlayerSession | undefined): PartyInvite {
+    const tile = this.partyBattles.getTile(invite.partyId);
+    const mapId = this.partyBattles.getMapId(invite.partyId);
+    if (!tile || !mapId || !viewer) return { ...invite };
+    if (mapId !== viewer.getMapId()) return { ...invite, sameMap: false };
+    const zoneName = getZone(tile.zone, this.content.getAllZones())?.displayName;
+    const roomName = this.content.getTileById(tile.id)?.name;
+    return {
+      ...invite,
+      sameMap: true,
+      ...(roomName ? { roomName } : {}),
+      ...(zoneName ? { zoneName } : {}),
     };
   }
 
@@ -1002,11 +1028,75 @@ export class PlayerManager {
     }
   }
 
+  /** Invite `target` to the player's party. Returns why it was refused, or null. */
+  inviteToParty(username: string, target: string): string | null {
+    if (!this.sessions.has(target)) return 'Player not found';
+    const getPartyId = (u: string) => this.sessions.get(u)?.getPartyId() ?? null;
+    const result = this.parties.inviteToParty(username, target, getPartyId, (a, b) => this.invitePolicy(a, b));
+    if (result !== true) return result;
+
+    this.sendStateToPlayer(target);
+    this.sendStateToPlayer(username);
+    this.notify.notify(target, 'party_invite_received', {
+      title: 'Party invite',
+      body: `${username} invited you to their party.`,
+      payload: { inviterUsername: username, partyId: getPartyId(username) },
+    });
+    return null;
+  }
+
+  /** Anyone in the inviter's room, or a friend anywhere; never across a block, nor before the target has a character. */
+  invitePolicy(inviter: string, target: string): true | string {
+    if (!this.sessions.get(target)?.hasCharacter()) return INVITE_REFUSED;
+    // Reach before block: a stranger elsewhere who blocked you must get the same answer as any stranger elsewhere.
+    if (!this.areSameTile(inviter, target) && !this.areMutualFriends(inviter, target)) return NOT_INVITABLE_FROM_HERE;
+    return this.isTradeBlocked(inviter, target) ? INVITE_REFUSED : true;
+  }
+
+  /** A joiner from another room must be able to walk to the party by themselves. */
+  joinPolicy(username: string, partyId: string): true | string {
+    return this.joinRouteFailure(username, partyId) ?? true;
+  }
+
+  /** Why `username` can't reach `partyId`'s room to join it, or null when they are there or could walk there. */
+  joinRouteFailure(username: string, partyId: string): string | null {
+    const inviter = this.parties.getPendingInvites(username).find(invite => invite.partyId === partyId)?.inviterUsername;
+    if (!inviter) return INVITE_NO_LONGER_VALID;
+    if (this.areSameTile(username, inviter)) return null;
+
+    const fromPartyId = this.sessions.get(username)?.getPartyId();
+    const fromMapId = fromPartyId ? this.partyBattles.getMapId(fromPartyId) : null;
+    const fromPos = fromPartyId ? this.partyBattles.getPosition(fromPartyId) : null;
+    if (!fromMapId || !fromPos) return `You can't walk to ${inviter}'s room from here.`;
+    return this.partyBattles.walkRouteFailure(username, fromMapId, fromPos, partyId, inviter);
+  }
+
+  areMutualFriends(a: string, b: string): boolean {
+    return this.friends.areMutualFriends(a, b) && this.friends.areMutualFriends(b, a);
+  }
+
+  /** Decline a party invite. Returns why it was refused, or null. */
+  declinePartyInvite(username: string, partyId: string): string | null {
+    const inviter = this.parties.getPendingInvites(username).find(invite => invite.partyId === partyId)?.inviterUsername;
+    const result = this.parties.declineInvite(username, partyId);
+    this.sendStateToPlayer(username);
+    if (result !== true) return result;
+    if (inviter) this.sendStateToPlayer(inviter);
+    return null;
+  }
+
+  /** Drop expired party invites, telling everyone whose invite lists changed. */
+  pruneExpiredInvites(now: number = Date.now()): void {
+    for (const username of this.parties.pruneExpired(now)) this.sendStateToPlayer(username);
+  }
+
   /** Accept a party invite, leaving the current party. Returns why it was refused, or null. */
   acceptPartyInvite(username: string, partyId: string): string | null {
     const oldPartyId = this.sessions.get(username)?.getPartyId() ?? null;
     if (oldPartyId === partyId) return null;
     if (this.partyBattles.isInDungeonRun(partyId)) return 'That party is in a dungeon right now.';
+    const invite = this.parties.getPendingInvites(username).find(i => i.partyId === partyId);
+    if (invite && this.isTradeBlocked(username, invite.inviterUsername)) return INVITE_NO_LONGER_VALID;
 
     const departure = this.partyDeparture(username);
     const result = this.parties.acceptInvite(
@@ -1014,7 +1104,7 @@ export class PlayerManager {
       partyId,
       (u) => this.sessions.get(u)?.getPartyId() ?? null,
       (u, id) => this.sessions.get(u)?.setPartyId(id),
-      (a, b) => this.areSameTile(a, b),
+      (u, id) => this.joinPolicy(u, id),
     );
     if (typeof result === 'string') return result;
 
@@ -1267,7 +1357,14 @@ export class PlayerManager {
 
     const henchmen = partyId ? this.parties.getHenchmen(partyId) : [];
     const autoRun = partyId ? this.parties.isAutoRun(partyId) : false;
-    return session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen, autoRun);
+    const data = session.toSaveData(movementData ?? undefined, partyInfo, dungeonData, henchmen, autoRun);
+    const invites = this.parties.getPendingInvites(session.username).map((invite): SavedPartyInvite => ({
+      inviterUsername: invite.inviterUsername,
+      timestamp: invite.timestamp,
+      expiresAt: partyInviteExpiresAt(invite),
+    }));
+    if (invites.length > 0) data.partyInvites = invites;
+    return data;
   }
 
   /**
@@ -1465,6 +1562,28 @@ export class PlayerManager {
       console.log(`[Startup] Phase 4: ${soloSaves.length} solo parties created in ${(performance.now() - phaseStart).toFixed(1)}ms`);
       console.log(`[PlayerManager] Restored ${this.sessions.size} sessions`);
     }
+
+    this.restorePartyInvites(validSaves);
+  }
+
+  /** Solo parties get new ids on restore, so each saved invite is pointed at its inviter's party as it is now. */
+  private restorePartyInvites(saves: PlayerSaveData[], now: number = Date.now()): void {
+    for (const data of saves) {
+      if (!Array.isArray(data.partyInvites) || !this.sessions.get(data.username)?.hasCharacter()) continue;
+      for (const saved of data.partyInvites) {
+        if (!isSavedPartyInvite(saved)) continue;
+        const inviter = this.sessions.get(saved.inviterUsername);
+        const partyId = inviter?.hasCharacter() ? inviter.getPartyId() : null;
+        if (!partyId || this.isTradeBlocked(saved.inviterUsername, data.username)) continue;
+        this.parties.restoreInvite({
+          partyId,
+          inviterUsername: saved.inviterUsername,
+          targetUsername: data.username,
+          timestamp: saved.timestamp,
+          expiresAt: Math.min(saved.expiresAt, saved.timestamp + PARTY_INVITE_TTL_MS),
+        }, now);
+      }
+    }
   }
 
   /** Create a solo party and its (not yet started) battle entry at a specific tile. Returns the party id. */
@@ -1654,14 +1773,6 @@ export class PlayerManager {
     return count;
   }
 
-  /** Cancel any pending party invites involving party members that just moved. */
-  private cancelInvitesOnMove(members: ReadonlySet<string>): void {
-    const affected = this.parties.cancelInvitesInvolving(members);
-    for (const username of affected) {
-      this.sendStateToPlayer(username);
-    }
-  }
-
   /** Check if either player has the other blocked (in either direction). */
   isTradeBlocked(a: string, b: string): boolean {
     const sessionA = this.sessions.get(a);
@@ -1785,6 +1896,7 @@ export class PlayerManager {
    */
   saveAll(store: GameStateStore): Promise<void> {
     return this.inSaveOrder(async () => {
+      this.pruneExpiredInvites();
       const boxes = this.mailboxes.snapshot();
       const data = this.getAllSaveData();
       // New entries land before player files change, and old ones go after, so a crash mid-pass can't lose a gift.

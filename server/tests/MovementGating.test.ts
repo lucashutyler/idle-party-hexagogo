@@ -196,13 +196,14 @@ async function setup(usernames: string[] = ['alice']): Promise<{
 function joinParty(pm: PlayerManager, leader: string, joiner: string): void {
   const getPartyId = (u: string) => pm.getSessionByUsername(u)?.getPartyId() ?? null;
   const setPartyId = (u: string, id: string | null) => { pm.getSessionByUsername(u)?.setPartyId(id); };
-  const sameTile = (a: string, b: string) => pm.areSameTile(a, b);
+  const mayInvite = (a: string, b: string) => pm.invitePolicy(a, b);
+  const mayJoin = (u: string, id: string) => pm.joinPolicy(u, id);
 
   const partyId = getPartyId(leader)!;
   const oldPartyId = getPartyId(joiner);
-  const invited = pm.parties.inviteToParty(leader, joiner, getPartyId, sameTile);
+  const invited = pm.parties.inviteToParty(leader, joiner, getPartyId, mayInvite);
   if (invited !== true) throw new Error(invited);
-  const accepted = pm.parties.acceptInvite(joiner, partyId, getPartyId, setPartyId, sameTile);
+  const accepted = pm.parties.acceptInvite(joiner, partyId, getPartyId, setPartyId, mayJoin);
   if (typeof accepted === 'string') throw new Error(accepted);
   pm.handlePartyJoin(joiner, partyId, oldPartyId);
 }

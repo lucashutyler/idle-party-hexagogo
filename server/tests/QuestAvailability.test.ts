@@ -254,8 +254,8 @@ describe('Quest availability in the state push', () => {
     const getPartyId = (u: string) => pm.getSessionByUsername(u)?.getPartyId() ?? null;
     const aliceParty = getPartyId('alice')!;
     const bobOldParty = getPartyId('bob');
-    expect(pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => pm.areSameTile(a, b))).toBe(true);
-    const joined = pm.parties.acceptInvite('bob', aliceParty, getPartyId, (u, id) => pm.getSessionByUsername(u)?.setPartyId(id), (a, b) => pm.areSameTile(a, b));
+    expect(pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => pm.invitePolicy(a, b))).toBe(true);
+    const joined = pm.parties.acceptInvite('bob', aliceParty, getPartyId, (u, id) => pm.getSessionByUsername(u)?.setPartyId(id), (u, id) => pm.joinPolicy(u, id));
     expect(typeof joined).not.toBe('string');
     pm.handlePartyJoin('bob', aliceParty, bobOldParty);
 

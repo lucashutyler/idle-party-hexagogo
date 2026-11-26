@@ -234,6 +234,8 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Unread message indicators
 - [x] Social badge notifications (nav dot + segment counts for friend requests and party invites; unread count on the chat strip and rail)
 - [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Gift, Block; a bottom sheet on phones)
+- [x] Party invites anywhere: an on-screen invite card with Join / Decline / Later, friends invitable from any room, invites that survive moving and restarts and last 24 hours, and Accept brings you to your friend when you could walk there yourself
+- [x] Leader prompt: the owner and leaders are asked once per joiner whether they may move the party too
 - [x] Class icons next to usernames everywhere
 - [x] XP gauge on Hero › Stats: XP/hr in the current room from what its fights pay and the room forecast blended with fights seen, time to the next level, "this run so far" in a dungeon, plus the reset counter
 - [x] Rooms whose fights pay no XP say so in the room sheet
@@ -245,7 +247,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] DM notifications (suppressed while actively viewing that conversation)
 - [x] Friend-request notifications (received + accepted)
 - [x] Notification preferences UI (category × channel grid, per-channel kill switch, enable/disable all)
-- [x] In-app notification bell (dropdown inbox, unread badge, live toasts)
+- [x] In-app notification bell (dropdown inbox, unread badge, live toasts, ended party invites marked as ended)
 - [x] PWA scaffolding (installable manifest, service worker, offline app-shell caching)
 - [ ] Guild event notifications (blocked on the guild system existing)
 - [ ] SMS / Discord channel drivers

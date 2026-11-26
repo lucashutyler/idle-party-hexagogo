@@ -62,11 +62,24 @@ export interface GamePartyInfo {
   forecastKey?: string;
 }
 
+/** How long a party invite stays open. */
+export const PARTY_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export interface PartyInvite {
   partyId: string;
   inviterUsername: string;
   targetUsername: string;
   timestamp: number;
+  /** Absent → `timestamp + PARTY_INVITE_TTL_MS`. */
+  expiresAt?: number;
+  /** Where the inviting party is, filled per viewer at send time and never stored. Absent when unknown. */
+  roomName?: string;
+  zoneName?: string;
+  sameMap?: boolean;
+}
+
+export function partyInviteExpiresAt(invite: Pick<PartyInvite, 'timestamp' | 'expiresAt'>): number {
+  return invite.expiresAt ?? invite.timestamp + PARTY_INVITE_TTL_MS;
 }
 
 // --- Trade System ---

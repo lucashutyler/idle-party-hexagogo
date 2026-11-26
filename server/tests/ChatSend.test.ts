@@ -123,11 +123,12 @@ async function setup(...usernames: string[]) {
   const joinParty = (member: string, owner: string) => {
     const partyId = (u: string) => pm.getSessionByUsername(u)?.getPartyId() ?? null;
     const setPartyId = (u: string, id: string | null) => { pm.getSessionByUsername(u)?.setPartyId(id); };
-    const sameRoom = (a: string, b: string) => pm.areSameTile(a, b);
+    const mayInvite = (a: string, b: string) => pm.invitePolicy(a, b);
+    const mayJoin = (u: string, id: string) => pm.joinPolicy(u, id);
     const ownerParty = partyId(owner)!;
     const memberOldParty = partyId(member);
-    expect(pm.parties.inviteToParty(owner, member, partyId, sameRoom)).toBe(true);
-    expect(typeof pm.parties.acceptInvite(member, ownerParty, partyId, setPartyId, sameRoom)).not.toBe('string');
+    expect(pm.parties.inviteToParty(owner, member, partyId, mayInvite)).toBe(true);
+    expect(typeof pm.parties.acceptInvite(member, ownerParty, partyId, setPartyId, mayJoin)).not.toBe('string');
     pm.handlePartyJoin(member, ownerParty, memberOldParty);
   };
   const rename = (oldUsername: string, newUsername: string) => {
