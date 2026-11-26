@@ -46,8 +46,9 @@ describe('Codex reply secrecy', () => {
   for (const [name, save, unlocked] of states) {
     it(`holds only discovered facts: ${name}`, () => {
       const content = codexContent();
-      const { reply, knowledge } = build(content, save, unlocked);
-      expectOnlyDiscovered(reply, knowledge, content, unlocked);
+      const kills = { goblin: 3, wolf: 1, ghost_monster: 2 };
+      const { reply, knowledge } = build(content, save, unlocked, kills);
+      expectOnlyDiscovered(reply, knowledge, content, unlocked, kills);
     });
   }
 

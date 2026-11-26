@@ -67,7 +67,7 @@ describe('Codex requests', () => {
     expect(reply.monsters.map(m => m.id)).toEqual(['goblin', 'wolf']);
     expect(reply.shops.map(s => s.id)).toEqual(['mill_post']);
     const knowledge = CodexKnowledge.fromSave(alice.toSaveData().codex);
-    expectOnlyDiscovered(reply, knowledge, content, alice.getUnlockedKeys());
+    expectOnlyDiscovered(reply, knowledge, content, alice.getUnlockedKeys(), alice.getMonsterKills());
   });
 });
 

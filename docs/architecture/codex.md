@@ -47,7 +47,7 @@ The first meeting with a monster writes one `codex` journal line, "New in your C
 
 ## Secrecy
 
-Every reply holds only discovered facts. `server/tests/CodexBuild.test.ts` walks replies over several knowledge states (empty, partial, everything, dangling ids) and fails if any monster is unmet, any held-item id is not in the player's items, any unheld item is outside a visited shop's stock, any shop or dungeon is unvisited, any table key belongs to no found walkable room, or any encounter id or name appears in the JSON.
+Every reply holds only discovered facts. `server/tests/CodexBuild.test.ts` walks replies over several knowledge states (empty, partial, everything, dangling ids) and fails if any monster is unmet, any held-item id is not in the player's items, any unheld item is outside a visited shop's stock, any shop or dungeon is unvisited, any table key belongs to no found walkable room, any table or dungeon lists a monster it cannot spawn, any fight line is not a fought encounter of that table as its met monsters, any drop tally or kill count differs from the player's own, or any encounter id or name appears in the JSON.
 
 Room facts are not secret: `/api/world` already sends every room of every map with its name, id, own encounter table ids and doors, `/api/npcs` every NPC and `/api/dungeons` every dungeon with its floor tables and reward ids. The Codex adds no room facts and shows only found rooms; it never sends a monster definition, drop, shop stock, encounter's monsters, zone table result or item definition for anything undiscovered.
 

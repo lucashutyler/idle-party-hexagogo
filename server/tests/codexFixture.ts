@@ -22,6 +22,7 @@ import type { Account, AccountStore } from '../src/auth/AccountStore.js';
 import { PlayerManager } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { CodexKnowledge } from '../src/game/codex/CodexKnowledge.js';
+import { codexContentIndex } from '../src/game/codex/CodexBuild.js';
 import type { CodexContent } from '../src/game/codex/CodexBuild.js';
 import { recapContent, room } from './recapFixture.js';
 import { wrapGrids } from './testGrids.js';
@@ -213,8 +214,14 @@ export function codexManager(
   return { pm, grid, hex };
 }
 
-/** Fails when the reply holds any id the player has not discovered, or any encounter id or name. */
-export function expectOnlyDiscovered(reply: ServerCodexMessage, knowledge: CodexKnowledge, content: CodexContent, unlocked: readonly string[]): void {
+/** Fails when the reply holds any id the player has not discovered, any fact they have not earned, or any encounter id or name. */
+export function expectOnlyDiscovered(
+  reply: ServerCodexMessage,
+  knowledge: CodexKnowledge,
+  content: CodexContent,
+  unlocked: readonly string[],
+  kills: Readonly<Record<string, number>> = {},
+): void {
   const shopStock = new Set(knowledge.shopIds().flatMap(id => content.getShop(id)?.inventory.map(line => line.itemId) ?? []));
   const monsterIds = [
     ...reply.monsters.map(m => m.id),
@@ -242,9 +249,30 @@ export function expectOnlyDiscovered(reply: ServerCodexMessage, knowledge: Codex
     .map(id => tiles.get(id))
     .filter((t): t is WorldTileDefinition => !!t && isTileTraversable(t.type, content.getTileType(t.type)));
   const foundKeys = new Set(found.map(codexTableKey));
+  const index = codexContentIndex(content);
+  const fought = new Set(knowledge.encounterIds());
+  const sameFight = (a: readonly string[], b: readonly string[]) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
   for (const table of reply.tables) {
     expect(foundKeys.has(table.key), `table ${table.key}`).toBe(true);
-    for (const at of table.fights) expect(reply.fights[at]).toBeDefined();
+    const spawns = index.tables.get(table.key)?.spawns ?? [];
+    for (const id of table.monsters) expect(spawns.includes(id), `table ${table.key} spawns ${id}`).toBe(true);
+    const earned = (index.tables.get(table.key)?.encounters ?? [])
+      .filter(encounterId => fought.has(encounterId))
+      .map(encounterId => (index.encounterMonsters.get(encounterId) ?? []).filter(id => knowledge.hasMonster(id)))
+      .filter(fight => fight.length > 0);
+    for (const at of table.fights) {
+      const fight = reply.fights[at];
+      expect(fight, `table ${table.key} fight ${at}`).toBeDefined();
+      expect(earned.some(line => sameFight(line, fight)), `table ${table.key} fight ${JSON.stringify(fight)}`).toBe(true);
+    }
+  }
+  for (const dungeon of reply.dungeons) {
+    const spawns = index.dungeonSpawns.get(dungeon.id) ?? [];
+    for (const id of dungeon.monsters) expect(spawns.includes(id), `dungeon ${dungeon.id} spawns ${id}`).toBe(true);
+  }
+  for (const m of reply.monsters) {
+    expect(m.kills, `kills of ${m.id}`).toBe(Object.prototype.hasOwnProperty.call(kills, m.id) ? kills[m.id] : 0);
+    for (const d of m.drops) expect(knowledge.dropsOf(m.id).get(d.itemId), `drop ${m.id} -> ${d.itemId}`).toBe(d.seen);
   }
 
   const json = JSON.stringify(reply);
