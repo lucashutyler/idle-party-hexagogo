@@ -195,6 +195,8 @@ export class ThreeWorldMap {
   private artUploadPending = false;
 
   private grid: HexGrid = new HexGrid();
+  /** The map `grid` was built from; a world reload can move WorldCache's current map without a rebuild. */
+  private gridMapId = '';
   private worldTileDefs = new Map<string, WorldTileDefinition>();
   /** A map the player is looking at instead of the party's; null follows the party. */
   private viewedMapId: string | null = null;
@@ -399,7 +401,7 @@ export class ThreeWorldMap {
 
   /** The map on screen. */
   get drawnMapId(): string {
-    return this.worldCache.getCurrentMapId();
+    return this.gridMapId;
   }
 
   get isFollowing(): boolean {
@@ -468,7 +470,8 @@ export class ThreeWorldMap {
     const shown = this.viewedMapId ?? state.currentMapId;
     const onPartyMap = shown === state.currentMapId;
     // A map switch never tweens: the two grids are unrelated.
-    const mapChanged = this.worldCache.setCurrentMap(shown);
+    this.worldCache.setCurrentMap(shown);
+    const mapChanged = shown !== this.gridMapId;
     const firstState = this.isFirstState;
     const shouldSnap = !!snap || firstState || mapChanged;
     if (mapChanged) {
@@ -565,7 +568,7 @@ export class ThreeWorldMap {
       : [];
 
     return {
-      mapId: this.worldCache.getCurrentMapId(),
+      mapId: this.gridMapId,
       tileId: def?.id ?? null,
       col,
       row,
@@ -662,6 +665,7 @@ export class ThreeWorldMap {
 
   private buildGridFromCache(mapChanged: boolean): HexGrid {
     const grid = new HexGrid();
+    this.gridMapId = this.worldCache.getCurrentMapId();
     this.worldTileDefs.clear();
 
     for (const tileDef of this.worldCache.getTiles()) {
@@ -1749,7 +1753,7 @@ export class ThreeWorldMap {
   private updateQuestTargetsOverlay(): void {
     this.questTargetsByRoom.clear();
     const outlines = document.createDocumentFragment();
-    const mapId = this.worldCache.getCurrentMapId();
+    const mapId = this.gridMapId;
     for (const [tileId, questNames] of this.questTargets) {
       const def = this.worldCache.getTileByGuid(tileId);
       if (!def || def.mapId !== mapId || !this.worldCache.isUnlocked(def.col, def.row)) continue;

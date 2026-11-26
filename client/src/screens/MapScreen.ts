@@ -172,7 +172,7 @@ export class MapScreen implements Screen {
     const state = this.gameClient.lastState;
     if (this.map) {
       const viewGone = !!this.viewedMapId && !this.mapExists(this.viewedMapId);
-      if (viewGone) this.stopViewing();
+      if (viewGone) this.dropGoneView();
       else this.map.rebuildFromCache();
       if (state) this.map.applyServerState(state, true);
       else if (viewGone) this.map.rebuildFromCache();
@@ -818,12 +818,12 @@ export class MapScreen implements Screen {
     return this.worldCache.getMaps().find(m => m.id === mapId)?.name || mapId;
   }
 
-  /** Look at another map: no token, route or other players on it, and Back or Escape returns to the party. */
+  /** Look at another map: no token, route or other players on it, and Back or Escape returns to the party. The party's own map recentres. */
   private viewMap(mapId: string, focusTileId?: string): void {
     const state = this.gameClient.lastState;
     if (!this.map || !state) return;
     if (mapId === state.currentMapId) {
-      this.endView();
+      this.recenterOnPlayer();
       return;
     }
     this.dismissSheet();
@@ -870,6 +870,11 @@ export class MapScreen implements Screen {
     else this.endView();
   }
 
+  private dropGoneView(): void {
+    this.stopViewing();
+    this.dismissSheet();
+  }
+
   /** Forget the view without drawing anything: the next applyServerState draws the party's map. */
   private stopViewing(): void {
     this.viewedMapId = null;
@@ -910,12 +915,8 @@ export class MapScreen implements Screen {
     const previousPartyMapId = this.partyMapId;
     this.partyMapId = state.currentMapId;
     if (this.viewedMapId) {
-      if (state.currentMapId === this.viewedMapId) {
-        this.stopViewing();
-      } else if (!this.mapExists(this.viewedMapId)) {
-        this.stopViewing();
-        this.dismissSheet();
-      }
+      if (state.currentMapId === this.viewedMapId) this.stopViewing();
+      else if (!this.mapExists(this.viewedMapId)) this.dropGoneView();
       return;
     }
     if (!this.map || !previousPartyMapId || previousPartyMapId === state.currentMapId) return;

@@ -37,6 +37,13 @@ function json(body: unknown): Response {
 }
 
 async function makeCache(tiles: unknown[] = TILES): Promise<WorldCache> {
+  stubWorld(tiles);
+  const cache = new WorldCache();
+  await cache.loadWorld();
+  return cache;
+}
+
+function stubWorld(tiles: unknown[]): void {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url === '/api/world') return json({
       startTile: { col: 0, row: 0 },
@@ -49,9 +56,6 @@ async function makeCache(tiles: unknown[] = TILES): Promise<WorldCache> {
     if (url === '/api/dungeons') return json({ dungeons: { caves: { id: 'caves', name: 'Crystal Caves', floors: [] } } });
     return json({});
   }));
-  const cache = new WorldCache();
-  await cache.loadWorld();
-  return cache;
 }
 
 function makeState(overrides: Partial<ServerStateMessage> = {}): ServerStateMessage {
@@ -345,6 +349,23 @@ describe('ThreeWorldMap overlays', () => {
       expect(party.style.transform).toBe(`translate(${spot.x}px, ${spot.y}px)`);
       expect(map.isFollowing).toBe(true);
       expect(map.getTileInfo(2, 0)!.isCurrentTile).toBe(true);
+    });
+
+    it('draws the party\'s map again after a world reload takes the viewed one away', async () => {
+      const cache = await makeCache();
+      const map = new ThreeWorldMap(container, cache);
+      map.applyServerState(atShop());
+      map.setViewedMap('cellar');
+      map.applyServerState(atShop(), true);
+
+      stubWorld(TILES.filter(t => t.mapId !== 'cellar'));
+      await cache.loadWorld();
+      map.setViewedMap(null);
+      map.applyServerState(atShop(), true);
+
+      expect(map.drawnMapId).toBe('overworld');
+      expect(map.getTileInfo(0, 0)).toMatchObject({ mapId: 'overworld', tileId: 't-home', roomName: 'Home' });
+      expect(container.querySelector<HTMLElement>('.three-map-party')!.style.display).toBe('');
     });
   });
 

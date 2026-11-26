@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerRouteConfirmMessage, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../src/network/GameClient';
@@ -326,6 +328,29 @@ describe('Looking at another map', () => {
     expect(m.map.drawnMapId).toBe('vale');
   });
 
+  it('closes a sheet on the viewed map when a world reload removes that map', async () => {
+    const m = await mount();
+    await viewGrotto(m);
+    tapRoom(m, 1);
+    expect(sheetOpen()).toBe(true);
+
+    const world = { ...WORLD, maps: WORLD.maps.filter(map => map.id !== 'grotto'), tiles: WORLD.tiles.filter(t => t.mapId !== 'grotto') };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === '/api/world' ? world : {})));
+    await m.cache.loadWorld();
+    m.screen.refreshWorld();
+    expect(sheetOpen()).toBe(false);
+  });
+
+  it('takes the camera back to the party when the party\'s own map is picked', async () => {
+    const m = await mount();
+    m.map.focusOn(2, 0);
+    (await openMaps()).find(item => item.dataset.mapId === 'vale')!.click();
+    await tick();
+    expect((m.map as unknown as { recenterOnPlayer: ReturnType<typeof vi.fn> }).recenterOnPlayer).toHaveBeenCalled();
+    expect(m.map.isFollowing).toBe(true);
+    expect(viewing()).toBe(false);
+  });
+
   it('opens a room on another visited map from focusRoom, and refuses one on a map never visited', async () => {
     const m = await mount();
     m.screen.focusRoom('g1');
@@ -364,5 +389,21 @@ describe('Looking at another map', () => {
     document.querySelector<HTMLElement>('.confirm-cancel')!.click();
     await tick();
     expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
+  });
+});
+
+describe('view banner and Maps list layout', () => {
+  const css = readFileSync(resolve(__dirname, '../src/styles/map.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector.trim(), body }));
+
+  it('centres in the part of the map the sheet leaves, so the sheet never covers the map name', () => {
+    const rule = rules.find(r => r.selector.includes('[data-sheet="side"]') && r.selector.includes('.map-view-banner'));
+    expect(rule?.body).toMatch(/left:\s*calc\(\(100% - 320px\) \/ 2\)/);
+    expect(rule?.body).toMatch(/max-width:\s*calc\(100% - 344px\)/);
+  });
+
+  it('keeps the Maps list off the sheet\'s edges, like the other sheets', () => {
+    const rule = rules.find(r => r.selector === '.map-list-body');
+    expect(rule?.body).toMatch(/padding:\s*\d+px/);
   });
 });

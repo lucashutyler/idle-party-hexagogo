@@ -424,12 +424,19 @@ button.map-route-stop::before {
   position: absolute;
   inset: -6px -2px;
 }
+#screen-map[data-sheet="side"] .map-view-banner {
+  left: calc((100% - 320px) / 2);
+  max-width: calc(100% - 344px);
+}
 #screen-map[data-viewing] .room-status { display: none; }
 @media (max-width: 767px) {
   #screen-map[data-viewing] .map-route-chip { top: 56px; }
   #screen-map[data-viewing] .map-toast { top: 104px; }
 }
 
+.map-list-body {
+  padding: 12px 14px 14px;
+}
 .map-list {
   display: flex;
   flex-direction: column;
