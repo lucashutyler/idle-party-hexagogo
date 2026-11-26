@@ -196,7 +196,7 @@ describe('Codex recording at fight start', () => {
 });
 
 describe('Codex journal lines', () => {
-  it('writes one line for monsters met for the first time, with a ref to the first one', async () => {
+  it('writes one line per monster met for the first time, each with its own ref, in fight order', async () => {
     const world = codexWorld();
     world.dungeons.damp_cave.floors[0].encounterTable = [{ encounterId: 'boss_room', weight: 1 }];
     const { pm, login, moveTo, partyOf, fight } = await setup(['alice'], world);
@@ -208,9 +208,9 @@ describe('Codex journal lines', () => {
     expect(pm.partyBattles.enterDungeon(partyOf('alice'), 'damp_cave').success).toBe(true);
     fight('alice');
 
-    expect(journal(alice, 'codex')).toEqual(['New in your Codex: Goblin.', 'New in your Codex: Cave King, Cave Bat.']);
+    expect(journal(alice, 'codex')).toEqual(['New in your Codex: Goblin.', 'New in your Codex: Cave King.', 'New in your Codex: Cave Bat.']);
     const lines = alice.toSaveData().combatLog.filter(l => l.type === 'codex');
-    expect(lines.map(l => l.codex)).toEqual([{ kind: 'monster', id: 'goblin' }, { kind: 'monster', id: 'cave_boss' }]);
+    expect(lines.map(l => l.codex)).toEqual([{ kind: 'monster', id: 'goblin' }, { kind: 'monster', id: 'cave_boss' }, { kind: 'monster', id: 'bat' }]);
   });
 
   it('writes nothing for monsters known from kills made before the Codex', async () => {

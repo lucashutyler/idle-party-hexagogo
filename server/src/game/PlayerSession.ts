@@ -1412,12 +1412,12 @@ export class PlayerSession {
 
   // ── Codex ──────────────────────────────────────
 
-  /** Credit a fight this player is in; the first meeting with a monster gets one journal line. */
+  /** Credit a fight this player is in; each first meeting with a monster gets its own journal line. */
   noteCodexFight(monsters: readonly Pick<MonsterInstance, 'id' | 'name'>[], place: CodexFightPlace): void {
-    const fresh = this.codex.noteFight(monsters.map(m => m.id), place);
-    if (fresh.length === 0) return;
-    const names = [...new Set(fresh.map(id => monsters.find(m => m.id === id)?.name ?? id))];
-    this.addLogEntry(`New in your Codex: ${names.join(', ')}.`, 'codex', { codex: { kind: 'monster', id: fresh[0] } });
+    for (const id of this.codex.noteFight(monsters.map(m => m.id), place)) {
+      const name = monsters.find(m => m.id === id)?.name ?? id;
+      this.addLogEntry(`New in your Codex: ${name}.`, 'codex', { codex: { kind: 'monster', id } });
+    }
   }
 
   /** Credit a shop the player bought or hired from, as a fight in its room would. */
