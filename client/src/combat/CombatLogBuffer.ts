@@ -10,10 +10,12 @@ export interface CombatLogLine {
   type: CombatLogType;
 }
 
+type PendingLine = Omit<CombatLogLine, 'seq'>;
+
 interface PendingBatch {
   battleId: number;
   releaseAt: number;
-  lines: { key: string; text: string }[];
+  lines: PendingLine[];
 }
 
 type Listener = () => void;
@@ -24,6 +26,11 @@ const LIVE_LINE_TYPE: CombatLogType = 'damage';
 /** Journal lines come from state messages; live lines are keyed `c:` by the battle they belong to. */
 export function isJournalLine(line: Pick<CombatLogLine, 'key'>): boolean {
   return line.key.startsWith('j:');
+}
+
+/** Held journal entries queue as batches of their own. */
+function isJournalBatch(batch: PendingBatch): boolean {
+  return isJournalLine(batch.lines[0]);
 }
 
 /**
@@ -68,21 +75,30 @@ export class CombatLogBuffer {
     return () => { this.listeners.delete(listener); };
   }
 
+  /** Journal entries that arrive behind held live lines (a fight's rewards, say) wait to come out after them. */
   ingestJournal(entries: readonly CombatLogEntry[]): void {
     if (entries.length === 0) return;
     const newest = entries[entries.length - 1].id;
     let changed = false;
     if (newest < this.lastJournalId) {
-      this.removeWhere(line => line.key.startsWith('j:'));
+      this.removeWhere(isJournalLine);
+      this.pending = this.pending.filter(b => !isJournalBatch(b));
       this.lastJournalId = -1;
       changed = true;
     }
+    const fresh: PendingLine[] = [];
     for (const entry of entries) {
       if (entry.id <= this.lastJournalId) continue;
       this.lastJournalId = entry.id;
       const key = `j:${entry.id}`;
       if (this.keys.has(key)) continue;
-      this.append(key, entry.text, entry.type);
+      fresh.push({ key, text: entry.text, type: entry.type });
+    }
+    const behind = this.holdLive ? this.pending[this.pending.length - 1] : undefined;
+    if (behind && fresh.length > 0) {
+      this.pending.push({ battleId: behind.battleId, releaseAt: behind.releaseAt, lines: fresh });
+    } else if (fresh.length > 0) {
+      this.appendLines(fresh);
       changed = true;
     }
     if (changed) this.commit();
@@ -92,10 +108,10 @@ export class CombatLogBuffer {
   pushLive(battleId: number, texts: readonly string[], releaseAt?: number): void {
     if (texts.length === 0) return;
     const seq = ++this.liveMessageSeq;
-    const lines = texts.map((text, i) => ({ key: `c:${battleId}:${seq}:${i}`, text }));
+    const lines = texts.map((text, i) => ({ key: `c:${battleId}:${seq}:${i}`, text, type: LIVE_LINE_TYPE }));
     if (!this.holdLive || releaseAt === undefined) {
       this.flushPending(() => true);
-      for (const line of lines) this.append(line.key, line.text, LIVE_LINE_TYPE);
+      this.appendLines(lines);
       this.commit();
       return;
     }
@@ -105,11 +121,13 @@ export class CombatLogBuffer {
   /** Resync: the server's recent live lines for `battleId` replace whatever this buffer holds for it. */
   replaceLive(battleId: number, texts: readonly string[]): void {
     const prefix = `c:${battleId}:`;
+    const journalBehind = this.pending.filter(b => b.battleId === battleId && isJournalBatch(b));
     this.pending = this.pending.filter(b => b.battleId !== battleId);
     this.flushPending(() => true);
     this.removeWhere(line => line.key.startsWith(prefix));
     const seq = ++this.liveMessageSeq;
     texts.forEach((text, i) => this.append(`c:${battleId}:${seq}:${i}`, text, LIVE_LINE_TYPE));
+    for (const batch of journalBehind) this.appendLines(batch.lines);
     this.commit();
   }
 
@@ -131,11 +149,14 @@ export class CombatLogBuffer {
   private flushPending(due: (batch: PendingBatch) => boolean): boolean {
     let released = false;
     while (this.pending.length > 0 && due(this.pending[0])) {
-      const batch = this.pending.shift()!;
-      for (const line of batch.lines) this.append(line.key, line.text, LIVE_LINE_TYPE);
+      this.appendLines(this.pending.shift()!.lines);
       released = true;
     }
     return released;
+  }
+
+  private appendLines(lines: readonly PendingLine[]): void {
+    for (const line of lines) this.append(line.key, line.text, line.type);
   }
 
   private append(key: string, text: string, type: CombatLogType): void {

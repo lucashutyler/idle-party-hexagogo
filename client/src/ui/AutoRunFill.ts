@@ -22,7 +22,12 @@ export class AutoRunFill {
       this.hold(bar, 0);
       return;
     }
-    if (battle.autoRunLeaveMs === undefined || reducedMotion()) {
+    const walking = battle.state === 'result' && battle.visual === 'none';
+    if (walking || battle.autoRunLeaveMs === undefined) {
+      this.hold(bar, walking ? 1 : 0);
+      return;
+    }
+    if (reducedMotion()) {
       this.hold(bar, 1);
       return;
     }

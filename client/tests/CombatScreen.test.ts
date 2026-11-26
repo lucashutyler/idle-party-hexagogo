@@ -51,9 +51,11 @@ function setup(initial?: ServerStateMessage, skills: Record<string, SkillDefinit
   const combatListeners = new Set<CombatListener>();
   const combatLog = new CombatLogBuffer();
   let lastState: ServerStateMessage = initial ?? makeState(1, GOBLIN, []);
+  let lastStateAt = Date.now();
 
   const gameClient = {
     get lastState() { return lastState; },
+    get lastStateAt() { return lastStateAt; },
     lastCombat: null,
     lastBestiary: null,
     combatLog,
@@ -78,11 +80,13 @@ function setup(initial?: ServerStateMessage, skills: Record<string, SkillDefinit
 
   const pushState = (battleId: number, monster: ClientCombatUnit, log: CombatLogEntry[] = []) => {
     lastState = makeState(battleId, monster, log);
+    lastStateAt = Date.now();
     combatLog.ingestJournal(log);
     for (const l of stateListeners) l(lastState);
   };
   const push = (next: ServerStateMessage) => {
     lastState = next;
+    lastStateAt = Date.now();
     for (const l of stateListeners) l(lastState);
   };
   const playEvents = (events: CombatEvent[], battleId = 1) => {
@@ -319,6 +323,80 @@ describe('CombatScreen', () => {
     t.push(makeState(1, GOBLIN, []));
     expect(bar.style.transform).toBe('scaleX(0)');
     expect(animate).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs Autorun\'s timer on Run straight through a win it waited out, and keeps it empty while the party stands after one it did not', () => {
+    const t = start();
+    const bar = document.querySelector('.combat-run-btn .autorun-fill') as HTMLElement;
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel: vi.fn() }) as unknown as Animation);
+    bar.animate = animate;
+    const base = makeState(1, GOBLIN, []);
+    const won = { ...snapshot(1, { ...GOBLIN, hp: 0 }), finished: true, result: 'victory' as const };
+
+    t.push(withBattle(base, { autoRunWalking: true, autoRunLeaveMs: 600 }));
+    vi.advanceTimersByTime(600);
+    const shown: string[] = [];
+    for (const battle of [
+      { visual: 'victory', combat: won, autoRunWalking: true, autoRunLeaveMs: 0 },
+      { state: 'result', visual: 'victory', combat: won, autoRunWalking: true, autoRunLeaveMs: 0 },
+      { state: 'result', visual: 'none', combat: won, autoRunWalking: true },
+    ]) {
+      t.push(withBattle(base, battle));
+      shown.push(bar.style.transform);
+    }
+    expect(shown).not.toContain('scaleX(0)');
+    expect(shown.at(-1)).toBe('scaleX(1)');
+    expect(animate).toHaveBeenCalledTimes(1);
+
+    t.push(withBattle(makeState(2, GOBLIN, []), { state: 'result', visual: 'victory', combat: { ...won, battleId: 2 }, autoRunWalking: true }));
+    expect(bar.style.transform).toBe('scaleX(0)');
+    t.push(withBattle(makeState(2, GOBLIN, []), { state: 'result', visual: 'none', combat: { ...won, battleId: 2 }, autoRunWalking: true }));
+    expect(bar.style.transform).toBe('scaleX(1)');
+  });
+
+  it('picks Autorun\'s timer up where it is when the player comes back to the battle screen', () => {
+    const t = start();
+    const bar = document.querySelector('.combat-run-btn .autorun-fill') as HTMLElement;
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel: vi.fn() }) as unknown as Animation);
+    bar.animate = animate;
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { autoRunWalking: true, autoRunLeaveMs: 600 }));
+    t.screen.onDeactivate();
+    vi.advanceTimersByTime(200);
+    t.screen.onActivate();
+    expect(animate).toHaveBeenCalledTimes(1);
+
+    t.screen.onDeactivate();
+    t.push(withBattle(makeState(2, WOLF, []), { combat: snapshot(2, WOLF), autoRunWalking: true, autoRunLeaveMs: 600 }));
+    vi.advanceTimersByTime(300);
+    t.screen.onActivate();
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate).toHaveBeenLastCalledWith([{ transform: 'scaleX(0.5)' }, { transform: 'scaleX(1)' }], { duration: 300, easing: 'linear' });
+  });
+
+  it('keeps Run\'s own charge to its own fight: empty between fights and from the start of the next', () => {
+    const t = start();
+    const run = () => document.querySelector('.combat-run-btn') as HTMLElement;
+    const charge = () => Number(run().style.getPropertyValue('--run'));
+    const runHint = () => document.querySelector('.combat-run-hint')!.textContent;
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(charge()).toBeGreaterThan(0);
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(charge()).toBe(0);
+    expect(runHint()).toBe('The next fight is about to start');
+
+    t.push(withBattle(makeState(2, WOLF, []), { combat: snapshot(2, WOLF, 0) }));
+    expect(charge()).toBe(0);
+    vi.advanceTimersByTime(3000);
+    expect(charge()).toBeGreaterThan(0.2);
+
+    t.push(withBattle(makeState(3, GOBLIN, []), { combat: snapshot(3, GOBLIN, 0) }));
+    expect(charge()).toBe(0);
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(charge()).toBeLessThan(0.05);
+    expect(runHint()).toBe('Run becomes available 5 seconds into a fight');
   });
 
   it('drops the per-fight banners and dimming while Autorun walks the party on', () => {

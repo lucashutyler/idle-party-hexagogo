@@ -4,6 +4,8 @@ export const PATCH_NOTES: { version: string; notes: string[] }[] = [
     notes: [
       'When Autorun walks your party into the last room of a route, the battle screen now stays steady until the fight there begins.',
       'If the server has trouble starting a fight, the battle screen no longer says "Walking on" while your party is standing still.',
+      'The Autorun timer on the Run button and on the map no longer shows full while your party is standing still, such as while it pauses after a win, falls in a fight or regroups. It fills while Autorun waits to move on and stays full only while your party walks.',
+      'Fight rewards in the battle log now appear after the killing blow.',
     ],
   },
   {
