@@ -243,6 +243,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Names that look like game staff are reserved
 - [x] User blocking (hidden on the client)
 - [x] Unread message indicators
+- [x] Chat strip keeps an unread line from another player over server notices, shows your own message after you send one, and marks mentions of your name in gold
 - [x] Social badge notifications (nav dot + segment counts for friend requests, party invites and guild invites; unread count on the chat strip and rail)
 - [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Gift, Block; a bottom sheet on phones)
 - [x] Party invites anywhere: an on-screen invite card with Join / Decline / Later, friends invitable from any room, invites that survive moving and restarts and last 24 hours, and Accept brings you to your friend when you could walk there yourself

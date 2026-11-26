@@ -21,6 +21,13 @@ export interface ChatAudience {
 export interface ChatPreview {
   count: number;
   message: ChatMessage | null;
+  /** The line is unread and from another player. */
+  unread: boolean;
+  own: boolean;
+  /** The line is unread and names the reader. */
+  mention: boolean;
+  /** The newest timestamp in the log, shown or not. */
+  latestAt: number;
 }
 
 export interface DmThread {
@@ -145,28 +152,60 @@ export function isShownInView(message: ChatMessage, view: ChatView, audience: Ch
   }
 }
 
-function belongsInPreview(message: ChatMessage, audience: ChatAudience): boolean {
-  return message.senderUsername !== audience.me
-    && !isBlockedMessage(message, audience.blocked)
-    && passesFilter(message, audience.filters);
+const NAME_CHAR = /[\p{L}\p{N}_-]/u;
+
+/** Case-insensitive, and only where no other name character touches it, so "Bob" is not in "Bobby". */
+export function mentionsName(text: string, name: string): boolean {
+  const needle = name.toLowerCase();
+  if (!needle) return false;
+  const haystack = text.toLowerCase();
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    if (!NAME_CHAR.test(haystack.charAt(at - 1)) && !NAME_CHAR.test(haystack.charAt(at + needle.length))) return true;
+  }
+  return false;
 }
 
-/** The strip's line and count. A newest unread DM pins over public lines; server lines may show but never count. */
+/** A line from another player that names the reader. */
+export function isChatMention(message: ChatMessage, me: string | undefined): boolean {
+  return !!me && message.senderUsername !== me && message.channelType !== 'server' && mentionsName(message.text, me);
+}
+
+function belongsInPreview(message: ChatMessage, audience: ChatAudience): boolean {
+  return !isBlockedMessage(message, audience.blocked) && passesFilter(message, audience.filters);
+}
+
+/**
+ * The strip's line and count: the newest unread DM, else the newest unread line that names the reader,
+ * else the newest unread line from another player, else the newest line of any kind. Server lines and your own never count.
+ */
 export function chatPreview(messages: readonly ChatMessage[], lastSeenAt: number, audience: ChatAudience): ChatPreview {
   let count = 0;
   let newest: ChatMessage | null = null;
+  let newestUnread: ChatMessage | null = null;
   let pinnedDm: ChatMessage | null = null;
+  let pinnedMention: ChatMessage | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     const unread = message.timestamp > lastSeenAt;
     if (!unread && newest) break;
     if (!belongsInPreview(message, audience)) continue;
     newest ??= message;
-    if (!unread || message.channelType === 'server') continue;
+    if (!unread || message.senderUsername === audience.me || message.channelType === 'server') continue;
     count++;
+    newestUnread ??= message;
     if (message.channelType === 'dm') pinnedDm ??= message;
+    else if (!pinnedMention && isChatMention(message, audience.me)) pinnedMention = message;
   }
-  return { count, message: pinnedDm ?? newest };
+  const unreadLine = pinnedDm ?? pinnedMention ?? newestUnread;
+  const message = unreadLine ?? newest;
+  return {
+    count,
+    message,
+    unread: unreadLine !== null,
+    own: !!message && !!audience.me && message.senderUsername === audience.me,
+    mention: !!unreadLine && isChatMention(unreadLine, audience.me),
+    latestAt: messages[messages.length - 1]?.timestamp ?? 0,
+  };
 }
 
 /** One row per DM partner, newest first. `seenAt` answers when that partner's thread was last on screen. */
@@ -301,7 +340,8 @@ export function renderChatRow(message: ChatMessage, options: ChatRowOptions): st
       + `<span class="chat-msg-dm-to">to</span>`
       + `<button type="button" class="chat-msg-sender chat-msg-sender-btn" data-user="${recipient}">${recipient}:</button>`
     : `<button type="button" class="${senderClass}" data-user="${sender}">${sender}:</button>`;
-  return `<div class="chat-msg" data-ch="${channelType}">${time}${tag}${names} <span class="chat-msg-text">${text}</span></div>`;
+  const rowClass = isChatMention(message, options.me) ? 'chat-msg chat-msg-mention' : 'chat-msg';
+  return `<div class="${rowClass}" data-ch="${channelType}">${time}${tag}${names} <span class="chat-msg-text">${text}</span></div>`;
 }
 
 /** Message rows for the view: the newest `CHAT_ROW_CAP`, with day separators. */

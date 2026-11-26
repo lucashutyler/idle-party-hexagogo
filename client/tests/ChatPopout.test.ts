@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ServerErrorCode, ServerStateMessage } from '@idle-party-rpg/shared';
 import { ChatPopout } from '../src/ui/ChatPopout';
 import { ChatStrip } from '../src/ui/ChatStrip';
 import type { ChatPreview } from '../src/ui/chatModel';
+import { setReducedMotionOverride } from '../src/ui/motion';
 import { chatFocusTracker } from '../src/network/ChatFocusTracker';
 import { bringToFront, dismissTop, release } from '../src/ui/ModalStack';
 import { CHAT_ROW_CAP } from '../src/ui/chatModel';
@@ -423,6 +426,38 @@ describe('ChatPopout unread and preview', () => {
     expect(t.previews.at(-1)?.count).toBe(5);
   });
 
+  it('shows my own message after a server line', () => {
+    localStorage.setItem('chatLastSeenAt', '1000');
+    const t = withPreview();
+    t.receive(message('s1', 'Server', 'a new player joined', { channelType: 'server', channelId: 'server', timestamp: 2000 }));
+    vi.advanceTimersByTime(1000);
+    t.receive(message('m1', 'me', 'welcome!', { channelType: 'global', channelId: '', timestamp: 3000 }));
+    vi.advanceTimersByTime(1000);
+    expect(t.previews.at(-1)).toMatchObject({ count: 0, own: true, unread: false });
+    expect(t.previews.at(-1)?.message?.text).toBe('welcome!');
+  });
+
+  it('keeps an unread line from another player over later server lines', () => {
+    localStorage.setItem('chatLastSeenAt', '1000');
+    const t = withPreview();
+    t.receive(message('m1', 'bob', 'anyone around?', { timestamp: 2000 }));
+    t.receive(message('s1', 'Server', 'a new player joined', { channelType: 'server', channelId: 'server', timestamp: 3000 }));
+    vi.advanceTimersByTime(1000);
+    expect(t.previews.at(-1)).toMatchObject({ count: 1, unread: true });
+    expect(t.previews.at(-1)?.message?.text).toBe('anyone around?');
+  });
+
+  it('reports nothing unread while chat is open', () => {
+    localStorage.setItem('chatLastSeenAt', '1000');
+    const t = withPreview();
+    t.receive(message('m1', 'bob', 'hi me', { timestamp: 2000 }));
+    vi.advanceTimersByTime(1000);
+    expect(t.previews.at(-1)).toMatchObject({ unread: true, mention: true });
+
+    t.chat.open();
+    expect(t.previews.at(-1)).toMatchObject({ count: 0, unread: false, mention: false });
+  });
+
   it('asks for the backlog at boot and again on reconnect', () => {
     const t = setup();
     expect(t.gameClient.sendSyncChat).toHaveBeenCalledTimes(1);
@@ -446,9 +481,21 @@ describe('ChatStrip', () => {
     return { strip: new ChatStrip(slot, onOpen), slot, onOpen };
   }
 
+  function line(msg: ChatMessage | null, over: Partial<ChatPreview> = {}): ChatPreview {
+    return { count: 0, message: msg, unread: false, own: false, mention: false, latestAt: msg?.timestamp ?? 0, ...over };
+  }
+
+  function unreadFrom(id: string, sender: string, timestamp: number): ChatPreview {
+    return line(message(id, sender, `from ${sender}`, { timestamp }), { count: 1, unread: true });
+  }
+
+  const arriving = (slot: HTMLElement) => slot.querySelector('.chat-strip-arrive') !== null;
+
+  afterEach(() => setReducedMotionOverride(null));
+
   it('paints the sender and escaped text', () => {
     const { strip: s, slot } = strip();
-    s.render({ count: 1, message: message('m1', 'bob', '<b>hi</b>') });
+    s.render(line(message('m1', 'bob', '<b>hi</b>'), { count: 1, unread: true }));
     expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('bob');
     expect(slot.querySelector('.chat-strip-text')?.textContent).toBe('<b>hi</b>');
     expect(slot.querySelector('b')).toBeNull();
@@ -457,13 +504,116 @@ describe('ChatStrip', () => {
 
   it('dims a server line', () => {
     const { strip: s, slot } = strip();
-    s.render({ count: 0, message: message('m1', 'Server', 'welcome', { channelType: 'server' }) });
+    s.render(line(message('m1', 'Server', 'welcome', { channelType: 'server' })));
     expect(slot.querySelector('.chat-strip-dim')).not.toBeNull();
+  });
+
+  it('labels your own line "You" and does not dim it', () => {
+    const { strip: s, slot } = strip();
+    s.render(line(message('m1', 'me', 'hello all', { channelType: 'global' }), { own: true }));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('You');
+    expect(slot.querySelector('.chat-strip-text')?.textContent).toBe('hello all');
+    expect(slot.querySelector('.chat-strip-dim')).toBeNull();
+    expect(slot.classList.contains('has-unread')).toBe(false);
+  });
+
+  it('marks the strip while its line is unread, in the line\'s channel colour, and gold for a mention', () => {
+    const { strip: s, slot } = strip();
+    s.render(unreadFrom('m1', 'bob', 1000));
+    expect(slot.classList.contains('has-unread')).toBe(true);
+    expect(slot.classList.contains('has-mention')).toBe(false);
+    expect(slot.dataset.ch).toBe('zone');
+
+    s.render(line(message('m2', 'bob', 'hi me', { timestamp: 2000 }), { count: 1, unread: true, mention: true }));
+    expect(slot.classList.contains('has-mention')).toBe(true);
+
+    s.render(line(message('m2', 'bob', 'hi me', { timestamp: 2000 })));
+    expect(slot.classList.contains('has-unread')).toBe(false);
+    expect(slot.classList.contains('has-mention')).toBe(false);
+
+    s.render(line(null));
+    expect(slot.dataset.ch).toBeUndefined();
+  });
+
+  it('plays the arrival cue once for each new unread line, never for the first line painted', () => {
+    const { strip: s, slot } = strip();
+    s.render(line(null));
+    s.render(unreadFrom('m1', 'bob', 1000));
+    expect(arriving(slot)).toBe(false);
+
+    s.render(unreadFrom('m2', 'carol', 2000));
+    expect(arriving(slot)).toBe(true);
+    s.render(unreadFrom('m2', 'carol', 2000));
+    expect(arriving(slot)).toBe(false);
+
+    s.render(unreadFrom('m1', 'bob', 1000));
+    expect(arriving(slot)).toBe(false);
+    s.render(unreadFrom('m3', 'dan', 3000));
+    expect(arriving(slot)).toBe(true);
+  });
+
+  it('plays no arrival cue for your own line or a server line', () => {
+    const { strip: s, slot } = strip();
+    s.render(line(message('m1', 'Server', 'welcome', { channelType: 'server', timestamp: 1000 })));
+    s.render(line(message('m2', 'me', 'hi', { timestamp: 2000 }), { own: true }));
+    expect(arriving(slot)).toBe(false);
+    s.render(line(message('m3', 'Server', 'a new player joined', { channelType: 'server', timestamp: 3000 })));
+    expect(arriving(slot)).toBe(false);
+
+    s.render(unreadFrom('m4', 'bob', 4000));
+    expect(arriving(slot)).toBe(true);
+  });
+
+  it('plays no arrival cue for an older line a block or unblock brings back', () => {
+    const { strip: s, slot } = strip();
+    const dm = message('d1', 'Grief', 'psst', { channelType: 'dm', timestamp: 10 });
+    s.render(line(dm, { count: 2, unread: true, latestAt: 50 }));
+    s.render(line(message('m1', 'bob', 'hi', { timestamp: 50 }), { count: 1, unread: true }));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('bob');
+    expect(arriving(slot)).toBe(false);
+
+    s.render(line(dm, { count: 2, unread: true, latestAt: 50 }));
+    expect(arriving(slot)).toBe(false);
+    s.render(unreadFrom('m2', 'carol', 60));
+    expect(arriving(slot)).toBe(true);
+  });
+
+  it('plays no arrival cue for a line older than the newest one the log already held', () => {
+    const { strip: s, slot } = strip();
+    s.render(unreadFrom('m1', 'bob', 1000));
+    s.render(line(message('m1', 'bob', 'from bob', { timestamp: 1000 }), { count: 2, unread: true, latestAt: 3000 }));
+    s.render(unreadFrom('m2', 'carol', 2000));
+    expect(arriving(slot)).toBe(false);
+  });
+
+  it('drops the arrival cue once it has played or been cut short, so showing the strip again does not replay it', () => {
+    const { strip: s, slot } = strip();
+    s.render(unreadFrom('m1', 'bob', 1000));
+    s.render(unreadFrom('m2', 'carol', 2000));
+    slot.querySelector('.chat-strip-line')!.dispatchEvent(new Event('animationend'));
+    expect(arriving(slot)).toBe(false);
+
+    s.render(unreadFrom('m3', 'dan', 3000));
+    slot.querySelector('.chat-strip-line')!.dispatchEvent(new Event('animationcancel'));
+    expect(arriving(slot)).toBe(false);
+
+    s.render(unreadFrom('m3', 'dan', 3000));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('dan');
+    expect(arriving(slot)).toBe(false);
+  });
+
+  it('plays no arrival cue with reduced motion', () => {
+    setReducedMotionOverride(true);
+    const { strip: s, slot } = strip();
+    s.render(unreadFrom('m1', 'bob', 1000));
+    s.render(unreadFrom('m2', 'carol', 2000));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('carol');
+    expect(arriving(slot)).toBe(false);
   });
 
   it('falls back to a label with nothing to show', () => {
     const { strip: s, slot } = strip();
-    s.render({ count: 0, message: null });
+    s.render(line(null));
     expect(slot.querySelector('.chat-strip-open-label')?.textContent).toBe('Chat');
     expect(slot.classList.contains('has-preview')).toBe(false);
   });
@@ -481,6 +631,28 @@ describe('ChatStrip', () => {
     pointer('pointerdown', 100, 100);
     pointer('pointerup', 100, 50);
     expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a held paint, arrival cue included, until the press is over', () => {
+    const { strip: s, slot } = strip();
+    s.render(unreadFrom('m1', 'bob', 1000));
+    press(slot.querySelector('.chat-strip-open')!);
+    s.render(unreadFrom('m2', 'carol', 2000));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('bob');
+
+    document.dispatchEvent(new PointerEvent('pointercancel'));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('carol');
+    expect(arriving(slot)).toBe(true);
+  });
+});
+
+describe('chat.css', () => {
+  const css = readFileSync(resolve(__dirname, '../src/styles/chat.css'), 'utf8');
+
+  it('runs nothing forever, and drops the arrival cue for reduced motion', () => {
+    expect(css).not.toMatch(/\binfinite\b/);
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(reduced).toMatch(/\.chat-strip-arrive\s*\{\s*animation: none;/);
   });
 });
 

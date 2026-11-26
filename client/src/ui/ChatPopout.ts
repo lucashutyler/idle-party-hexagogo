@@ -1028,12 +1028,13 @@ export class ChatPopout {
     this.previewTimer = undefined;
     this.lastPreviewAt = Date.now();
     const preview = chatPreview(this.log.messages, this.lastSeenAt, this.audience());
-    const count = this.isOpen ? 0 : preview.count;
+    const closed = !this.isOpen;
+    const count = closed ? preview.count : 0;
     if (count !== this.unreadCount) {
       this.unreadCount = count;
       this.onUnreadChange?.(count);
     }
-    this.onPreviewChange?.({ count, message: preview.message });
+    this.onPreviewChange?.({ ...preview, count, unread: closed && preview.unread, mention: closed && preview.mention });
   }
 
   /** The server suppresses DM notifications for this thread, so it must be the one really on screen. */

@@ -11,7 +11,9 @@ import {
   DEFAULT_CHAT_FILTERS,
   dmPartner,
   escapeChatHtml,
+  isChatMention,
   isShownInView,
+  mentionsName,
   normalizeChatMessage,
   renderChatRow,
   renderChatRows,
@@ -232,9 +234,127 @@ describe('chatPreview', () => {
     expect(chatPreview([server], 10, withFilterOff('server')).message).toBeNull();
   });
 
-  it('keeps looking for an unread line past an own echo at the end', () => {
-    const preview = chatPreview([msg({ timestamp: 5 }), msg({ timestamp: 6, senderUsername: 'me' })], 10, audience());
-    expect(preview.message?.timestamp).toBe(5);
+  it('shows your own message when nothing is unread', () => {
+    const mine = msg({ timestamp: 6, senderUsername: 'me' });
+    const preview = chatPreview([msg({ timestamp: 5 }), mine], 10, audience());
+    expect(preview).toEqual({ count: 0, message: mine, unread: false, own: true, mention: false, latestAt: 6 });
+  });
+
+  it('shows your own message over an older server line, and never counts it', () => {
+    const mine = msg({ timestamp: 16, senderUsername: 'me' });
+    const preview = chatPreview([msg({ timestamp: 15, channelType: 'server', senderUsername: 'Server' }), mine], 10, audience());
+    expect(preview.message).toBe(mine);
+    expect(preview.own).toBe(true);
+    expect(preview.count).toBe(0);
+  });
+
+  it('keeps an unread line from another player over a later server line and a later own message', () => {
+    const fromBob = msg({ timestamp: 11 });
+    const messages = [
+      fromBob,
+      msg({ timestamp: 12, channelType: 'server', senderUsername: 'Server' }),
+      msg({ timestamp: 13, senderUsername: 'me' }),
+      msg({ timestamp: 14, channelType: 'server', senderUsername: 'Server' }),
+    ];
+    expect(chatPreview(messages, 10, audience())).toEqual({ count: 1, message: fromBob, unread: true, own: false, mention: false, latestAt: 14 });
+  });
+
+  it('shows the newest line of any kind once everything is read', () => {
+    const server = msg({ timestamp: 14, channelType: 'server', senderUsername: 'Server' });
+    const preview = chatPreview([msg({ timestamp: 11 }), msg({ timestamp: 12, senderUsername: 'me' }), server], 20, audience());
+    expect(preview.message).toBe(server);
+    expect(preview.unread).toBe(false);
+    expect(preview.own).toBe(false);
+  });
+
+  it('flags a pinned DM as unread', () => {
+    const dm = msg({ channelType: 'dm', channelId: 'me', senderUsername: 'Mira', timestamp: 15 });
+    const preview = chatPreview([dm, msg({ timestamp: 16, senderUsername: 'me' })], 10, audience());
+    expect(preview.message).toBe(dm);
+    expect(preview.unread).toBe(true);
+    expect(preview.count).toBe(1);
+  });
+
+  it('honours filters and blocks when falling back to the newest line', () => {
+    const shown = msg({ timestamp: 5 });
+    const ownZone = msg({ timestamp: 6, senderUsername: 'me', channelType: 'zone' });
+    expect(chatPreview([shown, ownZone], 10, withFilterOff('zone')).message).toBe(shown);
+    const blockedLast = msg({ timestamp: 7, senderUsername: 'Grief' });
+    expect(chatPreview([shown, blockedLast], 10, audience({ blocked: { Grief: 'all' } })).message).toBe(shown);
+  });
+
+  it('treats nothing as your own before your name is known', () => {
+    const line = msg({ timestamp: 15, senderUsername: 'me' });
+    const preview = chatPreview([line], 10, audience({ me: undefined }));
+    expect(preview.own).toBe(false);
+    expect(preview.unread).toBe(true);
+    expect(preview.count).toBe(1);
+  });
+
+  it('flags an unread line that names you as a mention, and only while unread', () => {
+    const line = msg({ timestamp: 15, text: 'hey ME, over here' });
+    expect(chatPreview([line], 10, audience()).mention).toBe(true);
+    expect(chatPreview([line], 20, audience()).mention).toBe(false);
+    expect(chatPreview([msg({ timestamp: 15, text: 'memes' })], 10, audience()).mention).toBe(false);
+  });
+
+  it('keeps an unread mention on the line over a later plain line from another player', () => {
+    const mention = msg({ timestamp: 11, text: 'hey me, want to party?' });
+    const preview = chatPreview([mention, msg({ timestamp: 12, senderUsername: 'carol', text: 'lol' })], 10, audience());
+    expect(preview).toMatchObject({ message: mention, mention: true, unread: true, count: 2 });
+  });
+
+  it('still pins an unread DM over a newer mention', () => {
+    const dm = msg({ channelType: 'dm', channelId: 'me', senderUsername: 'Mira', text: 'psst', timestamp: 11 });
+    const messages = [dm, msg({ timestamp: 12, text: 'me, over here' }), msg({ timestamp: 13, senderUsername: 'carol' })];
+    expect(chatPreview(messages, 10, audience())).toMatchObject({ message: dm, mention: false, count: 3 });
+  });
+
+  it('reports the newest timestamp in the log, blocked and filtered lines included', () => {
+    const messages = [msg({ timestamp: 5 }), msg({ timestamp: 7, senderUsername: 'Grief' }), msg({ timestamp: 9, channelType: 'zone' })];
+    const preview = chatPreview(messages, 10, { ...withFilterOff('zone'), blocked: { Grief: 'all' } });
+    expect(preview.message).toBe(messages[0]);
+    expect(preview.latestAt).toBe(9);
+    expect(chatPreview([], 10, audience()).latestAt).toBe(0);
+  });
+});
+
+describe('mentionsName', () => {
+  it('finds the name as a whole word in any case', () => {
+    expect(mentionsName('hi Mira', 'mira')).toBe(true);
+    expect(mentionsName('MIRA come here', 'Mira')).toBe(true);
+    expect(mentionsName('Mira', 'Mira')).toBe(true);
+  });
+
+  it('accepts punctuation around the name', () => {
+    for (const text of ['@Mira hi', 'thanks, Mira!', '(Mira)', 'Mira\'s sword', 'ok Mira.', 'Mira:']) {
+      expect(mentionsName(text, 'Mira'), text).toBe(true);
+    }
+  });
+
+  it('does not find the name inside a longer word or name', () => {
+    for (const text of ['Miras', 'Admira', 'Mira_2', 'Mira-chan', 'Mira2', 'Miraé']) {
+      expect(mentionsName(text, 'Mira'), text).toBe(false);
+    }
+  });
+
+  it('keeps looking past an occurrence inside a word', () => {
+    expect(mentionsName('Miras and Mira', 'Mira')).toBe(true);
+  });
+
+  it('treats the name as plain text, not a pattern', () => {
+    expect(mentionsName('hello a.b', 'a.b')).toBe(true);
+    expect(mentionsName('hello axb', 'a.b')).toBe(false);
+    expect(mentionsName('anything', '')).toBe(false);
+  });
+});
+
+describe('isChatMention', () => {
+  it('is never your own line, a server line, or anything before your name is known', () => {
+    expect(isChatMention(msg({ senderUsername: 'me', text: 'me again' }), 'me')).toBe(false);
+    expect(isChatMention(msg({ channelType: 'server', senderUsername: 'Server', text: 'welcome me' }), 'me')).toBe(false);
+    expect(isChatMention(msg({ text: 'hi me' }), undefined)).toBe(false);
+    expect(isChatMention(msg({ text: 'hi me' }), 'me')).toBe(true);
   });
 });
 
@@ -379,6 +499,14 @@ describe('renderChatRow', () => {
   it('keeps server rows inert', () => {
     const row = rowElement(renderChatRow(msg({ channelType: 'server', senderUsername: 'Server' }), options));
     expect(row.querySelector('button')).toBeNull();
+  });
+
+  it('marks a row from another player that names you', () => {
+    expect(rowElement(renderChatRow(msg({ text: 'over here, Me!' }), options)).classList.contains('chat-msg-mention')).toBe(true);
+    expect(rowElement(renderChatRow(msg({ text: 'memes' }), options)).classList.contains('chat-msg-mention')).toBe(false);
+    expect(rowElement(renderChatRow(msg({ senderUsername: 'me', text: 'me again' }), options)).classList.contains('chat-msg-mention')).toBe(false);
+    const server = rowElement(renderChatRow(msg({ channelType: 'server', senderUsername: 'Server', text: 'welcome me' }), options));
+    expect(server.classList.contains('chat-msg-mention')).toBe(false);
   });
 });
 
