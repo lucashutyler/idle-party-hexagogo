@@ -705,7 +705,7 @@ export class CombatScreen implements Screen {
     const regroupLeftMs = this.regroupEndsAt - performance.now();
     const regroupSeconds = regroupLeftMs > 0 ? Math.ceil(regroupLeftMs / 1000) : 0;
     this.bookRegroupRepaint(regroupLeftMs);
-    const walking = state.battle.visual === 'none' && state.battle.state === 'result';
+    const walking = state.battle.visual === 'none' && state.battle.state === 'result' && !state.battle.recovering;
     const nextRoom = state.party?.path?.[0];
     const target = walking ? state.party : nextRoom;
     const fought = this.headerLatch?.battleId === this.playback.battleId ? this.headerLatch.state.dungeon : state.dungeon;

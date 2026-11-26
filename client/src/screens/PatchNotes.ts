@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.2',
+    notes: [
+      'When Autorun walks your party into the last room of a route, the battle screen now stays steady until the fight there begins.',
+      'If the server has trouble starting a fight, the battle screen no longer says "Walking on" while your party is standing still.',
+    ],
+  },
+  {
     version: '2026.11.25.1',
     notes: [
       'Autorun now walks your party a room every second instead of about every 6, so travelling is much faster and safer: you\'re gone before monsters get a swing in. A fight you win before moving on (say, with an Archer\'s first arrow) still pays; one you leave unfinished gives no XP, loot or kill progress, though visiting rooms still counts for quests. Rooms you haven\'t uncovered still need a full fight, and running by hand works as before.',

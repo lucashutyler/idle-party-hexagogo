@@ -744,6 +744,7 @@ export class PartyBattleManager {
       ...(regroupMs > 0 && !timer.isLive ? { regroupMs } : {}),
       ...(timer.autoRunWalking ? { autoRunWalking: true } : {}),
       ...(autoRunLeaveMs !== undefined ? { autoRunLeaveMs } : {}),
+      ...(timer.isRecovering ? { recovering: true } : {}),
       combat: combat ? buildClientCombatSnapshot(combat, timer.battleId, true) : undefined,
     };
   }

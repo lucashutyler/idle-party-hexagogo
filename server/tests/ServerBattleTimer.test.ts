@@ -526,6 +526,19 @@ describe('ServerBattleTimer', () => {
       h.timer.destroy();
     });
 
+    it('says it is recovering until a fight runs again', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let broken = true;
+      const h = harness('long', { callbacks: { onCombatFlush: () => { if (broken) throw new Error('socket exploded'); } } });
+      h.timer.start();
+      expect(h.timer.isRecovering).toBe(true);
+      broken = false;
+      vi.advanceTimersByTime(1000);
+      expect(h.timer.isRecovering).toBe(false);
+      expect(h.timer.isLive).toBe(true);
+      h.timer.destroy();
+    });
+
     it('does not retry after destroy()', () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const h = harness(() => { throw new Error('always'); });

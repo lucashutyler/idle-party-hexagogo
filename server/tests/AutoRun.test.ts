@@ -110,6 +110,21 @@ describe('auto run', () => {
     h.timer.destroy();
   });
 
+  it.each([['an unfinished fight', longFight], ['a quick win', quickKill]])(
+    'still reports the walk into the last room of its route, after %s',
+    (_, createCombat) => {
+      const h = harness({ autoRun: true, destination: true }, createCombat);
+      h.party.moveToNextTile.mockImplementationOnce(() => { h.state.destination = false; return true; });
+      h.timer.start();
+      vi.advanceTimersByTime(LEAVE_MS + 50);
+      expect(h.party.moveToNextTile).toHaveBeenCalledTimes(1);
+      expect(h.timer.autoRunWalking).toBe(true);
+      vi.advanceTimersByTime(MOVE_DURATION);
+      expect(h.timer.autoRunWalking).toBe(false);
+      h.timer.destroy();
+    },
+  );
+
   it('keeps the usual pauses after a quick win with auto run off', () => {
     const h = harness({ autoRun: false, destination: true }, quickKill);
     h.timer.start();
@@ -271,6 +286,8 @@ describe('auto run through the party battle manager', () => {
     expect(w.entry().serverParty.tile.id).toBe(tileId(2, 1));
     expect(w.journal().join('\n')).toContain('Moved to');
     expect(w.journal()).not.toContain('Escaped the battle!');
+    expect(w.pm.partyBattles.getBattleState(w.partyId)?.autoRunWalking).toBe(true);
+    vi.advanceTimersByTime(MOVE_DURATION);
     expect(w.pm.partyBattles.getBattleState(w.partyId)?.autoRunWalking).toBeUndefined();
     w.pm.partyBattles.destroyEntry(w.partyId);
     vi.restoreAllMocks();

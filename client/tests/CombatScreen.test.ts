@@ -348,6 +348,13 @@ describe('CombatScreen', () => {
     expect(stage().classList.contains('victory')).toBe(true);
   });
 
+  it('does not say the party is walking while the server retries a fight that failed to start', () => {
+    const t = start();
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, recovering: true }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(statusText()).toBe('Regrouping');
+  });
+
   it('does not say the party is walking while it waits to fight again', () => {
     const t = start();
     t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, regroupMs: 2000 }));
