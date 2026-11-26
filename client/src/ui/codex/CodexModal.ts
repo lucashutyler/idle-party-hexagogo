@@ -86,7 +86,7 @@ export class CodexModal {
     room: listState('name'),
     shop: listState('newest'),
   };
-  private newKeys: ReadonlySet<string> | null = null;
+  private seenAtOpen: readonly string[] | null = null;
   private memo: { key: readonly unknown[]; index: CodexIndex } | null = null;
   private requestedAt = 0;
   private refreshTimer?: ReturnType<typeof setTimeout>;
@@ -127,7 +127,7 @@ export class CodexModal {
     this.titleEl = this.backBtn = this.homeBtn = this.controlsEl = this.searchEl = this.sortEl = this.bodyEl = null;
     this.stack = [];
     this.paintedView = null;
-    this.newKeys = null;
+    this.seenAtOpen = null;
     this.memo = null;
   }
 
@@ -362,11 +362,9 @@ export class CodexModal {
     const ctx: CodexViewContext = { index, state, world: this.host.worldCache };
     const { target } = view;
     if (target.kind === 'home') {
-      if (!this.newKeys) {
-        const username = state?.username;
-        this.newKeys = username ? newRecentKeys(index.recent, readSeen(username)) : new Set();
-      }
-      return codexHomeHtml(ctx, { query: this.homeQuery, newKeys: this.newKeys });
+      if (!this.seenAtOpen && state?.username) this.seenAtOpen = readSeen(state.username);
+      const newKeys = this.seenAtOpen ? newRecentKeys(index.recent, this.seenAtOpen) : new Set<string>();
+      return codexHomeHtml(ctx, { query: this.homeQuery, newKeys });
     }
     if (target.kind === 'list') {
       const list = this.lists[target.list];
@@ -376,7 +374,7 @@ export class CodexModal {
     return codexEntryHtml(target, ctx, view.expanded);
   }
 
-  /** "New" tags stay for this opening; the next one shows only what arrived since. */
+  /** "New" is judged against the seen list as it stood at this opening; the next opening shows only what arrived since. */
   private rememberSeen(): void {
     const username = this.host.gameClient.lastState?.username;
     if (username && this.memo) writeSeen(username, this.memo.index.recent.map(codexRefKey));

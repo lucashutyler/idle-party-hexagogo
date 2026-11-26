@@ -295,6 +295,26 @@ describe('CodexModal', () => {
     modal.open({ kind: 'home' });
     expect(tagged()).toEqual([]);
   });
+
+  it('tags what a fresh reply brings over a cached older one, and what arrives while home stays open', () => {
+    const older = codexReply({ version: 'v1', recent: [{ kind: 'item', id: 'fang' }, { kind: 'shop', id: 'mill_post' }] });
+    mount(codexState({ character: { ...codexState().character!, codexVersion: 'v2' } }), older);
+    localStorage.setItem('codexSeen:me', JSON.stringify(['item:fang', 'shop:mill_post']));
+    const tagged = () => [...body().querySelectorAll('.codex-chip-new')].map(c => c.closest('[data-codex]')!.getAttribute('data-codex'));
+
+    modal.open({ kind: 'home' });
+    expect(tagged()).toEqual([]);
+
+    client.reply(codexReply({ version: 'v2', recent: [{ kind: 'monster', id: 'wolf' }, { kind: 'item', id: 'fang' }, { kind: 'shop', id: 'mill_post' }] }));
+    expect(tagged()).toEqual(['monster:wolf']);
+
+    client.reply(codexReply({ version: 'v3', recent: [{ kind: 'monster', id: 'goblin' }, { kind: 'monster', id: 'wolf' }, { kind: 'item', id: 'fang' }, { kind: 'shop', id: 'mill_post' }] }));
+    expect(tagged()).toEqual(['monster:goblin', 'monster:wolf']);
+
+    modal.close();
+    modal.open({ kind: 'home' });
+    expect(tagged()).toEqual([]);
+  });
 });
 
 describe('createCodexOpener', () => {
