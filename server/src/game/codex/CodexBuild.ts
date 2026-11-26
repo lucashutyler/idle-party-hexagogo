@@ -120,7 +120,13 @@ function buildContentIndex(content: CodexContent): CodexContentIndex {
   const tables = new Map<string, CodexTableSpawns>();
   const encounterMonsters = new Map<string, readonly string[]>();
 
+  const entranceZones = new Map<string, Set<string>>();
   for (const tile of content.getWorld().tiles) {
+    if (tile.dungeonId) {
+      const zoneIds = entranceZones.get(tile.dungeonId) ?? new Set<string>();
+      zoneIds.add(tile.zone);
+      entranceZones.set(tile.dungeonId, zoneIds);
+    }
     if (!isTileTraversable(tile.type, content.getTileType(tile.type))) continue;
     const key = codexTableKey(tile);
     roomTable.set(tile.id, key);
@@ -138,11 +144,22 @@ function buildContentIndex(content: CodexContent): CodexContentIndex {
   for (const [id, dungeon] of Object.entries(content.getAllDungeons())) {
     const spawns = new Set<string>();
     for (const floor of dungeon.floors ?? []) {
-      for (const monsterId of tableMonsterIds(floor.encounterTable ?? [], monsters, encounters)) spawns.add(monsterId);
+      const floorTables: (readonly EncounterTableEntry[])[] = floor.encounterTable?.length
+        ? [floor.encounterTable]
+        : entranceZoneTables(entranceZones.get(id), zones);
+      for (const table of floorTables) {
+        for (const monsterId of tableMonsterIds(table, monsters, encounters)) spawns.add(monsterId);
+      }
     }
     dungeonSpawns.set(id, [...spawns]);
   }
   return { roomTable, tables, encounterMonsters, dungeonSpawns };
+}
+
+/** What a floor with an empty table rolls: its entrance rooms' zone tables, as `createEncounter` does. */
+function entranceZoneTables(zoneIds: ReadonlySet<string> | undefined, zones: ReturnType<CodexContent['getAllZones']>): (readonly EncounterTableEntry[])[] {
+  if (!zoneIds || zoneIds.size === 0) return [[]];
+  return [...zoneIds].map(zoneId => (hasOwn(zones, zoneId) ? zones[zoneId]?.encounterTable : undefined) ?? []);
 }
 
 function codexMonster(id: string, input: CodexBuildInput, content: CodexContent): CodexMonster | null {

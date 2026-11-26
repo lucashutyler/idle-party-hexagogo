@@ -190,6 +190,25 @@ describe('Codex content index', () => {
     expect(index.tables.get('z:meadow')).toEqual({ spawns: ['goblin', 'wolf'], encounters: ['goblins', 'wolves'] });
     expect([...index.dungeonSpawns]).toEqual([['damp_cave', ['bat', 'cave_boss']]]);
   });
+
+  it('gives a floor with an empty table what its entrance rooms\' zone tables roll, not the rooms\' own tables', () => {
+    const world = codexWorld();
+    world.dungeons.damp_cave.floors[0].encounterTable = [];
+    const gate = world.tiles.find(t => t.id === 'gate')!;
+    gate.encounterTable = [{ encounterId: 'bears', weight: 1 }];
+    world.tiles.push(room('back_gate', 0, 2, { zone: 'pines', dungeonId: 'damp_cave' }));
+
+    expect(codexContentIndex(codexContent(world)).dungeonSpawns.get('damp_cave')).toEqual(['goblin', 'wolf', 'shaman', 'cave_boss', 'bat']);
+  });
+
+  it('gives a floor with an empty table the fallback monster only when the entrance zone\'s table is empty too', () => {
+    const world = codexWorld();
+    world.dungeons.damp_cave.floors[0].encounterTable = [];
+    world.dungeons.damp_cave.floors[1].encounterTable = [];
+    world.zones.meadow.encounterTable = [];
+
+    expect(codexContentIndex(codexContent(world)).dungeonSpawns.get('damp_cave')).toEqual(['goblin']);
+  });
 });
 
 describe('Codex reply from a session', () => {
