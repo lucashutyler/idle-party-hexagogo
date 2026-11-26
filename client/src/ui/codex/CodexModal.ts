@@ -185,7 +185,7 @@ export class CodexModal {
 
     const { gameClient } = this.host;
     this.unsubscribers.push(
-      gameClient.subscribe(state => this.onState(state)),
+      gameClient.subscribe(() => this.onState()),
       gameClient.onCodex(() => this.onCodex()),
     );
     this.refetch();
@@ -287,7 +287,7 @@ export class CodexModal {
     this.paint();
   }
 
-  private onState(state: ServerStateMessage): void {
+  private onState(): void {
     if (!this.overlay) return;
     if (this.isStale()) {
       if (this.host.gameClient.lastCodex === null) this.refetch();
