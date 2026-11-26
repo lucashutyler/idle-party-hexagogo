@@ -796,8 +796,12 @@ export class MapScreen implements Screen {
 
   private async openMapList(): Promise<void> {
     if (!this.mapList) {
-      const { MapList } = await import('../ui/MapList');
-      this.mapList ??= new MapList(this.gameClient, this.worldCache, () => this.viewedMapId, (mapId) => this.viewMap(mapId));
+      const loaded = await import('../ui/MapList').catch(() => null);
+      if (!loaded) {
+        this.showMoveToast(OFFLINE_NOTICE);
+        return;
+      }
+      this.mapList ??= new loaded.MapList(this.gameClient, this.worldCache, () => this.viewedMapId, (mapId) => this.viewMap(mapId));
     }
     if (this.active) this.mapList.open();
   }
