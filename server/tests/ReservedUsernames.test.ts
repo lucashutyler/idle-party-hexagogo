@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountStore } from '../src/auth/AccountStore.js';
-import { isReservedUsername, isStoreFileName } from '../src/auth/reservedUsernames.js';
+import { isReservedUsername, isStoreFileName, looksLikeStaffName } from '../src/auth/reservedUsernames.js';
 import { JsonFileStore } from '../src/game/JsonFileStore.js';
 import type { PlayerSaveData } from '../src/game/GameStateStore.js';
 
@@ -52,6 +52,24 @@ describe('isReservedUsername', () => {
   });
 });
 
+describe('looksLikeStaffName', () => {
+  it.each([
+    'Admin', 'admin', 'ADMIN', 'Admin_Bob', 'bob-admin', 'TheAdmin', 'Admin42', '42admin',
+    'Administrator', 'Moderator', 'Mod', 'mod_7', 'GM', 'gm', 'GameMaster', 'game_master', 'Game-Master', 'G_M',
+    'Staff', 'StaffBob', 'System', 'Official', 'OfficialNews', 'Support', 'SupportDesk', 'Server', 'Server_1',
+    'Ad_min', 'A-d-m-i-n', 'Sys_tem',
+  ])('refuses %s', (name) => {
+    expect(looksLikeStaffName(name)).toBe(true);
+  });
+
+  it.each([
+    'Badminton', 'Modern', 'Systemic', 'Gemma', 'Serverus', 'Supporter', 'Admiral', 'Modest', 'Stafford', 'Officially',
+    'alice', 'Knight_42', 'bot_001', 'Regular_Name-1', 'GMoney', 'Gamer', 'Master', 'Game', 'Commodore',
+  ])('allows %s', (name) => {
+    expect(looksLikeStaffName(name)).toBe(false);
+  });
+});
+
 describe('AccountStore.setUsername', () => {
   let accounts: AccountStore;
 
@@ -59,6 +77,18 @@ describe('AccountStore.setUsername', () => {
     accounts = new AccountStore();
     vi.spyOn(accounts as unknown as { save(): Promise<void> }, 'save').mockResolvedValue();
     await accounts.createAccount('a@example.test');
+  });
+
+  it('refuses a staff-like name for an account that does not hold it', async () => {
+    expect(await accounts.setUsername('a@example.test', 'Admin_Bob')).toEqual({ success: false, error: 'That name is reserved' });
+    expect(accounts.findByEmail('a@example.test')?.username).toBeNull();
+  });
+
+  it('lets an account that already holds a staff-like name send it again', async () => {
+    accounts.findByEmail('a@example.test')!.username = 'Admin';
+
+    expect(await accounts.setUsername('a@example.test', 'Admin')).toEqual({ success: true });
+    expect(accounts.findByEmail('a@example.test')?.username).toBe('Admin');
   });
 
   it('refuses a reserved name on a first pick and on a rename', async () => {

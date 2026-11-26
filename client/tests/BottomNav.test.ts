@@ -68,6 +68,8 @@ describe('BottomNav', () => {
     expect(t.tab('social').getAttribute('aria-label')).toBe('Social, needs attention');
     t.push({ social: { incomingFriendRequests: [], pendingInvites: [] } });
     expect(t.tab('social').getAttribute('aria-label')).toBe('Social');
+    t.push({ social: { incomingFriendRequests: [], pendingInvites: [], guildInvites: [{ guildId: 'g1', guildName: 'Lanterns', inviterUsername: 'Testy' }] } });
+    expect(t.tab('social').getAttribute('aria-label')).toBe('Social, needs attention');
   });
 
   it('labels every tab and marks only rail destinations as rail-only', () => {

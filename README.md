@@ -234,11 +234,14 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Social tab with segments (Party / Guild / Friends / Ranks); chat is docked in the shell, not part of Social
 - [x] Ranks: all players with rank numbers, search, sort, filter
 - [x] Friends system (request-based two-way: send/accept/decline/revoke, auto-accept cross-requests)
-- [x] Guild system (create at level 20+, join, leave, invite)
+- [x] Guild system (create at level 5+, leave, invites the target accepts or declines and that last 7 days, leaders can remove members)
 - [x] Chat system (unified timeline, 7 channels: Room/Zone/Party/Guild/Global/DM/Server, per-user persistent history, timestamps, clickable senders + channel tags, All/Party/Guild/DMs tabs, channel filters, DM threads)
+- [x] Chat history kept per channel group (DMs, party and guild, public), so private messages stay however busy public chat is
+- [x] Chat send limits per player (and a slower pace for global chat), friend request limits, and text direction controls removed from chat
+- [x] Names that look like game staff are reserved
 - [x] User blocking (hidden on the client)
 - [x] Unread message indicators
-- [x] Social badge notifications (nav dot + segment counts for friend requests and party invites; unread count on the chat strip and rail)
+- [x] Social badge notifications (nav dot + segment counts for friend requests, party invites and guild invites; unread count on the chat strip and rail)
 - [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Gift, Block; a bottom sheet on phones)
 - [x] Party invites anywhere: an on-screen invite card with Join / Decline / Later, friends invitable from any room, invites that survive moving and restarts and last 24 hours, and Accept brings you to your friend when you could walk there yourself
 - [x] Leader prompt: the owner and leaders are asked once per joiner whether they may move the party too
@@ -252,10 +255,12 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Party notifications (invite received, kicked, promoted, demoted, ownership transferred, member joined/left)
 - [x] DM notifications (suppressed while actively viewing that conversation)
 - [x] Friend-request notifications (received + accepted)
+- [x] Guild notifications (invite received, removed from guild)
+- [x] Repeat friend requests and party or guild invites from the same sender notify once per window
 - [x] Notification preferences UI (category × channel grid, per-channel kill switch, enable/disable all)
 - [x] In-app notification bell (dropdown inbox, unread badge, live toasts, ended party invites marked as ended)
 - [x] PWA scaffolding (installable manifest, service worker, offline app-shell caching)
-- [ ] Guild event notifications (blocked on the guild system existing)
+- [ ] More guild event notifications (promotion, achievements, raid reminders)
 - [ ] SMS / Discord channel drivers
 
 ### Towns & Economy

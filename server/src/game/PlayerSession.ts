@@ -155,10 +155,10 @@ import { gateIndex, gatesOpenedByLevel } from './GateIndexCache.js';
 import { roomLevelBands } from './RoomLevels.js';
 import type { LevelBand } from './RoomLevels.js';
 import type { QuestDefinition, QuestGuide, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
+import { SERVER_CHAT_CAPS, chatBucket, countChatBuckets, trimChatHistory } from '@idle-party-rpg/shared';
 
 const MAX_LOG_ENTRIES = 1000;
 const MAX_SAVE_LOG_ENTRIES = 1000;
-const MAX_CHAT_HISTORY = 1000;
 const MASTERY_RECENT_COUNT = 5;
 /** A victory at or below this share of party HP becomes a recap moment. */
 const CLOSE_CALL_MOMENT_PCT = 20;
@@ -188,6 +188,7 @@ export class PlayerSession {
   private battleCount = 0;
   private character: CharacterState | null = null;
   private chatHistory: ChatMessage[] = [];
+  private chatBucketCounts = countChatBuckets([]);
   private friends: string[] = [];
   private outgoingFriendRequests: FriendRequest[] = [];
   private blockedUsers: Record<string, BlockLevel> = {};
@@ -1175,12 +1176,15 @@ export class PlayerSession {
   getChatFocus(): { channelType: string; channelId: string } | null { return this.chatFocus; }
   setChatFocus(focus: { channelType: string; channelId: string } | null): void { this.chatFocus = focus; }
 
-  /** Store a chat message in this player's personal history. */
+  /** Store a chat message in this player's personal history; past its bucket's cap, that bucket's oldest goes. */
   addChatMessage(message: ChatMessage): void {
     this.chatHistory.push(message);
-    if (this.chatHistory.length > MAX_CHAT_HISTORY) {
-      this.chatHistory = this.chatHistory.slice(-MAX_CHAT_HISTORY);
-    }
+    const bucket = chatBucket(message.channelType);
+    this.chatBucketCounts[bucket]++;
+    if (this.chatBucketCounts[bucket] <= SERVER_CHAT_CAPS[bucket]) return;
+    const oldest = this.chatHistory.findIndex(m => chatBucket(m.channelType) === bucket);
+    this.chatHistory.splice(oldest, 1);
+    this.chatBucketCounts[bucket]--;
   }
 
   /** Get all chat history. */
@@ -1720,7 +1724,7 @@ export class PlayerSession {
       partyId: this.partyId,
       partyRole: partyInfo?.role,
       partyGridPosition: partyInfo?.gridPosition,
-      chatHistory: this.chatHistory.slice(-MAX_CHAT_HISTORY),
+      chatHistory: [...this.chatHistory],
       chatSendChannel: this.chatSendChannel,
       chatDmTarget: this.chatDmTarget,
       craftQueue: { activeStartedAtMs: this.craftQueue.activeStartedAtMs, jobs: [...this.craftQueue.jobs] },
@@ -1843,7 +1847,8 @@ export class PlayerSession {
     const level = data.character?.level ?? 0;
     session['awayLedger'] = sanitizeLedger(data.awayLedger, level);
     session['pendingRecap'] = sanitizeLedger(data.pendingRecap, level);
-    session['chatHistory'] = data.chatHistory ? [...data.chatHistory] : [];
+    session['chatHistory'] = trimChatHistory(savedChatHistory(data.chatHistory), SERVER_CHAT_CAPS);
+    session['chatBucketCounts'] = countChatBuckets(session['chatHistory']);
     session['chatSendChannel'] = (data.chatSendChannel as ChatChannelType) ?? 'zone';
     session['chatDmTarget'] = data.chatDmTarget ?? '';
     session['initialMailbox'] = data.mailbox ? [...data.mailbox] : [];
@@ -2087,6 +2092,10 @@ function withRenamedUser(message: ChatMessage, oldUsername: string, newUsername:
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function savedChatHistory(raw: unknown): ChatMessage[] {
+  return Array.isArray(raw) ? raw.filter((message): message is ChatMessage => isRecord(message)) : [];
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

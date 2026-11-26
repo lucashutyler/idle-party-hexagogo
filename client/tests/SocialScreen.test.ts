@@ -113,6 +113,17 @@ describe('SocialScreen gift refusals', () => {
     expect(document.querySelector('.map-toast')?.textContent).toBe('That party is in a dungeon right now.');
   });
 
+  it.each([
+    ['guild_refused', 'They already have an invite to your guild.'],
+    ['friend_refused', 'You\'ve sent a lot of friend requests. Try again in a few minutes.'],
+  ])('shows the reason for a %s', (code, message) => {
+    const t = setup();
+
+    t.serverError(message, code);
+
+    expect(document.querySelector('.map-toast')?.textContent).toBe(message);
+  });
+
   it('leaves other server errors alone', () => {
     const t = setup();
 
@@ -499,12 +510,22 @@ describe('SocialScreen guild creation', () => {
 
   it('disables Create below the level floor and says why', () => {
     const t = setup();
-    t.push([], { guild: null }, { character: { inventory: {}, level: 12 } });
+    t.push([], { guild: null }, { character: { inventory: {}, level: 3 } });
     t.screen.setSubTab('guild');
     t.screen.onActivate();
     typeName('Name');
     expect(createBtn().disabled).toBe(true);
-    expect(t.panel().textContent).toContain('You are level 12');
+    expect(t.panel().textContent).toContain('You are level 3');
+    t.screen.onDeactivate();
+  });
+
+  it('enables Create at level 5', () => {
+    const t = setup();
+    t.push([], { guild: null }, { character: { inventory: {}, level: 5 } });
+    t.screen.setSubTab('guild');
+    t.screen.onActivate();
+    typeName('Name');
+    expect(createBtn().disabled).toBe(false);
     t.screen.onDeactivate();
   });
 
@@ -636,14 +657,138 @@ describe('SocialScreen guild creation', () => {
 
   it('gives the level reason to a player below the limit, name or not', () => {
     const t = setup();
-    t.push([], {}, { character: { level: 7 } });
+    t.push([], {}, { character: { level: 3 } });
     t.screen.onActivate();
     t.screen.setSubTab('guild');
 
-    expect(reason().textContent).toBe('Starting a guild needs level 20. You are level 7.');
+    expect(reason().textContent).toBe('Starting a guild needs level 5. You are level 3.');
     typeName('Hexers');
     expect(create().disabled).toBe(true);
     expect(reason().hidden).toBe(false);
+  });
+});
+
+describe('SocialScreen guild invites and members', () => {
+  const lanterns = { guildId: 'g1', guildName: 'Lanterns', inviterUsername: 'Testy' };
+  const ravens = { guildId: 'g2', guildName: 'Ravens', inviterUsername: 'Quill' };
+  const ledBy = (leader: string) => ({
+    guild: { id: 'g1', name: 'Lanterns', leaderUsername: leader, createdAt: 1 },
+    guildMembers: ['alice', 'bob', 'carol'].map(username => ({ username, joinedAt: 1, role: username === leader ? 'leader' : 'member' })),
+  });
+  const inviteRow = (guildId: string) => document.querySelector(`.social-user-row[data-guild-id="${guildId}"]`) as HTMLElement | null;
+  const removeBtn = (username: string) => document.querySelector(`.social-guild-remove-btn[data-username="${username}"]`) as HTMLButtonElement | null;
+  const anchor = () => {
+    const el = document.createElement('button');
+    document.body.appendChild(el);
+    return el;
+  };
+  const popupItem = (text: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>('.user-popup-item')].find(b => b.querySelector('.user-popup-item-label')?.textContent === text) ?? null;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    while (dismissTop());
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+  });
+
+  it('lists a guildless player\'s invites with Accept and Decline', () => {
+    const t = setup();
+    t.push([], { guild: null, guildInvites: [lanterns, ravens] });
+    t.screen.setSubTab('guild');
+    t.screen.onActivate();
+
+    expect(inviteRow('g1')?.textContent).toContain('Lanterns');
+    expect(inviteRow('g1')?.textContent).toContain('Invited by Testy');
+    expect(inviteRow('g2')?.textContent).toContain('Ravens');
+    expect(t.panel().querySelector('.social-guild-create')).not.toBeNull();
+
+    (inviteRow('g1')!.querySelector('.social-guild-accept-invite') as HTMLButtonElement).click();
+    expect(t.send('sendAcceptGuildInvite')).toHaveBeenCalledWith('g1');
+    (inviteRow('g2')!.querySelector('.social-guild-decline-invite') as HTMLButtonElement).click();
+    expect(t.send('sendDeclineGuildInvite')).toHaveBeenCalledWith('g2');
+    t.screen.onDeactivate();
+  });
+
+  it('shows an invite that arrives while the panel is open', () => {
+    const t = setup();
+    t.push([], { guild: null });
+    t.screen.setSubTab('guild');
+    t.screen.onActivate();
+    expect(inviteRow('g1')).toBeNull();
+
+    t.push([], { guild: null, guildInvites: [lanterns] });
+
+    expect(inviteRow('g1')).not.toBeNull();
+    t.screen.onDeactivate();
+  });
+
+  it('counts invites on the Guild segment', () => {
+    const t = setup();
+    t.push([], { guild: null, guildInvites: [lanterns, ravens] });
+    t.screen.onActivate();
+    expect(t.badge('guild')).toBe('2');
+
+    t.push([], { guild: null, guildInvites: [] });
+    expect(t.badge('guild')).toBeNull();
+    t.screen.onDeactivate();
+  });
+
+  it('gives the leader a Remove button on every other member, and asks first', async () => {
+    const t = setup();
+    t.push([], ledBy('alice'));
+    t.screen.setSubTab('guild');
+    t.screen.onActivate();
+
+    expect(removeBtn('alice')).toBeNull();
+    expect(removeBtn('carol')).not.toBeNull();
+    removeBtn('bob')!.click();
+    expect(document.querySelector('.confirm-dialog, .confirm-ok')).not.toBeNull();
+    expect(document.body.textContent).toContain('Remove bob from Lanterns?');
+    expect(t.send('sendKickGuildMember')).not.toHaveBeenCalled();
+
+    await answerConfirm(true);
+    expect(t.send('sendKickGuildMember')).toHaveBeenCalledWith('bob');
+    t.screen.onDeactivate();
+  });
+
+  it('sends nothing when the leader cancels a removal', async () => {
+    const t = setup();
+    t.push([], ledBy('alice'));
+    t.screen.setSubTab('guild');
+    t.screen.onActivate();
+
+    removeBtn('bob')!.click();
+    await answerConfirm(false);
+
+    expect(t.send('sendKickGuildMember')).not.toHaveBeenCalled();
+    t.screen.onDeactivate();
+  });
+
+  it('gives members who aren\'t the leader no Remove buttons', () => {
+    const t = setup();
+    t.push([], ledBy('bob'));
+    t.screen.setSubTab('guild');
+    t.screen.onActivate();
+
+    expect(document.querySelectorAll('.social-guild-remove-btn')).toHaveLength(0);
+    t.screen.onDeactivate();
+  });
+
+  it('offers Invite to Guild in the popup, and says Invited to Guild while one is open', () => {
+    stubSheetViewport(false);
+    const t = setup();
+    t.push([], { ...ledBy('alice'), guildMembers: [{ username: 'alice', joinedAt: 1, role: 'leader' }] });
+    t.screen.showUserPopup('dora', anchor());
+    popupItem('Invite to Guild')!.click();
+    expect(t.send('sendInviteGuild')).toHaveBeenCalledWith('dora');
+
+    t.push([], { ...ledBy('alice'), guildMembers: [{ username: 'alice', joinedAt: 1, role: 'leader' }], outgoingGuildInvites: ['dora'] });
+    t.screen.showUserPopup('dora', anchor());
+    const invited = popupItem('Invited to Guild');
+    expect(invited?.disabled).toBe(true);
+    expect(invited?.querySelector('.user-popup-note')?.textContent).toBe('Waiting for their answer');
+    expect(popupItem('Invite to Guild')).toBeNull();
   });
 });
 

@@ -31,7 +31,17 @@ export interface GuildMemberEntry {
   role: 'leader' | 'member';
 }
 
-export const MIN_GUILD_LEVEL = 20;
+export const MIN_GUILD_LEVEL = 5;
+
+/** How long a guild invite stays open. */
+export const GUILD_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** A guild invite as its target sees it. */
+export interface GuildInviteInfo {
+  guildId: string;
+  guildName: string;
+  inviterUsername: string;
+}
 
 // --- Party System ---
 export type PartyRole = 'owner' | 'leader' | 'member';
@@ -149,6 +159,46 @@ export interface ChatChannel {
   unreadCount: number;
 }
 
+/** Chat history is capped per bucket. See docs/architecture/social.md → Chat history. */
+export type ChatBucket = 'dm' | 'group' | 'public';
+export type ChatCaps = Readonly<Record<ChatBucket, number>>;
+
+export const CHAT_BUCKETS: readonly ChatBucket[] = ['dm', 'group', 'public'];
+export const SERVER_CHAT_CAPS: ChatCaps = { dm: 300, group: 200, public: 500 };
+export const CLIENT_CHAT_CAPS: ChatCaps = { dm: 150, group: 100, public: 250 };
+
+/** Anything unknown counts as public: saved history can hold channel types no longer sent. */
+export function chatBucket(channelType: ChatChannelType): ChatBucket {
+  switch (channelType) {
+    case 'dm':
+      return 'dm';
+    case 'party':
+    case 'guild':
+      return 'group';
+    default:
+      return 'public';
+  }
+}
+
+export function countChatBuckets(messages: readonly Pick<ChatMessage, 'channelType'>[]): Record<ChatBucket, number> {
+  const counts: Record<ChatBucket, number> = { dm: 0, group: 0, public: 0 };
+  for (const message of messages) counts[chatBucket(message.channelType)]++;
+  return counts;
+}
+
+/** Drops the oldest messages of each bucket over its cap; the rest keep their order. */
+export function trimChatHistory<T extends Pick<ChatMessage, 'channelType'>>(messages: readonly T[], caps: ChatCaps): T[] {
+  const excess = countChatBuckets(messages);
+  for (const bucket of CHAT_BUCKETS) excess[bucket] -= caps[bucket];
+  if (CHAT_BUCKETS.every(bucket => excess[bucket] <= 0)) return [...messages];
+  return messages.filter(message => {
+    const bucket = chatBucket(message.channelType);
+    if (excess[bucket] <= 0) return true;
+    excess[bucket]--;
+    return false;
+  });
+}
+
 // --- Block System ---
 export type BlockLevel = 'dm' | 'all';
 
@@ -170,6 +220,10 @@ export interface ClientSocialState {
   outgoingFriendRequests: FriendRequest[];
   guild: GuildInfo | null;
   guildMembers: GuildMemberEntry[];
+  /** Open invites to join a guild; only sent while this player is in none. */
+  guildInvites?: GuildInviteInfo[];
+  /** Players with an open invite to this player's guild. */
+  outgoingGuildInvites?: string[];
   party: GamePartyInfo | null;
   pendingInvites: PartyInvite[];
   outgoingPartyInvites: string[];
@@ -227,9 +281,19 @@ export interface ClientInviteGuildMessage {
   username: string;
 }
 
-export interface ClientJoinGuildMessage {
-  type: 'join_guild';
+export interface ClientAcceptGuildInviteMessage {
+  type: 'accept_guild_invite';
   guildId: string;
+}
+
+export interface ClientDeclineGuildInviteMessage {
+  type: 'decline_guild_invite';
+  guildId: string;
+}
+
+export interface ClientKickGuildMemberMessage {
+  type: 'kick_guild_member';
+  username: string;
 }
 
 export interface ClientLeaveGuildMessage {
@@ -376,7 +440,9 @@ export type ClientSocialMessage =
   | ClientRemoveFriendMessage
   | ClientCreateGuildMessage
   | ClientInviteGuildMessage
-  | ClientJoinGuildMessage
+  | ClientAcceptGuildInviteMessage
+  | ClientDeclineGuildInviteMessage
+  | ClientKickGuildMemberMessage
   | ClientLeaveGuildMessage
   | ClientCreatePartyMessage
   | ClientInvitePartyMessage

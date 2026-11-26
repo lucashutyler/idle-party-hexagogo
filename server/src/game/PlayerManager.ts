@@ -6,7 +6,7 @@ import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData, SavedPartyInvite } from './GameStateStore.js';
 import { FriendsSystem } from './social/FriendsSystem.js';
-import { GuildSystem } from './social/GuildSystem.js';
+import { GuildSystem, GUILD_INVITE_NOT_FOUND, GUILD_INVITE_REFUSED } from './social/GuildSystem.js';
 import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem, INVITE_NO_LONGER_VALID, canMove } from './social/PartySystem.js';
@@ -14,7 +14,7 @@ import { TradeSystem, INVALID_TRADE_ITEMS, parseOfferItems } from './social/Trad
 import { MailboxSystem, mailboxesWithEntriesFrom } from './social/MailboxSystem.js';
 import type { MailboxStore, Mailboxes } from './social/MailboxStore.js';
 import { NotificationSystem } from './social/NotificationSystem.js';
-import { NotificationService } from './social/NotificationService.js';
+import { NotificationService, GUILD_INVITE_NOTICE_WINDOW_MS, PARTY_INVITE_NOTICE_WINDOW_MS } from './social/NotificationService.js';
 import { InAppNotificationDriver } from './social/InAppNotificationDriver.js';
 import { BrowserPushNotificationDriver } from './social/BrowserPushNotificationDriver.js';
 import { EmailNotificationDriver } from './social/EmailNotificationDriver.js';
@@ -27,6 +27,8 @@ import { prepareStatePush, encodeStatePush } from './StatePush.js';
 import type { SentStateFields } from './StatePush.js';
 import { SharedRosters } from './SharedRosters.js';
 import type { RosterSnapshot } from './SharedRosters.js';
+import { chatBucket } from '@idle-party-rpg/shared';
+import { ChatRateLimiter, CHAT_SEND_LIMIT_REFUSAL } from './social/ChatRateLimiter.js';
 
 /** A socket buffering more than this skips droppable combat messages. */
 export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
@@ -82,6 +84,7 @@ export class PlayerManager {
   private stateRetryPending = new WeakSet<WebSocket>();
   private wholeStateSockets = new WeakSet<WebSocket>();
   private rosters = new SharedRosters(() => this.rosterSnapshot());
+  private readonly chatLimits = new ChatRateLimiter();
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -392,13 +395,14 @@ export class PlayerManager {
 
     const route = this.routeChat(session, channelType, channelId);
     if (typeof route === 'string') return route;
+    if (!this.chatLimits.tryTake(username, channelType)) return CHAT_SEND_LIMIT_REFUSAL;
 
     const recipients = route.recipients.map(u => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
     const message = this.chat.sendMessage(username, channelType, route.channelId, text, recipients);
     if (!message) return null;
 
     this.sendChatToPlayer(username, message);
-    if (channelType === 'dm') this.notifyDmReceived(route.channelId, username, text);
+    if (channelType === 'dm') this.notifyDmReceived(route.channelId, username, message.text);
     return null;
   }
 
@@ -482,8 +486,6 @@ export class PlayerManager {
     this.chat.sendMessage('Server', 'server', 'server', text, recipients);
   }
 
-  private static readonly SYNC_CHAT_LIMIT = 200;
-
   /** Get chat messages for a player since a given message ID (for incremental sync). */
   syncChatForPlayer(username: string, sinceId?: string): { messages: ChatMessage[]; full: boolean } {
     const session = this.sessions.get(username);
@@ -491,9 +493,8 @@ export class PlayerManager {
 
     if (!sinceId) {
       // No sinceId — return the latest batch
-      const all = session.getChatHistory();
       return {
-        messages: all.slice(-PlayerManager.SYNC_CHAT_LIMIT),
+        messages: latestChatBatch(session.getChatHistory()),
         full: true,
       };
     }
@@ -504,11 +505,68 @@ export class PlayerManager {
     }
 
     // sinceId not found — client cache is stale, return latest batch
-    const all = session.getChatHistory();
     return {
-      messages: all.slice(-PlayerManager.SYNC_CHAT_LIMIT),
+      messages: latestChatBatch(session.getChatHistory()),
       full: false,
     };
+  }
+
+  /** Invites `target` to the player's guild. Returns why it was refused, or null. See docs/architecture/social.md → Guild. */
+  inviteToGuild(username: string, target: string): string | null {
+    if (!this.sessions.get(target)?.hasCharacter()) return GUILD_INVITE_REFUSED;
+    const guild = this.guilds.inviteToGuild(username, target, this.isTradeBlocked(username, target));
+    if (typeof guild === 'string') return guild;
+
+    this.sendStateToPlayer(username);
+    this.sendStateToPlayer(target);
+    this.notify.notify(target, 'guild_invite_received', {
+      title: 'Guild invite',
+      body: `${username} invited you to join ${guild.info.name}.`,
+      payload: { guildId: guild.info.id, inviterUsername: username },
+    }, { dedupeKey: guild.info.id, withinMs: GUILD_INVITE_NOTICE_WINDOW_MS });
+    return null;
+  }
+
+  /** A refusal also re-sends state, so an invite that has closed leaves the list. */
+  acceptGuildInvite(username: string, guildId: string): string | null {
+    const invite = this.guilds.findInvite(username, guildId);
+    const result = invite && this.isTradeBlocked(username, invite.inviterUsername)
+      ? GUILD_INVITE_NOT_FOUND
+      : this.guilds.acceptInvite(username, guildId);
+    if (typeof result === 'string') {
+      this.sendStateToPlayer(username);
+      return result;
+    }
+
+    this.sessions.get(username)?.setGuildId(result.info.id);
+    this.sendStateToPlayer(username);
+    if (invite) this.sendStateToPlayer(invite.inviterUsername);
+    return null;
+  }
+
+  declineGuildInvite(username: string, guildId: string): string | null {
+    const invite = this.guilds.findInvite(username, guildId);
+    const result = this.guilds.declineInvite(username, guildId);
+    this.sendStateToPlayer(username);
+    if (result !== true) return result;
+    if (invite) this.sendStateToPlayer(invite.inviterUsername);
+    return null;
+  }
+
+  /** Leader only. The removed player is told, online or not. */
+  kickGuildMember(username: string, target: string): string | null {
+    const guild = this.guilds.kickMember(username, target);
+    if (typeof guild === 'string') return guild;
+
+    this.sessions.get(target)?.setGuildId(null);
+    this.sendStateToPlayer(username);
+    this.sendStateToPlayer(target);
+    this.notify.notify(target, 'guild_kicked', {
+      title: 'Removed from guild',
+      body: `You were removed from ${guild.info.name}.`,
+      payload: { guildId: guild.info.id },
+    });
+    return null;
   }
 
   /** Get the size of the player's current party (1 = solo). */
@@ -818,6 +876,9 @@ export class PlayerManager {
       outgoingFriendRequests: this.friends.getOutgoingRequests(username),
       guild: guildData?.info ?? null,
       guildMembers: guildData?.members ?? [],
+      guildInvites: guildData ? [] : this.guilds.getInvitesFor(username)
+        .filter(invite => !this.isTradeBlocked(username, invite.inviterUsername)),
+      outgoingGuildInvites: guildData ? this.guilds.getInvitedUsernames(guildData.info.id) : [],
       party: partyData && {
         ...partyData,
         members: this.resolvePartyMembers(partyData.members),
@@ -1046,7 +1107,7 @@ export class PlayerManager {
       title: 'Party invite',
       body: `${username} invited you to their party.`,
       payload: { inviterUsername: username, partyId: getPartyId(username) },
-    });
+    }, { dedupeKey: username, withinMs: PARTY_INVITE_NOTICE_WINDOW_MS });
     return null;
   }
 
@@ -1995,6 +2056,35 @@ export class PlayerManager {
       .map(([u]) => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
     this.chat.sendMessage('Server', 'server', 'server', text, recipients);
   }
+}
+
+const SYNC_CHAT_LIMIT = 200;
+const SYNC_CHAT_DM_LIMIT = 100;
+const SYNC_CHAT_GROUP_LIMIT = 50;
+
+/** The newest messages overall, plus the newest DMs and party or guild lines however busy public chat has been. In time order. */
+function latestChatBatch(history: readonly ChatMessage[]): ChatMessage[] {
+  const picked = new Set(history.slice(-SYNC_CHAT_LIMIT));
+  let dms = 0;
+  let groups = 0;
+  for (let i = history.length - 1; i >= 0 && (dms < SYNC_CHAT_DM_LIMIT || groups < SYNC_CHAT_GROUP_LIMIT); i--) {
+    const bucket = chatBucket(history[i].channelType);
+    if (bucket === 'dm' && dms < SYNC_CHAT_DM_LIMIT) {
+      picked.add(history[i]);
+      dms++;
+    } else if (bucket === 'group' && groups < SYNC_CHAT_GROUP_LIMIT) {
+      picked.add(history[i]);
+      groups++;
+    }
+  }
+  const seenIds = new Set<string>();
+  const batch: ChatMessage[] = [];
+  for (const message of history) {
+    if (!picked.has(message) || seenIds.has(message.id)) continue;
+    seenIds.add(message.id);
+    batch.push(message);
+  }
+  return batch.sort((a, b) => a.timestamp - b.timestamp);
 }
 
 /** A saved queue on its map's grid, or null when any of its rooms is gone: a queue with a hole in it would jump. */

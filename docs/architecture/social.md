@@ -31,7 +31,15 @@ Party events (join, leave, kick, promotion, demotion, ownership change) post per
 
 ### Guild
 
-Create guild (level 20+, 2-20 char name), leave guild (confirmed). Create is disabled with a visible reason below the level, and the typed name survives repaints. Guild invites are sent via the user popup menu; "Invite to Guild" adds the target immediately, with no acceptance step. Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.
+Create guild (level `MIN_GUILD_LEVEL`, 5, or higher; 2-20 char name), leave guild (confirmed). Create is disabled with a visible reason below the level, and the typed name survives repaints. A name holding a text direction control (U+202A–U+202E, U+2066–U+2069) is refused: "Guild name has characters that can't be used". Guild data persisted in `data/guilds.json`. Leader auto-transfers on leave.
+
+**Invites ask first.** "Invite to Guild" in the user popup sends `invite_guild`; `PlayerManager.inviteToGuild` calls `GuildSystem.inviteToGuild`, which stores a `GuildInvite` (`username`, `inviterUsername`, `createdAt`) on the guild's `GuildData.invites` and adds no one. It refuses an inviter with no guild, a target already in a guild, and a second invite to the same guild while one is open. A block in either direction, at either level, and a target with no character get one refusal ("That player can't be invited."), so it doesn't reveal a block. The target gets a `guild_invite_received` notification and the invite in `ClientSocialState.guildInvites` (`{ guildId, guildName, inviterUsername }`, oldest first, only while they are in no guild, leaving out any whose inviter they have blocked or been blocked by). The guild's members get the target in `outgoingGuildInvites`, and the popup then reads "Invited to Guild" (disabled, "Waiting for their answer").
+
+- **Answering.** The guildless Guild panel lists invites above the create form, with Accept (`accept_guild_invite`) and Decline (`decline_guild_invite`). `GuildSystem.acceptInvite` needs an open invite, adds the player as a member and closes every other guild invite they hold; founding a guild closes them too. `PlayerManager.acceptGuildInvite` also refuses once either player has blocked the other ("That invite is no longer open."). A refused Accept or Decline re-sends state, so a closed invite leaves the list. There is no way to join a guild without an invite: the old `join_guild` message is gone.
+- **Lifetime.** An invite lasts `GUILD_INVITE_TTL_MS` (7 days). `GuildSystem` drops expired invites from a guild whenever it reads them, so the file loses them on the next save.
+- **Removing members.** The leader sees Remove on every other member's row, behind `confirmDialog`; it sends `kick_guild_member`. `GuildSystem.kickMember` is leader-only and refuses the leader themselves and anyone outside the guild. `PlayerManager.kickGuildMember` clears the removed player's `guildId`, pushes state to both and sends them `guild_kicked`. They need a new invite to come back.
+- Every guild refusal (create, leave, invite, accept, decline, remove) carries `code: 'guild_refused'`, and `SocialScreen` shows it as a toast. The Guild segment counts open invites, and they light the Social tab's dot.
+- **Saved files.** `invites` is optional on `GuildData`: a `guilds.json` written before it loads with no invites, and a guild with none open is saved without the field. `GuildStore.load` drops an unreadable invite on its own and keeps the guild. An older server build reads the file as before and carries `invites` through untouched.
 
 ### Friends
 
@@ -45,7 +53,30 @@ All registered players sorted by level descending by default (proxy for XP). Sor
 
 The UI is documented in [`client.md`](client.md) → Chat: phone strip and sheet, desktop column, clickable senders + channel tags, and the body data-attributes that drive the layout. Protocol-level chat behavior:
 
-WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM), plus a day-separator row ("Today"/"Yesterday"/short date) inserted wherever consecutive messages cross a calendar-day boundary. 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). A filter popover shows or hides each channel on the All tab. Channel selector dropdown for sending (Party/Guild left out when solo or guildless; `server` is server-emit-only). Per-user chat history (1000 msgs, saved with player data) — messages persist with the player forever, not with the channel; the client holds the newest 500.
+WoW-style unified timeline with all channels in one scrollable view, color-coded by channel type with timestamps (HH:MM), plus a day-separator row ("Today"/"Yesterday"/short date) inserted wherever consecutive messages cross a calendar-day boundary. 7 `ChatChannelType` values: `tile` (Room), `zone`, `party`, `guild`, `dm`, `global`, `server` (system announcements). A filter popover shows or hides each channel on the All tab. Channel selector dropdown for sending (Party/Guild left out when solo or guildless; `server` is server-emit-only). Per-user chat history, saved with player data — messages persist with the player, not with the channel (see Chat history below).
+
+### Chat history
+
+History is capped per bucket, so DMs and party or guild lines keep their own room however busy public chat is. `chatBucket` (`shared/src/systems/SocialTypes.ts`) sorts each channel type into `dm`, `group` (`party`, `guild`) or `public` (`global`, `zone`, `tile`, `server`, and anything unknown). `trimChatHistory(messages, caps)` drops the oldest messages of each bucket over its cap and keeps the rest in order.
+
+| | DMs | Party and guild | Public | Total |
+|---|---|---|---|---|
+| Server, per player (`SERVER_CHAT_CAPS`) | 300 | 200 | 500 | 1000 |
+| Client `ChatLog` (`CLIENT_CHAT_CAPS`) | 150 | 100 | 250 | 500 |
+
+`PlayerSession.addChatMessage` keeps a count per bucket, so a new line only scans for the oldest of its own bucket when that bucket is full. `fromSaveData` trims the saved history the same way (an older save with more than 500 public lines keeps the newest 500 and every DM) and skips entries that aren't objects; `toSaveData` writes what is held, never more than 1000 lines, so an older server build reads all of it. `ChatLog.add` trims with the client caps, keeps its id set in step and reports as added only what it kept.
+
+`sync_chat` without a `sinceId`, or with one the server no longer holds (answered with `full: false`), gets the newest 200 lines overall plus the newest 100 DMs and 50 party or guild lines, without repeats, in time order (`latestChatBatch` in `PlayerManager.ts`). A `sinceId` the server holds still gets everything after it.
+
+### Send limits
+
+`PlayerManager.sendPlayerChat` asks `ChatRateLimiter` (`server/src/game/social/ChatRateLimiter.ts`, on `SlidingWindowLimiter` from `server/src/RateLimiter.ts`) after the channel checks pass and before anything is stored or delivered. Per sender, across every channel: 5 messages in any 5 seconds and 20 in any 60 seconds; global chat also 1 in any 3 seconds. A message counts against every limit that applies or, when one is reached, against none. A refusal is "You're sending messages too fast. Wait a few seconds." with `code: 'chat_refused'` and `sendLimited: true`; `ChatPopout` puts the text back and, on a DM, stays in the thread (without `sendLimited` a refused DM means the name has no account). Lines the server writes (`broadcastServerMessage`, `broadcastPartyEvent`, `broadcastWelcome`) never go through it. The limiter is in memory and prunes idle senders at most once a minute.
+
+`send_friend_request` allows 20 requests per sender in any 10 minutes (`FriendRequestLimiter`); only requests that went through count, and the 21st is refused with `code: 'friend_refused'` ("You've sent a lot of friend requests. Try again in a few minutes."), shown as a toast. The `friend_request_received` and `party_invite_received` notifications are deduped too (see [`notifications.md`](notifications.md) → Dedupe); the request or invite itself is still created and listed in Social.
+
+### Chat text
+
+`ChatSystem.sendMessage` removes text direction controls (U+202A–U+202E, U+2066–U+2069) before the 500-character check, so a message made only of them is dropped. Zero-width joiners stay. The DM notification uses the cleaned text.
 
 `send_chat` goes through `PlayerManager.sendPlayerChat`, which validates `channelId` against the channel type and refuses anything else with a `chat_refused` error:
 
@@ -80,11 +111,11 @@ Limits of this:
 - A suspended player has no session in memory, so the block list in their save file keeps the old name.
 - A block left behind by a rename before this existed can't be repaired, because the old name isn't recorded anywhere.
 
-**Nothing else follows yet.** Friends, friend requests, guild rosters, party members, trades, notification inboxes and other players' DM targets and chat history all stay under the old name, and a socket that was already open keeps acting as the old name until it reconnects.
+**Nothing else follows yet.** Friends, friend requests, guild rosters and guild invites, party members, trades, notification inboxes and other players' DM targets and chat history all stay under the old name, and a socket that was already open keeps acting as the old name until it reconnects.
 
 ## User popup menu
 
-A contextual popup shown when clicking any username across the app (Friends, Ranks, Guild/Party members, RoomView and room sheet players, combat cards, chat sender names). The header shows avatar, online dot, level, class and labels (Friend, Guild, Party, Blocked). Actions: View Player, Chat (DM), Trade (Open Trade when one is in progress), Send Gift, Add / Accept / Decline / Revoke / Remove Friend, Invite to Party, Invite to Guild, Block / Unblock. Disabled actions say why in visible text: Invite to Party names the role, full-party, already-invited or different-room reason (a friend in another room can be invited, with a note saying they join you where you are), and paints "Invited to Party" only from `outgoingPartyInvites`. Trade is **not** room-gated — trades are async (see below). Block and Remove Friend go through `confirmDialog`. Dismissed on outside click, the X, Back, Escape or after an action.
+A contextual popup shown when clicking any username across the app (Friends, Ranks, Guild/Party members, RoomView and room sheet players, combat cards, chat sender names). The header shows avatar, online dot, level, class and labels (Friend, Guild, Party, Blocked). Actions: View Player, Chat (DM), Trade (Open Trade when one is in progress), Send Gift, Add / Accept / Decline / Revoke / Remove Friend, Invite to Party, Invite to Guild, Block / Unblock. Disabled actions say why in visible text: Invite to Party names the role, full-party, already-invited or different-room reason (a friend in another room can be invited, with a note saying they join you where you are), and paints "Invited to Party" only from `outgoingPartyInvites`; Invite to Guild becomes "Invited to Guild" only from `outgoingGuildInvites`. Trade is **not** room-gated — trades are async (see below). Block and Remove Friend go through `confirmDialog`. Dismissed on outside click, the X, Back, Escape or after an action.
 
 Implemented in `SocialScreen`. It is a bottom sheet below 768px wide or 520px tall, otherwise a menu at the anchor, clamped to the viewport and re-clamped on resize; it closes if a rotation crosses between the two. Your own name opens a small self popup.
 
@@ -124,11 +155,11 @@ Suspended accounts can't be sent gifts, and neither can anyone who has blocked t
 
 ## Social badges
 
-Red dot on the Social tab when there are pending friend requests or party invites (an invite put off with Later on its card still counts). Segment counts: Party (pending invites), Friends (incoming friend requests). Trades and gifts badge the Hero tab instead. The rail's Chat tab and the strip show one unread count, driven by `ChatPopout`.
+Red dot on the Social tab when there are pending friend requests, party invites (an invite put off with Later on its card still counts) or guild invites. Segment counts: Party (pending invites), Guild (open guild invites), Friends (incoming friend requests). Trades and gifts badge the Hero tab instead. The rail's Chat tab and the strip show one unread count, driven by `ChatPopout`.
 
 ## Social state
 
-`ClientSocialState` is included in every `ServerStateMessage.social`. Contains friends, incoming/outgoing friend requests, guild info, guild members, party info, pending party invites, outgoing party invites (sent by this player), online players list, all registered players list (as `PlayerListEntry[]` with className and level), blocked users, chat preferences (send channel + DM target), and the player's notification inbox + preferences (see [`notifications.md`](notifications.md)). `PlayerManager` builds this via `getSocialState()` callback on each `PlayerSession`.
+`ClientSocialState` is included in every `ServerStateMessage.social`. Contains friends, incoming/outgoing friend requests, guild info, guild members, open guild invites to this player (`guildInvites`) and from their guild (`outgoingGuildInvites`), party info, pending party invites, outgoing party invites (sent by this player), online players list, all registered players list (as `PlayerListEntry[]` with className and level), blocked users, chat preferences (send channel + DM target), and the player's notification inbox + preferences (see [`notifications.md`](notifications.md)). `PlayerManager` builds this via `getSocialState()` callback on each `PlayerSession`.
 
 Incoming friend requests also fire a `friend_request_received` notification, and an accepted outgoing request fires `friend_request_accepted` for the original sender (including the auto-accept case when both sides happen to request each other).
 

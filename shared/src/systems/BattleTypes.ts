@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.26.1'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.26.3'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -415,7 +415,8 @@ export interface ClientSetActionOrderMessage {
  * Machine-readable tag on an `error` message, for the cases a screen needs to react
  * to rather than just log. Most errors carry no code.
  */
-export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused' | 'travel_refused' | 'party_refused' | 'item_protected';
+export type ServerErrorCode = 'trade_nonce_mismatch' | 'quest_refused' | 'dungeon_entry_refused' | 'chat_refused' | 'gift_refused' | 'travel_refused' | 'party_refused' | 'item_protected'
+  | 'guild_refused' | 'friend_refused';
 
 export interface ServerForecastMessage {
   type: 'forecast';
@@ -455,6 +456,8 @@ export interface ServerErrorMessage {
   code?: ServerErrorCode;
   /** Set on `quest_refused`: the quest the refused accept/turn-in named. */
   questId?: string;
+  /** Set on a `chat_refused` for sending too fast: the channel and recipient were fine. */
+  sendLimited?: true;
 }
 
 export interface ClientViewPlayerMessage {

@@ -86,6 +86,59 @@ describe('GuildStore', () => {
     expect(vi.mocked(console.error)).toHaveBeenCalled();
   });
 
+  it('loads back the invites it saved', async () => {
+    const withInvites: GuildData = { ...GUILD, invites: [{ username: 'Mira', inviterUsername: 'alice', createdAt: 5 }] };
+    const store = new GuildStore();
+    store.set('g1', withInvites);
+    await store.save();
+
+    const loaded = new GuildStore();
+    await loaded.load();
+
+    expect(loaded.getAll()).toEqual([withInvites]);
+  });
+
+  it('loads a file written before invites, unchanged, and saves it back without the field', async () => {
+    const old = [{ info: { id: 'g1', name: 'Old Hall', leaderUsername: 'alice', createdAt: 1 }, members: [{ username: 'alice', joinedAt: 1, role: 'leader' }] }];
+    await fs.writeFile(file(), JSON.stringify(old));
+    const store = new GuildStore();
+
+    await store.load();
+    expect(store.getAll()).toEqual(old);
+    await store.save();
+
+    expect(JSON.parse(await fs.readFile(file(), 'utf-8'))).toEqual(old);
+    expect(await asideFiles('guilds.json')).toEqual([]);
+  });
+
+  it('drops only the unreadable invites and keeps the guild', async () => {
+    const good = { username: 'Mira', inviterUsername: 'alice', createdAt: 5 };
+    await fs.writeFile(file(), JSON.stringify([
+      { ...GUILD, invites: [good, null, { username: 7 }] },
+      { ...GUILD, info: { ...GUILD.info, id: 'g2' }, invites: 'not a list' },
+    ]));
+    const store = new GuildStore();
+
+    await store.load();
+
+    expect(store.get('g1')).toEqual({ ...GUILD, invites: [good] });
+    expect(store.get('g2')).toEqual({ ...GUILD, info: { ...GUILD.info, id: 'g2' } });
+    expect(await asideFiles('guilds.json')).toEqual([]);
+  });
+
+  it('writes guilds with invites in the shape an older build reads: a list with info.id and members on each', async () => {
+    const store = new GuildStore();
+    store.set('g1', { ...GUILD, invites: [{ username: 'Mira', inviterUsername: 'alice', createdAt: 5 }] });
+    await store.save();
+
+    const written = JSON.parse(await fs.readFile(file(), 'utf-8')) as unknown[];
+    expect(Array.isArray(written)).toBe(true);
+    for (const guild of written as GuildData[]) {
+      expect(typeof guild.info.id).toBe('string');
+      expect(Array.isArray(guild.members)).toBe(true);
+    }
+  });
+
   it('starts empty with no file and moves nothing', async () => {
     const store = new GuildStore();
 

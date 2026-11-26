@@ -1,7 +1,7 @@
 import { writeFile, rename, mkdir } from 'fs/promises';
 import path from 'path';
 import type { AdminRole } from './AdminRoles.js';
-import { isReservedUsername, isStoreFileName } from './reservedUsernames.js';
+import { isReservedUsername, isStoreFileName, looksLikeStaffName } from './reservedUsernames.js';
 import { UnreadableDataFileError, displayPath, readJsonFile } from '../game/JsonFiles.js';
 
 export interface SessionRecord {
@@ -33,6 +33,7 @@ interface AccountsData {
 
 const DATA_DIR = path.resolve('data');
 export const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+export const RESERVED_NAME_REFUSAL = 'That name is reserved';
 
 export class AccountStore {
   // Only setUsername may change a username: accounts are handed out live, and this index would go stale.
@@ -121,7 +122,8 @@ export class AccountStore {
     const account = this.accounts[email.toLowerCase()];
     if (!account) return { success: false, error: 'Account not found' };
 
-    if (isReservedUsername(username)) return { success: false, error: 'That name is reserved' };
+    if (isReservedUsername(username)) return { success: false, error: RESERVED_NAME_REFUSAL };
+    if (looksLikeStaffName(username) && account.username !== username) return { success: false, error: RESERVED_NAME_REFUSAL };
 
     // Check uniqueness (case-insensitive)
     const existing = this.findByUsername(username);

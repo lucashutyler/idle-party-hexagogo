@@ -7,6 +7,7 @@
 
 export type NotificationCategory =
   | 'party'
+  | 'guild'
   | 'guild_combat'
   | 'dm'
   | 'friend'
@@ -26,6 +27,7 @@ export interface NotificationCategoryMeta {
 
 export const NOTIFICATION_CATEGORY_META: NotificationCategoryMeta[] = [
   { category: 'party', label: 'Party' },
+  { category: 'guild', label: 'Guild' },
   { category: 'guild_combat', label: 'Guild Combat' },
   { category: 'dm', label: 'Direct Messages' },
   { category: 'friend', label: 'Friends' },
@@ -52,6 +54,8 @@ export const NOTIFICATION_EVENT_REGISTRY: NotificationEventDefinition[] = [
   { eventKey: 'party_ownership_transferred', category: 'party', label: 'Became party owner', defaultChannels: ['in_app'] },
   { eventKey: 'party_member_joined', category: 'party', label: 'Member joined your party', defaultChannels: [] },
   { eventKey: 'party_member_left', category: 'party', label: 'Member left your party', defaultChannels: [] },
+  { eventKey: 'guild_invite_received', category: 'guild', label: 'Guild invite received', defaultChannels: ['in_app'] },
+  { eventKey: 'guild_kicked', category: 'guild', label: 'Removed from guild', defaultChannels: ['in_app'] },
   { eventKey: 'world_room_gated', category: 'world_event', label: 'Moved out of a room your party no longer qualifies for', defaultChannels: ['in_app'] },
   { eventKey: 'dm_received', category: 'dm', label: 'New direct message', defaultChannels: ['in_app'] },
   { eventKey: 'friend_request_received', category: 'friend', label: 'New friend request', defaultChannels: ['in_app'] },
@@ -162,6 +166,7 @@ export interface ServerNotificationMessage {
 /** Where clicking a notification should take the player, resolved per eventKey/category. */
 export type NotificationNavigationTarget =
   | { kind: 'party' }
+  | { kind: 'guild' }
   | { kind: 'friend_requests' }
   | { kind: 'dm_reply'; username: string }
   | { kind: 'options' }
@@ -170,13 +175,14 @@ export type NotificationNavigationTarget =
 /**
  * Resolves a notification's click destination from its category/eventKey/payload.
  * Any 'party' category notification (invite, kick, promotion, membership churn, ...) routes to the
- * Party tab — add a case here for other event types only once there's an equally obvious destination;
- * everything else falls through to 'none' (clicking still just marks the notification read).
+ * Party tab, and any 'guild' one to the Guild tab — add a case here for other event types only once there's an
+ * equally obvious destination; everything else falls through to 'none' (clicking still just marks the notification read).
  */
 export function resolveNotificationNavigation(
   entry: Pick<NotificationEntry, 'category' | 'eventKey' | 'payload'>,
 ): NotificationNavigationTarget {
   if (entry.category === 'party') return { kind: 'party' };
+  if (entry.category === 'guild') return { kind: 'guild' };
 
   switch (entry.eventKey) {
     case 'friend_request_received':

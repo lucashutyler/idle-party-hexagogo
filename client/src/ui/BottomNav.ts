@@ -152,7 +152,8 @@ export class BottomNav {
       if (social) {
         const friendRequests = (social.incomingFriendRequests?.length ?? 0) > 0;
         const partyInvites = (social.pendingInvites?.length ?? 0) > 0;
-        this.setDotBadge('social', friendRequests || partyInvites);
+        const guildInvites = (social.guildInvites?.length ?? 0) > 0;
+        this.setDotBadge('social', friendRequests || partyInvites || guildInvites);
 
         const hasMailbox = (social.mailbox?.length ?? 0) > 0;
         const tradeNeedsAction = (social.proposedTrades ?? []).some(t =>

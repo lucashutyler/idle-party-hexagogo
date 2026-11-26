@@ -2,9 +2,17 @@ import path from 'path';
 import type { GuildInfo, GuildMemberEntry } from '@idle-party-rpg/shared';
 import { UnreadableDataFileError, isDamagedDataFileError, isJsonObject, moveAside, readJsonFile, writeJsonFileAtomic } from '../JsonFiles.js';
 
+export interface GuildInvite {
+  username: string;
+  inviterUsername: string;
+  createdAt: number;
+}
+
 export interface GuildData {
   info: GuildInfo;
   members: GuildMemberEntry[];
+  /** Absent in files written before invites, and whenever none are open. */
+  invites?: GuildInvite[];
 }
 
 const GUILD_FILE = path.resolve('data', 'guilds.json');
@@ -29,7 +37,7 @@ export class GuildStore {
     }
     if (!saved) return;
     for (const g of saved) {
-      this.guilds.set(g.info.id, g);
+      this.guilds.set(g.info.id, withReadableInvites(g));
     }
     console.log(`[GuildStore] Loaded ${this.guilds.size} guilds`);
   }
@@ -76,4 +84,19 @@ async function readGuilds(): Promise<GuildData[] | undefined> {
 
 function isGuild(value: unknown): value is GuildData {
   return isJsonObject(value) && isJsonObject(value.info) && typeof value.info.id === 'string' && Array.isArray(value.members);
+}
+
+function isGuildInvite(value: unknown): value is GuildInvite {
+  return isJsonObject(value)
+    && typeof value.username === 'string'
+    && typeof value.inviterUsername === 'string'
+    && Number.isFinite(value.createdAt);
+}
+
+/** An unreadable invite is dropped on its own: it must never cost the guild. */
+function withReadableInvites(guild: GuildData): GuildData {
+  if (guild.invites === undefined) return guild;
+  const { invites, ...rest } = guild;
+  const readable = Array.isArray(invites) ? invites.filter(isGuildInvite) : [];
+  return readable.length > 0 ? { ...rest, invites: readable } : rest;
 }

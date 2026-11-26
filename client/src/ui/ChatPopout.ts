@@ -173,7 +173,7 @@ export class ChatPopout {
       this.pendingSends = [];
       if (connected) gameClient.sendSyncChat(this.log.latestId());
     });
-    gameClient.onServerError((message, code) => this.handleServerError(message, code));
+    gameClient.onServerError((message, code, detail) => this.handleServerError(message, code, detail?.sendLimited === true));
   }
 
   setOnClose(cb: () => void): void { this.onClose = cb; }
@@ -643,7 +643,7 @@ export class ChatPopout {
   }
 
   /** A refused send comes back as an error rather than an echo. Its text must never land where it would reach someone else. */
-  private handleServerError(message: string, code: ServerErrorCode | undefined): void {
+  private handleServerError(message: string, code: ServerErrorCode | undefined, sendLimited: boolean): void {
     if (code !== 'chat_refused') return;
     const now = Date.now();
     this.pendingSends = this.pendingSends.filter(pending => now - pending.at <= SEND_REPLY_WINDOW_MS);
@@ -654,13 +654,14 @@ export class ChatPopout {
       && (sent.channel !== 'dm' || sameUser(this.thread ?? this.dmInput.value.trim(), sent.target));
     if (composerFree) this.inputEl.value = sent.text;
 
-    if (this.tab === 'dm' && this.thread && sameUser(this.thread, sent.target)) {
+    const unknownTarget = !!sent.target && !sendLimited;
+    if (unknownTarget && this.tab === 'dm' && this.thread && sameUser(this.thread, sent.target)) {
       this.thread = null;
       this.enterViewDeferred();
     }
 
     if (!composerFree) this.keepUnsent(sent.text);
-    this.showStatus(sent.target ? `No player is called "${sent.target}".` : message);
+    this.showStatus(unknownTarget ? `No player is called "${sent.target}".` : message);
   }
 
   /** The only copy of a refused message, so it stays until the player dismisses it. */

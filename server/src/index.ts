@@ -41,6 +41,8 @@ import { canMove } from './game/social/PartySystem.js';
 import { parseForecastRequestTarget } from './game/ForecastService.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 import { isEmailConfigured } from './auth/EmailService.js';
+import { CHAT_SEND_LIMIT_REFUSAL, FRIEND_REQUEST_LIMIT_REFUSAL, FriendRequestLimiter } from './game/social/ChatRateLimiter.js';
+import { FRIEND_REQUEST_NOTICE_WINDOW_MS } from './game/social/NotificationService.js';
 
 /**
  * Render an unmet room entry requirement as the wire message. Item gates keep
@@ -84,8 +86,20 @@ const ROUTE_REFUSALS: Record<RouteRefusal, string> = {
 };
 
 function chatRefusal(message: string): ServerErrorMessage {
-  return { type: 'error', message, code: 'chat_refused' };
+  return message === CHAT_SEND_LIMIT_REFUSAL
+    ? { type: 'error', message, code: 'chat_refused', sendLimited: true }
+    : { type: 'error', message, code: 'chat_refused' };
 }
+
+function guildRefusal(message: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'guild_refused' };
+}
+
+function friendRefusal(message: string): ServerErrorMessage {
+  return { type: 'error', message, code: 'friend_refused' };
+}
+
+const friendRequestLimits = new FriendRequestLimiter();
 
 function giftRefusal(message: string): ServerErrorMessage {
   return message === GIFT_NOT_FOUND ? { type: 'error', message } : { type: 'error', message, code: 'gift_refused' };
@@ -913,18 +927,23 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
           return;
         }
+        if (!friendRequestLimits.allows(username)) {
+          ws.send(JSON.stringify(friendRefusal(FRIEND_REQUEST_LIMIT_REFUSAL)));
+          return;
+        }
         const result = playerManager.friends.sendRequest(username, target);
         if (result !== 'created' && result !== 'auto_accepted') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
+        friendRequestLimits.take(username);
         syncFriendState(username, target);
         if (result === 'created') {
           playerManager.notify.notify(target, 'friend_request_received', {
             title: 'Friend request',
             body: `${username} sent you a friend request.`,
             payload: { fromUsername: username },
-          });
+          }, { dedupeKey: username, withinMs: FRIEND_REQUEST_NOTICE_WINDOW_MS });
         } else {
           // Mutual request — target's earlier outgoing request just got auto-accepted.
           playerManager.notify.notify(target, 'friend_request_accepted', {
@@ -1120,23 +1139,10 @@ wss.on('connection', (ws, req) => {
         if (!session) return;
         const result = playerManager.guilds.createGuild(username, msg.name, session.getLevel());
         if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
+          ws.send(JSON.stringify(guildRefusal(result)));
           return;
         }
         session.setGuildId(result.id);
-        playerManager.sendStateToPlayer(username);
-        return;
-      }
-
-      if (msg.type === 'join_guild' && typeof msg.guildId === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-        const result = playerManager.guilds.joinGuild(username, msg.guildId);
-        if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
-          return;
-        }
-        session.setGuildId(msg.guildId);
         playerManager.sendStateToPlayer(username);
         return;
       }
@@ -1146,7 +1152,7 @@ wss.on('connection', (ws, req) => {
         if (!session) return;
         const result = playerManager.guilds.leaveGuild(username);
         if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
+          ws.send(JSON.stringify(guildRefusal(result)));
           return;
         }
         session.setGuildId(null);
@@ -1155,26 +1161,30 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'invite_guild' && typeof msg.username === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-        const guildId = session.getGuildId();
-        if (!guildId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'You are not in a guild' }));
-          return;
-        }
-        const targetSession = playerManager.getSessionByUsername(msg.username);
-        if (!targetSession) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
-          return;
-        }
-        const result = playerManager.guilds.joinGuild(msg.username, guildId);
-        if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
-          return;
-        }
-        targetSession.setGuildId(guildId);
-        playerManager.sendStateToPlayer(username);
-        playerManager.sendStateToPlayer(msg.username);
+        if (!playerManager.getSessionByUsername(username)) return;
+        const refusal = playerManager.inviteToGuild(username, msg.username);
+        if (refusal) ws.send(JSON.stringify(guildRefusal(refusal)));
+        return;
+      }
+
+      if (msg.type === 'accept_guild_invite' && typeof msg.guildId === 'string') {
+        if (!playerManager.getSessionByUsername(username)) return;
+        const refusal = playerManager.acceptGuildInvite(username, msg.guildId);
+        if (refusal) ws.send(JSON.stringify(guildRefusal(refusal)));
+        return;
+      }
+
+      if (msg.type === 'decline_guild_invite' && typeof msg.guildId === 'string') {
+        if (!playerManager.getSessionByUsername(username)) return;
+        const refusal = playerManager.declineGuildInvite(username, msg.guildId);
+        if (refusal) ws.send(JSON.stringify(guildRefusal(refusal)));
+        return;
+      }
+
+      if (msg.type === 'kick_guild_member' && typeof msg.username === 'string') {
+        if (!playerManager.getSessionByUsername(username)) return;
+        const refusal = playerManager.kickGuildMember(username, msg.username);
+        if (refusal) ws.send(JSON.stringify(guildRefusal(refusal)));
         return;
       }
 
