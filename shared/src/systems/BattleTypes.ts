@@ -23,6 +23,7 @@ import type { CombatPrefs, ForecastRequestTarget, ForecastResult, ForecastStatus
 import type { MasteryEntry, MasterySummary } from './Mastery.js';
 import type { AwayLedger } from './AwayTypes.js';
 import type { LockTarget, RoomLockInfo } from './RoomLock.js';
+import type { ClientRequestCodexMessage, CodexRef, ServerCodexMessage } from './CodexTypes.js';
 
 export type BattleTimerState = 'battle' | 'result';
 export type BattleResult = 'victory' | 'defeat';
@@ -30,7 +31,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.26.6'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.26.7'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -115,6 +116,8 @@ export interface ClientCharacterState {
   mastery?: MasterySummary;
   /** Inventory items a quest still needs: they can't be destroyed, sold, gifted or traded. Absent when none. */
   questKeptItemIds?: string[];
+  /** Moves whenever this player's Codex reply would change; clients refetch while the Codex is open. */
+  codexVersion?: string;
 }
 
 /** The Hero screen's XP gauge. See docs/architecture/combat.md → XP gauge. */
@@ -153,7 +156,7 @@ export interface OtherPlayerState {
   dungeonName?: string;
 }
 
-export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'mastery' | 'opened';
+export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'mastery' | 'opened' | 'codex';
 
 export interface CombatLogEntry {
   id: number;
@@ -161,6 +164,8 @@ export interface CombatLogEntry {
   type: CombatLogType;
   /** The room a line is about (an `opened` line names the room or door room that opened). */
   roomId?: string;
+  /** What a `codex` line announces. */
+  codex?: CodexRef;
 }
 
 export interface ServerStateMessage {
@@ -469,6 +474,7 @@ export type ServerMessage =
   | PlayerProfileMessage
   | ServerForecastMessage
   | ServerBestiaryMessage
+  | ServerCodexMessage
   | ServerErrorMessage;
 
 export interface ServerErrorMessage {
@@ -624,6 +630,7 @@ export type ClientMessage =
   | ClientRequestForecastMessage
   | ClientSetCombatPrefsMessage
   | ClientRequestBestiaryMessage
+  | ClientRequestCodexMessage
   | ClientAckRecapMessage
   | ClientPresenceMessage
   | ClientSocialMessage

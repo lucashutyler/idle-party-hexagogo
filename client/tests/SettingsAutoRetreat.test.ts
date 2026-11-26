@@ -123,7 +123,7 @@ describe('Settings list', () => {
   it('groups its rows and shows the current values', () => {
     const screen = mount(fakeClient({ pct: 40 }));
     screen.onActivate();
-    expect([...document.querySelectorAll('.settings-group')].map(g => g.querySelectorAll('.settings-row').length)).toEqual([2, 1, 1]);
+    expect([...document.querySelectorAll('.settings-group')].map(g => g.querySelectorAll('.settings-row').length)).toEqual([3, 1, 1]);
     expect(document.querySelector('#btn-player-options .ui-row-sub')!.textContent).toBe('Auto-retreat: below 40 %');
     expect(document.querySelector('#btn-sign-out .ui-row-sub')!.textContent).toBe('Signed in as me');
   });
@@ -137,6 +137,27 @@ describe('Settings list', () => {
     expect(document.querySelector('#btn-player-options .ui-row-sub')!.textContent).toBe('Auto-retreat: off');
     screen.onDeactivate();
     expect(client.listeners).toHaveLength(0);
+  });
+
+  it('shows the Codex row, first in Game, only while the state carries its marker', () => {
+    const client = fakeClient();
+    const screen = mount(client);
+    const row = () => document.querySelector<HTMLElement>('#btn-codex')!;
+    expect(row().hidden).toBe(true);
+    expect(row().getAttribute('data-codex')).toBe('home');
+    expect(document.querySelector('.settings-group .settings-row')).toBe(row());
+    screen.onActivate();
+    expect(row().hidden).toBe(true);
+
+    (client.lastState.character as Record<string, unknown>).codexVersion = '1.1.0.4';
+    client.listeners.forEach(l => l());
+    expect(row().hidden).toBe(false);
+    expect(row().querySelector('.ui-row-title')!.textContent).toBe('Codex');
+    expect(row().querySelector('.ui-row-sub')!.textContent).toBe("Monsters, items and rooms you've discovered");
+
+    delete (client.lastState.character as Record<string, unknown>).codexVersion;
+    client.listeners.forEach(l => l());
+    expect(row().hidden).toBe(true);
   });
 
   it('builds patch notes only when opened, and closes them with Back', async () => {

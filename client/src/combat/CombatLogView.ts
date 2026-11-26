@@ -1,5 +1,6 @@
 import { registerDismiss, release } from '../ui/ModalStack';
 import { deferWhilePressed, setHtml } from '../ui/render';
+import { codexTargetAttr } from '../ui/codexLinks';
 import type { CombatLogBuffer, CombatLogLine } from './CombatLogBuffer';
 import type { CombatLogFormatter } from './CombatLogFormatter';
 
@@ -139,7 +140,11 @@ export class CombatLogView {
     this.dirty = false;
     this.lastTickerAt = performance.now();
     this.renderTicker();
-    if (this.open && !this.paused) this.renderFull(false);
+    if (this.open && !this.paused) {
+      deferWhilePressed(this.full, () => {
+        if (this.open && !this.paused) this.renderFull(false);
+      });
+    }
   }
 
   private renderTicker(): void {
@@ -156,7 +161,7 @@ export class CombatLogView {
     const entries = this.buffer.entries;
     const rebuild = force || this.renderedGen !== this.buffer.generation || this.renderedFormatter !== this.formatter.version;
     if (rebuild) {
-      this.full.innerHTML = entries.map(line => this.lineHtml(line)).join('');
+      this.full.innerHTML = entries.map(line => this.lineHtml(line, true)).join('');
       this.renderedSeqs = entries.map(e => e.seq);
       this.renderedGen = this.buffer.generation;
       this.renderedFormatter = this.formatter.version;
@@ -169,15 +174,20 @@ export class CombatLogView {
       const lastSeq = this.renderedSeqs.length > 0 ? this.renderedSeqs[this.renderedSeqs.length - 1] : -1;
       const fresh = entries.filter(e => e.seq > lastSeq);
       if (fresh.length > 0) {
-        this.full.insertAdjacentHTML('beforeend', fresh.map(line => this.lineHtml(line)).join(''));
+        this.full.insertAdjacentHTML('beforeend', fresh.map(line => this.lineHtml(line, true)).join(''));
         for (const line of fresh) this.renderedSeqs.push(line.seq);
       }
     }
     this.full.scrollTop = this.full.scrollHeight;
   }
 
-  private lineHtml(line: CombatLogLine): string {
-    return `<div class="log-entry ${line.type}">${this.formatter.format(line.text, line.key)}</div>`;
+  /** Only the full log links Codex lines: a tap on the ticker opens the log. */
+  private lineHtml(line: CombatLogLine, links = false): string {
+    const text = this.formatter.format(line.text, line.key);
+    const body = links && line.codex
+      ? `<button type="button" class="codex-link log-codex-link" data-codex="${codexTargetAttr(line.codex)}">${text}</button>`
+      : text;
+    return `<div class="log-entry ${line.type}">${body}</div>`;
   }
 
   private setPaused(paused: boolean): void {

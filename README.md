@@ -211,6 +211,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Overworld auto-retreat (skip or leave rooms the forecast says you'll lose; off / 25 / 40 / 60 %, default 25 %; back through a door with a way back, 20 s after arriving, when nowhere nearby is safe and the party has no hires)
 - [x] Autorun (party-wide toggle: walks a room every second while traveling; owners and leaders switch it)
 - [x] Kill mastery + bestiary (per-monster ranks, up to +10 % against that monster)
+- [x] Codex (each player's record of the monsters, items, rooms and shops they've discovered, with drops seen, where monsters live, fights known per room, links between entries and travel to a room; opened from Settings and from item, monster, room and quest links)
 - [x] "While you were away" recap (toast or story modal of what happened while the game was hidden, with quests ready to turn in, the next main-story step and how many items full bags left behind)
 - [x] "Now open" journal lines, recap moments and banner when a quest turn-in or level-up opens a locked room or door the player has found
 - [x] Room level labels (the room sheet and travel buttons show the monsters' authored level band, red with ⚠ when it is far above the party, and a door to such a room asks first)

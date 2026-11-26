@@ -25,6 +25,7 @@ import {
 import type { Screen } from './ScreenManager';
 import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, registerDismiss, release, wireFocusOnInteract } from '../ui/ModalStack';
+import { codexLinkHtml } from '../ui/codexLinks';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { discoveredRoomName } from '../ui/routeSummary';
 import { autoRunTitle } from '../ui/autoRunText';
@@ -1595,6 +1596,7 @@ export class CombatScreen implements Screen {
                onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${fallback}';}else{this.style.display='none';}" />
         </div>
         <div class="monster-popup-name">${escapeHtml(name)}</div>
+        ${st.id ? codexLinkHtml({ kind: 'monster', id: st.id }, 'Codex ›', 'monster-popup-codex') : ''}
         ${this.monsterMetaHtml(st)}
         <div class="monster-popup-hp"><div class="monster-popup-hp-fill"></div><span></span></div>
         <div class="monster-popup-status"></div>

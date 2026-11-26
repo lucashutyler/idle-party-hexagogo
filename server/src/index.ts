@@ -18,7 +18,7 @@ import type { IncomingMessage } from 'http';
 import { WS_SERVER_OPTIONS } from './wsServerOptions.js';
 import { clientAcceptsPartialState } from './game/StatePush.js';
 import { GameLoop } from './game/GameLoop.js';
-import { GIFT_NOT_FOUND } from './game/PlayerManager.js';
+import { COMBAT_BACKPRESSURE_BYTES, GIFT_NOT_FOUND } from './game/PlayerManager.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { isStoreFileName } from './auth/reservedUsernames.js';
@@ -712,36 +712,11 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        const shop = session.getCurrentShop();
-        if (!shop) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
+        const refusal = session.handleShopBuy(msg.itemId);
+        if (refusal) {
+          ws.send(JSON.stringify(refusal));
           return;
         }
-
-        // Check item is in shop inventory
-        const shopItem = shop.inventory.find(si => si.itemId === msg.itemId);
-        if (!shopItem) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Item not available in this shop' }));
-          return;
-        }
-
-        // Check player has enough gold
-        if (session.getGold() < shopItem.price) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not enough gold' }));
-          return;
-        }
-
-        // Check inventory space (addOneToInventory checks MAX_STACK)
-        if (!session.addOneToInventory(msg.itemId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full' }));
-          return;
-        }
-
-        // Deduct gold (item already added above)
-        session.deductGold(shopItem.price);
-
-        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
-        session.addLogEntry(`Bought ${itemDef?.name ?? msg.itemId} for ${shopItem.price} gold`, 'victory');
         playerManager.sendStateToPlayer(username);
         return;
       }
@@ -1045,6 +1020,13 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'request_codex') {
+        if (ws.bufferedAmount > COMBAT_BACKPRESSURE_BYTES) return;
+        const codex = playerManager.buildCodex(username);
+        if (codex) ws.send(JSON.stringify(codex));
+        return;
+      }
+
       if (msg.type === 'set_chat_preferences' && typeof msg.sendChannel === 'string') {
         const session = playerManager.getSessionByUsername(username);
         if (session) {
@@ -1296,6 +1278,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
+        session.noteCodexShop(shop.id);
 
         const partyId = session.getPartyId();
         if (partyId) {

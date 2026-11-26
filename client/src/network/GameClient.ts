@@ -1,7 +1,7 @@
 import type { ServerStateMessage, ServerEquipBlockedMessage, ServerCombatMessage,
   ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode,
   ServerForecastMessage, ServerBestiaryMessage, ForecastTarget, ForecastRequestTarget, AutoRetreatPct, AwayLedger, ItemDefinition,
-  RouteWarningKind, ServerRouteConfirmMessage, LockTarget, ServerLockInfoMessage } from '@idle-party-rpg/shared';
+  RouteWarningKind, ServerRouteConfirmMessage, LockTarget, ServerLockInfoMessage, ServerCodexMessage } from '@idle-party-rpg/shared';
 import { PARTIAL_STATE_PARAM, restoreElidedState } from '@idle-party-rpg/shared';
 import { CombatLogBuffer } from '../combat/CombatLogBuffer';
 
@@ -10,6 +10,7 @@ export const FORECAST_TTL_MS = 60_000;
 const FORECAST_RETRY_MS = 15_000;
 const FORECAST_UNAVAILABLE_TTL_MS = 10_000;
 const BESTIARY_RETRY_MS = 15_000;
+export const CODEX_RETRY_MS = 15_000;
 const FORECAST_CACHE_MAX = 200;
 
 type StateListener = (state: ServerStateMessage) => void;
@@ -35,6 +36,7 @@ type ServerErrorListener = (message: string, code?: ServerErrorCode, detail?: Se
 type CombatListener = (message: ServerCombatMessage, receivedAt: number) => void;
 type ForecastListener = (message: ServerForecastMessage) => void;
 type BestiaryListener = (message: ServerBestiaryMessage) => void;
+type CodexListener = (message: ServerCodexMessage) => void;
 type RecapListener = (recap: AwayLedger | null) => void;
 
 interface CachedForecast {
@@ -84,6 +86,7 @@ export class GameClient {
   private combatListeners = new Set<CombatListener>();
   private forecastListeners = new Set<ForecastListener>();
   private bestiaryListeners = new Set<BestiaryListener>();
+  private codexListeners = new Set<CodexListener>();
   private recapListeners = new Set<RecapListener>();
   private combatViewRequested = false;
   private combatViewSent: boolean | null = null;
@@ -99,6 +102,7 @@ export class GameClient {
   /** `targetKey|forecastKey` pairs already re-requested after a stale reply. */
   private staleRetried = new Set<string>();
   private bestiaryRequestedAt: number | null = null;
+  private codexRequestedAt: number | null = null;
   private notifiedRecapId: string | null = null;
   private ackedRecapIds = new Set<string>();
 
@@ -119,6 +123,9 @@ export class GameClient {
 
   /** Most recent bestiary (null until one arrives). */
   lastBestiary: ServerBestiaryMessage | null = null;
+
+  /** Most recent Codex (null until one arrives, and again after a world update). */
+  lastCodex: ServerCodexMessage | null = null;
 
   /** Unacknowledged "while you were away" recap from the latest state (null when none). */
   lastRecap: AwayLedger | null = null;
@@ -275,6 +282,8 @@ export class GameClient {
         this.handleForecast(msg as ServerForecastMessage);
       } else if (msg.type === 'bestiary') {
         this.handleBestiary(msg as ServerBestiaryMessage);
+      } else if (msg.type === 'codex') {
+        this.handleCodex(msg as ServerCodexMessage);
       } else if (msg.type === 'chat_message') {
         for (const listener of this.chatListeners) {
           try {
@@ -292,6 +301,7 @@ export class GameClient {
           }
         }
       } else if (msg.type === 'world_update') {
+        this.lastCodex = null;
         for (const listener of this.worldUpdateListeners) {
           try {
             listener();
@@ -458,6 +468,18 @@ export class GameClient {
     }
   }
 
+  private handleCodex(msg: ServerCodexMessage): void {
+    this.lastCodex = msg;
+    this.codexRequestedAt = null;
+    for (const listener of this.codexListeners) {
+      try {
+        listener(msg);
+      } catch (err) {
+        console.error('[GameClient] error in codex listener:', err);
+      }
+    }
+  }
+
   private updateRecap(state: ServerStateMessage): void {
     const recap = state.awayRecap && !this.ackedRecapIds.has(state.awayRecap.id) ? state.awayRecap : null;
     this.lastRecap = recap;
@@ -489,6 +511,10 @@ export class GameClient {
     if (this.bestiaryRequestedAt !== null) {
       this.bestiaryRequestedAt = now;
       this.sendRaw({ type: 'request_bestiary' });
+    }
+    if (this.codexRequestedAt !== null) {
+      this.codexRequestedAt = now;
+      this.sendRaw({ type: 'request_codex' });
     }
   }
 
@@ -615,6 +641,25 @@ export class GameClient {
     this.bestiaryRequestedAt = now;
     this.sendRaw({ type: 'request_bestiary' });
     return null;
+  }
+
+  // --- Codex ---
+
+  onCodex(listener: CodexListener): () => void {
+    this.codexListeners.add(listener);
+    return () => { this.codexListeners.delete(listener); };
+  }
+
+  /** The cached Codex, which may be behind the state's marker; asks for a fresh one, at most once per CODEX_RETRY_MS, when it is. */
+  requestCodex(): ServerCodexMessage | null {
+    const marker = this.lastState?.character?.codexVersion;
+    if (marker === undefined || this.lastCodex?.version === marker) return this.lastCodex;
+    const now = Date.now();
+    if (this.codexRequestedAt === null || now - this.codexRequestedAt >= CODEX_RETRY_MS) {
+      this.codexRequestedAt = now;
+      this.sendRaw({ type: 'request_codex' });
+    }
+    return this.lastCodex;
   }
 
   // --- Combat preferences ---
@@ -995,6 +1040,7 @@ export class GameClient {
     this.combatListeners.clear();
     this.forecastListeners.clear();
     this.bestiaryListeners.clear();
+    this.codexListeners.clear();
     this.recapListeners.clear();
   }
 }

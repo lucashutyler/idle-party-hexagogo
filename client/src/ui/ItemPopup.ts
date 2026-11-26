@@ -3,6 +3,7 @@ import { getItemEffectText, getSetsForItem, getSetBonusText, getSetDisplayName, 
 import { RARITY_COLORS, SLOT_LABELS, SHINY_RARITIES, getItemInitials, escapeHtml } from './ItemIcon';
 import { artworkUrl, renderTrackedImg } from './assets';
 import { bringToFront, release } from './ModalStack';
+import { codexTargetAttr } from './codexLinks';
 
 export const ITEM_POPUP_CLOSE_HTML = '<button type="button" class="item-popup-close" aria-label="Close">&times;</button>';
 
@@ -25,6 +26,8 @@ export interface ItemPopupOptions {
   actionsHtml?: string;
   /** Extra HTML rendered between the set sections and the action buttons (e.g. the equip comparison). */
   extraHtml?: string;
+  /** An "Open in Codex" link under the stats, for an item the viewer owns or is being shown. */
+  codexLink?: boolean;
 }
 
 /**
@@ -126,6 +129,7 @@ export function renderItemPopupContent(def: ItemDefinition, options?: ItemPopupO
     </div>
     <div class="item-popup-name" style="color:${color}">${escapeHtml(def.name)}</div>
     <div class="item-popup-stats">${statLines.join('')}</div>
+    ${options?.codexLink ? `<button type="button" class="codex-link item-popup-codex" data-codex="${codexTargetAttr({ kind: 'item', id: def.id })}">Open in Codex ›</button>` : ''}
     ${setHtmlBlocks}
     ${extraHtml}
     ${actionsHtml ? `<div class="item-popup-actions">${actionsHtml}</div>` : ''}

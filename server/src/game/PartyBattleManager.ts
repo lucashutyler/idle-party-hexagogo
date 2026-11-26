@@ -84,6 +84,7 @@ import type {
   RouteWarningKind,
   LockTarget,
   RoomLockInfo,
+  WorldTileDefinition,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
 import { lockRequirements } from './LockInfo.js';
@@ -99,6 +100,7 @@ import type { ForecastService, ForecastWork } from './ForecastService.js';
 import { AUTO_RETREAT_SKIP_WINDOW, decideAutoRetreat, doorRetreatDelayMs, isKnownSafe, pickRetreatTarget, stratumUpperPct } from './AutoRetreat.js';
 import type { RelocateCause, RetreatCandidate } from './AutoRetreat.js';
 import type { PlayerSession } from './PlayerSession.js';
+import type { CodexFightPlace } from './codex/CodexKnowledge.js';
 import type { ContentStore } from './ContentStore.js';
 import type { WorldGrids } from './WorldGrids.js';
 
@@ -1295,10 +1297,7 @@ export class PartyBattleManager {
 
   /** The weighted table a fight in this room rolls from: its own, else its zone's (empty → the fallback pack). */
   resolveEncounterTable(tileId: string, zoneId?: string): EncounterTableEntry[] {
-    const tileDef = this.content.getTileById(tileId);
-    if (tileDef?.encounterTable?.length) return tileDef.encounterTable;
-    const zone = zoneId ?? tileDef?.zone;
-    return (zone ? this.content.getAllZones()[zone]?.encounterTable : undefined) ?? [];
+    return this.encounterSource(tileId, zoneId).table;
   }
 
   /** Digest of the party's forecast inputs (`GamePartyInfo.forecastKey`); undefined without a forecaster. */
@@ -1370,17 +1369,35 @@ export class PartyBattleManager {
 
     if (entry.dungeonRun && floor) {
       const monsters = createEncounter(zone, allMonsters, allZones, allEncounters, floor.encounterTable);
+      // The party's tile is the entrance room during a run: credit no shop or encounter from it.
+      this.noteCodexFight(players, monsters, { kind: 'dungeon', dungeonId: entry.dungeonRun.dungeonId });
       return createPartyCombatState(players, monsters, { pace: COMBAT_PACE });
     }
 
     const tileId = entry.serverParty.tile.id;
     this.logSidelinedHires(entry, highestLevel(roster.filter(p => !p.isHenchman)));
-    const table = this.resolveEncounterTable(tileId, zone);
+    const { table, tile } = this.encounterSource(tileId, zone);
     const rolled = rollEncounter(zone, allMonsters, allZones, allEncounters, table);
+    this.noteCodexFight(players, rolled.monsters, { kind: 'room', encounterId: rolled.entryId || undefined, shopId: tile?.shopId || undefined });
     entry.battle = { battleId: entry.battleTimer.battleId, tileId, entryId: rolled.entryId, players };
     entry.recentSkips = [...entry.recentSkips, false].slice(-AUTO_RETREAT_SKIP_WINDOW);
 
     return createPartyCombatState(players, rolled.monsters, { pace: COMBAT_PACE });
+  }
+
+  private encounterSource(tileId: string, zoneId?: string): { table: EncounterTableEntry[]; tile: WorldTileDefinition | undefined } {
+    const tile = this.content.getTileById(tileId);
+    if (tile?.encounterTable?.length) return { table: tile.encounterTable, tile };
+    const zone = zoneId ?? tile?.zone;
+    return { table: (zone ? this.content.getAllZones()[zone]?.encounterTable : undefined) ?? [], tile };
+  }
+
+  private noteCodexFight(players: readonly PartyCombatantInit[], monsters: readonly MonsterInstance[], place: CodexFightPlace): void {
+    for (const player of players) {
+      // A hire's username is its display name, which can equal a real player's.
+      if (player.isHenchman) continue;
+      this.getSession(player.username)?.noteCodexFight(monsters, place);
+    }
   }
 
   private handleBattleEnd(partyId: string, result: BattleResult): void {
@@ -1447,7 +1464,11 @@ export class PartyBattleManager {
 
     // Roll item drops once and give each to one random share; a henchman's share is discarded.
     const memberItems: Map<string, string[]> = new Map();
-    for (const { username } of humans) memberItems.set(username, []);
+    const memberSources: Map<string, string[]> = new Map();
+    for (const { username } of humans) {
+      memberItems.set(username, []);
+      memberSources.set(username, []);
+    }
     const shares: { username: string | null; className: string }[] = [
       ...humans.map(p => ({ username: p.username, className: p.className })),
       ...hires.map(p => ({ username: null, className: p.className })),
@@ -1465,7 +1486,10 @@ export class PartyBattleManager {
             if (matching.length > 0) eligible = matching;
           }
           const recipient = eligible[Math.floor(Math.random() * eligible.length)];
-          if (recipient.username) memberItems.get(recipient.username)!.push(itemId);
+          if (recipient.username) {
+            memberItems.get(recipient.username)!.push(itemId);
+            memberSources.get(recipient.username)!.push(m.id);
+          }
         }
       }
     }
@@ -1493,7 +1517,7 @@ export class PartyBattleManager {
       const run = entry.runGauge;
       if (run) run.xp.set(fighter.username, (run.xp.get(fighter.username) ?? 0) + xp);
       session.handleVictory(
-        { xp, gold: splitGold, items: memberItems.get(fighter.username)! },
+        { xp, gold: splitGold, items: memberItems.get(fighter.username)!, itemSources: memberSources.get(fighter.username)! },
         entry.serverParty.tile,
         // Dungeon floors aren't overworld tiles — don't unlock neighbours mid-run.
         { unlockTiles: !entry.dungeonRun, kills: killed.length },

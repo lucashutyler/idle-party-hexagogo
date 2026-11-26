@@ -133,7 +133,7 @@ interface Mounted {
   moveBlocked: (msg: ServerMoveBlockedMessage) => void;
 }
 
-async function mount(state = partyState()): Promise<Mounted> {
+async function mount(state = partyState(), beforeMapBuilt?: (screen: MapScreen) => void): Promise<Mounted> {
   document.body.innerHTML = '<div id="map-screen"></div><div id="game-container"></div>';
   const cache = await loadCache();
   mapStub.tileInfo = (mapId, col, row, shown) => {
@@ -171,6 +171,7 @@ async function mount(state = partyState()): Promise<Mounted> {
   } as unknown as Mounted['gameClient'];
   const screen = new MapScreen('map-screen', gameClient, cache);
   screen.onActivate();
+  beforeMapBuilt?.(screen);
   await tick();
   const map = mapStub.instances[mapStub.instances.length - 1] as StubMap;
   const push = (next: ServerStateMessage) => {
@@ -434,6 +435,73 @@ describe('Looking at another map', () => {
     m.confirmRoute({ type: 'route_confirm', tileId: 'v1', warnings: [{ kind: 'no_way_back' }] });
     document.querySelector<HTMLElement>('.confirm-cancel')!.click();
     await tick();
+    expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
+  });
+});
+
+describe('Go to a room by id', () => {
+  beforeEach(() => { mapStub.instances.length = 0; });
+  afterEach(() => {
+    dismissMapToast();
+    while (dismissTop()) { /* drain */ }
+    vi.unstubAllGlobals();
+  });
+
+  it('opens the room\'s sheet and sends Go from it, as two taps would', async () => {
+    const m = await mount();
+    m.screen.goToRoomById('v2');
+    expect(m.gameClient.sendMoveTo).toHaveBeenCalledWith('v2', { col: 2, row: 0 });
+    expect(sheetOpen()).toBe(true);
+    expect(document.querySelector('.room-sheet-go')!.textContent).toBe('Setting off…');
+  });
+
+  it('opens another visited map first, and goes by room id alone there', async () => {
+    const m = await mount();
+    m.screen.goToRoomById('g1');
+    expect(m.map.drawnMapId).toBe('grotto');
+    expect(m.gameClient.sendMoveTo).toHaveBeenCalledWith('g1', undefined);
+    expect(document.querySelector('.room-sheet-name')!.textContent).toBe('Room g1');
+  });
+
+  it('shows the party\'s own room instead of moving', async () => {
+    const m = await mount();
+    m.screen.goToRoomById('v0');
+    expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>('.room-view-overlay')!.style.display).toBe('flex');
+  });
+
+  it('says so when the room is gone', async () => {
+    const m = await mount();
+    m.screen.goToRoomById('nowhere');
+    expect(toast()).toBe('That room is gone.');
+    expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
+  });
+
+  it('waits for the map on the first visit, then shows the room and presses Go', async () => {
+    const m = await mount(partyState(), screen => screen.goToRoomById('g1'));
+    expect(m.map.drawnMapId).toBe('grotto');
+    expect(m.map.bakes).toBe(1);
+    expect(m.gameClient.sendMoveTo).toHaveBeenCalledWith('g1', undefined);
+    expect(document.querySelector('.room-sheet-go')!.textContent).toBe('Setting off…');
+  });
+
+  it('drops a waiting Go when the player leaves the Map before it is built', async () => {
+    const m = await mount(partyState(), screen => {
+      screen.goToRoomById('v2');
+      screen.onDeactivate();
+    });
+    m.screen.onActivate();
+    await tick();
+    expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
+    expect(sheetOpen()).toBe(true);
+  });
+
+  it('lets a later focus on the first visit replace a waiting Go', async () => {
+    const m = await mount(partyState(), screen => {
+      screen.goToRoomById('v2');
+      screen.focusRoom('v2');
+    });
+    expect(sheetOpen()).toBe(true);
     expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
   });
 });

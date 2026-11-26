@@ -1,6 +1,7 @@
 import type { QuestObjective, QuestReward, QuestScope, QuestStatus, ServerStateMessage } from '@idle-party-rpg/shared';
 import { getObjectiveTarget } from '@idle-party-rpg/shared';
 import { escapeHtml } from './ItemIcon';
+import { codexLinkHtml } from './codexLinks';
 
 export type QuestResolutions = ServerStateMessage['questResolutions'];
 
@@ -15,6 +16,23 @@ export function objectiveText(obj: QuestObjective, progress: number, resolutions
     return `Collect ${escapeHtml(resolutions?.items[obj.itemId] ?? 'unknown item')} (${cap}/${target})`;
   }
   const place = escapeHtml(roomText(obj.tileId, resolutions));
+  return cap >= 1 ? `Visit ${place} — done` : `Visit ${place}`;
+}
+
+/** `objectiveText` with its target as a Codex link: monsters and items always, a room once it is found. */
+export function objectiveHtml(obj: QuestObjective, progress: number, resolutions: QuestResolutions, found: ReadonlySet<string>): string {
+  const target = getObjectiveTarget(obj);
+  const cap = Math.min(progress, target);
+  if (obj.kind === 'kill') {
+    const name = resolutions?.monsters[obj.monsterId];
+    return `Kill ${name ? codexLinkHtml({ kind: 'monster', id: obj.monsterId }, name) : 'unknown monster'} (${cap}/${target})`;
+  }
+  if (obj.kind === 'collect') {
+    const name = resolutions?.items[obj.itemId];
+    return `Collect ${name ? codexLinkHtml({ kind: 'item', id: obj.itemId }, name) : 'unknown item'} (${cap}/${target})`;
+  }
+  const label = roomText(obj.tileId, resolutions);
+  const place = found.has(obj.tileId) ? codexLinkHtml({ kind: 'room', id: obj.tileId }, label) : escapeHtml(label);
   return cap >= 1 ? `Visit ${place} — done` : `Visit ${place}`;
 }
 

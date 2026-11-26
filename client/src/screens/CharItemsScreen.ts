@@ -1345,6 +1345,7 @@ export class CharItemsScreen implements Screen {
       skills: this.worldCache.getSkillContent().skills,
       actionsHtml,
       extraHtml,
+      codexLink: true,
     }));
 
     this.modalOverlay.querySelector('.popup-action-change')?.addEventListener('click', () => {

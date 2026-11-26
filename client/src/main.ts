@@ -9,6 +9,7 @@ import './styles/chat.css';
 import './styles/map.css';
 import './styles/hero.css';
 import './styles/social.css';
+import './styles/codex.css';
 import './styles/popups.css';
 import { App } from './App';
 import { registerServiceWorker } from './network/PushNotifications';

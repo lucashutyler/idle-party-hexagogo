@@ -12,7 +12,7 @@ import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import { escapeHtml } from './ItemIcon';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
-import { objectiveText, rewardsText, scopeBadgeHtml, statusLabel, type QuestResolutions } from './QuestText';
+import { objectiveHtml, rewardsText, scopeBadgeHtml, statusLabel, type QuestResolutions } from './QuestText';
 import {
   giverLocations,
   nextStoryStep,
@@ -229,7 +229,7 @@ export class QuestLog {
     const objectives = (def?.objectives ?? []).map((obj, i) => {
       const progress = entry.progress[i] ?? 0;
       const done = progress >= getObjectiveTarget(obj);
-      return `<div class="quest-objective${done ? ' quest-objective-done' : ''}">${done ? '✓' : '•'} ${objectiveText(obj, progress, resolutions)}${objectiveBarHtml(obj, progress)}</div>`;
+      return `<div class="quest-objective${done ? ' quest-objective-done' : ''}">${done ? '✓' : '•'} ${objectiveHtml(obj, progress, resolutions, unlocked)}${objectiveBarHtml(obj, progress)}</div>`;
     }).join('');
     const name = def ? (style.main ? questTitle(def) : def.name) : UNKNOWN_QUEST;
     const classes = ['quest-card', ready ? 'quest-card-ready' : '', style.main ? 'quest-card-main' : ''].filter(Boolean).join(' ');

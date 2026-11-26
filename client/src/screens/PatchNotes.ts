@@ -1,5 +1,17 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.26.7',
+    notes: [
+      'New: the Codex. Open it from Settings to look up the monsters, items, rooms and shops you\'ve discovered.',
+      'Monster pages show the drops you\'ve found and the rooms you\'ve discovered where they live, with a button to travel to the nearest one.',
+      'Item pages show which monsters dropped them for you, which shops you\'ve visited sell them, and how to craft them.',
+      'Room pages show the monsters and fights you know there, and take you there in one tap.',
+      'Item details, the Bestiary, monster cards in battle, the room panel on the map and the Quest Log now open the Codex.',
+      'The battle log notes each monster you meet for the first time. Tap that line in the full log to see it in the Codex.',
+      'Your Codex starts with the monsters you\'ve defeated and the items you have. Drops, fights and shop visits are added from now on.',
+    ],
+  },
+  {
     version: '2026.11.26.6',
     notes: [
       'After you send a chat message, the chat line above the menu shows it instead of an older server notice.',

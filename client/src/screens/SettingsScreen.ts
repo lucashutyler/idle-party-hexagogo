@@ -10,9 +10,9 @@ import { AUTO_RETREAT_OPTIONS, DEFAULT_COMBAT_PREFS, GAME_VERSION } from '@idle-
 import { autoRetreatLine, formatPct } from '../combat/ForecastFormat';
 import { confirmDialog } from '../ui/ConfirmDialog';
 
-function settingsRow(id: string, glyph: string, title: string, sub: string, extraClass = ''): string {
+function settingsRow(id: string, glyph: string, title: string, sub: string, extraClass = '', attrs = ''): string {
   return `
-    <button type="button" class="ui-row settings-row${extraClass}" id="${id}">
+    <button type="button" class="ui-row settings-row${extraClass}" id="${id}"${attrs ? ` ${attrs}` : ''}>
       <span class="ui-row-media settings-row-glyph" aria-hidden="true">${glyph}</span>
       <span class="ui-row-main">
         <span class="ui-row-title">${title}</span>
@@ -43,6 +43,7 @@ export class SettingsScreen implements Screen {
           <h2 class="settings-title">Settings</h2>
           <div class="ui-section-label">Game</div>
           <div class="settings-group">
+            ${settingsRow('btn-codex', '📖', 'Codex', "Monsters, items and rooms you've discovered", '', 'data-codex="home" hidden')}
             ${settingsRow('btn-player-options', '⚔️', 'Player Options', '')}
             ${settingsRow('btn-notifications', '🔔', 'Notifications', 'Choose what reaches you, and how')}
           </div>
@@ -269,6 +270,8 @@ export class SettingsScreen implements Screen {
   private paintRows(): void {
     const state = this.gameClient.lastState;
     const pct = state?.character?.combatPrefs?.autoRetreatBelowPct ?? DEFAULT_COMBAT_PREFS.autoRetreatBelowPct;
+    const codex = this.container.querySelector<HTMLElement>('#btn-codex');
+    if (codex) codex.hidden = !state?.character?.codexVersion;
     const options = this.container.querySelector('#btn-player-options .ui-row-sub');
     if (options) setHtml(options, escapeHtml(autoRetreatLine(pct)));
     const account = this.container.querySelector('#btn-sign-out .ui-row-sub');

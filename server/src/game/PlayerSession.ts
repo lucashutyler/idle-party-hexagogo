@@ -104,10 +104,12 @@ import type {
   MasteryEntry,
   MasteryMonsterInfo,
   MasterySummary,
+  MonsterInstance,
   MonsterTier,
   HiredHenchman,
   HenchmanOffer,
   ServerStateMessage,
+  ServerCodexMessage,
   ServerBattleState,
   ServerPartyState,
   OtherPlayerState,
@@ -154,6 +156,9 @@ import { buildQuestGuide, questGivers } from './QuestGuide.js';
 import { gateIndex, gatesOpenedByLevel } from './GateIndexCache.js';
 import { roomLevelBands } from './RoomLevels.js';
 import type { LevelBand } from './RoomLevels.js';
+import { CodexKnowledge } from './codex/CodexKnowledge.js';
+import { buildCodexMessage } from './codex/CodexBuild.js';
+import type { CodexBackfill, CodexFightPlace } from './codex/CodexKnowledge.js';
 import type { QuestDefinition, QuestGuide, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
 import { SERVER_CHAT_CAPS, chatBucket, countChatBuckets, trimChatHistory } from '@idle-party-rpg/shared';
 
@@ -199,6 +204,7 @@ export class PlayerSession {
   private monsterKills: Record<string, number> = emptyKillCounts();
   /** Monster ids by most recent kill, newest first. In memory only. */
   private recentKills: string[] = [];
+  private codex = new CodexKnowledge();
   private combatPrefs: CombatPrefs = { ...DEFAULT_COMBAT_PREFS };
   private autoRetreatNotified = false;
   private awayLedger: AwayLedger | null = null;
@@ -355,10 +361,10 @@ export class PlayerSession {
   /**
    * Handle victory rewards (called by PartyBattleManager with pre-split rewards).
    * Set `options.unlockTiles = false` to skip adjacent-tile unlocking (dungeon
-   * floors aren't overworld tiles).
+   * floors aren't overworld tiles). `itemSources[i]` is the monster that dropped `items[i]`.
    */
   handleVictory(
-    rewards: { xp: number; gold: number; items: string[] },
+    rewards: { xp: number; gold: number; items: string[]; itemSources?: readonly string[] },
     tile: HexTile,
     options?: { unlockTiles?: boolean; kills?: number },
   ): void {
@@ -380,11 +386,13 @@ export class PlayerSession {
 
     let stored = 0;
     let leftBehind = 0;
-    for (const itemId of rewards.items) {
+    for (const [i, itemId] of rewards.items.entries()) {
       const reward = this.storeRewardItem(itemId);
       if (!reward) continue;
       if (reward.stored) {
         stored++;
+        const source = rewards.itemSources?.[i];
+        if (source !== undefined) this.codex.noteDrop(source, itemId);
         this.addLogEntry(`Found ${reward.def.name}!`, 'victory');
       } else {
         leftBehind++;
@@ -423,6 +431,7 @@ export class PlayerSession {
     const def = this.content.getItem(itemId);
     if (!def) return null;
     if (!addItemToInventory(this.character.inventory, itemId)) return { def, stored: false };
+    this.codex.noteItem(itemId);
     const rarity = def.rarity ?? 'common';
     this.updateAway(l => recordAwayItem(l, itemId, rarity));
     if (awayRarityRank(rarity) >= awayRarityRank(AWAY_NOTABLE_MIN_RARITY)) {
@@ -916,6 +925,7 @@ export class PlayerSession {
     const battleState = this.getBattleState?.();
     const partyState = this.getPartyPositionState?.();
     const partyZone = this.getPartyZone?.();
+    const unlocked = this.unlockSystem.getUnlockedKeys();
 
     let charState: ClientCharacterState | null = null;
     if (this.character) {
@@ -943,6 +953,7 @@ export class PlayerSession {
         craftXp: this.character.craftXp,
         combatPrefs: { ...this.combatPrefs },
         mastery: this.getMasterySummary(),
+        codexVersion: this.codexVersion(unlocked.length),
       };
       const inventory = this.character.inventory;
       const questKeptItemIds = this.questKeptItemIds().filter(itemId => hasOwn(inventory, itemId));
@@ -963,7 +974,7 @@ export class PlayerSession {
       username: this.username,
       party: partyState ?? { col: 0, row: 0, state: 'idle', path: [] },
       battle: battleState ?? { state: 'battle', visual: 'none', duration: 0 },
-      unlocked: this.unlockSystem.getUnlockedKeys(),
+      unlocked,
       mapSize: this.currentGrid().size,
       currentMapId: this.getMapId(),
       otherPlayers,
@@ -1053,6 +1064,7 @@ export class PlayerSession {
       if (ev.quantityProduced > 0) {
         const qtyStr = ev.quantityProduced > 1 ? `x${ev.quantityProduced}` : '';
         this.addLogEntry(`Crafted ${itemName}${qtyStr}.`, 'unlock');
+        this.codex.noteItem(ev.resultItemId);
         produced = true;
       }
       this.noteItemsLeftBehind(ev.quantityLost, `${itemName}${ev.quantityLost > 1 ? ` x${ev.quantityLost}` : ''} from crafting`);
@@ -1222,7 +1234,9 @@ export class PlayerSession {
   /** Add one item to the unequipped inventory. Returns false if stack is full (MAX_STACK). */
   addOneToInventory(itemId: string): boolean {
     if (!this.character) return false;
-    return addItemToInventory(this.character.inventory, itemId);
+    if (!addItemToInventory(this.character.inventory, itemId)) return false;
+    this.codex.noteItem(itemId);
+    return true;
   }
 
   /** Remove `quantity` items from the unequipped inventory. Returns false if insufficient. */
@@ -1245,6 +1259,7 @@ export class PlayerSession {
     const current = this.character.inventory[itemId] ?? 0;
     if (current + quantity > MAX_STACK) return false;
     this.character.inventory[itemId] = current + quantity;
+    if (quantity > 0) this.codex.noteItem(itemId);
     return true;
   }
 
@@ -1393,6 +1408,48 @@ export class PlayerSession {
   private monsterTier(monsterId: string): MonsterTier | undefined {
     const def = this.content.getMonster(monsterId);
     return def ? effectiveMonsterTier(def) : undefined;
+  }
+
+  // ── Codex ──────────────────────────────────────
+
+  /** Credit a fight this player is in; each first meeting with a monster gets its own journal line. */
+  noteCodexFight(monsters: readonly Pick<MonsterInstance, 'id' | 'name'>[], place: CodexFightPlace): void {
+    for (const id of this.codex.noteFight(monsters.map(m => m.id), place)) {
+      const name = monsters.find(m => m.id === id)?.name ?? id;
+      this.addLogEntry(`New in your Codex: ${name}.`, 'codex', { codex: { kind: 'monster', id } });
+    }
+  }
+
+  /** Credit a shop the player bought or hired from, as a fight in its room would. */
+  noteCodexShop(shopId: string): void {
+    this.codex.noteShop(shopId);
+  }
+
+  /** This player's whole Codex reply; its version is the `codexVersion` the state carries. */
+  buildCodex(): ServerCodexMessage {
+    const unlocked = this.unlockSystem.getUnlockedKeys();
+    return buildCodexMessage(
+      { knowledge: this.codex, unlocked, kills: this.monsterKills, version: this.codexVersion(unlocked.length) },
+      this.content,
+    );
+  }
+
+  /** What the save already proves: kills, bag, gear, dungeons cleared or under way. */
+  private codexBackfill(runDungeonId: unknown): CodexBackfill {
+    const items = new Set<string>();
+    if (this.character) {
+      for (const itemId of Object.keys(this.character.inventory)) items.add(itemId);
+      for (const itemId of Object.values(this.character.equipment)) {
+        if (typeof itemId === 'string') items.add(itemId);
+      }
+    }
+    const dungeons = [...this.clearedDungeons];
+    if (typeof runDungeonId === 'string') dungeons.push(runDungeonId);
+    return { monsters: Object.keys(this.monsterKills), items, dungeons };
+  }
+
+  private codexVersion(unlockedCount: number): string {
+    return `${this.content.contentEpoch}.${this.codex.serial}.${this.codex.revision}.${unlockedCount}`;
   }
 
   // ── Combat preferences ──────────────────────────────────────
@@ -1624,7 +1681,7 @@ export class PlayerSession {
     return true;
   }
 
-  addLogEntry(text: string, type: CombatLogEntry['type'], refs?: Pick<CombatLogEntry, 'roomId'>): void {
+  addLogEntry(text: string, type: CombatLogEntry['type'], refs?: Pick<CombatLogEntry, 'roomId' | 'codex'>): void {
     this.combatLog.push({ id: ++this.logIdCounter, text, type, ...refs });
     if (this.combatLog.length > MAX_LOG_ENTRIES) {
       this.combatLog.shift();
@@ -1666,6 +1723,7 @@ export class PlayerSession {
     this.clearedDungeons.clear();
     this.monsterKills = emptyKillCounts();
     this.recentKills = [];
+    this.codex = new CodexKnowledge();
     this.awayLedger = null;
     this.pendingRecap = null;
 
@@ -1736,6 +1794,7 @@ export class PlayerSession {
       partyAutoRun: partyAutoRun || undefined,
       clearedDungeons: [...this.clearedDungeons],
       monsterKills: { ...this.monsterKills },
+      codex: this.codex.toSave(),
       combatPrefs: { ...this.combatPrefs },
       autoRetreatNotified: this.autoRetreatNotified || undefined,
       awayLedger: this.awayLedger,
@@ -1842,6 +1901,8 @@ export class PlayerSession {
     session['clearedDungeons'] = new Set(data.clearedDungeons ?? []);
     session['monsterKills'] = sanitizeKillCounts(data.monsterKills);
     session['recentKills'] = [];
+    session['codex'] = CodexKnowledge.fromSave(data.codex);
+    session['codex'].mergeBackfill(session.codexBackfill(data.dungeonRun?.dungeonId));
     session['combatPrefs'] = sanitizeCombatPrefs(data.combatPrefs);
     session['autoRetreatNotified'] = data.autoRetreatNotified === true;
     const level = data.character?.level ?? 0;
@@ -2005,6 +2066,20 @@ export class PlayerSession {
     if (kept) return kept;
     const result = destroyItems(this.character.inventory, itemId, count);
     return result.success ? null : plainError('Cannot destroy item');
+  }
+
+  handleShopBuy(itemId: string): ServerErrorMessage | null {
+    const shop = this.getCurrentShop();
+    if (!shop) return plainError('No shop here');
+    const shopItem = shop.inventory.find(si => si.itemId === itemId);
+    if (!shopItem) return plainError('Item not available in this shop');
+    if (this.getGold() < shopItem.price) return plainError('Not enough gold');
+    if (!this.addOneToInventory(itemId)) return plainError('Inventory full');
+
+    this.deductGold(shopItem.price);
+    this.noteCodexShop(shop.id);
+    this.addLogEntry(`Bought ${this.content.getItem(itemId)?.name ?? itemId} for ${shopItem.price} gold`, 'victory');
+    return null;
   }
 
   /** Sell at the item's sell value; no shop is needed in the room. Null once sold. */

@@ -203,6 +203,7 @@ export class CraftingScreen implements Screen {
       className: this.lastClassName,
       skills: this.worldCache?.getSkillContent().skills,
       extraHtml: renderEquipCompareBlock(def, this.lastEquipment, { ...this.lastItemDefs, ...this.lastState?.itemDefs }),
+      codexLink: true,
     });
   }
 
