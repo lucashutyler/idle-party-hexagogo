@@ -6,7 +6,11 @@ const files = new Map<string, string>();
 vi.mock('fs', () => ({ existsSync: (path: string) => files.has(path) }));
 vi.mock('fs/promises', () => ({
   mkdir: async () => {},
-  readFile: async (path: string) => files.get(path),
+  readFile: async (path: string) => {
+    const content = files.get(path);
+    if (content === undefined) throw Object.assign(new Error(`ENOENT: open ${path}`), { code: 'ENOENT' });
+    return content;
+  },
   writeFile: async (path: string, content: string) => {
     files.set(path, content);
   },
@@ -109,13 +113,13 @@ describe('AccountStore username lookups', () => {
       expect(store.findByUsername('alice')).toBeNull();
     });
 
-    it('forgets everyone when the file cannot be read', async () => {
+    it('refuses a file it cannot read rather than forget everyone', async () => {
       const store = await storeWith(savedAccount('a@example.test', 'Alice'));
 
       files.set(ACCOUNTS_FILE, '{ not json');
-      await store.load();
+      await expect(store.load()).rejects.toThrow('accounts.json');
 
-      expect(store.findByUsername('alice')).toBeNull();
+      expect(store.findByUsername('alice')?.email).toBe('a@example.test');
     });
   });
 

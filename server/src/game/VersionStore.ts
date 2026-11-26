@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, EncounterDefinition, EncounterTableEntry, SetDefinition, ShopDefinition, HenchmanDefinition, TileTypeDefinition, RecipeDefinition, NpcDefinition, QuestDefinition, DungeonDefinition, SkillDefinition, SkillSlot, DesignNote } from '@idle-party-rpg/shared';
 import { migrateWorldData, migrateLegacySkill } from '@idle-party-rpg/shared';
+import { UnreadableDataFileError, displayPath, isJsonObject, readJsonFile, writeFileAtomic } from './JsonFiles.js';
 
 export type VersionStatus = 'draft' | 'published';
 
@@ -41,7 +42,7 @@ interface VersionManifest {
 }
 
 const VERSIONS_DIR = path.resolve('data', 'versions');
-const MANIFEST_FILE = path.join(VERSIONS_DIR, 'manifest.json');
+export const MANIFEST_FILE = path.join(VERSIONS_DIR, 'manifest.json');
 
 /**
  * Manages content version snapshots.
@@ -49,21 +50,30 @@ const MANIFEST_FILE = path.join(VERSIONS_DIR, 'manifest.json');
  */
 export class VersionStore {
   private manifest: VersionManifest = { versions: [], activeVersionId: null };
+  private writeQueue: Promise<void> = Promise.resolve();
 
+  /** Starts fresh only when there is no manifest; a damaged one throws, so boot can't mint a new version over it. */
   async load(): Promise<void> {
+    let manifest: VersionManifest | undefined;
     try {
-      const raw = await fs.readFile(MANIFEST_FILE, 'utf-8');
-      this.manifest = JSON.parse(raw);
-      console.log(`[VersionStore] Loaded ${this.manifest.versions.length} versions`);
-    } catch {
-      // No manifest yet — start empty
-      console.log('[VersionStore] No versions found — starting fresh');
+      manifest = await readManifest();
+    } catch (err) {
+      if (err instanceof UnreadableDataFileError) {
+        console.error(`[VersionStore] ${displayPath(err.file)} is unreadable. Refusing to start so the version list isn't replaced. Restore it from a backup, then restart.`, err.cause);
+      }
+      throw err;
     }
+    if (!manifest) {
+      console.log('[VersionStore] No versions found — starting fresh');
+      return;
+    }
+    this.manifest = manifest;
+    console.log(`[VersionStore] Loaded ${this.manifest.versions.length} versions`);
   }
 
   async save(): Promise<void> {
-    await fs.mkdir(VERSIONS_DIR, { recursive: true });
-    await fs.writeFile(MANIFEST_FILE, JSON.stringify(this.manifest, null, 2));
+    const json = JSON.stringify(this.manifest, null, 2);
+    await this.inWriteOrder(() => writeFileAtomic(MANIFEST_FILE, json, { fsync: true }));
   }
 
   getAll(): ContentVersion[] {
@@ -134,12 +144,7 @@ export class VersionStore {
     if (!version) return { success: false, error: 'Version not found.' };
     if (version.isActive) return { success: false, error: 'Cannot delete the active version.' };
 
-    // Remove snapshot file
-    try {
-      await fs.unlink(this.snapshotPath(id));
-    } catch {
-      // File may not exist
-    }
+    await this.inWriteOrder(() => fs.unlink(this.snapshotPath(id)).catch(() => {}));
 
     this.manifest.versions = this.manifest.versions.filter(v => v.id !== id);
     await this.save();
@@ -214,13 +219,28 @@ export class VersionStore {
   }
 
   async saveSnapshot(id: string, snapshot: ContentSnapshot): Promise<void> {
-    await fs.mkdir(VERSIONS_DIR, { recursive: true });
-    await fs.writeFile(this.snapshotPath(id), JSON.stringify(snapshot, null, 2));
+    const json = JSON.stringify(snapshot, null, 2);
+    await this.inWriteOrder(() => writeFileAtomic(this.snapshotPath(id), json, { fsync: true }));
   }
 
   private snapshotPath(id: string): string {
     return path.join(VERSIONS_DIR, `${id}.json`);
   }
+
+  /** Writes land in call order, so an older manifest can't be renamed over a newer one. A failed write doesn't stop the next. */
+  private inWriteOrder(write: () => Promise<void>): Promise<void> {
+    this.writeQueue = this.writeQueue.then(write, write);
+    return this.writeQueue;
+  }
+}
+
+async function readManifest(): Promise<VersionManifest | undefined> {
+  const value = await readJsonFile<unknown>(MANIFEST_FILE);
+  if (value === undefined) return undefined;
+  if (!isJsonObject(value) || !Array.isArray(value.versions)) {
+    throw new UnreadableDataFileError(MANIFEST_FILE, new Error('it holds something other than a version list'));
+  }
+  return value as unknown as VersionManifest;
 }
 
 /**

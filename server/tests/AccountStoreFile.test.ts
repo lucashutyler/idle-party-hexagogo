@@ -1,12 +1,18 @@
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const files = new Map<string, string>();
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+const ACCOUNTS_PATH = resolve('data', 'accounts.json');
 
 vi.mock('fs', () => ({ existsSync: (path: string) => files.has(path) }));
 vi.mock('fs/promises', () => ({
   mkdir: async () => {},
-  readFile: async (path: string) => files.get(path),
+  readFile: async (path: string) => {
+    const content = files.get(path);
+    if (content === undefined) throw Object.assign(new Error(`ENOENT: open ${path}`), { code: 'ENOENT' });
+    return content;
+  },
   writeFile: async (path: string, content: string) => {
     await tick();
     files.set(path, content);
@@ -100,5 +106,30 @@ describe('AccountStore file handling', () => {
     files.set(accountsFile(), JSON.stringify({ username: 'accounts', target: null, position: { col: 0, row: 0 } }));
 
     await expect(new AccountStore().load()).resolves.toBeUndefined();
+  });
+
+  it('starts with no accounts when there is no file', async () => {
+    const accounts = new AccountStore();
+
+    await accounts.load();
+
+    expect(accounts.getAllAccounts()).toEqual([]);
+    expect(files.size).toBe(0);
+  });
+
+  it.each([
+    ['a half-written file', '{"a@example.test": {"email": "a@exa'],
+    ['an empty file', ''],
+    ['a file of blanks', '  \n'],
+  ])('refuses to load %s, names it, and writes nothing', async (_label, content) => {
+    files.set(ACCOUNTS_PATH, content);
+    const accounts = new AccountStore();
+    const save = vi.spyOn(accounts, 'save');
+
+    await expect(accounts.load()).rejects.toThrow('accounts.json');
+
+    expect(save).not.toHaveBeenCalled();
+    expect(files.get(ACCOUNTS_PATH)).toBe(content);
+    expect(String(vi.mocked(console.error).mock.calls[0]?.[0])).toContain('accounts.json is unreadable. Refusing to start');
   });
 });
