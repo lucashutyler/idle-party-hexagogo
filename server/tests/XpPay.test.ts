@@ -529,7 +529,7 @@ describe('only the roster in a fight is paid', () => {
     const fight = w.entry().battleTimer.battleId;
     const bobBefore = earned(w, 'bob');
     const getPartyId = (u: string) => w.pm.getSessionByUsername(u)?.getPartyId() ?? null;
-    expect(w.pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => w.pm.areSameTile(a, b))).toBe(true);
+    expect(w.pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => w.pm.invitePolicy(a, b))).toBe(true);
     expect(w.pm.acceptPartyInvite('bob', w.partyId)).toBeNull();
     expect(w.entry().battleTimer.battleId).toBe(fight);
     for (const m of combat(w).monsters) m.currentHp = 1;

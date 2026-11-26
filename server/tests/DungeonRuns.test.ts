@@ -197,9 +197,9 @@ async function setupDuo(dungeon = makeDungeon(), others: string[] = []) {
     return session;
   };
   const getPartyId = (u: string) => pm.getSessionByUsername(u)?.getPartyId() ?? null;
-  const sameTile = (a: string, b: string) => pm.areSameTile(a, b);
+  const mayInvite = (a: string, b: string) => pm.invitePolicy(a, b);
   const invite = (inviter: string, invitee: string) => {
-    if (pm.parties.inviteToParty(inviter, invitee, getPartyId, sameTile) !== true) throw new Error('invite failed');
+    if (pm.parties.inviteToParty(inviter, invitee, getPartyId, mayInvite) !== true) throw new Error('invite failed');
   };
   const join = (inviter: string, joiner: string) => {
     const target = getPartyId(inviter)!;

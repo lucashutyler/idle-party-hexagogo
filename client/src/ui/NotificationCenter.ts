@@ -1,11 +1,22 @@
 import type { GameClient } from '../network/GameClient';
-import type { NotificationEntry, NotificationNavigationTarget } from '@idle-party-rpg/shared';
+import type { NotificationEntry, NotificationNavigationTarget, PartyInvite } from '@idle-party-rpg/shared';
 import { resolveNotificationNavigation } from '@idle-party-rpg/shared';
 import { confirmDialog } from './ConfirmDialog';
 import { bringToFront, dismissModals, release, wireFocusOnInteract } from './ModalStack';
+import { PartyInviteCard } from './PartyInviteCard';
 import { deferWhilePressed, setHtml } from './render';
 
 const TOAST_LIFETIME_MS = 6000;
+const PARTY_INVITE_EVENT = 'party_invite_received';
+
+/** An invite notification whose invite is no longer pending. Matches on party id when the entry has one. */
+function isEndedInvite(entry: NotificationEntry, live: readonly PartyInvite[]): boolean {
+  if (entry.eventKey !== PARTY_INVITE_EVENT) return false;
+  const partyId = entry.payload?.partyId;
+  if (typeof partyId === 'string') return !live.some(i => i.partyId === partyId);
+  const inviter = entry.payload?.inviterUsername;
+  return !live.some(i => i.inviterUsername === inviter);
+}
 
 function relativeTime(ms: number): string {
   const diff = Date.now() - ms;
@@ -24,15 +35,17 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Global notification bell + dropdown inbox + live toast stack. The bell mounts into the
- * top HUD's bell slot when present; the dropdown and toasts live in #notification-center-root.
+ * Global notification bell + dropdown inbox + live toast stack + party invite cards. The bell mounts into the
+ * top HUD's bell slot when present; the rest lives in #notification-center-root.
  */
 export class NotificationCenter {
   private root: HTMLElement;
   private bellButton: HTMLButtonElement;
   private toastStack: HTMLElement;
+  private inviteCard: PartyInviteCard;
   private dropdown: HTMLElement | null = null;
   private notifications: NotificationEntry[] = [];
+  private pendingInvites: PartyInvite[] = [];
 
   constructor(
     private gameClient: GameClient,
@@ -54,6 +67,12 @@ export class NotificationCenter {
     const hudSlot = document.querySelector<HTMLElement>('#top-hud .top-hud-bell-slot');
     (hudSlot ?? this.root).appendChild(this.bellButton);
 
+    this.inviteCard = new PartyInviteCard(gameClient, () => {
+      dismissModals();
+      this.onNavigate({ kind: 'party' });
+    });
+    this.root.appendChild(this.inviteCard.root);
+
     this.toastStack = document.createElement('div');
     this.toastStack.className = 'notif-toast-stack';
     this.root.appendChild(this.toastStack);
@@ -62,6 +81,7 @@ export class NotificationCenter {
 
     this.gameClient.subscribe((state) => {
       this.notifications = state.social?.notifications ?? [];
+      this.pendingInvites = state.social?.pendingInvites ?? [];
       this.updateBadge();
       if (this.dropdown) deferWhilePressed(this.dropdown, () => this.renderDropdownList());
     }, { replay: true });
@@ -161,19 +181,22 @@ export class NotificationCenter {
     }
 
     const sorted = [...this.notifications].sort((a, b) => b.createdAt - a.createdAt);
-    setHtml(list, sorted.map(n => `
-      <div class="notif-row${n.readAt === null ? ' notif-row-unread' : ''}">
+    setHtml(list, sorted.map(n => {
+      const ended = isEndedInvite(n, this.pendingInvites);
+      return `
+      <div class="notif-row${n.readAt === null ? ' notif-row-unread' : ''}${ended ? ' notif-row-ended' : ''}">
         <button class="notif-row-main" data-id="${n.id}">
           <span class="notif-row-dot"></span>
           <span class="notif-row-body">
             <span class="notif-row-title">${escapeHtml(n.title)}</span>
-            <span class="notif-row-text">${escapeHtml(n.body)}</span>
+            <span class="notif-row-text">${escapeHtml(n.body)}${ended ? ' <span class="notif-row-ended-note">This invite has ended.</span>' : ''}</span>
             <span class="notif-row-time">${relativeTime(n.createdAt)}</span>
           </span>
         </button>
         <button class="notif-row-dismiss" data-id="${n.id}" aria-label="Dismiss notification">×</button>
       </div>
-    `).join(''));
+    `;
+    }).join(''));
   }
 
   private onListClick(e: Event): void {
@@ -194,7 +217,7 @@ export class NotificationCenter {
   /** Resolves and applies the click-to-navigate target for a notification, closing the dropdown if it navigates. */
   private navigateFor(id: string): void {
     const entry = this.notifications.find(n => n.id === id);
-    if (!entry) return;
+    if (!entry || isEndedInvite(entry, this.pendingInvites)) return;
     const target = resolveNotificationNavigation(entry);
     if (target.kind === 'none') return;
     this.onNavigate(target);
@@ -202,6 +225,7 @@ export class NotificationCenter {
   }
 
   private showToast(notification: NotificationEntry): void {
+    if (notification.eventKey === PARTY_INVITE_EVENT && this.inviteCard.root.isConnected) return;
     const toast = document.createElement('div');
     toast.className = 'notif-toast';
     toast.innerHTML = `

@@ -1,5 +1,14 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.5',
+    notes: [
+      'Party invites now stay on screen with Join and Decline buttons, wherever you are.',
+      'You can invite friends to your party from anywhere, and invites no longer vanish when either of you moves. Accepting brings you to your friend if you could walk there yourself.',
+      'When someone joins your party, you\'re asked whether they can move the party too.',
+      'Old party invites in your notifications now say when they have ended.',
+    ],
+  },
+  {
     version: '2026.11.25.4',
     notes: [
       'Fixed a bug with item amounts in trades and shop sales.',

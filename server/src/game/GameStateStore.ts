@@ -1,5 +1,12 @@
 import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription, DungeonRunState, CombatPrefs, AwayLedger } from '@idle-party-rpg/shared';
 
+/** A party invite this player received. Restored onto the inviter's party as it is after the restart. */
+export interface SavedPartyInvite {
+  inviterUsername: string;
+  timestamp: number;
+  expiresAt: number;
+}
+
 /**
  * Serializable snapshot of a player's persistent state.
  */
@@ -66,6 +73,8 @@ export interface PlayerSaveData {
   partyHenchmen?: HiredHenchman[];
   /** The party's auto run setting, mirrored onto every member's save like `partyHenchmen`. */
   partyAutoRun?: boolean;
+  /** Party invites this player has received and not answered. Absent → none. */
+  partyInvites?: SavedPartyInvite[];
   /** Capped notification inbox (most recent last). */
   notifications?: NotificationEntry[];
   /** Per-category/channel notification opt-ins. Absent → registry defaults apply. */

@@ -419,15 +419,37 @@ describe('SocialScreen confirmations', () => {
   });
 
   describe('outside a dungeon', () => {
-    it('accepts an invite in one tap', () => {
+    it('accepts an invite in one tap from a solo party with no hires', () => {
       const t = setup();
-      t.push(['dave'], partyOfThree);
+      t.push(['dave']);
       t.screen.onActivate();
 
       t.acceptBtn('dave')!.click();
 
       expect(t.send('sendAcceptPartyInvite')).toHaveBeenCalledWith('party_dave');
       expect(document.querySelector('.confirm-ok')).toBeNull();
+      t.screen.onDeactivate();
+    });
+
+    it.each([
+      ['with other players, as the owner', partyOfThree, 'You will leave your party, and another member becomes its owner.'],
+      ['with other players, as a member', {
+        party: { id: 'p0', members: [{ username: 'bob', role: 'owner', gridPosition: 2 }, { username: 'alice', role: 'member', gridPosition: 4 }], henchmen: [] },
+      }, 'You will leave bob\'s party.'],
+      ['with hires', {
+        party: { id: 'p0', members: [{ username: 'alice', role: 'owner', gridPosition: 4 }], henchmen: [{ instanceId: 'h1', henchmanId: 'hm', gridPosition: 0, mapId: 'm' }] },
+      }, 'You will leave your current party. Your hired fighters will leave.'],
+    ])('asks before accepting %s, the way the invite card does', async (_label, social, body) => {
+      const t = setup();
+      t.push(['dave'], social);
+      t.screen.onActivate();
+
+      t.acceptBtn('dave')!.click();
+      expect(document.querySelector('.confirm-title')!.textContent).toBe('Join dave\'s party?');
+      expect(document.querySelector('.confirm-body')!.textContent).toBe(body);
+      expect(t.send('sendAcceptPartyInvite')).not.toHaveBeenCalled();
+      await answerConfirm(true);
+      expect(t.send('sendAcceptPartyInvite')).toHaveBeenCalledWith('party_dave');
       t.screen.onDeactivate();
     });
 
@@ -523,6 +545,43 @@ describe('SocialScreen party room list', () => {
     t.push([], { party: { ...owner, henchmen: [] }, outgoingPartyInvites: ['bob'] }, bobHere);
     expect(invite().disabled).toBe(true);
     expect(invite().textContent).toBe('Invited');
+  });
+
+  it('says under a plain member that they can\'t move the party', () => {
+    const t = setup();
+    t.push([], partyOfThree);
+    t.screen.onActivate();
+    const row = (name: string) => document.querySelector(`.social-party-roster .social-user-row[data-username="${name}"]`)!;
+    const note = (name: string) => row(name).querySelector('.social-user-note')?.textContent ?? null;
+
+    expect(note('bob')).toBe('Can\'t move the party');
+    expect(row('bob').querySelector('.social-promote-btn')).not.toBeNull();
+    expect(note('carol')).toBeNull();
+    expect(note('alice')).toBeNull();
+  });
+
+  it('points a leader with no one in the room to friends, wherever they are', () => {
+    const t = setup();
+    t.push([], { party: { ...owner, henchmen: [] } });
+    t.screen.onActivate();
+
+    const roster = document.querySelector('.social-party-roster')!.textContent!;
+    expect(roster).toContain('You can invite a friend from anywhere');
+    expect(roster).not.toContain('Walk to');
+  });
+
+  it('says where each invite is from', () => {
+    const t = setup();
+    t.push([], {
+      pendingInvites: [
+        { partyId: 'party_bob', inviterUsername: 'bob', roomName: 'Camp', zoneName: 'Test Vale', sameMap: true },
+        { partyId: 'party_carol', inviterUsername: 'carol', sameMap: false },
+      ],
+    });
+    t.screen.onActivate();
+
+    const subs = [...document.querySelectorAll('.social-user-row[data-party-id] .social-user-sub')].map(s => s.textContent);
+    expect(subs).toEqual(['In Camp, Test Vale', 'On another map']);
   });
 
   it('turns the invite off with a reason when the party is full', () => {
@@ -873,9 +932,29 @@ describe('user popup', () => {
     const t = setup();
     t.push([], {}, { otherPlayers: [{ username: 'bob', col: 0, row: 0 }] });
     t.screen.showUserPopup('bob', anchor());
+    expect(item('Invite to Party')!.querySelector('.user-popup-note')).toBeNull();
     item('Invite to Party')!.click();
     expect(t.send('sendInviteParty')).toHaveBeenCalledWith('bob');
     expect(document.querySelector('.user-popup-menu')).toBeNull();
+  });
+
+  it('enables the invite for a friend in another room, and says what happens', () => {
+    const t = setup();
+    t.push([], { friends: ['bob'] }, { otherPlayers: [{ username: 'bob', col: 5, row: 5 }] });
+    t.screen.showUserPopup('bob', anchor());
+    const invite = item('Invite to Party')!;
+    expect(invite.disabled).toBe(false);
+    expect(invite.querySelector('.user-popup-note')?.textContent).toBe('They join you where you are, if they can walk here.');
+
+    invite.click();
+    expect(t.send('sendInviteParty')).toHaveBeenCalledWith('bob');
+  });
+
+  it('keeps the invite off for a stranger in another room', () => {
+    const t = setup();
+    t.push([], { friends: ['carol'] }, { otherPlayers: [{ username: 'bob', col: 5, row: 5 }] });
+    t.screen.showUserPopup('bob', anchor());
+    expect(item('Invite to Party')!.disabled).toBe(true);
   });
 
   it('closes through Back and Escape, the X and the backdrop', () => {

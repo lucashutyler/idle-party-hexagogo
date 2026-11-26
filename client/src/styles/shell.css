@@ -598,6 +598,15 @@ body[data-chat-layout="full"] #chat-popout-root .chat-popout {
 .notif-dropdown-actions [hidden] {
   display: none;
 }
+.notif-row-ended .notif-row-title {
+  color: var(--text-2);
+}
+.notif-row-ended-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+  font-style: italic;
+}
 body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropdown) {
   display: none;
 }
@@ -611,6 +620,135 @@ body[data-active-screen="suspended"] :is(#notification-center-root, .notif-dropd
   position: absolute;
   inset: -9px 0;
 }
+/* ── Party invite cards ──────────────────────────────────── */
+/* Under every ModalStack z-index (from 1500), over the nav, and always clear of it. */
+.party-invite-overlay {
+  position: fixed;
+  left: calc(8px + var(--safe-left));
+  right: calc(8px + var(--safe-right));
+  bottom: calc(var(--nav-total) + var(--strip-height) + 8px);
+  z-index: 1400;
+  max-width: 420px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+body[data-chat-open="1"] .party-invite-overlay {
+  bottom: calc(var(--nav-total) + var(--chat-sheet-height) + 8px);
+}
+body:is([data-chat-open="1"][data-chat-layout="full"], [data-chat-typing]) .party-invite-overlay {
+  display: none;
+}
+.party-invite-list,
+.party-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.party-invite-card,
+.party-invite-more {
+  pointer-events: auto;
+}
+.party-invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--grad-panel);
+  border: 2px solid var(--gold);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-2);
+  font-family: var(--font-body);
+  color: var(--text-1);
+  animation: party-invite-in 180ms ease-out;
+}
+@keyframes party-invite-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .party-invite-card { animation: none; }
+}
+.party-invite-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.party-invite-title {
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+.party-invite-title strong {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  color: var(--gold);
+}
+.party-invite-where {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.party-invite-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.party-invite-btn,
+.party-invite-later,
+.party-invite-more {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid var(--gold);
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.party-invite-btn {
+  flex: 1;
+  font-size: var(--fs-md);
+  background: transparent;
+  color: var(--text-1);
+}
+:is(.party-invite-join, .party-prompt-promote) {
+  background: var(--gold);
+  color: #3a2200;
+}
+.party-invite-later {
+  flex: none;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+  background: transparent;
+  color: var(--text-2);
+}
+.party-invite-more {
+  align-self: flex-end;
+  font-size: var(--fs-sm);
+  background: var(--grad-panel);
+  color: var(--gold);
+}
+:is(.party-invite-btn, .party-invite-later, .party-invite-more):focus-visible {
+  outline: 2px solid var(--text-1);
+  outline-offset: 2px;
+}
+@media (min-width: 860px), (orientation: landscape) and (max-height: 500px) {
+  .party-invite-overlay,
+  body[data-chat-open="1"] .party-invite-overlay {
+    left: calc(var(--rail-width) + var(--safe-left) + 12px);
+    right: auto;
+    bottom: calc(12px + var(--safe-bottom));
+    width: 360px;
+    max-width: calc(100vw - var(--rail-width) - var(--safe-left) - var(--safe-right) - 24px);
+    margin: 0;
+  }
+}
+
 @media (max-width: 767px) {
   .notif-dropdown {
     left: 0 !important;
