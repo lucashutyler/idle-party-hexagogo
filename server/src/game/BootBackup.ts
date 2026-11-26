@@ -15,10 +15,8 @@ export function bootBackupName(at: Date): string {
 }
 
 /**
- * Copy every file in `files` that exists, byte for byte and damaged or not, into
- * `<dataDir>/boot-backups/<time>/` at its path inside `dataDir`, then keep the newest
- * {@link BOOT_BACKUPS_KEPT}. Skipped when the files match the newest backup, so a crash loop
- * can't push older backups out. Never throws. See docs/architecture/persistence.md.
+ * Copy each existing file, damaged or not, into `<dataDir>/boot-backups/<time>/` and keep the newest {@link BOOT_BACKUPS_KEPT};
+ * skipped when nothing changed since the newest, so a crash loop keeps older ones. Never throws. See docs/architecture/persistence.md.
  */
 export async function backUpDataFiles(dataDir: string, files: readonly string[], at: Date = new Date()): Promise<string | undefined> {
   try {
