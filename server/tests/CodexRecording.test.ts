@@ -275,6 +275,55 @@ describe('Codex drops', () => {
   });
 });
 
+describe('Codex shops from buying', () => {
+  const marker = (session: PlayerSession) => session.getState([]).character!.codexVersion!;
+
+  it('records the shop of a purchase made before any fight in its room', async () => {
+    const { login, moveTo } = await setup(['alice']);
+    const { session: alice } = await login('alice');
+    moveTo('alice', 'mill');
+    alice.grantGold(10);
+    const before = marker(alice);
+
+    expect(alice.handleShopBuy('rope')).toBeNull();
+
+    expect(codexOf(alice).shops).toEqual(['mill_post']);
+    expect(codexOf(alice).recent?.[0]).toEqual({ kind: 'shop', id: 'mill_post' });
+    expect(marker(alice)).not.toBe(before);
+  });
+
+  it('records nothing for a purchase that fails', async () => {
+    const { login, moveTo } = await setup(['alice']);
+    const { session: alice } = await login('alice');
+    moveTo('alice', 'mill');
+    alice.deductGold(alice.getGold());
+    const before = marker(alice);
+
+    expect(alice.handleShopBuy('rope')).toEqual({ type: 'error', message: 'Not enough gold' });
+    alice.grantGold(10);
+    expect(alice.handleShopBuy('lamp')).toEqual({ type: 'error', message: 'Item not available in this shop' });
+    inventoryOf(alice).rope = MAX_STACK;
+    expect(alice.handleShopBuy('rope')).toEqual({ type: 'error', message: 'Inventory full' });
+
+    expect(codexOf(alice).shops).toBeUndefined();
+    expect(marker(alice)).toBe(before);
+  });
+
+  it('records the entrance room\'s shop for a purchase made during a dungeon run', async () => {
+    const { pm, login, moveTo, partyOf, fight } = await setup(['alice']);
+    const { session: alice } = await login('alice');
+    moveTo('alice', 'gate');
+    expect(pm.partyBattles.enterDungeon(partyOf('alice'), 'damp_cave').success).toBe(true);
+    fight('alice');
+    alice.grantGold(10);
+
+    expect(alice.handleShopBuy('lamp')).toBeNull();
+
+    expect(codexOf(alice).shops).toEqual(['gate_stall']);
+    expect(codexOf(alice).items).toContain('lamp');
+  });
+});
+
 describe('Codex items from every way into the bags', () => {
   it('adds dungeon rewards, shop buys, quest rewards, gifts, trades and crafts', async () => {
     const { pm, content, login } = await setup();

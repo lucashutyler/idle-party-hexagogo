@@ -712,36 +712,11 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        const shop = session.getCurrentShop();
-        if (!shop) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No shop here' }));
+        const refusal = session.handleShopBuy(msg.itemId);
+        if (refusal) {
+          ws.send(JSON.stringify(refusal));
           return;
         }
-
-        // Check item is in shop inventory
-        const shopItem = shop.inventory.find(si => si.itemId === msg.itemId);
-        if (!shopItem) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Item not available in this shop' }));
-          return;
-        }
-
-        // Check player has enough gold
-        if (session.getGold() < shopItem.price) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not enough gold' }));
-          return;
-        }
-
-        // Check inventory space (addOneToInventory checks MAX_STACK)
-        if (!session.addOneToInventory(msg.itemId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Inventory full' }));
-          return;
-        }
-
-        // Deduct gold (item already added above)
-        session.deductGold(shopItem.price);
-
-        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
-        session.addLogEntry(`Bought ${itemDef?.name ?? msg.itemId} for ${shopItem.price} gold`, 'victory');
         playerManager.sendStateToPlayer(username);
         return;
       }
@@ -1303,6 +1278,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;
         }
+        session.noteCodexShop(shop.id);
 
         const partyId = session.getPartyId();
         if (partyId) {

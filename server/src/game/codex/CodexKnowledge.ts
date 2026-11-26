@@ -78,10 +78,12 @@ export class CodexKnowledge {
       return fresh;
     }
     if (place.encounterId !== undefined) this.add(this.encounters, place.encounterId, CODEX_CAPS.encounters);
-    if (place.shopId !== undefined && this.add(this.shops, place.shopId, CODEX_CAPS.shops)) {
-      this.pushRecent({ kind: 'shop', id: place.shopId });
-    }
+    if (place.shopId !== undefined) this.noteShop(place.shopId);
     return fresh;
+  }
+
+  noteShop(shopId: string): void {
+    if (this.add(this.shops, shopId, CODEX_CAPS.shops)) this.pushRecent({ kind: 'shop', id: shopId });
   }
 
   noteDrop(monsterId: string, itemId: string): void {

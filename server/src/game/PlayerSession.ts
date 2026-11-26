@@ -1420,6 +1420,11 @@ export class PlayerSession {
     this.addLogEntry(`New in your Codex: ${names.join(', ')}.`, 'codex', { codex: { kind: 'monster', id: fresh[0] } });
   }
 
+  /** Credit a shop the player bought or hired from, as a fight in its room would. */
+  noteCodexShop(shopId: string): void {
+    this.codex.noteShop(shopId);
+  }
+
   /** This player's whole Codex reply; its version is the `codexVersion` the state carries. */
   buildCodex(): ServerCodexMessage {
     const unlocked = this.unlockSystem.getUnlockedKeys();
@@ -2064,6 +2069,20 @@ export class PlayerSession {
   }
 
   /** Sell at the item's sell value; no shop is needed in the room. Null once sold. */
+  handleShopBuy(itemId: string): ServerErrorMessage | null {
+    const shop = this.getCurrentShop();
+    if (!shop) return plainError('No shop here');
+    const shopItem = shop.inventory.find(si => si.itemId === itemId);
+    if (!shopItem) return plainError('Item not available in this shop');
+    if (this.getGold() < shopItem.price) return plainError('Not enough gold');
+    if (!this.addOneToInventory(itemId)) return plainError('Inventory full');
+
+    this.deductGold(shopItem.price);
+    this.noteCodexShop(shop.id);
+    this.addLogEntry(`Bought ${this.content.getItem(itemId)?.name ?? itemId} for ${shopItem.price} gold`, 'victory');
+    return null;
+  }
+
   handleSellItems(itemId: string, quantity: number): ServerErrorMessage | null {
     if (!isWholeItemCount(quantity)) return plainError('Invalid quantity');
     if (this.getInventoryCount(itemId) < quantity) return plainError('Not enough items');
