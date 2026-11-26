@@ -304,7 +304,6 @@ export function codexHomeHtml(ctx: CodexViewContext, opts: CodexHomeOptions): st
     + `<p class="codex-footnote">${ADDED_AS_YOU_PLAY}</p>`;
 }
 
-/** Builds row HTML for the shown slice only. */
 function pagedRows<T>(items: readonly T[], shown: number, key: string, row: (item: T) => string): string {
   const left = items.length - shown;
   return `<div class="codex-rows">${items.slice(0, shown).map(row).join('')}</div>${left > 0 ? moreButton(left, key) : ''}`;
@@ -313,7 +312,6 @@ function pagedRows<T>(items: readonly T[], shown: number, key: string, row: (ite
 const MEMO_KEYS_PER_INDEX = 64;
 const memos = new WeakMap<CodexIndex, Map<string, unknown>>();
 
-/** Sorted and grouped lists, kept per index so a repaint with the same inputs sorts nothing. */
 function memoised<T>(index: CodexIndex, key: string, build: () => T): T {
   let perIndex = memos.get(index);
   if (!perIndex) memos.set(index, perIndex = new Map());

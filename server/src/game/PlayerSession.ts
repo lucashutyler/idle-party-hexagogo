@@ -2068,7 +2068,6 @@ export class PlayerSession {
     return result.success ? null : plainError('Cannot destroy item');
   }
 
-  /** Sell at the item's sell value; no shop is needed in the room. Null once sold. */
   handleShopBuy(itemId: string): ServerErrorMessage | null {
     const shop = this.getCurrentShop();
     if (!shop) return plainError('No shop here');
@@ -2083,6 +2082,7 @@ export class PlayerSession {
     return null;
   }
 
+  /** Sell at the item's sell value; no shop is needed in the room. Null once sold. */
   handleSellItems(itemId: string, quantity: number): ServerErrorMessage | null {
     if (!isWholeItemCount(quantity)) return plainError('Invalid quantity');
     if (this.getInventoryCount(itemId) < quantity) return plainError('Not enough items');
