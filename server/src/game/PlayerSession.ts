@@ -217,6 +217,7 @@ export class PlayerSession {
   private chatFocus: { channelType: string; channelId: string } | null = null;
   private availableQuests: { key: string; ids: string[]; computedAt: number; staleAt: number } | null = null;
   private questGuide: { key: string; guide: QuestGuide; computedAt: number; staleAt: number } | null = null;
+  private acceptingQuestId: string | null = null;
   /** Per-player quest tracking. */
   quests: QuestSystem;
 
@@ -442,8 +443,9 @@ export class PlayerSession {
     this.quests.recomputeCollect(this.content.getQuestCatalog(), itemId => this.getInventoryCount(itemId));
   }
 
+  /** A quest ready the moment it is accepted is announced after the "Accepted quest" line instead. */
   private handleQuestEvent(event: QuestEvent, forward?: (event: QuestEvent) => void): void {
-    if (event.type === 'ready') this.announceQuestReady(event.questId);
+    if (event.type === 'ready' && event.questId !== this.acceptingQuestId) this.announceQuestReady(event.questId);
     forward?.(event);
   }
 
@@ -839,13 +841,20 @@ export class PlayerSession {
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
 
-    const reason = this.quests.accept(def, {
-      playerLevel: this.character.level,
-      partySize,
-      currentTileId: this.getCurrentTile?.()?.id,
-    });
+    this.acceptingQuestId = questId;
+    let reason: string | null;
+    try {
+      reason = this.quests.accept(def, {
+        playerLevel: this.character.level,
+        partySize,
+        currentTileId: this.getCurrentTile?.()?.id,
+      });
+    } finally {
+      this.acceptingQuestId = null;
+    }
     if (reason) return { success: false, error: reason };
     this.addLogEntry(`Accepted quest: ${def.name}`, 'battle');
+    if (this.quests.isStatus(questId, 'ready')) this.announceQuestReady(questId);
     return { success: true };
   }
 
@@ -1840,6 +1849,7 @@ export class PlayerSession {
     session['notificationPreferences'] = data.notificationPreferences ?? emptyNotificationPreferences();
     session['pushSubscriptions'] = data.pushSubscriptions ? [...data.pushSubscriptions] : [];
     session['chatFocus'] = null;
+    session['acceptingQuestId'] = null;
 
     // Restore craft queue (lazy completion happens on next tick)
     session['craftQueue'] = data.craftQueue

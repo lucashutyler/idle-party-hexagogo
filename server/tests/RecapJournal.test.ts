@@ -159,6 +159,14 @@ describe('Quests ready to turn in', () => {
       .toEqual(['Quest ready to turn in: Pelts for the Tanner']);
   });
 
+  it('announces a quest ready on accept after the accept line', () => {
+    const { session } = setup();
+    expect(session.handleAcceptQuest('teeth', 1)).toEqual({ success: true });
+    expect(journal(session).slice(-2)).toEqual(['Accepted quest: A Bag of Teeth', 'Quest ready to turn in: A Bag of Teeth']);
+    expect(session.handleAcceptQuest('pelts', 1)).toEqual({ success: true });
+    expect(journal(session).slice(-1)).toEqual(['Accepted quest: Pelts for the Tanner']);
+  });
+
   it('journals through a restored session and still forwards quest events to the caller', () => {
     const { session, content } = setup();
     const grids = (session as unknown as { grids: WorldGrids }).grids;
