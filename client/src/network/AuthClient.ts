@@ -22,10 +22,12 @@ export interface LoginStatusResult {
   email?: string;
   username?: string | null;
   error?: string;
+  deactivated?: boolean;
 }
 
 export interface ApproveResult {
   success?: boolean;
+  needsCode?: boolean;
   error?: string;
 }
 
@@ -84,6 +86,13 @@ export async function pollLoginStatus(loginId: string): Promise<LoginStatusResul
   return jsonFetch<LoginStatusResult>(
     `${API_BASE}/login-status?loginId=${encodeURIComponent(loginId)}`
   );
+}
+
+export async function submitLoginCode(loginId: string, code: string): Promise<LoginStatusResult> {
+  return jsonFetch<LoginStatusResult>(`${API_BASE}/login-code`, {
+    method: 'POST',
+    body: JSON.stringify({ loginId, code }),
+  });
 }
 
 export async function approveLogin(token: string): Promise<ApproveResult> {

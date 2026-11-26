@@ -5,7 +5,7 @@ import express from 'express';
 import { AccountStore } from '../src/auth/AccountStore.js';
 import { createAuthRoutes } from '../src/auth/authRoutes.js';
 import type { InviteListStore } from '../src/auth/InviteListStore.js';
-import type { TokenStore } from '../src/auth/TokenStore.js';
+import { TokenStore } from '../src/auth/TokenStore.js';
 
 const EMAIL = 'player@example.test';
 const OTHER_EMAIL = 'other@example.test';
@@ -50,7 +50,7 @@ describe('POST /auth/username', () => {
     });
     app.use('/auth', createAuthRoutes({
       accountStore: accounts,
-      tokenStore: {} as TokenStore,
+      tokenStore: new TokenStore(),
       inviteListStore: {} as InviteListStore,
     }));
     server = await new Promise<Server>(resolve => {

@@ -1,6 +1,7 @@
 import { GameClient } from './network/GameClient';
 import { WorldCache } from './network/WorldCache';
-import { getSession, loginWithEmail, verifyToken, pollLoginStatus, setUsername } from './network/AuthClient';
+import { getSession, loginWithEmail, verifyToken, pollLoginStatus, setUsername, submitLoginCode } from './network/AuthClient';
+import type { LoginStatusResult } from './network/AuthClient';
 import { ScreenManager } from './screens/ScreenManager';
 import { LoginScreen } from './screens/LoginScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
@@ -73,6 +74,7 @@ export class App {
   private xpBar?: PersistentXpBar;
   private chatPopout?: ChatPopout;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private loginId: string | null = null;
   private recapModal?: RecapModal;
   private masteryToasts?: MasteryToasts;
   private openOptionsDelegate?: (e: MouseEvent) => void;
@@ -131,6 +133,8 @@ export class App {
     // Login screen (now email-based)
     this.loginScreen = new LoginScreen('screen-login', (email) => {
       this.handleEmailLogin(email);
+    }, (code) => {
+      this.handleLoginCode(code);
     });
     this.screenManager.register('login', document.getElementById('screen-login')!, this.loginScreen);
 
@@ -229,6 +233,49 @@ export class App {
     } catch {
       this.loginScreen.showError('Could not connect to server');
       this.loginScreen.setLoading(false);
+    }
+  }
+
+  private async handleLoginCode(code: string): Promise<void> {
+    const loginId = this.loginId;
+    if (!loginId) return;
+
+    try {
+      const result = await submitLoginCode(loginId, code);
+      if (this.loginId !== loginId) return;
+      await this.finishSignIn(result, () => {
+        this.loginScreen.showCodeError(result.error ?? 'That code didn\'t work. Please try again.');
+      });
+    } catch {
+      if (this.loginId === loginId) this.loginScreen.showCodeError('Could not connect to server');
+    }
+  }
+
+  /** Acts on a poll or code result; `onPending` runs when the sign-in is still waiting. */
+  private async finishSignIn(result: LoginStatusResult, onPending: () => void): Promise<void> {
+    if (result.deactivated) {
+      this.stopPolling();
+      this.showSuspensionScreen(result.email);
+      return;
+    }
+    if (result.status === 'approved') {
+      this.stopPolling();
+      await this.enterAfterSignIn(result);
+      return;
+    }
+    if (result.status === 'expired') {
+      this.stopPolling();
+      this.loginScreen.showExpired();
+      return;
+    }
+    onPending();
+  }
+
+  private async enterAfterSignIn(result: LoginStatusResult): Promise<void> {
+    if (result.username) {
+      await this.connectAndEnterGame();
+    } else {
+      this.screenManager.switchTo('username');
     }
   }
 
@@ -357,26 +404,13 @@ export class App {
 
   private startPolling(loginId: string): void {
     this.stopPolling();
+    this.loginId = loginId;
 
     this.pollTimer = setInterval(async () => {
       try {
         const result = await pollLoginStatus(loginId);
-
-        if (result.status === 'approved') {
-          this.stopPolling();
-          if (result.username) {
-            await this.connectAndEnterGame();
-          } else {
-            this.screenManager.switchTo('username');
-          }
-          return;
-        }
-
-        if (result.status === 'expired') {
-          this.stopPolling();
-          this.loginScreen.showExpired();
-          return;
-        }
+        if (this.loginId !== loginId) return;
+        await this.finishSignIn(result, () => {});
       } catch {
         // Network error during poll: keep trying silently
       }
@@ -384,6 +418,7 @@ export class App {
   }
 
   private stopPolling(): void {
+    this.loginId = null;
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;

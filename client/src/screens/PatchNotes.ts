@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.3',
+    notes: [
+      'Signing in on a new device now uses a 6-digit code from your sign-in email.',
+      'Direct-message emails no longer include the message itself.',
+    ],
+  },
+  {
     version: '2026.11.25.1',
     notes: [
       'Autorun now walks your party a room every second instead of about every 6, so travelling is much faster and safer: you\'re gone before monsters get a swing in. A fight you win before moving on (say, with an Archer\'s first arrow) still pays; one you leave unfinished gives no XP, loot or kill progress, though visiting rooms still counts for quests. Rooms you haven\'t uncovered still need a full fight, and running by hand works as before.',

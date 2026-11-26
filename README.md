@@ -25,7 +25,7 @@ npm run build        # build shared types first (required before first dev run)
 npm run dev
 ```
 
-In dev mode, email verification is instant — enter any email, choose "Email me a sign-in link", pick a username, and you're in.
+In dev mode, email verification is instant — enter any email, choose "Email me a sign-in code", pick a username, and you're in.
 
 ## Production Setup
 
@@ -79,8 +79,8 @@ else needs configuring.
 
 Each instance needs its own `PORT` (the script scans sibling installs, suggests
 the next free one, and refuses a collision) and its own `APP_URL`, which drives
-both magic-link redirects and the CORS origin. `SESSION_SECRET` should be distinct
-per instance. The SES credentials can be shared. Note that magic-link emails are
+both sign-in email links and the CORS origin. `SESSION_SECRET` should be distinct
+per instance. The SES credentials can be shared. Note that sign-in emails are
 branded "Idle Party RPG" regardless of instance — only the link URL differs.
 
 ### Environment Variables
@@ -284,7 +284,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 ### Server
 - [x] Node.js/TypeScript server
 - [x] Per-player game state (independent battle timers, movement, unlocks)
-- [x] Email-based magic link authentication (dev auto-verify, prod via AWS SES)
+- [x] Email sign-in (dev auto-verify; prod via AWS SES with a 6-digit code, or the email's link opened in the asking browser)
 - [x] Session cookies (express-session, 30-day expiry, httpOnly)
 - [x] Account system (email + username)
 - [x] WebSocket auth via session cookie (no WS login messages)
@@ -296,7 +296,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Low mobile data use: state pushes leave out what a socket already holds, player rosters go out as changes, and WebSocket messages are compressed
 
 ### UI
-- [x] Login screen with email input (sign-in link with resend) + username choice screen; class pick with a reply timeout
+- [x] Login screen with email input (sign-in code field, resend) + username choice screen; class pick with a reply timeout
 - [x] Map tab with hex rendering (three.js WebGL canvas + HTML overlay, loaded on first Map visit)
 - [x] Other players visible on map (per-room flags within same zone, readable +N/×N counts that scale with zoom, party token)
 - [x] Browser tab resume (instant state request, party snaps, camera re-centres while following)
