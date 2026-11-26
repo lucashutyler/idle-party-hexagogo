@@ -26,6 +26,12 @@ describe('codex.css', () => {
     expect(css).toMatch(/\.codex-status,\s*\.codex-empty,\s*\.codex-footnote\s*\{[^}]*overflow-wrap:\s*anywhere/);
   });
 
+  it('gives the Bestiary row\'s small link a 44 px hit area', () => {
+    const rule = css.match(/button\.bestiary-codex::before\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(rule).toMatch(/width:\s*44px/);
+    expect(rule).toMatch(/height:\s*44px/);
+  });
+
   it('keeps hidden rows hidden although .ui-row is a flex box', () => {
     expect(css).toMatch(/\.settings-row\[hidden\][^{]*\{\s*display:\s*none/);
   });
