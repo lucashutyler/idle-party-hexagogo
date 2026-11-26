@@ -3,9 +3,14 @@ import {
   isRoomGateEmpty,
   toRoomRequirements,
   mergeRoomRequirements,
+  resolveTileRequirements,
   validateRoomEntry,
+  validateRoomEntryAll,
 } from '../src/systems/RoomRequirements';
-import type { RoomEntryMemberInfo, RoomEntryLabels } from '../src/systems/RoomRequirements';
+import type { RoomEntryMemberInfo, RoomEntryLabels, RoomEntryRequirements } from '../src/systems/RoomRequirements';
+import { HexTile } from '../src/hex/HexTile';
+import type { TileTypeDefinition } from '../src/hex/HexTile';
+import { createCube } from '../src/hex/HexUtils';
 
 describe('RoomRequirements', () => {
   const member = (over: Partial<RoomEntryMemberInfo> = {}): RoomEntryMemberInfo => ({
@@ -166,6 +171,86 @@ describe('RoomRequirements', () => {
     it('passes every gate vacuously for an empty member list', () => {
       const reqs = { minLevel: 99, requiredItemId: 'lantern', requiredQuestIds: ['q_intro'] };
       expect(validateRoomEntry(reqs, [])).toBeNull();
+    });
+  });
+
+  describe('validateRoomEntryAll', () => {
+    const reqs = { minLevel: 20, requiredItemId: 'lantern', requiredQuestIds: ['q_intro', 'q_bridge', 'q_extra'] };
+
+    it('is empty when there is no gate or every requirement is met', () => {
+      expect(validateRoomEntryAll(undefined, [member()])).toEqual([]);
+      const ready = member({
+        level: 20,
+        equippedItemIds: new Set(['lantern']),
+        completedQuestIds: new Set(['q_intro', 'q_bridge', 'q_extra']),
+      });
+      expect(validateRoomEntryAll(reqs, [ready])).toEqual([]);
+    });
+
+    it('lists every unmet requirement, item then level then each quest in list order', () => {
+      const members = [
+        member({ username: 'Alice', level: 25, completedQuestIds: new Set(['q_bridge']) }),
+        member({ username: 'Bob', level: 3, equippedItemIds: new Set(['lantern']), completedQuestIds: new Set(['q_intro', 'q_bridge']) }),
+      ];
+      const failures = validateRoomEntryAll(reqs, members, { questName: id => `Quest ${id}` });
+      expect(failures.map(f => [f.kind, f.questId ?? f.itemId ?? f.minLevel, f.missingPlayers])).toEqual([
+        ['item', 'lantern', ['Alice']],
+        ['level', 20, ['Bob']],
+        ['quest', 'q_intro', ['Alice']],
+        ['quest', 'q_extra', ['Alice', 'Bob']],
+      ]);
+      expect(failures[3].reason).toBe('"Quest q_extra" must be completed to enter this room.');
+    });
+
+    it('starts with exactly the failure validateRoomEntry reports', () => {
+      const gates: RoomEntryRequirements[] = [
+        reqs,
+        { minLevel: 30, requiredQuestIds: ['q_bridge'] },
+        { requiredQuestIds: ['q_bridge', 'q_intro'] },
+        { requiredItemId: 'boots' },
+      ];
+      const members = [member({ level: 22, equippedItemIds: new Set(['lantern']), completedQuestIds: new Set(['q_intro']) })];
+      for (const gate of gates) {
+        expect(validateRoomEntryAll(gate, members)[0]).toEqual(validateRoomEntry(gate, members));
+      }
+    });
+  });
+
+  describe('resolveTileRequirements', () => {
+    const type = (over: Partial<TileTypeDefinition> = {}): TileTypeDefinition => ({
+      id: 'lava', name: 'Lava', icon: '', color: '#ff0000', traversable: true, ...over,
+    });
+    const hexTile = (
+      tileTypeDef: TileTypeDefinition | undefined,
+      requiredItemId?: string,
+      entryRequirements?: RoomEntryRequirements,
+    ) => new HexTile(createCube(0, 0), 'lava', 'zone', 'room-1', requiredItemId, tileTypeDef, entryRequirements);
+
+    const cases: [string, TileTypeDefinition | undefined, string | undefined, RoomEntryRequirements | undefined][] = [
+      ['ungated', type(), undefined, undefined],
+      ['type-only', type({ entryRequirements: { minLevel: 10, requiredItemId: 'boots' } }), undefined, undefined],
+      ['room-only', type(), undefined, { requiredQuestIds: ['q_intro'] }],
+      ['merged', type({ entryRequirements: { requiredItemId: 'boots', minLevel: 5 } }), undefined, { minLevel: 25 }],
+      ['legacy type item', type({ requiredItemId: 'boots' }), undefined, { minLevel: 3 }],
+      ['legacy room item', type({ entryRequirements: { minLevel: 4 } }), 'lantern', undefined],
+      ['legacy item under an explicit one', type({ requiredItemId: 'boots' }), 'lantern', { requiredItemId: 'key' }],
+      ['no tile type', undefined, 'lantern', { minLevel: 2 }],
+    ];
+
+    it.each(cases)('matches HexTile.entryRequirements: %s', (_name, typeDef, legacyItem, roomReqs) => {
+      const tile = hexTile(typeDef, legacyItem, roomReqs);
+      const resolved = resolveTileRequirements({ entryRequirements: roomReqs, requiredItemId: legacyItem }, typeDef);
+      expect(resolved).toEqual(tile.entryRequirements);
+    });
+
+    it('merges a room over its type field by field', () => {
+      const resolved = resolveTileRequirements(
+        { entryRequirements: { minLevel: 25 } },
+        { entryRequirements: { requiredItemId: 'boots', minLevel: 5 } },
+      );
+      expect(resolved).toEqual({ minLevel: 25, requiredItemId: 'boots' });
+      expect(resolveTileRequirements(undefined, undefined)).toBeUndefined();
+      expect(resolveTileRequirements({ requiredItemId: 'lantern' }, undefined)).toEqual({ requiredItemId: 'lantern' });
     });
   });
 

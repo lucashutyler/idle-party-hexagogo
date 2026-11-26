@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cubeToPixel, offsetToCube } from '@idle-party-rpg/shared';
-import type { QuestDefinition, QuestProgressEntry, ServerStateMessage } from '@idle-party-rpg/shared';
+import type { HexTile, MapTransitionLink, QuestDefinition, QuestProgressEntry, ServerStateMessage } from '@idle-party-rpg/shared';
 
 vi.mock('three', () => {
   class Stub {
@@ -23,6 +23,7 @@ vi.mock('three', () => {
 
 import { ThreeWorldMap } from '../src/ui/ThreeWorldMap';
 import { WorldCache } from '../src/network/WorldCache';
+import { previewRoomLock, previewTravelLock } from '../src/ui/RoomEntryCheck';
 
 const TILES = [
   { id: 't-home', mapId: 'overworld', col: 0, row: 0, type: 'plains', zone: 'z', zoneName: 'Zone', name: 'Home', npcId: 'mira', dungeonId: 'caves' },
@@ -35,12 +36,12 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-async function makeCache(): Promise<WorldCache> {
+async function makeCache(tiles: unknown[] = TILES): Promise<WorldCache> {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url === '/api/world') return json({
       startTile: { col: 0, row: 0 },
       maps: [{ id: 'overworld', name: 'Overworld', startTile: { col: 0, row: 0 } }],
-      tiles: TILES,
+      tiles,
       tileTypes: { plains: { id: 'plains', name: 'Plains', icon: '', color: '#00ff00', traversable: true } },
       shops: { store: { id: 'store', name: 'General Store', sellsItems: true, hiresHenchmen: false } },
     });
@@ -188,6 +189,110 @@ describe('ThreeWorldMap overlays', () => {
     const badges = [...container.querySelectorAll<HTMLElement>('.three-map-badge')].map(b => b.textContent);
     expect(badges.sort()).toEqual(['+1', '×2']);
     expect(container.querySelectorAll('.three-map-dungeon-key')).toHaveLength(2);
+  });
+
+  describe('locks', () => {
+    const LOCK_TILES = [
+      { id: 't-home', mapId: 'overworld', col: 0, row: 0, type: 'plains', zone: 'z', zoneName: 'Zone', name: 'Home' },
+      { id: 't-hall', mapId: 'overworld', col: 1, row: 0, type: 'plains', zone: 'z', zoneName: 'Zone', name: 'Hall', npcId: 'mira', shopId: 'store', entryRequirements: { minLevel: 10 } },
+      { id: 't-den', mapId: 'overworld', col: 2, row: 0, type: 'plains', zone: 'z', zoneName: 'Zone', name: 'Den', entryRequirements: { requiredQuestIds: ['q-x'] } },
+      { id: 't-door', mapId: 'overworld', col: 3, row: 0, type: 'plains', zone: 'z', zoneName: 'Zone', name: 'Door', transitions: [{ mapId: 'cellar', tileId: 't-cellar', entryRequirements: { minLevel: 10 } }] },
+      { id: 't-far', mapId: 'overworld', col: 6, row: 0, type: 'plains', zone: 'far', zoneName: 'Far', name: 'Far', entryRequirements: { minLevel: 10 } },
+      { id: 't-cellar', mapId: 'cellar', col: 2, row: 0, type: 'plains', zone: 'c', zoneName: 'Cellar', name: 'Cellar Door' },
+    ];
+
+    function lockState(level: number, completed: string[] = []): ServerStateMessage {
+      return makeState({
+        unlocked: ['t-home', 't-hall', 't-door'],
+        otherPlayers: [],
+        character: { level, equipment: {}, inventory: {} } as unknown as ServerStateMessage['character'],
+        completedQuests: completed.map(questId => ({ questId, completedAt: '' })),
+        social: { party: { members: [{ username: 'me' }] }, allPlayers: [] } as unknown as ServerStateMessage['social'],
+      });
+    }
+
+    async function lockedMap() {
+      const cache = await makeCache(LOCK_TILES);
+      const map = new ThreeWorldMap(container, cache);
+      const room = vi.fn((tile: HexTile, state: ServerStateMessage) => previewRoomLock(tile.entryRequirements, state) !== null);
+      const travel = vi.fn((link: MapTransitionLink, state: ServerStateMessage) =>
+        previewTravelLock(link, cache.getTileByGuid(link.tileId), cache, state) !== null);
+      map.setLockCheck({ room, travel });
+      return { map, room, travel };
+    }
+
+    const rounded = (x: number, y: number) => [Math.round(x * 100) / 100 + 0, Math.round(y * 100) / 100 + 0];
+    const padlockSpots = () => [...container.querySelectorAll<HTMLElement>('.three-map-locks .three-map-lock')]
+      .map(el => rounded(parseFloat(el.style.left), parseFloat(el.style.top)));
+    const spot = (col: number, row: number) => {
+      const p = cubeToPixel(offsetToCube({ col, row }));
+      return rounded(p.x, p.y);
+    };
+
+    it('padlocks locked rooms in zones the player knows, explored or not, and never in an unknown zone', async () => {
+      const { map } = await lockedMap();
+      map.applyServerState(lockState(1));
+      expect(padlockSpots()).toEqual([spot(1, 0), spot(2, 0)]);
+      expect(container.querySelector('.three-map-lock')!.textContent).toBe('🔒');
+    });
+
+    it('sits between the quest outlines and the markers', async () => {
+      await lockedMap();
+      const layers = [...container.querySelector('.three-map-overlay')!.children].map(el => el.className);
+      expect(layers.indexOf('three-map-locks')).toBe(layers.indexOf('three-map-quest-targets') + 1);
+      expect(layers.indexOf('three-map-locks')).toBeLessThan(layers.indexOf('three-map-markers'));
+    });
+
+    it("lets the padlock stand in for a locked room's npc and shop, and pips a locked exit", async () => {
+      const { map } = await lockedMap();
+      map.applyServerState(lockState(1));
+      const markers = [...container.querySelectorAll('.three-map-marker')];
+      expect(markers.map(m => m.textContent)).toEqual(['🌀']);
+      expect(markers[0].querySelector('.travel-lock-pip')).not.toBeNull();
+      expect(hoverRoom(container, 1, 0)).toEqual(['Zone: Hall', '🔒 Locked']);
+      expect(hoverRoom(container, 3, 0)).toEqual(['Zone: Door', '🌀 Cellar Door · Locked']);
+    });
+
+    it('asks again only when the lock preview key moves, then redraws locks and markers', async () => {
+      const { map, room, travel } = await lockedMap();
+      map.applyServerState(lockState(1));
+      const roomCalls = room.mock.calls.length;
+      const travelCalls = travel.mock.calls.length;
+      const padlock = container.querySelector('.three-map-lock');
+      const marker = container.querySelector('.three-map-marker');
+
+      map.applyServerState(lockState(1));
+      map.applyServerState(lockState(1), true);
+      expect(room).toHaveBeenCalledTimes(roomCalls);
+      expect(travel).toHaveBeenCalledTimes(travelCalls);
+      expect(container.querySelector('.three-map-lock')).toBe(padlock);
+      expect(container.querySelector('.three-map-marker')).toBe(marker);
+
+      map.applyServerState(lockState(10));
+      expect(room.mock.calls.length).toBeGreaterThan(roomCalls);
+      expect(padlockSpots()).toEqual([spot(2, 0)]);
+      expect([...container.querySelectorAll('.three-map-marker')].map(m => m.textContent)).toEqual(['🧙🪙', '🌀']);
+      expect(container.querySelector('.travel-lock-pip')).toBeNull();
+
+      map.applyServerState(lockState(10, ['q-x']));
+      expect(padlockSpots()).toEqual([]);
+    });
+
+    it('draws nothing without a lock check', async () => {
+      const map = new ThreeWorldMap(container, await makeCache(LOCK_TILES));
+      map.applyServerState(lockState(1));
+      expect(container.querySelector('.three-map-lock')).toBeNull();
+      expect([...container.querySelectorAll('.three-map-marker')].map(m => m.textContent)).toEqual(['🧙🪙', '🌀']);
+    });
+
+    it('tells walk-connected rooms apart from rooms only a door reaches', async () => {
+      const { map } = await lockedMap();
+      map.applyServerState(lockState(1));
+      expect(map.getWalkableArea(0, 0)).not.toBeNull();
+      expect(map.getWalkableArea(3, 0)).toBe(map.getWalkableArea(0, 0));
+      expect(map.getWalkableArea(6, 0)).not.toBe(map.getWalkableArea(0, 0));
+      expect(map.getWalkableArea(9, 9)).toBeNull();
+    });
   });
 
   it('builds the tile info for the current room', async () => {

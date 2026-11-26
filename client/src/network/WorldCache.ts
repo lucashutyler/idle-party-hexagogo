@@ -1,5 +1,11 @@
-import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, getSlotSchedule } from '@idle-party-rpg/shared';
-import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, ShopSummary, SkillDefinition, SkillSlot, SkillContent, ClassName } from '@idle-party-rpg/shared';
+import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, getSlotSchedule } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, ShopSummary, SkillDefinition, SkillSlot, SkillContent, ClassName, TileType } from '@idle-party-rpg/shared';
+
+export interface MapRoomsFound {
+  name: string;
+  found: number;
+  total: number;
+}
 
 /** Without the server's catalog there is no telling whether this world has Attack skills, so none are shown. */
 const FALLBACK_SKILLS = Object.fromEntries(Object.entries(SEED_SKILLS).filter(([, skill]) => skill.type !== 'attack'));
@@ -217,6 +223,32 @@ export class WorldCache {
     return this.tiles.get(`${mapId}:${col},${row}`);
   }
 
+  /**
+   * Walkable rooms found and in all, per map in world order, for every map with any.
+   * A locked room the fog has lifted from counts as found; unknown ids are skipped.
+   */
+  roomsFoundByMap(unlockedIds: readonly string[]): Map<string, MapRoomsFound> {
+    const byMap = new Map<string, MapRoomsFound>();
+    for (const map of this.maps) byMap.set(map.id, { name: map.name || map.id, found: 0, total: 0 });
+    for (const tile of this.tiles.values()) {
+      if (!this.isWalkableRoom(tile)) continue;
+      let entry = byMap.get(tile.mapId);
+      if (!entry) {
+        entry = { name: tile.mapId, found: 0, total: 0 };
+        byMap.set(tile.mapId, entry);
+      }
+      entry.total++;
+    }
+    for (const id of new Set(unlockedIds)) {
+      const tile = this.tilesByGuid.get(id);
+      if (tile && this.isWalkableRoom(tile)) byMap.get(tile.mapId)!.found++;
+    }
+    for (const [mapId, entry] of byMap) {
+      if (entry.total === 0) byMap.delete(mapId);
+    }
+    return byMap;
+  }
+
   /** Get the start tile position. */
   getStartTile(): { col: number; row: number } {
     return this.startTile;
@@ -290,5 +322,11 @@ export class WorldCache {
   /** Check if world data has been loaded. */
   get isLoaded(): boolean {
     return this.tiles.size > 0;
+  }
+
+  private isWalkableRoom(tile: WorldTileDefinition): boolean {
+    if (tile.type === 'void') return false;
+    const def = this.tileTypeDefs.get(tile.type);
+    return def ? def.traversable : TILE_CONFIGS[tile.type as TileType]?.traversable ?? true;
   }
 }

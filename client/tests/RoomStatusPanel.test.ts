@@ -83,6 +83,27 @@ describe('RoomStatusPanel', () => {
     expect(chips()[0].querySelector('.quest-ready-pip')).toBeNull();
   });
 
+  it('puts a padlock on a locked travel chip and says so, but still lets it be tapped', () => {
+    const onAction = vi.fn();
+    const status = mount(onAction);
+    const door: RoomAction = { kind: 'travel', icon: '🌀', name: 'Cellar', targetId: 'cellar', locked: true };
+    const open: RoomAction = { kind: 'travel', icon: '🌀', name: 'Attic', targetId: 'attic' };
+    status.update(makeStatus({ actions: [door, open] }));
+
+    const [locked, unlocked] = chips();
+    expect(locked.classList.contains('room-status-chip-locked')).toBe(true);
+    expect(locked.querySelector('.room-status-chip-badge')?.textContent).toBe('🔒');
+    expect(locked.getAttribute('aria-label')).toBe('Travel to Cellar · Locked');
+    expect(unlocked.classList.contains('room-status-chip-locked')).toBe(false);
+    expect(unlocked.querySelector('.room-status-chip-badge')).toBeNull();
+
+    locked.click();
+    expect(onAction).toHaveBeenCalledWith(door);
+
+    status.update(makeStatus({ actions: [{ ...door, locked: undefined }, open] }));
+    expect(chips()[0].querySelector('.room-status-chip-badge')).toBeNull();
+  });
+
   it('holds a repaint while a chip is pressed, so the tap still lands', () => {
     vi.useFakeTimers();
     try {

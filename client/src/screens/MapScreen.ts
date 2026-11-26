@@ -1,4 +1,4 @@
-import type { ServerStateMessage } from '@idle-party-rpg/shared';
+import type { MapTransitionLink, ServerStateMessage, WorldTileDefinition } from '@idle-party-rpg/shared';
 import { toShopSummary } from '@idle-party-rpg/shared';
 import { OFFLINE_NOTICE } from '../network/GameClient';
 import type { GameClient } from '../network/GameClient';
@@ -12,8 +12,9 @@ import { AUTO_RUN_FILL_HTML, AutoRunFill } from '../ui/AutoRunFill';
 import type { RoomForecastState } from '../ui/RoomView';
 import { isForecastStale } from '../combat/ForecastFormat';
 import { RoomStatusPanel } from '../ui/RoomStatusPanel';
-import { actionLabel, getRoomActions, questMarks } from '../ui/RoomActions';
-import type { RoomAction, RoomActionLookups } from '../ui/RoomActions';
+import { actionLabel, getRoomActions, lockTravel, questMarks } from '../ui/RoomActions';
+import type { RoomAction, RoomActionLookups, RoomContents } from '../ui/RoomActions';
+import { NO_WALKING_ROUTE_TEXT, previewRoomLock, previewTravelLock, roomLockLines, roomRequirements } from '../ui/RoomEntryCheck';
 import { ShopPopup } from '../ui/ShopPopup';
 import { RoomSheet } from '../ui/RoomSheet';
 import type { RoomSheetModel } from '../ui/RoomSheet';
@@ -300,6 +301,10 @@ export class MapScreen implements Screen {
   private wireMap(map: ThreeWorldMap): void {
     map.setSendMove((col, row) => { this.tryMove(col, row); });
     map.setOnTileClick((info) => { this.onRoomTap(info); });
+    map.setLockCheck({
+      room: (tile, state) => previewRoomLock(tile.entryRequirements, state) !== null,
+      travel: (link, state) => this.travelLocked(link, state),
+    });
     map.setOnBackgroundClick((blocked) => {
       this.dismissSheet();
       if (blocked) this.showMoveToast(BLOCKED_ROOM_TEXT);
@@ -395,6 +400,10 @@ export class MapScreen implements Screen {
   }
 
   private goToRoom(info: TileClickInfo): void {
+    if (this.roomSheet?.isShowing(info.col, info.row) && this.roomSheet.isBlocked) {
+      this.roomSheet.pulseLock();
+      return;
+    }
     if (this.tryMove(info.col, info.row)) this.dismissSheet();
   }
 
@@ -409,14 +418,41 @@ export class MapScreen implements Screen {
     const tileDef = this.worldCache.getTile(info.col, info.row);
     return {
       info,
-      actions: info.isUnlocked && tileDef ? getRoomActions(tileDef, this.worldCache, questMarks(state)) : [],
+      actions: info.isUnlocked && tileDef ? this.remoteRoomActions(tileDef, state) : [],
       othersHere: this.map?.countOthersAt(info.col, info.row) ?? 0,
       roomId: tileDef?.id ?? null,
       typeId: tileDef?.type ?? null,
       forecastTileId: tileDef?.id && info.isUnlocked && info.isTraversable ? tileDef.id : null,
       inDungeon: !!state?.dungeon,
       paysNoXp: !!tileDef?.noXp,
+      lock: this.roomLock(tileDef, state),
+      unreachable: this.isUnreachable(info, state),
     };
+  }
+
+  private roomLock(tileDef: WorldTileDefinition | undefined, state: ServerStateMessage | null): string[] | null {
+    const failures = tileDef ? previewRoomLock(roomRequirements(tileDef, this.worldCache), state) : null;
+    return failures ? roomLockLines(failures, state) : null;
+  }
+
+  /** Walls or water cut the room off from the party's, so only a door leads there. */
+  private isUnreachable(info: TileClickInfo, state: ServerStateMessage | null): boolean {
+    if (!state || !this.map) return false;
+    const here = this.map.getWalkableArea(state.party.col, state.party.row);
+    const there = this.map.getWalkableArea(info.col, info.row);
+    return here !== null && there !== null && here !== there;
+  }
+
+  private remoteRoomActions(tileDef: WorldTileDefinition, state: ServerStateMessage | null): RoomAction[] {
+    return this.withTravelLocks(getRoomActions(tileDef, this.worldCache, questMarks(state)), tileDef, state);
+  }
+
+  private withTravelLocks(actions: RoomAction[], room: RoomContents, state: ServerStateMessage | null): RoomAction[] {
+    return lockTravel(actions, room, link => this.travelLocked(link, state));
+  }
+
+  private travelLocked(link: MapTransitionLink, state: ServerStateMessage | null): boolean {
+    return previewTravelLock(link, this.worldCache.getTileByGuid(link.tileId), this.worldCache, state) !== null;
   }
 
   private refreshSheet(): void {
@@ -457,10 +493,13 @@ export class MapScreen implements Screen {
     this.roomView.isTraveling = (state?.party.path?.length ?? 0) > 0;
     if (info.isCurrentTile) {
       this.roomView.actions = state ? this.currentRoomActions(state) : [];
+      this.roomView.blockedLines = [];
     } else {
-      this.roomView.actions = info.isUnlocked && tileDef
-        ? getRoomActions(tileDef, this.worldCache, questMarks(state))
-        : [];
+      this.roomView.actions = info.isUnlocked && tileDef ? this.remoteRoomActions(tileDef, state) : [];
+      this.roomView.blockedLines = [
+        ...(this.roomLock(tileDef, state) ?? []),
+        ...(this.isUnreachable(info, state) ? [NO_WALKING_ROUTE_TEXT] : []),
+      ];
     }
     const explored = info.isCurrentTile || info.isUnlocked;
     this.roomView.forecastTileId = (tileDef?.id && explored && info.isTraversable && !(info.isCurrentTile && state?.dungeon))
@@ -489,12 +528,12 @@ export class MapScreen implements Screen {
       getMaps: () => this.worldCache.getMaps(),
     };
     const room = state.dungeon ? { npcId: tile.npcId, shopId: shop?.id } : { ...tile, shopId: shop?.id };
-    return getRoomActions(room, lookups, questMarks(state));
+    return this.withTravelLocks(getRoomActions(room, lookups, questMarks(state)), room, state);
   }
 
-  /** A round chip shows one word, so a tap that takes the party off this map says where first. */
+  /** A round chip shows one word, so a tap that takes the party off this map says where first; a locked exit lets the server say why instead. */
   private runStatusChip(action: RoomAction): void {
-    if (action.kind === 'travel' && !window.matchMedia?.(SPELLED_OUT_CHIPS_QUERY).matches) {
+    if (action.kind === 'travel' && !action.locked && !window.matchMedia?.(SPELLED_OUT_CHIPS_QUERY).matches) {
       void this.confirmTravel(action);
     } else {
       this.runAction(action);

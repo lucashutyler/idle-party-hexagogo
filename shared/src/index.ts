@@ -40,9 +40,12 @@ export {
   isRoomGateEmpty,
   toRoomRequirements,
   mergeRoomRequirements,
+  resolveTileRequirements,
   validateRoomEntry,
+  validateRoomEntryAll,
 } from './systems/RoomRequirements.js';
 export type {
+  RoomGateSource,
   RoomEntryRequirements,
   RoomEntryMemberInfo,
   RoomEntryLabels,

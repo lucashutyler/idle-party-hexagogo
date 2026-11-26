@@ -180,6 +180,8 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Room actions on explored rooms (map markers for NPCs, shops, dungeon entrances and travel points; hover tooltip lists them plus a player count; NPCs marked with a green `!` for a new quest or a gold `?` for one ready to hand in)
 - [x] Room status panel for the current room (desktop card / mobile chips that talk, shop, enter or travel directly; a travel chip confirms first on phones)
 - [x] Room sheet (tap a room for its name, actions, forecast and Go; tap it again to go)
+- [x] Lock preview (padlocks on rooms and exits the party would be refused, in zones the player knows; the room sheet lists what is missing and withholds Go; rooms only a door reaches say so)
+- [x] Rooms found per region on Hero > Stats
 - [x] Terrain, fog and art layers (procedural terrain from room-type colours, separate fog, room art loaded near the view)
 - [x] Follow camera, route line and route chip with Stop, zone labels, zoom-based detail levels
 - [x] Stop here — tap your own room mid-route to stop (or walk back if you've already left it)
