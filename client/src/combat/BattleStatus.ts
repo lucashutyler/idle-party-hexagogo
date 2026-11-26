@@ -65,7 +65,10 @@ function nextStep(outcome: CombatResult | null, input: BattleStatusInput): strin
 
 /** What the party is doing between fights, or null while a fight is running. */
 export function battleStatus(input: BattleStatusInput): BattleStatus | null {
-  if (!input.hasFight) return { tone: 'idle', title: '', rewards: [], next: regroupText(input) };
+  if (!input.hasFight) {
+    const next = input.walking && !input.regroupSeconds ? walkingText(null) : regroupText(input);
+    return { tone: 'idle', title: '', rewards: [], next };
+  }
   const outcome = outcomeOf(input);
   if (!outcome && !input.walking && !input.regroupSeconds) return null;
   return {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { COMBAT_PACE, DEFAULT_MAP_ID } from '@idle-party-rpg/shared';
+import { COMBAT_PACE, DEFAULT_MAP_ID, RUN_AVAILABLE_MS } from '@idle-party-rpg/shared';
 import type { DungeonDefinition, DungeonForecastInput, HenchmanDefinition, HiredHenchman, ServerForecastMessage, PartyCombatState, CombatEvent } from '@idle-party-rpg/shared';
 import { FORECAST_REQUESTS_PER_WINDOW } from '../src/game/ForecastService.js';
 import { LIVE_FORECAST_DEBOUNCE_MS } from '../src/game/PartyBattleManager.js';
@@ -249,6 +249,19 @@ describe('live battle forecasts', () => {
     expect(live[1].key).toBe(`battle:${battleId}:0`);
     expect(w.svc.get(live[1].key)).toBeNull();
     expect(w.stub.jobs.find(j => j.key === live[1].key)?.input).toMatchObject({ kind: 'battle', henchmenAllowed: true });
+  });
+
+  it('keeps the forecast of the fight a manual Run starts when the party stays', async () => {
+    const w = await forecastWorld({ defaultEncounter: 'brutes' });
+    w.pm.partyBattles.setForecaster(w.svc);
+    w.entry().battleTimer.restartBattle();
+    const first = w.entry().battleTimer.battleId;
+    vi.advanceTimersByTime(RUN_AVAILABLE_MS + 500);
+    expect(w.pm.partyBattles.escapeBattle(w.partyId)).toBe(true);
+    const battleId = w.entry().battleTimer.battleId;
+    expect(battleId).not.toBe(first);
+    vi.advanceTimersByTime(50);
+    expect(forecastMessages(w.ws).filter(m => m.target.battleId === battleId).map(m => m.status)).toEqual(['pending', 'ok']);
   });
 
   it('sends live forecasts only to sockets showing the battle', async () => {

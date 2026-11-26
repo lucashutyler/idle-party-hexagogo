@@ -33,6 +33,8 @@ export class RoomView {
   actions: RoomAction[] = [];
   /** Whether the party is walking a route. Set externally before showing. */
   isTraveling = false;
+  /** Stop here: end the route in whatever room the party has reached, which may be past this one. */
+  onStop: () => void = () => {};
   /** GUID of the room being shown — the per-room artwork override id. Set externally before showing. */
   roomId: string | null = null;
   /** Room to forecast (null hides the forecast). Set externally before showing. */
@@ -186,7 +188,7 @@ export class RoomView {
     this.modal.querySelector('.room-view-close')!.addEventListener('click', () => this.hide());
 
     this.modal.querySelector('.room-view-action-stop')?.addEventListener('click', () => {
-      this.onMove(info.col, info.row);
+      this.onStop();
       this.hide();
     });
 

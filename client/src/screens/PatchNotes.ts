@@ -1,5 +1,17 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.1',
+    notes: [
+      'Autorun now walks your party a room every second instead of about every 6, so travelling is much faster and safer: you\'re gone before monsters get a swing in. A fight you win before moving on (say, with an Archer\'s first arrow) still pays; one you leave unfinished gives no XP, loot or kill progress, though visiting rooms still counts for quests. Rooms you haven\'t uncovered still need a full fight, and running by hand works as before.',
+      'While Autorun walks your party, the Run button on the battle screen and the Autorun button on the map fill up to show when you\'re about to move on.',
+      'While Autorun walks your party, the battle screen stays steady instead of flashing fight banners, and your Victory message stays up while you move on.',
+      'The Stop button on the map now stops your party where it is, even if it has just stepped into the next room.',
+      'The map no longer shifts while you are dragging it or have a room selected.',
+      'Hiring or dismissing a fighter while your party is walking no longer skips past a room.',
+      'While your party is walking between fights, the battle screen now says "Walking on" instead of "Regrouping".',
+    ],
+  },
+  {
     version: '2026.11.09.4',
     notes: [
       'The Auto button is now called Autorun, on both the battle screen and the map, so it is clearer what it does.',

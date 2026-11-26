@@ -284,6 +284,70 @@ describe('CombatScreen', () => {
     expect(runHint()).toBe('The next fight is about to start');
   });
 
+  it('does not charge Run while the server says Autorun is walking the party on', () => {
+    const t = start();
+    const run = () => document.querySelector('.combat-run-btn') as HTMLElement;
+    const runHint = () => document.querySelector('.combat-run-hint')!.textContent;
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { autoRunWalking: true }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(runHint()).toBe('Autorun is walking the party on');
+    expect(run().style.getPropertyValue('--run')).toBe('0.00');
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, autoRunWalking: true }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(runHint()).toBe('Autorun is walking the party on');
+
+    t.push(makeState(1, GOBLIN, []));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(runHint()).toBe('Run becomes available 5 seconds into a fight');
+    expect(Number(run().style.getPropertyValue('--run'))).toBeGreaterThan(0);
+  });
+
+  it('fills Run with Autorun\'s timer while it waits, holds it for the walk and empties it after', () => {
+    const t = start();
+    const bar = document.querySelector('.combat-run-btn .autorun-fill') as HTMLElement;
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel: vi.fn() }) as unknown as Animation);
+    bar.animate = animate;
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { autoRunWalking: true, autoRunLeaveMs: 600 }));
+    expect(animate).toHaveBeenCalledWith([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: 600, easing: 'linear' });
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, autoRunWalking: true }));
+    expect(bar.style.transform).toBe('scaleX(1)');
+
+    t.push(makeState(1, GOBLIN, []));
+    expect(bar.style.transform).toBe('scaleX(0)');
+    expect(animate).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the per-fight banners and dimming while Autorun walks the party on', () => {
+    const elite: ClientCombatUnit = { ...GOBLIN, tier: 'elite' };
+    const t = start();
+    t.push(withBattle(makeState(3, elite, []), { combat: snapshot(3, elite), autoRunWalking: true }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(stage().classList.contains('autorun-walking')).toBe(true);
+
+    const banner = () => document.querySelector('.combat-banner')?.classList.contains('show') ?? false;
+    t.playEvents([{ id: 1, t: 1100, kind: 'battle_start' }], 3);
+    expect(banner()).toBe(false);
+    t.playEvents([{ id: 2, t: 1200, kind: 'battle_end', result: 'victory' }], 3);
+    expect(banner()).toBe(false);
+    expect(document.querySelector('.combat-spark')).toBeNull();
+  });
+
+  it('keeps Victory up when the walk begins before playback reaches the kill', () => {
+    const t = start();
+    const base = makeState(1, GOBLIN, []);
+    const finished = { ...snapshot(1, { ...GOBLIN, hp: 0 }), finished: true, result: 'victory' as const };
+    const onward = { party: { col: 0, row: 0, path: [{ col: 1, row: 0 }] }, character: { ...base.character!, xp: 25 } };
+
+    t.push(withBattle(base, { state: 'result', visual: 'victory', combat: finished, autoRunWalking: true }, onward));
+    t.push(withBattle(base, { state: 'result', visual: 'none', combat: finished, autoRunWalking: true }, onward));
+    expect(statusText()).toBe('Victory+15 XPWalking to Old Mill');
+    expect(stage().classList.contains('victory')).toBe(true);
+  });
+
   it('does not say the party is walking while it waits to fight again', () => {
     const t = start();
     t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, regroupMs: 2000 }));

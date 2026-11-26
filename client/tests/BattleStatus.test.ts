@@ -75,6 +75,11 @@ describe('battleStatus', () => {
   it('says the party is regrouping when there is no fight on the board', () => {
     expect(battleStatus(input({ hasFight: false, visual: 'none' }))).toMatchObject({ tone: 'idle', title: '', next: 'Regrouping' });
   });
+
+  it('says the party is walking on after a run that cleared the board, unless a hold is running', () => {
+    expect(battleStatus(input({ hasFight: false, visual: 'none', walking: true, roomName: 'Old Mill' }))).toMatchObject({ tone: 'idle', title: '', next: 'Walking on' });
+    expect(battleStatus(input({ hasFight: false, visual: 'none', walking: true, regroupSeconds: 2 }))?.next).toBe('Regrouping, 2s');
+  });
 });
 
 describe('rewardLines', () => {

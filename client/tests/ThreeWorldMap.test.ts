@@ -428,6 +428,19 @@ describe('ThreeWorldMap overlays', () => {
     expect(onFollow.mock.lastCall).toEqual([true]);
   });
 
+  it('holds the camera while a room is selected, then catches up when it is cleared', async () => {
+    Object.defineProperty(container, 'clientWidth', { value: 400 });
+    Object.defineProperty(container, 'clientHeight', { value: 400 });
+    const map = new ThreeWorldMap(container, await makeCache());
+    map.applyServerState(makeState());
+    const tween = vi.spyOn(map as unknown as { animateCamera: () => void }, 'animateCamera');
+    map.setSelectedRoom({ col: 1, row: 0 });
+    map.applyServerState(makeState({ party: { col: 12, row: 0, state: 'moving', path: [] } }));
+    expect(tween).not.toHaveBeenCalled();
+    map.setSelectedRoom(null);
+    expect(tween).toHaveBeenCalledOnce();
+  });
+
   it('outlines the selected room', async () => {
     const map = new ThreeWorldMap(container, await makeCache());
     const outline = container.querySelector<HTMLElement>('.three-map-selected')!;

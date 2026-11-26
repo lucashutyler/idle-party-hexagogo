@@ -228,6 +228,7 @@ export class ThreeWorldMap {
   private mousePixelY = 0;
 
   private pointerActive = false;
+  private roomSelected = false;
   private isDragging = false;
   private dragStartClientX = 0;
   private dragStartClientY = 0;
@@ -375,8 +376,12 @@ export class ThreeWorldMap {
 
   /** The room outlined as selected; null clears it. */
   setSelectedRoom(room: { col: number; row: number } | null): void {
+    const released = this.roomSelected && room === null;
+    this.roomSelected = room !== null;
     if (!room) {
       this.selectedEl.style.display = 'none';
+      // The camera held still while the room was selected, and the party may have walked on.
+      if (released && this.following) this.followParty();
       return;
     }
     const p = cubeToPixel(offsetToCube(room));
@@ -684,6 +689,8 @@ export class ThreeWorldMap {
 
   /** One tween, and only when the party has left the inner frame. */
   private followParty(): void {
+    // The map must hold still under a finger, and while a second tap on a selected room may follow.
+    if (this.isDragging || this.isPinching || this.roomSelected) return;
     if (!this.partyLeftFollowFrame()) return;
     const px = cubeToPixel(offsetToCube({ col: this.partyTargetCol, row: this.partyTargetRow }));
     this.animateCamera(px.x, px.y, this.zoom, FOLLOW_TWEEN_MS);
