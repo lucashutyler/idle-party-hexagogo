@@ -81,6 +81,7 @@ export class GameLoop {
   private mailboxStore: MailboxStore;
   private saveInterval?: ReturnType<typeof setInterval>;
   private craftTickInterval?: ReturnType<typeof setInterval>;
+  private saveChain: Promise<void> = Promise.resolve();
   private grids!: WorldGrids;
 
   constructor(store: GameStateStore) {
@@ -230,16 +231,12 @@ export class GameLoop {
   }
 
   /**
-   * Save all player state.
+   * Save all player state. Passes run one at a time, so shutdown waits for a periodic pass in flight.
    */
-  async saveAll(): Promise<void> {
-    const count = this.playerManager.sessionCount;
-    await this.playerManager.saveAll(this.store);
-    if (count > 0) console.log(`[GameLoop] Saved ${count} session(s)`);
-    await this.guildStore.save();
-    await this.tradeStore.save(this.playerManager.trades.getAllTrades());
-    await this.contentStore.persist();
-    await this.versionStore.save();
+  saveAll(): Promise<void> {
+    const pass = () => this.savePass();
+    this.saveChain = this.saveChain.then(pass, pass);
+    return this.saveChain;
   }
 
   /**
@@ -316,5 +313,16 @@ export class GameLoop {
     const relocated = this.playerManager.relocateDisplacedParties(this.grids, this.contentStore);
     this.playerManager.partyBattles.endOrphanedRuns();
     return relocated;
+  }
+
+  private async savePass(): Promise<void> {
+    const count = this.playerManager.sessionCount;
+    const started = performance.now();
+    await this.playerManager.saveAll(this.store);
+    if (count > 0) console.log(`[GameLoop] Saved ${count} session(s) in ${(performance.now() - started).toFixed(0)} ms`);
+    await this.guildStore.save();
+    await this.tradeStore.save(this.playerManager.trades.getAllTrades());
+    await this.contentStore.persistIfDirty();
+    await this.versionStore.save();
   }
 }

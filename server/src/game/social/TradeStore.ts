@@ -1,6 +1,6 @@
-import fs from 'fs/promises';
 import path from 'path';
 import type { TradeState } from '@idle-party-rpg/shared';
+import { UnreadableDataFileError, isJsonObject, moveAside, readJsonFile, writeJsonFileAtomic } from '../JsonFiles.js';
 
 const TRADE_FILE = path.resolve('data', 'trades.json');
 
@@ -13,18 +13,28 @@ const TRADE_FILE = path.resolve('data', 'trades.json');
  * already removed from TradeSystem.
  */
 export class TradeStore {
+  /** An unreadable file is moved aside and no trades are restored, so the next save can't write over it. */
   async load(): Promise<TradeState[]> {
     try {
-      const raw = await fs.readFile(TRADE_FILE, 'utf-8');
-      const arr = JSON.parse(raw) as TradeState[];
-      return Array.isArray(arr) ? arr : [];
-    } catch {
+      return await readTrades() ?? [];
+    } catch (err) {
+      if (!(err instanceof UnreadableDataFileError)) throw err;
+      const aside = await moveAside(TRADE_FILE);
+      console.error(`[TradeStore] Moved an unreadable file to ${aside}; starting with no trades:`, err.cause);
       return [];
     }
   }
 
   async save(trades: TradeState[]): Promise<void> {
-    await fs.mkdir(path.dirname(TRADE_FILE), { recursive: true });
-    await fs.writeFile(TRADE_FILE, JSON.stringify(trades, null, 2));
+    await writeJsonFileAtomic(TRADE_FILE, trades, { space: 2 });
   }
+}
+
+async function readTrades(): Promise<TradeState[] | undefined> {
+  const value = await readJsonFile<unknown>(TRADE_FILE);
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isJsonObject)) {
+    throw new UnreadableDataFileError(TRADE_FILE, new Error('it holds something other than a list of trades'));
+  }
+  return value as unknown as TradeState[];
 }

@@ -1,4 +1,3 @@
-import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import type { MonsterDefinition, ItemDefinition, ZoneDefinition, WorldData, WorldTileDefinition, WorldMapMeta, EncounterDefinition, EncounterTableEntry, TileTypeDefinition } from '@idle-party-rpg/shared';
@@ -14,6 +13,10 @@ import type { SkillDefinition, SkillSlot } from '@idle-party-rpg/shared';
 import type { DesignNote } from '@idle-party-rpg/shared';
 import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES, SEED_RECIPES, SEED_NPCS, SEED_HENCHMEN, SEED_DUNGEONS, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, migrateLegacySet, migrateLegacySkill, findSetConflicts, DEFAULT_MAP_ID, migrateWorldData } from '@idle-party-rpg/shared';
 import { TileType } from '@idle-party-rpg/shared';
+import { ACCOUNTS_FILE } from '../auth/AccountStore.js';
+import { backUpDataFiles } from './BootBackup.js';
+import { UnreadableDataFileError, displayPath, isJsonObject, readJsonFile, writeFileAtomic } from './JsonFiles.js';
+import { MANIFEST_FILE } from './VersionStore.js';
 
 /** Generated definitions merged only where their id is still free. */
 export interface SeedDefinitions {
@@ -44,11 +47,14 @@ const DUNGEONS_FILE = path.join(DATA_DIR, 'dungeons.json');
 const SKILLS_FILE = path.join(DATA_DIR, 'skills.json');
 const SKILL_SLOTS_FILE = path.join(DATA_DIR, 'skill-slots.json');
 const DESIGN_NOTES_FILE = path.join(DATA_DIR, 'design-notes.json');
+const CONTENT_FILES = [
+  MONSTERS_FILE, ITEMS_FILE, ZONES_FILE, WORLD_FILE, ENCOUNTERS_FILE, SETS_FILE, SHOPS_FILE, HENCHMEN_FILE,
+  TILE_TYPES_FILE, RECIPES_FILE, NPCS_FILE, QUESTS_FILE, DUNGEONS_FILE, SKILLS_FILE, SKILL_SLOTS_FILE, DESIGN_NOTES_FILE,
+];
 
 /**
- * Loads and manages game content from JSON files in data/.
- * Follows the GuildStore pattern: in-memory data + JSON file persistence.
- * If data files don't exist, seeds with defaults and saves.
+ * Loads and manages game content from JSON files in data/. Seeds defaults only when none of
+ * the four core files exist; a damaged file stops the load. See docs/architecture/persistence.md.
  */
 export class ContentStore {
   private monsters = new Map<string, MonsterDefinition>();
@@ -76,6 +82,9 @@ export class ContentStore {
     tiles: [],
   };
   private epoch = 0;
+  private changeCount = 0;
+  private writtenChangeCount = 0;
+  private writeQueue: Promise<void> = Promise.resolve();
 
   /** Bumps on every load, save and replace, so anything derived from content (forecasts) can tell it went stale. */
   get contentEpoch(): number {
@@ -84,7 +93,13 @@ export class ContentStore {
 
   async load(): Promise<void> {
     this.epoch++;
-    const exists = await this.tryLoadAll();
+    await backUpDataFiles(DATA_DIR, [...CONTENT_FILES, MANIFEST_FILE, ACCOUNTS_FILE]);
+    const exists = await this.tryLoadAll().catch((err: unknown) => {
+      if (err instanceof UnreadableDataFileError) {
+        console.error(`[ContentStore] ${displayPath(err.file)} is unreadable. Refusing to start so content isn't replaced. Restore it from a backup or from data/versions/<id>.json, then restart.`, err.cause);
+      }
+      throw err;
+    });
     if (!exists) {
       console.log('[ContentStore] No data files found — seeding defaults');
       this.seedDefaults();
@@ -96,28 +111,14 @@ export class ContentStore {
   async save(): Promise<void> {
     // Synchronous, before the first await: every mutator calls save() right after changing content.
     this.epoch++;
+    this.changeCount++;
     await this.persist();
   }
 
-  /** Write the current content to disk without marking it changed (periodic saves). */
-  async persist(): Promise<void> {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(MONSTERS_FILE, JSON.stringify(Array.from(this.monsters.values()), null, 2));
-    await fs.writeFile(ITEMS_FILE, JSON.stringify(Array.from(this.items.values()), null, 2));
-    await fs.writeFile(ZONES_FILE, JSON.stringify(Array.from(this.zones.values()), null, 2));
-    await fs.writeFile(WORLD_FILE, JSON.stringify(this.world, null, 2));
-    await fs.writeFile(ENCOUNTERS_FILE, JSON.stringify(Array.from(this.encounters.values()), null, 2));
-    await fs.writeFile(SETS_FILE, JSON.stringify(Array.from(this.sets.values()), null, 2));
-    await fs.writeFile(SHOPS_FILE, JSON.stringify(Array.from(this.shops.values()), null, 2));
-    await fs.writeFile(HENCHMEN_FILE, JSON.stringify(Array.from(this.henchmen.values()), null, 2));
-    await fs.writeFile(TILE_TYPES_FILE, JSON.stringify(Array.from(this.tileTypes.values()), null, 2));
-    await fs.writeFile(RECIPES_FILE, JSON.stringify(Array.from(this.recipes.values()), null, 2));
-    await fs.writeFile(NPCS_FILE, JSON.stringify(Array.from(this.npcs.values()), null, 2));
-    await fs.writeFile(QUESTS_FILE, JSON.stringify(Array.from(this.quests.values()), null, 2));
-    await fs.writeFile(DUNGEONS_FILE, JSON.stringify(Array.from(this.dungeons.values()), null, 2));
-    await fs.writeFile(SKILLS_FILE, JSON.stringify(Array.from(this.skills.values()), null, 2));
-    await fs.writeFile(SKILL_SLOTS_FILE, JSON.stringify(this.skillSlotSchedulesToArray(), null, 2));
-    await fs.writeFile(DESIGN_NOTES_FILE, JSON.stringify(Array.from(this.designNotes.values()), null, 2));
+  /** Write content only if a change hasn't reached disk yet (a failed write); waits for writes in flight either way. */
+  async persistIfDirty(): Promise<void> {
+    await this.writeQueue.catch(() => {});
+    if (this.changeCount > this.writtenChangeCount) await this.persist();
   }
 
   // --- Accessors ---
@@ -904,6 +905,40 @@ export class ContentStore {
 
   // --- Private ---
 
+  /** Serializes now and queues the write, so writes land in the order of the changes they hold. */
+  private persist(): Promise<void> {
+    const changes = this.changeCount;
+    const files = this.serializeFiles();
+    const write = async () => {
+      await writeAll(files);
+      this.writtenChangeCount = Math.max(this.writtenChangeCount, changes);
+    };
+    this.writeQueue = this.writeQueue.then(write, write);
+    return this.writeQueue;
+  }
+
+  private serializeFiles(): [string, string][] {
+    const json = (value: unknown) => JSON.stringify(value, null, 2);
+    return [
+      [MONSTERS_FILE, json(Array.from(this.monsters.values()))],
+      [ITEMS_FILE, json(Array.from(this.items.values()))],
+      [ZONES_FILE, json(Array.from(this.zones.values()))],
+      [WORLD_FILE, json(this.world)],
+      [ENCOUNTERS_FILE, json(Array.from(this.encounters.values()))],
+      [SETS_FILE, json(Array.from(this.sets.values()))],
+      [SHOPS_FILE, json(Array.from(this.shops.values()))],
+      [HENCHMEN_FILE, json(Array.from(this.henchmen.values()))],
+      [TILE_TYPES_FILE, json(Array.from(this.tileTypes.values()))],
+      [RECIPES_FILE, json(Array.from(this.recipes.values()))],
+      [NPCS_FILE, json(Array.from(this.npcs.values()))],
+      [QUESTS_FILE, json(Array.from(this.quests.values()))],
+      [DUNGEONS_FILE, json(Array.from(this.dungeons.values()))],
+      [SKILLS_FILE, json(Array.from(this.skills.values()))],
+      [SKILL_SLOTS_FILE, json(this.skillSlotSchedulesToArray())],
+      [DESIGN_NOTES_FILE, json(Array.from(this.designNotes.values()))],
+    ];
+  }
+
   private addMissingSeedDefinitions(defs: SeedDefinitions): number {
     let added = 0;
     for (const monster of defs.monsters ?? []) {
@@ -929,173 +964,105 @@ export class ContentStore {
     return Array.from(this.skillSlotSchedules.entries()).map(([className, slots]) => ({ className, slots }));
   }
 
+  /** False when none of the four core files exist. Throws {@link UnreadableDataFileError} rather than load around a damaged file. */
   private async tryLoadAll(): Promise<boolean> {
-    try {
-      const [monstersRaw, itemsRaw, zonesRaw, worldRaw] = await Promise.all([
-        fs.readFile(MONSTERS_FILE, 'utf-8'),
-        fs.readFile(ITEMS_FILE, 'utf-8'),
-        fs.readFile(ZONES_FILE, 'utf-8'),
-        fs.readFile(WORLD_FILE, 'utf-8'),
-      ]);
-
-      const monstersArr: MonsterDefinition[] = JSON.parse(monstersRaw);
-      for (const m of monstersArr) this.monsters.set(m.id, m);
-
-      const itemsArr: ItemDefinition[] = JSON.parse(itemsRaw);
-      for (const i of itemsArr) this.items.set(i.id, i);
-
-      const zonesArr: ZoneDefinition[] = JSON.parse(zonesRaw);
-      for (const z of zonesArr) this.zones.set(z.id, z);
-
-      this.world = JSON.parse(worldRaw);
-
-      // Try loading optional files (may not exist on older installations)
-      try {
-        const encountersRaw = await fs.readFile(ENCOUNTERS_FILE, 'utf-8');
-        const encountersArr: EncounterDefinition[] = JSON.parse(encountersRaw);
-        for (const e of encountersArr) this.encounters.set(e.id, e);
-      } catch {
-        // encounters.json doesn't exist yet — will be created after migration
-      }
-
-      try {
-        const setsRaw = await fs.readFile(SETS_FILE, 'utf-8');
-        const setsArr: SetDefinition[] = JSON.parse(setsRaw);
-        for (const s of setsArr) this.sets.set(s.id, migrateLegacySet(s));
-      } catch {
-        // sets.json doesn't exist yet
-      }
-
-      try {
-        const shopsRaw = await fs.readFile(SHOPS_FILE, 'utf-8');
-        const shopsArr: ShopDefinition[] = JSON.parse(shopsRaw);
-        for (const s of shopsArr) this.shops.set(s.id, s);
-      } catch {
-        // shops.json doesn't exist yet
-      }
-
-      let henchmenSeeded = false;
-      try {
-        const henchmenRaw = await fs.readFile(HENCHMEN_FILE, 'utf-8');
-        const henchmenArr: HenchmanDefinition[] = JSON.parse(henchmenRaw);
-        for (const h of henchmenArr) this.henchmen.set(h.id, h);
-      } catch {
-        // henchmen.json doesn't exist yet
-        if (process.env.NODE_ENV !== 'production') {
-          for (const h of Object.values(SEED_HENCHMEN)) this.henchmen.set(h.id, h);
-          henchmenSeeded = true;
-        }
-      }
-
-      let tileTypesSeeded = false;
-      try {
-        const tileTypesRaw = await fs.readFile(TILE_TYPES_FILE, 'utf-8');
-        const tileTypesArr: TileTypeDefinition[] = JSON.parse(tileTypesRaw);
-        for (const t of tileTypesArr) this.tileTypes.set(t.id, t);
-      } catch {
-        // tile-types.json doesn't exist yet — seed from defaults
-        for (const t of SEED_TILE_TYPES) this.tileTypes.set(t.id, t);
-        tileTypesSeeded = true;
-      }
-
-      let recipesSeeded = false;
-      try {
-        const recipesRaw = await fs.readFile(RECIPES_FILE, 'utf-8');
-        const recipesArr: RecipeDefinition[] = JSON.parse(recipesRaw);
-        for (const r of recipesArr) this.recipes.set(r.id, r);
-      } catch {
-        // recipes.json doesn't exist yet — seed from defaults
-        for (const r of Object.values(SEED_RECIPES)) this.recipes.set(r.id, r);
-        recipesSeeded = true;
-      }
-
-      try {
-        const npcsRaw = await fs.readFile(NPCS_FILE, 'utf-8');
-        const npcsArr: NpcDefinition[] = JSON.parse(npcsRaw);
-        for (const n of npcsArr) this.npcs.set(n.id, n);
-      } catch {
-        // npcs.json doesn't exist yet — start empty (intentionally not seeded
-        // on existing installs; dev-only seed lives in seedDefaults())
-      }
-
-      try {
-        const questsRaw = await fs.readFile(QUESTS_FILE, 'utf-8');
-        const questsArr: QuestDefinition[] = JSON.parse(questsRaw);
-        for (const q of questsArr) this.quests.set(q.id, q);
-      } catch {
-        // quests.json doesn't exist yet — start empty
-      }
-
-      try {
-        const dungeonsRaw = await fs.readFile(DUNGEONS_FILE, 'utf-8');
-        const dungeonsArr: DungeonDefinition[] = JSON.parse(dungeonsRaw);
-        for (const d of dungeonsArr) this.dungeons.set(d.id, d);
-      } catch {
-        // dungeons.json doesn't exist yet
-      }
-
-      try {
-        const designNotesRaw = await fs.readFile(DESIGN_NOTES_FILE, 'utf-8');
-        const designNotesArr: DesignNote[] = JSON.parse(designNotesRaw);
-        for (const n of designNotesArr) this.designNotes.set(n.id, n);
-      } catch {
-        // design-notes.json doesn't exist yet — start empty (no seed; every note is authored)
-      }
-
-      let skillsSeeded = false;
-      try {
-        const skillsRaw = await fs.readFile(SKILLS_FILE, 'utf-8');
-        const skillsArr: SkillDefinition[] = JSON.parse(skillsRaw);
-        for (const s of skillsArr) this.skills.set(s.id, migrateLegacySkill(s));
-      } catch {
-        // skills.json doesn't exist yet — seed from defaults
-        for (const s of Object.values(SEED_SKILLS)) this.skills.set(s.id, s);
-        skillsSeeded = true;
-      }
-
-      let skillSlotsSeeded = false;
-      try {
-        const slotsRaw = await fs.readFile(SKILL_SLOTS_FILE, 'utf-8');
-        const slotsArr: { className: string; slots: SkillSlot[] }[] = JSON.parse(slotsRaw);
-        for (const entry of slotsArr) this.skillSlotSchedules.set(entry.className, entry.slots);
-      } catch {
-        // skill-slots.json doesn't exist yet — seed from defaults
-        for (const [className, slots] of Object.entries(SEED_SKILL_SLOT_SCHEDULES)) {
-          this.skillSlotSchedules.set(className, slots);
-        }
-        skillSlotsSeeded = true;
-      }
-
-      // Migrate: assign GUIDs to any tiles missing an id
-      let migrated = 0;
-      for (const tile of this.world.tiles) {
-        if (!tile.id) {
-          tile.id = crypto.randomUUID();
-          migrated++;
-        }
-      }
-      if (migrated > 0) {
-        console.log(`[ContentStore] Assigned GUIDs to ${migrated} tiles (migration)`);
-      }
-
-      // Normalize legacy single-map worlds into the multi-map shape (mapId / maps / defaultMapId)
-      const worldMigrated = migrateWorldData(this.world);
-
-      // Migrate old-format encounter tables (monsterId → encounterId)
-      const encountersMigrated = this.migrateEncounterTables();
-
-      // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
-      const itemsMigrated = this.migrateItems();
-
-      if (migrated > 0 || worldMigrated || encountersMigrated || itemsMigrated || henchmenSeeded || tileTypesSeeded || recipesSeeded || skillsSeeded || skillSlotsSeeded) {
-        await this.save();
-      }
-
-      console.log(`[ContentStore] Loaded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
-      return true;
-    } catch {
-      return false;
+    const [monstersArr, itemsArr, zonesArr, world] = await Promise.all([
+      readContentList<MonsterDefinition>(MONSTERS_FILE),
+      readContentList<ItemDefinition>(ITEMS_FILE),
+      readContentList<ZoneDefinition>(ZONES_FILE),
+      readWorldFile(WORLD_FILE),
+    ]);
+    if (!monstersArr || !itemsArr || !zonesArr || !world) {
+      const core: [string, unknown][] = [[MONSTERS_FILE, monstersArr], [ITEMS_FILE, itemsArr], [ZONES_FILE, zonesArr], [WORLD_FILE, world]];
+      const missing = core.filter(([, value]) => value === undefined).map(([file]) => file);
+      if (missing.length === core.length) return false;
+      throw new UnreadableDataFileError(missing[0], new Error('it is missing while other content files exist'));
     }
+
+    for (const m of monstersArr) this.monsters.set(m.id, m);
+    for (const i of itemsArr) this.items.set(i.id, i);
+    for (const z of zonesArr) this.zones.set(z.id, z);
+    this.world = world;
+
+    const [encountersArr, setsArr, shopsArr, henchmenArr, tileTypesArr, recipesArr, npcsArr, questsArr, dungeonsArr, designNotesArr, skillsArr, slotsArr] = await Promise.all([
+      readContentList<EncounterDefinition>(ENCOUNTERS_FILE),
+      readContentList<SetDefinition>(SETS_FILE),
+      readContentList<ShopDefinition>(SHOPS_FILE),
+      readContentList<HenchmanDefinition>(HENCHMEN_FILE),
+      readContentList<TileTypeDefinition>(TILE_TYPES_FILE),
+      readContentList<RecipeDefinition>(RECIPES_FILE),
+      readContentList<NpcDefinition>(NPCS_FILE),
+      readContentList<QuestDefinition>(QUESTS_FILE),
+      readContentList<DungeonDefinition>(DUNGEONS_FILE),
+      readContentList<DesignNote>(DESIGN_NOTES_FILE),
+      readContentList<SkillDefinition>(SKILLS_FILE),
+      readContentList<{ className: string; slots: SkillSlot[] }>(SKILL_SLOTS_FILE),
+    ]);
+
+    for (const e of encountersArr ?? []) this.encounters.set(e.id, e);
+    for (const s of setsArr ?? []) this.sets.set(s.id, migrateLegacySet(s));
+    for (const s of shopsArr ?? []) this.shops.set(s.id, s);
+
+    let henchmenSeeded = false;
+    if (henchmenArr) {
+      for (const h of henchmenArr) this.henchmen.set(h.id, h);
+    } else if (process.env.NODE_ENV !== 'production') {
+      for (const h of Object.values(SEED_HENCHMEN)) this.henchmen.set(h.id, h);
+      henchmenSeeded = true;
+    }
+
+    const tileTypesSeeded = !tileTypesArr;
+    for (const t of tileTypesArr ?? SEED_TILE_TYPES) this.tileTypes.set(t.id, t);
+
+    const recipesSeeded = !recipesArr;
+    for (const r of recipesArr ?? Object.values(SEED_RECIPES)) this.recipes.set(r.id, r);
+
+    for (const n of npcsArr ?? []) this.npcs.set(n.id, n);
+    for (const q of questsArr ?? []) this.quests.set(q.id, q);
+    for (const d of dungeonsArr ?? []) this.dungeons.set(d.id, d);
+    for (const n of designNotesArr ?? []) this.designNotes.set(n.id, n);
+
+    const skillsSeeded = !skillsArr;
+    if (skillsArr) {
+      for (const s of skillsArr) this.skills.set(s.id, migrateLegacySkill(s));
+    } else {
+      for (const s of Object.values(SEED_SKILLS)) this.skills.set(s.id, s);
+    }
+
+    const skillSlotsSeeded = !slotsArr;
+    if (slotsArr) {
+      for (const entry of slotsArr) this.skillSlotSchedules.set(entry.className, entry.slots);
+    } else {
+      for (const [className, slots] of Object.entries(SEED_SKILL_SLOT_SCHEDULES)) this.skillSlotSchedules.set(className, slots);
+    }
+
+    // Migrate: assign GUIDs to any tiles missing an id
+    let migrated = 0;
+    for (const tile of this.world.tiles) {
+      if (!tile.id) {
+        tile.id = crypto.randomUUID();
+        migrated++;
+      }
+    }
+    if (migrated > 0) {
+      console.log(`[ContentStore] Assigned GUIDs to ${migrated} tiles (migration)`);
+    }
+
+    // Normalize legacy single-map worlds into the multi-map shape (mapId / maps / defaultMapId)
+    const worldMigrated = migrateWorldData(this.world);
+
+    // Migrate old-format encounter tables (monsterId → encounterId)
+    const encountersMigrated = this.migrateEncounterTables();
+
+    // Migrate items: twoHanded → twohanded slot, remove dodge, classRestriction→array, add value
+    const itemsMigrated = this.migrateItems();
+
+    if (migrated > 0 || worldMigrated || encountersMigrated || itemsMigrated || henchmenSeeded || tileTypesSeeded || recipesSeeded || skillsSeeded || skillSlotsSeeded) {
+      await this.save();
+    }
+
+    console.log(`[ContentStore] Loaded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
+    return true;
   }
 
   /**
@@ -1107,8 +1074,8 @@ export class ContentStore {
     let migrated = false;
 
     // Helper: detect old-format entry (has monsterId field)
-    const isOldFormat = (entry: Record<string, unknown>): boolean => {
-      return 'monsterId' in entry && !('encounterId' in entry);
+    const isOldFormat = (entry: unknown): boolean => {
+      return isJsonObject(entry) && 'monsterId' in entry && !('encounterId' in entry);
     };
 
     // Helper: get or create an encounter definition for an old-format entry
@@ -1130,7 +1097,7 @@ export class ContentStore {
 
     // Migrate zone encounter tables
     for (const zone of this.zones.values()) {
-      if (zone.encounterTable.length > 0 && isOldFormat(zone.encounterTable[0] as unknown as Record<string, unknown>)) {
+      if (Array.isArray(zone.encounterTable) && zone.encounterTable.length > 0 && isOldFormat(zone.encounterTable[0])) {
         const oldTable = zone.encounterTable as unknown as { monsterId: string; weight: number; minCount: number; maxCount: number }[];
         const newTable: EncounterTableEntry[] = oldTable.map(entry => ({
           encounterId: getOrCreateEncounter(entry),
@@ -1143,7 +1110,7 @@ export class ContentStore {
 
     // Migrate tile encounter tables
     for (const tile of this.world.tiles) {
-      if (tile.encounterTable && tile.encounterTable.length > 0 && isOldFormat(tile.encounterTable[0] as unknown as Record<string, unknown>)) {
+      if (Array.isArray(tile.encounterTable) && tile.encounterTable.length > 0 && isOldFormat(tile.encounterTable[0])) {
         const oldTable = tile.encounterTable as unknown as { monsterId: string; weight: number; minCount: number; maxCount: number }[];
         const newTable: EncounterTableEntry[] = oldTable.map(entry => ({
           encounterId: getOrCreateEncounter(entry),
@@ -1329,4 +1296,35 @@ export class ContentStore {
 
     console.log(`[ContentStore] Seeded ${this.monsters.size} monsters, ${this.items.size} items, ${this.zones.size} zones, ${this.encounters.size} encounters, ${this.dungeons.size} dungeons, ${this.world.tiles.length} tiles`);
   }
+}
+
+/** All files written together, so one failure can't leave another write of the same file still running. */
+async function writeAll(files: readonly [string, string][]): Promise<void> {
+  const results = await Promise.allSettled(files.map(([file, json]) => writeFileAtomic(file, json, { fsync: true })));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failure) throw failure.reason;
+}
+
+async function readContentList<T>(file: string): Promise<T[] | undefined> {
+  const value = await readJsonFile<unknown>(file);
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new UnreadableDataFileError(file, new Error('it holds something other than a list'));
+  return objectEntries(file, value) as T[];
+}
+
+async function readWorldFile(file: string): Promise<WorldData | undefined> {
+  const value = await readJsonFile<unknown>(file);
+  if (value === undefined) return undefined;
+  if (!isJsonObject(value) || !Array.isArray(value.tiles)) {
+    throw new UnreadableDataFileError(file, new Error('it holds something other than a world with a list of tiles'));
+  }
+  return { ...value, tiles: objectEntries(file, value.tiles) } as unknown as WorldData;
+}
+
+function objectEntries(file: string, entries: unknown[]): Record<string, unknown>[] {
+  const objects = entries.filter(isJsonObject);
+  if (objects.length < entries.length) {
+    console.warn(`[ContentStore] Skipped ${entries.length - objects.length} entries in ${displayPath(file)} that aren't objects`);
+  }
+  return objects;
 }

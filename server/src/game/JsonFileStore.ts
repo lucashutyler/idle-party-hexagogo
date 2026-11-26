@@ -1,17 +1,21 @@
-import { readFile, writeFile, rename, readdir, mkdir, unlink } from 'fs/promises';
+import { readdir, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
 import { isStoreFileName } from '../auth/reservedUsernames.js';
+import { UnreadableDataFileError, moveAside, readJsonFile, writeJsonFileAtomic } from './JsonFiles.js';
 
 const SAVE_DIR = 'data';
+/** Saves written before the save pass yields to the event loop, so fight timers aren't held up by the whole pass. */
+export const SAVE_CHUNK_SIZE = 25;
+const SAVE_FILE_SUFFIX = '.json';
 
 /**
  * Persists player state as individual JSON files on disk.
- * One file per player: data/<username>.json
+ * One file per player: data/<username>.json, as one-line JSON.
  *
- * Uses atomic writes (write to .tmp, then rename) to prevent
- * corruption if the process is killed mid-write.
+ * Each write goes to a temp file that is renamed over the save, so a kill
+ * mid-write leaves the old save whole.
  */
 export class JsonFileStore implements GameStateStore {
   private dir: string;
@@ -20,50 +24,43 @@ export class JsonFileStore implements GameStateStore {
     this.dir = baseDir ?? SAVE_DIR;
   }
 
-  private filePath(username: string): string {
-    return join(this.dir, `${username}.json`);
-  }
-
-  private async ensureDir(): Promise<void> {
-    if (!existsSync(this.dir)) {
-      await mkdir(this.dir, { recursive: true });
-    }
-  }
-
   async save(data: PlayerSaveData): Promise<void> {
     if (isStoreFileName(data.username)) {
       console.error(`[JsonFileStore] Refusing to save player "${data.username}" over a store file`);
       return;
     }
     await this.ensureDir();
-    const json = JSON.stringify(data, null, 2);
-    const target = this.filePath(data.username);
-    // Use a unique tmp filename to avoid races between concurrent saves
-    const tmp = `${target}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-    // Write to temp file, then atomically rename over the real file.
-    // If the process dies mid-write, only the .tmp is corrupted.
-    await writeFile(tmp, json, 'utf-8');
-    await rename(tmp, target);
+    await writeJsonFileAtomic(this.filePath(data.username), data);
   }
 
+  /** Writes every save even when some fail, then rejects with the first failure. */
   async saveAll(data: PlayerSaveData[]): Promise<void> {
     await this.ensureDir();
-    await Promise.all(data.map(d => this.save(d)));
+    let firstFailure: { error: unknown } | undefined;
+    for (let start = 0; start < data.length; start += SAVE_CHUNK_SIZE) {
+      if (start > 0) await new Promise<void>(resolve => setImmediate(resolve));
+      const results = await Promise.allSettled(data.slice(start, start + SAVE_CHUNK_SIZE).map(d => this.save(d)));
+      for (const result of results) {
+        if (result.status === 'rejected' && !firstFailure) firstFailure = { error: result.reason };
+      }
+    }
+    if (firstFailure) throw firstFailure.error;
   }
 
+  /** An unreadable save is moved aside, so the fresh player that replaces it can't write over it. */
   async load(username: string): Promise<PlayerSaveData | null> {
     if (isStoreFileName(username)) return null;
     const path = this.filePath(username);
-    if (!existsSync(path)) return null;
     try {
-      const raw = await readFile(path, 'utf-8');
-      if (!raw.trim()) {
-        console.warn(`[JsonFileStore] Empty save file for "${username}" — skipping`);
-        return null;
+      return await readJsonFile<PlayerSaveData>(path) ?? null;
+    } catch (err) {
+      if (!(err instanceof UnreadableDataFileError)) throw err;
+      try {
+        const aside = await moveAside(path);
+        console.error(`[JsonFileStore] Moved the unreadable save for "${username}" to ${aside}:`, err.cause);
+      } catch (moveErr) {
+        console.error(`[JsonFileStore] The save for "${username}" is unreadable and could not be moved aside:`, err.cause, moveErr);
       }
-      return JSON.parse(raw) as PlayerSaveData;
-    } catch {
-      console.error(`[JsonFileStore] Failed to load save for "${username}"`);
       return null;
     }
   }
@@ -71,12 +68,11 @@ export class JsonFileStore implements GameStateStore {
   async loadAll(): Promise<PlayerSaveData[]> {
     await this.ensureDir();
     const files = await readdir(this.dir);
-    const jsonFiles = files.filter(f => f.endsWith('.json') && !f.endsWith('.tmp'));
     const results: PlayerSaveData[] = [];
 
-    for (const file of jsonFiles) {
-      const username = file.replace('.json', '');
-      const data = await this.load(username);
+    for (const file of files) {
+      if (!file.endsWith(SAVE_FILE_SUFFIX)) continue;
+      const data = await this.load(file.slice(0, -SAVE_FILE_SUFFIX.length));
       if (data) {
         results.push(data);
       }
@@ -89,6 +85,16 @@ export class JsonFileStore implements GameStateStore {
     const path = this.filePath(username);
     if (existsSync(path)) {
       await unlink(path);
+    }
+  }
+
+  private filePath(username: string): string {
+    return join(this.dir, `${username}${SAVE_FILE_SUFFIX}`);
+  }
+
+  private async ensureDir(): Promise<void> {
+    if (!existsSync(this.dir)) {
+      await mkdir(this.dir, { recursive: true });
     }
   }
 }

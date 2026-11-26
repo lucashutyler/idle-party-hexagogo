@@ -1,8 +1,8 @@
-import { readFile, writeFile, rename, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
+import { writeFile, rename, mkdir } from 'fs/promises';
 import path from 'path';
 import type { AdminRole } from './AdminRoles.js';
 import { isReservedUsername, isStoreFileName } from './reservedUsernames.js';
+import { UnreadableDataFileError, displayPath, readJsonFile } from '../game/JsonFiles.js';
 
 export interface SessionRecord {
   deviceToken: string;
@@ -32,7 +32,7 @@ interface AccountsData {
 }
 
 const DATA_DIR = path.resolve('data');
-const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+export const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 
 export class AccountStore {
   // Only setUsername may change a username: accounts are handed out live, and this index would go stale.
@@ -40,20 +40,19 @@ export class AccountStore {
   private accounts: AccountsData = {};
   private writeQueue: Promise<void> = Promise.resolve();
 
+  /** Starts empty only when there is no file; a damaged one throws, so new sign-ins can't claim existing names. */
   async load(): Promise<void> {
-    if (!existsSync(ACCOUNTS_FILE)) {
-      this.accounts = {};
-      this.rebuildUsernameIndex();
-      return;
-    }
+    let saved: AccountsData | null | undefined;
     try {
-      const raw = await readFile(ACCOUNTS_FILE, 'utf-8');
-      this.accounts = JSON.parse(raw);
-      console.log(`[AccountStore] Loaded ${Object.keys(this.accounts).length} accounts`);
+      saved = await readJsonFile<AccountsData | null>(ACCOUNTS_FILE);
     } catch (err) {
-      console.error('[AccountStore] Failed to load accounts:', err);
-      this.accounts = {};
+      if (err instanceof UnreadableDataFileError) {
+        console.error(`[AccountStore] ${displayPath(err.file)} is unreadable. Refusing to start so accounts aren't replaced. Restore it from a backup, then restart.`, err.cause);
+      }
+      throw err;
     }
+    this.accounts = saved ?? {};
+    if (saved !== undefined) console.log(`[AccountStore] Loaded ${Object.keys(this.accounts).length} accounts`);
     this.rebuildUsernameIndex();
     for (const account of Object.values(this.accounts)) {
       if (account?.username && isStoreFileName(account.username)) {
