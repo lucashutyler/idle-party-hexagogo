@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { CODEX_CAPS, CODEX_DROP_TALLY_MAX, CODEX_RECENT_MAX, isCodexId, isCodexRef } from '@idle-party-rpg/shared';
 import type { CodexKind, CodexRef, CodexSaveData } from '@idle-party-rpg/shared';
 
@@ -14,11 +15,9 @@ export interface CodexBackfill {
 const RECENT_KINDS: readonly CodexKind[] = ['monster', 'item', 'shop'];
 const NO_DROPS: ReadonlyMap<string, number> = new Map();
 
-let serialCounter = 0;
-
 /** What one player has met, fought, held and visited. Pure: no content, no clock. See docs/architecture/codex.md. */
 export class CodexKnowledge {
-  readonly serial = ++serialCounter;
+  readonly serial = randomUUID().slice(0, 8);
   private readonly monsters = new Set<string>();
   private readonly encounters = new Set<string>();
   private readonly items = new Set<string>();

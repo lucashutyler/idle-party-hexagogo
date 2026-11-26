@@ -213,10 +213,11 @@ describe('CodexKnowledge save', () => {
     expect(CodexKnowledge.fromSave(hostile).toSave()).toBeUndefined();
   });
 
-  it('gives every object its own serial', () => {
+  it('gives every object its own opaque serial, not a count', () => {
+    const serials = Array.from({ length: 50 }, () => new CodexKnowledge().serial);
     const a = new CodexKnowledge();
-    const b = CodexKnowledge.fromSave(a.toSave());
-    expect(a.serial).not.toBe(b.serial);
-    expect(new CodexKnowledge().serial).toBeGreaterThan(b.serial);
+    expect(CodexKnowledge.fromSave(a.toSave()).serial).not.toBe(a.serial);
+    expect(new Set(serials).size).toBe(serials.length);
+    for (const serial of serials) expect(serial).toMatch(/^[0-9a-f]{8}$/);
   });
 });

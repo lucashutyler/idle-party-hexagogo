@@ -38,7 +38,7 @@ The first meeting with a monster writes one `codex` journal line, "New in your C
 ## Protocol
 
 - `request_codex` (no payload) → one `codex` message (`ServerCodexMessage`) to the asking socket: `monsters` (met, in discovery order, with kills, received drops by tally and `dropKinds`), `items` (held first, `found: true`, then visited shops' stock not held, `found: false`), `shops` (stock and hires), `tables` (one per distinct table key of the found rooms, kept when it lists a met monster or a known fight), `fights` (indexed by `tables`), `dungeons` and `recent`. Built by `buildCodexMessage` (`server/src/game/codex/CodexBuild.ts`) through `PlayerSession.buildCodex`.
-- Marker: `ClientCharacterState.codexVersion` = `contentEpoch.serial.revision.unlockedCount`, a few bytes in every state push. It moves on any new fact or raised tally (`revision`), any content change (`contentEpoch`), a rebuilt knowledge object after a master reset or an unban login (`serial`, a module counter), and newly found rooms. A reply's `version` is the marker it was built at, so a client refetches only while the marker differs from its copy.
+- Marker: `ClientCharacterState.codexVersion` = `contentEpoch.serial.revision.unlockedCount`, a few bytes in every state push. It moves on any new fact or raised tally (`revision`), any content change (`contentEpoch`), a rebuilt knowledge object after a master reset or an unban login (`serial`, eight random hex characters per object, so it counts nothing), and newly found rooms. A reply's `version` is the marker it was built at, so a client refetches only while the marker differs from its copy.
 - Refused before a character exists, like every message but `set_class`.
 
 ## Content index
