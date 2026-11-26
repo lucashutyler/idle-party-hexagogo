@@ -1,5 +1,9 @@
+import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { countText } from './countText';
+import { questOfferedHere } from './QuestLogModel';
+
+export const NEW_QUEST_HERE_TEXT = 'new quest here';
 
 export interface NavTabConfig {
   id: string;
@@ -19,6 +23,15 @@ export function navIconHtml(id: string, label: string, glyph: string): string {
 
 export function readyQuestCount(activeQuests: readonly { status: string }[] | undefined): number {
   return (activeQuests ?? []).filter(q => q.status === 'ready').length;
+}
+
+/** Someone in the party's room has a quest the player can take, or holds the next main-story step. */
+export function newQuestHere(
+  state: Pick<ServerStateMessage, 'offeredQuestIds' | 'availableQuestIds' | 'questGuide' | 'questGiverNpcId'> | null | undefined,
+): boolean {
+  if (questOfferedHere(state)) return true;
+  const first = state?.questGuide?.steps[0];
+  return first?.status === 'available' && !!state?.questGiverNpcId && !!first.giverNpcIds?.includes(state.questGiverNpcId);
 }
 
 /** Phone tab bar and, at desktop widths, the side rail: same element, laid out by CSS. */
@@ -95,6 +108,18 @@ export class BottomNav {
     this.setTabName(id, text && `${text} ${noun}`);
   }
 
+  /** The ready count wins; with nothing ready, a green dot says someone here has a quest. */
+  private setQuestBadge(state: ServerStateMessage): void {
+    const ready = readyQuestCount(state.activeQuests);
+    this.setCountBadge('quests', ready, 'ready');
+    const badge = this.tabButtons.get('quests')?.querySelector('.nav-badge');
+    const fresh = ready === 0 && newQuestHere(state);
+    badge?.classList.toggle('nav-badge-new', fresh);
+    if (!fresh) return;
+    badge?.classList.add('visible');
+    this.setTabName('quests', NEW_QUEST_HERE_TEXT);
+  }
+
   private setDotBadge(id: string, visible: boolean): void {
     this.tabButtons.get(id)?.querySelector('.nav-badge')?.classList.toggle('visible', visible);
     this.setTabName(id, visible ? 'needs attention' : '');
@@ -120,7 +145,7 @@ export class BottomNav {
         }
       }
       this.tabButtons.get('map')?.classList.toggle('has-path', state.party.path.length > 0);
-      this.setCountBadge('quests', readyQuestCount(state.activeQuests), 'ready');
+      this.setQuestBadge(state);
 
       const social = state.social;
       if (social) {

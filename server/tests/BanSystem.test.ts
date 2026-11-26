@@ -39,6 +39,7 @@ function createFakeContentStore(): ContentStore {
     getTileById: () => undefined,
     getWorld: () => ({ tiles: [], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),
     getAllSets: () => ({}),
+    getQuestCatalog: () => ({}),
     ...fakeSkillContent(),
   } as unknown as ContentStore;
 }

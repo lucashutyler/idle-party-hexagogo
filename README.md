@@ -276,6 +276,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Quest log (utility strip or rail: who has new quests for you, active quests with ready-to-turn-in first and where to turn them in, rows that take you to the room, progress bars; completed quests behind a toggle)
 - [x] Quest discovery (green `!` on NPCs with a quest you can take, quest destinations outlined on the map, objectives name rooms instead of coordinates)
 - [x] Quest popup feedback (Accept / Turn In show progress and the reason for any refusal)
+- [x] Main story guide (main-story quests pinned in gold in the Quest Log with the next step even before it can be taken, a goal line under the battle, a Quests dot when someone in your room has a quest; a visit counts when you accept a quest in its room)
 - [ ] Quest chains / storylines
 
 ### Dungeons

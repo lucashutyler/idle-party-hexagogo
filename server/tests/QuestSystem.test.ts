@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QuestSystem } from '../src/game/QuestSystem.js';
-import type { QuestDefinition } from '@idle-party-rpg/shared';
+import type { QuestDefinition, QuestProgressEntry } from '@idle-party-rpg/shared';
 
 const killGoblinsParty: QuestDefinition = {
   id: 'kill_goblins',
@@ -250,6 +250,113 @@ describe('QuestSystem', () => {
       const entry = restored.getProgress('kill_goblins')!;
       expect(entry.progress).toEqual([1]);
       expect(entry.status).toBe('in_progress');
+    });
+  });
+
+  describe('visit credit on accept', () => {
+    const visitAndKill: QuestDefinition = {
+      ...visitWell,
+      id: 'visit_and_kill',
+      objectives: [
+        { kind: 'kill', monsterId: 'goblin', count: 2 },
+        { kind: 'visit', tileId: 'tile-well-id' },
+        { kind: 'visit', tileId: 'tile-elsewhere' },
+      ],
+    };
+
+    it('counts a visit to the room the party stands in, so the quest is ready at once', () => {
+      const events: string[] = [];
+      const local = new QuestSystem('bob', (e) => events.push(`${e.type}:${e.questId}`));
+      expect(local.accept(visitWell, { playerLevel: 1, partySize: 1, currentTileId: 'tile-well-id' })).toBeNull();
+
+      expect(local.getProgress('visit_well')).toMatchObject({ status: 'ready', progress: [1] });
+      expect(events).toEqual(['accepted:visit_well', 'ready:visit_well']);
+      expect(local.turnIn('visit_well', allQuests, () => true, () => 0).success).toBe(true);
+    });
+
+    it('stays accepted when the party stands somewhere else, or nowhere known', () => {
+      const events: string[] = [];
+      const local = new QuestSystem('bob', (e) => events.push(e.type));
+      local.accept(visitWell, { playerLevel: 1, partySize: 1, currentTileId: 'tile-other' });
+      expect(local.getProgress('visit_well')).toMatchObject({ status: 'accepted', progress: [0] });
+      expect(events).toEqual(['accepted']);
+
+      qs.accept(visitWell, { playerLevel: 1, partySize: 1 });
+      expect(qs.getProgress('visit_well')).toMatchObject({ status: 'accepted', progress: [0] });
+    });
+
+    it('credits only the matching visit of a quest with several objectives', () => {
+      qs.accept(visitAndKill, { playerLevel: 1, partySize: 1, currentTileId: 'tile-well-id' });
+      expect(qs.getProgress('visit_and_kill')).toMatchObject({ status: 'in_progress', progress: [0, 1, 0] });
+    });
+  });
+
+  describe('progress reconcile', () => {
+    const killFive: QuestDefinition = { ...killGoblinsParty, objectives: [{ kind: 'kill', monsterId: 'goblin', count: 5 }] };
+
+    function holding(progress: number[], status: QuestProgressEntry['status'] = 'in_progress'): QuestSystem {
+      const local = new QuestSystem('alice');
+      local.loadFromSaveData({
+        active: [{ questId: 'kill_goblins', status, progress, acceptedAt: '2026-01-01T00:00:00.000Z' }],
+        completed: [{ questId: 'visit_well', completedAt: '2026-01-01T00:00:00.000Z' }],
+        weeklyCompletions: {},
+      });
+      return local;
+    }
+
+    it('makes a holder ready when content lowers a count below their progress', () => {
+      const local = holding([4]);
+      local.recomputeCollect(allQuests, () => 0);
+      expect(local.getProgress('kill_goblins')).toMatchObject({ status: 'ready', progress: [3] });
+      expect(local.turnIn('kill_goblins', allQuests, () => true, () => 0).success).toBe(true);
+    });
+
+    it('does the same while loading a save, given the catalog', () => {
+      const local = new QuestSystem('alice');
+      local.loadFromSaveData({
+        active: [{ questId: 'kill_goblins', status: 'in_progress', progress: [4], acceptedAt: '2026-01-01T00:00:00.000Z' }],
+        completed: [],
+        weeklyCompletions: {},
+      }, allQuests);
+      expect(local.getProgress('kill_goblins')).toMatchObject({ status: 'ready', progress: [3] });
+    });
+
+    it('moves a ready holder back when content raises the count', () => {
+      const local = holding([3], 'ready');
+      local.recomputeCollect({ ...allQuests, kill_goblins: killFive }, () => 0);
+      expect(local.getProgress('kill_goblins')).toMatchObject({ status: 'in_progress', progress: [3] });
+      local.applyKill('goblin', { ...allQuests, kill_goblins: killFive });
+      expect(local.getProgress('kill_goblins')!.progress).toEqual([4]);
+    });
+
+    it('pads an added objective with 0, which keeps the quest from being ready', () => {
+      const local = holding([3], 'ready');
+      const added: QuestDefinition = { ...killGoblinsParty, objectives: [...killGoblinsParty.objectives, { kind: 'visit', tileId: 'tile-well-id' }] };
+      const quests = { ...allQuests, kill_goblins: added };
+      local.recomputeCollect(quests, () => 0);
+      expect(local.getProgress('kill_goblins')).toMatchObject({ status: 'in_progress', progress: [3, 0] });
+
+      local.applyVisit('tile-well-id', quests);
+      expect(local.getProgress('kill_goblins')).toMatchObject({ status: 'ready', progress: [3, 1] });
+    });
+
+    it('drops the progress of a removed objective', () => {
+      const local = holding([2, 1]);
+      local.recomputeCollect(allQuests, () => 0);
+      expect(local.getProgress('kill_goblins')).toMatchObject({ status: 'in_progress', progress: [2] });
+    });
+
+    it('fixes a stored value that is not a number, and keeps a kill from adding to it', () => {
+      const local = holding([Number.NaN]);
+      local.applyKill('goblin', allQuests);
+      expect(local.getProgress('kill_goblins')!.progress).toEqual([1]);
+    });
+
+    it('leaves completed history and quests missing from content alone', () => {
+      const local = holding([9]);
+      local.recomputeCollect({}, () => 0);
+      expect(local.getProgress('kill_goblins')).toMatchObject({ status: 'in_progress', progress: [9] });
+      expect(local.getCompleted()).toEqual([{ questId: 'visit_well', completedAt: '2026-01-01T00:00:00.000Z' }]);
     });
   });
 

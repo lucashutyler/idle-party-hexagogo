@@ -500,10 +500,16 @@ export {
   acceptableQuestIds,
   nextWeeklyReopening,
   initialProgress,
+  isMainQuest,
+  questTitle,
+  MAIN_QUEST_PREFIX,
   SOLO_QUEST_IN_PARTY_REASON,
   WEEKLY_COOLDOWN_MS,
 } from './systems/QuestTypes.js';
 export type {
+  MainStoryStep,
+  MainStoryStepStatus,
+  QuestGuide,
   QuestAcceptContext,
   QuestStatus,
   QuestScope,

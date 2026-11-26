@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PlayerManager } from '../src/game/PlayerManager.js';
+import type { PlayerSession } from '../src/game/PlayerSession.js';
 import { WorldGrids } from '../src/game/WorldGrids.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
@@ -73,8 +74,12 @@ interface QuestContentEditor {
   replaceNpc(npc: NpcDefinition): void;
 }
 
-function createFakeContentStore(world: WorldData): ContentStore & QuestContentEditor {
-  const npcs: Record<string, NpcDefinition> = { [SMITH.id]: SMITH, [FENCE.id]: FENCE, [HERMIT.id]: HERMIT };
+function createFakeContentStore(
+  world: WorldData,
+  quests: Record<string, QuestDefinition> = QUESTS,
+  npcList: NpcDefinition[] = [SMITH, FENCE, HERMIT],
+): ContentStore & QuestContentEditor {
+  const npcs: Record<string, NpcDefinition> = Object.fromEntries(npcList.map(npc => [npc.id, npc]));
   let questRevision = 0;
   return {
     replaceNpc: (npc: NpcDefinition) => { npcs[npc.id] = npc; questRevision++; },
@@ -101,8 +106,8 @@ function createFakeContentStore(world: WorldData): ContentStore & QuestContentEd
     getQuestRevision: () => questRevision,
     getQuestCatalog() { return this.getAllQuests(); },
     getNpc: (id: string) => npcs[id],
-    getAllQuests: () => QUESTS,
-    getQuest: (id: string) => QUESTS[id],
+    getAllQuests: () => quests,
+    getQuest: (id: string) => quests[id],
     getDungeon: () => undefined,
     getAllDungeons: () => ({}),
     ...fakeSkillContent(),
@@ -134,9 +139,9 @@ function createFakeWs(): WebSocket {
   return { readyState: 1, send: vi.fn(), close: vi.fn(), on: vi.fn() } as unknown as WebSocket;
 }
 
-async function setup() {
+async function setup(quests?: Record<string, QuestDefinition>, npcs?: NpcDefinition[]) {
   const world = makeWorld();
-  const content = createFakeContentStore(world);
+  const content = createFakeContentStore(world, quests, npcs);
   const grids = new WorldGrids(content);
   const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice', 'bob']), createFakeStore());
   const session = await pm.login(createFakeWs(), 'alice');
@@ -295,5 +300,97 @@ describe('Quest availability in the state push', () => {
     const { session } = await setup();
 
     expect(session.handleAcceptQuest('q_far', 1)).toEqual({ success: false, error: "That quest isn't offered in this room." });
+  });
+});
+
+const STORY: Record<string, QuestDefinition> = {
+  p_first: quest('p_first', { name: 'Progress: First Steps' }),
+  p_second: quest('p_second', { name: 'Progress: Second Steps', prerequisiteQuestIds: ['p_first'] }),
+  p_high: quest('p_high', { name: 'Progress: Uphill', requiredLevel: 10 }),
+  p_below: quest('p_below', { name: 'Progress: Down Below', objectives: [{ kind: 'visit', tileId: SEWER_HUB }] }),
+};
+const STORY_SMITH: NpcDefinition = { ...SMITH, questIds: ['p_first', 'p_second', 'p_high'] };
+const STORY_FENCE: NpcDefinition = { ...FENCE, questIds: ['p_below'] };
+
+function storySetup() {
+  return setup(STORY, [STORY_SMITH, STORY_FENCE, HERMIT]);
+}
+
+const stepsOf = (session: PlayerSession) =>
+  (session.getState([]).questGuide?.steps ?? []).map(s => `${s.questId}:${s.status}`);
+
+describe('Main-story guide in the state push', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('lists the next steps, givers on this map first, and the main quests the player can take', async () => {
+    const { session } = await storySetup();
+    const guide = session.getState([]).questGuide!;
+
+    expect(guide.steps).toEqual([
+      { questId: 'p_first', name: 'Progress: First Steps', status: 'available', giverNpcIds: [SMITH.id] },
+      { questId: 'p_below', name: 'Progress: Down Below', status: 'available', giverNpcIds: [FENCE.id] },
+      { questId: 'p_high', name: 'Progress: Uphill', status: 'needs_level', requiredLevel: 10, giverNpcIds: [SMITH.id] },
+    ]);
+    expect(guide.mainQuestIds).toEqual(['p_below', 'p_first']);
+  });
+
+  it('reuses the guide across pushes while nothing it depends on changes', async () => {
+    const { session } = await storySetup();
+    const first = session.getState([]).questGuide;
+    expect(session.getState([]).questGuide).toBe(first);
+  });
+
+  it('recomputes after an accept and a turn-in', async () => {
+    const { session } = await storySetup();
+    expect(session.handleAcceptQuest('p_first', 1).success).toBe(true);
+    expect(stepsOf(session)).toEqual(['p_first:active', 'p_below:available', 'p_high:needs_level']);
+
+    expect(session.handleTurnInQuest('p_first').success).toBe(true);
+    expect(stepsOf(session)).toEqual(['p_second:available', 'p_below:available', 'p_high:needs_level']);
+  });
+
+  it('recomputes after a level-up', async () => {
+    const { session } = await storySetup();
+    session.grantXp(10_000_000);
+    expect(stepsOf(session)).toEqual(['p_first:available', 'p_high:available', 'p_below:available']);
+  });
+
+  it('recomputes after a map change', async () => {
+    const { pm, session, partyId } = await storySetup();
+    pm.partyBattles.enterTransition(partyId, SEWER_HUB);
+    expect(stepsOf(session)).toEqual(['p_below:available', 'p_first:available', 'p_high:needs_level']);
+  });
+
+  it('is absent before a class is chosen and empty when no quest is main', async () => {
+    const { pm, session } = await setup();
+    const bob = await pm.login(createFakeWs(), 'bob');
+    expect(bob.getState([]).questGuide).toBeUndefined();
+    expect(session.getState([]).questGuide).toEqual({ steps: [], mainQuestIds: [] });
+  });
+});
+
+describe('Accepting a quest in the room it sends you to', () => {
+  it('counts the visit at once, so the quest can be turned in straight away', async () => {
+    const { pm, session, partyId } = await storySetup();
+    pm.partyBattles.enterTransition(partyId, SEWER_HUB);
+
+    expect(session.handleAcceptQuest('p_below', 1).success).toBe(true);
+    const state = session.getState([]);
+    expect(state.activeQuests).toEqual([expect.objectContaining({ questId: 'p_below', status: 'ready', progress: [1] })]);
+
+    expect(session.handleTurnInQuest('p_below').success).toBe(true);
+    expect(session.getState([]).completedQuests?.map(c => c.questId)).toEqual(['p_below']);
+  });
+
+  it('leaves the visit to do when the quest is taken elsewhere', async () => {
+    const below: NpcDefinition = { ...STORY_SMITH, questIds: ['p_below'] };
+    const { session } = await setup(STORY, [below, STORY_FENCE, HERMIT]);
+
+    expect(session.handleAcceptQuest('p_below', 1).success).toBe(true);
+    expect(session.getState([]).activeQuests).toEqual([expect.objectContaining({ questId: 'p_below', status: 'accepted', progress: [0] })]);
   });
 });

@@ -355,6 +355,17 @@ body[data-chat-open="1"] #utility-strip {
   background: var(--gold);
   color: #3a2200;
 }
+.utility-quests-badge.utility-quests-new {
+  top: 5px;
+  right: 8px;
+  width: 10px;
+  min-width: 0;
+  height: 10px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 2px #17214b;
+}
 
 /* ── Tab bar ─────────────────────────────────────────────── */
 /* First in the DOM so the rail is first in Tab order; `order` puts the phone bar back at the bottom. */
@@ -501,6 +512,9 @@ body[data-chat-open="1"] #utility-strip {
   line-height: 17px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+.nav-badge.nav-badge-new {
+  background: var(--green);
 }
 .nav-tab.has-path .nav-icon::after {
   content: '';

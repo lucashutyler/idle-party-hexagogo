@@ -311,11 +311,13 @@ export class NpcTalkPopup {
     const resolutions = state.questResolutions;
     const activeById = new Map((state.activeQuests ?? []).map(a => [a.questId, a]));
     const acceptable = new Set(state.availableQuestIds ?? []);
+    const main = new Set(state.questGuide?.mainQuestIds ?? []);
     const partySize = state.social?.party?.members.length ?? 1;
 
     const ready: string[] = [];
     const progress: string[] = [];
     const available: string[] = [];
+    const availableMain: string[] = [];
     const actionable = new Set<string>();
     for (const questId of offered) {
       const def = defs[questId];
@@ -328,16 +330,17 @@ export class NpcTalkPopup {
         progress.push(this.progressCardHtml(def, entry, resolutions));
       } else if (acceptable.has(questId)) {
         const reason = def.scope === 'solo' && partySize > 1 ? SOLO_QUEST_IN_PARTY_REASON : null;
-        available.push(this.availableCardHtml(def, resolutions, reason));
+        const isMain = main.has(questId);
+        (isMain ? availableMain : available).push(this.availableCardHtml(def, resolutions, reason, isMain));
         actionable.add(questId);
       }
     }
 
-    const nothingShown = ready.length + progress.length + available.length === 0;
+    const nothingShown = ready.length + progress.length + availableMain.length + available.length === 0;
     return {
       ready: sectionHtml('Ready to Turn In', ready),
       progress: sectionHtml('In Progress', progress),
-      available: sectionHtml('Available', available),
+      available: sectionHtml('Available', [...availableMain, ...available]),
       empty: offered.length > 0 && nothingShown ? 'Nothing for you right now.' : '',
       actionable,
     };
@@ -359,15 +362,18 @@ export class NpcTalkPopup {
     `).join('');
   }
 
-  private availableCardHtml(def: QuestDefinition, resolutions: QuestResolutions, blockedReason: string | null): string {
+  private availableCardHtml(def: QuestDefinition, resolutions: QuestResolutions, blockedReason: string | null, main: boolean): string {
     const action = blockedReason
       ? `<span class="quest-card-blocked">${escapeHtml(blockedReason)}</span>`
       : this.refusalHtml(def.id) + this.requestButtonHtml('accept', def.id);
+    const pills = main
+      ? `<span class="quest-log-pills"><span class="quest-pill quest-pill-main">Main story</span>${scopeBadgeHtml(def.scope)}</span>`
+      : scopeBadgeHtml(def.scope);
     return `
-      <div class="quest-card" data-quest-id="${escapeHtml(def.id)}">
+      <div class="quest-card${main ? ' quest-card-main' : ''}" data-quest-id="${escapeHtml(def.id)}">
         <div class="quest-card-header">
           <span class="quest-card-name">${escapeHtml(def.name)}</span>
-          ${scopeBadgeHtml(def.scope)}
+          ${pills}
         </div>
         <div class="quest-card-desc">${escapeHtml(def.description)}</div>
         <div class="quest-card-objectives">
