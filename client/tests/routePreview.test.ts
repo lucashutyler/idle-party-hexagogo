@@ -65,12 +65,18 @@ describe('previewRoute', () => {
 
   it('counts the doors through a found door room, and says when one changes maps', async () => {
     const cache = await loadCache();
-    expect(previewRoute(state(['v0', 'v2']), cache, 'g1')).toEqual({ kind: 'doors', doors: 1, otherMap: true });
+    expect(previewRoute(state(['v0', 'v2']), cache, 'g1')).toEqual({ kind: 'doors', doors: 1, otherMap: true, gated: false });
   });
 
   it('goes round a door the viewer is locked out of', async () => {
     const cache = await loadCache();
-    expect(previewRoute(state(['v2', 'v3', 'g1']), cache, 'v9')).toEqual({ kind: 'doors', doors: 2, otherMap: true });
+    expect(previewRoute(state(['v2', 'v3', 'g1']), cache, 'v9')).toEqual({ kind: 'doors', doors: 2, otherMap: true, gated: false });
+  });
+
+  it('says when a door on the way has a gate, even one the viewer passes', async () => {
+    const cache = await loadCache();
+    const strong = { ...state(['v2', 'v3', 'g1']), character: { level: 9, equipment: {} } } as ServerStateMessage;
+    expect(previewRoute(strong, cache, 'v9')).toEqual({ kind: 'doors', doors: 1, otherMap: false, gated: true });
   });
 
   it('names the lock of the only door the viewer knows', async () => {
@@ -95,8 +101,8 @@ describe('previewRoute', () => {
 
 describe('routePreviewLines', () => {
   it('says how the way goes, and nothing for a walk', () => {
-    expect(routePreviewLines({ kind: 'doors', doors: 1, otherMap: false }, null)).toEqual(['Through 1 door']);
-    expect(routePreviewLines({ kind: 'doors', doors: 3, otherMap: true }, null)).toEqual(['Through 3 doors']);
+    expect(routePreviewLines({ kind: 'doors', doors: 1, otherMap: false, gated: false }, null)).toEqual(['Through 1 door']);
+    expect(routePreviewLines({ kind: 'doors', doors: 3, otherMap: true, gated: true }, null)).toEqual(['Through 3 doors']);
     expect(routePreviewLines({ kind: 'none' }, null)).toEqual([NO_KNOWN_WAY_TEXT]);
     expect(routePreviewLines({ kind: 'walk' }, null)).toEqual([]);
     expect(routePreviewLines(null, null)).toEqual([]);

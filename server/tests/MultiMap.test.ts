@@ -446,4 +446,45 @@ describe('Arriving through a door', () => {
     expect(pm.partyBattles.getPartyState(partyId)!.route).toBeUndefined();
     expect(session.quests.getProgress(VISIT_ENTRANCE.id)?.progress).toEqual([1]);
   });
+
+  it('does not count a forced relocation as a visit', async () => {
+    const world = makeWorld();
+    const content = createFakeContentStore(world, { [VISIT_ENTRANCE.id]: VISIT_ENTRANCE });
+    const grids = new WorldGrids(content);
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    const session = await pm.login(createFakeWs(), 'alice');
+    session.setClass('Knight');
+    pm.ensureParty('alice');
+    session.quests.accept(VISIT_ENTRANCE, { playerLevel: 1, partySize: 1 });
+
+    pm.partyBattles.relocateParty(session.getPartyId()!, grids.getOrThrow('sewers').getTileById(SEWER_ENTRANCE_ID)!, 'sewers');
+    expect(session.quests.getProgress(VISIT_ENTRANCE.id)?.progress).toEqual([0]);
+  });
+});
+
+describe('A locked door of the party\'s room', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('names its room and the room it leads to, and the card lists the door\'s gate and the room\'s', async () => {
+    const world = makeGatedWorld();
+    world.tiles.find(t => t.id === SEWER_DEPTHS_ID)!.entryRequirements = { minLevel: 5, requiredQuestIds: [PERMIT_QUEST_ID] };
+    const content = createFakeContentStore(world, { [PERMIT_QUEST_ID]: SEWER_PERMIT });
+    const grids = new WorldGrids(content);
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    const session = await pm.login(createFakeWs(), 'alice');
+    session.setClass('Knight');
+    pm.ensureParty('alice');
+
+    const result = pm.handleEnterTransition('alice', SEWER_DEPTHS_ID);
+    if (result.success || !result.blocked) throw new Error('expected a gate refusal');
+    expect(result.blocked).toMatchObject({ roomId: MANHOLE_ID, door: true, doorTileId: SEWER_DEPTHS_ID });
+    expect(pm.lockForRefusal('alice', result.blocked)?.requirements.map(r => r.kind)).toEqual(['level', 'quest']);
+
+    const target = { kind: 'door' as const, fromTileId: MANHOLE_ID, tileId: SEWER_VAULT_ID };
+    expect(pm.handleInspectLock('alice', target, 10_000)?.lock).toMatchObject({
+      roomId: MANHOLE_ID, door: true, doorTileId: SEWER_VAULT_ID, requirements: [{ kind: 'quest', questId: PERMIT_QUEST_ID, questName: 'Sewer Permit' }],
+    });
+    expect(pm.handleInspectLock('alice', { kind: 'door', fromTileId: MANHOLE_ID, tileId: SEWER_ENTRANCE_ID }, 20_000)?.lock).toBeNull();
+  });
 });

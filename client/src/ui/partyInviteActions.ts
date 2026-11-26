@@ -20,6 +20,18 @@ export function runEndsWarning(state: ServerStateMessage | null): string | null 
   return (state.social?.party?.members.length ?? 0) > 1 ? PARTY_RUN_ENDS_WARNING : OWN_RUN_ENDS_WARNING;
 }
 
+/** What to ask before removing a member from the party. */
+export function kickConfirmOptions(username: string, state: ServerStateMessage | null): ConfirmDialogOptions {
+  const warning = runEndsWarning(state);
+  const body = 'They will be removed from this party and carry on alone.';
+  return {
+    title: `Kick ${username}?`,
+    body: warning ? `${body} ${warning}` : body,
+    confirmLabel: 'Kick',
+    danger: true,
+  };
+}
+
 /** What to ask before joining `partyId`, or null when joining costs nothing. */
 export function joinConfirmOptions(partyId: string, state: ServerStateMessage | null): ConfirmDialogOptions | null {
   const social = state?.social;

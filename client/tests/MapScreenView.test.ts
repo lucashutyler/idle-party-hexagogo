@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerRouteConfirmMessage, ServerStateMessage } from '@idle-party-rpg/shared';
+import type { RoomLockInfo, ServerMoveBlockedMessage, ServerRouteConfirmMessage, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../src/network/GameClient';
 import { WorldCache } from '../src/network/WorldCache';
 import type { TileClickInfo } from '../src/ui/ThreeWorldMap';
@@ -125,6 +125,7 @@ interface Mounted {
   map: StubMap;
   push: (state: ServerStateMessage) => void;
   confirmRoute: (msg: ServerRouteConfirmMessage) => void;
+  moveBlocked: (msg: ServerMoveBlockedMessage) => void;
 }
 
 async function mount(state = partyState()): Promise<Mounted> {
@@ -144,18 +145,22 @@ async function mount(state = partyState()): Promise<Mounted> {
   };
   const stateListeners: ((s: ServerStateMessage) => void)[] = [];
   let routeConfirm: (msg: ServerRouteConfirmMessage) => void = () => {};
+  let moveBlocked: (msg: ServerMoveBlockedMessage) => void = () => {};
   const gameClient = {
     lastState: state,
     lastStateAt: 0,
     isInitialState: false,
-    onMoveBlocked: () => () => {},
+    onMoveBlocked: (l: (msg: ServerMoveBlockedMessage) => void) => { moveBlocked = l; return () => {}; },
     onRouteConfirm: (l: (msg: ServerRouteConfirmMessage) => void) => { routeConfirm = l; return () => {}; },
+    onLockInfo: () => () => {},
+    onConnection: () => () => {},
     onServerError: () => () => {},
     onForecast: () => () => {},
     subscribe: vi.fn((l: (s: ServerStateMessage) => void) => { stateListeners.push(l); return () => {}; }),
     sendMoveTo: vi.fn(() => true),
     sendEnterTransition: vi.fn(() => true),
     sendStopTravel: vi.fn(() => true),
+    sendInspectLock: vi.fn(() => true),
     requestForecast: vi.fn(() => null),
     peekForecast: () => null,
   } as unknown as Mounted['gameClient'];
@@ -167,7 +172,7 @@ async function mount(state = partyState()): Promise<Mounted> {
     (gameClient as unknown as { lastState: ServerStateMessage }).lastState = next;
     for (const l of stateListeners) l(next);
   };
-  return { screen, gameClient, cache, map, push, confirmRoute: msg => routeConfirm(msg) };
+  return { screen, gameClient, cache, map, push, confirmRoute: msg => routeConfirm(msg), moveBlocked: msg => moveBlocked(msg) };
 }
 
 const banner = () => document.querySelector<HTMLElement>('.map-view-banner');
@@ -388,6 +393,71 @@ describe('Looking at another map', () => {
     m.confirmRoute({ type: 'route_confirm', tileId: 'v1', warnings: [{ kind: 'no_way_back' }] });
     document.querySelector<HTMLElement>('.confirm-cancel')!.click();
     await tick();
+    expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
+  });
+});
+
+describe('The lock card\'s next step', () => {
+  beforeEach(() => { mapStub.instances.length = 0; });
+  afterEach(() => {
+    dismissMapToast();
+    while (dismissTop()) { /* drain */ }
+    vi.unstubAllGlobals();
+  });
+
+  /** Go to v1 is refused by a quest whose giver stands in g1, on the other map. */
+  async function refused(): Promise<Mounted> {
+    const m = await mount();
+    tapRoom(m, 1);
+    tapRoom(m, 1);
+    const lock: RoomLockInfo = {
+      roomId: 'v1',
+      requirements: [{
+        kind: 'quest',
+        questId: 'q_gate',
+        questName: 'Mend the Bridge',
+        members: [{
+          username: 'me',
+          met: false,
+          nextStep: {
+            questId: 'q_first',
+            questName: 'Find the Ferryman',
+            state: 'available',
+            remaining: 2,
+            giver: { npcName: 'Old Wren', roomId: 'g1', mapId: 'grotto', mapName: 'Grotto', roomName: 'Room g1' },
+          },
+        }],
+      }],
+    };
+    m.moveBlocked({ type: 'move_blocked', requirement: 'quest', reason: '"Mend the Bridge" must be completed to enter this room.', missingPlayers: ['me'], lock });
+    return m;
+  }
+
+  it('names the next step and where it is given', async () => {
+    await refused();
+    expect(document.querySelector('.lock-card-need-text')!.textContent).toBe('You need to complete "Mend the Bridge"');
+    expect(document.querySelector('.lock-card-step-line')!.textContent).toBe('Your next step: Find the Ferryman · Old Wren, Room g1, Grotto');
+    expect([...document.querySelectorAll('.lock-card-step-note')].map(n => n.textContent)).toEqual(['2 quests to go']);
+  });
+
+  it('walks there across maps: the giver\'s map opens with its room\'s sheet setting off, by room id alone', async () => {
+    const m = await refused();
+    m.gameClient.sendMoveTo.mockClear();
+    document.querySelector<HTMLElement>('[data-lock-action="walk"]')!.click();
+    expect(m.map.drawnMapId).toBe('grotto');
+    expect(m.gameClient.sendMoveTo).toHaveBeenCalledWith('g1', undefined);
+    expect(sheetOpen()).toBe(true);
+    expect(document.querySelector('.room-sheet-name')!.textContent).toBe('Room g1');
+    expect(document.querySelector('.room-sheet-go')!.textContent).toBe('Setting off…');
+  });
+
+  it('shows the giver\'s room on the map without moving', async () => {
+    const m = await refused();
+    m.gameClient.sendMoveTo.mockClear();
+    document.querySelector<HTMLElement>('[data-lock-action="show"]')!.click();
+    expect(m.map.drawnMapId).toBe('grotto');
+    expect(m.map.focusOn).toHaveBeenLastCalledWith(1, 0);
+    expect(sheetOpen()).toBe(true);
     expect(m.gameClient.sendMoveTo).not.toHaveBeenCalled();
   });
 });

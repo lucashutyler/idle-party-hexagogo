@@ -46,7 +46,8 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
   return { ThreeWorldMap };
 });
 
-import { MapScreen } from '../src/screens/MapScreen';
+import { LOCK_INSPECT_DEBOUNCE_MS, MapScreen, ORDER_ANSWER_MS } from '../src/screens/MapScreen';
+import { SETTING_OFF_TEXT } from '../src/ui/RoomSheet';
 import { NO_KNOWN_WAY_TEXT } from '../src/ui/routePreview';
 
 function info(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
@@ -58,24 +59,33 @@ function info(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
 }
 
 let stateListeners: ((state: unknown) => void)[] = [];
+let moveBlockedListeners: ((msg: unknown) => void)[] = [];
+let lockInfoListeners: ((msg: unknown) => void)[] = [];
+let connectionListeners: ((connected: boolean) => void)[] = [];
 const PARTY_ROOM = { id: 'party-room', mapId: 'here', col: 0, row: 0, type: 'plains' };
 
 function mount(lastState: unknown = null, tile: Record<string, unknown> = { id: 'room-1', type: 'plains' }, routeRooms: RouteRoom[] = []) {
   stateListeners = [];
+  moveBlockedListeners = [];
+  lockInfoListeners = [];
+  connectionListeners = [];
   document.body.innerHTML = '<div id="map-screen"></div><div id="game-container"></div>';
-  const gameClient = {
+  const gameClient: Record<string, unknown> = {
     lastState,
     isInitialState: false,
-    onMoveBlocked: () => () => {},
-    onRouteConfirm: () => () => {},
+    onMoveBlocked: (l: (msg: unknown) => void) => { moveBlockedListeners.push(l); return () => {}; },
+    onRouteConfirm: (l: (msg: unknown) => void) => { gameClient.routeConfirm = l; return () => {}; },
+    onLockInfo: (l: (msg: unknown) => void) => { lockInfoListeners.push(l); return () => {}; },
+    onConnection: (l: (connected: boolean) => void) => { connectionListeners.push(l); return () => {}; },
     onServerError: () => () => {},
     onForecast: () => () => {},
     subscribe: vi.fn((listener: (state: unknown) => void) => { stateListeners.push(listener); return () => {}; }),
     sendMoveTo: vi.fn(() => true),
     sendEnterTransition: vi.fn(() => true),
+    sendInspectLock: vi.fn(() => true),
     requestForecast: () => null,
     peekForecast: () => null,
-  } as unknown as GameClient;
+  };
   const index = buildRouteIndex(routeRooms);
   const worldCache = {
     isLoaded: true,
@@ -90,7 +100,8 @@ function mount(lastState: unknown = null, tile: Record<string, unknown> = { id: 
     viewableMapIds: () => new Set(['here']),
     roomsFoundByMap: () => new Map(),
   } as unknown as WorldCache;
-  return { screen: new MapScreen('map-screen', gameClient, worldCache), gameClient };
+  const client = gameClient as unknown as GameClient;
+  return { screen: new MapScreen('map-screen', client, worldCache), gameClient: client };
 }
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -230,8 +241,123 @@ describe('MapScreen room selection', () => {
 
     map.tap(info());
     expect(gameClient.sendMoveTo).toHaveBeenCalledWith('room-1', { col: 3, row: 4 });
-    expect(sheet().hidden).toBe(true);
-    expect(map.setSelectedRoom).toHaveBeenLastCalledWith(null);
+  });
+
+  describe('Go waits for the server with the sheet up', () => {
+    const here = { username: 'me', party: { col: 0, row: 0, state: 'idle', path: [] }, unlocked: [], social: null, currentMapId: 'here', otherPlayers: [] };
+    const go = () => document.querySelector<HTMLButtonElement>('.room-sheet-go')!;
+    const push = (state: unknown) => { for (const listener of stateListeners) listener(state); };
+
+    async function sent() {
+      const mounted = await opened(here);
+      mounted.map.getTileInfo.mockReturnValue(info());
+      mounted.map.tap(info());
+      mounted.map.tap(info());
+      return mounted;
+    }
+
+    it('says the party sets off and holds Go until a push shows the party on its way', async () => {
+      const { map, gameClient } = await sent();
+      expect(sheet().hidden).toBe(false);
+      expect(go().textContent).toBe(SETTING_OFF_TEXT);
+      expect(go().disabled).toBe(true);
+      map.tap(info());
+      go().click();
+      expect(gameClient.sendMoveTo).toHaveBeenCalledOnce();
+
+      push({ ...here, party: { ...here.party, path: [{ col: 1, row: 1 }] } });
+      expect(sheet().hidden).toBe(false);
+      push({ ...here, party: { ...here.party, state: 'moving', path: [{ col: 1, row: 1 }, { col: 3, row: 4 }] } });
+      expect(sheet().hidden).toBe(true);
+      expect(map.setSelectedRoom).toHaveBeenLastCalledWith(null);
+    });
+
+    it('closes when the push shows a door route to the room', async () => {
+      await sent();
+      push({ ...here, party: { ...here.party, path: [{ col: 1, row: 0 }], route: { destinationId: 'room-1', destinationMapId: 'here', doors: 1, rooms: 3, leavesMap: false } } });
+      expect(sheet().hidden).toBe(true);
+    });
+
+    it('turns into the lock card when the server refuses at a locked room', async () => {
+      const lock = { roomId: 'room-1', requirements: [{ kind: 'level', minLevel: 7, members: [{ username: 'me', met: false, level: 2 }] }] };
+      await sent();
+      for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'level', reason: 'Level 7 is required to enter this room.', missingPlayers: ['me'], lock });
+      expect(sheet().hidden).toBe(false);
+      expect(sheet().dataset.lock).toBe('1');
+      expect(document.querySelector('.lock-card-title')!.textContent).toBe('🔒 Locked');
+      expect(go().hidden).toBe(true);
+      expect(document.querySelector('#map-screen .map-toast')).toBeNull();
+    });
+
+    it('shows a refusal without a card in the sheet, keeping Go', async () => {
+      await sent();
+      for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'item', reason: 'A Brass Key is required to enter this room.', missingPlayers: ['me'] });
+      expect(document.querySelector('.room-sheet-lock-line[data-kind="notice"]')!.textContent).toBe('A Brass Key is required to enter this room.');
+      expect(go().hidden).toBe(false);
+      expect(go().textContent).toBe('Go');
+    });
+
+    it('closes after a while with no answer, and a late refusal is a toast', async () => {
+      const { map } = await opened(here);
+      map.getTileInfo.mockReturnValue(info());
+      vi.useFakeTimers();
+      try {
+        map.tap(info());
+        map.tap(info());
+        vi.advanceTimersByTime(ORDER_ANSWER_MS - 1);
+        expect(sheet().hidden).toBe(false);
+        vi.advanceTimersByTime(1);
+        expect(sheet().hidden).toBe(true);
+
+        for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'level', reason: 'Level 7 is required to enter this room.', missingPlayers: ['me'] });
+        expect(document.querySelector('#map-screen .map-toast')?.textContent).toBe('Level 7 is required to enter this room.');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('waits the same way after Go to room in the room card, so a lock refusal becomes the card', async () => {
+      const { map, gameClient } = await opened(here);
+      map.getTileInfo.mockReturnValue(info());
+      map.tap(info());
+      document.querySelector<HTMLElement>('.room-sheet-details')!.click();
+      document.querySelector<HTMLElement>('.room-view-action-go')!.click();
+      expect(gameClient.sendMoveTo).toHaveBeenCalledOnce();
+      expect(sheet().hidden).toBe(false);
+      expect(go().textContent).toBe(SETTING_OFF_TEXT);
+
+      const lock = { roomId: 'room-1', requirements: [{ kind: 'level', minLevel: 7, members: [{ username: 'me', met: false, level: 2 }] }] };
+      for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'level', reason: 'Level 7 is required to enter this room.', missingPlayers: ['me'], lock });
+      expect(sheet().dataset.lock).toBe('1');
+      expect(document.querySelector('#map-screen .map-toast')).toBeNull();
+    });
+
+    it('gives Go back with the offline notice when the connection drops before an answer', async () => {
+      const { map } = await opened(here);
+      map.getTileInfo.mockReturnValue(info());
+      vi.useFakeTimers();
+      try {
+        map.tap(info());
+        map.tap(info());
+        for (const listener of connectionListeners) listener(false);
+        vi.advanceTimersByTime(ORDER_ANSWER_MS);
+        expect(sheet().hidden).toBe(false);
+        expect(document.querySelector('.room-sheet-lock-line[data-kind="notice"]')?.textContent).toBe(OFFLINE_NOTICE);
+        expect(go().textContent).toBe('Go');
+        expect(go().disabled).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('closes when the server asks first about the route, and the dialog takes over', async () => {
+      const { gameClient } = await sent();
+      const confirm = (gameClient as unknown as { routeConfirm: (msg: unknown) => void }).routeConfirm;
+      confirm({ type: 'route_confirm', tileId: 'room-1', warnings: [{ kind: 'no_way_back' }] });
+      expect(sheet().hidden).toBe(true);
+      expect(document.querySelector('.confirm-title')!.textContent).toBe('Set off?');
+      document.querySelector<HTMLElement>('.confirm-cancel')!.click();
+    });
   });
 
   it('says on the sheet when fights in the room pay no XP', async () => {
@@ -323,6 +449,102 @@ describe('MapScreen room selection', () => {
       expect(document.querySelector<HTMLElement>('.room-sheet-lock')!.hidden).toBe(true);
       map.tap(info());
       expect(gameClient.sendMoveTo).toHaveBeenCalledWith('room-1', { col: 3, row: 4 });
+    });
+  });
+
+  describe('the lock card', () => {
+    const gated = { id: 'room-1', type: 'plains', entryRequirements: { minLevel: 5 } };
+    const solo = { username: 'me', party: { col: 0, row: 0, path: [] }, unlocked: [], social: null, currentMapId: 'here', otherPlayers: [], character: { level: 1, equipment: {} } };
+    const duo = (level: number, mateLevel: number) => ({
+      ...solo,
+      character: { level, equipment: {} },
+      social: { party: { members: [{ username: 'me', role: 'owner', level }, { username: 'Bryn', role: 'member', level: mateLevel }] }, onlinePlayers: ['me'] },
+    });
+    const lock = (members: { username: string; met: boolean; level?: number }[]) =>
+      ({ roomId: 'room-1', requirements: [{ kind: 'level', minLevel: 5, members }] });
+    const wait = () => new Promise(resolve => setTimeout(resolve, LOCK_INSPECT_DEBOUNCE_MS + 20));
+    const reply = (lockInfo: unknown) => { for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: { kind: 'room', tileId: 'room-1' }, lock: lockInfo }); };
+
+    it('asks the server after a pause when the preview finds a lock, and keeps the card through pushes until it reports the room open', async () => {
+      const { map, gameClient } = await opened(solo, gated);
+      const push = (state: unknown) => {
+        (gameClient as unknown as { lastState: unknown }).lastState = state;
+        for (const listener of stateListeners) listener(state);
+      };
+      map.getTileInfo.mockReturnValue(info());
+      map.tap(info());
+      expect(gameClient.sendInspectLock).not.toHaveBeenCalled();
+      await wait();
+      expect(gameClient.sendInspectLock).toHaveBeenCalledWith({ kind: 'room', tileId: 'room-1' });
+
+      reply(lock([{ username: 'me', met: false, level: 1 }]));
+      expect(sheet().dataset.lock).toBe('1');
+      expect(document.querySelector('.lock-card-need-text')!.textContent).toBe("You need level 5 (you're level 1)");
+      push(solo);
+      expect(document.querySelector('.lock-card')).not.toBeNull();
+      expect(gameClient.sendInspectLock).toHaveBeenCalledOnce();
+
+      push({ ...solo, character: { level: 5, equipment: {} } });
+      await wait();
+      expect(gameClient.sendInspectLock).toHaveBeenCalledTimes(2);
+      reply(null);
+      expect(document.querySelector('.lock-card')).toBeNull();
+      expect(document.querySelector<HTMLElement>('.room-sheet-go')!.hidden).toBe(false);
+    });
+
+    it('asks nothing for a lone player when nothing is locked', async () => {
+      const { map, gameClient } = await opened(solo);
+      map.tap(info());
+      await wait();
+      expect(gameClient.sendInspectLock).not.toHaveBeenCalled();
+    });
+
+    it('asks about any gate with others along, since their quests and gear are hidden, and ticks each member', async () => {
+      const { map, gameClient } = await opened(duo(9, 9), gated);
+      map.tap(info());
+      await wait();
+      expect(gameClient.sendInspectLock).toHaveBeenCalledWith({ kind: 'room', tileId: 'room-1' });
+      reply(lock([{ username: 'me', met: true, level: 9 }, { username: 'Bryn', met: false, level: 3 }]));
+      const rows = [...document.querySelectorAll('.lock-card-member')].map(row => row.textContent);
+      expect(rows).toEqual(['✓You', '✗Brynlevel 3']);
+      expect(document.querySelector('[data-lock-action="remove"]')!.textContent).toBe('Remove Bryn from the party');
+    });
+
+    it('withholds Go to room in the room card while the card says the room is locked', async () => {
+      const { map, gameClient } = await opened(duo(9, 9), gated);
+      map.tap(info());
+      reply(lock([{ username: 'me', met: true, level: 9 }, { username: 'Bryn', met: false, level: 3 }]));
+      document.querySelector<HTMLElement>('.room-sheet-details')!.click();
+      expect(document.querySelector('.room-view-lock')!.textContent).toBe('🔒 Locked');
+      expect(document.querySelector('.room-view-action-go')).toBeNull();
+      expect(gameClient.sendMoveTo).not.toHaveBeenCalled();
+    });
+
+    it('asks again once the viewer takes on the quest the card names as the next step', async () => {
+      const { map, gameClient } = await opened(solo, { ...gated, entryRequirements: { requiredQuestIds: ['q-gate'] } });
+      const push = (state: unknown) => {
+        (gameClient as unknown as { lastState: unknown }).lastState = state;
+        for (const listener of stateListeners) listener(state);
+      };
+      map.getTileInfo.mockReturnValue(info());
+      map.tap(info());
+      await wait();
+      expect(gameClient.sendInspectLock).toHaveBeenCalledOnce();
+      push({ ...solo, activeQuests: [{ questId: 'q-first', status: 'active', progress: [0], acceptedAt: '' }] });
+      await wait();
+      expect(gameClient.sendInspectLock).toHaveBeenCalledTimes(2);
+    });
+
+    it('asks before removing a member, then sends the kick', async () => {
+      const { map, gameClient } = await opened(duo(9, 9), gated);
+      (gameClient as unknown as { sendKickPartyMember: ReturnType<typeof vi.fn> }).sendKickPartyMember = vi.fn();
+      map.tap(info());
+      reply(lock([{ username: 'me', met: true }, { username: 'Bryn', met: false }]));
+      document.querySelector<HTMLElement>('[data-lock-action="remove"]')!.click();
+      expect(document.querySelector('.confirm-title')!.textContent).toBe('Kick Bryn?');
+      document.querySelector<HTMLElement>('.confirm-ok')!.click();
+      await tick();
+      expect((gameClient as unknown as { sendKickPartyMember: ReturnType<typeof vi.fn> }).sendKickPartyMember).toHaveBeenCalledWith('Bryn');
     });
   });
 
@@ -517,25 +739,77 @@ describe('MapScreen status chips', () => {
     expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
   });
 
-  it('padlocks a locked exit and lets the server say why instead of asking first', async () => {
-    vi.spyOn(window, 'matchMedia').mockImplementation(() => ({
-      matches: false,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }) as unknown as MediaQueryList);
-    const mounted = mount({ ...state, username: 'me', character: { level: 1, equipment: {} } });
-    Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
-      getTileOn: () => ({ ...transitionTile, transitions: [{ tileId: 'far', mapId: 'there', entryRequirements: { minLevel: 5 } }] }),
-      getTileByGuid: () => ({ name: 'Harbour', mapId: 'there' }),
-    });
-    mounted.screen.onActivate();
-    await tick();
+  describe('a locked exit', () => {
+    const doorLock = {
+      roomId: 'room-1',
+      door: true,
+      doorTileId: 'far',
+      requirements: [{ kind: 'level', minLevel: 5, members: [{ username: 'me', met: false, level: 1 }] }],
+    };
 
-    const chip = document.querySelector<HTMLElement>('.room-status-chip')!;
-    expect(chip.querySelector('.room-status-chip-badge')!.textContent).toBe('🔒');
-    chip.click();
-    expect(document.querySelector('.confirm-dialog')).toBeNull();
-    expect(mounted.gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    async function withLockedExit(wide: boolean) {
+      vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+        matches: query.includes('min-width: 768px') && wide,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList);
+      const mounted = mount({ ...state, username: 'me', character: { level: 1, equipment: {} } });
+      Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
+        getTileOn: () => ({ ...transitionTile, transitions: [{ tileId: 'far', mapId: 'there', entryRequirements: { minLevel: 5 } }] }),
+        getTileByGuid: () => ({ name: 'Harbour', mapId: 'there' }),
+      });
+      mounted.screen.onActivate();
+      await tick();
+      return mounted;
+    }
+
+    it.each([[false], [true]])('shows what it needs and asks the server, never "right away" (wide: %s)', async (wide) => {
+      const { gameClient } = await withLockedExit(wide);
+      const chip = document.querySelector<HTMLElement>('.room-status-chip')!;
+      expect(chip.querySelector('.room-status-chip-badge')!.textContent).toBe('🔒');
+      chip.click();
+
+      expect(document.querySelector('.confirm-body')).toBeNull();
+      expect(document.querySelector('.lock-dialog .confirm-title')!.textContent).toBe('Travel to Harbour');
+      expect(document.querySelector('.lock-dialog .lock-card-need-text')!.textContent).toBe("Needs level 5 (you're level 1)");
+      expect(gameClient.sendEnterTransition).not.toHaveBeenCalled();
+      expect(gameClient.sendInspectLock).toHaveBeenCalledWith({ kind: 'door', fromTileId: 'room-1', tileId: 'far' });
+
+      for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: { kind: 'door', fromTileId: 'room-1', tileId: 'far' }, lock: doorLock });
+      expect(document.querySelector('.lock-dialog .lock-card-need-text')!.textContent).toBe("You need level 5 (you're level 1)");
+
+      document.querySelector<HTMLElement>('.lock-dialog-close')!.click();
+      expect(document.querySelector('.lock-dialog')).toBeNull();
+    });
+
+    it('offers to travel when the server finds the way open after all', async () => {
+      const { gameClient } = await withLockedExit(true);
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: { kind: 'door', fromTileId: 'room-1', tileId: 'far' }, lock: null });
+      document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
+      await tick();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+  });
+
+  it('opens the lock dialog when the server refuses a door the client thought open', async () => {
+    const { gameClient } = await withTravelChip(true);
+    document.querySelector<HTMLElement>('.room-status-chip')!.click();
+    expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    const lock = { roomId: 'room-1', door: true, doorTileId: 'far', requirements: [{ kind: 'item', itemName: 'Tide Charm', members: [{ username: 'me', met: false }] }] };
+    for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'item', reason: 'Tide Charm is required to enter this room.', missingPlayers: ['me'], lock });
+    expect(document.querySelector('.lock-dialog .lock-card-need-text')!.textContent).toBe('You need Tide Charm equipped');
+    expect(document.querySelector('#map-screen .map-toast')).toBeNull();
+  });
+
+  it('turns a door refusal that comes back after the player left the map into a toast over the page', async () => {
+    const { screen } = await withTravelChip(true);
+    document.querySelector<HTMLElement>('.room-status-chip')!.click();
+    screen.onDeactivate();
+    const lock = { roomId: 'room-1', door: true, doorTileId: 'far', requirements: [{ kind: 'item', itemName: 'Tide Charm', members: [{ username: 'me', met: false }] }] };
+    for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'item', reason: 'Tide Charm is required to enter this room.', missingPlayers: ['me'], lock });
+    expect(document.querySelector('.lock-dialog')).toBeNull();
+    expect(document.querySelector('body > .map-toast')?.textContent).toBe('Tide Charm is required to enter this room.');
   });
 
   it('hands the map checks that padlock rooms and exits the party would be refused', async () => {

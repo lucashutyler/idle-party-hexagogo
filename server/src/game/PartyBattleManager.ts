@@ -82,8 +82,14 @@ import type {
   RouteDoor,
   RouteWarning,
   RouteWarningKind,
+  LockTarget,
+  RoomLockInfo,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
+import { lockRequirements } from './LockInfo.js';
+import type { LockMemberFacts } from './LockInfo.js';
+import { moveRefusalText } from './MoveRefusals.js';
+import type { RouteRefusal } from './MoveRefusals.js';
 import type { PartyRoute, SavedPartyRoute } from './ServerParty.js';
 import { routeIndexOf } from './RouteIndexCache.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
@@ -103,12 +109,13 @@ export const LIVE_FORECAST_DEBOUNCE_MS = 3000;
 const AUTO_RETREAT_NOTICE = 'Auto-retreat kept your party out of a losing fight. Change it in Options.';
 const ROUTE_CHANGED = 'the way on has changed.';
 
-export type RouteRefusal = 'no_party' | 'in_dungeon' | 'gone' | 'not_walkable' | 'no_route';
+export type { RouteRefusal } from './MoveRefusals.js';
 
-export type RoomMoveResult =
+export type MoveResult =
   | { success: true }
-  | { success: false; blocked?: RoomEntryFailure; reason?: RouteRefusal }
-  | { success: false; confirm: RouteWarning[] };
+  | { success: false; blocked?: RoomEntryFailure; reason?: RouteRefusal };
+
+export type RoomMoveResult = MoveResult | { success: false; confirm: RouteWarning[] };
 
 type RoutePlan =
   | { ok: true; firstLeg: HexTile[]; route: PartyRoute; warnings: RouteWarning[] }
@@ -576,16 +583,14 @@ export class PartyBattleManager {
   }
 
   /** Handle a col/row move, which old tabs send: a walk within the party's area. Returns the unmet requirement if the path is gated. */
-  handleMove(partyId: string, col: number, row: number): { success: true } | { success: false; blocked?: RoomEntryFailure } {
+  handleMove(partyId: string, col: number, row: number): MoveResult {
     const entry = this.entries.get(partyId);
-    if (!entry) return { success: false };
-
-    // Parties are locked inside a dungeon instance — no overworld movement.
-    if (entry.dungeonRun) return { success: false };
+    if (!entry) return { success: false, reason: 'no_party' };
+    if (entry.dungeonRun) return { success: false, reason: 'in_dungeon' };
 
     const coord = offsetToCube({ col, row });
     const tile = this.grids.getOrThrow(entry.serverParty.currentMapId).getTile(coord);
-    if (!tile || !tile.isTraversable) return { success: false };
+    if (!tile || !tile.isTraversable) return { success: false, reason: 'not_walkable' };
     return this.walkTo(entry, tile);
   }
 
@@ -608,8 +613,7 @@ export class PartyBattleManager {
     const hereArea = index.areaOf(party.tile.id);
     // A room that can't be walked into has no area: only a walk leaves it, as a col/row move does.
     if (mapId === party.currentMapId && (hereArea === undefined || hereArea === index.areaOf(target.id))) {
-      const walked = this.walkTo(entry, target);
-      return walked.success || walked.blocked ? walked : { success: false, reason: 'no_route' };
+      return this.walkTo(entry, target);
     }
 
     const plan = this.planRoute(entry, target);
@@ -636,15 +640,33 @@ export class PartyBattleManager {
   }
 
   /**
+   * What would stop the party going to a room, or through a door of the room it stands in, as `viewer` sees it;
+   * null when nothing would. Changes nothing. See docs/architecture/content.md → Lock info.
+   */
+  inspectLock(partyId: string, target: LockTarget, viewer: string): RoomLockInfo | null {
+    const entry = this.entries.get(partyId);
+    if (!entry || entry.dungeonRun) return null;
+    const failure = target.kind === 'door' ? this.doorTargetFailure(entry, target) : this.roomTargetFailure(entry, target.tileId);
+    if (failure === 'unreachable') return { roomId: target.tileId, unreachable: true, requirements: [] };
+    return failure ? this.describeLock(entry, failure, viewer) : null;
+  }
+
+  /** The lock card for a refused order, from the room or door its failure names. */
+  lockForRefusal(partyId: string, failure: RoomEntryFailure, viewer: string): RoomLockInfo | null {
+    const entry = this.entries.get(partyId);
+    return entry ? this.describeLock(entry, failure, viewer) : null;
+  }
+
+  /**
    * Travel through the transition on the party's current room to its linked
    * (mapId, tileId): swap the party's grid + position, reveal the arrival area
    * for every member, and start a fresh battle on the new map.
    */
   enterTransition(partyId: string, targetTileId: string): { success: true } | { success: false; error: string; blocked?: RoomEntryFailure } {
     const entry = this.entries.get(partyId);
-    if (!entry) return { success: false, error: 'No party.' };
+    if (!entry) return { success: false, error: moveRefusalText('no_party') };
     entry.battleTimer.settlePendingResult();
-    if (entry.dungeonRun) return { success: false, error: "Can't travel from inside a dungeon." };
+    if (entry.dungeonRun) return { success: false, error: moveRefusalText('in_dungeon') };
 
     const fromDef = this.content.getTileById(entry.serverParty.tile.id);
     // The current room must actually offer a transition to the requested target.
@@ -667,9 +689,12 @@ export class PartyBattleManager {
 
     // A transition is a door into a room: the link's own gate and the
     // destination room's gate both apply.
-    const blocked = this.checkRoomEntry(entry.members, link.entryRequirements)
+    const failure = this.checkRoomEntry(entry.members, link.entryRequirements)
       ?? this.checkRoomEntry(entry.members, destTile.entryRequirements);
-    if (blocked) return { success: false, error: blocked.reason, blocked };
+    if (failure) {
+      const blocked: RoomEntryFailure = { ...failure, roomId: entry.serverParty.tile.id, door: true, doorTileId: link.tileId };
+      return { success: false, error: blocked.reason, blocked };
+    }
 
     entry.serverParty.switchMap(destGrid, destTile, link.mapId);
     this.afterDoorCrossing(entry, link, destTile, destDef.name);
@@ -767,20 +792,20 @@ export class PartyBattleManager {
     const labels = this.roomLabels();
     for (const tile of path) {
       const failure = validateRoomEntry(tile.entryRequirements, infos, labels);
-      if (failure) return failure;
+      if (failure) return { ...failure, roomId: tile.id };
     }
     return null;
   }
 
   /** A walk within the party's map. A refused walk puts back the queue and any door route. */
-  private walkTo(entry: PartyBattleEntry, tile: HexTile): { success: true } | { success: false; blocked?: RoomEntryFailure } {
+  private walkTo(entry: PartyBattleEntry, tile: HexTile): MoveResult {
     const previous = entry.serverParty.routeSnapshot();
-    if (!entry.serverParty.setDestination(tile)) return { success: false };
+    if (!entry.serverParty.setDestination(tile)) return { success: false, reason: 'no_route' };
 
     const blocked = this.validatePathRequirements(entry);
     if (blocked) {
       entry.serverParty.restoreRoute(previous);
-      return { success: false, blocked };
+      return { success: false, blocked: blocked.roomId === tile.id ? blocked : { ...blocked, onRoute: true } };
     }
     this.afterOrder(entry);
     return { success: true };
@@ -806,8 +831,13 @@ export class PartyBattleManager {
     const sessions = [...entry.members].map(m => this.getSession(m)).filter((s): s is PlayerSession => !!s);
     const found = (tileId: string) => sessions.some(s => s.isTileIdUnlocked(tileId));
     const arrival = (door: RouteDoor) => this.grids.get(door.toMapId)?.getTileById(door.toTileId);
-    const doorFailure = (door: RouteDoor) => validateRoomEntry(door.link.entryRequirements, infos, labels)
-      ?? validateRoomEntry(arrival(door)?.entryRequirements, infos, labels);
+    const doorFailure = (door: RouteDoor): RoomEntryFailure | null => {
+      const linkFailure = validateRoomEntry(door.link.entryRequirements, infos, labels);
+      const failure = linkFailure ?? validateRoomEntry(arrival(door)?.entryRequirements, infos, labels);
+      if (!failure) return null;
+      if (!linkFailure && door.toTileId === target.id) return { ...failure, roomId: target.id };
+      return { ...failure, roomId: door.fromTileId, onRoute: true, door: true, doorTileId: door.toTileId };
+    };
     const usable = (door: RouteDoor) => found(door.fromTileId) && !!arrival(door);
     const noRoute: RoutePlan = { ok: false, refusal: { reason: 'no_route' } };
     if (!targetMapId) return noRoute;
@@ -833,9 +863,10 @@ export class PartyBattleManager {
     for (const tile of legs.flat()) {
       const failure = validateRoomEntry(tile.entryRequirements, infos, labels);
       if (!failure) continue;
-      if (tile.id === target.id) return { ok: false, refusal: { blocked: failure } };
+      if (tile.id === target.id) return { ok: false, refusal: { blocked: { ...failure, roomId: tile.id } } };
       const name = found(tile.id) ? this.roomName(tile) : 'a room on the way';
-      return { ok: false, refusal: { blocked: { ...failure, reason: `The way there passes ${name}. ${failure.reason}` } } };
+      const reason = `The way there passes ${name}. ${failure.reason}`;
+      return { ok: false, refusal: { blocked: { ...failure, reason, roomId: tile.id, onRoute: true } } };
     }
 
     const warnings: RouteWarning[] = [];
@@ -870,10 +901,77 @@ export class PartyBattleManager {
     for (const door of doors ?? []) {
       const failure = doorFailure(door);
       if (!failure) continue;
+      if (!failure.onRoute) return { ok: false, refusal: { blocked: failure } };
       const reason = `The way there passes a locked door in ${this.roomNameById(door.fromTileId)}. ${failure.reason}`;
       return { ok: false, refusal: { blocked: { ...failure, reason } } };
     }
     return null;
+  }
+
+  /** A dry run of the order a move by room id would give: its gate refusal, no way there at all, or null. */
+  private roomTargetFailure(entry: PartyBattleEntry, tileId: string): RoomEntryFailure | 'unreachable' | null {
+    const index = routeIndexOf(this.content);
+    const target = this.tileById(tileId);
+    if (!target?.isTraversable) return null;
+    const party = entry.serverParty;
+    const hereArea = index.areaOf(party.tile.id);
+    if (index.mapOf(tileId) === party.currentMapId && (hereArea === undefined || hereArea === index.areaOf(tileId))) {
+      const path = new HexPathfinder(this.grids.getOrThrow(party.currentMapId)).findPath(party.tile.coord, target.coord);
+      if (!path) return 'unreachable';
+      const infos = this.buildMemberInfos(entry.members);
+      const labels = this.roomLabels();
+      for (const tile of path.slice(1)) {
+        const failure = validateRoomEntry(tile.entryRequirements, infos, labels);
+        if (failure) return { ...failure, roomId: tile.id, ...(tile.id === tileId ? {} : { onRoute: true as const }) };
+      }
+      return null;
+    }
+    const plan = this.planRoute(entry, target);
+    if (plan.ok) return null;
+    return plan.refusal.blocked ?? 'unreachable';
+  }
+
+  /** Only a door of the party's own room is answered. */
+  private doorTargetFailure(entry: PartyBattleEntry, target: Extract<LockTarget, { kind: 'door' }>): RoomEntryFailure | null {
+    if (target.fromTileId !== entry.serverParty.tile.id) return null;
+    const link = this.content.getTileById(target.fromTileId)?.transitions?.find(t => t.tileId === target.tileId);
+    if (!link) return null;
+    const failure = this.checkRoomEntry(entry.members, link.entryRequirements)
+      ?? this.checkRoomEntry(entry.members, this.tileById(link.tileId)?.entryRequirements);
+    return failure ? { ...failure, roomId: target.fromTileId, door: true, doorTileId: target.tileId } : null;
+  }
+
+  private describeLock(entry: PartyBattleEntry, failure: RoomEntryFailure, viewer: string): RoomLockInfo | null {
+    const roomId = failure.roomId;
+    if (!roomId) return null;
+    const gates = failure.door ? this.doorGates(roomId, failure.doorTileId) : [this.tileById(roomId)?.entryRequirements];
+    const viewerSession = this.getSession(viewer);
+    const requirements = lockRequirements(gates, this.lockMembers(entry), this.roomLabels(), this.content, viewerSession?.getLevel() ?? 0);
+    if (requirements.length === 0) return null;
+    return {
+      roomId,
+      ...(viewerSession?.isTileIdUnlocked(roomId) ? { roomName: this.roomNameById(roomId) } : {}),
+      ...(failure.onRoute ? { onRoute: true as const } : {}),
+      ...(failure.door ? { door: true as const, doorTileId: failure.doorTileId } : {}),
+      requirements,
+    };
+  }
+
+  /** A door's own gate, then the gate of the room behind it. */
+  private doorGates(fromTileId: string, toTileId: string | undefined): (RoomEntryRequirements | undefined)[] {
+    const link = this.content.getTileById(fromTileId)?.transitions?.find(t => t.tileId === toTileId);
+    if (!link) return [];
+    return [link.entryRequirements, this.tileById(link.tileId)?.entryRequirements];
+  }
+
+  private lockMembers(entry: PartyBattleEntry): LockMemberFacts[] {
+    const infos = this.buildMemberInfos(entry.members);
+    return infos.map(info => ({ info, session: this.getSession(info.username) }));
+  }
+
+  private tileById(tileId: string): HexTile | undefined {
+    const mapId = routeIndexOf(this.content).mapOf(tileId);
+    return mapId ? this.grids.get(mapId)?.getTileById(tileId) : undefined;
   }
 
   /** The battle loop's door step: cross the route's next door if it is still there and still open, else stop here. */

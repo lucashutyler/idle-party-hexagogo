@@ -1,7 +1,10 @@
 import { classIconHtml } from '@idle-party-rpg/shared';
+import type { RoomLockInfo } from '@idle-party-rpg/shared';
 import { forecastHeadline, forecastVerdict } from '../combat/ForecastFormat';
 import { artworkUrl, placeholderUrl } from './assets';
 import { renderForecastRing } from './ForecastChip';
+import { lockCardAction, renderLockCard } from './LockCard';
+import type { LockCardAction, LockCardContext } from './LockCard';
 import { registerDismiss, release } from './ModalStack';
 import { escapeHtml } from './ItemIcon';
 import { deferWhilePressed, setHtml } from './render';
@@ -14,6 +17,7 @@ import type { RoutePreview } from './routePreview';
 
 export const ROOM_SHEET_FORECAST_DEBOUNCE_MS = 250;
 export const DUNGEON_TRAVEL_LOCK_TEXT = 'Leave the dungeon before traveling';
+export const SETTING_OFF_TEXT = 'Setting off…';
 const LOCK_PULSE_CLASS = 'room-sheet-lock-pulse';
 
 export interface RoomSheetModel {
@@ -36,6 +40,8 @@ export interface RoomSheetModel {
   routeLines: string[];
   /** Another player is in the party: they may know a door the viewer doesn't, so an unknown way keeps Go. */
   partyHasOthers: boolean;
+  /** Who reads the lock card, when the server sends one. */
+  lockContext: LockCardContext;
 }
 
 export interface RoomSheetHandlers {
@@ -43,6 +49,7 @@ export interface RoomSheetHandlers {
   onDetails: (info: TileClickInfo) => void;
   onUserClick: (username: string, anchor: HTMLElement, col: number, row: number) => void;
   onDismiss: () => void;
+  onLockAction: (action: LockCardAction) => void;
 }
 
 function isExplored(info: TileClickInfo): boolean {
@@ -79,6 +86,11 @@ export class RoomSheet {
   private model: RoomSheetModel | null = null;
   private forecastTimer: ReturnType<typeof setTimeout> | undefined;
   private shownForecastTileId: string | null = null;
+  /** The server's lock card; it stays until the sheet closes or another room is shown. */
+  private lock: RoomLockInfo | null = null;
+  /** A refusal that leaves Go in place, such as one that may pass on a retry. */
+  private notice: string | null = null;
+  private pending = false;
 
   constructor(parent: HTMLElement, handlers: RoomSheetHandlers, forecastProvider: RoomForecastProvider) {
     this.handlers = handlers;
@@ -95,7 +107,7 @@ export class RoomSheet {
       <div class="room-sheet-forecast" hidden></div>
       <div class="room-sheet-players"></div>
       <div class="room-sheet-buttons">
-        <div class="room-sheet-lock" hidden></div>
+        <div class="room-sheet-lock" role="status" hidden></div>
         <button type="button" class="room-sheet-go">Go</button>
         <button type="button" class="room-sheet-details">Details</button>
       </div>
@@ -130,6 +142,10 @@ export class RoomSheet {
     return this.model?.info.mapId ?? null;
   }
 
+  get selectedRoomId(): string | null {
+    return this.model?.roomId ?? null;
+  }
+
   get selectedCol(): number | null {
     return this.model?.info.col ?? null;
   }
@@ -144,7 +160,44 @@ export class RoomSheet {
 
   /** The shown room is locked or out of walking reach, so Go is withheld. */
   get isBlocked(): boolean {
-    return this.model !== null && blockedLines(this.model).length > 0;
+    return this.model !== null && (this.lock !== null || blockedLines(this.model).length > 0);
+  }
+
+  get element(): HTMLElement {
+    return this.el;
+  }
+
+  get shownLock(): RoomLockInfo | null {
+    return this.lock;
+  }
+
+  /** Rendered height; 0 before layout. */
+  get height(): number {
+    return this.el.hidden ? 0 : this.el.offsetHeight;
+  }
+
+  /** Show the server's lock card in place of the preview lines, or drop it (null) and fall back to them. */
+  setLock(lock: RoomLockInfo | null): void {
+    if (!this.model) return;
+    this.lock = lock;
+    this.notice = null;
+    this.repaint();
+  }
+
+  /** A refusal shown where the lock lines go; Go stays for another try. */
+  setNotice(text: string | null): void {
+    if (!this.model) return;
+    this.notice = text;
+    this.pending = false;
+    this.repaint();
+  }
+
+  /** Go was sent and the sheet waits for the server: Go says so and can't be pressed again. */
+  setPending(pending: boolean): void {
+    if (!this.model || this.pending === pending) return;
+    this.pending = pending;
+    if (pending) this.notice = null;
+    this.repaint();
   }
 
   /** Draws the eye back to why the room can't be entered. */
@@ -157,7 +210,14 @@ export class RoomSheet {
 
   show(model: RoomSheetModel): void {
     const sameRoom = this.model !== null && this.isShowing(model.info.mapId, model.info.col, model.info.row);
-    if (!sameRoom) this.lockEl.classList.remove(LOCK_PULSE_CLASS);
+    if (!sameRoom) {
+      this.lockEl.classList.remove(LOCK_PULSE_CLASS);
+      this.lock = null;
+      this.notice = null;
+      this.pending = false;
+      this.el.scrollTop = 0;
+      this.lockEl.scrollTop = 0;
+    }
     this.model = model;
     this.el.hidden = false;
     this.el.dataset.explored = isExplored(model.info) ? '1' : '0';
@@ -171,9 +231,7 @@ export class RoomSheet {
     if (!this.model) return;
     this.model = model;
     if (model.forecastTileId !== this.shownForecastTileId) this.startForecast(model.forecastTileId);
-    deferWhilePressed(this.el, () => {
-      if (this.model) this.paint(this.model);
-    });
+    this.repaint();
   }
 
   updateForecast(tileId: string, state: RoomForecastState): void {
@@ -185,18 +243,30 @@ export class RoomSheet {
     clearTimeout(this.forecastTimer);
     this.model = null;
     this.shownForecastTileId = null;
+    this.lock = null;
+    this.notice = null;
+    this.pending = false;
     this.el.hidden = true;
     release(this.el);
+  }
+
+  private repaint(): void {
+    deferWhilePressed(this.el, () => {
+      if (this.model) this.paint(this.model);
+    });
   }
 
   private onClick(e: Event): void {
     const target = e.target as HTMLElement;
     const model = this.model;
     if (!model) return;
-    if (target.closest('.room-sheet-close')) {
+    const lockAction = lockCardAction(target);
+    if (lockAction) {
+      this.handlers.onLockAction(lockAction);
+    } else if (target.closest('.room-sheet-close')) {
       this.handlers.onDismiss();
     } else if (target.closest('.room-sheet-go')) {
-      if (!model.inDungeon) this.handlers.onGo(model.info);
+      if (!model.inDungeon && !this.pending) this.handlers.onGo(model.info);
     } else if (target.closest('.room-sheet-details, .room-sheet-forecast')) {
       this.handlers.onDetails(model.info);
     } else {
@@ -214,19 +284,32 @@ export class RoomSheet {
     this.paintArt(model, explored);
     this.paintLock(model);
     this.detailsEl.hidden = !explored;
-    this.goEl.disabled = model.inDungeon;
-    const goText = model.inDungeon ? DUNGEON_TRAVEL_LOCK_TEXT : 'Go';
+    this.goEl.disabled = model.inDungeon || this.pending;
+    const goText = model.inDungeon ? DUNGEON_TRAVEL_LOCK_TEXT : this.pending ? SETTING_OFF_TEXT : 'Go';
     if (this.goEl.textContent !== goText) this.goEl.textContent = goText;
     this.goEl.dataset.locked = model.inDungeon ? '1' : '0';
+    this.goEl.dataset.pending = this.pending ? '1' : '0';
   }
 
   private paintLock(model: RoomSheetModel): void {
-    const lines = blockedLines(model);
-    const blocked = lines.length > 0;
+    const card = this.lock;
+    const lines = card ? [] : blockedLines(model);
+    const blocked = card !== null || lines.length > 0;
     this.el.dataset.blocked = blocked ? '1' : '0';
-    this.lockEl.hidden = !blocked;
+    this.el.dataset.lock = card ? '1' : '0';
+    this.el.dataset.notice = !card && this.notice !== null ? '1' : '0';
+    this.lockEl.hidden = !blocked && this.notice === null;
     this.goEl.hidden = blocked;
-    setHtml(this.lockEl, lines.map(line => `<div class="room-sheet-lock-line">${escapeHtml(line)}</div>`).join(''));
+    const lineHtml = (line: string, kind: string) => `<div class="room-sheet-lock-line" data-kind="${kind}">${escapeHtml(line)}</div>`;
+    setHtml(this.lockEl, card
+      ? renderLockCard(card, model.lockContext)
+      : lines.map(line => lineHtml(line, 'lock')).join('') + (this.notice ? lineHtml(this.notice, 'notice') : ''));
+  }
+
+  /** The room itself is locked, not just the way there. */
+  private roomLocked(model: RoomSheetModel): boolean {
+    if (this.lock) return !this.lock.onRoute && !this.lock.unreachable;
+    return model.lock !== null;
   }
 
   private nameHtml(name: string, locked: boolean): string {
@@ -235,16 +318,16 @@ export class RoomSheet {
   }
 
   private unexploredHead(model: RoomSheetModel): string {
-    const note = routeNote(model);
-    return this.nameHtml(model.info.roomName || 'Unexplored Room', model.lock !== null)
+    const note = this.lock ? null : routeNote(model);
+    return this.nameHtml(model.info.roomName || 'Unexplored Room', this.roomLocked(model))
       + (note ? `<div class="room-sheet-sub"><span class="room-sheet-sub-route">${escapeHtml(note)}</span></div>` : '');
   }
 
   private exploredHead(model: RoomSheetModel): string {
-    const { info, actions, othersHere, paysNoXp, lock } = model;
+    const { info, actions, othersHere, paysNoXp } = model;
     const count = othersHere > 0 ? ` · ${othersHere} ${othersHere === 1 ? 'player' : 'players'}` : '';
     const first = actions[0] ? `<span class="room-sheet-sub-action">${escapeHtml(actionLabel(actions[0]))}</span>` : '';
-    const note = routeNote(model);
+    const note = this.lock ? null : routeNote(model);
     const route = note ? `<span class="room-sheet-sub-route">${escapeHtml(note)}</span>` : '';
     const noXp = paysNoXp ? '<span class="room-sheet-sub-noxp">Fights here pay no XP</span>' : '';
     const icons = actions.map(action => {
@@ -255,7 +338,7 @@ export class RoomSheet {
         + `<span class="room-sheet-action-icon${pip ? ` ${pip}` : ''}">${escapeHtml(action.icon)}</span>`
         + `<span class="room-sheet-action-name">${escapeHtml(action.name)}</span></span>`;
     }).join('');
-    return this.nameHtml(info.roomName || 'Unnamed Room', lock !== null)
+    return this.nameHtml(info.roomName || 'Unnamed Room', this.roomLocked(model))
       + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span>${route}${noXp}</div>`
       + (icons ? `<div class="room-sheet-actions">${icons}</div>` : '');
   }

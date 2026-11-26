@@ -1,7 +1,7 @@
 import type { ServerStateMessage, ServerEquipBlockedMessage, ServerCombatMessage,
   ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode,
   ServerForecastMessage, ServerBestiaryMessage, ForecastTarget, ForecastRequestTarget, AutoRetreatPct, AwayLedger, ItemDefinition,
-  RouteWarningKind, ServerRouteConfirmMessage } from '@idle-party-rpg/shared';
+  RouteWarningKind, ServerRouteConfirmMessage, LockTarget, ServerLockInfoMessage } from '@idle-party-rpg/shared';
 import { PARTIAL_STATE_PARAM, restoreElidedState } from '@idle-party-rpg/shared';
 import { CombatLogBuffer } from '../combat/CombatLogBuffer';
 
@@ -22,6 +22,7 @@ type SuspensionListener = () => void;
 type ResumeListener = () => void;
 type MoveBlockedListener = (msg: ServerMoveBlockedMessage) => void;
 type RouteConfirmListener = (msg: ServerRouteConfirmMessage) => void;
+type LockInfoListener = (msg: ServerLockInfoMessage) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 type NotificationListener = (notification: NotificationEntry) => void;
 export const OFFLINE_NOTICE = "You're offline — reconnecting. Try again in a moment.";
@@ -74,6 +75,7 @@ export class GameClient {
   private equipBlockedListeners = new Set<EquipBlockedListener>();
   private moveBlockedListeners = new Set<MoveBlockedListener>();
   private routeConfirmListeners = new Set<RouteConfirmListener>();
+  private lockInfoListeners = new Set<LockInfoListener>();
   private suspensionListeners = new Set<SuspensionListener>();
   private resumeListeners = new Set<ResumeListener>();
   private playerProfileListeners = new Set<PlayerProfileListener>();
@@ -321,6 +323,14 @@ export class GameClient {
             console.error('[GameClient] error in route_confirm listener:', err);
           }
         }
+      } else if (msg.type === 'lock_info') {
+        for (const listener of this.lockInfoListeners) {
+          try {
+            listener(msg as ServerLockInfoMessage);
+          } catch (err) {
+            console.error('[GameClient] error in lock_info listener:', err);
+          }
+        }
       } else if (msg.type === 'player_profile') {
         for (const listener of this.playerProfileListeners) {
           try {
@@ -512,6 +522,16 @@ export class GameClient {
   onRouteConfirm(listener: RouteConfirmListener): () => void {
     this.routeConfirmListeners.add(listener);
     return () => { this.routeConfirmListeners.delete(listener); };
+  }
+
+  /** Ask what locks a room or a door of the party's room; the answer comes back as `lock_info`. */
+  sendInspectLock(target: LockTarget): boolean {
+    return this.sendRaw({ type: 'inspect_lock', target });
+  }
+
+  onLockInfo(listener: LockInfoListener): () => void {
+    this.lockInfoListeners.add(listener);
+    return () => { this.lockInfoListeners.delete(listener); };
   }
 
   sendStopTravel(): boolean {

@@ -14,7 +14,7 @@ import { classAttackSkill, renderSkillCardMeta } from '../ui/SkillCardChip';
 import { partyGridCell } from '../ui/partyGridLayout';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { renderSegments, wireSegments } from '../ui/Segments';
-import { acceptInviteWithConfirm, inviteWhereText, runEndsWarning } from '../ui/partyInviteActions';
+import { acceptInviteWithConfirm, inviteWhereText, kickConfirmOptions, runEndsWarning } from '../ui/partyInviteActions';
 
 type SubTab = 'party' | 'guild' | 'friends' | 'ranks';
 
@@ -299,12 +299,7 @@ export class SocialScreen implements Screen {
         return;
       }
       if (btn.matches('.social-kick-btn') && username) {
-        this.confirmPartyChange({
-          title: `Kick ${username}?`,
-          body: 'They will be removed from this party and carry on alone.',
-          confirmLabel: 'Kick',
-          danger: true,
-        }, () => this.gameClient.sendKickPartyMember(username));
+        this.confirmThen(kickConfirmOptions(username, this.gameClient.lastState), () => this.gameClient.sendKickPartyMember(username));
         return;
       }
       if (btn.matches('.social-party-leave-btn')) {

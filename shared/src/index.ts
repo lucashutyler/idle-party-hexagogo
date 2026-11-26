@@ -48,6 +48,18 @@ export {
 } from './systems/RoomRequirements.js';
 export { collectGates, gateMinLevel, gateQuestIds, passesGate } from './systems/GateIndex.js';
 export type { GateRef } from './systems/GateIndex.js';
+export { LOCK_QUEST_SPOILER_LEVELS, isSpoilerQuest, parseLockTarget, sameLockTarget } from './systems/RoomLock.js';
+export type {
+  LockTarget,
+  QuestGiverInfo,
+  QuestStepState,
+  QuestStepInfo,
+  RoomLockMember,
+  RoomLockRequirement,
+  RoomLockInfo,
+} from './systems/RoomLock.js';
+export { QUEST_CHAIN_DEPTH_CAP, nextQuestStep } from './systems/QuestChain.js';
+export type { QuestChainProgress } from './systems/QuestChain.js';
 export type {
   RoomGateSource,
   RoomEntryRequirements,
@@ -397,6 +409,8 @@ export type {
   ClientEquipItemForceDestroyMessage,
   ServerEquipBlockedMessage,
   ServerMoveBlockedMessage,
+  ClientInspectLockMessage,
+  ServerLockInfoMessage,
   RouteWarningKind,
   RouteWarning,
   ServerRouteConfirmMessage,

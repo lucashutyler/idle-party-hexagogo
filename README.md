@@ -183,6 +183,8 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Room status panel for the current room (desktop card / mobile chips that talk, shop, enter or travel directly; a travel chip confirms first on phones)
 - [x] Room sheet (tap a room for its name, actions, forecast and Go; tap it again to go)
 - [x] Lock preview (padlocks on rooms and exits the party would be refused, in zones the player knows; the room sheet lists what is missing and withholds Go; rooms beyond a door say how many doors, or that no way is known yet)
+- [x] Lock card (the server's account of a locked room, door or room on the way: each requirement with a tick or a cross per party member, the viewer's next quest step with Walk there, Show on map or Quest Log, and Remove for missing members; stays until the sheet closes; a locked door of the party's room opens it as a dialog)
+- [x] Every travel refusal shown (coded refusals for moves, Stop, Autorun, doors and leaving a dungeon; Go keeps the sheet open until the party sets off or the server says why; a locked room names the members it waits on and whether they're online)
 - [x] Rooms found per region on Hero > Stats
 - [x] Terrain, fog and art layers (procedural terrain from room-type colours, separate fog, room art loaded near the view)
 - [x] Follow camera, route line and route chip with Stop, zone labels, zoom-based detail levels

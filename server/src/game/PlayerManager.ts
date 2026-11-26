@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey, getZone, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit, isWholeItemCount, partyInviteExpiresAt, planRouteDoors, PARTY_INVITE_TTL_MS } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem, PartyInvite, RouteWarningKind } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem, PartyInvite, RouteWarningKind, LockTarget, RoomLockInfo, ServerLockInfoMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData, SavedPartyInvite } from './GameStateStore.js';
@@ -20,6 +20,7 @@ import { BrowserPushNotificationDriver } from './social/BrowserPushNotificationD
 import { EmailNotificationDriver } from './social/EmailNotificationDriver.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
 import type { CombatSendOptions, RoomMoveResult } from './PartyBattleManager.js';
+import { moveRefusalText } from './MoveRefusals.js';
 import { routeIndexOf } from './RouteIndexCache.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
@@ -40,6 +41,10 @@ export const STATE_RETRY_MS = 500;
 export const PRESENCE_GRACE_MS = 5000;
 /** The least time between two moves by room id from one player; each one plans a route. */
 export const ROUTE_MOVE_GAP_MS = 200;
+/** Once a player's burst is spent, one more lock inspection every this long; each one may plan a route and walk quest chains. */
+export const LOCK_INSPECT_GAP_MS = 200;
+/** Lock inspections one player may send at once: a phone's network can deliver a few together. */
+export const LOCK_INSPECT_BURST = 3;
 
 type PlayerChatChannel = Exclude<ChatChannelType, 'server'>;
 
@@ -73,6 +78,7 @@ export interface PartyDeparture {
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private lastRouteMoveAt = new WeakMap<PlayerSession, number>();
+  private lockInspectBudget = new WeakMap<PlayerSession, { tokens: number; at: number }>();
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
   private combatViewHidden = new WeakSet<WebSocket>();
@@ -1321,15 +1327,39 @@ export class PlayerManager {
     return this.partyBattles.leaveDungeon(partyId);
   }
 
-  /** A move by room id, at most one per player every ROUTE_MOVE_GAP_MS: null when this one came too soon and was dropped. */
-  handleMoveToRoom(username: string, tileId: string, accept: readonly RouteWarningKind[], now = Date.now()): RoomMoveResult | null {
+  /** A move by room id, at most one per player every ROUTE_MOVE_GAP_MS; one that comes too soon changes nothing and is refused as `too_soon`. */
+  handleMoveToRoom(username: string, tileId: string, accept: readonly RouteWarningKind[], now = Date.now()): RoomMoveResult {
     const session = this.sessions.get(username);
     const partyId = session?.getPartyId();
     if (!session || !partyId) return { success: false, reason: 'no_party' };
     const last = this.lastRouteMoveAt.get(session);
-    if (last !== undefined && now - last < ROUTE_MOVE_GAP_MS) return null;
+    if (last !== undefined && now - last < ROUTE_MOVE_GAP_MS) return { success: false, reason: 'too_soon' };
     this.lastRouteMoveAt.set(session, now);
     return this.partyBattles.handleMoveToRoom(partyId, tileId, accept);
+  }
+
+  /** What locks `target` for this player's party: null when the player's inspections ran past LOCK_INSPECT_BURST and the request was dropped. */
+  handleInspectLock(username: string, target: LockTarget, now = Date.now()): ServerLockInfoMessage | null {
+    const session = this.sessions.get(username);
+    if (!session || !this.takeLockInspect(session, now)) return null;
+    const partyId = session.getPartyId();
+    return { type: 'lock_info', target, lock: partyId ? this.partyBattles.inspectLock(partyId, target, username) : null };
+  }
+
+  /** The lock card for an order this player gave that a gate refused. */
+  lockForRefusal(username: string, failure: RoomEntryFailure): RoomLockInfo | null {
+    const partyId = this.sessions.get(username)?.getPartyId();
+    return partyId ? this.partyBattles.lockForRefusal(partyId, failure, username) : null;
+  }
+
+  /** A token bucket: LOCK_INSPECT_BURST at once, then one more each LOCK_INSPECT_GAP_MS. A dropped request spends nothing. */
+  private takeLockInspect(session: PlayerSession, now: number): boolean {
+    const last = this.lockInspectBudget.get(session);
+    const refilled = last ? last.tokens + Math.max(0, now - last.at) / LOCK_INSPECT_GAP_MS : LOCK_INSPECT_BURST;
+    const tokens = Math.min(LOCK_INSPECT_BURST, refilled);
+    if (tokens < 1) return false;
+    this.lockInspectBudget.set(session, { tokens: tokens - 1, at: now });
+    return true;
   }
 
   /**
@@ -1342,10 +1372,8 @@ export class PlayerManager {
     username: string,
     targetTileId: string,
   ): { success: true } | { success: false; error: string; blocked?: RoomEntryFailure } {
-    const session = this.sessions.get(username);
-    if (!session) return { success: false, error: 'No session.' };
-    const partyId = session.getPartyId();
-    if (!partyId) return { success: false, error: 'No party.' };
+    const partyId = this.sessions.get(username)?.getPartyId();
+    if (!partyId) return { success: false, error: moveRefusalText('no_party') };
     return this.partyBattles.enterTransition(partyId, targetTileId);
   }
 

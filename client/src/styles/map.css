@@ -730,6 +730,107 @@ button.map-status-retry {
 @media (prefers-reduced-motion: reduce) {
   .room-sheet-lock-pulse { animation-name: room-sheet-lock-blink; }
 }
+.room-sheet-lock-line[data-kind="notice"] {
+  color: var(--gold);
+}
+
+/* A lock card or a refusal grows the bottom sheet; MapScreen reads its height for the controls above it. */
+#screen-map:not([data-sheet="side"]) .room-sheet:is([data-lock="1"], [data-notice="1"]) {
+  height: auto;
+  min-height: 112px;
+  max-height: min(300px, 60%);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.room-sheet[data-lock="1"] .room-sheet-forecast,
+#screen-map:not([data-sheet="side"]) .room-sheet[data-notice="1"] .room-sheet-forecast {
+  display: none;
+}
+#screen-map:not([data-sheet="side"]) .room-sheet:is([data-lock="1"], [data-notice="1"]) .room-sheet-buttons {
+  position: static;
+  grid-area: foot;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+#screen-map:not([data-sheet="side"]) .room-sheet:is([data-lock="1"], [data-notice="1"]) .room-sheet-lock {
+  flex-basis: 100%;
+  max-height: none;
+  justify-content: flex-start;
+  padding: 6px 10px;
+  font-size: var(--fs-xs);
+}
+
+.lock-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+.lock-card-title {
+  font-weight: 800;
+  color: var(--gold);
+}
+.lock-card-needs,
+.lock-card-members {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lock-card-need + .lock-card-need {
+  margin-top: 2px;
+}
+.lock-card-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.lock-card-member {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.lock-card-member[data-met="1"] .lock-card-tick { color: #7fe08a; }
+.lock-card-member[data-met="0"] .lock-card-tick { color: #ff8f7f; }
+.lock-card-member-detail::before {
+  content: '· ';
+}
+.lock-card-step-quest {
+  color: var(--gold);
+}
+.lock-card-step-note {
+  font-weight: 700;
+  color: var(--text-2);
+}
+.lock-card-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+button.lock-card-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #2f3d8c 0%, #222d6d 100%);
+  border: 2px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  color: var(--text-1);
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  cursor: pointer;
+}
+button.lock-card-btn-primary {
+  background: var(--grad-primary);
+  color: #5a3300;
+}
+.lock-dialog-body .lock-card {
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+  color: var(--text-1);
+}
 
 button.room-sheet-close {
   grid-area: close;
@@ -839,6 +940,10 @@ button.room-sheet-go[data-locked="1"] {
   font-weight: 800;
   cursor: default;
 }
+button.room-sheet-go[data-pending="1"] {
+  opacity: 0.75;
+  cursor: progress;
+}
 button.room-sheet-details {
   flex: none;
   background: linear-gradient(180deg, #2f3d8c 0%, #222d6d 100%);
@@ -848,7 +953,7 @@ button.room-sheet-details[hidden],
 button.room-sheet-go[hidden] { display: none; }
 
 #screen-map[data-sheet="bottom"] .map-zoom-controls {
-  transform: translateY(-112px);
+  transform: translateY(calc(-1 * var(--room-sheet-h, 112px)));
 }
 #screen-map[data-controls="some"] button.map-zoom-btn:not(.map-recenter),
 #screen-map:is([data-controls="some"], [data-controls="none"]) .room-status,
@@ -1035,7 +1140,7 @@ button.room-sheet-player:hover { background: rgba(255, 255, 255, 0.06); }
 
 @media (max-width: 767px) {
   #screen-map[data-sheet="bottom"] .room-status {
-    transform: translateY(-112px);
+    transform: translateY(calc(-1 * var(--room-sheet-h, 112px)));
   }
 }
 
@@ -1055,7 +1160,7 @@ button.room-sheet-player:hover { background: rgba(255, 255, 255, 0.06); }
     bottom: 64px;
   }
   #screen-map[data-sheet="bottom"] .map-toast {
-    bottom: 176px;
+    bottom: calc(64px + var(--room-sheet-h, 112px));
   }
   .map-route-chip {
     top: auto;
@@ -1065,7 +1170,7 @@ button.room-sheet-player:hover { background: rgba(255, 255, 255, 0.06); }
     max-width: calc(100% - 80px);
   }
   #screen-map[data-sheet="bottom"] .map-route-chip {
-    transform: translateY(-112px);
+    transform: translateY(calc(-1 * var(--room-sheet-h, 112px)));
   }
   #screen-map[data-sheet="side"] .map-route-chip {
     max-width: calc(100% - 400px);

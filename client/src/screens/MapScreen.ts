@@ -1,5 +1,14 @@
-import type { MapTransitionLink, ServerRouteConfirmMessage, ServerStateMessage, WorldTileDefinition } from '@idle-party-rpg/shared';
-import { cubeToPixel, offsetToCube, toShopSummary } from '@idle-party-rpg/shared';
+import type {
+  LockTarget,
+  MapTransitionLink,
+  RoomLockInfo,
+  ServerLockInfoMessage,
+  ServerMoveBlockedMessage,
+  ServerRouteConfirmMessage,
+  ServerStateMessage,
+  WorldTileDefinition,
+} from '@idle-party-rpg/shared';
+import { cubeToPixel, isRoomGateEmpty, offsetToCube, sameLockTarget, toShopSummary } from '@idle-party-rpg/shared';
 import { OFFLINE_NOTICE } from '../network/GameClient';
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
@@ -18,6 +27,10 @@ import { previewRoomLock, previewTravelLock, roomLockLines, roomRequirements } f
 import { ShopPopup } from '../ui/ShopPopup';
 import { RoomSheet } from '../ui/RoomSheet';
 import type { RoomSheetModel } from '../ui/RoomSheet';
+import { lockCardKey, lockCardTitle, showLockDialog } from '../ui/LockCard';
+import type { LockCardAction, LockCardContext, LockDialog } from '../ui/LockCard';
+import { describeMoveBlock } from '../ui/moveBlockText';
+import { kickConfirmOptions } from '../ui/partyInviteActions';
 import type { ThreeWorldMap, TileClickInfo } from '../ui/ThreeWorldMap';
 import { NpcTalkPopup } from '../ui/NpcTalkPopup';
 import { DungeonEntryPopup } from '../ui/DungeonEntryPopup';
@@ -45,6 +58,10 @@ const BLOCKED_ROOM_TEXT = "You can't walk there";
 const CHARTING_TEXT = 'Charting the map…';
 const UNVISITED_MAP_TEXT = "You haven't visited that map yet.";
 const OWN_TRAVEL_FOLLOW_MS = 5000;
+/** How long Go and a door wait for the server's answer before the sheet closes and a refusal becomes a toast. */
+export const ORDER_ANSWER_MS = 5000;
+/** Quick taps across the map shouldn't each ask the server about a lock. */
+export const LOCK_INSPECT_DEBOUNCE_MS = 250;
 const MAP_KEY_PAN_PX = 80;
 const MAP_KEY_PAN: Readonly<Record<string, readonly [number, number]>> = {
   ArrowLeft: [-1, 0],
@@ -89,6 +106,16 @@ export class MapScreen implements Screen {
   /** Until then the next map change is the player's own trip through a door, which the camera follows. */
   private followCrossingUntil = 0;
   private confirmingRoute = false;
+  /** Go was sent from the open sheet; the sheet waits for the push or a refusal. */
+  private pendingGo: { tileId: string; mapId: string; col: number; row: number; at: number } | null = null;
+  private pendingGoTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A door was taken; a gate refusal opens the lock dialog. */
+  private pendingTravel: { action: RoomAction; at: number } | null = null;
+  /** The sheet's room the lock card was asked for, and the lock preview key it was asked under. */
+  private lockRequest: { tileId: string; key: string } | null = null;
+  private lockTimer: ReturnType<typeof setTimeout> | undefined;
+  private lockDialog: { dialog: LockDialog; target: Extract<LockTarget, { kind: 'door' }>; key: string } | null = null;
+  private openQuestLog?: () => void;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
@@ -105,15 +132,19 @@ export class MapScreen implements Screen {
     gc.setAttribute('aria-label', 'World map. Arrow keys pan, plus and minus zoom, Home returns to your party.');
     gc.addEventListener('keydown', (e) => this.onMapKey(e));
 
-    this.gameClient.onMoveBlocked((msg) => {
-      const names = msg.missingPlayers.join(', ');
-      this.showMoveToast(names ? `${msg.reason} Missing: ${names}` : msg.reason);
+    this.gameClient.onMoveBlocked((msg) => { this.onMoveBlocked(msg); });
+    this.gameClient.onRouteConfirm((msg) => {
+      if (this.pendingGo) this.dismissSheet();
+      void this.confirmRoute(msg);
     });
-    this.gameClient.onRouteConfirm((msg) => { void this.confirmRoute(msg); });
+    this.gameClient.onLockInfo((msg) => { this.onLockInfo(msg); });
+    this.gameClient.onConnection((connected) => {
+      if (!connected && this.takePendingGo()) this.roomSheet?.setNotice(OFFLINE_NOTICE);
+    });
     // While the entry popup is open it shows the refusal itself.
     this.gameClient.onServerError((message, code) => {
       if (code === 'dungeon_entry_refused' && !this.dungeonEntryPopup?.isOpen) this.showMoveToast(message);
-      if (code === 'travel_refused') this.showMoveToast(message);
+      if (code === 'travel_refused') this.onTravelRefused(message);
     });
     if (typeof ResizeObserver !== 'undefined') {
       new ResizeObserver(() => this.onScreenResize()).observe(this.container);
@@ -136,6 +167,11 @@ export class MapScreen implements Screen {
     this.onUserClickCallback = cb;
   }
 
+  /** What a lock card's Quest Log button opens. */
+  setOpenQuestLog(open: () => void): void {
+    this.openQuestLog = open;
+  }
+
   /** Back to the party's map if another is on screen, then centre on the party and follow it. */
   recenterOnPlayer(): void {
     this.endView();
@@ -153,18 +189,27 @@ export class MapScreen implements Screen {
       this.recenterOnPlayer();
       return;
     }
+    const info = this.showRoomOnMap(def);
+    if (info === undefined) {
+      this.showMoveToast(UNVISITED_MAP_TEXT);
+      return;
+    }
+    if (info && !info.isCurrentTile) this.selectRoom(info, false);
+  }
+
+  /** Draws the room's map and pans to it: undefined when that map is one the player hasn't visited. */
+  private showRoomOnMap(def: WorldTileDefinition): TileClickInfo | null | undefined {
+    if (!this.map) return undefined;
     const state = this.gameClient.lastState;
     if (def.mapId === (state?.currentMapId ?? this.map.drawnMapId)) {
       this.endView();
     } else if (state && this.isViewable(def.mapId, state)) {
       this.viewMap(def.mapId, def.id);
     } else {
-      this.showMoveToast(UNVISITED_MAP_TEXT);
-      return;
+      return undefined;
     }
     this.map.focusOn(def.col, def.row);
-    const info = this.map.getTileInfo(def.col, def.row);
-    if (info && !info.isCurrentTile) this.selectRoom(info, false);
+    return this.map.getTileInfo(def.col, def.row);
   }
 
   /** Refresh the map from updated WorldCache data. A view of a map that no longer exists ends. */
@@ -206,6 +251,8 @@ export class MapScreen implements Screen {
     this.active = false;
     if (this.map) this.map.pause();
     this.dismissSheet();
+    this.closeLockDialog();
+    this.pendingTravel = null;
     this.roomView?.hide();
     this.mapList?.close();
     if (this.viewBanner) release(this.viewBanner);
@@ -308,8 +355,98 @@ export class MapScreen implements Screen {
     return true;
   }
 
+  /** Over the map while it is on screen, else over whatever is, since a refusal may answer another screen's button. */
   private showMoveToast(message: string): void {
-    showMapToast(this.container, message);
+    showMapToast(this.active ? this.container : document.body, message);
+  }
+
+  private onMoveBlocked(msg: ServerMoveBlockedMessage): void {
+    if (this.takePendingGo()) {
+      if (msg.lock) this.showSheetLock(msg.lock);
+      else this.roomSheet?.setNotice(this.moveBlockText(msg));
+      return;
+    }
+    const travel = this.takePendingTravel();
+    const state = this.gameClient.lastState;
+    if (travel && msg.lock && state) {
+      this.openDoorLock(travel.action, state, msg.lock);
+      return;
+    }
+    this.showMoveToast(this.moveBlockText(msg));
+  }
+
+  private onTravelRefused(message: string): void {
+    this.pendingTravel = null;
+    if (this.takePendingGo()) this.roomSheet?.setNotice(message);
+    else this.showMoveToast(message);
+  }
+
+  private moveBlockText(msg: ServerMoveBlockedMessage): string {
+    const state = this.gameClient.lastState;
+    const online = new Set(state?.social?.onlinePlayers ?? []);
+    return describeMoveBlock(msg, state?.username ?? '', state?.social?.party, online).text;
+  }
+
+  private onLockInfo(msg: ServerLockInfoMessage): void {
+    const door = this.lockDialog;
+    if (door?.dialog.isOpen && sameLockTarget(door.target, msg.target)) {
+      door.dialog.setLock(msg.lock);
+      return;
+    }
+    const request = this.lockRequest;
+    if (msg.target.kind !== 'room' || request?.tileId !== msg.target.tileId) return;
+    if (this.roomSheet?.selectedRoomId !== msg.target.tileId) return;
+    this.roomSheet.setLock(msg.lock);
+  }
+
+  /** A card from a refusal is asked for again, like one the sheet asked for, once the party or the viewer changes. */
+  private showSheetLock(lock: RoomLockInfo): void {
+    const roomId = this.roomSheet?.selectedRoomId;
+    if (!roomId) return;
+    this.roomSheet!.setLock(lock);
+    clearTimeout(this.lockTimer);
+    this.lockRequest = { tileId: roomId, key: lockCardKey(this.gameClient.lastState) };
+  }
+
+  /** Whether Go was waiting on the room the sheet still shows, and in time; ends the wait either way. */
+  private takePendingGo(): boolean {
+    const pending = this.pendingGo;
+    if (!pending) return false;
+    this.endPendingGo();
+    return performance.now() - pending.at <= ORDER_ANSWER_MS && !!this.roomSheet?.isShowing(pending.mapId, pending.col, pending.row);
+  }
+
+  private takePendingTravel(): { action: RoomAction } | null {
+    const pending = this.pendingTravel;
+    this.pendingTravel = null;
+    return pending && performance.now() - pending.at <= ORDER_ANSWER_MS ? pending : null;
+  }
+
+  private startPendingGo(info: TileClickInfo, tileId: string): void {
+    this.endPendingGo();
+    const pending = { tileId, mapId: info.mapId, col: info.col, row: info.row, at: performance.now() };
+    this.pendingGo = pending;
+    this.roomSheet?.setPending(true);
+    this.pendingGoTimer = setTimeout(() => {
+      if (this.pendingGo === pending) this.dismissSheet();
+    }, ORDER_ANSWER_MS);
+  }
+
+  private endPendingGo(): void {
+    if (!this.pendingGo) return;
+    this.pendingGo = null;
+    clearTimeout(this.pendingGoTimer);
+    this.roomSheet?.setPending(false);
+  }
+
+  /** The push that shows the party on its way, or already there, answers Go. */
+  private arrivedOrOnTheWay(state: ServerStateMessage): boolean {
+    const pending = this.pendingGo;
+    if (!pending) return false;
+    if (state.party.route?.destinationId === pending.tileId) return true;
+    if (state.currentMapId !== pending.mapId) return false;
+    const at = (spot: { col: number; row: number } | undefined) => spot?.col === pending.col && spot.row === pending.row;
+    return at(state.party.path[state.party.path.length - 1]) || at(state.party);
   }
 
   /** The first tap on Map shouldn't also pay for fetching and parsing three.js. */
@@ -389,7 +526,7 @@ export class MapScreen implements Screen {
     this.dungeonEntryPopup = new DungeonEntryPopup(this.gameClient);
     this.roomView = new RoomView(
       this.container,
-      (info) => { if (this.tryMoveTo(info)) this.dismissSheet(); },
+      (info) => { this.goFromRoomView(info); },
       (username, anchor, tileCol, tileRow) => { this.onUserClickCallback?.(username, anchor, tileCol, tileRow); },
       (action) => { this.runAction(action); },
       (tileId) => this.roomForecastState(tileId),
@@ -402,9 +539,13 @@ export class MapScreen implements Screen {
         onDetails: (info) => { this.showRoom(info); },
         onUserClick: (username, anchor, col, row) => { this.onUserClickCallback?.(username, anchor, col, row); },
         onDismiss: () => { this.dismissSheet(); },
+        onLockAction: (action) => { this.runLockAction(action); },
       },
       (tileId) => this.roomForecastState(tileId),
     );
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => this.onScreenResize()).observe(this.roomSheet.element);
+    }
     this.unsubscribeForecast?.();
     this.unsubscribeForecast = this.gameClient.onForecast((msg) => {
       if (msg.target.kind !== 'room' || msg.status === 'pending') return;
@@ -436,12 +577,46 @@ export class MapScreen implements Screen {
   }
 
   private selectRoom(info: TileClickInfo, reveal: boolean): void {
-    this.shownForecastKey = this.gameClient.lastState?.social?.party?.forecastKey ?? null;
-    this.roomSheet?.show(this.sheetModel(info));
+    const state = this.gameClient.lastState;
+    this.shownForecastKey = state?.social?.party?.forecastKey ?? null;
+    if (this.pendingGo && !this.roomSheet?.isShowing(info.mapId, info.col, info.row)) this.endPendingGo();
+    const model = this.sheetModel(info);
+    this.roomSheet?.show(model);
     this.map?.setSelectedRoom({ col: info.col, row: info.row });
     this.sheetMapId = info.mapId;
     this.syncScreenLayout();
     if (reveal) this.map?.revealRoom(info.col, info.row, this.sheetInsets());
+    const tileDef = this.worldCache.getTileOn(info.mapId, info.col, info.row);
+    if (tileDef && this.wantsLockInfo(model, tileDef, state)) this.requestLockInfo(tileDef.id);
+    else this.dropLockRequest();
+  }
+
+  /** The client's preview can't see other members' quests and gear, so with others along any gate on the way is asked about. */
+  private wantsLockInfo(model: RoomSheetModel, tileDef: WorldTileDefinition, state: ServerStateMessage | null): boolean {
+    if (!state || state.dungeon || !model.info.isTraversable) return false;
+    if (model.lock || model.route?.kind === 'locked') return true;
+    if (!this.partyHasOthers(state)) return false;
+    return !isRoomGateEmpty(roomRequirements(tileDef, this.worldCache)) || (model.route?.kind === 'doors' && model.route.gated);
+  }
+
+  private requestLockInfo(tileId: string): void {
+    clearTimeout(this.lockTimer);
+    this.lockRequest = { tileId, key: lockCardKey(this.gameClient.lastState) };
+    this.lockTimer = setTimeout(() => {
+      if (this.roomSheet?.selectedRoomId === tileId) this.gameClient.sendInspectLock({ kind: 'room', tileId });
+    }, LOCK_INSPECT_DEBOUNCE_MS);
+  }
+
+  private dropLockRequest(): void {
+    clearTimeout(this.lockTimer);
+    this.lockRequest = null;
+  }
+
+  /** A card on show is asked for again once anything the lock depends on may have changed. */
+  private refreshLockInfo(): void {
+    const request = this.lockRequest;
+    if (!request || request.tileId !== this.roomSheet?.selectedRoomId) return;
+    if (lockCardKey(this.gameClient.lastState) !== request.key) this.requestLockInfo(request.tileId);
   }
 
   /** Follows the map's own width rather than the viewport's, because the chat column can take half of it. */
@@ -455,8 +630,15 @@ export class MapScreen implements Screen {
     const layout = this.sheetLayout();
     if (open) this.container.dataset.sheet = layout;
     else delete this.container.dataset.sheet;
-    const free = this.container.clientHeight - (open && layout === 'bottom' ? SHEET_BOTTOM_HEIGHT : 0);
+    const sheetHeight = this.bottomSheetHeight();
+    this.container.style.setProperty('--room-sheet-h', `${sheetHeight}px`);
+    const free = this.container.clientHeight - (open && layout === 'bottom' ? sheetHeight : 0);
     this.container.dataset.controls = free >= CONTROLS_FULL_MIN_HEIGHT ? 'full' : free >= CONTROLS_RECENTER_MIN_HEIGHT ? 'some' : 'none';
+  }
+
+  /** A lock card grows the bottom sheet past its usual height. */
+  private bottomSheetHeight(): number {
+    return Math.max(SHEET_BOTTOM_HEIGHT, this.roomSheet?.isOpen ? this.roomSheet.height : 0);
   }
 
   private onScreenResize(): void {
@@ -470,18 +652,32 @@ export class MapScreen implements Screen {
   private sheetInsets(): { right: number; bottom: number } {
     return this.sheetLayout() === 'side'
       ? { right: SHEET_SIDE_WIDTH, bottom: 0 }
-      : { right: 0, bottom: SHEET_BOTTOM_HEIGHT };
+      : { right: 0, bottom: this.bottomSheetHeight() };
   }
 
+  /** Go keeps the sheet up, saying the party sets off, until a push shows it on its way or the server says why not. */
   private goToRoom(info: TileClickInfo): void {
-    if (this.roomSheet?.isShowing(info.mapId, info.col, info.row) && this.roomSheet.isBlocked) {
-      this.roomSheet.pulseLock();
+    const sheet = this.roomSheet;
+    const showing = !!sheet?.isShowing(info.mapId, info.col, info.row);
+    if (showing && sheet!.isBlocked) {
+      sheet!.pulseLock();
       return;
     }
-    if (this.tryMoveTo(info)) this.dismissSheet();
+    if (showing && this.pendingGo) return;
+    if (!this.tryMoveTo(info)) return;
+    if (showing && info.tileId) this.startPendingGo(info, info.tileId);
+    else this.dismissSheet();
+  }
+
+  /** The room card's Go waits in the sheet behind it, so a refusal shows there too. */
+  private goFromRoomView(info: TileClickInfo): void {
+    if (this.roomSheet?.isShowing(info.mapId, info.col, info.row)) this.goToRoom(info);
+    else if (this.tryMoveTo(info)) this.dismissSheet();
   }
 
   private dismissSheet(): void {
+    this.endPendingGo();
+    this.dropLockRequest();
     this.roomSheet?.hide();
     this.map?.setSelectedRoom(null);
     this.syncScreenLayout();
@@ -504,6 +700,16 @@ export class MapScreen implements Screen {
       route,
       routeLines: routePreviewLines(route, state),
       partyHasOthers: this.partyHasOthers(state),
+      lockContext: this.lockContext(state),
+    };
+  }
+
+  private lockContext(state: ServerStateMessage | null): LockCardContext {
+    return {
+      viewer: state?.username ?? '',
+      humans: state?.social?.party?.members ?? [],
+      viewerLevel: state?.character?.level ?? 0,
+      canMove: this.canMove(),
     };
   }
 
@@ -549,6 +755,7 @@ export class MapScreen implements Screen {
       return;
     }
     this.roomSheet.update(this.sheetModel(info));
+    this.refreshLockInfo();
   }
 
   private showStatusCard(message: string, onRetry?: () => void): void {
@@ -581,8 +788,9 @@ export class MapScreen implements Screen {
     } else {
       const route = this.routeTo(tileDef, state);
       const routeBlocks = routeUnknown(route) && !this.partyHasOthers(state);
+      const card = this.roomSheet?.isShowing(info.mapId, info.col, info.row) ? this.roomSheet.shownLock : null;
       this.roomView.actions = info.isUnlocked && tileDef ? this.remoteRoomActions(tileDef, state) : [];
-      this.roomView.blockedLines = [
+      this.roomView.blockedLines = card ? [lockCardTitle(card)] : [
         ...(this.roomLock(tileDef, state) ?? []),
         ...(routeBlocks ? routePreviewLines(route, state) : []),
       ];
@@ -615,7 +823,7 @@ export class MapScreen implements Screen {
     return this.withTravelLocks(getRoomActions(room, lookups, questMarks(state)), room, state);
   }
 
-  /** A round chip shows one word, so a tap that takes the party off this map says where first; a locked exit lets the server say why instead. */
+  /** A round chip shows one word, so a tap that takes the party off this map says where first; a locked exit shows what it needs instead. */
   private runStatusChip(action: RoomAction): void {
     if (action.kind !== 'travel') {
       this.runAction(action);
@@ -652,11 +860,15 @@ export class MapScreen implements Screen {
     this.dungeonEntryPopup?.show(dungeon, state.party.col, state.party.row, { canEnter: this.canMove() });
   }
 
-  /** Every way through a door asks first when the party's hires would stay behind on this map. */
+  /** A locked exit shows what it needs instead; every other way through a door asks first when the party's hires would stay behind on this map. */
   private async travelThrough(action: RoomAction, askFirst: boolean): Promise<void> {
     const state = this.gameClient.lastState;
     if (!state) return;
     if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
+    if (action.locked) {
+      this.openDoorLock(action, state);
+      return;
+    }
     if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can travel'); return; }
     const hires = doorHiresText(state, this.worldCache.getMaps(), this.exitMapId(state, action.targetId));
     if (hires || askFirst) {
@@ -671,7 +883,91 @@ export class MapScreen implements Screen {
       this.showMoveToast(OFFLINE_NOTICE);
       return;
     }
-    this.followCrossingUntil = performance.now() + OWN_TRAVEL_FOLLOW_MS;
+    const now = performance.now();
+    this.followCrossingUntil = now + OWN_TRAVEL_FOLLOW_MS;
+    this.pendingTravel = { action, at: now };
+  }
+
+  /** The lock dialog for an exit of the party's room: the client's own lines first, then the server's card. */
+  private openDoorLock(action: RoomAction, state: ServerStateMessage, lock?: RoomLockInfo): void {
+    const here = this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row);
+    if (!here) return;
+    this.closeLockDialog();
+    const link = here.transitions?.find(l => l.tileId === action.targetId);
+    const failures = link ? previewTravelLock(link, this.worldCache.getTileByGuid(link.tileId), this.worldCache, state) : null;
+    const target = { kind: 'door' as const, fromTileId: here.id, tileId: action.targetId };
+    const dialog = showLockDialog({
+      title: actionLabel(action),
+      lines: failures ? roomLockLines(failures, state) : [],
+      context: () => this.lockContext(this.gameClient.lastState),
+      onAction: (picked) => { this.runLockAction(picked); },
+      onOpen: () => { void this.travelThrough({ ...action, locked: false }, false); },
+    });
+    this.lockDialog = { dialog, target, key: lockCardKey(state) };
+    if (lock) dialog.setLock(lock);
+    else this.gameClient.sendInspectLock(target);
+  }
+
+  /** The dialog is about a door of the room the party stands in: it closes once the party leaves, and asks again when the lock may have changed. */
+  private refreshDoorLock(state: ServerStateMessage): void {
+    const open = this.lockDialog;
+    if (!open?.dialog.isOpen) return;
+    const here = this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row);
+    if (here?.id !== open.target.fromTileId) {
+      this.closeLockDialog();
+      return;
+    }
+    const key = lockCardKey(state);
+    if (key === open.key) return;
+    open.key = key;
+    this.gameClient.sendInspectLock(open.target);
+  }
+
+  private closeLockDialog(): void {
+    this.lockDialog?.dialog.close();
+    this.lockDialog = null;
+  }
+
+  private runLockAction(action: LockCardAction): void {
+    switch (action.kind) {
+      case 'walk':
+        this.walkToRoom(action.roomId);
+        break;
+      case 'show':
+        this.closeLockDialog();
+        this.roomView?.hide();
+        this.focusRoom(action.roomId);
+        break;
+      case 'quests':
+        this.closeLockDialog();
+        this.openQuestLog?.();
+        break;
+      case 'remove':
+        void this.confirmRemove(action.username);
+        break;
+    }
+  }
+
+  /** Opens the room's sheet and sends Go from it, as two taps would; a room on a map not yet visited is just sent to. */
+  private walkToRoom(roomId: string): void {
+    this.closeLockDialog();
+    this.roomView?.hide();
+    const def = this.worldCache.getTileByGuid(roomId);
+    if (!def) return;
+    const info = this.showRoomOnMap(def);
+    if (info?.isCurrentTile) {
+      this.dismissSheet();
+      this.showRoom(info);
+    } else if (info) {
+      this.selectRoom(info, false);
+      this.goToRoom(info);
+    } else if (this.sendOrder(() => this.gameClient.sendMoveTo(roomId, this.coordsOnPartyMap(def.mapId, def)))) {
+      this.dismissSheet();
+    }
+  }
+
+  private async confirmRemove(username: string): Promise<void> {
+    if (await confirmDialog(kickConfirmOptions(username, this.gameClient.lastState))) this.gameClient.sendKickPartyMember(username);
   }
 
   /** The map an exit of the party's room leads to. */
@@ -942,7 +1238,9 @@ export class MapScreen implements Screen {
       this.refreshOpenRoomForecast();
       this.updateRoomStatus(state);
       this.updateRouteChip(state);
+      if (this.arrivedOrOnTheWay(state)) this.dismissSheet();
       this.refreshSheet();
+      this.refreshDoorLock(state);
     });
     this.refreshOpenRoomForecast();
   }
