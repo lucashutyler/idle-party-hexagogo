@@ -1,4 +1,4 @@
-import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription, DungeonRunState, CombatPrefs, AwayLedger } from '@idle-party-rpg/shared';
+import type { HiredHenchman, CombatLogEntry, BlockLevel, ChatMessage, FriendRequest, SkillLoadout, MailboxEntry, CraftQueueState, QuestProgressEntry, CompletedQuestEntry, NotificationEntry, NotificationPreferences, WebPushSubscription, DungeonRunState, CombatPrefs, AwayLedger, CodexSaveData } from '@idle-party-rpg/shared';
 
 /** A party invite this player received. Restored onto the inviter's party as it is after the restart. */
 export interface SavedPartyInvite {
@@ -63,6 +63,8 @@ export interface PlayerSaveData {
   clearedDungeons?: string[];
   /** Lifetime kills per monster definition id (kill mastery). */
   monsterKills?: Record<string, number>;
+  /** Codex knowledge: what this player has met, fought, held and visited. Absent → empty. See docs/architecture/codex.md. */
+  codex?: CodexSaveData;
   /** Absent → DEFAULT_COMBAT_PREFS. */
   combatPrefs?: CombatPrefs;
   /** The one-time "auto-retreat kept your party out of a losing fight" notification was sent. */

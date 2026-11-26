@@ -55,7 +55,7 @@ export class CodexKnowledge {
     if (this.drops.size > 0) {
       data.drops = Object.fromEntries([...this.drops].map(([monsterId, perItem]) => [monsterId, Object.fromEntries(perItem)]));
     }
-    if (this.recent.length > 0) data.recent = this.recentRefs();
+    if (this.recent.length > 0) data.recent = this.recent.map(ref => ({ kind: ref.kind, id: ref.id }));
     return Object.keys(data).length > 0 ? data : undefined;
   }
 
