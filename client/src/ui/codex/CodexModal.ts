@@ -134,6 +134,12 @@ export class CodexModal {
     this.paintedView = null;
     this.seenAtOpen = null;
     this.memo = null;
+    this.homeQuery = '';
+    for (const list of Object.values(this.lists)) {
+      list.query = '';
+      list.shown = CODEX_PAGE;
+      list.zoneShown.clear();
+    }
   }
 
   destroy(): void {

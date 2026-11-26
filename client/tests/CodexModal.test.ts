@@ -211,6 +211,38 @@ describe('CodexModal', () => {
     expect(body().querySelectorAll('.codex-row')).toHaveLength(120);
   });
 
+  it('starts each opening with empty searches and the first page, and keeps the chosen sort', () => {
+    vi.useFakeTimers();
+    const monsters = Array.from({ length: 120 }, (_, i) => ({ id: `m${i}`, name: `Monster ${String(i).padStart(3, '0')}`, tier: 'trash' as const, kills: 0, drops: [], dropKinds: 0 }));
+    mount(codexState(), codexReply({ monsters }));
+    const search = () => document.querySelector<HTMLInputElement>('.codex-search')!;
+    const type = (value: string) => {
+      search().value = value;
+      search().dispatchEvent(new Event('input'));
+      vi.advanceTimersByTime(CODEX_SEARCH_DEBOUNCE_MS);
+    };
+
+    modal.open({ kind: 'home' });
+    type('monster 00');
+    expect(body().querySelector('.codex-list-link')).toBeNull();
+    click('[data-codex-see="monster"]');
+    type('monster');
+    const sort = document.querySelector<HTMLSelectElement>('.codex-sort')!;
+    sort.value = 'name';
+    sort.dispatchEvent(new Event('change'));
+    click('[data-codex-more="list"]');
+    modal.close();
+
+    modal.open({ kind: 'home' });
+    expect(search().value).toBe('');
+    expect(body().querySelectorAll('.codex-list-link')).toHaveLength(4);
+    click('[data-codex="list:monster"]');
+    expect(search().value).toBe('');
+    expect(document.querySelector<HTMLSelectElement>('.codex-sort')!.value).toBe('name');
+    expect(body().querySelectorAll('.codex-row')).toHaveLength(100);
+    expect(body().querySelector('.codex-row')!.getAttribute('data-codex')).toBe('monster:m0');
+  });
+
   it('keeps the monster list\'s rows in place when a push only raises a kill count, and updates the count', () => {
     mount();
     modal.open({ kind: 'list', list: 'monster' });
