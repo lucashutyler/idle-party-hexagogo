@@ -99,8 +99,14 @@ const ZONE: ZoneDefinition = { id: 'test_dale', displayName: 'Test Dale', encoun
 export interface TravelOptions {
   /** On the west → east door. */
   doorGate?: RoomEntryRequirements;
+  /** On the east → west door. */
+  backDoorGate?: RoomEntryRequirements;
+  /** Where the test dungeon's entrance stands; w0 when unset. */
+  dungeonAt?: RoomKey;
   /** Adds a second, shorter door w1 → e1 with this gate. */
   shortcutGate?: RoomEntryRequirements;
+  /** More doors, each one way, after the usual ones. */
+  extraDoors?: Partial<Record<RoomKey, RoomKey[]>>;
   gates?: Partial<Record<RoomKey, RoomEntryRequirements>>;
   walls?: RoomKey[];
   /** Without one every fight is won at once, so the party walks on after every fight. */
@@ -115,18 +121,21 @@ function makeWorld(opts: TravelOptions): WorldData {
   const links: Partial<Record<RoomKey, WorldTileDefinition['transitions']>> = {
     w1: opts.shortcutGate ? [{ mapId: DELL, tileId: ROOM.e1, entryRequirements: opts.shortcutGate }] : undefined,
     w2: [{ mapId: DELL, tileId: ROOM.e0, ...(opts.doorGate ? { entryRequirements: opts.doorGate } : {}) }],
-    e0: [{ mapId: DELL, tileId: ROOM.w2 }],
+    e0: [{ mapId: DELL, tileId: ROOM.w2, ...(opts.backDoorGate ? { entryRequirements: opts.backDoorGate } : {}) }],
     e2: [{ mapId: BURROW, tileId: ROOM.b0 }],
     b0: [{ mapId: DELL, tileId: ROOM.e2 }],
     b1: [{ mapId: PIT, tileId: ROOM.p0 }],
   };
+  for (const [from, rooms] of Object.entries(opts.extraDoors ?? {}) as [RoomKey, RoomKey[]][]) {
+    links[from] = [...(links[from] ?? []), ...rooms.map(to => ({ mapId: PLACE[to].mapId, tileId: ROOM[to] }))];
+  }
   const tiles = (Object.keys(ROOM) as RoomKey[]).map((key): WorldTileDefinition => ({
     id: ROOM[key],
     ...PLACE[key],
     type: key === 'x3' || opts.walls?.includes(key) ? 'cliff' : 'plains',
     zone: ZONE.id,
     name: `Room ${key}`,
-    ...(key === 'w0' ? { dungeonId: DUNGEON.id } : {}),
+    ...(key === (opts.dungeonAt ?? 'w0') ? { dungeonId: DUNGEON.id } : {}),
     ...(links[key] ? { transitions: links[key] } : {}),
     ...(opts.gates?.[key] ? { entryRequirements: opts.gates[key] } : {}),
     ...npcIn(opts, key),

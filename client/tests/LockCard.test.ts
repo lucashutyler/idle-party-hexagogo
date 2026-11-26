@@ -223,4 +223,47 @@ describe('showLockDialog', () => {
     expect(onOpen).toHaveBeenCalledOnce();
     expect(dialog.isOpen).toBe(false);
   });
+
+  it('keeps a note about the monsters under the title through the server\'s answer, red only when told so', () => {
+    const note = () => document.querySelector<HTMLElement>('.lock-dialog .confirm-note');
+    const text = "Monsters there are level 16. You're level 4.";
+    const dialog = showLockDialog({ title: 'Travel', lines: [], note: { text, danger: true }, context: () => context(), onAction: vi.fn() });
+    expect(note()!.textContent).toBe(text);
+    expect(note()!.dataset.danger).toBe('1');
+    dialog.setLock(questLock(step()));
+    expect(note()!.textContent).toBe(text);
+    dialog.close();
+
+    showLockDialog({ title: 'Travel', lines: [], note: { text, danger: false }, context: () => context(), onAction: vi.fn() });
+    expect(note()!.dataset.danger).toBe('0');
+    dismissTop();
+    showLockDialog({ title: 'Travel', lines: [], context: () => context(), onAction: vi.fn() });
+    expect(note()).toBeNull();
+  });
+
+  it('swaps its note when told, and hands Travel the note on show, holding a new one back while Travel is pressed', () => {
+    const note = () => document.querySelector<HTMLElement>('.lock-dialog .confirm-note');
+    const grey = { text: "Monsters there are level 16. Your party's best is level 20.", danger: false };
+    const red = { text: "Monsters there are level 16. You're level 6.", danger: true };
+    const onOpen = vi.fn();
+    const dialog = showLockDialog({ title: 'Travel', lines: [], context: () => context(), onAction: vi.fn(), onOpen });
+    dialog.setNote(grey);
+    expect(note()!.textContent).toBe(grey.text);
+    dialog.setNote(red);
+    expect(note()!.textContent).toBe(red.text);
+    expect(note()!.dataset.danger).toBe('1');
+    dialog.setLock(null);
+
+    const travel = document.querySelector<HTMLElement>('.lock-dialog-travel')!;
+    travel.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+    dialog.setNote(grey);
+    expect(note()!.textContent).toBe(red.text);
+    travel.click();
+    expect(onOpen).toHaveBeenCalledWith(red);
+
+    const quiet = vi.fn();
+    showLockDialog({ title: 'Travel', lines: [], context: () => context(), onAction: vi.fn(), onOpen: quiet }).setLock(null);
+    document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
+    expect(quiet).toHaveBeenCalledWith(null);
+  });
 });

@@ -4,9 +4,17 @@ import { bringToFront, release } from './ModalStack';
 export interface ConfirmDialogOptions {
   title: string;
   body?: string;
+  /** A line of its own under the body; `danger` shows it as a warning. */
+  note?: { text: string; danger?: boolean };
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+}
+
+/** The note line shared by confirm-shaped dialogs. */
+export function confirmNoteHtml(note: { text: string; danger?: boolean } | null | undefined): string {
+  if (!note) return '';
+  return `<div class="confirm-note" data-danger="${note.danger ? '1' : '0'}">${escapeHtml(note.text)}</div>`;
 }
 
 /** Resolves true on confirm; false on cancel, the backdrop, Back or Escape. */
@@ -18,6 +26,7 @@ export function confirmDialog(opts: ConfirmDialogOptions): Promise<boolean> {
       <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-label="${escapeHtml(opts.title)}">
         <div class="confirm-title">${escapeHtml(opts.title)}</div>
         ${opts.body ? `<div class="confirm-body">${escapeHtml(opts.body)}</div>` : ''}
+        ${confirmNoteHtml(opts.note)}
         <div class="confirm-actions">
           <button type="button" class="pixel-btn confirm-cancel">${escapeHtml(opts.cancelLabel ?? 'Cancel')}</button>
           <button type="button" class="pixel-btn confirm-ok${opts.danger ? ' confirm-ok-danger' : ''}">${escapeHtml(opts.confirmLabel ?? 'Confirm')}</button>

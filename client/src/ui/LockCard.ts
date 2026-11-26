@@ -1,10 +1,12 @@
 import { isSpoilerQuest, questTitle } from '@idle-party-rpg/shared';
 import type { GamePartyMember, QuestStepInfo, RoomLockInfo, RoomLockMember, RoomLockRequirement, ServerStateMessage } from '@idle-party-rpg/shared';
+import { confirmNoteHtml } from './ConfirmDialog';
 import { escapeHtml } from './ItemIcon';
 import { bringToFront, release } from './ModalStack';
 import { deferWhilePressed, setHtml } from './render';
 import { removableMembers } from './moveBlockText';
 import { lockPreviewKey } from './RoomEntryCheck';
+import type { LevelNote } from './roomLevels';
 
 export const LOCK_SPOILER_TEXT = 'Opens later in the main story';
 export const NO_WAY_YET_TEXT = "Your party hasn't found a way there yet.";
@@ -174,10 +176,12 @@ export interface LockDialogOptions {
   title: string;
   /** What the client can tell, shown until the server's answer arrives. */
   lines: readonly string[];
+  /** Stays under the title whatever the server answers, until `setNote` replaces it. */
+  note?: LevelNote | null;
   context: () => LockCardContext;
   onAction: (action: LockCardAction) => void;
-  /** Offered as a Travel button when the server finds nothing in the way after all. */
-  onOpen?: () => void;
+  /** Offered as a Travel button when the server finds nothing in the way after all; gets the note shown when it was tapped. */
+  onOpen?: (shownNote: LevelNote | null) => void;
   /** However the dialog closed. */
   onClose?: () => void;
 }
@@ -186,6 +190,8 @@ export interface LockDialog {
   readonly isOpen: boolean;
   /** The server's answer; null means nothing stops the party. */
   setLock(lock: RoomLockInfo | null): void;
+  /** Replaces the note under the title. */
+  setNote(note: LevelNote | null): void;
   close(): void;
 }
 
@@ -196,6 +202,7 @@ export function showLockDialog(opts: LockDialogOptions): LockDialog {
   overlay.innerHTML = `
     <div class="confirm-dialog lock-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(opts.title)}">
       <div class="confirm-title">${escapeHtml(opts.title)}</div>
+      <div class="lock-dialog-note"></div>
       <div class="lock-dialog-body"></div>
       <div class="confirm-actions">
         <button type="button" class="pixel-btn confirm-cancel lock-dialog-close">Close</button>
@@ -205,6 +212,9 @@ export function showLockDialog(opts: LockDialogOptions): LockDialog {
   const body = overlay.querySelector<HTMLElement>('.lock-dialog-body')!;
   setHtml(body, `<div class="lock-card"><div class="lock-card-title">🔒 Locked</div>`
     + `<ul class="lock-card-needs">${opts.lines.map(line => `<li class="lock-card-need"><div class="lock-card-need-text">${escapeHtml(line)}</div></li>`).join('')}</ul></div>`);
+  const noteSlot = overlay.querySelector<HTMLElement>('.lock-dialog-note')!;
+  let note = opts.note ?? null;
+  setHtml(noteSlot, confirmNoteHtml(note));
 
   let open = true;
   const close = (): void => {
@@ -228,7 +238,7 @@ export function showLockDialog(opts: LockDialogOptions): LockDialog {
       close();
     } else if (target.closest('.lock-dialog-travel')) {
       close();
-      opts.onOpen?.();
+      opts.onOpen?.(note);
     } else {
       const action = lockCardAction(target);
       if (action) opts.onAction(action);
@@ -249,6 +259,14 @@ export function showLockDialog(opts: LockDialogOptions): LockDialog {
           + (opts.onOpen ? '<div class="lock-card-buttons"><button type="button" class="lock-card-btn lock-card-btn-primary lock-dialog-travel">Travel</button></div>' : '')
           + '</div>';
       deferWhilePressed(body, () => setHtml(body, html));
+    },
+    setNote(next) {
+      if (!open) return;
+      // Held while Travel is pressed: the tap must hand over the note the player saw.
+      deferWhilePressed(overlay, () => {
+        note = next;
+        setHtml(noteSlot, confirmNoteHtml(next));
+      });
     },
     close,
   };

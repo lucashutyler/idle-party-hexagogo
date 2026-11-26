@@ -1,7 +1,7 @@
 import type { TileClickInfo } from './ThreeWorldMap';
 import type { ForecastResult, PartyAutoRetreatInfo, AutoRetreatPct } from '@idle-party-rpg/shared';
 import { classIconHtml } from '@idle-party-rpg/shared';
-import { LOCKED_DETAIL, ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
+import { LEVEL_DANGER_TEXT, LOCKED_DETAIL, ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderForecastPopover, renderForecastRing } from './ForecastChip';
@@ -156,7 +156,9 @@ export class RoomView {
       ? `<button class="room-view-action room-view-action-stop">Stop here</button>`
       : '';
     const actionButtons = actions.map((action, i) => {
-      const title = action.detail ? ` title="${this.escapeHtml(action.detail)}"` : '';
+      const danger = action.danger && !action.locked;
+      const detail = danger ? `${action.detail} · ${LEVEL_DANGER_TEXT}` : action.detail;
+      const title = detail ? ` title="${this.escapeHtml(detail)}"` : '';
       const pip = pipSuffix(action);
       const icon = action.kind === 'shop'
         ? renderAssetImg('shop', action.targetId, { className: 'room-view-action-icon', label: action.name })
@@ -164,8 +166,11 @@ export class RoomView {
       const locked = action.locked
         ? `<span class="room-view-action-lock" role="img" aria-label="${LOCKED_DETAIL}">${ROOM_ICONS.lock}</span>`
         : '';
+      const level = action.kind === 'travel' && !action.locked && action.detail
+        ? `<span class="room-view-action-level"${danger ? ' data-danger="1"' : ''}>${this.escapeHtml(action.detail)}</span>`
+        : '';
       return `<button class="room-view-action room-view-action-${action.kind}${action.locked ? ' room-view-action-locked' : ''}" data-action-index="${i}"${title}>`
-        + `${icon}<span>${this.escapeHtml(actionLabel(action))}</span>${locked}</button>`;
+        + `${icon}<span>${this.escapeHtml(actionLabel(action))}</span>${level}${locked}</button>`;
     }).join('');
 
     this.modal.innerHTML = `

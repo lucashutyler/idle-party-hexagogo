@@ -35,6 +35,10 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
     panBy = vi.fn();
     adjustZoom = vi.fn();
     setLockCheck = vi.fn();
+    setTrackedRoom = vi.fn();
+    setOnTrackedRoomClick = vi.fn();
+    setEdgeArrowInsets = vi.fn();
+    avoidWithEdgeArrow = vi.fn();
     constructor() {
       if (mapStub.failNext) {
         mapStub.failNext = false;
@@ -99,6 +103,7 @@ function mount(lastState: unknown = null, tile: Record<string, unknown> = { id: 
     routeIndex: () => index,
     viewableMapIds: () => new Set(['here']),
     roomsFoundByMap: () => new Map(),
+    getRoomLevels: (def: { levels?: [number, number] }) => def.levels,
   } as unknown as WorldCache;
   const client = gameClient as unknown as GameClient;
   return { screen: new MapScreen('map-screen', client, worldCache), gameClient: client };
@@ -241,6 +246,18 @@ describe('MapScreen room selection', () => {
 
     map.tap(info());
     expect(gameClient.sendMoveTo).toHaveBeenCalledWith('room-1', { col: 3, row: 4 });
+  });
+
+  it('keeps the edge arrow clear of the docked sheet and of the controls over the map', async () => {
+    const { map } = await opened();
+    const edge = map as unknown as { setEdgeArrowInsets: ReturnType<typeof vi.fn>; avoidWithEdgeArrow: ReturnType<typeof vi.fn> };
+    const avoided = edge.avoidWithEdgeArrow.mock.calls.map(([el]) => (el as HTMLElement).className);
+    expect(avoided).toEqual(expect.arrayContaining(['map-zoom-controls', 'room-status', 'map-route-chip']));
+
+    map.tap(info());
+    expect(edge.setEdgeArrowInsets).toHaveBeenLastCalledWith({ right: 0, bottom: 112 });
+    map.background();
+    expect(edge.setEdgeArrowInsets).toHaveBeenLastCalledWith({ right: 0, bottom: 0 });
   });
 
   describe('Go waits for the server with the sheet up', () => {
@@ -815,7 +832,7 @@ describe('MapScreen status chips', () => {
     social: { party: { members: [{ username: 'me', role: 'owner' }], henchmen: [{ instanceId: 'h1', henchmanId: 'brin', mapId: 'here', name: 'Brin' }] } },
   };
 
-  async function withTravelChip(wide: boolean, lastState: unknown = state, link = transitionTile.transitions[0]) {
+  async function withTravelChip(wide: boolean, lastState: unknown = state, link = transitionTile.transitions[0], dest: Record<string, unknown> = {}) {
     vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
       matches: query.includes('min-width: 768px') && wide,
       addEventListener: () => {},
@@ -824,7 +841,7 @@ describe('MapScreen status chips', () => {
     const mounted = mount(lastState);
     Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
       getTileOn: () => ({ ...transitionTile, transitions: [link] }),
-      getTileByGuid: () => ({ name: 'Harbour', mapId: link.mapId }),
+      getTileByGuid: () => ({ name: 'Harbour', mapId: link.mapId, ...dest }),
       getMaps: () => [{ id: 'here', name: 'Home Isle', startTile: { col: 0, row: 0 } }],
     });
     mounted.screen.onActivate();
@@ -898,6 +915,79 @@ describe('MapScreen status chips', () => {
     expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
   });
 
+  describe('the level of the monsters behind an exit', () => {
+    const levelSix = { ...state, username: 'me', character: { level: 6, equipment: {} } };
+    const note = () => document.querySelector<HTMLElement>('.confirm-note');
+
+    it('is named in the phone confirm, and warns when they are far above the party', async () => {
+      await withTravelChip(false, levelSix, transitionTile.transitions[0], { levels: [12, 12] });
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(document.querySelector('.confirm-body')!.textContent).toBe('Your party will go there right away.');
+      expect(note()!.textContent).toBe("Monsters there are level 12. You're level 6.");
+      expect(note()!.dataset.danger).toBe('1');
+    });
+
+    it('does not warn at the edge of what still pays more', async () => {
+      await withTravelChip(false, levelSix, transitionTile.transitions[0], { levels: [11, 13] });
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(note()!.textContent).toBe("Monsters there are level 11–13. You're level 6.");
+      expect(note()!.dataset.danger).toBe('0');
+    });
+
+    it('says nothing when the world sends no levels', async () => {
+      await withTravelChip(false, levelSix);
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(document.querySelector('.confirm-dialog')).not.toBeNull();
+      expect(note()).toBeNull();
+    });
+
+    it('rides on the wide chip and the room card button, marked when far above the party', async () => {
+      await withTravelChip(true, levelSix, transitionTile.transitions[0], { levels: [12, 12] });
+      const chip = document.querySelector<HTMLElement>('.room-status-chip')!;
+      const chipLevel = chip.querySelector<HTMLElement>('.room-status-chip-level')!;
+      expect(chipLevel.textContent).toBe('Lv 12');
+      expect(chipLevel.dataset.danger).toBe('1');
+      expect(chip.getAttribute('aria-label')).toBe('Travel to Harbour · Lv 12 · Far above your party');
+      latestMap().tap(info({ isCurrentTile: true, col: 0, row: 0 }));
+      const cardLevel = document.querySelector<HTMLElement>('.room-view-action-travel .room-view-action-level')!;
+      expect(cardLevel.textContent).toBe('Lv 12');
+      expect(cardLevel.dataset.danger).toBe('1');
+    });
+
+    it('marks nothing at the edge of what still pays more', async () => {
+      await withTravelChip(true, levelSix, transitionTile.transitions[0], { levels: [11, 13] });
+      const chip = document.querySelector<HTMLElement>('.room-status-chip')!;
+      expect(chip.querySelector<HTMLElement>('.room-status-chip-level')!.dataset.danger).toBeUndefined();
+      expect(chip.getAttribute('aria-label')).toBe('Travel to Harbour · Lv 11–13');
+    });
+
+    it('asks first before the wide chip or the room card takes the party far above its level', async () => {
+      const { gameClient } = await withTravelChip(true, levelSix, transitionTile.transitions[0], { levels: [12, 12] });
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(gameClient.sendEnterTransition).not.toHaveBeenCalled();
+      expect(document.querySelector('.confirm-title')!.textContent).toBe('Travel to Harbour?');
+      expect(note()!.dataset.danger).toBe('1');
+      document.querySelector<HTMLElement>('.confirm-cancel')!.click();
+      await tick();
+      expect(gameClient.sendEnterTransition).not.toHaveBeenCalled();
+
+      latestMap().tap(info({ isCurrentTile: true, col: 0, row: 0 }));
+      document.querySelector<HTMLElement>('.room-view-action-travel')!.click();
+      expect(gameClient.sendEnterTransition).not.toHaveBeenCalled();
+      expect(note()!.textContent).toBe("Monsters there are level 12. You're level 6.");
+      document.querySelector<HTMLElement>('.confirm-ok')!.click();
+      await tick();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+
+    it('still goes straight there from the wide chip when the monsters are within reach', async () => {
+      const { gameClient } = await withTravelChip(true, levelSix, transitionTile.transitions[0], { levels: [11, 13] });
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(document.querySelector('.confirm-dialog')).toBeNull();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+  });
+
   describe('a locked exit', () => {
     const doorLock = {
       roomId: 'room-1',
@@ -906,7 +996,7 @@ describe('MapScreen status chips', () => {
       requirements: [{ kind: 'level', minLevel: 5, members: [{ username: 'me', met: false, level: 1 }] }],
     };
 
-    async function withLockedExit(wide: boolean, lastState: unknown = { ...state, username: 'me', character: { level: 1, equipment: {} } }) {
+    async function withLockedExit(wide: boolean, levels?: [number, number], lastState: unknown = { ...state, username: 'me', character: { level: 1, equipment: {} } }) {
       vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
         matches: query.includes('min-width: 768px') && wide,
         addEventListener: () => {},
@@ -915,7 +1005,7 @@ describe('MapScreen status chips', () => {
       const mounted = mount(lastState);
       Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
         getTileOn: () => ({ ...transitionTile, transitions: [{ tileId: 'far', mapId: 'there', entryRequirements: { minLevel: 5 } }] }),
-        getTileByGuid: () => ({ name: 'Harbour', mapId: 'there' }),
+        getTileByGuid: () => ({ name: 'Harbour', mapId: 'there', ...(levels ? { levels } : {}) }),
       });
       mounted.screen.onActivate();
       await tick();
@@ -941,18 +1031,79 @@ describe('MapScreen status chips', () => {
       expect(document.querySelector('.lock-dialog')).toBeNull();
     });
 
-    it('offers to travel when the server finds the way open after all', async () => {
-      const { gameClient } = await withLockedExit(true);
+    it('names the monster levels behind the door, whatever the server answers', async () => {
+      await withLockedExit(true, [12, 12]);
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      const note = () => document.querySelector<HTMLElement>('.lock-dialog .confirm-note');
+      expect(note()!.textContent).toBe("Monsters there are level 12. You're level 1.");
+      expect(note()!.dataset.danger).toBe('1');
+      for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: { kind: 'door', fromTileId: 'room-1', tileId: 'far' }, lock: doorLock });
+      expect(note()!.textContent).toBe("Monsters there are level 12. You're level 1.");
+
+      document.querySelector<HTMLElement>('.lock-dialog-close')!.click();
+      await withLockedExit(true, [6, 6]);
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(note()!.dataset.danger).toBe('0');
+    });
+
+    it.each([[undefined], [[12, 12] as [number, number]]])('offers to travel when the server finds the way open after all (levels %j)', async (levels) => {
+      const { gameClient } = await withLockedExit(true, levels);
       document.querySelector<HTMLElement>('.room-status-chip')!.click();
       for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: { kind: 'door', fromTileId: 'room-1', tileId: 'far' }, lock: null });
       document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
       await tick();
+      expect(document.querySelector('.confirm-dialog')).toBeNull();
       expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+
+    it('keeps the note under the title true once the strongest member leaves, and travels on the warning it then shows', async () => {
+      const door = { kind: 'door', fromTileId: 'room-1', tileId: 'far' };
+      const me = { username: 'me', role: 'owner', level: 6 };
+      const pair = { ...state, username: 'me', character: { level: 6, equipment: {} }, social: { party: { members: [me, { username: 'Bryn', role: 'member', level: 20 }] }, onlinePlayers: ['me', 'Bryn'] } };
+      const solo = { ...pair, social: { party: { members: [me] }, onlinePlayers: ['me'] } };
+      const { gameClient } = await withTravelChip(true, pair, transitionTile.transitions[0], { levels: [16, 16] });
+      const note = () => document.querySelector<HTMLElement>('.lock-dialog .confirm-note');
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledTimes(1);
+      const lock = { roomId: 'room-1', door: true, doorTileId: 'far', requirements: [{ kind: 'item', itemName: 'Tide Charm', members: [{ username: 'me', met: true }, { username: 'Bryn', met: false }] }] };
+      for (const listener of moveBlockedListeners) listener({ type: 'move_blocked', requirement: 'item', reason: 'Tide Charm is required to enter this room.', missingPlayers: ['Bryn'], lock });
+      expect(note()!.textContent).toBe("Monsters there are level 16. Your party's best is level 20.");
+      expect(note()!.dataset.danger).toBe('0');
+
+      (gameClient as unknown as { lastState: unknown }).lastState = solo;
+      for (const listener of stateListeners) listener(solo);
+      expect(gameClient.sendInspectLock).toHaveBeenLastCalledWith(door);
+      expect(note()!.textContent).toBe("Monsters there are level 16. You're level 6.");
+      expect(note()!.dataset.danger).toBe('1');
+
+      for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: door, lock: null });
+      document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
+      await tick();
+      expect(document.querySelector('.confirm-dialog')).toBeNull();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledTimes(2);
+    });
+
+    it('asks first from its Travel button when the warning on show no longer matches what is behind the door', async () => {
+      const mounted = await withLockedExit(true, [12, 12]);
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(document.querySelector('.lock-dialog .confirm-note')!.textContent).toBe("Monsters there are level 12. You're level 1.");
+      Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
+        getTileByGuid: () => ({ name: 'Harbour', mapId: 'there', levels: [16, 16] }),
+      });
+      for (const listener of lockInfoListeners) listener({ type: 'lock_info', target: { kind: 'door', fromTileId: 'room-1', tileId: 'far' }, lock: null });
+      document.querySelector<HTMLElement>('.lock-dialog-travel')!.click();
+      await tick();
+      expect(mounted.gameClient.sendEnterTransition).not.toHaveBeenCalled();
+      expect(document.querySelector('.confirm-title')!.textContent).toBe('Travel to Harbour?');
+      expect(document.querySelector<HTMLElement>('.confirm-note')!.textContent).toBe("Monsters there are level 16. You're level 1.");
+      document.querySelector<HTMLElement>('.confirm-ok')!.click();
+      await tick();
+      expect(mounted.gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
     });
 
     it('asks again every so often while its card waits on another member, and stops once it is closed', async () => {
       const members = [{ username: 'me', role: 'owner', level: 9 }, { username: 'Bryn', role: 'member', level: 3 }];
-      const { gameClient } = await withLockedExit(true, { ...state, username: 'me', character: { level: 9, equipment: {} }, social: { party: { members }, onlinePlayers: ['me', 'Bryn'] } });
+      const { gameClient } = await withLockedExit(true, undefined, { ...state, username: 'me', character: { level: 9, equipment: {} }, social: { party: { members }, onlinePlayers: ['me', 'Bryn'] } });
       vi.useFakeTimers();
       try {
         const door = { kind: 'door', fromTileId: 'room-1', tileId: 'far' };

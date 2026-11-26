@@ -45,6 +45,9 @@ import type { RoutePreview } from '../ui/routePreview';
 import { destinationName, isTravelling, routeCountText } from '../ui/routeSummary';
 import { doorHiresText, routeConfirmBody } from '../ui/travelWarnings';
 import { runStepsWhenIdle, saveDataRequested } from '../ui/idleSteps';
+import { trackerLine } from '../ui/QuestTrackerModel';
+import { isLevelDanger, levelBandText, partyBestLevel, travelLevelNote } from '../ui/roomLevels';
+import type { LevelNote } from '../ui/roomLevels';
 
 const SHEET_BOTTOM_HEIGHT = 112;
 const SHEET_SIDE_WIDTH = 320;
@@ -227,7 +230,7 @@ export class MapScreen implements Screen {
       const viewGone = !!this.viewedMapId && !this.mapExists(this.viewedMapId);
       if (viewGone) this.dropGoneView();
       else this.map.rebuildFromCache();
-      if (state) this.map.applyServerState(state, true);
+      if (state) this.drawState(state, true);
       else if (viewGone) this.map.rebuildFromCache();
     }
     this.updateRoomStatus(state);
@@ -244,7 +247,7 @@ export class MapScreen implements Screen {
       if (state) {
         this.partyMapId = null;
         this.syncView(state);
-        this.map.applyServerState(state, true);
+        this.drawState(state, true);
       }
       if (this.viewBanner && !this.viewBanner.hidden) registerDismiss(this.viewBanner, () => this.backFromView());
       this.updateRoomStatus(state);
@@ -535,7 +538,7 @@ export class MapScreen implements Screen {
     const state = this.gameClient.lastState;
     if (state) {
       this.viewPendingFocusMap(state);
-      this.map.applyServerState(state, true);
+      this.drawState(state, true);
       this.partyMapId = state.currentMapId;
     }
     this.updateRoomStatus(state);
@@ -569,6 +572,7 @@ export class MapScreen implements Screen {
       this.dismissSheet();
       if (blocked) this.showMoveToast(BLOCKED_ROOM_TEXT);
     });
+    map.setOnTrackedRoomClick((tileId) => { this.focusRoom(tileId); });
 
     this.shopPopup = new ShopPopup(this.gameClient, this.worldCache);
     this.npcTalkPopup = new NpcTalkPopup(this.gameClient);
@@ -609,6 +613,9 @@ export class MapScreen implements Screen {
     );
     this.createRouteChip();
     this.createZoomControls();
+    for (const el of [this.zoomControls, this.roomStatus.element, this.routeChip, this.viewBanner]) {
+      if (el) map.avoidWithEdgeArrow(el);
+    }
     map.setOnFollowChange((following) => {
       if (this.recenterButton) this.recenterButton.dataset.lit = following ? '0' : '1';
     });
@@ -684,6 +691,8 @@ export class MapScreen implements Screen {
     this.container.style.setProperty('--room-sheet-h', `${sheetHeight}px`);
     const free = this.container.clientHeight - (open && layout === 'bottom' ? sheetHeight : 0);
     this.container.dataset.controls = free >= CONTROLS_FULL_MIN_HEIGHT ? 'full' : free >= CONTROLS_RECENTER_MIN_HEIGHT ? 'some' : 'none';
+    const covered = layout === 'side' ? { right: SHEET_SIDE_WIDTH, bottom: 0 } : { right: 0, bottom: sheetHeight };
+    this.map?.setEdgeArrowInsets(open ? covered : { right: 0, bottom: 0 });
   }
 
   /** A lock card grows the bottom sheet past its usual height. */
@@ -738,6 +747,7 @@ export class MapScreen implements Screen {
     const state = this.gameClient.lastState;
     const tileDef = this.worldCache.getTileOn(info.mapId, info.col, info.row);
     const route = this.routeTo(tileDef, state);
+    const band = tileDef ? this.worldCache.getRoomLevels(tileDef) : undefined;
     return {
       info,
       actions: info.isUnlocked && tileDef ? this.remoteRoomActions(tileDef, state) : [],
@@ -747,6 +757,8 @@ export class MapScreen implements Screen {
       forecastTileId: this.remoteForecastTileId(info, tileDef, state),
       inDungeon: !!state?.dungeon,
       paysNoXp: !!tileDef?.noXp,
+      levels: band ? { text: levelBandText(band), danger: isLevelDanger(band, partyBestLevel(state)) } : null,
+      mainStory: info.mainStory?.[0] ?? null,
       lock: this.roomLock(tileDef, state),
       route,
       routeLines: routePreviewLines(route, state),
@@ -863,12 +875,15 @@ export class MapScreen implements Screen {
     const tile = this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row);
     if (!tile) return [];
     const shop = state.shopDefinition ? toShopSummary(state.shopDefinition) : undefined;
+    const best = partyBestLevel(state);
     const lookups: RoomActionLookups = {
       getNpc: id => this.worldCache.getNpc(id),
       getShop: () => shop,
       getDungeon: id => this.worldCache.getDungeon(id),
       getTileByGuid: id => this.worldCache.getTileByGuid(id),
       getMaps: () => this.worldCache.getMaps(),
+      getRoomLevels: def => this.worldCache.getRoomLevels(def),
+      isLevelDanger: band => isLevelDanger(band, best),
     };
     const room = state.dungeon ? { npcId: tile.npcId, shopId: shop?.id } : { ...tile, shopId: shop?.id };
     return this.withTravelLocks(getRoomActions(room, lookups, questMarks(state)), room, state);
@@ -911,8 +926,11 @@ export class MapScreen implements Screen {
     this.dungeonEntryPopup?.show(dungeon, state.party.col, state.party.row, { canEnter: this.canMove() });
   }
 
-  /** A locked exit shows what it needs instead; every other way through a door asks first when the party's hires would stay behind on this map. */
-  private async travelThrough(action: RoomAction, askFirst: boolean): Promise<void> {
+  /**
+   * A locked exit shows what it needs instead; every other way through a door asks first when the party's hires would
+   * stay behind on this map, or when the monsters there are far above the party and `shownNote` is not that same warning.
+   */
+  private async travelThrough(action: RoomAction, askFirst: boolean, shownNote: LevelNote | null = null): Promise<void> {
     const state = this.gameClient.lastState;
     if (!state) return;
     if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
@@ -922,10 +940,13 @@ export class MapScreen implements Screen {
     }
     if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can travel'); return; }
     const hires = doorHiresText(state, this.worldCache.getMaps(), this.exitMapId(state, action.targetId));
-    if (hires || askFirst) {
+    const note = this.exitLevelNote(action.targetId, state);
+    const warned = shownNote?.danger === true && shownNote.text === note?.text;
+    if (hires || askFirst || (note?.danger && !warned)) {
       const go = await confirmDialog({
         title: `${actionLabel(action)}?`,
         body: hires ?? 'Your party will go there right away.',
+        note: note ?? undefined,
         confirmLabel: hires ? 'Go' : 'Travel',
       });
       if (!go) return;
@@ -950,9 +971,10 @@ export class MapScreen implements Screen {
     const dialog = showLockDialog({
       title: actionLabel(action),
       lines: failures ? roomLockLines(failures, state) : [],
+      note: this.exitLevelNote(action.targetId, state),
       context: () => this.lockContext(this.gameClient.lastState),
       onAction: (picked) => { this.runLockAction(picked); },
-      onOpen: () => { void this.travelThrough({ ...action, locked: false }, false); },
+      onOpen: (shownNote) => { void this.travelThrough({ ...action, locked: false }, false, shownNote); },
       onClose: () => { this.syncLockRefresh(); },
     });
     this.lockDialog = { dialog, target, key: lockCardKey(state), lock: lock ?? null };
@@ -973,6 +995,7 @@ export class MapScreen implements Screen {
     const key = lockCardKey(state);
     if (key === open.key) return;
     open.key = key;
+    open.dialog.setNote(this.exitLevelNote(open.target.tileId, state));
     this.gameClient.sendInspectLock(open.target);
   }
 
@@ -1021,6 +1044,12 @@ export class MapScreen implements Screen {
 
   private async confirmRemove(username: string): Promise<void> {
     if (await confirmDialog(kickConfirmOptions(username, this.gameClient.lastState))) this.gameClient.sendKickPartyMember(username);
+  }
+
+  /** How the monsters behind an exit compare with the party, when the room behind it has known levels. */
+  private exitLevelNote(tileId: string, state: ServerStateMessage): LevelNote | null {
+    const dest = this.worldCache.getTileByGuid(tileId);
+    return travelLevelNote(dest ? this.worldCache.getRoomLevels(dest) : undefined, state);
   }
 
   /** The map an exit of the party's room leads to. */
@@ -1178,7 +1207,7 @@ export class MapScreen implements Screen {
     this.dismissSheet();
     this.viewedMapId = mapId;
     this.map.setViewedMap(mapId);
-    this.map.applyServerState(state, true);
+    this.drawState(state, true);
     const spot = this.viewFocus(mapId, focusTileId, state);
     if (spot) this.map.focusOn(spot.col, spot.row);
     this.showViewBanner(mapId);
@@ -1210,7 +1239,7 @@ export class MapScreen implements Screen {
     this.stopViewing();
     this.dismissSheet();
     const state = this.gameClient.lastState;
-    if (state) this.map?.applyServerState(state, true);
+    if (state) this.drawState(state, true);
   }
 
   /** Back and Escape close the viewed map's sheet before the view itself. */
@@ -1247,6 +1276,7 @@ export class MapScreen implements Screen {
       });
       this.container.appendChild(banner);
       this.viewBanner = banner;
+      this.map?.avoidWithEdgeArrow(banner);
     }
     const name = this.mapName(mapId);
     this.viewBanner.hidden = false;
@@ -1278,6 +1308,19 @@ export class MapScreen implements Screen {
     this.showMoveToast(`Your party traveled to ${this.mapName(state.currentMapId)}.`);
   }
 
+  /** Draws a push, and points the edge arrow at the current main-story room when the drawn map holds it. */
+  private drawState(state: ServerStateMessage, snap: boolean): void {
+    if (!this.map) return;
+    this.map.applyServerState(state, snap);
+    this.map.setTrackedRoom(this.trackedRoomOnDrawnMap(state));
+  }
+
+  private trackedRoomOnDrawnMap(state: ServerStateMessage): string | null {
+    const action = trackerLine(state, this.worldCache)?.action;
+    if (action?.type !== 'room' || !this.map) return null;
+    return this.worldCache.getTileByGuid(action.roomId)?.mapId === this.map.drawnMapId ? action.roomId : null;
+  }
+
   private subscribeToState(): void {
     this.unsubscribeState?.();
     if (!this.map) return;
@@ -1285,8 +1328,7 @@ export class MapScreen implements Screen {
     this.unsubscribeState = this.gameClient.subscribe((state) => {
       if (this.map) {
         this.syncView(state);
-        const snap = this.gameClient.isInitialState;
-        this.map.applyServerState(state, snap);
+        this.drawState(state, this.gameClient.isInitialState);
       }
       this.refreshOpenRoomForecast();
       this.updateRoomStatus(state);

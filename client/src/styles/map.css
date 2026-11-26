@@ -75,6 +75,96 @@
   opacity: 0.95;
 }
 
+/* Main-story room: gold over the fog, tinted so it never reads as the selection, with a star in the left slot. Static. */
+.three-map-quest-beacon {
+  width: 80px;
+  height: 70px;
+  color: var(--gold);
+}
+.three-map-quest-beacon svg { display: block; overflow: visible; }
+.three-map-quest-beacon polygon {
+  fill: rgba(255, 203, 61, 0.16);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+.three-map-quest-beacon-star {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%) scale(clamp(1, calc(0.75 / var(--map-zoom, 1)), 1.8));
+  background: rgba(6, 9, 24, 0.86);
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  color: var(--gold);
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* Screen-space, over the overlay: the arrow to an off-screen main-story room. */
+.three-map-edge {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.three-map-beacon-arrow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  padding: 0;
+  pointer-events: auto;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.three-map-beacon-arrow[hidden] { display: none; }
+.three-map-beacon-arrow-pointer {
+  position: absolute;
+  inset: 6px;
+  transform: rotate(var(--edge-arrow-angle, 0deg));
+}
+.three-map-beacon-arrow-pointer::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -2px;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 9px solid var(--gold);
+  transform: translateY(-50%);
+}
+.three-map-beacon-arrow-star {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: rgba(6, 9, 24, 0.9);
+  border: 2px solid var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  color: var(--gold);
+  font-size: 14px;
+  line-height: 1;
+}
+.three-map-beacon-arrow:focus-visible .three-map-beacon-arrow-star {
+  outline: 2px solid var(--text-1);
+  outline-offset: 2px;
+}
+
 /* A room the party would be refused: centre slot, under the party token. */
 .three-map-lock {
   position: absolute;
@@ -271,7 +361,7 @@
   border-color: var(--gold);
   font-size: 0;
 }
-.three-map-overlay[data-lod="far"] :is(.quest-ready-pip, .quest-available-pip)::after {
+.three-map-overlay[data-lod="far"] :is(.quest-ready-pip, .quest-main-pip, .quest-available-pip)::after {
   top: 50%;
   right: auto;
   left: 50%;
@@ -651,13 +741,27 @@ button.map-status-retry {
   color: var(--text-2);
 }
 .room-sheet-sub-action::after,
-.room-sheet-sub-zone + .room-sheet-sub-route::before,
+.room-sheet-sub-level:not(:last-child)::after,
+.room-sheet-sub > :not(.room-sheet-sub-level) + .room-sheet-sub-route::before,
 .room-sheet-sub-noxp::before {
   content: ' · ';
   color: var(--text-2);
 }
 .room-sheet-sub-route {
   color: #7fd8ff;
+}
+.room-sheet-sub-main {
+  color: var(--gold);
+}
+.room-sheet-sub-level[data-danger="1"],
+.room-status-chip-level[data-danger="1"],
+.room-view-action-level[data-danger="1"] {
+  color: var(--red);
+}
+.room-sheet-sub-level[data-danger="1"]::before,
+.room-status-chip-level[data-danger="1"]::before,
+.room-view-action-level[data-danger="1"]::before {
+  content: '⚠ ';
 }
 .room-sheet-sub-noxp {
   color: var(--text-1);
@@ -830,6 +934,9 @@ button.lock-card-btn-primary {
   font-size: var(--fs-sm);
   line-height: 1.35;
   color: var(--text-1);
+}
+.lock-dialog-note:empty {
+  display: none;
 }
 
 button.room-sheet-close {
@@ -1105,6 +1212,22 @@ button.room-sheet-player:hover { background: rgba(255, 255, 255, 0.06); }
 
 .room-status-chip-locked .room-status-chip-badge {
   background: var(--outline);
+}
+/* The phone's one-word chip confirms first and says the level there. */
+.room-status-chip-level {
+  display: none;
+}
+@media (min-width: 768px) {
+  .room-status-chip-level {
+    display: inline;
+    color: var(--text-2);
+    font-size: var(--fs-2xs);
+  }
+}
+.room-view-action-level {
+  margin-left: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
 }
 @media (min-width: 768px) {
   .room-status-chip-locked .room-status-chip-badge {

@@ -1254,6 +1254,14 @@ export class PlayerManager {
     return null;
   }
 
+  /** Hand the party to another member. Their auto-retreat setting applies from now on, so any retreat under way is called off. */
+  transferPartyOwnership(owner: string, target: string): true | string {
+    const result = this.parties.transferOwnership(owner, target, (u) => this.sessions.get(u)?.getPartyId() ?? null);
+    const partyId = this.sessions.get(owner)?.getPartyId();
+    if (result === true && partyId) this.partyBattles.clearRetreatHold(partyId);
+    return result;
+  }
+
   /** Handle a player joining a party (after accept invite). */
   handlePartyJoin(username: string, partyId: string, oldPartyId: string | null): void {
     if (oldPartyId) this.partyBattles.removeMember(oldPartyId, username);

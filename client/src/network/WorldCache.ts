@@ -1,5 +1,6 @@
 import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, buildRouteIndex, getSlotSchedule, isTileTraversable } from '@idle-party-rpg/shared';
 import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, ShopSummary, SkillDefinition, SkillSlot, SkillContent, ClassName, TileType, RouteIndex } from '@idle-party-rpg/shared';
+import type { LevelBand } from '../ui/roomLevels';
 
 export interface MapRoomsFound {
   name: string;
@@ -30,6 +31,7 @@ export class WorldCache {
   private shops = new Map<string, ShopSummary>();
   private roomsByNpc = new Map<string, WorldTileDefinition[]>();
   private startTile: { col: number; row: number } = { col: 0, row: 0 };
+  private zoneLevels: Record<string, LevelBand> = {};
   private maps: WorldMapMeta[] = [];
   private currentMapId: string = DEFAULT_MAP_ID;
 
@@ -70,9 +72,11 @@ export class WorldCache {
       tiles: WorldTileDefinition[];
       tileTypes?: Record<string, TileTypeDefinition>;
       shops?: Record<string, ShopSummary>;
+      zoneLevels?: Record<string, LevelBand>;
     };
 
     this.startTile = data.startTile;
+    this.zoneLevels = data.zoneLevels ?? {};
     this.maps = data.maps ?? [{ id: DEFAULT_MAP_ID, name: 'Overworld', startTile: data.startTile }];
     if (!this.maps.some(m => m.id === this.currentMapId)) {
       this.currentMapId = data.defaultMapId ?? this.maps[0]?.id ?? DEFAULT_MAP_ID;
@@ -191,6 +195,13 @@ export class WorldCache {
   /** Look up any tile by its stable GUID, across all maps. */
   getTileByGuid(id: string): WorldTileDefinition | undefined {
     return this.tilesByGuid.get(id);
+  }
+
+  /** The authored monster levels a room's fights roll from: its own table's, else its zone's. Undefined when unknown. */
+  getRoomLevels(def: Pick<WorldTileDefinition, 'levels' | 'zone' | 'encounterTable'>): LevelBand | undefined {
+    if (def.levels) return def.levels;
+    if (def.encounterTable?.length) return undefined;
+    return Object.prototype.hasOwnProperty.call(this.zoneLevels, def.zone) ? this.zoneLevels[def.zone] : undefined;
   }
 
   /** Check if a tile is unlocked (player can move to it). */

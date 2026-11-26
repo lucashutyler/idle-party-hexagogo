@@ -27,6 +27,8 @@ function makeModel(overrides: Partial<RoomSheetModel> = {}): RoomSheetModel {
     forecastTileId: 'room-1',
     inDungeon: false,
     paysNoXp: false,
+    levels: null,
+    mainStory: null,
     lock: null,
     route: null,
     routeLines: [],
@@ -99,6 +101,42 @@ describe('RoomSheet', () => {
 
     sheet.show(makeModel({ info: makeInfo({ col: 6, isUnlocked: false }), actions: [], paysNoXp: true }));
     expect(parent.querySelector('.room-sheet-sub-noxp')).toBeNull();
+  });
+
+  describe('monster levels', () => {
+    const subParts = () => [...q('.room-sheet-sub').children].map(child => child.textContent);
+
+    it('lead the line on an explored room, where a long zone or action name can never cut them off', () => {
+      sheet.show(makeModel({ othersHere: 2, levels: { text: 'Lv 16–17', danger: false } }));
+      expect(subParts()).toEqual(['Lv 16–17', 'Talk to Mira', 'Hatchetmill · 2 players']);
+      expect(q('.room-sheet-sub-level').dataset.danger).toBeUndefined();
+
+      sheet.update(makeModel({ othersHere: 2, levels: { text: 'Lv 16–17', danger: true } }));
+      expect(q('.room-sheet-sub-level').dataset.danger).toBe('1');
+      expect(q('.room-sheet-sub-level').title).toBe('Far above your party');
+    });
+
+    it('show on an unexplored room too, with no zone name, before the way there', () => {
+      sheet.show(makeModel({
+        info: makeInfo({ isUnlocked: false, roomName: 'Unexplored Room' }),
+        actions: [],
+        levels: { text: 'Lv 16', danger: false },
+        route: { kind: 'doors', doors: 1, otherMap: false, gated: false },
+        routeLines: ['Through 1 door'],
+      }));
+      expect(subParts()).toEqual(['Lv 16', 'Through 1 door']);
+      expect(parent.querySelector('.room-sheet-sub-zone')).toBeNull();
+    });
+  });
+
+  it('names the main-story quest an unexplored gold room is marked for', () => {
+    const unexplored = { info: makeInfo({ isUnlocked: false, roomName: 'Unexplored Room' }), actions: [], forecastTileId: null };
+    sheet.show(makeModel({ ...unexplored, mainStory: 'The Lost Bell', levels: { text: 'Lv 4', danger: false } }));
+    expect(q('.room-sheet-sub-main').textContent).toBe('★ Main story: The Lost Bell');
+    expect(q('.room-sheet-sub').textContent).toBe('Lv 4★ Main story: The Lost Bell');
+
+    sheet.show(makeModel({ info: makeInfo({ col: 9 }), mainStory: 'The Lost Bell' }));
+    expect(parent.querySelector('.room-sheet-sub-main')).toBeNull();
   });
 
   it('shows only the name and Go for an unexplored room', () => {
@@ -470,4 +508,19 @@ describe('the lock card in the bottom sheet', () => {
     expect(rules.find(r => r.selector === `${bottom} .room-sheet-buttons`)?.body).toMatch(/position:\s*static/);
     expect(rules.find(r => r.selector === `${bottom} .room-sheet-lock`)?.body).toMatch(/flex-basis:\s*100%/);
   });
+});
+
+describe('monster levels far above the party', () => {
+  const css = ['map.css', 'components.css']
+    .map(file => readFileSync(resolve(__dirname, '../src/styles', file), 'utf8'))
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector.trim(), body }));
+  const warned = (cls: string) => rules.some(r =>
+    r.selector.split(',').some(s => s.trim() === `.${cls}[data-danger="1"]::before`) && /content:\s*'⚠ '/.test(r.body));
+
+  it.each(['room-sheet-sub-level', 'room-status-chip-level', 'room-view-action-level', 'confirm-note'])(
+    'carry a ⚠ on %s, not colour alone',
+    cls => expect(warned(cls)).toBe(true),
+  );
 });

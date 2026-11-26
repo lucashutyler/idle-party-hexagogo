@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.26.5',
+    notes: [
+      'If auto-retreat finds nowhere safe nearby, it can now take your party back through a door to a safer room you\'ve already found, never one you couldn\'t come back from. It waits 20 seconds after you arrive, so you have time to act first, and it never does this while you have hired fighters.',
+      'Rooms and travel buttons show the level of the monsters there, marked in red with a ⚠ when they\'re far above your party, and going through a door to such a room asks you first.',
+      'Main-story destinations show as gold markers on the map, even before you\'ve explored them, with an arrow at the screen edge for your current goal.',
+      'People with a main-story quest for you have a gold star, and the room card of an unexplored gold room names the quest that leads there.',
+      'Tapping your goal under the battle now shows its room on the map even before you\'ve explored it.',
+    ],
+  },
+  {
     version: '2026.11.26.4',
     notes: [
       'If you leave or are removed from your party or guild while typing to it, your message now waits above the chat box as not sent.',

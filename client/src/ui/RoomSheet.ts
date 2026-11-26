@@ -8,17 +8,19 @@ import type { LockCardAction, LockCardContext } from './LockCard';
 import { registerDismiss, release } from './ModalStack';
 import { escapeHtml } from './ItemIcon';
 import { deferWhilePressed, setHtml } from './render';
-import { LOCKED_DETAIL, ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
+import { LEVEL_DANGER_TEXT, LOCKED_DETAIL, ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import type { RoomForecastProvider, RoomForecastState } from './RoomView';
 import type { TileClickInfo } from './ThreeWorldMap';
 import { routeUnknown } from './routePreview';
 import type { RoutePreview } from './routePreview';
+import type { LevelNote } from './roomLevels';
 
 export const ROOM_SHEET_FORECAST_DEBOUNCE_MS = 250;
 export const DUNGEON_TRAVEL_LOCK_TEXT = 'Leave the dungeon before traveling';
 export const SETTING_OFF_TEXT = 'Setting off…';
 const LOCK_PULSE_CLASS = 'room-sheet-lock-pulse';
+const MAIN_STORY_ICON = '★';
 
 export interface RoomSheetModel {
   info: TileClickInfo;
@@ -32,6 +34,10 @@ export interface RoomSheetModel {
   inDungeon: boolean;
   /** No pack this room can roll pays anyone XP. */
   paysNoXp: boolean;
+  /** The monsters' levels ("Lv 16–17"); null when the world sends none for the room. */
+  levels: LevelNote | null;
+  /** Main-story quest the map marks the room in gold for; shown while the room is unexplored. */
+  mainStory: string | null;
   /** Why the party can't go in, one line per unmet requirement; null when nothing the client can see stops it. */
   lock: string[] | null;
   /** How the party would get there; null when the client can't tell. */
@@ -69,6 +75,13 @@ function blockedLines(model: RoomSheetModel): string[] {
 function routeNote(model: RoomSheetModel): string | null {
   if (routeBlocksGo(model)) return null;
   return model.routeLines[0] ?? null;
+}
+
+/** First on the line, so a long name after it is what the ellipsis cuts. */
+function levelHtml({ levels }: RoomSheetModel): string {
+  if (!levels) return '';
+  const danger = levels.danger ? ` data-danger="1" title="${LEVEL_DANGER_TEXT}"` : '';
+  return `<span class="room-sheet-sub-level"${danger}>${escapeHtml(levels.text)}</span>`;
 }
 
 /** Non-modal panel for the selected room, docked in the map screen so the map keeps panning behind it. */
@@ -319,8 +332,13 @@ export class RoomSheet {
 
   private unexploredHead(model: RoomSheetModel): string {
     const note = this.lock ? null : routeNote(model);
+    const parts = [
+      levelHtml(model),
+      model.mainStory ? `<span class="room-sheet-sub-main">${MAIN_STORY_ICON} Main story: ${escapeHtml(model.mainStory)}</span>` : '',
+      note ? `<span class="room-sheet-sub-route">${escapeHtml(note)}</span>` : '',
+    ].filter(Boolean);
     return this.nameHtml(model.info.roomName || 'Unexplored Room', this.roomLocked(model))
-      + (note ? `<div class="room-sheet-sub"><span class="room-sheet-sub-route">${escapeHtml(note)}</span></div>` : '');
+      + (parts.length > 0 ? `<div class="room-sheet-sub">${parts.join('')}</div>` : '');
   }
 
   private exploredHead(model: RoomSheetModel): string {
@@ -339,7 +357,7 @@ export class RoomSheet {
         + `<span class="room-sheet-action-name">${escapeHtml(action.name)}</span></span>`;
     }).join('');
     return this.nameHtml(info.roomName || 'Unnamed Room', this.roomLocked(model))
-      + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span>${route}${noXp}</div>`
+      + `<div class="room-sheet-sub">${levelHtml(model)}${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span>${route}${noXp}</div>`
       + (icons ? `<div class="room-sheet-actions">${icons}</div>` : '');
   }
 
