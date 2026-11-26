@@ -1,6 +1,6 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.11.26.3',
+    version: '2026.11.26.2',
     notes: [
       'Private messages stay in your chat history even when other channels are busy.',
       'Chat now slows down anyone sending messages very fast.',
