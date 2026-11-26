@@ -119,7 +119,7 @@ describe('CodexKnowledge recent', () => {
   it('hands out copies', () => {
     const k = new CodexKnowledge();
     k.noteItem('pelt');
-    (k.recentRefs() as { id: string }[])[0].id = 'changed';
+    (k.recentRefs() as unknown as { id: string }[])[0].id = 'changed';
     (k.itemIds() as string[]).push('changed');
     expect(k.recentRefs()).toEqual([{ kind: 'item', id: 'pelt' }]);
     expect(k.itemIds()).toEqual(['pelt']);

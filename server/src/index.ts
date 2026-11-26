@@ -18,7 +18,7 @@ import type { IncomingMessage } from 'http';
 import { WS_SERVER_OPTIONS } from './wsServerOptions.js';
 import { clientAcceptsPartialState } from './game/StatePush.js';
 import { GameLoop } from './game/GameLoop.js';
-import { GIFT_NOT_FOUND } from './game/PlayerManager.js';
+import { COMBAT_BACKPRESSURE_BYTES, GIFT_NOT_FOUND } from './game/PlayerManager.js';
 import { JsonFileStore } from './game/JsonFileStore.js';
 import { AccountStore } from './auth/AccountStore.js';
 import { isStoreFileName } from './auth/reservedUsernames.js';
@@ -1042,6 +1042,13 @@ wss.on('connection', (ws, req) => {
       if (msg.type === 'request_bestiary') {
         const bestiary = playerManager.buildBestiary(username);
         if (bestiary) ws.send(JSON.stringify(bestiary));
+        return;
+      }
+
+      if (msg.type === 'request_codex') {
+        if (ws.bufferedAmount > COMBAT_BACKPRESSURE_BYTES) return;
+        const codex = playerManager.buildCodex(username);
+        if (codex) ws.send(JSON.stringify(codex));
         return;
       }
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
 import { offsetToCube, cubeDistance, cubeToKey, getZone, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit, isWholeItemCount, partyInviteExpiresAt, planRouteDoors, PARTY_INVITE_TTL_MS } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem, PartyInvite, RouteWarningKind, LockTarget, RoomLockInfo, ServerLockInfoMessage } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, ServerCodexMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem, PartyInvite, RouteWarningKind, LockTarget, RoomLockInfo, ServerLockInfoMessage } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData, SavedPartyInvite } from './GameStateStore.js';
@@ -45,6 +45,15 @@ export const ROUTE_MOVE_GAP_MS = 200;
 export const LOCK_INSPECT_GAP_MS = 200;
 /** Lock inspections one player may send at once: a phone's network can deliver a few together. */
 export const LOCK_INSPECT_BURST = 3;
+/** Codex replies one player may ask for at once. */
+export const CODEX_REQUEST_BURST = 2;
+/** Once the burst is spent, one more Codex reply every this long; each one walks every room the player has found. */
+export const CODEX_REQUEST_GAP_MS = 15_000;
+
+interface TokenBucket {
+  tokens: number;
+  at: number;
+}
 
 type PlayerChatChannel = Exclude<ChatChannelType, 'server'>;
 
@@ -78,7 +87,8 @@ export interface PartyDeparture {
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
   private lastRouteMoveAt = new WeakMap<PlayerSession, number>();
-  private lockInspectBudget = new WeakMap<PlayerSession, { tokens: number; at: number }>();
+  private lockInspectBudget = new WeakMap<PlayerSession, TokenBucket>();
+  private codexBudget = new WeakMap<PlayerSession, TokenBucket>();
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
   private combatViewHidden = new WeakSet<WebSocket>();
@@ -803,6 +813,14 @@ export class PlayerManager {
     return { type: 'bestiary', version: session.getMasterySummary().version, entries: session.getBestiary() };
   }
 
+  /** Everything this player has discovered: null without a character, or when the player ran past CODEX_REQUEST_BURST and the request was dropped. */
+  buildCodex(username: string, now = Date.now()): ServerCodexMessage | null {
+    const session = this.sessions.get(username);
+    if (!session?.hasCharacter()) return null;
+    if (!takeToken(this.codexBudget, session, now, CODEX_REQUEST_BURST, CODEX_REQUEST_GAP_MS)) return null;
+    return session.buildCodex();
+  }
+
   /** Send one socket the live fight as a full snapshot plus the recent log and live forecast. No-op between battles. */
   sendCombatResync(ws: WebSocket): void {
     if (!this.wantsCombat(ws)) return;
@@ -1349,7 +1367,7 @@ export class PlayerManager {
   /** What locks `target` for this player's party: null when the player's inspections ran past LOCK_INSPECT_BURST and the request was dropped. */
   handleInspectLock(username: string, target: LockTarget, now = Date.now()): ServerLockInfoMessage | null {
     const session = this.sessions.get(username);
-    if (!session || !this.takeLockInspect(session, now)) return null;
+    if (!session || !takeToken(this.lockInspectBudget, session, now, LOCK_INSPECT_BURST, LOCK_INSPECT_GAP_MS)) return null;
     const partyId = session.getPartyId();
     return { type: 'lock_info', target, lock: partyId ? this.partyBattles.inspectLock(partyId, target, username) : null };
   }
@@ -1358,16 +1376,6 @@ export class PlayerManager {
   lockForRefusal(username: string, failure: RoomEntryFailure): RoomLockInfo | null {
     const partyId = this.sessions.get(username)?.getPartyId();
     return partyId ? this.partyBattles.lockForRefusal(partyId, failure, username) : null;
-  }
-
-  /** A token bucket: LOCK_INSPECT_BURST at once, then one more each LOCK_INSPECT_GAP_MS. A dropped request spends nothing. */
-  private takeLockInspect(session: PlayerSession, now: number): boolean {
-    const last = this.lockInspectBudget.get(session);
-    const refilled = last ? last.tokens + Math.max(0, now - last.at) / LOCK_INSPECT_GAP_MS : LOCK_INSPECT_BURST;
-    const tokens = Math.min(LOCK_INSPECT_BURST, refilled);
-    if (tokens < 1) return false;
-    this.lockInspectBudget.set(session, { tokens: tokens - 1, at: now });
-    return true;
   }
 
   /**
@@ -2095,6 +2103,16 @@ export class PlayerManager {
       .map(([u]) => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
     this.chat.sendMessage('Server', 'server', 'server', text, recipients);
   }
+}
+
+/** A token bucket: `burst` at once, then one more each `gapMs`. A dropped request spends nothing. */
+function takeToken(budgets: WeakMap<PlayerSession, TokenBucket>, session: PlayerSession, now: number, burst: number, gapMs: number): boolean {
+  const last = budgets.get(session);
+  const refilled = last ? last.tokens + Math.max(0, now - last.at) / gapMs : burst;
+  const tokens = Math.min(burst, refilled);
+  if (tokens < 1) return false;
+  budgets.set(session, { tokens: tokens - 1, at: now });
+  return true;
 }
 
 const SYNC_CHAT_LIMIT = 200;

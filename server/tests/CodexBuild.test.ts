@@ -1,12 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { deflateRawSync } from 'zlib';
-import { codexTableKey, isTileTraversable } from '@idle-party-rpg/shared';
 import type { CodexSaveData, EncounterDefinition, MonsterDefinition, ServerCodexMessage, ShopDefinition, WorldTileDefinition } from '@idle-party-rpg/shared';
 import { CodexKnowledge } from '../src/game/codex/CodexKnowledge.js';
 import { buildCodexMessage, codexContentIndex } from '../src/game/codex/CodexBuild.js';
 import type { CodexContent } from '../src/game/codex/CodexBuild.js';
 import { PlayerSession } from '../src/game/PlayerSession.js';
-import { codexContent, codexGrid, codexWorld } from './codexFixture.js';
+import { codexContent, codexGrid, codexWorld, expectOnlyDiscovered } from './codexFixture.js';
 import type { CodexTestContent, CodexWorld } from './codexFixture.js';
 import { room } from './recapFixture.js';
 import { wrapGrids } from './testGrids.js';
@@ -16,47 +15,6 @@ const ALL_ROOMS = ['field', 'mill', 'den', 'gate', 'pond', 'ridge'];
 function build(content: CodexContent, save: CodexSaveData, unlocked: readonly string[] = ALL_ROOMS, kills: Record<string, number> = {}): { reply: ServerCodexMessage; knowledge: CodexKnowledge } {
   const knowledge = CodexKnowledge.fromSave(save);
   return { reply: buildCodexMessage({ knowledge, unlocked, kills, version: 'v1' }, content), knowledge };
-}
-
-/** Fails when the reply holds any id the player has not discovered, or any encounter id or name. */
-function expectOnlyDiscovered(reply: ServerCodexMessage, knowledge: CodexKnowledge, content: CodexContent, unlocked: readonly string[]): void {
-  const shopStock = new Set(knowledge.shopIds().flatMap(id => content.getShop(id)?.inventory.map(line => line.itemId) ?? []));
-  const monsterIds = [
-    ...reply.monsters.map(m => m.id),
-    ...reply.tables.flatMap(t => t.monsters),
-    ...reply.fights.flat(),
-    ...reply.dungeons.flatMap(d => d.monsters),
-    ...reply.recent.filter(r => r.kind === 'monster').map(r => r.id),
-  ];
-  for (const id of monsterIds) expect(knowledge.hasMonster(id), `monster ${id}`).toBe(true);
-
-  for (const { def, found } of reply.items) {
-    expect(found ? knowledge.hasItem(def.id) : shopStock.has(def.id), `item ${def.id}`).toBe(true);
-  }
-  const heldItemIds = [...reply.monsters.flatMap(m => m.drops.map(d => d.itemId)), ...reply.recent.filter(r => r.kind === 'item').map(r => r.id)];
-  for (const id of heldItemIds) expect(knowledge.hasItem(id), `held item ${id}`).toBe(true);
-  for (const shop of reply.shops) for (const line of shop.stock) expect(shopStock.has(line.itemId)).toBe(true);
-
-  for (const id of [...reply.shops.map(s => s.id), ...reply.recent.filter(r => r.kind === 'shop').map(r => r.id)]) {
-    expect(knowledge.hasShop(id), `shop ${id}`).toBe(true);
-  }
-  for (const dungeon of reply.dungeons) expect(knowledge.hasDungeon(dungeon.id), `dungeon ${dungeon.id}`).toBe(true);
-
-  const tiles = new Map(content.getWorld().tiles.map(t => [t.id, t]));
-  const found = unlocked
-    .map(id => tiles.get(id))
-    .filter((t): t is WorldTileDefinition => !!t && isTileTraversable(t.type, content.getTileType(t.type)));
-  const foundKeys = new Set(found.map(codexTableKey));
-  for (const table of reply.tables) {
-    expect(foundKeys.has(table.key), `table ${table.key}`).toBe(true);
-    for (const at of table.fights) expect(reply.fights[at]).toBeDefined();
-  }
-
-  const json = JSON.stringify(reply);
-  for (const encounter of Object.values(content.getAllEncounters()) as EncounterDefinition[]) {
-    expect(json.includes(`"${encounter.id}"`), `encounter id ${encounter.id}`).toBe(false);
-    expect(json.includes(encounter.name), `encounter name ${encounter.name}`).toBe(false);
-  }
 }
 
 describe('Codex reply secrecy', () => {
