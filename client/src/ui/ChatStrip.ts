@@ -1,5 +1,7 @@
+import type { ChatMessage } from '@idle-party-rpg/shared';
 import { escapeChatHtml } from './chatModel';
 import type { ChatPreview } from './chatModel';
+import { reducedMotion } from './motion';
 import { deferWhilePressed, setHtml } from './render';
 
 const SWIPE_MIN_PX = 28;
@@ -40,10 +42,23 @@ export function wireVerticalSwipe(el: HTMLElement, handlers: SwipeHandlers): voi
   }, true);
 }
 
+function previewHtml(preview: ChatPreview, message: ChatMessage, arriving: boolean): string {
+  const channel = escapeChatHtml(message.channelType);
+  const sender = preview.own ? 'You' : message.senderUsername || 'Server';
+  const lineClass = `chat-strip-line${message.channelType === 'server' ? ' chat-strip-dim' : ''}${arriving ? ' chat-strip-arrive' : ''}`;
+  return `<span class="chat-strip-dot" data-ch="${channel}"></span>`
+    + `<span class="${lineClass}">`
+    + `<span class="chat-strip-sender" data-ch="${channel}">${escapeChatHtml(sender)}</span> `
+    + `<span class="chat-strip-text">${escapeChatHtml(message.text)}</span>`
+    + '</span>';
+}
+
 /** The phone's one-line chat preview, painted inside the strip's existing button. */
 export class ChatStrip {
   private labelEl: HTMLElement | null;
   private slot: HTMLElement;
+  /** Null until a line is painted: what is already there at load never animates. */
+  private cuedAt: number | null = null;
 
   constructor(slot: HTMLElement, onOpen: () => void) {
     this.slot = slot;
@@ -56,15 +71,26 @@ export class ChatStrip {
     const label = this.labelEl;
     if (!label) return;
     const message = preview.message;
+    const arriving = this.takeArrival(preview);
     deferWhilePressed(this.slot, () => {
       this.slot.classList.toggle('has-preview', !!message);
-      setHtml(label, message
-        ? `<span class="chat-strip-dot" data-ch="${escapeChatHtml(message.channelType)}"></span>`
-          + `<span class="chat-strip-line${message.channelType === 'server' ? ' chat-strip-dim' : ''}">`
-          + `<span class="chat-strip-sender" data-ch="${escapeChatHtml(message.channelType)}">${escapeChatHtml(message.senderUsername || 'Server')}</span> `
-          + `<span class="chat-strip-text">${escapeChatHtml(message.text)}</span>`
-          + '</span>'
-        : 'Chat');
+      this.slot.classList.toggle('has-unread', preview.unread);
+      this.slot.classList.toggle('has-mention', preview.mention);
+      if (message) this.slot.dataset.ch = message.channelType;
+      else delete this.slot.dataset.ch;
+      setHtml(label, message ? previewHtml(preview, message, arriving) : 'Chat');
     });
+  }
+
+  private takeArrival(preview: ChatPreview): boolean {
+    const message = preview.message;
+    if (!message) return false;
+    if (this.cuedAt === null) {
+      this.cuedAt = message.timestamp;
+      return false;
+    }
+    if (!preview.unread || message.timestamp <= this.cuedAt) return false;
+    this.cuedAt = message.timestamp;
+    return !reducedMotion();
   }
 }

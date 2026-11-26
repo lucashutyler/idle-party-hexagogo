@@ -1,5 +1,13 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.26.6',
+    notes: [
+      'After you send a chat message, the chat line above the menu shows it instead of an older server notice.',
+      'Messages from other players now light up the chat line and stay on it until you open chat, even when server notices arrive after them.',
+      'Chat messages that use your name are highlighted in gold.',
+    ],
+  },
+  {
     version: '2026.11.26.5',
     notes: [
       'If auto-retreat finds nowhere safe nearby, it can now take your party back through a door to a safer room you\'ve already found, never one you couldn\'t come back from. It waits 20 seconds after you arrive, so you have time to act first, and it never does this while you have hired fighters.',
