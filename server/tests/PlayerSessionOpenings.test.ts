@@ -74,6 +74,35 @@ describe('Now open', () => {
     expect(journal(session, 'opened')).toEqual(['Now open: Old Mill → Sewers', 'Now open: Old Mill → East Field']);
   });
 
+  it('keeps a door shut while the room behind it is still locked, and opens it with that room', () => {
+    const { session } = world({
+      start: { transitions: [{ mapId: 'sewers', tileId: 'sewer', entryRequirements: { requiredQuestIds: ['key'] } }] },
+      sewer: gated({ minLevel: 3 }),
+    });
+    turnIn(session, 'key');
+    expect(journal(session, 'opened')).toEqual([]);
+    session.grantXp(xpForNextLevel(1) + xpForNextLevel(2));
+    expect(journal(session, 'opened')).toEqual(['Now open: Old Mill → Sewers']);
+  });
+
+  it('opens an ungated door when the room behind it opens, though that room is not found yet', () => {
+    const { session } = world({
+      start: { transitions: [{ mapId: 'sewers', tileId: 'sewer' }] },
+      sewer: gated({ requiredQuestIds: ['key'] }),
+    });
+    turnIn(session, 'key');
+    expect(openedLines(session)).toEqual([expect.objectContaining({ text: 'Now open: Old Mill → Sewers', roomId: 'start' })]);
+  });
+
+  it('names a found room once when a door into it opens with it', () => {
+    const { session } = world({
+      start: { transitions: [{ mapId: 'overworld', tileId: 'east' }] },
+      east: gated({ requiredQuestIds: ['bridge'] }),
+    });
+    turnIn(session, 'bridge');
+    expect(journal(session, 'opened')).toEqual(['Now open: East Field']);
+  });
+
   it('logs when a level-up reaches a room\'s minimum level, and not before', () => {
     const { session } = world({ east: gated({ minLevel: 3 }) });
     session.grantXp(xpForNextLevel(1));

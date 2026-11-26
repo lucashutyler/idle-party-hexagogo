@@ -48,6 +48,27 @@ describe('collectGates', () => {
     ]);
   });
 
+  it('gives a door the gate of the room it leads to, and lists an ungated exit into a gated room', () => {
+    const gates = collectGates([
+      room('cellar', {
+        transitions: [
+          { mapId: 'sewers', tileId: 's1', entryRequirements: { requiredQuestIds: ['q2'] } },
+          { mapId: 'sewers', tileId: 's2' },
+          { mapId: 'sewers', tileId: 'missing' },
+        ],
+      }),
+      room('s1', { mapId: 'sewers', type: 'crypt' }),
+      room('s2', { mapId: 'sewers', entryRequirements: { requiredQuestIds: ['q3'] } }),
+    ], TYPES);
+    expect(gates.filter(g => g.kind === 'door')).toEqual([
+      {
+        kind: 'door', tileId: 'cellar', mapId: 'overworld', linkTileId: 's1', linkMapId: 'sewers',
+        reqs: { requiredQuestIds: ['q2'] }, destinationReqs: { minLevel: 10 },
+      },
+      { kind: 'door', tileId: 'cellar', mapId: 'overworld', linkTileId: 's2', linkMapId: 'sewers', reqs: {}, destinationReqs: { requiredQuestIds: ['q3'] } },
+    ]);
+  });
+
   it('keeps a room gate and its door gate apart', () => {
     const gates = collectGates([room('gate', {
       entryRequirements: { minLevel: 3 },

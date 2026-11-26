@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CombatLogEntry, ServerStateMessage } from '@idle-party-rpg/shared';
-import { OPENED_BANNER_MS, OpenedBanner, newestOpening } from '../src/ui/OpenedBanner';
+import type { AwayLedger, CombatLogEntry, ServerStateMessage } from '@idle-party-rpg/shared';
+import { OPENED_BANNER_MS, OpenedBanner, newOpenings } from '../src/ui/OpenedBanner';
 import type { GameClient } from '../src/network/GameClient';
 
 interface FakeClient {
   lastState: ServerStateMessage | null;
   listener: ((state: ServerStateMessage) => void) | null;
   subscribe(cb: (state: ServerStateMessage) => void, opts?: { replay?: boolean }): () => void;
-  push(log: CombatLogEntry[]): void;
+  push(log: CombatLogEntry[], awayRecap?: AwayLedger): void;
 }
 
 function fakeClient(firstLog: CombatLogEntry[] | null): FakeClient {
@@ -19,8 +19,8 @@ function fakeClient(firstLog: CombatLogEntry[] | null): FakeClient {
       if (opts?.replay && c.lastState) cb(c.lastState);
       return () => { c.listener = null; };
     },
-    push(log) {
-      c.lastState = { combatLog: log } as ServerStateMessage;
+    push(log, awayRecap) {
+      c.lastState = { combatLog: log, awayRecap } as ServerStateMessage;
       c.listener?.(c.lastState);
     },
   };
@@ -34,12 +34,13 @@ function banner(): HTMLButtonElement | null {
   return document.querySelector('.opened-banner');
 }
 
-describe('newestOpening', () => {
-  it('finds the newest opening after the last seen id', () => {
+describe('newOpenings', () => {
+  it('lists the openings after the last seen id, oldest first', () => {
     const log = [line(1, 'Now open: A', 'opened'), line(2, 'Victory!'), line(3, 'Now open: B', 'opened'), line(4, '+5 XP')];
-    expect(newestOpening(log, 0)?.text).toBe('Now open: B');
-    expect(newestOpening(log, 3)).toBeUndefined();
-    expect(newestOpening(log.slice(0, 2), 1)).toBeUndefined();
+    expect(newOpenings(log, 0).map(e => e.text)).toEqual(['Now open: A', 'Now open: B']);
+    expect(newOpenings(log, 1).map(e => e.text)).toEqual(['Now open: B']);
+    expect(newOpenings(log, 3)).toEqual([]);
+    expect(newOpenings(log.slice(0, 2), 1)).toEqual([]);
   });
 });
 
@@ -95,6 +96,34 @@ describe('OpenedBanner', () => {
     client.push(log);
     client.push([...log, line(2, 'Victory!')]);
     expect(banner()).toBeNull();
+    opened.destroy();
+  });
+
+  it('says how many more opened alongside the newest one', () => {
+    const client = fakeClient([line(1, 'Victory!')]);
+    const opened = new OpenedBanner(client as unknown as GameClient, vi.fn());
+    client.push([
+      line(1, 'Victory!'),
+      line(2, 'Now open: Old Mill', 'opened', 'mill'),
+      line(3, 'Now open: East Field', 'opened', 'east'),
+      line(4, 'Now open: Old Mill → Sewers', 'opened', 'mill'),
+    ]);
+    expect(banner()!.textContent).toBe('🔓 Now open: Old Mill → Sewers (+2 more)');
+    opened.destroy();
+  });
+
+  it('leaves openings to the away recap when it already tells them', () => {
+    const client = fakeClient([line(1, 'Victory!')]);
+    const opened = new OpenedBanner(client as unknown as GameClient, vi.fn());
+    const recap = { moments: [{ at: 1, kind: 'opened', text: 'Now open: East Field' }] } as unknown as AwayLedger;
+    client.push([line(1, 'Victory!'), line(2, 'Now open: East Field', 'opened', 'east')], recap);
+    expect(banner()).toBeNull();
+    client.push([line(1, 'Victory!'), line(2, 'Now open: East Field', 'opened', 'east'), line(3, 'Victory!')]);
+    expect(banner()).toBeNull();
+    client.push([line(2, 'Now open: East Field', 'opened', 'east'), line(4, 'Now open: Old Mill', 'opened', 'mill')], {
+      moments: [{ at: 1, kind: 'level_up', text: 'Reached level 3' }],
+    } as unknown as AwayLedger);
+    expect(banner()!.textContent).toBe('🔓 Now open: Old Mill');
     opened.destroy();
   });
 

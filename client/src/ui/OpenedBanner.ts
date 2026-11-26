@@ -1,19 +1,20 @@
-import type { CombatLogEntry } from '@idle-party-rpg/shared';
+import type { CombatLogEntry, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { bringToFront, release } from './ModalStack';
 import { deferWhilePressed } from './render';
 
 export const OPENED_BANNER_MS = 10_000;
 
-/** The newest `opened` journal entry after `lastSeenId`. */
-export function newestOpening(log: readonly CombatLogEntry[], lastSeenId: number): CombatLogEntry | undefined {
+/** The `opened` journal entries after `lastSeenId`, oldest first. */
+export function newOpenings(log: readonly CombatLogEntry[], lastSeenId: number): CombatLogEntry[] {
+  const found: CombatLogEntry[] = [];
   for (let i = log.length - 1; i >= 0 && log[i].id > lastSeenId; i--) {
-    if (log[i].type === 'opened') return log[i];
+    if (log[i].type === 'opened') found.unshift(log[i]);
   }
-  return undefined;
+  return found;
 }
 
-/** A gold "Now open" banner for each new `opened` journal line. See docs/architecture/client.md → Now open banner. */
+/** A gold "Now open" banner for new `opened` journal lines. See docs/architecture/client.md → Now open banner. */
 export class OpenedBanner {
   /** Null until the first state: whatever that one holds is already known. */
   private lastSeenId: number | null = null;
@@ -22,7 +23,7 @@ export class OpenedBanner {
   private unsubscribe: () => void;
 
   constructor(gameClient: GameClient, private onOpen: (roomId: string | undefined) => void) {
-    this.unsubscribe = gameClient.subscribe(state => this.update(state.combatLog ?? []), { replay: true });
+    this.unsubscribe = gameClient.subscribe(state => this.update(state), { replay: true });
   }
 
   destroy(): void {
@@ -30,28 +31,32 @@ export class OpenedBanner {
     this.remove();
   }
 
-  private update(log: readonly CombatLogEntry[]): void {
+  private update(state: ServerStateMessage): void {
+    const log = state.combatLog ?? [];
     const newestId = log.length > 0 ? log[log.length - 1].id : 0;
     const seen = this.lastSeenId;
     this.lastSeenId = newestId;
     const journalReset = seen !== null && newestId < seen;
     if (seen === null || journalReset) return;
-    const entry = newestOpening(log, seen);
-    if (!entry) return;
-    if (this.banner) deferWhilePressed(this.banner, () => this.show(entry));
-    else this.show(entry);
+    if (state.awayRecap?.moments.some(m => m.kind === 'opened')) return;
+    const openings = newOpenings(log, seen);
+    const newest = openings[openings.length - 1];
+    if (!newest) return;
+    const text = openings.length > 1 ? `${newest.text} (+${openings.length - 1} more)` : newest.text;
+    if (this.banner) deferWhilePressed(this.banner, () => this.show(text, newest.roomId));
+    else this.show(text, newest.roomId);
   }
 
-  private show(entry: CombatLogEntry): void {
+  private show(text: string, roomId: string | undefined): void {
     this.remove();
     const banner = document.createElement('button');
     banner.type = 'button';
     banner.className = 'opened-banner';
     banner.setAttribute('role', 'status');
-    banner.textContent = `🔓 ${entry.text}`;
+    banner.textContent = `🔓 ${text}`;
     banner.addEventListener('click', () => {
       this.remove();
-      this.onOpen(entry.roomId);
+      this.onOpen(roomId);
     });
     document.body.appendChild(banner);
     bringToFront(banner);

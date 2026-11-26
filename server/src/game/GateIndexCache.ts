@@ -1,4 +1,4 @@
-import { collectGates } from '@idle-party-rpg/shared';
+import { collectGates, gateMinLevel, gateQuestIds } from '@idle-party-rpg/shared';
 import type { GateRef } from '@idle-party-rpg/shared';
 import type { ContentStore } from './ContentStore.js';
 
@@ -8,7 +8,7 @@ export interface GateIndex {
   /** Gates that name the quest among their required quests. */
   byQuest: ReadonlyMap<string, readonly GateRef[]>;
   /** Gates with a level requirement, lowest first. */
-  byLevel: readonly GateRef[];
+  byLevel: readonly { minLevel: number; gate: GateRef }[];
 }
 
 const indexes = new WeakMap<GateContent, { epoch: number; index: GateIndex }>();
@@ -25,8 +25,7 @@ export function gateIndex(content: GateContent): GateIndex {
 /** Gates whose minimum level is above `fromLevel` and at most `toLevel`. */
 export function gatesOpenedByLevel(index: GateIndex, fromLevel: number, toLevel: number): GateRef[] {
   const opened: GateRef[] = [];
-  for (const gate of index.byLevel) {
-    const minLevel = gate.reqs.minLevel!;
+  for (const { minLevel, gate } of index.byLevel) {
     if (minLevel > toLevel) break;
     if (minLevel > fromLevel) opened.push(gate);
   }
@@ -35,15 +34,16 @@ export function gatesOpenedByLevel(index: GateIndex, fromLevel: number, toLevel:
 
 function buildGateIndex(gates: readonly GateRef[]): GateIndex {
   const byQuest = new Map<string, GateRef[]>();
-  const byLevel: GateRef[] = [];
+  const byLevel: { minLevel: number; gate: GateRef }[] = [];
   for (const gate of gates) {
-    for (const questId of new Set(gate.reqs.requiredQuestIds ?? [])) {
+    for (const questId of gateQuestIds(gate)) {
       const list = byQuest.get(questId) ?? [];
       list.push(gate);
       byQuest.set(questId, list);
     }
-    if (Number.isFinite(gate.reqs.minLevel)) byLevel.push(gate);
+    const minLevel = gateMinLevel(gate);
+    if (minLevel !== undefined) byLevel.push({ minLevel, gate });
   }
-  byLevel.sort((a, b) => a.reqs.minLevel! - b.reqs.minLevel!);
+  byLevel.sort((a, b) => a.minLevel - b.minLevel);
   return { byQuest, byLevel };
 }

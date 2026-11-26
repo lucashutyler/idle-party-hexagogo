@@ -469,7 +469,7 @@ The quest section reads the state the recap arrived with, not the ledger: "Ready
 
 ## Now open banner
 
-`client/src/ui/OpenedBanner.ts`, mounted by `App` on `document.body`, subscribes to state with replay. The first state only seeds the newest journal id it has seen, so nothing in it (or replayed after a reconnect) shows; a journal whose newest id drops below that (a master reset) seeds again. After that, the newest new `opened` entry (`newestOpening`) shows as a gold top-centre button (`.opened-banner`, `role=status`, "🔓 Now open: …") for `OPENED_BANNER_MS` (10 s). Tapping dismisses it and goes to the map, focusing the entry's `roomId` when that room is on the current map (`mapScreen.focusRoom`). A banner replacing one under the finger waits through `deferWhilePressed`. The journal shows the same line in gold (`.log-entry.opened`).
+`client/src/ui/OpenedBanner.ts`, mounted by `App` on `document.body`, subscribes to state with replay. The first state only seeds the newest journal id it has seen, so nothing in it (or replayed after a reconnect) shows; a journal whose newest id drops below that (a master reset) seeds again. After that, the newest of the new `opened` entries (`newOpenings`) shows as a gold top-centre button (`.opened-banner`, `role=status`, "🔓 Now open: …", with " (+N more)" when others came with it) for `OPENED_BANNER_MS` (10 s). Tapping dismisses it and goes to the map, focusing the entry's `roomId` when that room is on the current map (`mapScreen.focusRoom`). A banner replacing one under the finger waits through `deferWhilePressed`. While the state carries an away recap with an `opened` moment, new lines show no banner: the recap tells them. The journal shows the same line in gold (`.log-entry.opened`).
 
 ## ModalStack
 

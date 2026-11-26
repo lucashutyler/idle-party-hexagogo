@@ -84,7 +84,7 @@ import {
   nextWeeklyReopening,
   isBlockedUser,
   createPaysXpCheck,
-  validateRoomEntry,
+  passesGate,
 } from '@idle-party-rpg/shared';
 import { COMBAT_PACE, hireLevelLimitText, isHireWithinLevelLimit, paceHitDamage } from '@idle-party-rpg/shared';
 import type {
@@ -484,17 +484,17 @@ export class PlayerSession {
     const opened = new Map<string, GateRef>();
     for (const gate of candidates) {
       if (!this.isTileIdUnlocked(gate.tileId)) continue;
-      if (validateRoomEntry(gate.reqs, [now]) || !validateRoomEntry(gate.reqs, [was])) continue;
+      if (!passesGate(gate, now) || passesGate(gate, was)) continue;
       opened.set(`${gate.kind}:${gate.tileId}:${gate.linkTileId ?? ''}`, gate);
     }
-    if (opened.size === 0) return;
+    const roomsOpened = new Set([...opened.values()].filter(gate => gate.kind === 'room').map(gate => gate.tileId));
+    const gates = [...opened.values()].filter(gate => gate.kind === 'room' || !roomsOpened.has(gate.linkTileId ?? ''));
+    if (gates.length === 0) return;
 
-    const gates = [...opened.values()];
-    const labels = gates.map(gate => this.gateLabel(gate));
     if (gates.length <= MAX_OPENING_LINES) {
-      gates.forEach((gate, i) => this.logOpening(`Now open: ${labels[i]}`, gate.tileId));
+      for (const gate of gates) this.logOpening(`Now open: ${this.gateLabel(gate)}`, gate.tileId);
     } else {
-      this.logOpening(`Now open: ${labels[0]}, ${labels[1]} and ${gates.length - 2} more`);
+      this.logOpening(`Now open: ${this.gateLabel(gates[0])}, ${this.gateLabel(gates[1])} and ${gates.length - 2} more`);
     }
   }
 
