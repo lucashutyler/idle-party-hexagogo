@@ -820,7 +820,9 @@ export class PlayerManager {
         autoRetreat: this.autoRetreatPolicy(partyData.id) ?? undefined,
         forecastKey: this.partyBattles.forecastKey(partyData.id),
       },
-      pendingInvites: this.parties.getPendingInvites(username).map(invite => this.inviteWithPlace(invite, session)),
+      pendingInvites: this.parties.getPendingInvites(username)
+        .filter(invite => !this.isTradeBlocked(username, invite.inviterUsername))
+        .map(invite => this.inviteWithPlace(invite, session)),
       outgoingPartyInvites: this.parties.getOutgoingInvites(username),
       onlinePlayers: withRosters ? this.getOnlinePlayers() : [],
       allPlayers: withRosters ? this.listedPlayers() : [],
@@ -1045,9 +1047,10 @@ export class PlayerManager {
 
   /** Anyone in the inviter's room, or a friend anywhere; never across a block, nor before the target has a character. */
   invitePolicy(inviter: string, target: string): true | string {
-    if (!this.sessions.get(target)?.hasCharacter() || this.isTradeBlocked(inviter, target)) return INVITE_REFUSED;
-    if (this.areSameTile(inviter, target) || this.areMutualFriends(inviter, target)) return true;
-    return NOT_INVITABLE_FROM_HERE;
+    if (!this.sessions.get(target)?.hasCharacter()) return INVITE_REFUSED;
+    // Reach before block: a stranger elsewhere who blocked you must get the same answer as any stranger elsewhere.
+    if (!this.areSameTile(inviter, target) && !this.areMutualFriends(inviter, target)) return NOT_INVITABLE_FROM_HERE;
+    return this.isTradeBlocked(inviter, target) ? INVITE_REFUSED : true;
   }
 
   /** A joiner from another room must be able to walk to the party by themselves. */

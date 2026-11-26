@@ -662,6 +662,8 @@ body:is([data-chat-open="1"][data-chat-layout="full"], [data-chat-typing]) .part
   box-shadow: inset 0 1px 0 var(--stroke-hi), var(--shadow-2);
   font-family: var(--font-body);
   color: var(--text-1);
+}
+.party-invite-card-enter {
   animation: party-invite-in 180ms ease-out;
 }
 @keyframes party-invite-in {
@@ -669,7 +671,16 @@ body:is([data-chat-open="1"][data-chat-layout="full"], [data-chat-typing]) .part
   to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .party-invite-card { animation: none; }
+  .party-invite-card-enter { animation: none; }
+}
+/* A short screen or an open chat sheet has no room for a prompt under two invites. */
+body[data-chat-open="1"] .party-invite-list:not(:empty) + .party-prompts {
+  display: none;
+}
+@media (max-height: 700px) {
+  .party-invite-list:not(:empty) + .party-prompts {
+    display: none;
+  }
 }
 .party-invite-body {
   display: flex;

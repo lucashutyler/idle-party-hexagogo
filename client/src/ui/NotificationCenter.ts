@@ -9,13 +9,12 @@ import { deferWhilePressed, setHtml } from './render';
 const TOAST_LIFETIME_MS = 6000;
 const PARTY_INVITE_EVENT = 'party_invite_received';
 
-/** An invite notification whose invite is no longer pending. Matches on party id when the entry has one. */
+/** An invite notification with nothing pending from its party or its inviter (a restart gives a solo party a new id). */
 function isEndedInvite(entry: NotificationEntry, live: readonly PartyInvite[]): boolean {
   if (entry.eventKey !== PARTY_INVITE_EVENT) return false;
   const partyId = entry.payload?.partyId;
-  if (typeof partyId === 'string') return !live.some(i => i.partyId === partyId);
   const inviter = entry.payload?.inviterUsername;
-  return !live.some(i => i.inviterUsername === inviter);
+  return !live.some(i => i.partyId === partyId || i.inviterUsername === inviter);
 }
 
 function relativeTime(ms: number): string {

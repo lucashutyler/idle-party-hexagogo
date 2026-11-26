@@ -51,7 +51,7 @@ Clicking a notification (dropdown row or live toast) can navigate the player to 
 | `auto_retreat` | Settings → Player Options (`{ kind: 'options' }`) | The notification's only action is changing the auto-retreat threshold there. |
 | Everything else (e.g. `friend_request_accepted`) | No-op | Informational only — nothing left to act on. |
 
-**Ended invites.** A `party_invite_received` row whose invite is no longer in `state.social.pendingInvites` (accepted, declined, expired, or its inviter left or lost the role) gets `notif-row-ended` and the line "This invite has ended." Tapping it marks it read and goes nowhere. The match is on `payload.partyId` (sent since this change), or `payload.inviterUsername` for older entries.
+**Ended invites.** A `party_invite_received` row whose invite is no longer in `state.social.pendingInvites` (accepted, declined, expired, or its inviter left or lost the role) gets `notif-row-ended` and the line "This invite has ended." Tapping it marks it read and goes nowhere. An entry stays open while any pending invite matches its `payload.partyId` or its `payload.inviterUsername`: a restart gives the inviter's solo party a new id, and older entries carry no `partyId`.
 
 A toast tap that navigates first closes any open modals (`dismissModals`), otherwise it would change the screen behind them. Scoped to in-app clicks only (bell dropdown + toasts). OS-level push-notification clicks (`client/public/sw.js`'s `notificationclick` handler) don't deep-link yet — the payload is available in `event.notification.data` but the handler just focuses/opens `/`; wiring that up would need a `postMessage` handshake to the running app and is a bigger follow-up.
 

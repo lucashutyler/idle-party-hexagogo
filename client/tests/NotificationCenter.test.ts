@@ -255,18 +255,22 @@ describe('NotificationCenter party invites', () => {
     expect(t.onNavigate).toHaveBeenCalledWith({ kind: 'party' });
   });
 
-  it('matches on the party id when the entry has one, else on the inviter', () => {
+  it('counts an entry as open while an invite from that party or that inviter is pending', () => {
     const t = setup();
     t.push([
-      inviteEntry('old_party', { inviterUsername: 'bob', partyId: 'party_bob_before' }),
+      inviteEntry('before_restart', { inviterUsername: 'bob', partyId: 'party_bob_before' }),
       inviteEntry('no_party_id', { inviterUsername: 'bob' }),
-      inviteEntry('someone_else', { inviterUsername: 'carol' }),
+      inviteEntry('same_party', { inviterUsername: 'dave', partyId: 'party_bob_now' }),
+      inviteEntry('someone_else', { inviterUsername: 'carol', partyId: 'party_carol' }),
     ], [pending('party_bob_now', 'bob')]);
     t.bell().click();
 
-    expect(isEnded('old_party')).toBe(true);
+    expect(isEnded('before_restart')).toBe(false);
     expect(isEnded('no_party_id')).toBe(false);
+    expect(isEnded('same_party')).toBe(false);
     expect(isEnded('someone_else')).toBe(true);
+    t.row('before_restart')!.click();
+    expect(t.onNavigate).toHaveBeenCalledWith({ kind: 'party' });
   });
 
   it('marks the entry ended as soon as the invite leaves the state', () => {

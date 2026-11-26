@@ -16,6 +16,7 @@ export class PartyInviteCard {
   private invitesEl: HTMLElement;
   /** Party ids the player put off with Later, for this page only. */
   private later = new Set<string>();
+  private onScreen = new Set<string>();
 
   constructor(private gameClient: GameClient, private openParty: () => void) {
     this.root = document.createElement('div');
@@ -23,6 +24,7 @@ export class PartyInviteCard {
     this.invitesEl = document.createElement('div');
     this.invitesEl.className = 'party-invite-list';
     this.invitesEl.setAttribute('aria-live', 'polite');
+    this.invitesEl.setAttribute('aria-relevant', 'additions');
     this.root.append(this.invitesEl, new PartyPrompts(gameClient).root);
     this.invitesEl.addEventListener('click', (e) => this.onClick(e));
     this.gameClient.subscribe((state) => {
@@ -38,20 +40,27 @@ export class PartyInviteCard {
       if (!live.has(partyId)) this.later.delete(partyId);
     }
     const shown = invites.filter(i => !this.later.has(i.partyId)).sort((a, b) => b.timestamp - a.timestamp);
+    const cards = shown.slice(0, MAX_CARDS);
     const more = shown.length - MAX_CARDS;
-    setHtml(this.invitesEl, shown.slice(0, MAX_CARDS).map(invite => this.cardHtml(invite)).join('')
+    const rebuilt = setHtml(this.invitesEl, cards.map(invite => this.cardHtml(invite)).join('')
       + (more > 0 ? `<button type="button" class="party-invite-more">+${more} more</button>` : ''));
+    this.invitesEl.querySelectorAll<HTMLElement>('.party-invite-card').forEach((el, i) => {
+      const where = el.querySelector('.party-invite-where');
+      if (where) where.textContent = inviteWhereText(cards[i]);
+      if (rebuilt && !this.onScreen.has(cards[i].partyId)) el.classList.add('party-invite-card-enter');
+    });
+    this.onScreen = new Set(cards.map(i => i.partyId));
   }
 
+  /** The location line is filled in after, so a party on the move updates its card in place. */
   private cardHtml(invite: PartyInvite): string {
     const inviter = escapeHtml(invite.inviterUsername);
     const partyId = escapeHtml(invite.partyId);
-    const where = inviteWhereText(invite);
     return `
       <div class="party-invite-card" role="group" aria-label="Party invite from ${inviter}" data-party-id="${partyId}">
         <div class="party-invite-body">
           <span class="party-invite-title"><strong>${inviter}</strong> invited you to their party</span>
-          ${where ? `<span class="party-invite-where">${escapeHtml(where)}</span>` : ''}
+          ${inviteWhereText(invite) ? '<span class="party-invite-where"></span>' : ''}
         </div>
         <div class="party-invite-actions">
           <button type="button" class="party-invite-btn party-invite-join" data-party-id="${partyId}">Join</button>

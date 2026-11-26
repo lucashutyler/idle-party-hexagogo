@@ -106,6 +106,24 @@ describe('PartyInviteCard', () => {
     expect(where()).toEqual([null]);
   });
 
+  it('follows a moving party on its card without building the card again', () => {
+    const t = setup();
+    const at = (roomName: string) => ({ roomName, zoneName: 'Test Vale', sameMap: true });
+    t.push([invite('bob', 1, at('Lane'))]);
+    const bob = t.cards()[0];
+    expect(bob.classList.contains('party-invite-card-enter')).toBe(true);
+
+    t.push([invite('bob', 1, at('Bend'))]);
+    expect(t.cards()[0]).toBe(bob);
+    expect(bob.querySelector('.party-invite-where')?.textContent).toBe('In Bend, Test Vale');
+
+    t.push([invite('carol', 2), invite('bob', 1, at('Camp'))]);
+    const [carolCard, bobCard] = t.cards();
+    expect(carolCard.classList.contains('party-invite-card-enter')).toBe(true);
+    expect(bobCard.classList.contains('party-invite-card-enter')).toBe(false);
+    expect(bobCard.querySelector('.party-invite-where')?.textContent).toBe('In Camp, Test Vale');
+  });
+
   it('joins at once from a solo party with no hires', () => {
     const t = setup();
     t.push([invite('bob', 1)]);

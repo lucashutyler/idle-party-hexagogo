@@ -48,7 +48,7 @@ export class PartyPrompts {
     }
     const name = escapeHtml(joiner.username);
     setHtml(this.root, `
-      <div class="party-invite-card party-prompt-card" role="group" aria-label="${name} joined your party">
+      <div class="party-invite-card party-invite-card-enter party-prompt-card" role="group" aria-label="${name} joined your party">
         <div class="party-invite-body">
           <span class="party-invite-title"><strong>${name}</strong> joined. Let them move the party too?</span>
           <span class="party-invite-where">Leaders can move the party, invite and remove members.</span>

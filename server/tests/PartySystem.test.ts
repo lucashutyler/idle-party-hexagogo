@@ -779,6 +779,26 @@ describe('PlayerManager invite policy', () => {
     expect(w.pm.inviteToParty('alice', 'newcomer')).toBe(INVITE_REFUSED);
   });
 
+  it('answers for a stranger in another room the same way whether or not they blocked the inviter', async () => {
+    const w = await setupRouteWorld(['alice', 'carol', 'dave']);
+    w.placeParty('alice', 'camp');
+    w.sessions.dave.blockUser('alice', 'all');
+
+    expect(w.pm.inviteToParty('alice', 'carol')).toBe(NOT_INVITABLE_FROM_HERE);
+    expect(w.pm.inviteToParty('alice', 'dave')).toBe(NOT_INVITABLE_FROM_HERE);
+  });
+
+  it('stops showing an invite once the target blocks its sender', async () => {
+    const w = await setupRouteWorld(['alice', 'bob']);
+    expect(w.pm.inviteToParty('alice', 'bob')).toBeNull();
+    expect(w.pm.getSocialState('bob').pendingInvites).toHaveLength(1);
+
+    w.sessions.bob.blockUser('alice', 'dm');
+
+    expect(w.pm.getSocialState('bob').pendingInvites).toEqual([]);
+    expect(w.pm.acceptPartyInvite('bob', w.partyOf('alice'))).toBe(INVITE_NO_LONGER_VALID);
+  });
+
   it('keeps an invite when either party moves', async () => {
     const w = await setupRouteWorld(['alice', 'bob']);
     w.befriend('alice', 'bob');
