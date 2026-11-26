@@ -67,6 +67,7 @@ describe('MapScreen dungeon refusals', () => {
     const gameClient = {
       lastState: null,
       onMoveBlocked: () => () => {},
+      onRouteConfirm: () => () => {},
       onServerError: (l: ErrorListener) => { errorListeners.push(l); return () => {}; },
     } as unknown as GameClient;
     const screen = new MapScreen('map-screen', gameClient, {} as WorldCache);

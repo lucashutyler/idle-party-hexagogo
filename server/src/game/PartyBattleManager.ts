@@ -26,6 +26,7 @@ import {
   recordAwayBattle,
   recordAwayDungeon,
   pickWeightedEncounter,
+  planRouteDoors,
   partyKey as partyKeyOf,
   RUN_AVAILABLE_MS,
   AUTO_RUN_ROOM_MS,
@@ -77,8 +78,14 @@ import type {
   ForecastResult,
   ServerForecastMessage,
   PartyAutoRetreatInfo,
+  MapTransitionLink,
+  RouteDoor,
+  RouteWarning,
+  RouteWarningKind,
 } from '@idle-party-rpg/shared';
 import { ServerParty } from './ServerParty.js';
+import type { PartyRoute, SavedPartyRoute } from './ServerParty.js';
+import { routeIndexOf } from './RouteIndexCache.js';
 import { ServerBattleTimer } from './ServerBattleTimer.js';
 import type { CombatFlush } from './ServerBattleTimer.js';
 import { dungeonForecastKey, liveForecastKey, roomForecastKey } from './ForecastService.js';
@@ -94,6 +101,18 @@ export type { DungeonRunState } from '@idle-party-rpg/shared';
 /** A live forecast re-runs at most this long after a party member falls. */
 export const LIVE_FORECAST_DEBOUNCE_MS = 3000;
 const AUTO_RETREAT_NOTICE = 'Auto-retreat kept your party out of a losing fight. Change it in Options.';
+const ROUTE_CHANGED = 'the way on has changed.';
+
+export type RouteRefusal = 'no_party' | 'in_dungeon' | 'gone' | 'not_walkable' | 'no_route';
+
+export type RoomMoveResult =
+  | { success: true }
+  | { success: false; blocked?: RoomEntryFailure; reason?: RouteRefusal }
+  | { success: false; confirm: RouteWarning[] };
+
+type RoutePlan =
+  | { ok: true; firstLeg: HexTile[]; route: PartyRoute; warnings: RouteWarning[] }
+  | { ok: false; refusal: { blocked?: RoomEntryFailure; reason?: RouteRefusal } };
 
 /** What an overworld fight was rolled from, for auto-retreat. */
 interface OverworldBattle {
@@ -331,9 +350,10 @@ export class PartyBattleManager {
           }
           this.onMembersMoved?.(members);
         },
+        onDoorStep: () => this.takeRouteDoor(partyId),
         canMoveToNextTile: () => {
           const nextTile = serverParty.nextTile;
-          if (!nextTile) return false;
+          if (!nextTile) return serverParty.doorStepDue;
           // Fog of war only. Entry requirements are checked when the move is
           // requested (handleMove validates every room in the path), so there
           // is nothing to re-decide per step.
@@ -555,7 +575,7 @@ export class PartyBattleManager {
     };
   }
 
-  /** Handle move request. Returns the unmet requirement if the path is gated. */
+  /** Handle a col/row move, which old tabs send: a walk within the party's area. Returns the unmet requirement if the path is gated. */
   handleMove(partyId: string, col: number, row: number): { success: true } | { success: false; blocked?: RoomEntryFailure } {
     const entry = this.entries.get(partyId);
     if (!entry) return { success: false };
@@ -566,24 +586,37 @@ export class PartyBattleManager {
     const coord = offsetToCube({ col, row });
     const tile = this.grids.getOrThrow(entry.serverParty.currentMapId).getTile(coord);
     if (!tile || !tile.isTraversable) return { success: false };
+    return this.walkTo(entry, tile);
+  }
 
-    // Snapshot first: setDestination overwrites the queue, so a refused move
-    // must put the party's previous path back rather than strand it.
-    const previousPath = entry.serverParty.remainingPath;
-    const success = entry.serverParty.setDestination(tile);
-    if (!success) return { success: false };
+  /**
+   * Send the party to any room by id: a walk within its area, else a route through doors, maybe across maps.
+   * A route with a warning not in `accept` changes nothing and asks first. See docs/architecture/content.md → Routes through doors.
+   */
+  handleMoveToRoom(partyId: string, tileId: string, accept: readonly RouteWarningKind[] = []): RoomMoveResult {
+    const entry = this.entries.get(partyId);
+    if (!entry) return { success: false, reason: 'no_party' };
+    if (entry.dungeonRun) return { success: false, reason: 'in_dungeon' };
 
-    const blocked = this.validatePathRequirements(entry);
-    if (blocked) {
-      entry.serverParty.restoreMovementQueue(previousPath);
-      return { success: false, blocked };
+    const index = routeIndexOf(this.content);
+    const mapId = index.mapOf(tileId);
+    const target = mapId ? this.grids.get(mapId)?.getTileById(tileId) : undefined;
+    if (!mapId || !target) return { success: false, reason: 'gone' };
+    if (!target.isTraversable) return { success: false, reason: 'not_walkable' };
+
+    const party = entry.serverParty;
+    const hereArea = index.areaOf(party.tile.id);
+    // A room that can't be walked into has no area: only a walk leaves it, as a col/row move does.
+    if (mapId === party.currentMapId && (hereArea === undefined || hereArea === index.areaOf(target.id))) {
+      const walked = this.walkTo(entry, target);
+      return walked.success || walked.blocked ? walked : { success: false, reason: 'no_route' };
     }
 
-    this.clearRetreatHold(partyId);
-    entry.battleTimer.syncAutoRun();
-    for (const m of entry.members) {
-      this.broadcastToMember(m);
-    }
+    const plan = this.planRoute(entry, target);
+    if (!plan.ok) return { success: false, ...plan.refusal };
+    if (plan.warnings.some(w => !accept.includes(w.kind))) return { success: false, confirm: plan.warnings };
+    party.setRoute(plan.firstLeg, plan.route);
+    this.afterOrder(entry);
     return { success: true };
   }
 
@@ -639,19 +672,25 @@ export class PartyBattleManager {
     if (blocked) return { success: false, error: blocked.reason, blocked };
 
     entry.serverParty.switchMap(destGrid, destTile, link.mapId);
-    this.announceHenchmenLeft(entry, this.dismissHenchmenOffMap(partyId, link.mapId));
-
-    for (const username of entry.members) {
-      const session = this.getSession(username);
-      if (!session) continue;
-      session.switchMapGrid(destTile);
-      session.addLogEntry(`Traveled to ${destDef.name}.`, 'move');
-    }
+    this.afterDoorCrossing(entry, link, destTile, destDef.name);
 
     // New map → fresh encounter.
     entry.battleTimer.restartBattle();
     for (const m of entry.members) this.broadcastToMember(m);
     return { success: true };
+  }
+
+  /** What every way through a door shares. Never restarts the fight or broadcasts: the door step runs inside the battle loop. */
+  private afterDoorCrossing(entry: PartyBattleEntry, link: MapTransitionLink, destTile: HexTile, destName: string): void {
+    this.announceHenchmenLeft(entry, this.dismissHenchmenOffMap(entry.partyId, link.mapId));
+    const quests = this.content.getQuestCatalog();
+    for (const username of entry.members) {
+      const session = this.getSession(username);
+      if (!session) continue;
+      session.switchMapGrid(destTile);
+      session.addLogEntry(`Traveled to ${destName}.`, 'move');
+      session.quests.applyVisit(destTile.id, quests);
+    }
   }
 
   private announceHenchmenLeft(entry: PartyBattleEntry, dismissed: HiredHenchman[]): void {
@@ -733,6 +772,200 @@ export class PartyBattleManager {
     return null;
   }
 
+  /** A walk within the party's map. A refused walk puts back the queue and any door route. */
+  private walkTo(entry: PartyBattleEntry, tile: HexTile): { success: true } | { success: false; blocked?: RoomEntryFailure } {
+    const previous = entry.serverParty.routeSnapshot();
+    if (!entry.serverParty.setDestination(tile)) return { success: false };
+
+    const blocked = this.validatePathRequirements(entry);
+    if (blocked) {
+      entry.serverParty.restoreRoute(previous);
+      return { success: false, blocked };
+    }
+    this.afterOrder(entry);
+    return { success: true };
+  }
+
+  private afterOrder(entry: PartyBattleEntry): void {
+    this.clearRetreatHold(entry.partyId);
+    entry.battleTimer.syncAutoRun();
+    for (const m of entry.members) this.broadcastToMember(m);
+  }
+
+  /**
+   * The doors and legs from the party's room to `target`, with what to ask first, or why there is no way. Changes nothing.
+   * Doors count once some member has found their room; offline members count, as they do for room steps.
+   */
+  private planRoute(entry: PartyBattleEntry, target: HexTile): RoutePlan {
+    const index = routeIndexOf(this.content);
+    const party = entry.serverParty;
+    const here = party.tile;
+    const targetMapId = index.mapOf(target.id);
+    const infos = this.buildMemberInfos(entry.members);
+    const labels = this.roomLabels();
+    const sessions = [...entry.members].map(m => this.getSession(m)).filter((s): s is PlayerSession => !!s);
+    const found = (tileId: string) => sessions.some(s => s.isTileIdUnlocked(tileId));
+    const arrival = (door: RouteDoor) => this.grids.get(door.toMapId)?.getTileById(door.toTileId);
+    const doorFailure = (door: RouteDoor) => validateRoomEntry(door.link.entryRequirements, infos, labels)
+      ?? validateRoomEntry(arrival(door)?.entryRequirements, infos, labels);
+    const usable = (door: RouteDoor) => found(door.fromTileId) && !!arrival(door);
+    const noRoute: RoutePlan = { ok: false, refusal: { reason: 'no_route' } };
+    if (!targetMapId) return noRoute;
+
+    const doors = planRouteDoors(index, here.id, target.id, door => usable(door) && !doorFailure(door));
+    if (!doors) return this.lockedDoorOnTheWay(planRouteDoors(index, here.id, target.id, usable), doorFailure) ?? noRoute;
+
+    const legs: HexTile[][] = [];
+    let from = here;
+    for (let k = 0; k <= doors.length; k++) {
+      const door: RouteDoor | undefined = doors[k];
+      const grid = this.grids.get(door?.fromMapId ?? targetMapId);
+      const to = door ? grid?.getTileById(door.fromTileId) : target;
+      const path = grid && to ? new HexPathfinder(grid).findPath(from.coord, to.coord) : null;
+      if (!path) return noRoute;
+      legs.push(path.slice(1));
+      if (!door) break;
+      const next = arrival(door);
+      if (!next) return noRoute;
+      from = next;
+    }
+
+    for (const tile of legs.flat()) {
+      const failure = validateRoomEntry(tile.entryRequirements, infos, labels);
+      if (!failure) continue;
+      if (tile.id === target.id) return { ok: false, refusal: { blocked: failure } };
+      const name = found(tile.id) ? this.roomName(tile) : 'a room on the way';
+      return { ok: false, refusal: { blocked: { ...failure, reason: `The way there passes ${name}. ${failure.reason}` } } };
+    }
+
+    const warnings: RouteWarning[] = [];
+    const hires = this.getPartyHenchmen(entry.partyId);
+    if (hires.length > 0 && doors.some(d => d.toMapId !== d.fromMapId)) {
+      warnings.push({
+        kind: 'hires_leave',
+        names: hires.map(h => this.content.getHenchman(h.henchmanId)?.name ?? 'Your henchman'),
+        mapName: this.mapName(party.currentMapId),
+      });
+    }
+    const routeRooms = new Set([here.id, ...doors.map(d => d.toTileId), ...legs.flat().map(t => t.id)]);
+    const back = planRouteDoors(index, target.id, here.id, door =>
+      (found(door.fromTileId) || routeRooms.has(door.fromTileId)) && !!arrival(door) && !doorFailure(door));
+    if (!back) warnings.push({ kind: 'no_way_back' });
+
+    return {
+      ok: true,
+      firstLeg: legs[0],
+      route: {
+        destinationId: target.id,
+        destinationMapId: targetMapId,
+        doors: doors.map(d => ({ fromTileId: d.fromTileId, toTileId: d.toTileId, toMapId: d.toMapId })),
+        legLengths: legs.slice(1).map(leg => leg.length),
+      },
+      warnings,
+    };
+  }
+
+  /** The first door on the only route that is locked, as a refusal naming its room. */
+  private lockedDoorOnTheWay(doors: RouteDoor[] | null, doorFailure: (door: RouteDoor) => RoomEntryFailure | null): RoutePlan | null {
+    for (const door of doors ?? []) {
+      const failure = doorFailure(door);
+      if (!failure) continue;
+      const reason = `The way there passes a locked door in ${this.roomNameById(door.fromTileId)}. ${failure.reason}`;
+      return { ok: false, refusal: { blocked: { ...failure, reason } } };
+    }
+    return null;
+  }
+
+  /** The battle loop's door step: cross the route's next door if it is still there and still open, else stop here. */
+  private takeRouteDoor(partyId: string): boolean {
+    const entry = this.entries.get(partyId);
+    if (!entry) return false;
+    const party = entry.serverParty;
+    const route = party.plannedRoute;
+    if (!party.doorStepDue || !route) {
+      party.clearDestination();
+      return false;
+    }
+
+    const step = route.doors[0];
+    const door = routeIndexOf(this.content).doorsFrom(party.tile.id).find(d => d.toTileId === step.toTileId);
+    const destGrid = door && door.toMapId === step.toMapId ? this.grids.get(door.toMapId) : undefined;
+    const arrival = destGrid?.getTileById(step.toTileId);
+    if (!door || !destGrid || !arrival) return this.stopRoute(entry, ROUTE_CHANGED);
+
+    const infos = this.buildMemberInfos(entry.members);
+    const labels = this.roomLabels();
+    const gate = validateRoomEntry(door.link.entryRequirements, infos, labels)
+      ?? validateRoomEntry(arrival.entryRequirements, infos, labels);
+    if (gate) return this.stopRoute(entry, gate.reason);
+
+    const nextStop = destGrid.getTileById(route.doors[1]?.fromTileId ?? route.destinationId);
+    const path = nextStop ? new HexPathfinder(destGrid).findPath(arrival.coord, nextStop.coord) : null;
+    if (!path) return this.stopRoute(entry, ROUTE_CHANGED);
+    const leg = path.slice(1);
+    for (const tile of leg) {
+      const failure = validateRoomEntry(tile.entryRequirements, infos, labels);
+      if (failure) return this.stopRoute(entry, failure.reason);
+    }
+
+    party.crossDoor(destGrid, arrival, door.toMapId, leg);
+    this.afterDoorCrossing(entry, door.link, arrival, this.roomNameById(arrival.id));
+    return true;
+  }
+
+  /** The party fights on in the room it stands in, with a journal line and a recap entry. */
+  private stopRoute(entry: PartyBattleEntry, reason: string): false {
+    entry.serverParty.clearDestination();
+    const room = this.roomName(entry.serverParty.tile);
+    for (const m of entry.members) this.getSession(m)?.addLogEntry(`Your party stopped at ${room}: ${reason}`, 'move');
+    this.recordRouteStopped(entry.partyId, room);
+    return false;
+  }
+
+  /** The saved route as it can still be walked, with its legs measured afresh; null when anything on it changed. */
+  private checkSavedRoute(entry: PartyBattleEntry, saved: SavedPartyRoute): PartyRoute | null {
+    if (typeof saved?.destinationId !== 'string' || !Array.isArray(saved.doors) || saved.doors.length === 0) return null;
+    const index = routeIndexOf(this.content);
+    const party = entry.serverParty;
+    const destMapId = index.mapOf(saved.destinationId);
+    const destination = destMapId ? this.grids.get(destMapId)?.getTileById(saved.destinationId) : undefined;
+    if (!destMapId || !destination) return null;
+
+    const queue = party.remainingPath;
+    const startId = (queue[queue.length - 1] ?? party.tile).id;
+    if (saved.doors[0]?.fromTileId !== startId) return null;
+
+    const doors: PartyRoute['doors'] = [];
+    const legLengths: number[] = [];
+    for (let k = 0; k < saved.doors.length; k++) {
+      const step = saved.doors[k];
+      const door = typeof step?.fromTileId === 'string'
+        ? index.doorsFrom(step.fromTileId).find(d => d.toTileId === step.toTileId)
+        : undefined;
+      const grid = door ? this.grids.get(door.toMapId) : undefined;
+      const arrival = grid?.getTileById(door?.toTileId ?? '');
+      if (!door || !grid || !arrival) return null;
+      const nextId = saved.doors[k + 1]?.fromTileId ?? saved.destinationId;
+      if (index.areaOf(door.toTileId) !== index.areaOf(nextId)) return null;
+      const nextStop = grid.getTileById(nextId);
+      const path = nextStop ? new HexPathfinder(grid).findPath(arrival.coord, nextStop.coord) : null;
+      if (!path) return null;
+      doors.push({ fromTileId: door.fromTileId, toTileId: door.toTileId, toMapId: door.toMapId });
+      legLengths.push(path.length - 1);
+    }
+    return { destinationId: saved.destinationId, destinationMapId: destMapId, doors, legLengths };
+  }
+
+  private roomNameById(tileId: string): string {
+    const def = this.content.getTileById(tileId);
+    if (def?.name) return def.name;
+    return (def && getZone(def.zone, this.content.getAllZones())?.displayName) || 'a room';
+  }
+
+  private mapName(mapId: string): string {
+    return this.content.getWorld().maps.find(m => m.id === mapId)?.name || mapId;
+  }
+
   /** Get the party's current position. */
   getPosition(partyId: string): { col: number; row: number } | null {
     const entry = this.entries.get(partyId);
@@ -796,6 +1029,7 @@ export class PartyBattleManager {
     mapId: string;
     target: { col: number; row: number } | null;
     movementQueue: { col: number; row: number }[];
+    route?: SavedPartyRoute;
   } | null {
     const entry = this.entries.get(partyId);
     if (!entry) return null;
@@ -807,7 +1041,24 @@ export class PartyBattleManager {
         ? { col: json.targetCol, row: json.targetRow }
         : null,
       movementQueue: json.path,
+      route: entry.serverParty.routeSave(),
     };
+  }
+
+  /**
+   * Put back a saved door route after a restart, once the party's queue is restored. Kept only if every door,
+   * arrival room and leg is still there; otherwise the party walks its queue and stops, and the recap says so.
+   */
+  restoreRoute(partyId: string, saved: SavedPartyRoute | undefined): void {
+    const entry = this.entries.get(partyId);
+    if (!saved || !entry || entry.dungeonRun) return;
+    const route = this.checkSavedRoute(entry, saved);
+    if (route) {
+      entry.serverParty.restoreSavedRoute(route);
+      return;
+    }
+    const queue = entry.serverParty.remainingPath;
+    this.recordRouteStopped(partyId, this.roomName(queue[queue.length - 1] ?? entry.serverParty.tile));
   }
 
   /** Get the map the party is currently on. */
@@ -865,10 +1116,13 @@ export class PartyBattleManager {
       const pos = cubeToOffset(entry.serverParty.position);
       const coord = offsetToCube(pos);
       const freshTile = grid.getTile(coord);
-      if (freshTile) {
-        // Re-set to the same position but with fresh tile reference
-        entry.serverParty.relocateTo(freshTile);
-      }
+      if (!freshTile) continue;
+      const hadDoorRoute = entry.serverParty.plannedRoute !== null;
+      entry.serverParty.relocateTo(freshTile);
+      if (!hadDoorRoute) continue;
+      const room = this.roomName(freshTile);
+      for (const m of entry.members) this.getSession(m)?.addLogEntry(`The world changed, so your party stopped at ${room}.`, 'move');
+      this.recordRouteStopped(entry.partyId, room);
     }
   }
 

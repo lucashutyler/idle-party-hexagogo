@@ -7,9 +7,10 @@ import { escapeHtml } from './ItemIcon';
 import { deferWhilePressed, setHtml } from './render';
 import { LOCKED_DETAIL, ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
-import { NO_WALKING_ROUTE_TEXT } from './RoomEntryCheck';
 import type { RoomForecastProvider, RoomForecastState } from './RoomView';
 import type { TileClickInfo } from './ThreeWorldMap';
+import { routeUnknown } from './routePreview';
+import type { RoutePreview } from './routePreview';
 
 export const ROOM_SHEET_FORECAST_DEBOUNCE_MS = 250;
 export const DUNGEON_TRAVEL_LOCK_TEXT = 'Leave the dungeon before traveling';
@@ -29,8 +30,12 @@ export interface RoomSheetModel {
   paysNoXp: boolean;
   /** Why the party can't go in, one line per unmet requirement; null when nothing the client can see stops it. */
   lock: string[] | null;
-  /** No walk from the party's room reaches this one. */
-  unreachable: boolean;
+  /** How the party would get there; null when the client can't tell. */
+  route: RoutePreview | null;
+  /** What the sheet says about the way there (see routePreviewLines). */
+  routeLines: string[];
+  /** Another player is in the party: they may know a door the viewer doesn't, so an unknown way keeps Go. */
+  partyHasOthers: boolean;
 }
 
 export interface RoomSheetHandlers {
@@ -44,8 +49,19 @@ function isExplored(info: TileClickInfo): boolean {
   return info.isUnlocked || info.isCurrentTile;
 }
 
+/** An unknown way withholds Go only from a lone player; with others along, the server judges. */
+function routeBlocksGo(model: RoomSheetModel): boolean {
+  return routeUnknown(model.route) && !model.partyHasOthers;
+}
+
 function blockedLines(model: RoomSheetModel): string[] {
-  return [...(model.lock ?? []), ...(model.unreachable ? [NO_WALKING_ROUTE_TEXT] : [])];
+  return [...(model.lock ?? []), ...(routeBlocksGo(model) ? model.routeLines : [])];
+}
+
+/** The one line under the name about the way there, when it isn't already in the lock block. */
+function routeNote(model: RoomSheetModel): string | null {
+  if (routeBlocksGo(model)) return null;
+  return model.routeLines[0] ?? null;
 }
 
 /** Non-modal panel for the selected room, docked in the map screen so the map keeps panning behind it. */
@@ -105,8 +121,13 @@ export class RoomSheet {
     return this.model !== null;
   }
 
-  isShowing(col: number, row: number): boolean {
-    return this.model?.info.col === col && this.model.info.row === row;
+  isShowing(mapId: string, col: number, row: number): boolean {
+    const info = this.model?.info;
+    return info?.mapId === mapId && info.col === col && info.row === row;
+  }
+
+  get selectedMapId(): string | null {
+    return this.model?.info.mapId ?? null;
   }
 
   get selectedCol(): number | null {
@@ -135,7 +156,7 @@ export class RoomSheet {
   }
 
   show(model: RoomSheetModel): void {
-    const sameRoom = this.model !== null && this.isShowing(model.info.col, model.info.row);
+    const sameRoom = this.model !== null && this.isShowing(model.info.mapId, model.info.col, model.info.row);
     if (!sameRoom) this.lockEl.classList.remove(LOCK_PULSE_CLASS);
     this.model = model;
     this.el.hidden = false;
@@ -213,13 +234,18 @@ export class RoomSheet {
     return `<div class="room-sheet-name">${padlock}${escapeHtml(name)}</div>`;
   }
 
-  private unexploredHead({ info, lock }: RoomSheetModel): string {
-    return this.nameHtml(info.roomName || 'Unexplored Room', lock !== null);
+  private unexploredHead(model: RoomSheetModel): string {
+    const note = routeNote(model);
+    return this.nameHtml(model.info.roomName || 'Unexplored Room', model.lock !== null)
+      + (note ? `<div class="room-sheet-sub"><span class="room-sheet-sub-route">${escapeHtml(note)}</span></div>` : '');
   }
 
-  private exploredHead({ info, actions, othersHere, paysNoXp, lock }: RoomSheetModel): string {
+  private exploredHead(model: RoomSheetModel): string {
+    const { info, actions, othersHere, paysNoXp, lock } = model;
     const count = othersHere > 0 ? ` · ${othersHere} ${othersHere === 1 ? 'player' : 'players'}` : '';
     const first = actions[0] ? `<span class="room-sheet-sub-action">${escapeHtml(actionLabel(actions[0]))}</span>` : '';
+    const note = routeNote(model);
+    const route = note ? `<span class="room-sheet-sub-route">${escapeHtml(note)}</span>` : '';
     const noXp = paysNoXp ? '<span class="room-sheet-sub-noxp">Fights here pay no XP</span>' : '';
     const icons = actions.map(action => {
       const pip = questPipClass(action);
@@ -230,7 +256,7 @@ export class RoomSheet {
         + `<span class="room-sheet-action-name">${escapeHtml(action.name)}</span></span>`;
     }).join('');
     return this.nameHtml(info.roomName || 'Unnamed Room', lock !== null)
-      + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span>${noXp}</div>`
+      + `<div class="room-sheet-sub">${first}<span class="room-sheet-sub-zone">${escapeHtml(info.zoneName)}${count}</span>${route}${noXp}</div>`
       + (icons ? `<div class="room-sheet-actions">${icons}</div>` : '');
   }
 

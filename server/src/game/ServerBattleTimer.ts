@@ -51,6 +51,8 @@ export interface ServerBattleCallbacks {
   isAutoRun?: () => boolean;
   /** Run now: the timer found auto run due. */
   onAutoRun?: () => void;
+  /** With the leg walked: step through the route's next door. False leaves the party fighting where it stands. */
+  onDoorStep?: () => boolean;
 }
 
 /** Drives one party's battle loop. See docs/architecture/combat.md (battle state machine). */
@@ -107,6 +109,7 @@ export class ServerBattleTimer {
   onRetreat?: (battleId: number) => void;
   isAutoRun?: () => boolean;
   onAutoRun?: () => void;
+  onDoorStep?: () => boolean;
 
   constructor(
     party: ServerParty,
@@ -128,6 +131,7 @@ export class ServerBattleTimer {
       this.onRetreat = callbacks.onRetreat;
       this.isAutoRun = callbacks.isAutoRun;
       this.onAutoRun = callbacks.onAutoRun;
+      this.onDoorStep = callbacks.onDoorStep;
     }
   }
 
@@ -534,6 +538,9 @@ export class ServerBattleTimer {
     if (this.party.moveToNextTile()) {
       this.autoRunHop = this.leftByAutoRun;
       this.onMove?.();
+    } else if (this.onDoorStep?.()) {
+      // Never restartBattle here: moveTimeout is not set yet, so it would start a second fight.
+      this.autoRunHop = this.leftByAutoRun;
     }
     this.currentVisual = 'none';
     this.onStateChange?.(this.state);

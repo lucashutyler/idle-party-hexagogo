@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HenchmanOffer, ItemDefinition, ServerStateMessage, SetDefinition, ShopItem } from '@idle-party-rpg/shared';
 import { ShopPopup } from '../src/ui/ShopPopup';
 import { dismissTop } from '../src/ui/ModalStack';
+import { hireLeftBehindText } from '../src/ui/travelWarnings';
 import { OFFLINE_NOTICE, type GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 
@@ -35,6 +36,8 @@ interface StateParts {
   hired?: { henchmanId: string; instanceId: string }[];
   sets?: Record<string, SetDefinition>;
   kept?: string[];
+  /** The party's route still has a door to another map ahead. */
+  leavesMap?: boolean;
 }
 
 function makeState(parts: StateParts = {}): ServerStateMessage {
@@ -51,6 +54,10 @@ function makeState(parts: StateParts = {}): ServerStateMessage {
     itemDefinitions: ITEMS,
     setDefinitions: parts.sets ?? {},
     social: { party: { members: [{ username: 'me' }], henchmen: parts.hired ?? [] } },
+    party: {
+      col: 0, row: 0, state: 'idle', path: [],
+      ...(parts.leavesMap !== undefined ? { route: { destinationId: 'far', destinationMapId: 'm2', doors: 1, rooms: 3, leavesMap: parts.leavesMap } } : {}),
+    },
   } as unknown as ServerStateMessage;
 }
 
@@ -479,6 +486,37 @@ describe('ShopPopup', () => {
       expect(t.q('.shop-toggle-btn[data-mode="hire"]')?.classList.contains('active')).toBe(true);
       t.q<HTMLButtonElement>('.shop-hire-btn')!.click();
       expect(t.gameClient.sendHireHenchman).toHaveBeenCalledWith('h_bob');
+    });
+
+    it('asks first when the party\'s route leads to another map, saying the new fighter will be left behind', async () => {
+      const t = setup({ stock: [], offers: [OFFER], leavesMap: true });
+      t.q<HTMLButtonElement>('.shop-hire-btn')!.click();
+      expect(t.gameClient.sendHireHenchman).not.toHaveBeenCalled();
+      expect(t.q('.confirm-body')?.textContent).toBe(hireLeftBehindText('Bob'));
+
+      t.q<HTMLButtonElement>('.confirm-cancel')!.click();
+      await Promise.resolve();
+      expect(t.gameClient.sendHireHenchman).not.toHaveBeenCalled();
+
+      t.q<HTMLButtonElement>('.shop-hire-btn')!.click();
+      t.q<HTMLButtonElement>('.confirm-ok')!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(t.gameClient.sendHireHenchman).toHaveBeenCalledWith('h_bob');
+    });
+
+    it('hires straight away while the route stays on this map', () => {
+      const t = setup({ stock: [], offers: [OFFER], leavesMap: false });
+      t.q<HTMLButtonElement>('.shop-hire-btn')!.click();
+      expect(t.q('.confirm-dialog')).toBeNull();
+      expect(t.gameClient.sendHireHenchman).toHaveBeenCalledWith('h_bob');
+    });
+
+    it('says so on the replace confirmation too', () => {
+      const hired = [1, 2, 3, 4].map(n => ({ henchmanId: `h_${n}`, instanceId: `i${n}`, name: `Hire ${n}` }));
+      const t = setup({ stock: [], offers: [OFFER], hired, leavesMap: true });
+      t.q<HTMLButtonElement>('.shop-hire-btn')!.click();
+      expect(t.q('.shop-route-warning')?.textContent).toBe(hireLeftBehindText('Bob'));
     });
 
     it('says why a hire over the level limit cannot be hired, and offers no button', () => {

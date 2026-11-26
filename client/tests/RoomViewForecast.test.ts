@@ -6,7 +6,7 @@ import type { TileClickInfo } from '../src/ui/ThreeWorldMap';
 
 function makeInfo(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
   return {
-    col: 3, row: 4, tileType: 'Plains', zoneName: 'Hatchetmill', roomName: 'Town Square', zoneId: 'hatchetmill',
+    mapId: 'here', tileId: 'room-1', col: 3, row: 4, tileType: 'Plains', zoneName: 'Hatchetmill', roomName: 'Town Square', zoneId: 'hatchetmill',
     isTraversable: true, isUnlocked: true, isSameZone: true, isCurrentTile: false, playersHere: [], partyMemberUsernames: [],
     ...overrides,
   };

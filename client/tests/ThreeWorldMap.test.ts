@@ -37,6 +37,13 @@ function json(body: unknown): Response {
 }
 
 async function makeCache(tiles: unknown[] = TILES): Promise<WorldCache> {
+  stubWorld(tiles);
+  const cache = new WorldCache();
+  await cache.loadWorld();
+  return cache;
+}
+
+function stubWorld(tiles: unknown[]): void {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url === '/api/world') return json({
       startTile: { col: 0, row: 0 },
@@ -49,9 +56,6 @@ async function makeCache(tiles: unknown[] = TILES): Promise<WorldCache> {
     if (url === '/api/dungeons') return json({ dungeons: { caves: { id: 'caves', name: 'Crystal Caves', floors: [] } } });
     return json({});
   }));
-  const cache = new WorldCache();
-  await cache.loadWorld();
-  return cache;
 }
 
 function makeState(overrides: Partial<ServerStateMessage> = {}): ServerStateMessage {
@@ -285,14 +289,103 @@ describe('ThreeWorldMap overlays', () => {
       expect([...container.querySelectorAll('.three-map-marker')].map(m => m.textContent)).toEqual(['🧙🪙', '🌀']);
     });
 
-    it('tells walk-connected rooms apart from rooms only a door reaches', async () => {
+    it('redraws the padlocks for the map on screen when another one is viewed', async () => {
       const { map } = await lockedMap();
       map.applyServerState(lockState(1));
-      expect(map.getWalkableArea(0, 0)).not.toBeNull();
-      expect(map.getWalkableArea(3, 0)).toBe(map.getWalkableArea(0, 0));
-      expect(map.getWalkableArea(6, 0)).not.toBe(map.getWalkableArea(0, 0));
-      expect(map.getWalkableArea(9, 9)).toBeNull();
+      expect(container.querySelectorAll('.three-map-lock').length).toBeGreaterThan(0);
+      map.setViewedMap('cellar');
+      map.applyServerState(lockState(1));
+      expect(container.querySelector('.three-map-lock')).toBeNull();
     });
+  });
+
+  describe('viewing another map', () => {
+    const atShop = (overrides: Partial<ServerStateMessage> = {}) => makeState({
+      party: { col: 2, row: 0, state: 'moving', path: [{ col: 1, row: 0 }] } as ServerStateMessage['party'],
+      unlocked: ['t-home', 't-shop', 't-cellar'],
+      ...overrides,
+    });
+
+    it('draws the viewed map through every push, with no token, route or flags on it', async () => {
+      const cache = await makeCache();
+      const map = new ThreeWorldMap(container, cache);
+      map.applyServerState(atShop());
+      map.setViewedMap('cellar');
+      map.applyServerState(atShop(), true);
+      map.applyServerState(atShop());
+
+      expect(map.drawnMapId).toBe('cellar');
+      expect(cache.getCurrentMapId()).toBe('cellar');
+      expect(container.querySelector<HTMLElement>('.three-map-party')!.style.display).toBe('none');
+      expect(container.querySelector('.three-map-path')!.children).toHaveLength(0);
+      expect(container.querySelector('.three-map-flags')!.children).toHaveLength(0);
+      expect(map.countOthersAt(0, 0)).toBe(0);
+    });
+
+    it('never takes a room at the party\'s spot on the viewed map for the party\'s own', async () => {
+      const map = new ThreeWorldMap(container, await makeCache());
+      map.setViewedMap('cellar');
+      map.applyServerState(atShop());
+      const info = map.getTileInfo(2, 0)!;
+      expect(info.isCurrentTile).toBe(false);
+      expect(info.mapId).toBe('cellar');
+      expect(info.tileId).toBe('t-cellar');
+      expect(info.playersHere).toEqual([]);
+    });
+
+    it('snaps the token back and follows the party on return', async () => {
+      const map = new ThreeWorldMap(container, await makeCache());
+      map.applyServerState(atShop());
+      map.setViewedMap('cellar');
+      map.applyServerState(atShop());
+      map.setViewedMap(null);
+      map.applyServerState(atShop());
+
+      const party = container.querySelector<HTMLElement>('.three-map-party')!;
+      const spot = cubeToPixel(offsetToCube({ col: 2, row: 0 }));
+      expect(map.drawnMapId).toBe('overworld');
+      expect(party.style.display).toBe('');
+      expect(party.dataset.snap).toBe('1');
+      expect(party.style.transform).toBe(`translate(${spot.x}px, ${spot.y}px)`);
+      expect(map.isFollowing).toBe(true);
+      expect(map.getTileInfo(2, 0)!.isCurrentTile).toBe(true);
+    });
+
+    it('draws the party\'s map again after a world reload takes the viewed one away', async () => {
+      const cache = await makeCache();
+      const map = new ThreeWorldMap(container, cache);
+      map.applyServerState(atShop());
+      map.setViewedMap('cellar');
+      map.applyServerState(atShop(), true);
+
+      stubWorld(TILES.filter(t => t.mapId !== 'cellar'));
+      await cache.loadWorld();
+      map.setViewedMap(null);
+      map.applyServerState(atShop(), true);
+
+      expect(map.drawnMapId).toBe('overworld');
+      expect(map.getTileInfo(0, 0)).toMatchObject({ mapId: 'overworld', tileId: 't-home', roomName: 'Home' });
+      expect(container.querySelector<HTMLElement>('.three-map-party')!.style.display).toBe('');
+    });
+  });
+
+  it('says which map and room a tap is on', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    map.applyServerState(makeState());
+    expect(map.getTileInfo(1, 0)).toMatchObject({ mapId: 'overworld', tileId: 't-shop' });
+  });
+
+  it('marks the leg\'s end as a door while a route goes on through it', async () => {
+    const map = new ThreeWorldMap(container, await makeCache());
+    const party = { col: 0, row: 0, state: 'moving', path: [{ col: 1, row: 0 }] } as ServerStateMessage['party'];
+    map.applyServerState(makeState({ party }));
+    expect(container.querySelector<HTMLElement>('.three-map-path-dest')!.dataset.door).toBeUndefined();
+
+    const route = { destinationId: 't-cellar', destinationMapId: 'cellar', doors: 1, rooms: 2, leavesMap: true };
+    map.applyServerState(makeState({ party: { ...party, route } }));
+    const pin = container.querySelector<HTMLElement>('.three-map-path-dest')!;
+    expect(pin.dataset.door).toBe('1');
+    expect(pin.textContent).toBe('🌀');
   });
 
   it('builds the tile info for the current room', async () => {

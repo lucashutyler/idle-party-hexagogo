@@ -175,12 +175,14 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Data-driven content (ContentStore: monsters, items, zones, world in JSON files)
 - [x] Server-driven map state (per-player fog of war, room names, room discovery)
 - [x] Multiple regions/zones with border transitions
-- [x] Multi-map / interior maps (rooms link to a room on another map via a transition; one HexGrid per map; admin authoring) — overworld map-select still to come (#168)
+- [x] Multi-map / interior maps (rooms link to a room on another map via a transition; one HexGrid per map; admin authoring)
+- [x] Map select (a Maps button lists every map with a found room; view one, tap its rooms and send the party there)
+- [x] Routes through doors and across maps (Go plans through the doors the party has found, asks first when hires would stay behind or there is no known way back, re-checks each door on the way, and survives restarts)
 - [x] Room entry requirements (gate a room or a map transition on an equipped item, a minimum level, and/or completed quests — every party member must qualify)
 - [x] Room actions on explored rooms (map markers for NPCs, shops, dungeon entrances and travel points; hover tooltip lists them plus a player count; NPCs marked with a green `!` for a new quest or a gold `?` for one ready to hand in)
 - [x] Room status panel for the current room (desktop card / mobile chips that talk, shop, enter or travel directly; a travel chip confirms first on phones)
 - [x] Room sheet (tap a room for its name, actions, forecast and Go; tap it again to go)
-- [x] Lock preview (padlocks on rooms and exits the party would be refused, in zones the player knows; the room sheet lists what is missing and withholds Go; rooms only a door reaches say so)
+- [x] Lock preview (padlocks on rooms and exits the party would be refused, in zones the player knows; the room sheet lists what is missing and withholds Go; rooms beyond a door say how many doors, or that no way is known yet)
 - [x] Rooms found per region on Hero > Stats
 - [x] Terrain, fog and art layers (procedural terrain from room-type colours, separate fog, room art loaded near the view)
 - [x] Follow camera, route line and route chip with Stop, zone labels, zoom-based detail levels

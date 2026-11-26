@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { offsetToCube, cubeDistance, cubeToKey, getZone, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit, isWholeItemCount, partyInviteExpiresAt, PARTY_INVITE_TTL_MS } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem, PartyInvite } from '@idle-party-rpg/shared';
+import { offsetToCube, cubeDistance, cubeToKey, getZone, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit, isWholeItemCount, partyInviteExpiresAt, planRouteDoors, PARTY_INVITE_TTL_MS } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem, PartyInvite, RouteWarningKind } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData, SavedPartyInvite } from './GameStateStore.js';
@@ -19,7 +19,8 @@ import { InAppNotificationDriver } from './social/InAppNotificationDriver.js';
 import { BrowserPushNotificationDriver } from './social/BrowserPushNotificationDriver.js';
 import { EmailNotificationDriver } from './social/EmailNotificationDriver.js';
 import { PartyBattleManager } from './PartyBattleManager.js';
-import type { CombatSendOptions } from './PartyBattleManager.js';
+import type { CombatSendOptions, RoomMoveResult } from './PartyBattleManager.js';
+import { routeIndexOf } from './RouteIndexCache.js';
 import type { ContentStore } from './ContentStore.js';
 import type { AccountStore } from '../auth/AccountStore.js';
 import { prepareStatePush, encodeStatePush } from './StatePush.js';
@@ -35,6 +36,8 @@ export const STATE_BACKPRESSURE_BYTES = 64 * 1024;
 export const STATE_RETRY_MS = 500;
 /** How long a new socket's visibility stays unknown before it counts as visible without a `presence` message. */
 export const PRESENCE_GRACE_MS = 5000;
+/** The least time between two moves by room id from one player; each one plans a route. */
+export const ROUTE_MOVE_GAP_MS = 200;
 
 type PlayerChatChannel = Exclude<ChatChannelType, 'server'>;
 
@@ -67,6 +70,7 @@ export interface PartyDeparture {
 
 export class PlayerManager {
   private sessions = new Map<string, PlayerSession>();
+  private lastRouteMoveAt = new WeakMap<PlayerSession, number>();
   private connections = new Map<WebSocket, string>();
   private playerConnections = new Map<string, Set<WebSocket>>();
   private combatViewHidden = new WeakSet<WebSocket>();
@@ -190,6 +194,7 @@ export class PlayerManager {
         saveData.mapId = this.content.getWorld().defaultMapId;
         saveData.target = null;
         saveData.movementQueue = [];
+        saveData.route = undefined;
         saveData.partyId = null;
         saveData.partyRole = undefined;
         saveData.partyGridPosition = undefined;
@@ -1252,6 +1257,17 @@ export class PlayerManager {
     return this.partyBattles.leaveDungeon(partyId);
   }
 
+  /** A move by room id, at most one per player every ROUTE_MOVE_GAP_MS: null when this one came too soon and was dropped. */
+  handleMoveToRoom(username: string, tileId: string, accept: readonly RouteWarningKind[], now = Date.now()): RoomMoveResult | null {
+    const session = this.sessions.get(username);
+    const partyId = session?.getPartyId();
+    if (!session || !partyId) return { success: false, reason: 'no_party' };
+    const last = this.lastRouteMoveAt.get(session);
+    if (last !== undefined && now - last < ROUTE_MOVE_GAP_MS) return null;
+    this.lastRouteMoveAt.set(session, now);
+    return this.partyBattles.handleMoveToRoom(partyId, tileId, accept);
+  }
+
   /**
    * Handle a map-transition request. The whole party travels together through
    * the transition on its current room. On failure the result carries an error
@@ -1407,6 +1423,7 @@ export class PlayerManager {
         data.mapId = defaultMapId;
         data.target = null;
         data.movementQueue = [];
+        data.route = undefined;
       }
 
       try {
@@ -1469,9 +1486,7 @@ export class PlayerManager {
       if (ownerData.target) {
         targetTile = partyGrid.getTile(offsetToCube(ownerData.target)) ?? null;
       }
-      const movementQueue = ownerData.movementQueue
-        .map(p => partyGrid.getTile(offsetToCube(p)))
-        .filter((t): t is NonNullable<typeof t> => t !== null);
+      const movementQueue = restoreQueue(partyGrid, ownerData.movementQueue);
 
       // Restore the party in PartySystem
       const members = group.map(d => ({
@@ -1493,7 +1508,7 @@ export class PlayerManager {
         firstUsername,
         currentTile,
         targetTile,
-        movementQueue,
+        movementQueue ?? [],
         partyMapId,
       );
 
@@ -1511,6 +1526,8 @@ export class PlayerManager {
       // After the henchmen, so a run dropped for vanished content can announce them rejoining.
       if (ownerData.dungeonRun) {
         this.partyBattles.restoreDungeonRun(party.id, ownerData.dungeonRun);
+      } else if (movementQueue) {
+        this.partyBattles.restoreRoute(party.id, ownerData.route);
       }
 
       this.partyBattles.startEntry(party.id);
@@ -1539,11 +1556,9 @@ export class PlayerManager {
       if (data.target) {
         targetTile = soloGrid.getTile(offsetToCube(data.target)) ?? null;
       }
-      const movementQueue = data.movementQueue
-        .map(p => soloGrid.getTile(offsetToCube(p)))
-        .filter((t): t is NonNullable<typeof t> => t !== null);
+      const movementQueue = restoreQueue(soloGrid, data.movementQueue);
 
-      const partyId = this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue, soloMapId);
+      const partyId = this.createSoloPartyAtTile(data.username, currentTile, targetTile, movementQueue ?? [], soloMapId);
       if (!partyId) continue;
 
       if (data.partyGridPosition !== undefined) {
@@ -1555,6 +1570,7 @@ export class PlayerManager {
       this.parties.setAutoRun(partyId, data.partyAutoRun === true);
       // After the henchmen, so a run dropped for vanished content can announce them rejoining.
       if (data.dungeonRun) this.partyBattles.restoreDungeonRun(partyId, data.dungeonRun);
+      else if (movementQueue) this.partyBattles.restoreRoute(partyId, data.route);
       this.partyBattles.startEntry(partyId);
     }
 
@@ -1618,16 +1634,14 @@ export class PlayerManager {
    * Returns the number of parties relocated.
    *
    * The reachability sweep only runs on the map that holds the world start
-   * tile. It walks the grid from that start, which is only a meaningful notion
-   * of "reachable" where players actually spawn and walk; on any other map a
-   * room is reached through a transition, possibly one-way, so a party can sit
-   * somewhere perfectly legitimate that no walk from that map's own start tile
-   * would ever find. Uprooting them would be worse than leaving them be.
-   * Revisiting this properly is issue #374.
+   * tile, where a room counts as reachable when a walk or any chain of doors
+   * (gates ignored) leads there from the start room. See docs/architecture/content.md
+   * → Room entry requirements.
    */
   relocateDisplacedParties(grids: WorldGrids, content: ContentStore): number {
     const world = content.getWorld();
     const defaultMapId = world.defaultMapId;
+    const doorReach = new Map<number, boolean>();
     let relocated = 0;
 
     for (const partyId of this.partyBattles.getAllPartyIds()) {
@@ -1676,6 +1690,7 @@ export class PlayerManager {
         const startCoord = offsetToCube(meta?.startTile ?? world.startTile);
         const reachable = grid.getReachableTiles(startCoord);
         if (reachable.has(cubeToKey(tile.coord))) continue; // still reachable
+        if (this.reachableThroughDoors(content, grid.getTile(startCoord), tile, doorReach)) continue;
 
         let bestDist = Infinity;
         for (const key of reachable) {
@@ -1698,6 +1713,19 @@ export class PlayerManager {
     }
 
     return relocated;
+  }
+
+  /** Whether any chain of doors, gates ignored, leads from the start room's area to this room's. Memoised per area in `byArea`. */
+  private reachableThroughDoors(content: ContentStore, start: HexTile | undefined, tile: HexTile, byArea: Map<number, boolean>): boolean {
+    const index = routeIndexOf(content);
+    const area = index.areaOf(tile.id);
+    if (!start || area === undefined) return false;
+    let reached = byArea.get(area);
+    if (reached === undefined) {
+      reached = planRouteDoors(index, start.id, tile.id, () => true) !== null;
+      byArea.set(area, reached);
+    }
+    return reached;
   }
 
   /**
@@ -1967,4 +1995,15 @@ export class PlayerManager {
       .map(([u]) => ({ username: u, send: (m: ChatMessage) => this.sendChatToPlayer(u, m) }));
     this.chat.sendMessage('Server', 'server', 'server', text, recipients);
   }
+}
+
+/** A saved queue on its map's grid, or null when any of its rooms is gone: a queue with a hole in it would jump. */
+function restoreQueue(grid: HexGrid, saved: readonly { col: number; row: number }[] | undefined): HexTile[] | null {
+  const queue: HexTile[] = [];
+  for (const step of saved ?? []) {
+    const tile = grid.getTile(offsetToCube(step));
+    if (!tile) return null;
+    queue.push(tile);
+  }
+  return queue;
 }

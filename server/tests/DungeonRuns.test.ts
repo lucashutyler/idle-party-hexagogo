@@ -66,6 +66,7 @@ function createFakeContentStore(dungeon: { current: DungeonDefinition }): Conten
     getAllZones: () => ({}),
     getAllEncounters: () => ENCOUNTERS,
     getTileById: (id: string) => (id === ENTRANCE_TILE_ID ? entranceTile : undefined),
+    getTileType: () => undefined,
     getAllShops: () => ({}),
     getShop: () => undefined,
     getWorld: () => ({ tiles: [entranceTile], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),

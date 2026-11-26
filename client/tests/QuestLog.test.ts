@@ -62,7 +62,7 @@ function makeState(parts: StateParts): ServerStateMessage {
   } as unknown as ServerStateMessage;
 }
 
-function setup(npcs: NpcDefinition[] = [], rooms: Record<string, WorldTileDefinition[]> = {}) {
+function setup(npcs: NpcDefinition[] = [], rooms: Record<string, WorldTileDefinition[]> = {}, viewableMaps: string[] = []) {
   document.body.innerHTML = '';
   const listeners = new Set<StateListener>();
   let lastState: ServerStateMessage | null = null;
@@ -75,6 +75,7 @@ function setup(npcs: NpcDefinition[] = [], rooms: Record<string, WorldTileDefini
   const worldCache = {
     getAllNpcs: () => npcs,
     getRoomsWithNpc: (id: string) => rooms[id] ?? [],
+    viewableMapIds: () => new Set(viewableMaps),
   } as unknown as WorldCache;
 
   const push = (parts: StateParts) => {
@@ -380,6 +381,18 @@ describe('Quest log room links', () => {
     const ids = [...document.querySelectorAll<HTMLElement>('.quest-log-turnin .quest-log-go')].map(el => el.dataset.roomId);
     expect(ids).toEqual(['r-square']);
     expect(document.querySelector('.quest-log-turnin')!.textContent).toContain('Hermit — Deep Cave, Hatchetmill');
+  });
+
+  it('links rooms on another map the player has visited, which opens that map', () => {
+    const t = setup([mara, hermit], rooms, ['overworld', 'cellar']);
+    t.push(parts);
+    const onGoToRoom = vi.fn();
+    new QuestLog(t.gameClient, t.worldCache, onGoToRoom).open();
+
+    const ids = [...document.querySelectorAll<HTMLElement>('.quest-log-turnin .quest-log-go')].map(el => el.dataset.roomId);
+    expect(ids).toEqual(['r-square', 'r-cave']);
+    document.querySelector<HTMLButtonElement>('.quest-log-go[data-room-id="r-cave"]')!.click();
+    expect(onGoToRoom).toHaveBeenCalledWith('r-cave');
   });
 
   it('has no links without someone to take the player there', () => {

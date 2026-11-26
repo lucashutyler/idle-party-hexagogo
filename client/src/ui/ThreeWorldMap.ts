@@ -8,7 +8,6 @@ import {
   offsetToCube,
   cubeToPixel,
   cubeToOffset,
-  cubeToKey,
 } from '@idle-party-rpg/shared';
 import type {
   ServerStateMessage,
@@ -34,6 +33,9 @@ import { pendingVisitTargets, questMarkerKey } from './QuestTargets';
 import { lockPreviewKey } from './RoomEntryCheck';
 
 export interface TileClickInfo {
+  /** The map the room is on: the drawn map, which may be one the player is only viewing. */
+  mapId: string;
+  tileId: string | null;
   col: number;
   row: number;
   tileType: string;
@@ -129,26 +131,6 @@ function revealNudge(pos: number, span: number, margin: number): number {
   return pos < margin ? pos - margin : 0;
 }
 
-/** A component id per walkable room, keyed by cube key: rooms share one when a walk links them. */
-function walkableAreas(grid: HexGrid): Map<string, number> {
-  const areas = new Map<string, number>();
-  let nextArea = 0;
-  for (const start of grid.getAllTiles()) {
-    if (!start.isTraversable || areas.has(start.key)) continue;
-    const area = nextArea++;
-    areas.set(start.key, area);
-    const stack = [start];
-    while (stack.length > 0) {
-      for (const next of grid.getTraversableNeighbors(stack.pop()!.coord)) {
-        if (areas.has(next.key)) continue;
-        areas.set(next.key, area);
-        stack.push(next);
-      }
-    }
-  }
-  return areas;
-}
-
 function hexOutlineSvg(strokeAttrs = ''): string {
   return `<svg viewBox="-40 -35 80 70" width="80" height="70" preserveAspectRatio="xMidYMid meet">
     <polygon points="40,0 20,34.64 -20,34.64 -40,0 -20,-34.64 20,-34.64" fill="none" stroke="currentColor" stroke-width="3"${strokeAttrs} />
@@ -213,9 +195,11 @@ export class ThreeWorldMap {
   private artUploadPending = false;
 
   private grid: HexGrid = new HexGrid();
+  /** The map `grid` was built from; a world reload can move WorldCache's current map without a rebuild. */
+  private gridMapId = '';
   private worldTileDefs = new Map<string, WorldTileDefinition>();
-  /** Walk-connected area per walkable room, keyed by cube key. */
-  private walkableAreaByKey = new Map<string, number>();
+  /** A map the player is looking at instead of the party's; null follows the party. */
+  private viewedMapId: string | null = null;
 
   /** World point at screen centre. Maps to camera.position (x, -y) and camera.zoom. */
   private camWorldX = 0;
@@ -258,6 +242,8 @@ export class ThreeWorldMap {
   private partyTargetCol = 0;
   private partyTargetRow = 0;
   private serverPath: { col: number; row: number }[] = [];
+  /** The leg ends at a door, not at the destination. */
+  private pathEndsAtDoor = false;
 
   private hoverCol: number | null = null;
   private hoverRow: number | null = null;
@@ -284,7 +270,6 @@ export class ThreeWorldMap {
   private pinchedThisTouch = false;
   private lastTouch: { x: number; y: number } | null = null;
 
-  private sendMoveFn?: (col: number, row: number) => void;
   private onTileClickFn?: (info: TileClickInfo) => void;
   private onBackgroundClickFn?: (blocked: boolean) => void;
 
@@ -394,10 +379,6 @@ export class ThreeWorldMap {
   }
 
 
-  setSendMove(fn: (col: number, row: number) => void): void {
-    this.sendMoveFn = fn;
-  }
-
   setOnTileClick(fn: (info: TileClickInfo) => void): void {
     this.onTileClickFn = fn;
   }
@@ -413,9 +394,18 @@ export class ThreeWorldMap {
     this.locksDirty = true;
   }
 
-  /** Which walk-connected area a walkable room belongs to; null for a room that can't be walked into. */
-  getWalkableArea(col: number, row: number): number | null {
-    return this.walkableAreaByKey.get(cubeToKey(offsetToCube({ col, row }))) ?? null;
+  /** Draw `mapId` instead of the party's map from the next state on; null goes back to the party's. */
+  setViewedMap(mapId: string | null): void {
+    this.viewedMapId = mapId;
+  }
+
+  /** The map on screen. */
+  get drawnMapId(): string {
+    return this.gridMapId;
+  }
+
+  get isFollowing(): boolean {
+    return this.following;
   }
 
   /** Told whenever the camera starts or stops following the party. */
@@ -477,12 +467,15 @@ export class ThreeWorldMap {
   }
 
   applyServerState(state: ServerStateMessage, snap?: boolean): void {
+    const shown = this.viewedMapId ?? state.currentMapId;
+    const onPartyMap = shown === state.currentMapId;
     // A map switch never tweens: the two grids are unrelated.
-    const mapChanged = this.worldCache.setCurrentMap(state.currentMapId);
+    this.worldCache.setCurrentMap(shown);
+    const mapChanged = shown !== this.gridMapId;
     const firstState = this.isFirstState;
     const shouldSnap = !!snap || firstState || mapChanged;
     if (mapChanged) {
-      this.loadParchment(state.currentMapId);
+      this.loadParchment(shown);
       this.grid = this.buildGridFromCache(true);
     }
 
@@ -494,23 +487,27 @@ export class ThreeWorldMap {
       if (this.terrainReady) this.requestViewArt();
     }
 
-    const partyMoved = this.applyPartyState(state.party, shouldSnap);
+    // Off the party's map there is no token; coming back, the first-render branch snaps it in.
+    let partyMoved = false;
+    if (onPartyMap) partyMoved = this.applyPartyState(state.party, shouldSnap);
+    else this.partyRendered = false;
     this.currentBattleVisual = state.battle.visual;
     this.partyEl.dataset.dungeon = state.dungeon ? '1' : '0';
     this.updatePartyToken(state);
 
-    this.playerCol = state.party.col;
-    this.playerRow = state.party.row;
-    const myTile = this.grid.getTile(offsetToCube({ col: state.party.col, row: state.party.row }));
+    this.playerCol = onPartyMap ? state.party.col : NaN;
+    this.playerRow = onPartyMap ? state.party.row : NaN;
+    const myTile = onPartyMap ? this.grid.getTile(offsetToCube({ col: state.party.col, row: state.party.row })) : undefined;
     const prevZone = this.currentZone;
     this.currentZone = myTile?.zone ?? '';
     const zoneChanged = this.currentZone !== prevZone;
     if (zoneChanged) this.fogDirty = true;
 
     this.partyMemberUsernames = (state.social?.party?.members ?? []).map(m => m.username);
-    this.lastOtherPlayers = state.otherPlayers.filter(p => !p.mapId || p.mapId === state.currentMapId);
+    this.lastOtherPlayers = onPartyMap ? state.otherPlayers.filter(p => !p.mapId || p.mapId === state.currentMapId) : [];
     this.othersByTile = this.groupOtherPlayers();
-    this.serverPath = state.party.path ?? [];
+    this.serverPath = onPartyMap ? state.party.path ?? [] : [];
+    this.pathEndsAtDoor = onPartyMap && !!state.party.route;
 
     const marks = questMarks(state);
     const targets = pendingVisitTargets(state.activeQuests, state.questDefinitions);
@@ -571,6 +568,8 @@ export class ThreeWorldMap {
       : [];
 
     return {
+      mapId: this.gridMapId,
+      tileId: def?.id ?? null,
       col,
       row,
       tileType: this.worldCache.getTileTypeDef(tile.type)?.name ?? tile.type,
@@ -666,6 +665,7 @@ export class ThreeWorldMap {
 
   private buildGridFromCache(mapChanged: boolean): HexGrid {
     const grid = new HexGrid();
+    this.gridMapId = this.worldCache.getCurrentMapId();
     this.worldTileDefs.clear();
 
     for (const tileDef of this.worldCache.getTiles()) {
@@ -675,7 +675,6 @@ export class ThreeWorldMap {
       grid.addTile(tile);
       this.worldTileDefs.set(`${tileDef.col},${tileDef.row}`, tileDef);
     }
-    this.walkableAreaByKey = walkableAreas(grid);
 
     const { rooms, landmarks } = this.buildBakeRooms(grid);
     this.baker.setRooms(rooms, landmarks, room => this.worldCache.isUnlocked(room.col, room.row), mapChanged);
@@ -1233,11 +1232,7 @@ export class ThreeWorldMap {
       return;
     }
 
-    if (this.onTileClickFn) {
-      this.onTileClickFn(info);
-    } else {
-      this.sendMoveFn?.(offset.col, offset.row);
-    }
+    this.onTileClickFn?.(info);
   }
 
   /** Returns whether the party changed rooms. */
@@ -1637,13 +1632,17 @@ export class ThreeWorldMap {
       .map(step => cubeToPixel(offsetToCube(step)));
     const line = points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
     const dest = points[points.length - 1];
+    const door = this.pathEndsAtDoor;
+    const pinCentre = door
+      ? `<text class="three-map-path-door" x="12" y="15.5" text-anchor="middle">${ROOM_ICONS.travel}</text>`
+      : '<circle cx="12" cy="11" r="3.6" fill="#060918"/>';
     setHtml(this.pathEl,
       `<svg class="three-map-route" width="1" height="1" aria-hidden="true">`
       + `<polyline class="three-map-route-under" points="${line}"/><polyline class="three-map-route-line" points="${line}"/></svg>`
-      + `<div class="three-map-path-dest" style="left:${dest.x}px;top:${dest.y}px">`
+      + `<div class="three-map-path-dest"${door ? ' data-door="1"' : ''} style="left:${dest.x}px;top:${dest.y}px">`
       + '<svg viewBox="0 0 24 32" width="24" height="32" aria-hidden="true">'
-      + '<path d="M12 31C12 31 22 18.5 22 11A10 10 0 0 0 2 11C2 18.5 12 31 12 31Z" fill="#ffcb3d" stroke="#060918" stroke-width="2"/>'
-      + '<circle cx="12" cy="11" r="3.6" fill="#060918"/></svg></div>');
+      + `<path d="M12 31C12 31 22 18.5 22 11A10 10 0 0 0 2 11C2 18.5 12 31 12 31Z" fill="${door ? '#7fd8ff' : '#ffcb3d'}" stroke="#060918" stroke-width="2"/>`
+      + `${pinCentre}</svg></div>`);
   }
 
   private groupOtherPlayers(): Map<string, TileOccupancy> {
@@ -1754,7 +1753,7 @@ export class ThreeWorldMap {
   private updateQuestTargetsOverlay(): void {
     this.questTargetsByRoom.clear();
     const outlines = document.createDocumentFragment();
-    const mapId = this.worldCache.getCurrentMapId();
+    const mapId = this.gridMapId;
     for (const [tileId, questNames] of this.questTargets) {
       const def = this.worldCache.getTileByGuid(tileId);
       if (!def || def.mapId !== mapId || !this.worldCache.isUnlocked(def.col, def.row)) continue;

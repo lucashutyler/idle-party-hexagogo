@@ -130,6 +130,20 @@ describe('trackerLine', () => {
     expect(trackerLine(visit('r-deep'), LOOKUPS)).toEqual({ kind: 'main', title: 'Title m1', detail: 'Visit Deep Hall on the Cellar map', action: { type: 'log' } });
   });
 
+  it('opens an explored visit room on another map the player can view, naming that map', () => {
+    const visit = (unlocked: string[]) => state({
+      activeQuests: [active('m1', 'accepted', [0])],
+      questDefinitions: { m1: quest('m1', { objectives: [{ kind: 'visit', tileId: 'r-deep' }] }) },
+      questGuide: guide([step('m1', { status: 'active' })], ['m1']),
+      unlocked,
+    });
+    const viewing = { ...LOOKUPS, viewableMapIds: (ids: readonly string[]) => new Set(ids.includes('r-deep') ? ['overworld', 'cellar'] : ['overworld']) };
+    expect(trackerLine(visit(['r-mill', 'r-deep']), viewing))
+      .toEqual({ kind: 'main', title: 'Title m1', detail: 'Visit Deep Hall on the Cellar map', action: { type: 'room', roomId: 'r-deep' } });
+    expect(trackerLine(visit(['r-mill']), viewing))
+      .toEqual({ kind: 'main', title: 'Title m1', detail: 'Visit Deep Hall on the Cellar map', action: { type: 'log' } });
+  });
+
   it('keeps an unexplored visit destination off the map, as the map itself does', () => {
     const s = state({
       activeQuests: [active('m1', 'accepted', [0])],

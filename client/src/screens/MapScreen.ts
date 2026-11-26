@@ -1,5 +1,5 @@
-import type { MapTransitionLink, ServerStateMessage, WorldTileDefinition } from '@idle-party-rpg/shared';
-import { toShopSummary } from '@idle-party-rpg/shared';
+import type { MapTransitionLink, ServerRouteConfirmMessage, ServerStateMessage, WorldTileDefinition } from '@idle-party-rpg/shared';
+import { cubeToPixel, offsetToCube, toShopSummary } from '@idle-party-rpg/shared';
 import { OFFLINE_NOTICE } from '../network/GameClient';
 import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
@@ -14,30 +14,37 @@ import { isForecastStale } from '../combat/ForecastFormat';
 import { RoomStatusPanel } from '../ui/RoomStatusPanel';
 import { actionLabel, getRoomActions, lockTravel, questMarks } from '../ui/RoomActions';
 import type { RoomAction, RoomActionLookups, RoomContents } from '../ui/RoomActions';
-import { NO_WALKING_ROUTE_TEXT, previewRoomLock, previewTravelLock, roomLockLines, roomRequirements } from '../ui/RoomEntryCheck';
+import { previewRoomLock, previewTravelLock, roomLockLines, roomRequirements } from '../ui/RoomEntryCheck';
 import { ShopPopup } from '../ui/ShopPopup';
 import { RoomSheet } from '../ui/RoomSheet';
 import type { RoomSheetModel } from '../ui/RoomSheet';
 import type { ThreeWorldMap, TileClickInfo } from '../ui/ThreeWorldMap';
 import { NpcTalkPopup } from '../ui/NpcTalkPopup';
 import { DungeonEntryPopup } from '../ui/DungeonEntryPopup';
+import type { MapList } from '../ui/MapList';
 import { showMapToast } from '../ui/MapToast';
 import { confirmDialog } from '../ui/ConfirmDialog';
 import { escapeHtml } from '../ui/ItemIcon';
+import { registerDismiss, release } from '../ui/ModalStack';
 import { deferWhilePressed, setHtml } from '../ui/render';
-import { discoveredRoomName } from '../ui/routeSummary';
+import { previewRoute, routePreviewLines, routeUnknown } from '../ui/routePreview';
+import type { RoutePreview } from '../ui/routePreview';
+import { destinationName, isTravelling, routeCountText } from '../ui/routeSummary';
+import { doorHiresText, routeConfirmBody } from '../ui/travelWarnings';
 import { runStepsWhenIdle, saveDataRequested } from '../ui/idleSteps';
 
 const SHEET_BOTTOM_HEIGHT = 112;
 const SHEET_SIDE_WIDTH = 320;
 const SIDE_SHEET_MIN_WIDTH = 720;
-/** Map height left over the sheet that the three round controls need. Below it only the recentre button stays. */
-const CONTROLS_FULL_MIN_HEIGHT = 168;
+/** Map height left over the sheet that the four round controls need. Below it only the recentre button stays. */
+const CONTROLS_FULL_MIN_HEIGHT = 218;
 const CONTROLS_RECENTER_MIN_HEIGHT = 56;
 /** Where the current room's chips spell out what they do; narrower, a chip shows one word. */
 const SPELLED_OUT_CHIPS_QUERY = '(min-width: 768px)';
 const BLOCKED_ROOM_TEXT = "You can't walk there";
 const CHARTING_TEXT = 'Charting the map…';
+const UNVISITED_MAP_TEXT = "You haven't visited that map yet.";
+const OWN_TRAVEL_FOLLOW_MS = 5000;
 const MAP_KEY_PAN_PX = 80;
 const MAP_KEY_PAN: Readonly<Record<string, readonly [number, number]>> = {
   ArrowLeft: [-1, 0],
@@ -45,6 +52,8 @@ const MAP_KEY_PAN: Readonly<Record<string, readonly [number, number]>> = {
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
 };
+const MAPS_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">'
+  + '<path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/></svg>';
 
 export class MapScreen implements Screen {
   private container: HTMLElement;
@@ -61,6 +70,8 @@ export class MapScreen implements Screen {
   private zoomControls?: HTMLElement;
   private recenterButton?: HTMLButtonElement;
   private routeChip?: HTMLElement;
+  private viewBanner?: HTMLElement;
+  private mapList?: MapList;
   private readonly autoRunFill = new AutoRunFill();
   private roomView?: RoomView;
   private roomSheet?: RoomSheet;
@@ -71,6 +82,13 @@ export class MapScreen implements Screen {
   private onUserClickCallback?: (username: string, anchor: HTMLElement, tileCol?: number, tileRow?: number) => void;
   private shownForecastKey: string | null = null;
   private sheetMapId: string | null = null;
+  /** A map the player is looking at instead of the party's. See docs/architecture/client.md → Multi-map travel. */
+  private viewedMapId: string | null = null;
+  /** The party's map at the last push this screen saw; null right after it was hidden. */
+  private partyMapId: string | null = null;
+  /** Until then the next map change is the player's own trip through a door, which the camera follows. */
+  private followCrossingUntil = 0;
+  private confirmingRoute = false;
 
   constructor(containerId: string, gameClient: GameClient, worldCache: WorldCache) {
     const el = document.getElementById(containerId);
@@ -91,6 +109,7 @@ export class MapScreen implements Screen {
       const names = msg.missingPlayers.join(', ');
       this.showMoveToast(names ? `${msg.reason} Missing: ${names}` : msg.reason);
     });
+    this.gameClient.onRouteConfirm((msg) => { void this.confirmRoute(msg); });
     // While the entry popup is open it shows the refusal itself.
     this.gameClient.onServerError((message, code) => {
       if (code === 'dungeon_entry_refused' && !this.dungeonEntryPopup?.isOpen) this.showMoveToast(message);
@@ -108,7 +127,7 @@ export class MapScreen implements Screen {
     if (pan) this.map.panBy(pan[0] * MAP_KEY_PAN_PX, pan[1] * MAP_KEY_PAN_PX);
     else if (e.key === '+' || e.key === '=') this.map.adjustZoom(1);
     else if (e.key === '-') this.map.adjustZoom(-1);
-    else if (e.key === 'Home') this.map.recenterOnPlayer();
+    else if (e.key === 'Home') this.recenterOnPlayer();
     else return;
     e.preventDefault();
   }
@@ -117,12 +136,13 @@ export class MapScreen implements Screen {
     this.onUserClickCallback = cb;
   }
 
-  /** Recenter the camera on the player's party, and resume following it. */
+  /** Back to the party's map if another is on screen, then centre on the party and follow it. */
   recenterOnPlayer(): void {
+    this.endView();
     this.map?.recenterOnPlayer();
   }
 
-  /** Pans to a room on the party's map and selects it. */
+  /** Pans to a room and selects it, opening its map when it is another one the player has visited. */
   focusRoom(roomId: string): void {
     if (!this.map) {
       this.pendingFocusRoomId = roomId;
@@ -133,8 +153,13 @@ export class MapScreen implements Screen {
       this.recenterOnPlayer();
       return;
     }
-    if (def.mapId !== this.worldCache.getCurrentMapId()) {
-      this.showMoveToast('That room is on another map');
+    const state = this.gameClient.lastState;
+    if (def.mapId === (state?.currentMapId ?? this.map.drawnMapId)) {
+      this.endView();
+    } else if (state && this.isViewable(def.mapId, state)) {
+      this.viewMap(def.mapId, def.id);
+    } else {
+      this.showMoveToast(UNVISITED_MAP_TEXT);
       return;
     }
     this.map.focusOn(def.col, def.row);
@@ -142,15 +167,17 @@ export class MapScreen implements Screen {
     if (info && !info.isCurrentTile) this.selectRoom(info, false);
   }
 
-  /** Refresh the map from updated WorldCache data. */
+  /** Refresh the map from updated WorldCache data. A view of a map that no longer exists ends. */
   refreshWorld(): void {
+    const state = this.gameClient.lastState;
     if (this.map) {
-      this.map.rebuildFromCache();
-      if (this.gameClient.lastState) {
-        this.map.applyServerState(this.gameClient.lastState, true);
-      }
+      const viewGone = !!this.viewedMapId && !this.mapExists(this.viewedMapId);
+      if (viewGone) this.dropGoneView();
+      else this.map.rebuildFromCache();
+      if (state) this.map.applyServerState(state, true);
+      else if (viewGone) this.map.rebuildFromCache();
     }
-    this.updateRoomStatus(this.gameClient.lastState);
+    this.updateRoomStatus(state);
   }
 
   onActivate(): void {
@@ -160,20 +187,28 @@ export class MapScreen implements Screen {
       void this.createMap();
     } else {
       this.map.resume();
-      if (this.gameClient.lastState) {
-        this.map.applyServerState(this.gameClient.lastState, true);
+      const state = this.gameClient.lastState;
+      if (state) {
+        this.partyMapId = null;
+        this.syncView(state);
+        this.map.applyServerState(state, true);
       }
-      this.updateRoomStatus(this.gameClient.lastState);
-      this.updateRouteChip(this.gameClient.lastState);
+      if (this.viewBanner && !this.viewBanner.hidden) registerDismiss(this.viewBanner, () => this.backFromView());
+      this.updateRoomStatus(state);
+      this.updateRouteChip(state);
       this.subscribeToState();
+      this.applyPendingFocus();
     }
   }
 
+  /** The view stays, so coming back costs no bake. */
   onDeactivate(): void {
     this.active = false;
     if (this.map) this.map.pause();
     this.dismissSheet();
     this.roomView?.hide();
+    this.mapList?.close();
+    if (this.viewBanner) release(this.viewBanner);
     this.unsubscribeState?.();
     this.unsubscribeState = undefined;
   }
@@ -224,9 +259,33 @@ export class MapScreen implements Screen {
     return me.role === 'owner' || me.role === 'leader';
   }
 
-  /** Returns whether the order went out. */
-  private tryMove(col: number, row: number): boolean {
-    return this.sendOrder(() => this.gameClient.sendMove(col, row));
+  /** Returns whether the order went out. Coordinates ride along only on the party's map, for older servers. */
+  private tryMoveTo(info: TileClickInfo): boolean {
+    const tileId = info.tileId;
+    if (!tileId) {
+      this.showMoveToast(BLOCKED_ROOM_TEXT);
+      return false;
+    }
+    return this.sendOrder(() => this.gameClient.sendMoveTo(tileId, this.coordsOnPartyMap(info.mapId, info)));
+  }
+
+  private coordsOnPartyMap(mapId: string, room: { col: number; row: number }): { col: number; row: number } | undefined {
+    return mapId === this.gameClient.lastState?.currentMapId ? { col: room.col, row: room.row } : undefined;
+  }
+
+  /** The server asks before a route that leaves hires behind or has no known way back; Go resends it accepted. */
+  private async confirmRoute(msg: ServerRouteConfirmMessage): Promise<void> {
+    if (this.confirmingRoute) return;
+    this.confirmingRoute = true;
+    try {
+      const go = await confirmDialog({ title: 'Set off?', body: routeConfirmBody(msg.warnings), confirmLabel: 'Go' });
+      if (!go) return;
+      const def = this.worldCache.getTileByGuid(msg.tileId);
+      const coords = def ? this.coordsOnPartyMap(def.mapId, def) : undefined;
+      this.sendOrder(() => this.gameClient.sendMoveTo(msg.tileId, coords, msg.warnings.map(w => w.kind)));
+    } finally {
+      this.confirmingRoute = false;
+    }
   }
 
   private stopTravel(): void {
@@ -256,7 +315,7 @@ export class MapScreen implements Screen {
   /** The first tap on Map shouldn't also pay for fetching and parsing three.js. */
   private preloadMapCode(): void {
     if (saveDataRequested() || typeof window.requestIdleCallback !== 'function') return;
-    runStepsWhenIdle([() => { void import('../ui/ThreeWorldMap').catch(() => {}); }]);
+    runStepsWhenIdle([() => { void Promise.all([import('../ui/ThreeWorldMap'), import('../ui/MapList')]).catch(() => {}); }]);
   }
 
   private async createMap(): Promise<void> {
@@ -287,19 +346,34 @@ export class MapScreen implements Screen {
       return;
     }
     this.map.resume();
-    if (this.gameClient.lastState) this.map.applyServerState(this.gameClient.lastState, true);
-    this.updateRoomStatus(this.gameClient.lastState);
-    this.updateRouteChip(this.gameClient.lastState);
-    this.subscribeToState();
-    if (this.pendingFocusRoomId) {
-      const roomId = this.pendingFocusRoomId;
-      this.pendingFocusRoomId = null;
-      this.focusRoom(roomId);
+    const state = this.gameClient.lastState;
+    if (state) {
+      this.viewPendingFocusMap(state);
+      this.map.applyServerState(state, true);
+      this.partyMapId = state.currentMapId;
     }
+    this.updateRoomStatus(state);
+    this.updateRouteChip(state);
+    this.subscribeToState();
+    this.applyPendingFocus();
+  }
+
+  /** A room to focus on another map: draw that map from the first state, so the map bakes once. */
+  private viewPendingFocusMap(state: ServerStateMessage): void {
+    const def = this.pendingFocusRoomId ? this.worldCache.getTileByGuid(this.pendingFocusRoomId) : undefined;
+    if (!def || def.mapId === state.currentMapId || !this.isViewable(def.mapId, state)) return;
+    this.viewedMapId = def.mapId;
+    this.map?.setViewedMap(def.mapId);
+  }
+
+  private applyPendingFocus(): void {
+    const roomId = this.pendingFocusRoomId;
+    if (!roomId) return;
+    this.pendingFocusRoomId = null;
+    this.focusRoom(roomId);
   }
 
   private wireMap(map: ThreeWorldMap): void {
-    map.setSendMove((col, row) => { this.tryMove(col, row); });
     map.setOnTileClick((info) => { this.onRoomTap(info); });
     map.setLockCheck({
       room: (tile, state) => previewRoomLock(tile.entryRequirements, state) !== null,
@@ -315,7 +389,7 @@ export class MapScreen implements Screen {
     this.dungeonEntryPopup = new DungeonEntryPopup(this.gameClient);
     this.roomView = new RoomView(
       this.container,
-      (col, row) => { if (this.tryMove(col, row)) this.dismissSheet(); },
+      (info) => { if (this.tryMoveTo(info)) this.dismissSheet(); },
       (username, anchor, tileCol, tileRow) => { this.onUserClickCallback?.(username, anchor, tileCol, tileRow); },
       (action) => { this.runAction(action); },
       (tileId) => this.roomForecastState(tileId),
@@ -354,7 +428,7 @@ export class MapScreen implements Screen {
     if (info.isCurrentTile) {
       this.dismissSheet();
       this.showRoom(info);
-    } else if (this.roomSheet?.isShowing(info.col, info.row)) {
+    } else if (this.roomSheet?.isShowing(info.mapId, info.col, info.row)) {
       this.goToRoom(info);
     } else {
       this.selectRoom(info, true);
@@ -365,7 +439,7 @@ export class MapScreen implements Screen {
     this.shownForecastKey = this.gameClient.lastState?.social?.party?.forecastKey ?? null;
     this.roomSheet?.show(this.sheetModel(info));
     this.map?.setSelectedRoom({ col: info.col, row: info.row });
-    this.sheetMapId = this.gameClient.lastState?.currentMapId ?? null;
+    this.sheetMapId = info.mapId;
     this.syncScreenLayout();
     if (reveal) this.map?.revealRoom(info.col, info.row, this.sheetInsets());
   }
@@ -400,11 +474,11 @@ export class MapScreen implements Screen {
   }
 
   private goToRoom(info: TileClickInfo): void {
-    if (this.roomSheet?.isShowing(info.col, info.row) && this.roomSheet.isBlocked) {
+    if (this.roomSheet?.isShowing(info.mapId, info.col, info.row) && this.roomSheet.isBlocked) {
       this.roomSheet.pulseLock();
       return;
     }
-    if (this.tryMove(info.col, info.row)) this.dismissSheet();
+    if (this.tryMoveTo(info)) this.dismissSheet();
   }
 
   private dismissSheet(): void {
@@ -415,32 +489,41 @@ export class MapScreen implements Screen {
 
   private sheetModel(info: TileClickInfo): RoomSheetModel {
     const state = this.gameClient.lastState;
-    const tileDef = this.worldCache.getTile(info.col, info.row);
+    const tileDef = this.worldCache.getTileOn(info.mapId, info.col, info.row);
+    const route = this.routeTo(tileDef, state);
     return {
       info,
       actions: info.isUnlocked && tileDef ? this.remoteRoomActions(tileDef, state) : [],
       othersHere: this.map?.countOthersAt(info.col, info.row) ?? 0,
       roomId: tileDef?.id ?? null,
       typeId: tileDef?.type ?? null,
-      forecastTileId: tileDef?.id && info.isUnlocked && info.isTraversable ? tileDef.id : null,
+      forecastTileId: this.remoteForecastTileId(info, tileDef, state),
       inDungeon: !!state?.dungeon,
       paysNoXp: !!tileDef?.noXp,
       lock: this.roomLock(tileDef, state),
-      unreachable: this.isUnreachable(info, state),
+      route,
+      routeLines: routePreviewLines(route, state),
+      partyHasOthers: this.partyHasOthers(state),
     };
+  }
+
+  /** The server denies forecasts off the party's map, so none is asked for. */
+  private remoteForecastTileId(info: TileClickInfo, tileDef: WorldTileDefinition | undefined, state: ServerStateMessage | null): string | null {
+    if (!tileDef?.id || !info.isUnlocked || !info.isTraversable) return null;
+    return info.mapId === state?.currentMapId ? tileDef.id : null;
+  }
+
+  private routeTo(tileDef: WorldTileDefinition | undefined, state: ServerStateMessage | null): RoutePreview | null {
+    return tileDef && state ? previewRoute(state, this.worldCache, tileDef.id) : null;
+  }
+
+  private partyHasOthers(state: ServerStateMessage | null): boolean {
+    return (state?.social?.party?.members ?? []).some(m => m.username !== state?.username);
   }
 
   private roomLock(tileDef: WorldTileDefinition | undefined, state: ServerStateMessage | null): string[] | null {
     const failures = tileDef ? previewRoomLock(roomRequirements(tileDef, this.worldCache), state) : null;
     return failures ? roomLockLines(failures, state) : null;
-  }
-
-  /** Walls or water cut the room off from the party's, so only a door leads there. */
-  private isUnreachable(info: TileClickInfo, state: ServerStateMessage | null): boolean {
-    if (!state || !this.map) return false;
-    const here = this.map.getWalkableArea(state.party.col, state.party.row);
-    const there = this.map.getWalkableArea(info.col, info.row);
-    return here !== null && there !== null && here !== there;
   }
 
   private remoteRoomActions(tileDef: WorldTileDefinition, state: ServerStateMessage | null): RoomAction[] {
@@ -455,13 +538,13 @@ export class MapScreen implements Screen {
     return previewTravelLock(link, this.worldCache.getTileByGuid(link.tileId), this.worldCache, state) !== null;
   }
 
+  /** A sheet belongs to the map it was opened on, and closes once another is drawn. */
   private refreshSheet(): void {
     if (!this.roomSheet?.isOpen || !this.map) return;
     const col = this.roomSheet.selectedCol;
     const row = this.roomSheet.selectedRow;
     const info = col === null || row === null ? null : this.map.getTileInfo(col, row);
-    const mapChanged = this.gameClient.lastState?.currentMapId !== this.sheetMapId;
-    if (!info || info.isCurrentTile || mapChanged) {
+    if (!info || info.isCurrentTile || this.map.drawnMapId !== this.sheetMapId) {
       this.dismissSheet();
       return;
     }
@@ -488,28 +571,29 @@ export class MapScreen implements Screen {
   private showRoom(info: TileClickInfo): void {
     if (!this.roomView) return;
     const state = this.gameClient.lastState;
-    const tileDef = this.worldCache.getTile(info.col, info.row);
+    const tileDef = this.worldCache.getTileOn(info.mapId, info.col, info.row);
     this.roomView.roomId = tileDef?.id ?? null;
-    this.roomView.isTraveling = (state?.party.path?.length ?? 0) > 0;
+    this.roomView.isTraveling = !!state && isTravelling(state.party);
     if (info.isCurrentTile) {
       this.roomView.actions = state ? this.currentRoomActions(state) : [];
       this.roomView.blockedLines = [];
+      this.roomView.forecastTileId = tileDef?.id && info.isTraversable && !state?.dungeon ? tileDef.id : null;
     } else {
+      const route = this.routeTo(tileDef, state);
+      const routeBlocks = routeUnknown(route) && !this.partyHasOthers(state);
       this.roomView.actions = info.isUnlocked && tileDef ? this.remoteRoomActions(tileDef, state) : [];
       this.roomView.blockedLines = [
         ...(this.roomLock(tileDef, state) ?? []),
-        ...(this.isUnreachable(info, state) ? [NO_WALKING_ROUTE_TEXT] : []),
+        ...(routeBlocks ? routePreviewLines(route, state) : []),
       ];
+      this.roomView.forecastTileId = this.remoteForecastTileId(info, tileDef, state);
     }
-    const explored = info.isCurrentTile || info.isUnlocked;
-    this.roomView.forecastTileId = (tileDef?.id && explored && info.isTraversable && !(info.isCurrentTile && state?.dungeon))
-      ? tileDef.id
-      : null;
     this.shownForecastKey = state?.social?.party?.forecastKey ?? null;
     this.roomView.show(info);
   }
 
   private openCurrentRoom(): void {
+    this.endView();
     const state = this.gameClient.lastState;
     const info = state ? this.map?.getTileInfo(state.party.col, state.party.row) : null;
     if (info) this.showRoom(info);
@@ -533,20 +617,12 @@ export class MapScreen implements Screen {
 
   /** A round chip shows one word, so a tap that takes the party off this map says where first; a locked exit lets the server say why instead. */
   private runStatusChip(action: RoomAction): void {
-    if (action.kind === 'travel' && !action.locked && !window.matchMedia?.(SPELLED_OUT_CHIPS_QUERY).matches) {
-      void this.confirmTravel(action);
-    } else {
+    if (action.kind !== 'travel') {
       this.runAction(action);
+      return;
     }
-  }
-
-  private async confirmTravel(action: RoomAction): Promise<void> {
-    const go = await confirmDialog({
-      title: `${actionLabel(action)}?`,
-      body: 'Your party will go there right away.',
-      confirmLabel: 'Travel',
-    });
-    if (go) this.runAction(action);
+    const oneWord = !action.locked && !window.matchMedia?.(SPELLED_OUT_CHIPS_QUERY).matches;
+    void this.travelThrough(action, oneWord);
   }
 
   private runAction(action: RoomAction): void {
@@ -554,7 +630,7 @@ export class MapScreen implements Screen {
       case 'npc': this.talkTo(action.targetId); break;
       case 'shop': this.openShop(); break;
       case 'dungeon': this.enterDungeon(action.targetId); break;
-      case 'travel': this.enterTransition(action.targetId); break;
+      case 'travel': void this.travelThrough(action, false); break;
     }
   }
 
@@ -576,12 +652,32 @@ export class MapScreen implements Screen {
     this.dungeonEntryPopup?.show(dungeon, state.party.col, state.party.row, { canEnter: this.canMove() });
   }
 
-  private enterTransition(tileId: string): void {
+  /** Every way through a door asks first when the party's hires would stay behind on this map. */
+  private async travelThrough(action: RoomAction, askFirst: boolean): Promise<void> {
     const state = this.gameClient.lastState;
     if (!state) return;
     if (state.dungeon) { this.showMoveToast('Already in a dungeon'); return; }
     if (!this.canMove()) { this.showMoveToast('Only the party owner or a leader can travel'); return; }
-    if (!this.gameClient.sendEnterTransition(tileId)) this.showMoveToast(OFFLINE_NOTICE);
+    const hires = doorHiresText(state, this.worldCache.getMaps(), this.exitMapId(state, action.targetId));
+    if (hires || askFirst) {
+      const go = await confirmDialog({
+        title: `${actionLabel(action)}?`,
+        body: hires ?? 'Your party will go there right away.',
+        confirmLabel: hires ? 'Go' : 'Travel',
+      });
+      if (!go) return;
+    }
+    if (!this.gameClient.sendEnterTransition(action.targetId)) {
+      this.showMoveToast(OFFLINE_NOTICE);
+      return;
+    }
+    this.followCrossingUntil = performance.now() + OWN_TRAVEL_FOLLOW_MS;
+  }
+
+  /** The map an exit of the party's room leads to. */
+  private exitMapId(state: ServerStateMessage, tileId: string): string | undefined {
+    const here = this.worldCache.getTileOn(state.currentMapId, state.party.col, state.party.row);
+    return here?.transitions?.find(link => link.tileId === tileId)?.mapId ?? this.worldCache.getTileByGuid(tileId)?.mapId;
   }
 
   private updateRoomStatus(state: ServerStateMessage | null): void {
@@ -598,7 +694,7 @@ export class MapScreen implements Screen {
       zoneName: tile.zoneName ?? state.zoneName,
       roomName: tile.name || 'Unnamed Room',
       actions: this.currentRoomActions(state),
-      othersHere: this.map?.countOthersAt(state.party.col, state.party.row) ?? 0,
+      othersHere: this.viewedMapId ? 0 : this.map?.countOthersAt(state.party.col, state.party.row) ?? 0,
       dungeonRun: run && { name: run.name, floor: run.floor, totalFloors: run.totalFloors },
     });
   }
@@ -627,15 +723,13 @@ export class MapScreen implements Screen {
   private updateRouteChip(state: ServerStateMessage | null): void {
     const chip = this.routeChip;
     if (!chip) return;
-    const path = state?.party.path ?? [];
-    if (!state || path.length === 0 || state.dungeon) {
+    if (!state || !isTravelling(state.party) || state.dungeon) {
       chip.hidden = true;
       return;
     }
-    const last = path[path.length - 1];
-    const name = discoveredRoomName(state, this.worldCache, last.col, last.row);
+    const name = destinationName(state, this.worldCache);
     const nameHtml = name ? `<span class="map-route-name">${escapeHtml(name)}</span><span class="map-route-dot">·</span>` : '';
-    const count = `${path.length} ${path.length === 1 ? 'room' : 'rooms'}`;
+    const count = routeCountText(state.party);
     const on = state.social?.party?.autoRun === true;
     const locked = !this.canMove();
     const autoTitle = locked
@@ -644,7 +738,7 @@ export class MapScreen implements Screen {
     chip.hidden = false;
     const receivedAt = this.gameClient.lastStateAt;
     deferWhilePressed(chip, () => {
-      setHtml(chip, `<span class="map-route-text"><span class="map-route-arrow">→</span>${nameHtml}<span class="map-route-count">${count}</span></span>`
+      setHtml(chip, `<span class="map-route-text"><span class="map-route-arrow">→</span>${nameHtml}<span class="map-route-count">${escapeHtml(count)}</span></span>`
         + `<button type="button" class="map-route-auto${on ? ' on' : ''}${locked ? ' locked' : ''}" aria-pressed="${on}" title="${autoTitle}">${AUTO_RUN_FILL_HTML}Autorun</button>`
         + '<button type="button" class="map-route-stop">Stop</button>');
       const auto = chip.querySelector('.map-route-auto');
@@ -666,6 +760,7 @@ export class MapScreen implements Screen {
     this.zoomControls = document.createElement('div');
     this.zoomControls.className = 'map-zoom-controls';
     this.zoomControls.innerHTML = `
+      <button type="button" class="map-zoom-btn map-maps-btn" aria-label="Maps" title="Maps">${MAPS_ICON}</button>
       <button type="button" class="map-zoom-btn map-recenter" aria-label="Recenter on your party" title="Recenter on your party" data-lit="0">
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
           <circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>
@@ -678,9 +773,14 @@ export class MapScreen implements Screen {
     this.container.appendChild(this.zoomControls);
     this.recenterButton = this.zoomControls.querySelector<HTMLButtonElement>('.map-recenter')!;
 
+    this.zoomControls.querySelector('.map-maps-btn')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void this.openMapList();
+    });
+
     this.recenterButton.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.map?.recenterOnPlayer();
+      this.recenterOnPlayer();
     });
 
     this.zoomControls.querySelector('.map-zoom-in')!.addEventListener('click', (e) => {
@@ -694,12 +794,148 @@ export class MapScreen implements Screen {
     });
   }
 
+  private async openMapList(): Promise<void> {
+    if (!this.mapList) {
+      const loaded = await import('../ui/MapList').catch(() => null);
+      if (!loaded) {
+        this.showMoveToast(OFFLINE_NOTICE);
+        return;
+      }
+      this.mapList ??= new loaded.MapList(this.gameClient, this.worldCache, () => this.viewedMapId, (mapId) => this.viewMap(mapId));
+    }
+    if (this.active) this.mapList.open();
+  }
+
+  private isViewable(mapId: string, state: ServerStateMessage): boolean {
+    return this.worldCache.viewableMapIds(state.unlocked ?? []).has(mapId);
+  }
+
+  private mapExists(mapId: string): boolean {
+    return this.worldCache.getMaps().some(m => m.id === mapId);
+  }
+
+  private mapName(mapId: string): string {
+    return this.worldCache.getMaps().find(m => m.id === mapId)?.name || mapId;
+  }
+
+  /** Look at another map: no token, route or other players on it, and Back or Escape returns to the party. The party's own map recentres. */
+  private viewMap(mapId: string, focusTileId?: string): void {
+    const state = this.gameClient.lastState;
+    if (!this.map || !state) return;
+    if (mapId === state.currentMapId) {
+      this.recenterOnPlayer();
+      return;
+    }
+    this.dismissSheet();
+    this.viewedMapId = mapId;
+    this.map.setViewedMap(mapId);
+    this.map.applyServerState(state, true);
+    const spot = this.viewFocus(mapId, focusTileId, state);
+    if (spot) this.map.focusOn(spot.col, spot.row);
+    this.showViewBanner(mapId);
+  }
+
+  /** The focus room, else the found room nearest the middle of the map's found rooms, else the map's start. */
+  private viewFocus(mapId: string, focusTileId: string | undefined, state: ServerStateMessage): { col: number; row: number } | null {
+    const focus = focusTileId ? this.worldCache.getTileByGuid(focusTileId) : undefined;
+    if (focus?.mapId === mapId) return focus;
+    const found: WorldTileDefinition[] = [];
+    for (const id of state.unlocked ?? []) {
+      const tile = this.worldCache.getTileByGuid(id);
+      if (tile?.mapId === mapId) found.push(tile);
+    }
+    if (found.length === 0) return this.worldCache.getMaps().find(m => m.id === mapId)?.startTile ?? null;
+    const points = found.map(tile => cubeToPixel(offsetToCube(tile)));
+    const midX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+    const midY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+    let best = 0;
+    for (let i = 1; i < points.length; i++) {
+      if (Math.hypot(points[i].x - midX, points[i].y - midY) < Math.hypot(points[best].x - midX, points[best].y - midY)) best = i;
+    }
+    return found[best];
+  }
+
+  /** Back to the party's map, centred on the party. Nothing happens while no other map is on screen. */
+  private endView(): void {
+    if (!this.viewedMapId) return;
+    this.stopViewing();
+    this.dismissSheet();
+    const state = this.gameClient.lastState;
+    if (state) this.map?.applyServerState(state, true);
+  }
+
+  /** Back and Escape close the viewed map's sheet before the view itself. */
+  private backFromView(): void {
+    if (this.roomSheet?.isOpen) this.dismissSheet();
+    else this.endView();
+  }
+
+  private dropGoneView(): void {
+    this.stopViewing();
+    this.dismissSheet();
+  }
+
+  /** Forget the view without drawing anything: the next applyServerState draws the party's map. */
+  private stopViewing(): void {
+    this.viewedMapId = null;
+    this.map?.setViewedMap(null);
+    delete this.container.dataset.viewing;
+    if (!this.viewBanner) return;
+    this.viewBanner.hidden = true;
+    release(this.viewBanner);
+  }
+
+  private showViewBanner(mapId: string): void {
+    if (!this.viewBanner) {
+      const banner = document.createElement('div');
+      banner.className = 'map-view-banner';
+      const stop = (e: Event) => { e.stopPropagation(); };
+      for (const ev of ['pointerdown', 'mousedown', 'click', 'touchstart'] as const) banner.addEventListener(ev, stop);
+      banner.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('.map-view-back')) this.recenterOnPlayer();
+        else if (target.closest('.map-view-name')) void this.openMapList();
+      });
+      this.container.appendChild(banner);
+      this.viewBanner = banner;
+    }
+    const name = this.mapName(mapId);
+    this.viewBanner.hidden = false;
+    this.container.dataset.viewing = '1';
+    setHtml(this.viewBanner, '<button type="button" class="map-view-back">◀ Your party</button>'
+      + `<button type="button" class="map-view-name" aria-label="Maps: viewing ${escapeHtml(name)}">${escapeHtml(name)}</button>`);
+    if (this.active) registerDismiss(this.viewBanner, () => this.backFromView());
+  }
+
+  /**
+   * Before a push is drawn: the party reaching the viewed map ends the view quietly, a viewed map that is gone
+   * ends it, and a party that crosses to another map while the player looks elsewhere leaves the old map as a view.
+   */
+  private syncView(state: ServerStateMessage): void {
+    const previousPartyMapId = this.partyMapId;
+    this.partyMapId = state.currentMapId;
+    if (this.viewedMapId) {
+      if (state.currentMapId === this.viewedMapId) this.stopViewing();
+      else if (!this.mapExists(this.viewedMapId)) this.dropGoneView();
+      return;
+    }
+    if (!this.map || !previousPartyMapId || previousPartyMapId === state.currentMapId) return;
+    const ownTravel = performance.now() < this.followCrossingUntil;
+    this.followCrossingUntil = 0;
+    if (ownTravel || (!this.roomSheet?.isOpen && this.map.isFollowing)) return;
+    this.viewedMapId = previousPartyMapId;
+    this.map.setViewedMap(previousPartyMapId);
+    this.showViewBanner(previousPartyMapId);
+    this.showMoveToast(`Your party traveled to ${this.mapName(state.currentMapId)}.`);
+  }
+
   private subscribeToState(): void {
     this.unsubscribeState?.();
     if (!this.map) return;
 
     this.unsubscribeState = this.gameClient.subscribe((state) => {
       if (this.map) {
+        this.syncView(state);
         const snap = this.gameClient.isInitialState;
         this.map.applyServerState(state, snap);
       }

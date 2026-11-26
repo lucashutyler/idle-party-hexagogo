@@ -26,7 +26,7 @@ export type RoomForecastProvider = (tileId: string) => RoomForecastState;
 export class RoomView {
   private overlay: HTMLElement;
   private modal: HTMLElement;
-  private onMove: (col: number, row: number) => void;
+  private onMove: (info: TileClickInfo) => void;
   private onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void;
   private onAction?: (action: RoomAction) => void;
   /** What the room offers. Set externally before showing; buttons on the current room, a list on a remote one. */
@@ -49,7 +49,7 @@ export class RoomView {
 
   constructor(
     parent: HTMLElement,
-    onMove: (col: number, row: number) => void,
+    onMove: (info: TileClickInfo) => void,
     onUserClick?: (username: string, anchor: HTMLElement, tileCol: number, tileRow: number) => void,
     onAction?: (action: RoomAction) => void,
     forecastProvider?: RoomForecastProvider,
@@ -257,7 +257,7 @@ export class RoomView {
     this.modal.querySelector('.room-view-close')!.addEventListener('click', () => this.hide());
     this.modal.querySelector('.room-view-action-cancel')!.addEventListener('click', () => this.hide());
     this.modal.querySelector('.room-view-action-go')?.addEventListener('click', () => {
-      this.onMove(info.col, info.row);
+      this.onMove(info);
       this.hide();
     });
     // Clickable usernames also work in the remote-room popup.

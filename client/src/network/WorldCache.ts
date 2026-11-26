@@ -1,5 +1,5 @@
-import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, getSlotSchedule } from '@idle-party-rpg/shared';
-import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, ShopSummary, SkillDefinition, SkillSlot, SkillContent, ClassName, TileType } from '@idle-party-rpg/shared';
+import { DEFAULT_MAP_ID, SEED_SKILLS, SEED_SKILL_SLOT_SCHEDULES, TILE_CONFIGS, buildRouteIndex, getSlotSchedule, isTileTraversable } from '@idle-party-rpg/shared';
+import type { WorldTileDefinition, WorldMapMeta, TileTypeDefinition, NpcDefinition, DungeonDefinition, ShopSummary, SkillDefinition, SkillSlot, SkillContent, ClassName, TileType, RouteIndex } from '@idle-party-rpg/shared';
 
 export interface MapRoomsFound {
   name: string;
@@ -14,10 +14,10 @@ const FALLBACK_SKILLS = Object.fromEntries(Object.entries(SEED_SKILLS).filter(([
  * Client-side cache for world data.
  * Loaded once from GET /api/world on login.
  *
- * A world holds multiple maps; the client only renders the map the party is
- * currently on (`currentMapId`, driven by the server state message). Tiles are
- * indexed by `mapId:col:row` so rooms at the same (col,row) on different maps
- * don't collide. Fog of war is determined by state.unlocked (sent with every state push).
+ * A world holds multiple maps; `currentMapId` is the map being drawn: the party's, or one the
+ * player is viewing (ThreeWorldMap sets it). Tiles are indexed by `mapId:col:row` so rooms at
+ * the same (col,row) on different maps don't collide. Fog of war is determined by
+ * state.unlocked (sent with every state push).
  */
 export class WorldCache {
   /** Keyed by "mapId:col:row". */
@@ -50,6 +50,8 @@ export class WorldCache {
 
   /** Previous unlock count — used to detect changes (-1 forces a recompute). */
   private lastUnlockedCount = -1;
+
+  private routeIndexCache: { gen: number; index: RouteIndex } | null = null;
 
   /** Load initial world data + NPC + dungeon + skill catalogs from the server. */
   async loadWorld(): Promise<void> {
@@ -217,7 +219,7 @@ export class WorldCache {
 
   /**
    * Get a tile on an explicitly named map. Prefer this over `getTile` outside the map renderer:
-   * `currentMapId` only advances when ThreeWorldMap calls `setCurrentMap`, so it can lag the party's real map.
+   * `currentMapId` is the drawn map, which can be a viewed one or lag the party's real map.
    */
   getTileOn(mapId: string, col: number, row: number): WorldTileDefinition | undefined {
     return this.tiles.get(`${mapId}:${col},${row}`);
@@ -247,6 +249,30 @@ export class WorldCache {
       if (entry.total === 0) byMap.delete(mapId);
     }
     return byMap;
+  }
+
+  /** Maps the player can look at: those with at least one found walkable room. */
+  viewableMapIds(unlockedIds: readonly string[]): Set<string> {
+    const ids = new Set<string>();
+    for (const [mapId, entry] of this.roomsFoundByMap(unlockedIds)) {
+      if (entry.found > 0) ids.add(mapId);
+    }
+    return ids;
+  }
+
+  /** Walkable areas and doors across every map, built once per world load. */
+  routeIndex(): RouteIndex {
+    if (this.routeIndexCache?.gen === this.contentGen) return this.routeIndexCache.index;
+    const index = buildRouteIndex([...this.tiles.values()].map(tile => ({
+      id: tile.id,
+      mapId: tile.mapId,
+      col: tile.col,
+      row: tile.row,
+      traversable: isTileTraversable(tile.type, this.tileTypeDefs.get(tile.type)),
+      transitions: tile.transitions,
+    })));
+    this.routeIndexCache = { gen: this.contentGen, index };
+    return index;
   }
 
   /** Get the start tile position. */

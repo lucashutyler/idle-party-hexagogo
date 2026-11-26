@@ -29,6 +29,8 @@ export interface TrackerLookups {
   getRoomsWithNpc(npcId: string): readonly NpcRoom[];
   getTileByGuid(id: string): NpcRoom | undefined;
   getMaps(): readonly WorldMapMeta[];
+  /** Maps the player can open from the tracker besides the party's own. */
+  viewableMapIds?(unlockedIds: readonly string[]): ReadonlySet<string>;
 }
 
 type TrackerState = Pick<
@@ -94,9 +96,11 @@ function objectiveLine(
   if (objective.kind !== 'visit') return { kind: 'main', title, detail, action: { type: 'log' } };
 
   const room = lookups.getTileByGuid(objective.tileId);
-  if (room?.mapId !== state.currentMapId) return { kind: 'main', title, detail: `${detail}${onMapText(room?.mapId, lookups)}`, action: { type: 'log' } };
   const explored = state.unlocked?.includes(objective.tileId) ?? false;
-  return { kind: 'main', title, detail, action: explored ? { type: 'room', roomId: objective.tileId } : { type: 'log' } };
+  const action: TrackerAction = { type: 'room', roomId: objective.tileId };
+  if (room?.mapId === state.currentMapId) return { kind: 'main', title, detail, action: explored ? action : { type: 'log' } };
+  const viewable = !!room && explored && !!lookups.viewableMapIds?.(state.unlocked ?? []).has(room.mapId);
+  return { kind: 'main', title, detail: `${detail}${onMapText(room?.mapId, lookups)}`, action: viewable ? action : { type: 'log' } };
 }
 
 function talkLine(step: MainStoryStep, state: TrackerState, lookups: TrackerLookups): TrackerLine {

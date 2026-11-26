@@ -13,18 +13,18 @@ describe('TopHud', () => {
       subscribe: (l: () => void) => { listener = l; },
       onConnection: () => {},
     };
-    const push = (className: string): void => {
+    const push = (className: string, party: Record<string, unknown> = { col: 0, row: 0, path: [] }): void => {
       gameClient.lastState = {
         username: 'me',
         currentMapId: 'm1',
         zoneName: 'Some Zone',
         unlocked: [],
-        party: { col: 0, row: 0, path: [] },
+        party,
         character: { className, level: 3, gold: 10 },
       };
       listener();
     };
-    const world = { getTileOn: () => ({ id: 'r', name: 'Here' }) } as unknown as WorldCache;
+    const world = { getTileOn: () => ({ id: 'r', name: 'Here' }), getTileByGuid: () => undefined } as unknown as WorldCache;
     new TopHud(gameClient as unknown as GameClient, world);
     return { push };
   }
@@ -55,6 +55,15 @@ describe('TopHud', () => {
     const t = setup();
     t.push('Knight');
     expect(document.querySelector('.top-hud-status')?.getAttribute('aria-label')).toBe('Open map, Here');
+  });
+
+  it('marks the status line as a route while a door is still ahead, even with the leg walked', () => {
+    const t = setup();
+    t.push('Knight');
+    const detail = () => document.querySelector('[data-route]');
+    expect(detail()).toBeNull();
+    t.push('Knight', { col: 0, row: 0, path: [], route: { destinationId: 'r2', destinationMapId: 'm2', doors: 1, rooms: 1, leavesMap: true } });
+    expect(detail()).not.toBeNull();
   });
 });
 
@@ -89,9 +98,14 @@ describe('hudStatus', () => {
     '2,0': { id: 'r-known', name: 'Known Place' },
     '3,0': { id: 'r-unknown', name: 'Secret Place' },
   };
+  const far: Record<string, { id: string; name: string }> = {
+    'r-far': { id: 'r-far', name: 'Far Hall' },
+    'r-hidden': { id: 'r-hidden', name: 'Hidden Hall' },
+  };
   const world = {
     getTileOn: (_mapId: string, col: number, row: number) => rooms[`${col},${row}`],
-  } as unknown as Pick<WorldCache, 'getTileOn'>;
+    getTileByGuid: (id: string) => far[id],
+  } as unknown as Pick<WorldCache, 'getTileOn' | 'getTileByGuid'>;
 
   function state(path: { col: number; row: number }[], extra: Partial<ServerStateMessage> = {}): ServerStateMessage {
     return {
@@ -115,6 +129,16 @@ describe('hudStatus', () => {
   it('never names an unexplored destination', () => {
     const detail = hudStatus(state([{ col: 3, row: 0 }]), world, true).detail;
     expect(detail).toBe('→ 1 room');
+  });
+
+  it('still travels in a door room with an empty leg, counting rooms and doors to the route\'s end', () => {
+    const route = { destinationId: 'r-far', destinationMapId: 'm2', doors: 2, rooms: 7, leavesMap: true };
+    const s = state([], { unlocked: ['r-here', 'r-far'] });
+    s.party.route = route;
+    expect(hudStatus(s, world, true).detail).toBe('→ Far Hall · 7 rooms · 2 doors');
+
+    s.party.route = { ...route, destinationId: 'r-hidden', doors: 1, rooms: 1 };
+    expect(hudStatus(s, world, true).detail).toBe('→ 1 room · 1 door');
   });
 
   it('shows the dungeon floor', () => {

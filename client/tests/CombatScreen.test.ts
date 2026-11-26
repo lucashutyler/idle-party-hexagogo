@@ -475,6 +475,21 @@ describe('CombatScreen', () => {
     expect(stage().classList.contains('victory')).toBe(true);
   });
 
+  it('walks on from a door room whose leg is already walked, and fights again without a route', () => {
+    const t = start();
+    const base = makeState(1, GOBLIN, []);
+    const finished = { ...snapshot(1, { ...GOBLIN, hp: 0 }), finished: true, result: 'victory' as const };
+    const route = { destinationId: 'r-far', destinationMapId: 'm2', doors: 1, rooms: 2, leavesMap: true };
+    const won = { state: 'result' as const, visual: 'victory' as const, combat: finished };
+
+    t.push(withBattle(base, won, { party: { col: 0, row: 0, path: [], route } }));
+    t.push(withBattle(base, won, { party: { col: 0, row: 0, path: [], route } }));
+    expect(statusText()).toBe('VictoryWalking on');
+
+    t.push(withBattle(base, won, { party: { col: 0, row: 0, path: [] } }));
+    expect(statusText()).toBe('VictoryFighting here again');
+  });
+
   it('does not say the party is walking while the server retries a fight that failed to start', () => {
     const t = start();
     t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, recovering: true }));

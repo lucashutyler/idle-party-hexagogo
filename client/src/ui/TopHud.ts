@@ -4,7 +4,7 @@ import type { GameClient } from '../network/GameClient';
 import type { WorldCache } from '../network/WorldCache';
 import { artworkUrl, renderTrackedImg } from './assets';
 import { deferWhilePressed, setHtml } from './render';
-import { routeSummary } from './routeSummary';
+import { isTravelling, routeSummary } from './routeSummary';
 
 /** Gold chip text: full number below 10 000, otherwise `12.3k` / `1.2M`. */
 export function formatGoldChip(gold: number): string {
@@ -27,13 +27,13 @@ export interface HudStatus {
 /** The HUD's two status lines. A walking destination is named only once it has been explored. */
 export function hudStatus(
   state: ServerStateMessage,
-  worldCache: Pick<WorldCache, 'getTileOn'>,
+  worldCache: Pick<WorldCache, 'getTileOn' | 'getTileByGuid'>,
   connected: boolean,
 ): HudStatus {
   const { col, row } = state.party;
   const room = worldCache.getTileOn(state.currentMapId, col, row)?.name ?? state.zoneName;
   if (!connected) return { room, detail: 'Reconnecting…' };
-  if (state.party.path.length > 0) return { room, detail: `→ ${routeSummary(state, worldCache)}` };
+  if (isTravelling(state.party)) return { room, detail: `→ ${routeSummary(state, worldCache)}` };
   if (state.dungeon) {
     return { room, detail: `${state.dungeon.name} · Floor ${state.dungeon.floor}/${state.dungeon.totalFloors}` };
   }
@@ -117,7 +117,7 @@ export class TopHud {
     setText(this.roomEl, status.room);
     setText(this.detailEl, status.detail);
     setText(this.zoneEl, state.zoneName);
-    this.detailEl.toggleAttribute('data-route', state.party.path.length > 0 && !state.dungeon);
+    this.detailEl.toggleAttribute('data-route', isTravelling(state.party) && !state.dungeon);
     this.statusBtn.setAttribute('aria-label', `Open map, ${status.room}`);
     this.container.toggleAttribute('data-offline', !this.connected);
     setText(this.nameEl, state.username);

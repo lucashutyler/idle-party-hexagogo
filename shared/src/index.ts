@@ -20,12 +20,14 @@ export {
 export type { CubeCoord, OffsetCoord, PixelCoord } from './hex/HexUtils.js';
 
 // Hex tile
-export { TileType, TILE_CONFIGS, SEED_TILE_TYPES, HexTile } from './hex/HexTile.js';
+export { TileType, TILE_CONFIGS, SEED_TILE_TYPES, HexTile, isTileTraversable } from './hex/HexTile.js';
 export type { TileConfig, TileTypeDefinition } from './hex/HexTile.js';
 
 // Hex grid & pathfinding
 export { HexGrid } from './hex/HexGrid.js';
 export { HexPathfinder } from './hex/HexPathfinder.js';
+export { MAX_ROUTE_DOORS, buildRouteIndex, planRouteDoors } from './hex/WorldRoute.js';
+export type { RouteRoom, RouteDoor, RouteIndex } from './hex/WorldRoute.js';
 
 // Map
 export { WORLD_MAP, DEFAULT_MAP_ID, migrateWorldData, zoneMapConflict, findZonesSpanningMaps } from './hex/MapSchema.js';
@@ -375,6 +377,7 @@ export type {
   PartyState,
   BattleVisual,
   ServerPartyState,
+  ServerPartyRoute,
   ServerBattleState,
   ServerCombatMessage,
   ClientCombatViewMessage,
@@ -394,6 +397,9 @@ export type {
   ClientEquipItemForceDestroyMessage,
   ServerEquipBlockedMessage,
   ServerMoveBlockedMessage,
+  RouteWarningKind,
+  RouteWarning,
+  ServerRouteConfirmMessage,
   ClientSetClassMessage,
   ClientResetXpRateMessage,
   ClientEquipSkillMessage,
@@ -419,6 +425,7 @@ export {
   RESULT_PAUSE,
   MOVE_DURATION,
   GAME_VERSION,
+  ROUTE_WARNING_KINDS,
   PARTIAL_STATE_PARAM,
   restoreElidedState,
 } from './systems/BattleTypes.js';

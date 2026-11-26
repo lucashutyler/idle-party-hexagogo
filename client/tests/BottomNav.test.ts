@@ -123,6 +123,8 @@ describe('BottomNav', () => {
     expect(t.tab('map').classList.contains('has-path')).toBe(true);
     t.push({ party: { path: [] } });
     expect(t.tab('map').classList.contains('has-path')).toBe(false);
+    t.push({ party: { path: [], route: { destinationId: 'r', destinationMapId: 'm', doors: 1, rooms: 1, leavesMap: false } } });
+    expect(t.tab('map').classList.contains('has-path')).toBe(true);
   });
 
   it('badges Social for invites and requests, Hero for mail and trades awaiting me', () => {

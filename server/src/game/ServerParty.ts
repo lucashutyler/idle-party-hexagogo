@@ -6,11 +6,37 @@ import {
 } from '@idle-party-rpg/shared';
 import type { CubeCoord, PartyState, ServerPartyState } from '@idle-party-rpg/shared';
 
+export interface RouteDoorStep {
+  fromTileId: string;
+  toTileId: string;
+  toMapId: string;
+}
+
+/** The doors still ahead of the current leg. Ids only: a grid rebuild makes new HexTiles. */
+export interface PartyRoute {
+  destinationId: string;
+  destinationMapId: string;
+  doors: RouteDoorStep[];
+  /** `legLengths[k]` is the number of room steps in the leg after `doors[k]`. */
+  legLengths: number[];
+}
+
+export interface SavedPartyRoute {
+  destinationId: string;
+  doors: { fromTileId: string; toTileId: string }[];
+}
+
+export interface RouteSnapshot {
+  queue: HexTile[];
+  route: PartyRoute | null;
+}
+
 export class ServerParty {
   private pathfinder: HexPathfinder;
   private currentTile: HexTile;
   private targetTile: HexTile | null = null;
   private movementQueue: HexTile[] = [];
+  private route: PartyRoute | null = null;
   private state: PartyState = 'idle';
   private mapId: string;
   private lastRoom: HexTile | null = null;
@@ -60,7 +86,16 @@ export class ServerParty {
   }
 
   get hasDestination(): boolean {
-    return this.movementQueue.length > 0;
+    return this.movementQueue.length > 0 || this.route !== null;
+  }
+
+  /** The leg is walked and the party stands in the room of the next door. */
+  get doorStepDue(): boolean {
+    return this.movementQueue.length === 0 && this.route?.doors[0]?.fromTileId === this.currentTile.id;
+  }
+
+  get plannedRoute(): Readonly<PartyRoute> | null {
+    return this.route;
   }
 
   get remainingPath(): HexTile[] {
@@ -81,6 +116,7 @@ export class ServerParty {
     return this.retreatTarget !== null && this.movementQueue.length === 1 && this.movementQueue[0] === this.retreatTarget;
   }
 
+  /** A walk within this map. Refused, it leaves the queue and any door route as they were. */
   setDestination(destinationTile: HexTile): boolean {
     if (!destinationTile.isTraversable) {
       return false;
@@ -89,6 +125,7 @@ export class ServerParty {
     const startTile = this.targetTile ?? this.currentTile;
     if (destinationTile.key === startTile.key) {
       this.movementQueue = [];
+      this.route = null;
       return true;
     }
 
@@ -99,26 +136,49 @@ export class ServerParty {
     }
 
     this.movementQueue = path.slice(1);
+    this.route = null;
     return true;
+  }
+
+  /** Walk `firstLeg`, then take the route's doors in turn. */
+  setRoute(firstLeg: HexTile[], route: PartyRoute): void {
+    this.movementQueue = [...firstLeg];
+    this.route = route.doors.length > 0 ? copyRoute(route) : null;
   }
 
   clearDestination(): void {
     this.movementQueue = [];
+    this.route = null;
   }
 
   /** Replace the route with a single step to `tile`; that step won't count as the room the party came from. */
   retreatTo(tile: HexTile): void {
     this.movementQueue = [tile];
+    this.route = null;
     this.retreatTarget = tile;
   }
 
-  /**
-   * Restore a previously snapshotted movement queue. Used to roll back a
-   * destination that turned out to be blocked, so a refused move leaves the
-   * party's in-flight path intact instead of stranding it.
-   */
-  restoreMovementQueue(queue: HexTile[]): void {
-    this.movementQueue = [...queue];
+  /** The queue and door route together, so a refused order can put both back. */
+  routeSnapshot(): RouteSnapshot {
+    return { queue: [...this.movementQueue], route: this.route ? copyRoute(this.route) : null };
+  }
+
+  restoreRoute(snapshot: RouteSnapshot): void {
+    this.movementQueue = [...snapshot.queue];
+    this.route = snapshot.route ? copyRoute(snapshot.route) : null;
+  }
+
+  /** Put back a saved door route; the queue it continues from is restored separately. */
+  restoreSavedRoute(route: PartyRoute): void {
+    this.route = route.doors.length > 0 ? copyRoute(route) : null;
+  }
+
+  routeSave(): SavedPartyRoute | undefined {
+    if (!this.route) return undefined;
+    return {
+      destinationId: this.route.destinationId,
+      doors: this.route.doors.map(d => ({ fromTileId: d.fromTileId, toTileId: d.toTileId })),
+    };
   }
 
   /**
@@ -152,6 +212,7 @@ export class ServerParty {
     this.currentTile = tile;
     this.targetTile = null;
     this.movementQueue = [];
+    this.route = null;
     this.lastRoom = null;
     this.retreatTarget = null;
   }
@@ -162,13 +223,18 @@ export class ServerParty {
    * because the pathfinder is bound to a single grid.
    */
   switchMap(grid: HexGrid, tile: HexTile, mapId: string): void {
-    this.pathfinder = new HexPathfinder(grid);
-    this.mapId = mapId;
-    this.currentTile = tile;
-    this.targetTile = null;
-    this.movementQueue = [];
-    this.lastRoom = null;
-    this.retreatTarget = null;
+    this.enterMap(grid, tile, mapId);
+    this.route = null;
+  }
+
+  /** Step through the route's next door to `arrival`, then walk `nextLeg`. */
+  crossDoor(grid: HexGrid, arrival: HexTile, mapId: string, nextLeg: HexTile[]): void {
+    this.enterMap(grid, arrival, mapId);
+    this.movementQueue = [...nextLeg];
+    if (!this.route) return;
+    this.route.doors.shift();
+    this.route.legLengths.shift();
+    if (this.route.doors.length === 0) this.route = null;
   }
 
   enterBattle(): void {
@@ -181,17 +247,10 @@ export class ServerParty {
     }
   }
 
-  private setState(newState: PartyState): void {
-    if (this.state !== newState) {
-      this.state = newState;
-      this.onStateChange?.(newState);
-    }
-  }
-
   toJSON(): ServerPartyState {
     const offset = cubeToOffset(this.currentTile.coord);
     const target = this.targetTile ? cubeToOffset(this.targetTile.coord) : undefined;
-    return {
+    const json: ServerPartyState = {
       col: offset.col,
       row: offset.row,
       state: this.state,
@@ -202,5 +261,51 @@ export class ServerParty {
         return { col: o.col, row: o.row };
       }),
     };
+    const route = this.route;
+    if (route) {
+      json.route = {
+        destinationId: route.destinationId,
+        destinationMapId: route.destinationMapId,
+        doors: route.doors.length,
+        rooms: this.movementQueue.length + route.doors.length + route.legLengths.reduce((sum, n) => sum + n, 0),
+        leavesMap: this.routeLeavesMap(route),
+      };
+    }
+    return json;
   }
+
+  private routeLeavesMap(route: PartyRoute): boolean {
+    let mapId = this.mapId;
+    for (const door of route.doors) {
+      if (door.toMapId !== mapId) return true;
+      mapId = door.toMapId;
+    }
+    return false;
+  }
+
+  private enterMap(grid: HexGrid, tile: HexTile, mapId: string): void {
+    this.pathfinder = new HexPathfinder(grid);
+    this.mapId = mapId;
+    this.currentTile = tile;
+    this.targetTile = null;
+    this.movementQueue = [];
+    this.lastRoom = null;
+    this.retreatTarget = null;
+  }
+
+  private setState(newState: PartyState): void {
+    if (this.state !== newState) {
+      this.state = newState;
+      this.onStateChange?.(newState);
+    }
+  }
+}
+
+function copyRoute(route: PartyRoute): PartyRoute {
+  return {
+    destinationId: route.destinationId,
+    destinationMapId: route.destinationMapId,
+    doors: route.doors.map(d => ({ ...d })),
+    legLengths: [...route.legLengths],
+  };
 }

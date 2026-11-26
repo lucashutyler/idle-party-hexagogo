@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.25.6'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.26.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -42,7 +42,22 @@ export interface ServerPartyState {
   state: PartyState;
   targetCol?: number;
   targetRow?: number;
+  /** The current leg, on `currentMapId`. */
   path: { col: number; row: number }[];
+  /** Present only while at least one door is left on the way. */
+  route?: ServerPartyRoute;
+}
+
+/** A route through doors, possibly across maps. */
+export interface ServerPartyRoute {
+  destinationId: string;
+  destinationMapId: string;
+  /** Doors still ahead. */
+  doors: number;
+  /** Room steps still ahead, door steps included. */
+  rooms: number;
+  /** Some door ahead leads to another map, so hires stay behind. */
+  leavesMap: boolean;
 }
 
 export interface ServerBattleState {
@@ -297,10 +312,29 @@ export function restoreElidedState(msg: ServerStateMessage, previous: ServerStat
   }
 }
 
+/** By room id, a move may cross doors and maps; col and row alone keep to the party's walkable area. */
 export interface ClientMoveMessage {
   type: 'move';
-  col: number;
-  row: number;
+  tileId?: string;
+  col?: number;
+  row?: number;
+  /** Warnings already accepted for this route. */
+  accept?: RouteWarningKind[];
+}
+
+export type RouteWarningKind = 'hires_leave' | 'no_way_back';
+
+export const ROUTE_WARNING_KINDS: readonly RouteWarningKind[] = ['hires_leave', 'no_way_back'];
+
+export type RouteWarning =
+  | { kind: 'hires_leave'; names: string[]; mapName: string }
+  | { kind: 'no_way_back' };
+
+/** A route that needs the player's go-ahead first; resend the move with these kinds in `accept`. */
+export interface ServerRouteConfirmMessage {
+  type: 'route_confirm';
+  tileId: string;
+  warnings: RouteWarning[];
 }
 
 export interface ClientRequestStateMessage {
@@ -405,6 +439,7 @@ export type ServerMessage =
   | ServerSyncChatMessage
   | ServerEquipBlockedMessage
   | ServerMoveBlockedMessage
+  | ServerRouteConfirmMessage
   | ServerTradeProposedMessage
   | ServerTradeCancelledMessage
   | ServerTradeCompletedMessage
