@@ -257,6 +257,20 @@ describe('production sign-in flow', () => {
       expect((await post('/login-code', { loginId, code })).body.status).toBe('approved');
     });
 
+    it('refuses the 101st code from one IP in the window, even the right one', async () => {
+      const { loginId, code } = await startSignIn();
+      for (let i = 0; i < 100; i++) {
+        expect((await post('/login-code', { loginId: `unknown-${i}`, code: '123456' })).body).toEqual({ status: 'expired' });
+      }
+
+      const refused = await post('/login-code', { loginId, code });
+
+      expect(refused.body).toMatchObject({ status: 'pending' });
+      expect(refused.body.error).toEqual(expect.any(String));
+      expect(session.email).toBeUndefined();
+      expect((await post('/login-code', { loginId, code }, { ip: '198.51.100.20' })).body.status).toBe('approved');
+    });
+
     it('turns a suspended account away with the appeal details', async () => {
       const { loginId, code } = await startSignIn();
       accounts.findByEmail(EMAIL)!.deactivated = true;

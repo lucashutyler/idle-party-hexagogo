@@ -107,6 +107,17 @@ describe('TokenStore sign-in', () => {
       expect(store.approveFromLink(token, ASKING_DEVICE)).toEqual({ status: 'invalid' });
     });
 
+    it('keeps counting wrong codes across a resend', () => {
+      const { loginId, code } = store.createLogin(EMAIL, ASKING_DEVICE);
+      const wrong = wrongCodeFor(code);
+      for (let i = 1; i < MAX_CODE_ATTEMPTS; i++) store.submitCode(loginId, wrong);
+
+      expect(store.createLogin(EMAIL, ASKING_DEVICE).loginId).toBe(loginId);
+
+      expect(store.submitCode(loginId, wrong)).toBe('expired');
+      expect(store.createLogin(EMAIL, ASKING_DEVICE).loginId).not.toBe(loginId);
+    });
+
     it('treats a code of the wrong length as wrong', () => {
       const { loginId, code } = store.createLogin(EMAIL, ASKING_DEVICE);
 
