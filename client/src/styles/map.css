@@ -292,6 +292,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  width: max-content;
   max-width: calc(100% - 24px);
   height: 40px;
   padding: 0 4px 0 14px;
@@ -306,20 +307,33 @@
 }
 .map-route-chip[hidden] { display: none; }
 .map-route-text {
-  display: flex;
-  gap: 0.35em;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.35em;
+  align-items: center;
   min-width: 0;
+  line-height: 1.2;
   white-space: nowrap;
 }
+.map-route-arrow {
+  grid-row: 1 / span 2;
+}
 .map-route-name {
-  min-width: 0;
+  grid-column: 2;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.map-route-arrow,
-.map-route-dot,
+.map-route-dot {
+  display: none;
+}
 .map-route-count {
-  flex: none;
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-route-name + .map-route-dot + .map-route-count {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
 }
 button.map-route-stop {
   position: relative;
@@ -383,6 +397,7 @@ button.map-route-stop::before {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: max-content;
   max-width: calc(100% - 24px);
   height: 40px;
   padding: 0 4px;
