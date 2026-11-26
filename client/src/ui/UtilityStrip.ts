@@ -1,5 +1,5 @@
 import type { GameClient } from '../network/GameClient';
-import { navIconHtml, readyQuestCount } from './BottomNav';
+import { NEW_QUEST_HERE_TEXT, navIconHtml, newQuestHere, readyQuestCount } from './BottomNav';
 import { countText } from './countText';
 
 export interface UtilityStripActions {
@@ -38,9 +38,12 @@ export class UtilityStrip {
 
     gameClient.subscribe((state) => {
       const ready = readyQuestCount(state.activeQuests);
+      const fresh = ready === 0 && newQuestHere(state);
       this.questBadge.textContent = ready > 0 ? countText(ready) : '';
-      this.questBadge.classList.toggle('visible', ready > 0);
-      this.questButton.setAttribute('aria-label', ready > 0 ? `Quests, ${countText(ready)} ready` : 'Quests');
+      this.questBadge.classList.toggle('visible', ready > 0 || fresh);
+      this.questBadge.classList.toggle('utility-quests-new', fresh);
+      const detail = ready > 0 ? `${countText(ready)} ready` : fresh ? NEW_QUEST_HERE_TEXT : '';
+      this.questButton.setAttribute('aria-label', detail ? `Quests, ${detail}` : 'Quests');
     }, { replay: true });
   }
 

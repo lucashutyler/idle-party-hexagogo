@@ -1,5 +1,14 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.6',
+    notes: [
+      'The Quest Log now shows your main story in gold at the top, with your next step even before you can take it.',
+      'A line under the battle shows your current main-story goal; tap it to see where to go.',
+      'The Quests button shows a dot when someone in your room has a quest for you.',
+      'Taking a quest in the room it asks you to visit now counts the visit straight away.',
+    ],
+  },
+  {
     version: '2026.11.25.4',
     notes: [
       'Fixed a bug with item amounts in trades and shop sales.',

@@ -145,7 +145,8 @@ import type { WorldGrids } from './WorldGrids.js';
 import { QuestSystem } from './QuestSystem.js';
 import type { QuestEvent } from './QuestSystem.js';
 import { questOnlyCollectItems } from './QuestKeptItems.js';
-import type { QuestDefinition, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
+import { buildQuestGuide, questGivers } from './QuestGuide.js';
+import type { QuestDefinition, QuestGuide, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
 
 const MAX_LOG_ENTRIES = 1000;
 const MAX_SAVE_LOG_ENTRIES = 1000;
@@ -199,6 +200,7 @@ export class PlayerSession {
   /** Which chat thread the player is actively looking at right now, if any — ephemeral, not persisted. */
   private chatFocus: { channelType: string; channelId: string } | null = null;
   private availableQuests: { key: string; ids: string[]; computedAt: number; staleAt: number } | null = null;
+  private questGuide: { key: string; guide: QuestGuide; computedAt: number; staleAt: number } | null = null;
   /** Per-player quest tracking. */
   quests: QuestSystem;
 
@@ -588,6 +590,33 @@ export class PlayerSession {
     return ids;
   }
 
+  /** The next main-story steps; recomputed only when an input to that answer changes. */
+  private getQuestGuide(
+    allQuests: Readonly<Record<string, QuestDefinition>>,
+    weeklyCompletions: Record<string, string>,
+    availableQuestIds: readonly string[],
+  ): QuestGuide | undefined {
+    if (!this.character) return undefined;
+    const mapId = this.getMapId();
+    const key = `${this.content.contentEpoch}:${this.content.getQuestRevision()}:${this.quests.getRevision()}:${this.character.level}:${mapId}`;
+    const now = Date.now();
+    const cached = this.questGuide;
+    if (cached && cached.key === key && now >= cached.computedAt && now < cached.staleAt) return cached.guide;
+
+    const guide = buildQuestGuide({
+      catalog: allQuests,
+      completedIds: this.quests.getCompletedQuestIds(),
+      activeIds: this.quests.getActiveQuestIds(),
+      level: this.character.level,
+      weeklyCompletions,
+      now: new Date(now),
+      givers: questGivers(this.content),
+      currentMapId: mapId,
+    }, availableQuestIds);
+    this.questGuide = { key, guide, computedAt: now, staleAt: nextWeeklyReopening(weeklyCompletions, now) };
+    return guide;
+  }
+
   /** Quest data block for the state message: active progress, completed history, defs, offered IDs. */
   private buildQuestState(): {
     activeQuests: QuestProgressEntry[];
@@ -597,6 +626,7 @@ export class PlayerSession {
     offeredQuestIds: string[];
     questGiverNpcId: string | undefined;
     availableQuestIds: string[];
+    questGuide: QuestGuide | undefined;
     questResolutions: {
       monsters: Record<string, string>;
       items: Record<string, string>;
@@ -665,6 +695,7 @@ export class PlayerSession {
       offeredQuestIds,
       questGiverNpcId: npc?.id,
       availableQuestIds,
+      questGuide: this.getQuestGuide(allQuests, weeklyCompletions, availableQuestIds),
       questResolutions: { monsters: monsterNames, items: itemNames, tiles: tileLookups },
     };
   }
@@ -680,7 +711,11 @@ export class PlayerSession {
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
 
-    const reason = this.quests.accept(def, { playerLevel: this.character.level, partySize });
+    const reason = this.quests.accept(def, {
+      playerLevel: this.character.level,
+      partySize,
+      currentTileId: this.getCurrentTile?.()?.id,
+    });
     if (reason) return { success: false, error: reason };
     this.addLogEntry(`Accepted quest: ${def.name}`, 'battle');
     return { success: true };
@@ -808,6 +843,7 @@ export class PlayerSession {
       offeredQuestIds: questBlock.offeredQuestIds,
       questGiverNpcId: questBlock.questGiverNpcId,
       availableQuestIds: questBlock.availableQuestIds,
+      questGuide: questBlock.questGuide,
       questResolutions: questBlock.questResolutions,
       dungeon: this.getDungeonState?.() ?? undefined,
       xpGauge: this.character ? this.getXpGauge?.() ?? undefined : undefined,
@@ -1577,7 +1613,7 @@ export class PlayerSession {
       active: data.activeQuests ?? [],
       completed: data.completedQuests ?? [],
       weeklyCompletions: data.weeklyCompletions ?? {},
-    });
+    }, content.getQuestCatalog());
     // Migrate old log entries without IDs and restore the counter
     const restoredLog = data.combatLog.slice(-MAX_LOG_ENTRIES).map(withCurrentLogType);
     let maxId = 0;
