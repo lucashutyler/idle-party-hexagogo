@@ -98,6 +98,23 @@ describe('previewRoomLock', () => {
   it('treats a viewer without party info as a solo party', () => {
     expect(kinds(previewRoomLock({ minLevel: 6 }, makeState({ level: 2, members: null })))).toEqual([['level', ['alice']]]);
   });
+
+  it('reads the quest history once for a whole map of gated rooms, and again after a turn-in', () => {
+    let reads = 0;
+    const done = new Proxy({ questId: 'q-done', completedAt: '' }, {
+      get(target, key, receiver) {
+        if (key === 'questId') reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const state = { ...makeState(), completedQuests: [done] } as ServerStateMessage;
+    for (let i = 0; i < 40; i++) previewRoomLock({ requiredQuestIds: [`q-${i}`, 'q-done'] }, state);
+    expect(reads).toBe(1);
+
+    const later = { ...state, completedQuests: [done, { questId: 'q-7', completedAt: '' }] } as ServerStateMessage;
+    expect(previewRoomLock({ requiredQuestIds: ['q-7', 'q-done'] }, later)).toBeNull();
+    expect(kinds(previewRoomLock({ requiredQuestIds: ['q-7'] }, state))).toEqual([['quest', ['alice']]]);
+  });
 });
 
 describe('previewTravelLock', () => {

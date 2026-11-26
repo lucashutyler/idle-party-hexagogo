@@ -226,21 +226,22 @@ describe('RoomRequirements', () => {
       entryRequirements?: RoomEntryRequirements,
     ) => new HexTile(createCube(0, 0), 'lava', 'zone', 'room-1', requiredItemId, tileTypeDef, entryRequirements);
 
-    const cases: [string, TileTypeDefinition | undefined, string | undefined, RoomEntryRequirements | undefined][] = [
-      ['ungated', type(), undefined, undefined],
-      ['type-only', type({ entryRequirements: { minLevel: 10, requiredItemId: 'boots' } }), undefined, undefined],
-      ['room-only', type(), undefined, { requiredQuestIds: ['q_intro'] }],
-      ['merged', type({ entryRequirements: { requiredItemId: 'boots', minLevel: 5 } }), undefined, { minLevel: 25 }],
-      ['legacy type item', type({ requiredItemId: 'boots' }), undefined, { minLevel: 3 }],
-      ['legacy room item', type({ entryRequirements: { minLevel: 4 } }), 'lantern', undefined],
-      ['legacy item under an explicit one', type({ requiredItemId: 'boots' }), 'lantern', { requiredItemId: 'key' }],
-      ['no tile type', undefined, 'lantern', { minLevel: 2 }],
+    type GateCase = [string, TileTypeDefinition | undefined, string | undefined, RoomEntryRequirements | undefined, RoomEntryRequirements | undefined];
+    const cases: GateCase[] = [
+      ['ungated', type(), undefined, undefined, undefined],
+      ['type-only', type({ entryRequirements: { minLevel: 10, requiredItemId: 'boots' } }), undefined, undefined, { minLevel: 10, requiredItemId: 'boots' }],
+      ['room-only', type(), undefined, { requiredQuestIds: ['q_intro'] }, { requiredQuestIds: ['q_intro'] }],
+      ['merged', type({ entryRequirements: { requiredItemId: 'boots', minLevel: 5 } }), undefined, { minLevel: 25 }, { minLevel: 25, requiredItemId: 'boots' }],
+      ['legacy type item', type({ requiredItemId: 'boots' }), undefined, { minLevel: 3 }, { minLevel: 3, requiredItemId: 'boots' }],
+      ['legacy room item', type({ entryRequirements: { minLevel: 4 } }), 'lantern', undefined, { minLevel: 4, requiredItemId: 'lantern' }],
+      ['legacy item under an explicit one', type({ requiredItemId: 'boots' }), 'lantern', { requiredItemId: 'key' }, { requiredItemId: 'key' }],
+      ['no tile type', undefined, 'lantern', { minLevel: 2 }, { minLevel: 2, requiredItemId: 'lantern' }],
     ];
 
-    it.each(cases)('matches HexTile.entryRequirements: %s', (_name, typeDef, legacyItem, roomReqs) => {
-      const tile = hexTile(typeDef, legacyItem, roomReqs);
+    it.each(cases)('resolves the gate HexTile.entryRequirements reports: %s', (_name, typeDef, legacyItem, roomReqs, expected) => {
       const resolved = resolveTileRequirements({ entryRequirements: roomReqs, requiredItemId: legacyItem }, typeDef);
-      expect(resolved).toEqual(tile.entryRequirements);
+      expect(resolved).toEqual(expected);
+      expect(hexTile(typeDef, legacyItem, roomReqs).entryRequirements).toEqual(expected);
     });
 
     it('merges a room over its type field by field', () => {

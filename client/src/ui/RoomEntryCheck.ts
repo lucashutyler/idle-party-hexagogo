@@ -1,5 +1,6 @@
 import type {
   ClientCharacterState,
+  CompletedQuestEntry,
   GamePartyMember,
   MapTransitionLink,
   RoomEntryFailure,
@@ -14,8 +15,12 @@ import type { WorldCache } from '../network/WorldCache';
 export const NO_WALKING_ROUTE_TEXT = 'No walking route from here. This area is reached through a door.';
 export const UNKNOWN_QUEST_LOCK_TEXT = 'Opens later in the story';
 const UNKNOWN_ITEM_NAME = 'a special item';
+const NO_COMPLETED_QUESTS: readonly CompletedQuestEntry[] = [];
 
 type TileTypeLookup = Pick<WorldCache, 'getTileTypeDef'>;
+
+/** Keyed by the history array itself: a push that leaves the history unchanged hands back the same one. */
+const completedIdsByHistory = new WeakMap<readonly CompletedQuestEntry[], ReadonlySet<string>>();
 
 /** A room's whole gate: its tile type's, overridden field by field by its own. */
 export function roomRequirements(def: WorldTileDefinition, worldCache: TileTypeLookup): RoomEntryRequirements | undefined {
@@ -109,7 +114,7 @@ function gateMembers(reqs: RoomEntryRequirements, state: ServerStateMessage): Ro
     username: state.username,
     level: character.level,
     equippedItemIds: equippedIds(character),
-    completedQuestIds: new Set((state.completedQuests ?? []).map(q => q.questId)),
+    completedQuestIds: completedQuestIds(state),
   }];
   const assumedItems = new Set(reqs.requiredItemId ? [reqs.requiredItemId] : []);
   const assumedQuests = new Set(reqs.requiredQuestIds ?? []);
@@ -124,6 +129,16 @@ function gateMembers(reqs: RoomEntryRequirements, state: ServerStateMessage): Ro
     });
   }
   return members;
+}
+
+function completedQuestIds(state: ServerStateMessage): ReadonlySet<string> {
+  const history = state.completedQuests ?? NO_COMPLETED_QUESTS;
+  let ids = completedIdsByHistory.get(history);
+  if (!ids) {
+    ids = new Set(history.map(q => q.questId));
+    completedIdsByHistory.set(history, ids);
+  }
+  return ids;
 }
 
 /** The map reads this on every push, so a character without its gear yet must not throw. */
