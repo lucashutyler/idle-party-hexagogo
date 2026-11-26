@@ -1123,7 +1123,7 @@ export function canEquipSkill(
   content: SkillContent,
 ): boolean {
   const schedule = getSlotSchedule(className, content);
-  if (slotIndex < 0 || slotIndex >= schedule.length) return false;
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= schedule.length) return false;
 
   const slot = schedule[slotIndex];
   if (level < slot.unlocksAtLevel) return false;
@@ -1164,7 +1164,7 @@ export function unequipSkillFromSlot(
   slotIndex: number,
   equippedSkills: (SkillId | null)[],
 ): (SkillId | null)[] {
-  if (slotIndex < 0 || slotIndex >= equippedSkills.length) return equippedSkills;
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= equippedSkills.length) return equippedSkills;
   const newEquipped = [...equippedSkills];
   newEquipped[slotIndex] = null;
   return newEquipped;

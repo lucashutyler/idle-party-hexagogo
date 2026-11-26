@@ -88,6 +88,19 @@ describe('PlayerSession skill loadout (content-driven)', () => {
     expect(loadout.equippedSkills).toEqual(['knight_guard', null]);
   });
 
+  it('refuses a slot index that is not a whole number', () => {
+    const session = makeSession();
+    setLevel(session, 3);
+    session.autoUnlockSkills();
+    expect(session.handleEquipSkill('knight_bash', 0.5)).toBe(false);
+    expect(session.handleEquipSkill('knight_bash', 1.5)).toBe(false);
+
+    session.handleUnequipSkill(0.5);
+    const equipped = session.getSkillLoadout()!.equippedSkills;
+    expect(equipped).toEqual(['knight_guard', null]);
+    expect(Object.keys(equipped)).toEqual(['0', '1']);
+  });
+
   it('rejects equipping a cross-class skill without a grant', () => {
     const session = makeSession(makeSkills(), { magic_ring: RING });
     expect(session.handleEquipSkill('mage_zap', 1)).toBe(false);

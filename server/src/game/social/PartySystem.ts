@@ -42,6 +42,10 @@ function occupiedPositions(party: GamePartyInfo, ignore?: string): Set<PartyGrid
   return taken;
 }
 
+function isGridPosition(position: number): position is PartyGridPosition {
+  return Number.isInteger(position) && position >= 0 && position <= 8;
+}
+
 function firstFreePosition(party: GamePartyInfo): PartyGridPosition | null {
   const taken = occupiedPositions(party);
   for (let i = 0; i < 9; i++) {
@@ -328,7 +332,7 @@ export class PartySystem {
     position: PartyGridPosition,
     getPlayerPartyId: (u: string) => string | null,
   ): true | string {
-    if (position < 0 || position > 8) return 'Invalid position';
+    if (!isGridPosition(position)) return 'Invalid position';
 
     const partyId = getPlayerPartyId(username);
     if (!partyId) return 'You are not in a party';
@@ -432,7 +436,7 @@ export class PartySystem {
     position: PartyGridPosition,
     getPlayerPartyId: (u: string) => string | null,
   ): true | string {
-    if (position < 0 || position > 8) return 'Invalid position';
+    if (!isGridPosition(position)) return 'Invalid position';
 
     const partyId = getPlayerPartyId(callerUsername);
     if (!partyId) return 'You are not in a party';

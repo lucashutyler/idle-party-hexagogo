@@ -437,7 +437,7 @@ describe('gift durability', () => {
     ['a fractional quantity', 'Taker', 'gem', 1.5, 'Invalid quantity'],
     ['a zero quantity', 'Taker', 'gem', 0, 'Invalid quantity'],
     ['more than the sender holds', 'Taker', 'gem', 4, 'Not enough'],
-    ['a huge quantity', 'Taker', 'gem', 1e21, 'Not enough'],
+    ['a huge quantity', 'Taker', 'gem', 1e21, 'Invalid quantity'],
     ['a non-item named __proto__', 'Taker', '__proto__', 1, 'Not enough'],
     ['a non-item named constructor', 'Taker', 'constructor', 1, 'Not enough'],
     ['a non-item named toString', 'Taker', 'toString', 1, 'Not enough'],

@@ -11,7 +11,7 @@ import type {
   SetDefinition,
   SkillDefinition,
 } from '@idle-party-rpg/shared';
-import { COMBAT_PACE, paceHitDamage } from '@idle-party-rpg/shared';
+import { COMBAT_PACE, MAX_STACK, itemSellValue, paceHitDamage } from '@idle-party-rpg/shared';
 import {
   computeEquipmentBonuses,
   classIconHtml,
@@ -144,6 +144,7 @@ export class CharItemsScreen implements Screen {
 
   private lastEquipment: Record<string, string | null> = {};
   private lastInventory: Record<string, number> = {};
+  private questKeptItemIds = new Set<string>();
   private lastClassName = '';
   private lastMailbox: MailboxEntry[] = [];
   private lastProposedTrades: TradeState[] = [];
@@ -494,6 +495,7 @@ export class CharItemsScreen implements Screen {
     this.setDefs = state.setDefinitions ?? {};
     this.lastEquipment = { ...char.equipment };
     this.lastInventory = { ...char.inventory };
+    this.questKeptItemIds = new Set(char.questKeptItemIds ?? []);
     this.lastClassName = char.className;
     this.lastMailbox = state.social?.mailbox ?? [];
     this.lastProposedTrades = state.social?.proposedTrades ?? [];
@@ -1131,10 +1133,10 @@ export class CharItemsScreen implements Screen {
       const color = def ? (RARITY_COLORS[def.rarity] ?? 'var(--text-1)') : 'var(--text-1)';
       const name = def?.name ?? entry.itemId;
       const fullCount = (this.lastInventory[entry.itemId] ?? 0) + entry.quantity;
-      const willOverflow = fullCount > 99;
+      const willOverflow = fullCount > MAX_STACK;
       const note = entry.returned ? '<span class="mailbox-note">(returned)</span>' : '';
       const overflow = willOverflow
-        ? `<div class="mailbox-warn">Inventory full: would exceed 99 (${this.lastInventory[entry.itemId] ?? 0} + ${entry.quantity})</div>`
+        ? `<div class="mailbox-warn">Inventory full: would exceed ${MAX_STACK} (${this.lastInventory[entry.itemId] ?? 0} + ${entry.quantity})</div>`
         : '';
       const icon = def ? renderItemIcon(entry.itemId, def, { extraClass: 'hero-row-icon' }) : '';
       return `<div class="mailbox-row">
@@ -1309,7 +1311,12 @@ export class CharItemsScreen implements Screen {
           actionsHtml += `<button class="popup-action-equip${blocked}" data-item="${escapeHtml(itemId)}">Equip</button>`;
         }
       }
-      actionsHtml += `<button class="popup-action-destroy danger" data-item="${escapeHtml(itemId)}" data-max="${count}">Destroy</button>`;
+      if (this.questKeptItemIds.has(itemId)) {
+        actionsHtml += '<span class="popup-action-kept">Needed for a quest</span>';
+      } else {
+        actionsHtml += `<button class="popup-action-sell">Sell (${itemSellValue(def)}g each)</button>`;
+        actionsHtml += `<button class="popup-action-destroy danger" data-item="${escapeHtml(itemId)}" data-max="${count}">Destroy</button>`;
+      }
     }
 
     const extraHtml = context === 'inventory' ? renderEquipCompareBlock(def, this.lastEquipment, this.itemDefs) : '';
@@ -1353,25 +1360,53 @@ export class CharItemsScreen implements Screen {
       });
     }
 
+    const backToItem = () => this.showItemPopup(itemId, 'inventory', undefined);
+
+    this.modalOverlay.querySelector('.popup-action-sell')?.addEventListener('click', () => {
+      this.showCountModal({
+        itemName: def.name,
+        max: this.lastInventory[itemId] ?? 0,
+        verb: 'Sell',
+        danger: false,
+        unitGold: itemSellValue(def),
+        onConfirm: (n) => this.whenNotQuestKept(itemId, () => this.gameClient.sendShopSell(itemId, n)),
+        onCancel: backToItem,
+      });
+    });
+
     const destroyBtn = this.modalOverlay.querySelector('.popup-action-destroy') as HTMLElement | null;
     if (destroyBtn) {
       destroyBtn.addEventListener('click', () => {
-        const id = destroyBtn.getAttribute('data-item')!;
         const max = parseInt(destroyBtn.getAttribute('data-max') ?? '1', 10);
-        const dDef = this.itemDefs[id];
-        const backToItem = () => this.showItemPopup(id, 'inventory', undefined);
         if (max === 1) {
           this.showConfirmModal(
-            `Destroy ${dDef?.name ?? 'item'}?`,
+            `Destroy ${def.name}?`,
             'This item will be permanently lost.',
-            () => { this.gameClient.sendDestroyItems(id, 1); this.hideModal(); },
+            () => this.whenNotQuestKept(itemId, () => this.gameClient.sendDestroyItems(itemId, 1)),
             backToItem,
           );
         } else {
-          this.showDestroyCountModal(id, dDef?.name ?? 'item', max, backToItem);
+          this.showCountModal({
+            itemName: def.name,
+            max,
+            verb: 'Destroy',
+            danger: true,
+            onConfirm: (n) => this.whenNotQuestKept(itemId, () => this.gameClient.sendDestroyItems(itemId, n)),
+            onCancel: backToItem,
+          });
         }
       });
     }
+  }
+
+  /** A push may have marked the item as needed for a quest while a prompt was open; its popup then says so. */
+  private whenNotQuestKept(itemId: string, send: () => void): void {
+    if (this.questKeptItemIds.has(itemId)) {
+      this.showItemPopup(itemId, 'inventory', undefined);
+      return;
+    }
+    send();
+    this.hideModal();
   }
 
   private showConfirmModal(title: string, message: string, onConfirm: () => void, onCancel = () => this.hideModal()): void {
@@ -1387,36 +1422,51 @@ export class CharItemsScreen implements Screen {
     this.modalOverlay.querySelector('.items-modal-cancel')!.addEventListener('click', onCancel);
   }
 
-  private showDestroyCountModal(itemId: string, itemName: string, max: number, onCancel: () => void): void {
+  /** Pick 1..max of a stack; with `unitGold` it also shows what that many are worth. */
+  private showCountModal(opts: {
+    itemName: string;
+    max: number;
+    verb: string;
+    danger: boolean;
+    unitGold?: number;
+    onConfirm: (count: number) => void;
+    onCancel: () => void;
+  }): void {
+    const { itemName, verb, danger, unitGold, onConfirm, onCancel } = opts;
+    const max = Math.max(1, opts.max);
+    const totalText = (n: number) => (unitGold === undefined ? '' : `Total: ${(n * unitGold).toLocaleString()} gold`);
+    const picker = max > 1
+      ? `<div class="item-popup-stats items-modal-prompt">How many? (1-${max})</div>
+        <div class="items-modal-count-row">
+          <button class="items-modal-btn items-modal-minus" aria-label="One fewer">-</button>
+          <span class="items-modal-count-value">1</span>
+          <button class="items-modal-btn items-modal-plus" aria-label="One more">+</button>
+          <button class="items-modal-btn items-modal-max">Max</button>
+        </div>`
+      : '';
     this.openModal(`
-      <div class="item-popup-name">Destroy ${escapeHtml(itemName)}</div>
-      <div class="item-popup-stats items-modal-prompt">How many? (1-${max})</div>
-      <div class="items-modal-count-row">
-        <button class="items-modal-btn items-modal-minus" aria-label="One fewer">-</button>
-        <span class="items-modal-count-value">1</span>
-        <button class="items-modal-btn items-modal-plus" aria-label="One more">+</button>
-        <button class="items-modal-btn items-modal-max">Max</button>
-      </div>
+      <div class="item-popup-name">${escapeHtml(verb)} ${escapeHtml(itemName)}</div>
+      ${picker}
+      ${unitGold === undefined ? '' : `<div class="items-modal-total">${totalText(1)}</div>`}
       <div class="item-popup-actions">
-        <button class="items-modal-confirm danger">Destroy</button>
+        <button class="items-modal-confirm${danger ? ' danger' : ''}">${escapeHtml(verb)}</button>
         <button class="items-modal-cancel">Cancel</button>
       </div>
     `);
 
-    const countEl = this.modalOverlay.querySelector('.items-modal-count-value') as HTMLElement;
+    const countEl = this.modalOverlay.querySelector('.items-modal-count-value');
+    const totalEl = this.modalOverlay.querySelector('.items-modal-total');
     let count = 1;
     const updateCount = (n: number) => {
       count = Math.max(1, Math.min(max, n));
-      countEl.textContent = String(count);
+      if (countEl) countEl.textContent = String(count);
+      if (totalEl) totalEl.textContent = totalText(count);
     };
 
-    this.modalOverlay.querySelector('.items-modal-minus')!.addEventListener('click', () => updateCount(count - 1));
-    this.modalOverlay.querySelector('.items-modal-plus')!.addEventListener('click', () => updateCount(count + 1));
-    this.modalOverlay.querySelector('.items-modal-max')!.addEventListener('click', () => updateCount(max));
-    this.modalOverlay.querySelector('.items-modal-confirm')!.addEventListener('click', () => {
-      this.gameClient.sendDestroyItems(itemId, count);
-      this.hideModal();
-    });
+    this.modalOverlay.querySelector('.items-modal-minus')?.addEventListener('click', () => updateCount(count - 1));
+    this.modalOverlay.querySelector('.items-modal-plus')?.addEventListener('click', () => updateCount(count + 1));
+    this.modalOverlay.querySelector('.items-modal-max')?.addEventListener('click', () => updateCount(max));
+    this.modalOverlay.querySelector('.items-modal-confirm')!.addEventListener('click', () => onConfirm(count));
     this.modalOverlay.querySelector('.items-modal-cancel')!.addEventListener('click', onCancel);
   }
 

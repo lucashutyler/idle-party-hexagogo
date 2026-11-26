@@ -173,7 +173,7 @@ export class SocialScreen implements Screen {
     // A confirm rejected on a stale nonce means the partner's offer moved. The
     // re-synced state repaints the new offer; this explains why nothing happened.
     this.gameClient.onServerError((message, code) => {
-      if (code === 'gift_refused' || code === 'party_refused') showMapToast(document.body, message);
+      if (code === 'gift_refused' || code === 'party_refused' || code === 'item_protected') showMapToast(document.body, message);
       if (code !== 'trade_nonce_mismatch' || !this.tradeModalEl) return;
       this.tradeNotice = 'That offer changed before your confirmation went through. Review the updated offer below, then confirm again.';
       deferWhilePressed(this.tradeModalEl, () => this.refreshTradeModal());
@@ -1842,7 +1842,8 @@ export class SocialScreen implements Screen {
   private itemPickerHtml(kind: 'trade' | 'gift', inventory: Record<string, number>, selection: Map<string, number>, emptyText: string): string {
     const itemDefs = this.lastState?.itemDefinitions ?? {};
     const skillDefs = this.worldCache.getSkillContent().skills;
-    const ids = listUnequippedEntries(inventory).map(([id]) => id).sort((a, b) => {
+    const questKept = new Set(this.lastState?.character?.questKeptItemIds ?? []);
+    const ids = listUnequippedEntries(inventory).map(([id]) => id).filter(id => !questKept.has(id)).sort((a, b) => {
       const rarity = (RARITY_ORDER[itemDefs[a]?.rarity ?? ''] ?? 99) - (RARITY_ORDER[itemDefs[b]?.rarity ?? ''] ?? 99);
       return rarity !== 0 ? rarity : (itemDefs[a]?.name ?? a).localeCompare(itemDefs[b]?.name ?? b);
     });

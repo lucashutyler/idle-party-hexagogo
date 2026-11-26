@@ -28,7 +28,7 @@ import { ApiTokenStore } from './auth/ApiTokenStore.js';
 import { createAuthRoutes } from './auth/authRoutes.js';
 import { createAdminRoutes } from './admin/adminRoutes.js';
 import { createMcpRouter } from './mcp/McpEndpoint.js';
-import { TRADE_NONCE_MISMATCH } from './game/social/TradeSystem.js';
+import { TRADE_NONCE_MISMATCH, TRADE_NO_LONGER_VALID, swapTradeItems } from './game/social/TradeSystem.js';
 import { AssetStore } from './game/AssetStore.js';
 import { mountAssetDirs } from './assetMounts.js';
 import swaggerUi from 'swagger-ui-express';
@@ -624,8 +624,9 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        if (!session.handleEquipItemForceDestroy(msg.itemId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot equip item' }));
+        const refusal = session.handleEquipItemForceDestroy(msg.itemId);
+        if (refusal) {
+          ws.send(JSON.stringify(refusal));
           return;
         }
         playerManager.sendStateToParty(username);
@@ -668,9 +669,12 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        if (!session.handleDestroyItems(msg.itemId, msg.count)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot destroy item' }));
+        const refusal = session.handleDestroyItems(msg.itemId, msg.count);
+        if (refusal) {
+          ws.send(JSON.stringify(refusal));
+          return;
         }
+        playerManager.sendStateToPlayer(username);
         return;
       }
 
@@ -724,36 +728,11 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        const quantity = msg.quantity;
-        if (quantity < 1) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid quantity' }));
+        const refusal = session.handleSellItems(msg.itemId, msg.quantity);
+        if (refusal) {
+          ws.send(JSON.stringify(refusal));
           return;
         }
-
-        // Check player has the item (unequipped inventory only)
-        if (session.getInventoryCount(msg.itemId) < quantity) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not enough items' }));
-          return;
-        }
-
-        // Get item definition for sell value
-        const itemDef = gameLoop.contentStore.getItem(msg.itemId);
-        if (!itemDef) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Unknown item' }));
-          return;
-        }
-
-        const sellValue = (itemDef.value ?? 1) * quantity;
-
-        // Remove items and add gold
-        if (!session.removeFromInventory(msg.itemId, quantity)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to remove items' }));
-          return;
-        }
-        session.grantGold(sellValue);
-
-        const itemName = quantity > 1 ? `${itemDef.name} x${quantity}` : itemDef.name;
-        session.addLogEntry(`Sold ${itemName} for ${sellValue} gold`, 'victory');
         playerManager.sendStateToPlayer(username);
         return;
       }
@@ -1460,21 +1439,22 @@ wss.on('connection', (ws, req) => {
 
       // --- Trade messages (asynchronous) ---
 
-      if (msg.type === 'propose_trade' && typeof msg.targetUsername === 'string' && Array.isArray(msg.items)) {
+      if (msg.type === 'propose_trade' && typeof msg.targetUsername === 'string') {
         const targetAccount = accountStore.findByUsername(msg.targetUsername);
         if (!targetAccount) {
           ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
           return;
         }
-        if (!msg.items.every((i: unknown) => { const item = i as Record<string, unknown>; return item && typeof item['itemId'] === 'string' && typeof item['quantity'] === 'number' && (item['quantity'] as number) > 0; })) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid trade items' }));
+        const offer = playerManager.tradeOffer(username, msg.items);
+        if (!Array.isArray(offer)) {
+          ws.send(JSON.stringify(offer));
           return;
         }
-        console.log(`[Trade] ${username} proposing trade with ${msg.targetUsername}:`, msg.items);
+        console.log(`[Trade] ${username} proposing trade with ${msg.targetUsername}:`, offer);
         const result = playerManager.trades.proposeTrade(
           username,
           msg.targetUsername,
-          msg.items,
+          offer,
           (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
           (a, b) => playerManager.isTradeBlocked(a, b),
         );
@@ -1487,16 +1467,17 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-      if (msg.type === 'counter_trade' && typeof msg.tradeId === 'string' && Array.isArray(msg.items)) {
-        if (!msg.items.every((i: unknown) => { const item = i as Record<string, unknown>; return item && typeof item['itemId'] === 'string' && typeof item['quantity'] === 'number' && (item['quantity'] as number) > 0; })) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid trade items' }));
+      if (msg.type === 'counter_trade' && typeof msg.tradeId === 'string') {
+        const offer = playerManager.tradeOffer(username, msg.items);
+        if (!Array.isArray(offer)) {
+          ws.send(JSON.stringify(offer));
           return;
         }
-        console.log(`[Trade] ${username} countering trade ${msg.tradeId}:`, msg.items);
+        console.log(`[Trade] ${username} countering trade ${msg.tradeId}:`, offer);
         const result = playerManager.trades.counterTrade(
           msg.tradeId,
           username,
-          msg.items,
+          offer,
           (u, itemId, qty) => playerManager.hasItemInInventory(u, itemId, qty),
         );
         if (typeof result === 'string') {
@@ -1534,6 +1515,7 @@ wss.on('connection', (ws, req) => {
           // Re-sync so a client that rejected on a stale nonce repaints with the
           // current offer (and its current nonce) instead of retrying the old one.
           playerManager.sendStateToPlayer(username);
+          if (result === TRADE_NO_LONGER_VALID && partner) playerManager.sendStateToPlayer(partner);
           return;
         }
 
@@ -1560,37 +1542,13 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        type Removal = { session: typeof initiatorSession; itemId: string; qty: number };
-        const removals: Removal[] = [];
-
-        const rollback = () => {
-          for (const { session, itemId, qty } of removals) {
-            session.addToInventory(itemId, qty);
-          }
-        };
-
-        for (const { itemId, quantity } of initiatorOffer.items) {
-          if (!initiatorSession.removeFromInventory(itemId, quantity)) {
-            rollback();
-            ws.send(JSON.stringify({ type: 'error', message: 'Trade failed — item no longer available' }));
-            return;
-          }
-          removals.push({ session: initiatorSession, itemId, qty: quantity });
-        }
-        for (const { itemId, quantity } of targetOffer.items) {
-          if (!targetSession.removeFromInventory(itemId, quantity)) {
-            rollback();
-            ws.send(JSON.stringify({ type: 'error', message: 'Trade failed — item no longer available' }));
-            return;
-          }
-          removals.push({ session: targetSession, itemId, qty: quantity });
-        }
-
-        for (const { itemId, quantity } of initiatorOffer.items) {
-          targetSession.addToInventory(itemId, quantity);
-        }
-        for (const { itemId, quantity } of targetOffer.items) {
-          initiatorSession.addToInventory(itemId, quantity);
+        const swapFailure = swapTradeItems(initiatorSession, initiatorOffer.items, targetSession, targetOffer.items);
+        if (swapFailure) {
+          const message = swapFailure === 'inventory_full' ? 'Trade failed — inventory full' : 'Trade failed — item no longer available';
+          ws.send(JSON.stringify({ type: 'error', message }));
+          playerManager.sendStateToPlayer(initiatorOffer.username);
+          playerManager.sendStateToPlayer(targetOffer.username);
+          return;
         }
 
         const describeItems = (items: typeof initiatorOffer.items) =>
@@ -1624,7 +1582,7 @@ wss.on('connection', (ws, req) => {
 
       if (msg.type === 'send_gift' && typeof msg.targetUsername === 'string' && typeof msg.itemId === 'string' && typeof msg.quantity === 'number') {
         const refusal = playerManager.sendGift(username, msg.targetUsername, msg.itemId, msg.quantity);
-        if (refusal) ws.send(JSON.stringify(giftRefusal(refusal)));
+        if (refusal) ws.send(JSON.stringify(typeof refusal === 'string' ? giftRefusal(refusal) : refusal));
         return;
       }
 

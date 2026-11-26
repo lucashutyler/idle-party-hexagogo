@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.3',
+    notes: [
+      'Fixed a bug with item amounts in trades and shop sales.',
+      'Items a quest still needs can no longer be destroyed, sold, gifted or traded away by mistake.',
+      'You can sell items straight from the Hero screen.',
+      'Gifts and trade offers now show item names and pictures.',
+      'Shops list the gear your class can use first.',
+    ],
+  },
+  {
     version: '2026.11.25.1',
     notes: [
       'Autorun now walks your party a room every second instead of about every 6, so travelling is much faster and safer: you\'re gone before monsters get a swing in. A fight you win before moving on (say, with an Archer\'s first arrow) still pays; one you leave unfinished gives no XP, loot or kill progress, though visiting rooms still counts for quests. Rooms you haven\'t uncovered still need a full fight, and running by hand works as before.',

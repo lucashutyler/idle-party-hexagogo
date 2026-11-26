@@ -281,6 +281,16 @@ export const SEED_ITEMS: Record<string, ItemDefinition> = {
 
 // --- Pure functions ---
 
+/** An amount of items a player can hold or hand over: a whole number, at least 1. */
+export function isWholeItemCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+}
+
+/** Gold a shop pays for one of this item. */
+export function itemSellValue(def: ItemDefinition): number {
+  return Math.max(0, Math.floor(def.value ?? 1));
+}
+
 /** Add one item to inventory. Returns false if stack is already at MAX_STACK. */
 export function addItemToInventory(inventory: Record<string, number>, itemId: string): boolean {
   const current = inventory[itemId] ?? 0;
@@ -350,8 +360,7 @@ export function equipItem(
   if (!def || !def.equipSlot) return { success: false };
   if (className && !canClassEquipItem(def, className)) return { success: false };
 
-  // Must have the item in inventory
-  if ((inventory[itemId] ?? 0) <= 0) return { success: false };
+  if ((inventory[itemId] ?? 0) < 1) return { success: false };
 
   const slot = def.equipSlot;
   const is2H = slot === 'twohanded';
@@ -544,7 +553,7 @@ export function destroyItems(
   itemId: string,
   count: number,
 ): { success: boolean; removed: number } {
-  if (count <= 0) return { success: false, removed: 0 };
+  if (!isWholeItemCount(count)) return { success: false, removed: 0 };
   const current = inventory[itemId] ?? 0;
   if (current <= 0) return { success: false, removed: 0 };
 
@@ -572,7 +581,7 @@ export function equipItemForceDestroy(
   const def = items[itemId];
   if (!def || !def.equipSlot) return { success: false };
   if (className && !canClassEquipItem(def, className)) return { success: false };
-  if ((inventory[itemId] ?? 0) <= 0) return { success: false };
+  if ((inventory[itemId] ?? 0) < 1) return { success: false };
 
   const slot = def.equipSlot;
   const is2H = slot === 'twohanded';
