@@ -46,6 +46,14 @@ describe('BottomNav', () => {
     document.body.innerHTML = '';
   });
 
+  it('keeps the victory flash through the walk that follows at once', () => {
+    const t = setup();
+    for (const visual of ['fighting', 'victory', 'none']) t.push({ battle: { visual } });
+    expect(t.tab('combat').classList.contains('victory-flash')).toBe(true);
+    t.push({ battle: { visual: 'fighting' } });
+    expect(t.tab('combat').classList.contains('victory-flash')).toBe(false);
+  });
+
   it('includes badges in the accessible tab names', () => {
     const t = setup();
     t.nav.setChatUnread(5);

@@ -6,6 +6,7 @@ import {
   COMBAT_SNAPSHOT_MS,
   KILL_BEAT_MS,
   RUN_AVAILABLE_MS,
+  AUTO_RUN_ROOM_MS,
   combatRealElapsedMs,
   combatRealStepMs,
   processCombatStep,
@@ -46,7 +47,7 @@ export interface ServerBattleCallbacks {
   onCombatFlush?: (flush: CombatFlush) => void;
   /** A retreat is ending battle `battleId`; runs before the party moves on, so it may still set the route. */
   onRetreat?: (battleId: number) => void;
-  /** Whether the party should run from a fight the moment Run opens. */
+  /** Whether auto run is on for this party. */
   isAutoRun?: () => boolean;
   /** Run now: the timer found auto run due. */
   onAutoRun?: () => void;
@@ -61,6 +62,7 @@ export class ServerBattleTimer {
   private currentResult?: BattleResult;
   private battleDuration = 0;
   private currentBattleId = 0;
+  private battleStartedAt = 0;
 
   private started = false;
   private destroyed = false;
@@ -166,6 +168,19 @@ export class ServerBattleTimer {
     return this.party.hasDestination && (this.canMoveToNextTile?.() ?? false);
   }
 
+  /**
+   * Whether Autorun is walking the party on. A fight counts only with an exit armed for it: a room that
+   * opens mid-fight arms none. Between fights, the next one will arm its own.
+   */
+  get autoRunWalking(): boolean {
+    return this.autoRunApplies && (!this.isFighting(this.currentBattleId) || this.autoRunTimeout !== undefined);
+  }
+
+  /** Time until Autorun leaves this fight (a win it is waiting out included), while its exit is armed. */
+  get autoRunLeaveMs(): number | undefined {
+    return this.autoRunTimeout !== undefined && this.autoRunApplies ? this.autoRunDueMs() : undefined;
+  }
+
   /** True while a fight (including its kill beat) is on screen. */
   get isLive(): boolean {
     return !this.destroyed && this.state === 'battle' && this.combatState !== null;
@@ -203,11 +218,14 @@ export class ServerBattleTimer {
   /** Escape the current battle — skip rewards, move like defeat (only to discovered rooms). */
   escapeBattle(): boolean {
     if (this.destroyed || !this.canEscape()) return false;
-    this.clearTimers();
-    this.combatState = null;
-    this.currentVisual = 'none';
-    this.party.exitBattle();
-    this.moveOnOrFightHere();
+    this.leaveFight(RESULT_PAUSE);
+    return true;
+  }
+
+  /** Autorun's exit: no rewards and no wait for Run to open, and with no result to show it walks at once. */
+  autoRunAway(): boolean {
+    if (!this.isFighting(this.currentBattleId) || !this.walksOn) return false;
+    this.leaveFight(0);
     return true;
   }
 
@@ -264,32 +282,42 @@ export class ServerBattleTimer {
 
   /**
    * Arm (or disarm) the auto run for the current fight: with auto run on and a walkable next room,
-   * the party runs once Run opens. Call whenever auto run or the route changes mid-fight.
+   * the party leaves in time to reach it `AUTO_RUN_ROOM_MS` after the fight began. Call whenever
+   * auto run or the route changes mid-fight.
    */
   syncAutoRun(): void {
     if (this.autoRunTimeout) clearTimeout(this.autoRunTimeout);
     this.autoRunTimeout = undefined;
-    const combat = this.combatState;
-    if (this.destroyed || !combat || !this.isFighting(this.currentBattleId)) return;
-    if (!this.isAutoRun?.() || !this.walksOn) return;
+    if (!this.isFighting(this.currentBattleId) || !this.autoRunApplies) return;
     const battleId = this.currentBattleId;
-    const wait = Math.max(0, RUN_AVAILABLE_MS - combatRealElapsedMs(combat));
     this.autoRunTimeout = setTimeout(() => this.guard(() => {
       this.autoRunTimeout = undefined;
-      if (!this.isFighting(battleId)) return;
-      if (!this.canEscape() || !this.walksOn) {
-        this.syncAutoRun();
-        return;
-      }
-      this.onAutoRun?.();
-    }), wait);
+      if (this.isFighting(battleId) && this.walksOn) this.onAutoRun?.();
+    }), this.autoRunDueMs());
   }
 
-  /** After a fight ends early: walk on if the next room is open (after the result pause), else fight again here at once. */
-  private moveOnOrFightHere(): void {
+  private get autoRunApplies(): boolean {
+    return !!this.isAutoRun?.() && this.walksOn;
+  }
+
+  /** Timed by the wall clock: the combat clock only moves in whole steps, which would round each room up. */
+  private autoRunDueMs(): number {
+    return Math.max(0, this.battleStartedAt + AUTO_RUN_ROOM_MS - MOVE_DURATION - Date.now());
+  }
+
+  private leaveFight(pauseMs: number): void {
+    this.clearTimers();
+    this.combatState = null;
+    this.currentVisual = 'none';
+    this.party.exitBattle();
+    this.moveOnOrFightHere(pauseMs);
+  }
+
+  /** After a fight ends early: walk on after `pauseMs` if the next room is open, else fight again here at once. */
+  private moveOnOrFightHere(pauseMs: number): void {
     if (this.walksOn) {
       this.setState('result');
-      this.resultTimeout = setTimeout(() => this.guard(() => this.moveThenFight()), RESULT_PAUSE);
+      this.resultTimeout = setTimeout(() => this.guard(() => this.moveThenFight()), pauseMs);
     } else {
       this.guard(() => this.triggerBattle());
     }
@@ -318,6 +346,8 @@ export class ServerBattleTimer {
       this.start();
       return;
     }
+    // Mid-walk the next fight isn't built yet, and holding it here would walk the party a second room.
+    if (this.moveTimeout) return;
     this.settlePendingResult();
     this.holdNextFightUntil(this.pauseEndsAt);
     this.clearTimers();
@@ -343,17 +373,19 @@ export class ServerBattleTimer {
     this.lastFlushMs = 0;
     this.lastSnapshotMs = 0;
     this.battleDuration = 0;
+    this.battleStartedAt = Date.now();
 
     this.combatState = this.createCombat();
     this.currentVisual = 'fighting';
     this.party.enterBattle();
+    // Armed first: the callbacks below report whether Autorun is walking the party on.
+    this.syncAutoRun();
 
     this.onBattleStart?.();
     this.setState('battle');
     this.flush('full');
 
     this.stepInterval = setInterval(() => this.guard(() => this.step()), combatRealStepMs(this.combatState));
-    this.syncAutoRun();
   }
 
   private step(): void {
@@ -369,8 +401,12 @@ export class ServerBattleTimer {
     if (tick.finished) {
       this.stopStepping();
       this.pendingResult = tick.result === 'victory' ? 'victory' : 'defeat';
-      this.pauseEndsAt = Date.now() + KILL_BEAT_MS + RESULT_PAUSE + MOVE_DURATION;
-      this.killBeatTimeout = setTimeout(() => this.guard(() => this.showBattleResult()), KILL_BEAT_MS);
+      // A fight won before Autorun left is paid, and the party still walks on schedule.
+      const onTheWay = this.pendingResult === 'victory' && this.autoRunTimeout !== undefined;
+      const beatMs = onTheWay ? this.autoRunDueMs() : KILL_BEAT_MS;
+      const pauseMs = onTheWay ? 0 : RESULT_PAUSE;
+      this.pauseEndsAt = Date.now() + beatMs + pauseMs + MOVE_DURATION;
+      this.killBeatTimeout = setTimeout(() => this.guard(() => this.showBattleResult(pauseMs)), beatMs);
       this.flush('dynamic');
       return;
     }
@@ -402,7 +438,7 @@ export class ServerBattleTimer {
     this.onCombatFlush?.({ battleId: this.currentBattleId, combat, events, log, snapshot });
   }
 
-  private showBattleResult(): void {
+  private showBattleResult(walkPauseMs: number): void {
     this.killBeatTimeout = undefined;
     const result = this.pendingResult;
     if (result === null) return;
@@ -422,16 +458,16 @@ export class ServerBattleTimer {
       result === 'victory' ||
       (this.canMoveToNextTile?.() ?? false)
     );
-    this.continueAfterResult(canMove);
+    this.continueAfterResult(canMove, walkPauseMs);
   }
 
   /** Show the result, then walk on or fight again in this room. */
-  private continueAfterResult(canMove: boolean): void {
+  private continueAfterResult(canMove: boolean, walkPauseMs: number = RESULT_PAUSE): void {
     if (this.holdForRegroup()) return;
     this.setState('result');
 
     if (canMove) {
-      this.resultTimeout = setTimeout(() => this.guard(() => this.moveThenFight()), RESULT_PAUSE);
+      this.resultTimeout = setTimeout(() => this.guard(() => this.moveThenFight()), walkPauseMs);
     } else {
       this.resultTimeout = setTimeout(() => this.guard(() => {
         this.currentVisual = 'none';

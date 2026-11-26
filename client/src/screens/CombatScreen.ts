@@ -27,6 +27,8 @@ import { artworkUrl, placeholderUrl } from '../ui/assets';
 import { bringToFront, registerDismiss, release, wireFocusOnInteract } from '../ui/ModalStack';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { discoveredRoomName } from '../ui/routeSummary';
+import { autoRunTitle } from '../ui/autoRunText';
+import { AUTO_RUN_FILL_HTML, AutoRunFill } from '../ui/AutoRunFill';
 import { CombatPlayback, enrageDisplay, guessCooldownMs, skillDisplayState, timedSkillMs, unitKey } from '../combat/CombatPlayback';
 import type { PlaybackUnit, UnitStatics } from '../combat/CombatPlayback';
 import { battleStatus, battleStatusHtml, rewardLines } from '../combat/BattleStatus';
@@ -186,6 +188,7 @@ export class CombatScreen implements Screen {
   private lastTextAt = -Infinity;
   private lastClockText = '';
   private lastRunKey = '';
+  private readonly autoRunFill = new AutoRunFill();
   private runHintTimer?: ReturnType<typeof setTimeout>;
   private snapping = false;
   private syncingShown = false;
@@ -210,6 +213,7 @@ export class CombatScreen implements Screen {
   private rewardBaseline: CharacterProgress | null = null;
   private rewards: string[] = [];
   private rewardsCounted = false;
+  private wonBattleId: number | null = null;
 
   private onUserClick?: (username: string, anchor: HTMLElement) => void;
 
@@ -278,7 +282,7 @@ export class CombatScreen implements Screen {
         <button class="combat-forecast" type="button" style="display:none"></button>
         <span class="combat-clock">–:––</span>
         <button class="combat-auto-run" type="button" aria-pressed="false" style="display:none">Autorun</button>
-        <button class="combat-run-btn combat-run-locked" type="button"><span class="combat-run-label">Run</span><span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
+        <button class="combat-run-btn combat-run-locked" type="button">${AUTO_RUN_FILL_HTML}<span class="combat-run-label">Run</span><span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <button class="combat-dungeon-leave" type="button" style="display:none">Leave<span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <span class="combat-run-hint" style="display:none"></span>
       </div>
@@ -436,8 +440,11 @@ export class CombatScreen implements Screen {
   private applyState(state: ServerStateMessage): void {
     this.stage.classList.remove('fighting', 'victory', 'defeat', 'retreat');
     if (state.battle.visual !== 'none') this.stage.classList.add(state.battle.visual);
+    else if (this.autoRunWalking() && this.wonThisFight()) this.stage.classList.add('victory');
+    this.stage.classList.toggle('autorun-walking', this.autoRunWalking());
     this.updateBackground(state);
     this.updateHeader(state);
+    this.autoRunFill.paint(this.runBtn, state.battle, this.gameClient.lastStateAt);
     this.syncIdleBoard(state);
     this.paintStatus();
     this.refreshIdentities();
@@ -555,7 +562,8 @@ export class CombatScreen implements Screen {
       live.add(unit.key);
       if (this.cards.has(unit.key)) continue;
       const card = this.addCard(unit.key, unit.side, unit.pos);
-      if (battleChanged || this.cameFromIdleBoard) this.fx.popIn(card.el, (order++) * POP_IN_STAGGER_MS);
+      const arriving = battleChanged || this.cameFromIdleBoard;
+      if (arriving && !this.autoRunWalking()) this.fx.popIn(card.el, (order++) * POP_IN_STAGGER_MS);
     }
     this.cameFromIdleBoard = false;
     for (const [key, card] of this.cards) {
@@ -668,6 +676,7 @@ export class CombatScreen implements Screen {
   private trackRewards(state: ServerStateMessage): void {
     const visual = state.battle.visual;
     if (visual === 'victory') {
+      this.wonBattleId = this.playback.battleId;
       if (this.rewardsCounted) return;
       this.rewardsCounted = true;
       this.rewards = rewardLines(this.rewardBaseline, this.progressOf(state));
@@ -676,6 +685,16 @@ export class CombatScreen implements Screen {
     this.rewardBaseline = this.progressOf(state);
     this.rewardsCounted = false;
     if (visual === 'fighting') this.rewards = [];
+  }
+
+  /** The server has called this fight won. Walking on, it stops saying so before playback gets there. */
+  private wonThisFight(): boolean {
+    return this.wonBattleId !== null && this.wonBattleId === this.playback.battleId;
+  }
+
+  /** At a room a second, per-fight flourishes would never finish. */
+  private autoRunWalking(): boolean {
+    return this.lastState?.battle.autoRunWalking === true;
   }
 
   private paintStatus(): void {
@@ -693,7 +712,7 @@ export class CombatScreen implements Screen {
     const status = battleStatus({
       visual: state.battle.visual,
       hasFight: this.playback.battleId !== null,
-      result: this.playback.result,
+      result: this.playback.result ?? (this.wonThisFight() ? 'victory' : null),
       inDungeon: !!fought,
       lastFloor: !!fought && fought.floor >= fought.totalFloors,
       walking,
@@ -869,6 +888,7 @@ export class CombatScreen implements Screen {
         this.showStartBanner();
         break;
       case 'battle_end':
+        if (ev.result === 'victory' && this.autoRunWalking()) break;
         this.stage.classList.toggle('big-result', this.bigFight());
         if (ev.result === 'victory') {
           this.showBanner('VICTORY!', 'victory', 1400);
@@ -974,6 +994,7 @@ export class CombatScreen implements Screen {
   }
 
   private showStartBanner(): void {
+    if (this.autoRunWalking()) return;
     if (this.playback.bossPositions.length > 0) this.showBanner('BOSS FIGHT!', 'boss', 1300);
     else this.showBanner('FIGHT!', 'fight', 950);
   }
@@ -1416,7 +1437,7 @@ export class CombatScreen implements Screen {
     }
     this.locationLabel.title = this.locationLabel.textContent ?? '';
     this.updateAutoRetreatFlag(state);
-    this.updateAutoRunButton(state);
+    this.updateAutoRunButton(latest);
     this.lastRunKey = '';
     this.updateRunButton(state);
   }
@@ -1444,7 +1465,7 @@ export class CombatScreen implements Screen {
     this.autoRunBtn.classList.toggle('locked', !canToggle);
     this.autoRunBtn.title = !canToggle
       ? 'Only the party owner or a leader can change Autorun'
-      : on ? 'Autorun is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Autorun: run as soon as Run opens while traveling';
+      : autoRunTitle(on);
   }
 
   private updateRunButton(state: ServerStateMessage): void {
@@ -1453,15 +1474,19 @@ export class CombatScreen implements Screen {
     const canRun = role === 'owner' || role === 'leader';
     const fighting = state.battle.visual === 'fighting' && this.playback.battleId !== null && !this.playback.finished;
     const elapsed = this.playback.elapsedMs;
-    const available = fighting && canRun && elapsed >= RUN_AVAILABLE_MS;
-    const progress = fighting && canRun ? Math.min(1, elapsed / RUN_AVAILABLE_MS) : 0;
+    // Autorun leaves before Run can open, so charging the button would never finish.
+    const walking = state.battle.autoRunWalking === true;
+    const charging = fighting && canRun && !walking;
+    const available = charging && elapsed >= RUN_AVAILABLE_MS;
+    const progress = charging ? Math.min(1, elapsed / RUN_AVAILABLE_MS) : 0;
     const below = state.social?.party?.autoRetreat?.belowPct ?? 0;
     const retreatNote = below > 0 ? `Auto-retreat is on (below ${below} %)` : '';
     const regrouping = this.regroupEndsAt > performance.now();
     const lockedHint = !canRun
       ? 'Only the party owner or a leader can run'
-      : fighting ? `Run becomes available ${RUN_AVAILABLE_MS / 1000} seconds into a fight`
-        : regrouping ? 'The party is regrouping' : 'The next fight is about to start';
+      : regrouping ? 'The party is regrouping'
+        : walking ? 'Autorun is walking the party on'
+          : fighting ? `Run becomes available ${RUN_AVAILABLE_MS / 1000} seconds into a fight` : 'The next fight is about to start';
     const hint = [lockedHint, retreatNote].filter(Boolean).join('. ');
     const key = `${available}|${progress.toFixed(2)}|${hint}`;
     if (key === this.lastRunKey) return;

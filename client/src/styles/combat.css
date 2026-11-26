@@ -151,6 +151,17 @@
   transform-origin: left;
   transition: transform 180ms linear;
 }
+/* Autorun's timer, on this button and the map's Autorun button; see AutoRunFill. */
+.autorun-fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255, 112, 136, 0.65), rgba(255, 112, 136, 0.35));
+  transform: scaleX(0);
+  transform-origin: left;
+  pointer-events: none;
+}
 .combat-run-btn.ready {
   box-shadow: 0 2px 0 var(--edge-danger), inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 10px rgba(255, 77, 109, 0.55);
 }
@@ -345,6 +356,10 @@
 }
 .combat-stage.no-combat .combat-card-body {
   opacity: 0.6;
+}
+/* Between rooms every second, dimming the board would make it flicker. */
+.combat-stage.no-combat.autorun-walking .combat-card-body {
+  opacity: 1;
 }
 .combat-telegraph {
   position: absolute;

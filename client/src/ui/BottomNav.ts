@@ -113,8 +113,11 @@ export class BottomNav {
       const combatTab = this.tabButtons.get('combat');
       if (combatTab) {
         combatTab.classList.toggle('fighting-pulse', visual === 'fighting');
-        combatTab.classList.toggle('victory-flash', visual === 'victory' && lastVisual === 'fighting');
-        combatTab.classList.toggle('defeat-flash', visual === 'defeat' && lastVisual === 'fighting');
+        // 'none' follows a result at once while Autorun walks; the flash keeps playing through it.
+        if (visual !== 'none') {
+          combatTab.classList.toggle('victory-flash', visual === 'victory' && lastVisual === 'fighting');
+          combatTab.classList.toggle('defeat-flash', visual === 'defeat' && lastVisual === 'fighting');
+        }
       }
       this.tabButtons.get('map')?.classList.toggle('has-path', state.party.path.length > 0);
       this.setCountBadge('quests', readyQuestCount(state.activeQuests), 'ready');

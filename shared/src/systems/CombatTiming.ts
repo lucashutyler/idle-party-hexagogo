@@ -7,6 +7,8 @@ export const SCORCH_MS = 2000;
 export const MIN_COOLDOWN_MS = 1000;
 export const INTERRUPT_DELAY_MS = 300;
 export const RUN_AVAILABLE_MS = 5000;
+/** Real time Autorun spends on each room, the walk to the next one (`MOVE_DURATION`) included. */
+export const AUTO_RUN_ROOM_MS = 1000;
 export const KILL_BEAT_MS = 800;
 /** Players' first action lands at this offset + 100 ms × sorted index (index capped at 5). */
 export const FIRST_ACTION_PLAYER_MS = 1000;

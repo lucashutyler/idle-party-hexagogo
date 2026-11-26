@@ -40,6 +40,7 @@ describe('combat public API', () => {
       MIN_COOLDOWN_MS: 1000,
       INTERRUPT_DELAY_MS: 300,
       RUN_AVAILABLE_MS: 5000,
+      AUTO_RUN_ROOM_MS: 1000,
       KILL_BEAT_MS: 800,
       FIRST_ACTION_PLAYER_MS: 1000,
       FIRST_ACTION_MONSTER_MS: 1400,

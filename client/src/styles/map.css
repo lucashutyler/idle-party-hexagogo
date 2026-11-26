@@ -324,6 +324,12 @@ button.map-route-auto.on {
   border-color: var(--outline);
   color: var(--text-1);
 }
+button.map-route-auto {
+  isolation: isolate;
+}
+button.map-route-auto .autorun-fill {
+  background: rgba(255, 255, 255, 0.3);
+}
 button.map-route-auto.locked {
   opacity: 0.6;
 }

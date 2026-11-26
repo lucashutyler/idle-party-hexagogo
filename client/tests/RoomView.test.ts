@@ -195,16 +195,19 @@ describe('RoomView room actions', () => {
     return parent.querySelector('.room-view-overlay') as HTMLElement;
   }
 
-  it('offers Stop here on the current room while travelling, moving to that room and closing', () => {
+  it('offers Stop here on the current room while travelling, stopping the party and closing', () => {
     const onMove = vi.fn();
+    const onStop = vi.fn();
     const view = new RoomView(parent, onMove);
+    view.onStop = onStop;
     view.isTraveling = true;
     view.show(makeInfo({ isCurrentTile: true }));
 
     const stop = parent.querySelector('.room-view-action-stop') as HTMLElement;
     expect(stop).toBeTruthy();
     stop.click();
-    expect(onMove).toHaveBeenCalledWith(3, 4);
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(onMove).not.toHaveBeenCalled();
     expect(overlay().style.display).toBe('none');
   });
 

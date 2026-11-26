@@ -492,6 +492,10 @@ export class GameClient {
     return this.sendRaw({ type: 'move', col, row });
   }
 
+  sendStopTravel(): boolean {
+    return this.sendRaw({ type: 'stop_travel' });
+  }
+
   sendRun(): void {
     this.sendRaw({ type: 'run' });
   }

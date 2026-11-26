@@ -7,6 +7,8 @@ import type { Screen } from './ScreenManager';
 import type { ServerForecastMessage } from '@idle-party-rpg/shared';
 import { DEFAULT_COMBAT_PREFS } from '@idle-party-rpg/shared';
 import { RoomView } from '../ui/RoomView';
+import { autoRunTitle } from '../ui/autoRunText';
+import { AUTO_RUN_FILL_HTML, AutoRunFill } from '../ui/AutoRunFill';
 import type { RoomForecastState } from '../ui/RoomView';
 import { isForecastStale } from '../combat/ForecastFormat';
 import { RoomStatusPanel } from '../ui/RoomStatusPanel';
@@ -58,6 +60,7 @@ export class MapScreen implements Screen {
   private zoomControls?: HTMLElement;
   private recenterButton?: HTMLButtonElement;
   private routeChip?: HTMLElement;
+  private readonly autoRunFill = new AutoRunFill();
   private roomView?: RoomView;
   private roomSheet?: RoomSheet;
   private roomStatus?: RoomStatusPanel;
@@ -222,6 +225,14 @@ export class MapScreen implements Screen {
 
   /** Returns whether the order went out. */
   private tryMove(col: number, row: number): boolean {
+    return this.sendOrder(() => this.gameClient.sendMove(col, row));
+  }
+
+  private stopTravel(): void {
+    this.sendOrder(() => this.gameClient.sendStopTravel());
+  }
+
+  private sendOrder(send: () => boolean): boolean {
     if (this.gameClient.lastState?.dungeon) {
       this.showMoveToast('Leave the dungeon before traveling');
       return false;
@@ -230,7 +241,7 @@ export class MapScreen implements Screen {
       this.showMoveToast('Only the party owner or a leader can move');
       return false;
     }
-    if (!this.gameClient.sendMove(col, row)) {
+    if (!send()) {
       this.showMoveToast(OFFLINE_NOTICE);
       return false;
     }
@@ -304,6 +315,7 @@ export class MapScreen implements Screen {
       (action) => { this.runAction(action); },
       (tileId) => this.roomForecastState(tileId),
     );
+    this.roomView.onStop = () => this.stopTravel();
     this.roomSheet = new RoomSheet(
       this.container,
       {
@@ -568,9 +580,7 @@ export class MapScreen implements Screen {
         this.toggleAutoRun(auto);
         return;
       }
-      if (!target.closest('.map-route-stop')) return;
-      const party = this.gameClient.lastState?.party;
-      if (party) this.tryMove(party.col, party.row);
+      if (target.closest('.map-route-stop')) this.stopTravel();
     });
     this.container.appendChild(this.routeChip);
   }
@@ -591,12 +601,15 @@ export class MapScreen implements Screen {
     const locked = !this.canMove();
     const autoTitle = locked
       ? 'Only the party owner or a leader can change Autorun'
-      : on ? 'Autorun is on: the party runs as soon as Run opens while it has somewhere to walk' : 'Autorun: run as soon as Run opens while traveling';
+      : autoRunTitle(on);
     chip.hidden = false;
+    const receivedAt = this.gameClient.lastStateAt;
     deferWhilePressed(chip, () => {
       setHtml(chip, `<span class="map-route-text"><span class="map-route-arrow">→</span>${nameHtml}<span class="map-route-count">${count}</span></span>`
-        + `<button type="button" class="map-route-auto${on ? ' on' : ''}${locked ? ' locked' : ''}" aria-pressed="${on}" title="${autoTitle}">Autorun</button>`
+        + `<button type="button" class="map-route-auto${on ? ' on' : ''}${locked ? ' locked' : ''}" aria-pressed="${on}" title="${autoTitle}">${AUTO_RUN_FILL_HTML}Autorun</button>`
         + '<button type="button" class="map-route-stop">Stop</button>');
+      const auto = chip.querySelector('.map-route-auto');
+      if (auto) this.autoRunFill.paint(auto, state.battle, receivedAt);
     });
   }
 

@@ -27,6 +27,7 @@ import {
   pickWeightedEncounter,
   partyKey as partyKeyOf,
   RUN_AVAILABLE_MS,
+  AUTO_RUN_ROOM_MS,
   GAUGE_LONG_FIGHT_FACTOR,
   RoomTally,
   gaugeStrata,
@@ -311,7 +312,7 @@ export class PartyBattleManager {
         },
         onRetreat: (battleId) => this.applyRetreat(partyId, battleId),
         isAutoRun: () => !this.entries.get(partyId)?.dungeonRun && this.autoRunPolicy(partyId),
-        onAutoRun: () => { this.escapeBattle(partyId); },
+        onAutoRun: () => { this.autoRunAway(partyId); },
         onMove: () => {
           const allQuests = this.content.getQuestCatalog();
           const tileId = serverParty.tile.id;
@@ -476,8 +477,9 @@ export class PartyBattleManager {
       if (s) s.addLogEntry('Escaped the battle!', 'battle');
     }
 
-    entry.battleTimer.escapeBattle();
+    // Before leaving: a party that stays starts its next fight, and that fight's forecast, at once.
     this.cancelLiveForecast(entry);
+    entry.battleTimer.escapeBattle();
 
     for (const m of entry.members) {
       this.broadcastToMember(m);
@@ -542,6 +544,21 @@ export class PartyBattleManager {
       this.broadcastToMember(m);
     }
     return { success: true };
+  }
+
+  /**
+   * Stop where the party is now. A move to the room the client last saw would walk it back
+   * when it has already stepped on.
+   */
+  stopTravel(partyId: string): void {
+    const entry = this.entries.get(partyId);
+    if (!entry || entry.dungeonRun) return;
+    entry.serverParty.clearDestination();
+    this.clearRetreatHold(partyId);
+    entry.battleTimer.syncAutoRun();
+    for (const m of entry.members) {
+      this.broadcastToMember(m);
+    }
   }
 
   /**
@@ -718,12 +735,15 @@ export class PartyBattleManager {
     const timer = entry.battleTimer;
     const combat = timer.currentCombat;
     const regroupMs = timer.regroupRemainingMs;
+    const autoRunLeaveMs = timer.autoRunLeaveMs;
     return {
       state: timer.currentState,
       result: timer.lastResult,
       visual: timer.visual,
       duration: timer.currentDuration,
       ...(regroupMs > 0 && !timer.isLive ? { regroupMs } : {}),
+      ...(timer.autoRunWalking ? { autoRunWalking: true } : {}),
+      ...(autoRunLeaveMs !== undefined ? { autoRunLeaveMs } : {}),
       combat: combat ? buildClientCombatSnapshot(combat, timer.battleId, true) : undefined,
     };
   }
@@ -1338,11 +1358,30 @@ export class PartyBattleManager {
     }
   }
 
+  /** Not journalled as an escape: each room already gets its "Moved to" line. */
+  private autoRunAway(partyId: string): void {
+    const entry = this.entries.get(partyId);
+    if (!entry || entry.dungeonRun) return;
+    if (entry.battleTimer.autoRunAway()) this.cancelLiveForecast(entry);
+  }
+
   private afterBattleStart(partyId: string): void {
     const entry = this.entries.get(partyId);
     if (!entry || !this.forecaster) return;
+    this.cancelLiveForecast(entry);
+    if (!entry.battleTimer.autoRunWalking) {
+      this.forecastBattle(entry);
+      return;
+    }
+    // Autorun leaves before a forecast could matter, so only a fight still on after the room's time gets one.
+    const battleId = entry.battleTimer.battleId;
+    setTimeout(() => {
+      if (this.entries.get(partyId) === entry && entry.battleTimer.isFighting(battleId)) this.forecastBattle(entry);
+    }, AUTO_RUN_ROOM_MS);
+  }
+
+  private forecastBattle(entry: PartyBattleEntry): void {
     this.guardForecast('battle start', () => {
-      this.cancelLiveForecast(entry);
       this.startLiveForecast(entry);
       this.checkAutoRetreat(entry);
     });
@@ -1521,7 +1560,7 @@ export class PartyBattleManager {
     const timer = entry.battleTimer;
     const combat = timer.currentCombat;
     const battleId = timer.battleId;
-    if (!combat || !timer.isLive || !timer.isFighting(battleId) || !isToughFight(combat)) return [];
+    if (!combat || !timer.isLive || !timer.isFighting(battleId) || !isToughFight(combat) || timer.autoRunWalking) return [];
     const live = entry.live?.battleId === battleId ? entry.live : undefined;
     const target = { kind: 'battle' as const, battleId };
     const messages: ServerForecastMessage[] = [];

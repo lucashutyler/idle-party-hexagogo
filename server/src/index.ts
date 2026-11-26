@@ -402,6 +402,18 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'stop_travel') {
+        const partyId = playerManager.getSessionByUsername(username)?.getPartyId();
+        if (!partyId) return;
+        const member = playerManager.parties.getParty(partyId)?.members.find(m => m.username === username);
+        if (!member || !canMove(member.role)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can move' }));
+          return;
+        }
+        playerManager.partyBattles.stopTravel(partyId);
+        return;
+      }
+
       if (msg.type === 'run') {
         const session = playerManager.getSessionByUsername(username);
         if (!session) return;

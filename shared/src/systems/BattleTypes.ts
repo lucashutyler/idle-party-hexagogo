@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.09.4'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.25.1'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -52,6 +52,10 @@ export interface ServerBattleState {
   duration: number;
   /** Time left before the next fight, while no fight is live. */
   regroupMs?: number;
+  /** Autorun is walking the party on. Only the server knows: a room any member has explored is open to all. */
+  autoRunWalking?: boolean;
+  /** Real time until Autorun leaves this fight, while it is waiting to. */
+  autoRunLeaveMs?: number;
   /** Always a full snapshot. */
   combat?: ClientCombatSnapshot;
 }
@@ -432,6 +436,11 @@ export interface ClientRunMessage {
   type: 'run';
 }
 
+/** Owners and leaders end the party's route in whatever room it has reached. */
+export interface ClientStopTravelMessage {
+  type: 'stop_travel';
+}
+
 /** Owners and leaders turn the party's auto run on or off. */
 export interface ClientSetAutoRunMessage {
   type: 'set_auto_run';
@@ -532,6 +541,7 @@ export type ClientMessage =
   | ClientUnequipSkillMessage
   | ClientSetActionOrderMessage
   | ClientRunMessage
+  | ClientStopTravelMessage
   | ClientSetAutoRunMessage
   | ClientViewPlayerMessage
   | ClientShopBuyMessage
