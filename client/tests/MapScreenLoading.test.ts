@@ -30,6 +30,8 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
     recenterOnPlayer = vi.fn();
     panBy = vi.fn();
     adjustZoom = vi.fn();
+    setLockCheck = vi.fn();
+    getWalkableArea = vi.fn((_col: number, _row: number): number | null => null);
     constructor() {
       if (mapStub.failNext) {
         mapStub.failNext = false;
@@ -77,13 +79,14 @@ function mount(lastState: unknown = null, tile: Record<string, unknown> = { id: 
     getNpc: () => undefined,
     getDungeon: () => undefined,
     getMaps: () => [],
+    getTileTypeDef: () => undefined,
   } as unknown as WorldCache;
   return { screen: new MapScreen('map-screen', gameClient, worldCache), gameClient };
 }
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 const tick = async () => { for (let i = 0; i < 5; i++) await flush(); };
-type StubMap = { tap: (i: TileClickInfo) => void; background: (blocked?: boolean) => void; setSelectedRoom: ReturnType<typeof vi.fn>; revealRoom: ReturnType<typeof vi.fn>; focusOn: ReturnType<typeof vi.fn>; getTileInfo: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> };
+type StubMap = { tap: (i: TileClickInfo) => void; background: (blocked?: boolean) => void; setSelectedRoom: ReturnType<typeof vi.fn>; setLockCheck: ReturnType<typeof vi.fn>; getWalkableArea: ReturnType<typeof vi.fn>; revealRoom: ReturnType<typeof vi.fn>; focusOn: ReturnType<typeof vi.fn>; getTileInfo: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> };
 const latestMap = () => mapStub.instances[mapStub.instances.length - 1] as StubMap;
 
 const resizeObservers: (() => void)[] = [];
@@ -269,6 +272,49 @@ describe('MapScreen room selection', () => {
     expect(document.querySelector('#map-screen .map-toast')?.textContent).toBe('Leave the dungeon before traveling');
   });
 
+  describe('a room the party cannot enter', () => {
+    const lowLevel = { username: 'me', party: { col: 0, row: 0 }, unlocked: [], social: null, character: { level: 1, equipment: {} } };
+    const lockLines = () => [...document.querySelectorAll('.room-sheet-lock-line')].map(line => line.textContent);
+
+    it('says why on the sheet, and a second tap sends nothing but draws the eye to the lock', async () => {
+      const { map, gameClient } = await opened(lowLevel, { id: 'room-1', type: 'plains', entryRequirements: { minLevel: 5 } });
+      map.tap(info());
+      expect(lockLines()).toEqual(["Needs level 5 (you're level 1)"]);
+      expect(document.querySelector<HTMLElement>('.room-sheet-go')!.hidden).toBe(true);
+
+      map.tap(info());
+      expect(gameClient.sendMove).not.toHaveBeenCalled();
+      expect(sheet().hidden).toBe(false);
+      expect(document.querySelector('.room-sheet-lock')!.classList.contains('room-sheet-lock-pulse')).toBe(true);
+    });
+
+    it('hides Go to room in the room card as well', async () => {
+      const { map } = await opened(lowLevel, { id: 'room-1', type: 'plains', entryRequirements: { minLevel: 5 } });
+      map.tap(info());
+      document.querySelector<HTMLElement>('.room-sheet-details')!.click();
+      expect(document.querySelector('.room-view-lock')!.textContent).toBe("Needs level 5 (you're level 1)");
+      expect(document.querySelector('.room-view-action-go')).toBeNull();
+    });
+
+    it('says a room cut off from the party is reached through a door', async () => {
+      const { map, gameClient } = await opened(lowLevel);
+      map.getWalkableArea.mockImplementation((col: number) => (col === 3 ? 2 : 1));
+      map.tap(info());
+      expect(lockLines()).toEqual(['No walking route from here. This area is reached through a door.']);
+      map.tap(info());
+      expect(gameClient.sendMove).not.toHaveBeenCalled();
+    });
+
+    it('walks into a gated room the party already qualifies for', async () => {
+      const { map, gameClient } = await opened({ ...lowLevel, character: { level: 9, equipment: {} } }, { id: 'room-1', type: 'plains', entryRequirements: { minLevel: 5 } });
+      map.getWalkableArea.mockReturnValue(1);
+      map.tap(info());
+      expect(document.querySelector<HTMLElement>('.room-sheet-lock')!.hidden).toBe(true);
+      map.tap(info());
+      expect(gameClient.sendMove).toHaveBeenCalledWith(3, 4);
+    });
+  });
+
   it('focusRoom pans to the room and selects it, even before the map has loaded', async () => {
     const { screen } = mount({ party: { col: 0, row: 0 }, unlocked: [], social: null });
     screen.focusRoom('room-1');
@@ -412,5 +458,42 @@ describe('MapScreen status chips', () => {
     document.querySelector<HTMLElement>('.room-status-chip')!.click();
     expect(document.querySelector('.confirm-dialog')).toBeNull();
     expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+  });
+
+  it('padlocks a locked exit and lets the server say why instead of asking first', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(() => ({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }) as unknown as MediaQueryList);
+    const mounted = mount({ ...state, username: 'me', character: { level: 1, equipment: {} } });
+    Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
+      getTileOn: () => ({ ...transitionTile, transitions: [{ tileId: 'far', mapId: 'there', entryRequirements: { minLevel: 5 } }] }),
+      getTileByGuid: () => ({ name: 'Harbour', mapId: 'there' }),
+    });
+    mounted.screen.onActivate();
+    await tick();
+
+    const chip = document.querySelector<HTMLElement>('.room-status-chip')!;
+    expect(chip.querySelector('.room-status-chip-badge')!.textContent).toBe('🔒');
+    chip.click();
+    expect(document.querySelector('.confirm-dialog')).toBeNull();
+    expect(mounted.gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+  });
+
+  it('hands the map checks that padlock rooms and exits the party would be refused', async () => {
+    const { screen } = mount(state);
+    screen.onActivate();
+    await tick();
+    const checks = latestMap().setLockCheck.mock.calls[0][0] as {
+      room: (tile: unknown, s: unknown) => boolean;
+      travel: (link: unknown, s: unknown) => boolean;
+    };
+    const viewer = { username: 'me', character: { level: 2, equipment: {} }, social: null };
+    expect(checks.room({ entryRequirements: { minLevel: 5 } }, viewer)).toBe(true);
+    expect(checks.room({ entryRequirements: { minLevel: 2 } }, viewer)).toBe(false);
+    expect(checks.room({ entryRequirements: undefined }, viewer)).toBe(false);
+    expect(checks.travel({ tileId: 'far', mapId: 'there', entryRequirements: { minLevel: 5 } }, viewer)).toBe(true);
+    expect(checks.travel({ tileId: 'far', mapId: 'there' }, viewer)).toBe(false);
   });
 });

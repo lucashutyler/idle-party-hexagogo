@@ -1191,32 +1191,9 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'invite_party' && typeof msg.username === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) return;
-        const targetSession = playerManager.getSessionByUsername(msg.username);
-        if (!targetSession) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }));
-          return;
-        }
-        const result = playerManager.parties.inviteToParty(
-          username,
-          msg.username,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-          (a, b) => playerManager.areSameTile(a, b),
-        );
-        if (typeof result === 'string') {
-          ws.send(JSON.stringify({ type: 'error', message: result }));
-          return;
-        }
-        // Notify the target they have a pending invite
-        playerManager.sendStateToPlayer(msg.username);
-        // Also update the inviter so outgoingPartyInvites reflects the sent invite
-        playerManager.sendStateToPlayer(username);
-        playerManager.notify.notify(msg.username, 'party_invite_received', {
-          title: 'Party invite',
-          body: `${username} invited you to their party.`,
-          payload: { inviterUsername: username },
-        });
+        if (!playerManager.getSessionByUsername(username)) return;
+        const error = playerManager.inviteToParty(username, msg.username);
+        if (error) ws.send(JSON.stringify(partyRefusal(error)));
         return;
       }
 
@@ -1230,8 +1207,8 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'decline_party_invite' && typeof msg.partyId === 'string') {
-        playerManager.parties.declineInvite(username, msg.partyId);
-        playerManager.sendStateToPlayer(username);
+        const error = playerManager.declinePartyInvite(username, msg.partyId);
+        if (error) ws.send(JSON.stringify(partyRefusal(error)));
         return;
       }
 

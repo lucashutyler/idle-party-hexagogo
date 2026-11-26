@@ -300,8 +300,8 @@ describe('Dungeon runtime (PartyBattleManager via PlayerManager)', () => {
     const getPartyId = (u: string) => pm.getSessionByUsername(u)?.getPartyId() ?? null;
     const partyId = alice.getPartyId()!;
     const bobOldParty = bob.getPartyId();
-    pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => pm.areSameTile(a, b));
-    pm.parties.acceptInvite('bob', partyId, getPartyId, (u, id) => pm.getSessionByUsername(u)?.setPartyId(id), (a, b) => pm.areSameTile(a, b));
+    pm.parties.inviteToParty('alice', 'bob', getPartyId, (a, b) => pm.invitePolicy(a, b));
+    pm.parties.acceptInvite('bob', partyId, getPartyId, (u, id) => pm.getSessionByUsername(u)?.setPartyId(id), (u, id) => pm.joinPolicy(u, id));
     pm.handlePartyJoin('bob', partyId, bobOldParty);
     return { pm, alice, bob, partyId };
   }

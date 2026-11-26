@@ -1,5 +1,5 @@
 import type { DungeonRunInfo } from '@idle-party-rpg/shared';
-import { ROOM_ICONS, actionLabel, actionShortLabel, questPipClass } from './RoomActions';
+import { LOCKED_DETAIL, ROOM_ICONS, actionLabel, actionShortLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import { deferWhilePressed } from './render';
 
@@ -21,6 +21,7 @@ interface Chip {
   badge?: string;
   detail?: string;
   pip?: string;
+  locked?: boolean;
   onClick?: () => void;
 }
 
@@ -86,8 +87,10 @@ export class RoomStatusPanel {
       icon: action.icon,
       label: actionLabel(action),
       short: actionShortLabel(action),
-      detail: action.detail,
+      badge: action.locked ? ROOM_ICONS.lock : undefined,
+      detail: action.locked ? LOCKED_DETAIL : action.detail,
       pip: questPipClass(action),
+      locked: action.locked,
       onClick: () => this.onAction(action),
     }));
     if (status.othersHere > 0) {
@@ -115,6 +118,7 @@ export class RoomStatusPanel {
   private renderChip(chip: Chip, index: number): HTMLElement {
     const el = document.createElement(chip.onClick ? 'button' : 'div');
     el.className = chip.onClick ? 'room-status-chip' : 'room-status-chip room-status-chip-static';
+    if (chip.locked) el.classList.add('room-status-chip-locked');
     if (chip.onClick) {
       (el as HTMLButtonElement).type = 'button';
       el.dataset.chipIndex = String(index);

@@ -168,9 +168,9 @@ function joinParty(pm: PlayerManager, leader: string, joiner: string): void {
   const setPartyId = (u: string, id: string | null) => { pm.getSessionByUsername(u)?.setPartyId(id); };
   const partyId = getPartyId(leader)!;
   const oldPartyId = getPartyId(joiner);
-  const invited = pm.parties.inviteToParty(leader, joiner, getPartyId, (a, b) => pm.areSameTile(a, b));
+  const invited = pm.parties.inviteToParty(leader, joiner, getPartyId, (a, b) => pm.invitePolicy(a, b));
   if (invited !== true) throw new Error(String(invited));
-  const accepted = pm.parties.acceptInvite(joiner, partyId, getPartyId, setPartyId, (a, b) => pm.areSameTile(a, b));
+  const accepted = pm.parties.acceptInvite(joiner, partyId, getPartyId, setPartyId, (u, id) => pm.joinPolicy(u, id));
   if (typeof accepted === 'string') throw new Error(accepted);
   pm.handlePartyJoin(joiner, partyId, oldPartyId);
 }

@@ -14,6 +14,7 @@ import {
   ROOM_ICONS,
   actionLabel,
   getRoomActions,
+  lockTravel,
   questMarks,
   questPipClass,
 } from '../src/ui/RoomActions';
@@ -157,6 +158,37 @@ describe('actionLabel', () => {
       'Enter Crystal Caves',
       'Travel to Darkwood Gate',
     ]);
+  });
+});
+
+describe('lockTravel', () => {
+  const room = {
+    npcId: 'mira',
+    shopId: 'store',
+    transitions: [{ mapId: 'forest', tileId: 'gate' }, { mapId: 'sewers', tileId: 'nameless' }],
+  };
+
+  it('marks only the travel actions whose exit is locked, leaving everything else as it was', () => {
+    const actions = getRoomActions(room, lookups);
+    const checked: string[] = [];
+    const locked = lockTravel(actions, room, link => { checked.push(link.tileId); return link.tileId === 'nameless'; });
+    expect(checked).toEqual(['gate', 'nameless']);
+    expect(locked.map(a => [a.targetId, a.locked ?? false])).toEqual([
+      ['mira', false], ['store', false], ['gate', false], ['nameless', true],
+    ]);
+    expect(locked[0]).toBe(actions[0]);
+    expect(actions[3].locked).toBeUndefined();
+  });
+
+  it('passes the flag through the labels and keeps the name', () => {
+    const [travel] = lockTravel(getRoomActions({ transitions: room.transitions.slice(0, 1) }, lookups), room, () => true);
+    expect(travel).toEqual({ kind: 'travel', icon: ROOM_ICONS.travel, name: 'Darkwood Gate', targetId: 'gate', locked: true });
+    expect(actionLabel(travel)).toBe('Travel to Darkwood Gate');
+  });
+
+  it('leaves a room without exits alone', () => {
+    const actions = getRoomActions({ npcId: 'mira' }, lookups);
+    expect(lockTravel(actions, {}, () => true)).toBe(actions);
   });
 });
 

@@ -1,5 +1,5 @@
 import { CubeCoord, cubeToPixel, cubeToKey } from './HexUtils.js';
-import { mergeRoomRequirements, toRoomRequirements } from '../systems/RoomRequirements.js';
+import { resolveTileRequirements } from '../systems/RoomRequirements.js';
 import type { RoomEntryRequirements } from '../systems/RoomRequirements.js';
 
 export enum TileType {
@@ -166,9 +166,9 @@ export class HexTile {
    * folded in at both levels. Undefined when the room is ungated.
    */
   get entryRequirements(): RoomEntryRequirements | undefined {
-    return mergeRoomRequirements(
-      toRoomRequirements(this._tileTypeDef?.entryRequirements, this._tileTypeDef?.requiredItemId),
-      toRoomRequirements(this._entryRequirements, this._requiredItemId),
+    return resolveTileRequirements(
+      { entryRequirements: this._entryRequirements, requiredItemId: this._requiredItemId },
+      this._tileTypeDef,
     );
   }
 

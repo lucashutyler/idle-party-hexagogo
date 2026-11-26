@@ -61,6 +61,7 @@ import {
   TIER_INFO,
 } from '../combat/CombatFormat';
 import { OPEN_OPTIONS_ATTR, renderForecastPopover, renderForecastRing } from '../ui/ForecastChip';
+import { QuestTracker, type QuestTrackerActions } from '../ui/QuestTracker';
 
 type Axis = 'x' | 'y';
 
@@ -168,6 +169,7 @@ export class CombatScreen implements Screen {
   private skillBarRoot!: HTMLElement;
   private logWrapper!: HTMLElement;
   private fx!: CombatFx;
+  private questTracker!: QuestTracker;
   private skillBar!: CombatSkillBar;
   private logView!: CombatLogView;
   private popover: HTMLElement | null = null;
@@ -246,6 +248,10 @@ export class CombatScreen implements Screen {
     this.onUserClick = cb;
   }
 
+  setQuestTrackerActions(actions: QuestTrackerActions): void {
+    this.questTracker.setActions(actions);
+  }
+
   onActivate(): void {
     this.isActive = true;
     const visible = document.visibilityState !== 'hidden';
@@ -286,6 +292,7 @@ export class CombatScreen implements Screen {
         <button class="combat-dungeon-leave" type="button" style="display:none">Leave<span class="combat-auto-retreat" aria-hidden="true" hidden>🏳</span></button>
         <span class="combat-run-hint" style="display:none"></span>
       </div>
+      <div class="combat-quest-tracker"></div>
       <div class="combat-stage">
         <div class="combat-stage-bg"></div>
         <div class="combat-stage-scrim"></div>
@@ -348,6 +355,7 @@ export class CombatScreen implements Screen {
       this.stageGrid,
       this.container.querySelector('.combat-banner')!,
     );
+    this.questTracker = new QuestTracker(this.container.querySelector('.combat-quest-tracker')!, this.gameClient, this.worldCache);
     this.skillBar = new CombatSkillBar(this.skillBarRoot, (id, anchor) => this.toggleSkillPopover(id, anchor));
     this.logView = new CombatLogView(this.logWrapper, this.gameClient.combatLog, this.formatter);
     this.logView.setOnOpenChange(() => {

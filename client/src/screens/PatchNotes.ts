@@ -1,5 +1,21 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.5',
+    notes: [
+      'Party invites now stay on screen with Join and Decline buttons, wherever you are.',
+      'You can invite friends to your party from anywhere, and invites no longer vanish when either of you moves. Accepting brings you to your friend if you could walk there yourself.',
+      'When someone joins your party, you\'re asked whether they can move the party too.',
+      'Old party invites in your notifications now say when they have ended.',
+      'The Quest Log now shows your main story in gold at the top, with your next step even before you can take it.',
+      'A line under the battle shows your current main-story goal; tap it to see where to go.',
+      'The Quests button shows a dot when someone in your room has a quest for you.',
+      'Taking a quest in the room it asks you to visit now counts the visit straight away.',
+      'Locked rooms show a padlock on the map, and the room card says what you need before you try to go there.',
+      'Travel buttons for locked doors show a padlock.',
+      'Hero > Stats shows how many rooms you\'ve found in each region.',
+    ],
+  },
+  {
     version: '2026.11.25.4',
     notes: [
       'Fixed a bug with item amounts in trades and shop sales.',

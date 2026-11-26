@@ -71,7 +71,40 @@ export interface CompletedQuestEntry {
   completedAt: string;
 }
 
+/** Content marks the main story by this name prefix only. See docs/architecture/content.md → Main story. */
+export const MAIN_QUEST_PREFIX = 'Progress:';
+
+export type MainStoryStepStatus = 'active' | 'available' | 'needs_level';
+
+/** One quest the player can work on next to move the main story along. */
+export interface MainStoryStep {
+  questId: string;
+  name: string;
+  status: MainStoryStepStatus;
+  requiredLevel?: number;
+  /** For a step that isn't itself main: the name of the main quest it unblocks. */
+  leadsTo?: string;
+  /** NPCs standing in some room who offer this quest. */
+  giverNpcIds?: string[];
+}
+
+export interface QuestGuide {
+  /** Every active step, then a few of the others; active first, then what can be taken now, then level-locked. */
+  steps: MainStoryStep[];
+  /** The main quests among the player's active quests and the quests they can take now. */
+  mainQuestIds: string[];
+}
+
 // --- Helpers ---
+
+export function isMainQuest(quest: Pick<QuestDefinition, 'name'>): boolean {
+  return quest.name.startsWith(MAIN_QUEST_PREFIX);
+}
+
+/** The name without the main-story prefix. */
+export function questTitle(quest: Pick<QuestDefinition, 'name'>): string {
+  return isMainQuest(quest) ? quest.name.slice(MAIN_QUEST_PREFIX.length).trim() : quest.name;
+}
 
 /** Get the target count for an objective (1 for visit, N for kill/collect). */
 export function getObjectiveTarget(obj: QuestObjective): number {

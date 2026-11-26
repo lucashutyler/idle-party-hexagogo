@@ -43,6 +43,7 @@ import { artworkUrl, missingAssetRetryCount, renderTrackedImg } from '../ui/asse
 import { bringToFront, registerDismiss, release } from '../ui/ModalStack';
 import { classAttackSkill, renderSkillCardChip, renderSkillCardMeta } from '../ui/SkillCardChip';
 import { BestiaryCard, BestiaryModal } from '../ui/BestiaryModal';
+import { explorationCardHtml } from '../ui/ExplorationCard';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { renderSegments, wireSegments } from '../ui/Segments';
 import { xpGaugeLines, xpSinceLine } from '../ui/XpGaugeText';
@@ -123,6 +124,8 @@ export class CharItemsScreen implements Screen {
   private classPassiveEl!: HTMLElement;
   private bestiaryCard!: BestiaryCard;
   private bestiaryModal: BestiaryModal;
+  private explorationEl!: HTMLElement;
+  private lastExplorationKey = '';
 
   private inventoryGrid!: HTMLElement;
   private inventoryCountEl!: HTMLElement;
@@ -312,7 +315,10 @@ export class CharItemsScreen implements Screen {
             <div class="hero-stat-list"></div>
             <div class="charitems-passive-info"></div>
           </div>
-          <div class="charitems-bestiary"></div>
+          <div class="hero-stats-side">
+            <div class="charitems-bestiary"></div>
+            <div class="hero-exploration"></div>
+          </div>
         </div>
       </div>
       <div class="items-modal-overlay" style="display:none"></div>
@@ -350,6 +356,7 @@ export class CharItemsScreen implements Screen {
     bestiaryEl.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('.bestiary-view-all')) this.bestiaryModal.open();
     });
+    this.explorationEl = this.container.querySelector('.hero-exploration')!;
 
     this.inventoryGrid = this.container.querySelector('.items-inv-grid')!;
     this.inventoryCountEl = this.container.querySelector('.hero-inventory .items-section-count')!;
@@ -558,6 +565,7 @@ export class CharItemsScreen implements Screen {
     this.renderXpGauge(state);
 
     this.bestiaryCard.update(char.mastery, this.gameClient.lastBestiary?.entries ?? [], char.level);
+    this.renderExploration(state.unlocked ?? []);
 
     const mailboxKey = this.itemDefsVersion + '|' + JSON.stringify(this.lastMailbox.map(e => [e.id, e.itemId, e.quantity, e.fromUsername, e.returned ?? false, this.lastInventory[e.itemId] ?? 0]));
     if (mailboxKey !== this.lastMailboxKey) {
@@ -956,6 +964,13 @@ export class CharItemsScreen implements Screen {
     setHtml(this.xpGaugeEl, `<div class="charitems-xp-gauge-rate">${escapeHtml(lines.rate)}</div>`
       + (lines.level === null ? '' : `<div class="charitems-xp-gauge-level">${escapeHtml(lines.level)}</div>`));
     setHtml(this.xpSinceEl, escapeHtml(xpSinceLine(char.xpRate.startTime, char.xpRate.totalXp)));
+  }
+
+  private renderExploration(unlocked: readonly string[]): void {
+    const key = `${unlocked.length}|${this.worldCache.contentGeneration}`;
+    if (key === this.lastExplorationKey) return;
+    this.lastExplorationKey = key;
+    setHtml(this.explorationEl, explorationCardHtml(this.worldCache.roomsFoundByMap(unlocked)));
   }
 
   private showStatTooltip(anchor: HTMLElement): void {

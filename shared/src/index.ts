@@ -40,9 +40,12 @@ export {
   isRoomGateEmpty,
   toRoomRequirements,
   mergeRoomRequirements,
+  resolveTileRequirements,
   validateRoomEntry,
+  validateRoomEntryAll,
 } from './systems/RoomRequirements.js';
 export type {
+  RoomGateSource,
   RoomEntryRequirements,
   RoomEntryMemberInfo,
   RoomEntryLabels,
@@ -500,10 +503,16 @@ export {
   acceptableQuestIds,
   nextWeeklyReopening,
   initialProgress,
+  isMainQuest,
+  questTitle,
+  MAIN_QUEST_PREFIX,
   SOLO_QUEST_IN_PARTY_REASON,
   WEEKLY_COOLDOWN_MS,
 } from './systems/QuestTypes.js';
 export type {
+  MainStoryStep,
+  MainStoryStepStatus,
+  QuestGuide,
   QuestAcceptContext,
   QuestStatus,
   QuestScope,
@@ -541,7 +550,7 @@ export type {
 } from './systems/DungeonTypes.js';
 
 // Social types
-export { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY, MIN_GUILD_LEVEL, isBlockedUser } from './systems/SocialTypes.js';
+export { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY, MIN_GUILD_LEVEL, PARTY_INVITE_TTL_MS, isBlockedUser, partyInviteExpiresAt } from './systems/SocialTypes.js';
 export type {
   PlayerListEntry,
   FriendEntry,

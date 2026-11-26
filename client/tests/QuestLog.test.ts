@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CompletedQuestEntry,
+  MainStoryStep,
   NpcDefinition,
   QuestDefinition,
+  QuestGuide,
   QuestProgressEntry,
   ServerStateMessage,
   WorldTileDefinition,
@@ -42,6 +44,7 @@ interface StateParts {
   availableQuestIds?: string[];
   tiles?: Record<string, { name: string; zoneName: string }>;
   currentMapId?: string;
+  questGuide?: QuestGuide;
 }
 
 function makeState(parts: StateParts): ServerStateMessage {
@@ -55,6 +58,7 @@ function makeState(parts: StateParts): ServerStateMessage {
     unlocked: parts.unlocked ?? [],
     availableQuestIds: parts.availableQuestIds ?? [],
     currentMapId: parts.currentMapId,
+    questGuide: parts.questGuide,
   } as unknown as ServerStateMessage;
 }
 
@@ -414,5 +418,162 @@ describe('Quest log ownership', () => {
     expect(dismissTop()).toBe(true);
     expect(document.querySelector('.quest-log-modal')).toBeNull();
     expect(t.listenerCount()).toBe(0);
+  });
+});
+
+describe('Quest log main story', () => {
+  const room = (id: string, mapId: string, name: string, zoneName = 'Vale') => ({ id, mapId, name, zoneName } as WorldTileDefinition);
+  const guideNpc: NpcDefinition = { id: 'guide-npc', name: 'Orla', emoji: '🧭', greeting: 'Hi', questIds: ['m-next', 'm-locked', 'side-new'] };
+  const farNpc: NpcDefinition = { id: 'far-npc', name: 'Bram', emoji: '🪓', greeting: 'Hm', questIds: ['m-far', 'side-far'] };
+  const sideNpc: NpcDefinition = { id: 'side-npc', name: 'Tess', emoji: '🧺', greeting: 'Yo', questIds: ['side-here'] };
+  const rooms = {
+    'guide-npc': [room('r-camp', 'overworld', 'Camp')],
+    'far-npc': [room('r-cave', 'cellar', 'Cave', 'Deep')],
+    'side-npc': [room('r-stall', 'overworld', 'Stall')],
+  };
+  const main = (id: string, over: Partial<QuestDefinition> = {}) => quest(id, { name: `Progress: Title ${id}`, ...over });
+  const step = (questId: string, over: Partial<MainStoryStep> = {}): MainStoryStep =>
+    ({ questId, name: `Progress: Title ${questId}`, status: 'available', ...over });
+
+  function storyParts(over: Partial<StateParts> = {}): StateParts {
+    return {
+      activeQuests: [active('m-now', 'in_progress', [1]), active('side-now', 'accepted', [0])],
+      questDefinitions: { 'm-now': main('m-now'), 'side-now': quest('side-now'), 'm-old': main('m-old') },
+      completedQuests: [{ questId: 'm-old', completedAt: '2026-01-01T00:00:00.000Z' }],
+      availableQuestIds: ['m-next', 'side-here'],
+      unlocked: ['r-camp', 'r-stall', 'r-cave'],
+      currentMapId: 'overworld',
+      questGuide: {
+        steps: [step('m-now', { status: 'active' }), step('m-next', { giverNpcIds: ['guide-npc'] })],
+        mainQuestIds: ['m-now', 'm-next'],
+      },
+      ...over,
+    };
+  }
+
+  it('pins the main story in gold above the other quests, then who has quests, then the history', () => {
+    const t = setup([guideNpc, farNpc, sideNpc], rooms);
+    t.push(storyParts());
+    new QuestLog(t.gameClient, t.worldCache, vi.fn()).open();
+
+    const sections = [...t.body()!.children].map(el => el.className);
+    expect(sections).toEqual(['quest-log-main', 'quest-card', 'quest-log-givers', 'quest-log-completed-toggle']);
+    const gold = document.querySelector('.quest-log-main')!;
+    expect(gold.querySelector('.quest-log-main-title')!.textContent).toBe('Main Story');
+    expect(gold.querySelector('.quest-card')!.classList.contains('quest-card-main')).toBe(true);
+    expect(t.cardIds()).toEqual(['m-now', 'side-now']);
+  });
+
+  it('strips the main prefix in the gold section only', () => {
+    const t = setup([guideNpc], rooms);
+    t.push(storyParts({ questGuide: { steps: [step('m-now', { status: 'active' })], mainQuestIds: ['m-now'] } }));
+    new QuestLog(t.gameClient, t.worldCache).open();
+    t.toggle()!.click();
+
+    expect(document.querySelector('.quest-log-main .quest-card-name')!.textContent).toBe('Title m-now');
+    expect(document.querySelector('.quest-log-completed-name')!.textContent).toContain('Progress: Title m-old');
+  });
+
+  it('shows the next step as a link to the giver on this map', () => {
+    const t = setup([guideNpc], rooms);
+    t.push(storyParts());
+    const onGoToRoom = vi.fn();
+    new QuestLog(t.gameClient, t.worldCache, onGoToRoom).open();
+
+    const next = document.querySelector<HTMLButtonElement>('.quest-log-main .quest-log-step')!;
+    expect(next.tagName).toBe('BUTTON');
+    expect(next.textContent).toBe('Next: Title m-next: talk to Orla, Camp, Vale');
+    next.click();
+    expect(onGoToRoom).toHaveBeenCalledWith('r-camp');
+  });
+
+  it('names an unexplored giver room for the next step', () => {
+    const t = setup([guideNpc], rooms);
+    t.push(storyParts({ unlocked: [] }));
+    new QuestLog(t.gameClient, t.worldCache, vi.fn()).open();
+    expect(document.querySelector('.quest-log-step')!.textContent).toBe('Next: Title m-next: talk to Orla, Camp, Vale');
+  });
+
+  it('says what level a locked step needs, and what a side step leads to', () => {
+    const t = setup([guideNpc, farNpc], rooms);
+    t.push(storyParts({ questGuide: { steps: [step('m-locked', { status: 'needs_level', requiredLevel: 9, giverNpcIds: ['guide-npc'] })], mainQuestIds: [] } }));
+    new QuestLog(t.gameClient, t.worldCache, vi.fn()).open();
+    expect(document.querySelector('.quest-log-step')!.textContent).toBe('Reach level 9 to continue: Title m-locked');
+    expect(document.querySelector('.quest-log-step')!.tagName).toBe('DIV');
+
+    t.push(storyParts({
+      questGuide: {
+        steps: [{ questId: 'side-far', name: 'Gather Kindling', status: 'available', leadsTo: 'Progress: Title m-far', giverNpcIds: ['far-npc'] }],
+        mainQuestIds: [],
+      },
+    }));
+    const lead = document.querySelector('.quest-log-step')!;
+    expect(lead.textContent).toBe('Needed for the main story (Title m-far): Gather Kindling: talk to Bram, Cave, Deep');
+    expect(lead.tagName).toBe('DIV');
+  });
+
+  it('marks an active quest the main story needs', () => {
+    const t = setup();
+    t.push(storyParts({
+      activeQuests: [active('side-now', 'accepted', [0])],
+      questGuide: { steps: [{ questId: 'side-now', name: 'Quest side-now', status: 'active', leadsTo: 'Progress: Title m-far' }], mainQuestIds: [] },
+    }));
+    new QuestLog(t.gameClient, t.worldCache).open();
+    const card = document.querySelector('.quest-log-main .quest-card-main')!;
+    expect(card.querySelector('.quest-card-leads')!.textContent).toBe('Needed for the main story (Title m-far)');
+    expect(card.querySelector('.quest-card-name')!.textContent).toBe('Quest side-now');
+  });
+
+  it('shows one upcoming step at most, one on another map only when none is on this one', () => {
+    const t = setup([guideNpc, farNpc], rooms);
+    const awayFirst = [step('m-far', { giverNpcIds: ['far-npc'] }), step('m-next', { status: 'needs_level', requiredLevel: 4, giverNpcIds: ['guide-npc'] })];
+    t.push(storyParts({ questGuide: { steps: awayFirst, mainQuestIds: [] } }));
+    new QuestLog(t.gameClient, t.worldCache, vi.fn()).open();
+    expect([...document.querySelectorAll('.quest-log-step')].map(el => el.textContent)).toEqual(['Reach level 4 to continue: Title m-next']);
+
+    t.push(storyParts({ questGuide: { steps: [step('m-far', { giverNpcIds: ['far-npc'] }), step('m-far2', { giverNpcIds: ['far-npc'] })], mainQuestIds: [] } }));
+    const steps = [...document.querySelectorAll('.quest-log-step')];
+    expect(steps.map(el => el.textContent)).toEqual(['Next: Title m-far: talk to Bram, Cave, Deep']);
+    expect(steps[0].tagName).toBe('DIV');
+  });
+
+  it('leaves the gold section out when the story has nothing to show', () => {
+    const t = setup();
+    t.push(storyParts({ activeQuests: [active('side-now', 'accepted', [0])], questGuide: { steps: [], mainQuestIds: [] } }));
+    new QuestLog(t.gameClient, t.worldCache).open();
+    expect(document.querySelector('.quest-log-main')).toBeNull();
+    expect(t.body()!.firstElementChild!.classList.contains('quest-card')).toBe(true);
+  });
+
+  it('tags main givers, lists them first and folds givers on other maps behind a toggle that survives updates', () => {
+    const t = setup([sideNpc, guideNpc, farNpc], rooms);
+    const parts = storyParts({ availableQuestIds: ['side-here', 'm-next', 'side-far'] });
+    t.push(parts);
+    new QuestLog(t.gameClient, t.worldCache, vi.fn()).open();
+
+    const givers = () => [...document.querySelectorAll('.quest-log-giver')].map(li => li.textContent?.replace(/\s+/g, ' ').trim());
+    expect(givers()).toEqual(['Main 🧭 Orla — Camp, Vale', '🧺 Tess — Stall, Vale']);
+    expect(document.querySelector('.quest-log-giver .quest-pill-main')!.textContent).toBe('Main');
+    const more = () => document.querySelector<HTMLButtonElement>('.quest-log-givers-more')!;
+    expect(more().textContent).toContain('1 more on other maps');
+    expect(more().getAttribute('aria-expanded')).toBe('false');
+
+    more().click();
+    expect(givers()).toEqual(['Main 🧭 Orla — Camp, Vale', '🧺 Tess — Stall, Vale', '🪓 Bram — Cave, Deep']);
+    t.push({ ...parts, activeQuests: [active('m-now', 'in_progress', [2]), active('side-now', 'accepted', [0])] });
+    expect(more().getAttribute('aria-expanded')).toBe('true');
+    expect(givers()).toHaveLength(3);
+  });
+
+  it("keeps today's layout when the server sends no guide", () => {
+    const t = setup([guideNpc], rooms);
+    t.push(storyParts({ questGuide: undefined }));
+    new QuestLog(t.gameClient, t.worldCache, vi.fn()).open();
+
+    expect(document.querySelector('.quest-log-main')).toBeNull();
+    expect(document.querySelector('.quest-pill-main')).toBeNull();
+    expect(document.querySelector('.quest-log-givers-more')).toBeNull();
+    expect(t.body()!.firstElementChild!.classList.contains('quest-log-givers')).toBe(true);
+    expect(document.querySelector('[data-quest-id="m-now"] .quest-card-name')!.textContent).toBe('Progress: Title m-now');
   });
 });

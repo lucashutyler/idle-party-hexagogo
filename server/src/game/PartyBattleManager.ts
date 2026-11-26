@@ -1,5 +1,6 @@
 import {
   HexTile,
+  HexPathfinder,
   offsetToCube,
   cubeToOffset,
   COMBAT_PACE,
@@ -378,13 +379,53 @@ export class PartyBattleManager {
     this.registerEntry(partyId, serverParty, new Set([username]));
   }
 
-  /** Add a member to an existing party battle. They join the next combat cycle. */
+  /** Add a member to an existing party battle. They join the next combat cycle; a queued route they can't walk is dropped. */
   addMember(partyId: string, username: string): void {
     const entry = this.entries.get(partyId);
     if (!entry) return;
     entry.battleTimer.settlePendingResult();
     entry.members.add(username);
     this.clearRetreatHold(partyId);
+    this.stopIfRouteBlocked(entry, username);
+  }
+
+  private stopIfRouteBlocked(entry: PartyBattleEntry, joiner: string): void {
+    const blocked = this.validatePathRequirements(entry);
+    if (!blocked) return;
+    entry.serverParty.clearDestination();
+    entry.battleTimer.syncAutoRun();
+    const names = blocked.missingPlayers.length > 0 ? blocked.missingPlayers.join(', ') : joiner;
+    const text = `The party stops: ${names} can't enter a room on the way.`;
+    for (const m of entry.members) this.getSession(m)?.addLogEntry(text, 'move');
+  }
+
+  /**
+   * Why `username` could not walk from `fromPos` on `fromMapId` to this party's room by themselves, or null
+   * when every room on the way is open to them. Gates are checked as `handleMove` checks them; any doubt refuses.
+   */
+  walkRouteFailure(
+    username: string,
+    fromMapId: string,
+    fromPos: { col: number; row: number },
+    partyId: string,
+    inviterName: string,
+  ): string | null {
+    const unreachable = `You can't walk to ${inviterName}'s room from here.`;
+    const entry = this.entries.get(partyId);
+    if (!entry) return unreachable;
+    if (entry.serverParty.currentMapId !== fromMapId) return `${inviterName} is on another map. Travel there to join.`;
+
+    const grid = this.grids.get(fromMapId);
+    const path = grid ? new HexPathfinder(grid).findPath(offsetToCube(fromPos), entry.serverParty.position) : null;
+    if (!path) return unreachable;
+
+    const infos = this.buildMemberInfos(new Set([username]));
+    const labels = this.roomLabels();
+    for (const tile of path.slice(1)) {
+      const failure = validateRoomEntry(tile.entryRequirements, infos, labels);
+      if (failure) return `You can't reach ${inviterName}'s room yet: ${failure.reason}`;
+    }
+    return null;
   }
 
   /**

@@ -5,6 +5,7 @@ import type {
   CompletedQuestEntry,
   NpcDefinition,
   QuestDefinition,
+  QuestGuide,
   QuestProgressEntry,
   ServerErrorCode,
   ServerStateMessage,
@@ -54,6 +55,7 @@ interface StateParts {
   partyMembers?: number;
   level?: number;
   combatRound?: number;
+  questGuide?: QuestGuide;
 }
 
 function makeState(parts: StateParts): ServerStateMessage {
@@ -76,6 +78,7 @@ function makeState(parts: StateParts): ServerStateMessage {
     questGiverNpcId: parts.questGiverNpcId === null ? undefined : parts.questGiverNpcId ?? GIVER.id,
     questResolutions: { monsters: { 'm-goblin': 'Goblin' }, items: {}, tiles: {} },
     social: members.length > 0 ? { party: { members } } : undefined,
+    questGuide: parts.questGuide,
   } as unknown as ServerStateMessage;
 }
 
@@ -578,12 +581,39 @@ describe('NpcTalkPopup availability', () => {
   });
 });
 
+describe('NPC popup main story', () => {
+  const defs = { q1: quest('q1'), q2: quest('q2', { name: 'Progress: Quest q2' }), q3: quest('q3') };
+  const availableIds = () => [...document.querySelectorAll<HTMLElement>('.npc-quest-available .quest-card')].map(el => el.dataset.questId);
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('lists main-story quests first among the available ones, with a Main story pill', () => {
+    const t = setup({ questDefinitions: defs, offeredQuestIds: ['q1', 'q2', 'q3'], questGuide: { steps: [], mainQuestIds: ['q2'] } });
+    t.popup.show(GIVER);
+
+    expect(availableIds()).toEqual(['q2', 'q1', 'q3']);
+    expect(card('q2')!.classList.contains('quest-card-main')).toBe(true);
+    expect(card('q2')!.querySelector('.quest-pill-main')!.textContent).toBe('Main story');
+    expect(card('q2')!.querySelector('.quest-card-name')!.textContent).toBe('Progress: Quest q2');
+    expect(card('q1')!.querySelector('.quest-pill-main')).toBeNull();
+    expect(acceptButton('q2')).not.toBeNull();
+  });
+
+  it('keeps the authored order and shows no pill without a guide', () => {
+    setup({ questDefinitions: defs, offeredQuestIds: ['q1', 'q2', 'q3'] }).popup.show(GIVER);
+    expect(availableIds()).toEqual(['q1', 'q2', 'q3']);
+    expect(document.querySelector('.quest-pill-main')).toBeNull();
+  });
+});
+
 describe('quest and NPC popup font sizes', () => {
-  const OWNED_SELECTOR = /\.(npc-talk|npc-quest|quest-card|quest-pill|quest-objective|quest-log)/;
+  const OWNED_SELECTOR = /\.(npc-talk|npc-quest|quest-card|quest-pill|quest-objective|quest-log|quest-tracker)/;
   const SMALLEST_TOKEN_PX = 11;
 
   it('never set quest or NPC text below the smallest font token', () => {
-    const css = ['pixel-theme.css', 'popups.css']
+    const css = ['pixel-theme.css', 'popups.css', 'combat.css']
       .map(file => readFileSync(resolve(__dirname, '../src/styles', file), 'utf8'))
       .join('\n')
       .replace(/\/\*[\s\S]*?\*\//g, '');

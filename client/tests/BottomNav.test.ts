@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerStateMessage } from '@idle-party-rpg/shared';
-import { BottomNav, readyQuestCount } from '../src/ui/BottomNav';
+import { BottomNav, newQuestHere, readyQuestCount } from '../src/ui/BottomNav';
 import { UtilityStrip } from '../src/ui/UtilityStrip';
 import type { GameClient } from '../src/network/GameClient';
 
@@ -182,5 +182,72 @@ describe('UtilityStrip', () => {
     expect(document.querySelector('.chat-strip-open')?.getAttribute('aria-label')).toBe('Open chat, 5 unread');
     strip.setChatUnread(0);
     expect(document.querySelector('.chat-strip-open')?.getAttribute('aria-label')).toBe('Open chat');
+  });
+});
+
+describe('new quest dot', () => {
+  const offeredHere = { offeredQuestIds: ['side'], availableQuestIds: ['side'], questGiverNpcId: 'orla' };
+  const nextStepHere = {
+    offeredQuestIds: [],
+    availableQuestIds: [],
+    questGiverNpcId: 'orla',
+    questGuide: { steps: [{ questId: 'm1', name: 'Progress: m1', status: 'available', giverNpcIds: ['orla'] }], mainQuestIds: ['m1'] },
+  };
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('lights when someone here has a quest the player can take, or holds the next main step', () => {
+    expect(newQuestHere(offeredHere as never)).toBe(true);
+    expect(newQuestHere(nextStepHere as never)).toBe(true);
+    expect(newQuestHere({ ...offeredHere, availableQuestIds: [] } as never)).toBe(false);
+    expect(newQuestHere({ ...nextStepHere, questGiverNpcId: 'bram' } as never)).toBe(false);
+    const lockedStep = { ...nextStepHere.questGuide.steps[0], status: 'needs_level' };
+    expect(newQuestHere({ ...nextStepHere, questGuide: { steps: [lockedStep], mainQuestIds: [] } } as never)).toBe(false);
+    expect(newQuestHere({} as never)).toBe(false);
+    expect(newQuestHere(null)).toBe(false);
+  });
+
+  it('shows a green dot, not a count, on the Quests tab, and the ready count wins', () => {
+    const t = setup();
+    t.push(offeredHere);
+    expect(t.badge('quests').classList.contains('visible')).toBe(true);
+    expect(t.badge('quests').classList.contains('nav-badge-new')).toBe(true);
+    expect(t.badge('quests').classList.contains('nav-badge-count')).toBe(false);
+    expect(t.badge('quests').textContent).toBe('');
+    expect(t.tab('quests').getAttribute('aria-label')).toBe('Quests, new quest here');
+
+    t.push({ ...offeredHere, activeQuests: [{ status: 'ready' }] });
+    expect(t.badge('quests').classList.contains('nav-badge-new')).toBe(false);
+    expect(t.badge('quests').textContent).toBe('1');
+    expect(t.tab('quests').getAttribute('aria-label')).toBe('Quests, 1 ready');
+
+    t.push({});
+    expect(t.badge('quests').classList.contains('visible')).toBe(false);
+    expect(t.badge('quests').classList.contains('nav-badge-new')).toBe(false);
+    expect(t.tab('quests').getAttribute('aria-label')).toBe('Quests');
+  });
+
+  it('shows the same dot on the utility strip', () => {
+    const t = setup();
+    new UtilityStrip(t.gameClient, { onOpenChat: vi.fn(), onOpenQuests: vi.fn() });
+    const badge = document.querySelector('.utility-quests-badge') as HTMLElement;
+    const button = document.querySelector('.utility-quests') as HTMLElement;
+
+    t.push(nextStepHere);
+    expect(badge.classList.contains('visible')).toBe(true);
+    expect(badge.classList.contains('utility-quests-new')).toBe(true);
+    expect(badge.textContent).toBe('');
+    expect(button.getAttribute('aria-label')).toBe('Quests, new quest here');
+
+    t.push({ ...nextStepHere, activeQuests: [{ status: 'ready' }, { status: 'ready' }] });
+    expect(badge.classList.contains('utility-quests-new')).toBe(false);
+    expect(badge.textContent).toBe('2');
+    expect(button.getAttribute('aria-label')).toBe('Quests, 2 ready');
+
+    t.push({});
+    expect(badge.classList.contains('visible')).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe('Quests');
   });
 });

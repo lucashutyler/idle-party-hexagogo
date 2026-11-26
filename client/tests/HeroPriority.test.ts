@@ -53,6 +53,7 @@ function setup(loadout: object, skills: Record<string, SkillDefinition> = CATALO
     getSlotSchedule: () => [{ type: 'active', unlocksAtLevel: 1 }, { type: 'active', unlocksAtLevel: 1 }, { type: 'active', unlocksAtLevel: 1 }],
     getSkill: (id: string) => skills[id] ?? null,
     hasServerSkillCatalog: () => serverCatalog,
+    roomsFoundByMap: () => new Map(),
     contentGeneration: 0,
   } as unknown as WorldCache;
   new CharItemsScreen('charitems', gameClient, worldCache).onActivate();

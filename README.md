@@ -180,6 +180,8 @@ Publishing a draft creates an **immutable snapshot** of all content at that poin
 - [x] Room actions on explored rooms (map markers for NPCs, shops, dungeon entrances and travel points; hover tooltip lists them plus a player count; NPCs marked with a green `!` for a new quest or a gold `?` for one ready to hand in)
 - [x] Room status panel for the current room (desktop card / mobile chips that talk, shop, enter or travel directly; a travel chip confirms first on phones)
 - [x] Room sheet (tap a room for its name, actions, forecast and Go; tap it again to go)
+- [x] Lock preview (padlocks on rooms and exits the party would be refused, in zones the player knows; the room sheet lists what is missing and withholds Go; rooms only a door reaches say so)
+- [x] Rooms found per region on Hero > Stats
 - [x] Terrain, fog and art layers (procedural terrain from room-type colours, separate fog, room art loaded near the view)
 - [x] Follow camera, route line and route chip with Stop, zone labels, zoom-based detail levels
 - [x] Stop here — tap your own room mid-route to stop (or walk back if you've already left it)
@@ -234,6 +236,8 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Unread message indicators
 - [x] Social badge notifications (nav dot + segment counts for friend requests and party invites; unread count on the chat strip and rail)
 - [x] User popup menu (click username → Chat, Guild Invite, Friend, Party Invite, Trade, Gift, Block; a bottom sheet on phones)
+- [x] Party invites anywhere: an on-screen invite card with Join / Decline / Later, friends invitable from any room, invites that survive moving and restarts and last 24 hours, and Accept brings you to your friend when you could walk there yourself
+- [x] Leader prompt: the owner and leaders are asked once per joiner whether they may move the party too
 - [x] Class icons next to usernames everywhere
 - [x] XP gauge on Hero › Stats: XP/hr in the current room from what its fights pay and the room forecast blended with fights seen, time to the next level, "this run so far" in a dungeon, plus the reset counter
 - [x] Rooms whose fights pay no XP say so in the room sheet
@@ -245,7 +249,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] DM notifications (suppressed while actively viewing that conversation)
 - [x] Friend-request notifications (received + accepted)
 - [x] Notification preferences UI (category × channel grid, per-channel kill switch, enable/disable all)
-- [x] In-app notification bell (dropdown inbox, unread badge, live toasts)
+- [x] In-app notification bell (dropdown inbox, unread badge, live toasts, ended party invites marked as ended)
 - [x] PWA scaffolding (installable manifest, service worker, offline app-shell caching)
 - [ ] Guild event notifications (blocked on the guild system existing)
 - [ ] SMS / Discord channel drivers
@@ -274,6 +278,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Quest log (utility strip or rail: who has new quests for you, active quests with ready-to-turn-in first and where to turn them in, rows that take you to the room, progress bars; completed quests behind a toggle)
 - [x] Quest discovery (green `!` on NPCs with a quest you can take, quest destinations outlined on the map, objectives name rooms instead of coordinates)
 - [x] Quest popup feedback (Accept / Turn In show progress and the reason for any refusal)
+- [x] Main story guide (main-story quests pinned in gold in the Quest Log with the next step even before it can be taken, a goal line under the battle, a Quests dot when someone in your room has a quest; a visit counts when you accept a quest in its room)
 - [ ] Quest chains / storylines
 
 ### Dungeons

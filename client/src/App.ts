@@ -442,10 +442,12 @@ export class App {
     this.xpBar = new PersistentXpBar(this.gameClient);
     this.topHud = new TopHud(this.gameClient, this.worldCache);
 
-    const questLog = new QuestLog(this.gameClient, this.worldCache, (roomId) => {
+    const showRoom = (roomId: string): void => {
       navigate('map');
       mapScreen.focusRoom(roomId);
-    });
+    };
+    const questLog = new QuestLog(this.gameClient, this.worldCache, showRoom);
+    combatScreen.setQuestTrackerActions({ openQuestLog: () => questLog.open(), showRoom });
 
     const chatPopout = new ChatPopout(this.gameClient);
     this.chatPopout = chatPopout;

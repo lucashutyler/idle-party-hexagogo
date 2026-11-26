@@ -1,5 +1,5 @@
 /* ── Combat screen ───────────────────────────────────────── */
-/* Portrait budget: header 36 · stage flex · skill bar 60 (40 empty) · ticker 48. See docs/architecture/client.md. */
+/* Portrait budget: header 36 · quest line 24 (when shown) · stage flex · skill bar 60 (40 empty) · ticker 48. See docs/architecture/client.md. */
 
 #screen-combat {
   background: var(--bg-0);
@@ -294,6 +294,108 @@
   border: 6px solid transparent;
   border-top: 0;
   border-bottom-color: var(--outline);
+}
+
+/* ── Quest tracker ───────────────────────────────────────── */
+.combat-quest-tracker {
+  position: relative;
+  z-index: 5;
+  flex: 0 0 24px;
+  height: 24px;
+  min-width: 0;
+  background: rgba(6, 9, 24, 0.9);
+  border-bottom: 1px solid var(--stroke);
+}
+.combat-quest-tracker[hidden] {
+  display: none;
+}
+.quest-tracker {
+  position: relative;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0 calc(10px + var(--safe-right)) 0 calc(10px + var(--safe-left));
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.quest-tracker::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 -12px;
+}
+.quest-tracker::after {
+  content: '›';
+  flex: none;
+  margin-left: auto;
+  color: var(--gold);
+  font-size: var(--fs-md);
+}
+.quest-tracker:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+.quest-tracker:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+.quest-tracker-label {
+  flex: none;
+  padding: 3px 6px 2px;
+  border-radius: var(--radius-pill);
+  background: var(--grad-primary);
+  color: #5a3300;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.quest-tracker-title,
+.quest-tracker-detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quest-tracker-title {
+  color: var(--gold);
+}
+.quest-tracker[data-kind="here"] .quest-tracker-title {
+  color: var(--green);
+}
+.quest-tracker-detail {
+  max-width: 60%;
+  color: var(--text-2);
+}
+.quest-tracker-detail::before {
+  content: '· ';
+  color: var(--text-3);
+}
+@media (max-height: 500px) {
+  .combat-quest-tracker {
+    display: none;
+  }
+}
+/* A shown quest line sits where the Run / Leave / forecast hit-slop would reach. */
+@media not all and (max-height: 500px) {
+  .combat-header:has(+ .combat-quest-tracker:not([hidden])) .combat-run-btn::after,
+  .combat-header:has(+ .combat-quest-tracker:not([hidden])) .combat-dungeon-leave::after,
+  .combat-header:has(+ .combat-quest-tracker:not([hidden])) .combat-forecast::after {
+    bottom: -4px;
+  }
 }
 
 /* ── Stage ───────────────────────────────────────────────── */
@@ -2492,16 +2594,26 @@ body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] 
   #screen-combat.active {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: 36px minmax(0, 1fr) 148px;
+    grid-template-rows: 36px auto minmax(0, 1fr) 148px;
   }
   .combat-header,
+  .combat-quest-tracker,
   .combat-stage {
     grid-column: 1 / -1;
+  }
+  .combat-header {
+    grid-row: 1;
+  }
+  .combat-quest-tracker {
+    grid-row: 2;
+  }
+  .combat-stage {
+    grid-row: 3;
   }
   .combat-skillbar,
   .combat-skillbar.empty {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 4;
     height: auto;
     padding-top: 10px;
     padding-bottom: 10px;
@@ -2516,7 +2628,7 @@ body[data-active-screen="combat"][data-chat-open="1"][data-chat-layout="sheet"] 
   }
   .combat-log-wrapper:not(.fullscreen) {
     grid-column: 2;
-    grid-row: 3;
+    grid-row: 4;
     border-left: 1px solid rgba(255, 255, 255, 0.06);
   }
 }

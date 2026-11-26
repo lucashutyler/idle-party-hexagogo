@@ -136,6 +136,30 @@ describe('CombatScreen', () => {
     document.body.innerHTML = '';
   });
 
+  it('puts the quest line between the header and the stage, hidden until it has a goal, and hands its taps on', () => {
+    const t = start();
+    const order = [...document.querySelector('#combat')!.children].map(el => el.classList[0]);
+    expect(order.slice(0, 3)).toEqual(['combat-header', 'combat-quest-tracker', 'combat-stage']);
+    const line = document.querySelector<HTMLElement>('.combat-quest-tracker')!;
+    expect(line.hidden).toBe(true);
+
+    const actions = { openQuestLog: vi.fn(), showRoom: vi.fn() };
+    t.screen.setQuestTrackerActions(actions);
+    t.push({
+      ...makeState(1, GOBLIN, []),
+      activeQuests: [{ questId: 'm1', status: 'in_progress', progress: [1], acceptedAt: '2026-01-01T00:00:00.000Z' }],
+      questDefinitions: {
+        m1: { id: 'm1', name: 'Progress: Title m1', description: '', scope: 'party_shared', objectives: [{ kind: 'kill', monsterId: 'goblin', count: 4 }], rewards: [] },
+      },
+      questResolutions: { monsters: { goblin: 'Goblin' }, items: {}, tiles: {} },
+      questGuide: { steps: [{ questId: 'm1', name: 'Progress: Title m1', status: 'active' }], mainQuestIds: ['m1'] },
+    } as ServerStateMessage);
+    expect(line.hidden).toBe(false);
+    expect(line.textContent).toBe('MainTitle m1Goblin 1/4');
+    line.querySelector<HTMLButtonElement>('.quest-tracker')!.click();
+    expect(actions.openQuestLog).toHaveBeenCalledOnce();
+  });
+
   it('draws a live combat event on the unit it hit', () => {
     const t = start();
     const flash = t.enemyCard(1)!.querySelector('.combat-card-flash')!;

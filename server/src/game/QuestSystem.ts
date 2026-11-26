@@ -1,6 +1,5 @@
 import {
   computeStatus,
-  initialProgress,
   objectivesComplete,
   canAcceptQuest,
   getObjectiveTarget,
@@ -91,10 +90,11 @@ export class QuestSystem {
   /**
    * Accept a quest. Returns null on success, or an error reason.
    * `partySize` is used to enforce 'solo' scope (must be in a party of 1).
+   * A visit objective for `currentTileId`, the room the party stands in, counts at once.
    */
   accept(
     quest: QuestDefinition,
-    ctx: { playerLevel: number; partySize: number },
+    ctx: { playerLevel: number; partySize: number; currentTileId?: string },
   ): string | null {
     const reason = canAcceptQuest(quest, {
       playerLevel: ctx.playerLevel,
@@ -105,14 +105,17 @@ export class QuestSystem {
     });
     if (reason) return reason;
 
-    this.active.set(quest.id, {
+    const progress = quest.objectives.map(obj => (obj.kind === 'visit' && obj.tileId === ctx.currentTileId ? 1 : 0));
+    const entry: QuestProgressEntry = {
       questId: quest.id,
-      status: 'accepted',
-      progress: initialProgress(quest),
+      status: computeStatus(quest, progress),
+      progress,
       acceptedAt: new Date().toISOString(),
-    });
+    };
+    this.active.set(quest.id, entry);
     this.revision++;
     this.fire({ type: 'accepted', questId: quest.id, username: this.username });
+    if (entry.status === 'ready') this.fire({ type: 'ready', questId: quest.id, username: this.username });
     return null;
   }
 
@@ -123,9 +126,10 @@ export class QuestSystem {
   applyKill(monsterId: string, quests: Record<string, QuestDefinition>): string[] {
     const transitioned: string[] = [];
     for (const entry of this.active.values()) {
-      if (entry.status === 'ready') continue;
       const def = quests[entry.questId];
       if (!def) continue;
+      reconcileEntry(entry, def);
+      if (entry.status === 'ready') continue;
       let changed = false;
       for (let i = 0; i < def.objectives.length; i++) {
         const obj = def.objectives[i];
@@ -157,9 +161,10 @@ export class QuestSystem {
   applyVisit(tileId: string, quests: Record<string, QuestDefinition>): string[] {
     const transitioned: string[] = [];
     for (const entry of this.active.values()) {
-      if (entry.status === 'ready') continue;
       const def = quests[entry.questId];
       if (!def) continue;
+      reconcileEntry(entry, def);
+      if (entry.status === 'ready') continue;
       let changed = false;
       for (let i = 0; i < def.objectives.length; i++) {
         const obj = def.objectives[i];
@@ -185,29 +190,31 @@ export class QuestSystem {
   }
 
   /**
-   * Recompute collect-objective progress from current inventory ownership counts.
-   * Called before exposing state to the client and before turn-in.
+   * Fit every active entry to its quest as authored now, then recompute collect-objective progress
+   * from current inventory ownership counts. Called before exposing state to the client.
    */
   recomputeCollect(
-    quests: Record<string, QuestDefinition>,
+    quests: Readonly<Record<string, QuestDefinition>>,
     getInventoryCount: (itemId: string) => number,
   ): void {
     for (const entry of this.active.values()) {
       const def = quests[entry.questId];
       if (!def) continue;
-      let changed = false;
+      fitProgress(entry, def);
       for (let i = 0; i < def.objectives.length; i++) {
         const obj = def.objectives[i];
         if (obj.kind !== 'collect') continue;
-        const owned = Math.min(obj.count, getInventoryCount(obj.itemId));
-        if (entry.progress[i] !== owned) {
-          entry.progress[i] = owned;
-          changed = true;
-        }
+        entry.progress[i] = Math.min(obj.count, getInventoryCount(obj.itemId));
       }
-      if (changed) {
-        entry.status = computeStatus(def, entry.progress);
-      }
+      entry.status = computeStatus(def, entry.progress);
+    }
+  }
+
+  /** Fit every active entry to its quest as authored now: an edited objective count must not strand a holder. */
+  reconcile(quests: Readonly<Record<string, QuestDefinition>>): void {
+    for (const entry of this.active.values()) {
+      const def = quests[entry.questId];
+      if (def) reconcileEntry(entry, def);
     }
   }
 
@@ -228,7 +235,7 @@ export class QuestSystem {
     const def = quests[questId];
     if (!def) return { success: false, error: 'Quest definition missing.' };
 
-    // Recompute collect progress before validating ready state
+    fitProgress(entry, def);
     for (let i = 0; i < def.objectives.length; i++) {
       const obj = def.objectives[i];
       if (obj.kind !== 'collect') continue;
@@ -280,7 +287,8 @@ export class QuestSystem {
     };
   }
 
-  loadFromSaveData(data: QuestSystemSaveData): void {
+  /** With `quests`, saved progress is fitted to the quests as authored now. */
+  loadFromSaveData(data: QuestSystemSaveData, quests?: Readonly<Record<string, QuestDefinition>>): void {
     this.active.clear();
     for (const entry of data.active) {
       this.active.set(entry.questId, {
@@ -293,6 +301,7 @@ export class QuestSystem {
     this.completed = [...data.completed];
     this.weeklyCompletions = { ...data.weeklyCompletions };
     this.revision++;
+    if (quests) this.reconcile(quests);
   }
 
   // --- Helpers (also used by tests) ---
@@ -312,4 +321,19 @@ export class QuestSystem {
   private fire(event: QuestEvent): void {
     this.onEvent?.(event);
   }
+}
+
+/** Pads or truncates progress to the authored objectives and clamps each value to its target. */
+function fitProgress(entry: QuestProgressEntry, def: QuestDefinition): void {
+  const { progress } = entry;
+  progress.length = def.objectives.length;
+  for (let i = 0; i < progress.length; i++) {
+    const value = progress[i];
+    progress[i] = Number.isFinite(value) ? Math.min(getObjectiveTarget(def.objectives[i]), Math.max(0, value)) : 0;
+  }
+}
+
+function reconcileEntry(entry: QuestProgressEntry, def: QuestDefinition): void {
+  fitProgress(entry, def);
+  entry.status = computeStatus(def, entry.progress);
 }

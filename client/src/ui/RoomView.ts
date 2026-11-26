@@ -1,7 +1,7 @@
 import type { TileClickInfo } from './ThreeWorldMap';
 import type { ForecastResult, PartyAutoRetreatInfo, AutoRetreatPct } from '@idle-party-rpg/shared';
 import { classIconHtml } from '@idle-party-rpg/shared';
-import { ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
+import { LOCKED_DETAIL, ROOM_ICONS, actionLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderForecastPopover, renderForecastRing } from './ForecastChip';
@@ -39,6 +39,8 @@ export class RoomView {
   roomId: string | null = null;
   /** Room to forecast (null hides the forecast). Set externally before showing. */
   forecastTileId: string | null = null;
+  /** Why the party can't go to this remote room; any line hides "Go to room". Set externally before showing. */
+  blockedLines: string[] = [];
   /** Last shown remote-room key — used to drive the arrival transition. */
   private lastRemoteKey: string | null = null;
   private forecastProvider?: RoomForecastProvider;
@@ -159,8 +161,11 @@ export class RoomView {
       const icon = action.kind === 'shop'
         ? renderAssetImg('shop', action.targetId, { className: 'room-view-action-icon', label: action.name })
         : `<span class="room-view-action-icon room-view-action-icon-emoji${pip}">${this.escapeHtml(action.icon)}</span>`;
-      return `<button class="room-view-action room-view-action-${action.kind}" data-action-index="${i}"${title}>`
-        + `${icon}<span>${this.escapeHtml(actionLabel(action))}</span></button>`;
+      const locked = action.locked
+        ? `<span class="room-view-action-lock" role="img" aria-label="${LOCKED_DETAIL}">${ROOM_ICONS.lock}</span>`
+        : '';
+      return `<button class="room-view-action room-view-action-${action.kind}${action.locked ? ' room-view-action-locked' : ''}" data-action-index="${i}"${title}>`
+        + `${icon}<span>${this.escapeHtml(actionLabel(action))}</span>${locked}</button>`;
     }).join('');
 
     this.modal.innerHTML = `
@@ -229,16 +234,22 @@ export class RoomView {
       ? `<div class="room-view-meta room-view-meta-dim">Unexplored — travel here to learn more.</div>`
       : '';
 
+    const blocked = this.blockedLines.length > 0;
+    const lockBlock = blocked
+      ? `<div class="room-view-lock">${this.blockedLines.map(line => `<div class="room-view-lock-line">${this.escapeHtml(line)}</div>`).join('')}</div>`
+      : '';
+
     this.modal.innerHTML = `
       <button class="room-view-close" aria-label="Close">×</button>
       <div class="room-view-zone">${this.escapeHtml(info.zoneName)}</div>
       <div class="room-view-name">${this.escapeHtml(info.roomName || 'Unexplored Room')}</div>
+      ${lockBlock}
       ${this.forecastSlotHtml()}
       ${info.isUnlocked ? this.renderContentsList(this.actions) : ''}
       ${partiesBlock}
       ${undiscoveredNote}
       <div class="room-view-actions">
-        ${info.isTraversable ? `<button class="room-view-action room-view-action-go">Go to room</button>` : ''}
+        ${info.isTraversable && !blocked ? `<button class="room-view-action room-view-action-go">Go to room</button>` : ''}
         <button class="room-view-action room-view-action-cancel">Close</button>
       </div>
     `;
@@ -360,8 +371,9 @@ export class RoomView {
     if (actions.length === 0) return '';
     const items = actions.map(action => {
       const pip = pipSuffix(action);
-      const detail = action.detail
-        ? `<span class="room-view-contents-detail">${this.escapeHtml(action.detail)}</span>`
+      const detailText = action.locked ? `${ROOM_ICONS.lock} ${LOCKED_DETAIL}` : action.detail;
+      const detail = detailText
+        ? `<span class="room-view-contents-detail">${this.escapeHtml(detailText)}</span>`
         : '';
       return `<li class="room-view-contents-item">`
         + `<span class="room-view-contents-icon${pip}">${this.escapeHtml(action.icon)}</span>`

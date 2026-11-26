@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   acceptableQuestIds,
   canAcceptQuest,
+  isMainQuest,
+  MAIN_QUEST_PREFIX,
   nextWeeklyReopening,
+  questTitle,
   SOLO_QUEST_IN_PARTY_REASON,
   WEEKLY_COOLDOWN_MS,
   type QuestAcceptContext,
@@ -93,5 +96,24 @@ describe('nextWeeklyReopening', () => {
     const w = quest('w', { repeat: 'weekly' });
     expect(canAcceptQuest(w, ctx({ weeklyCompletions: weekly, now: new Date(reopensAt - 1) }))).not.toBeNull();
     expect(canAcceptQuest(w, ctx({ weeklyCompletions: weekly, now: new Date(reopensAt) }))).toBeNull();
+  });
+});
+
+describe('main story names', () => {
+  it('marks a quest main only when its name starts with the prefix', () => {
+    expect(MAIN_QUEST_PREFIX).toBe('Progress:');
+    expect(isMainQuest({ name: 'Progress: Over the Ridge' })).toBe(true);
+    expect(isMainQuest({ name: 'Progress:Over the Ridge' })).toBe(true);
+    expect(isMainQuest({ name: 'Side Errand (Progress: none)' })).toBe(false);
+    expect(isMainQuest({ name: ' Progress: leading space' })).toBe(false);
+    expect(isMainQuest({ name: 'progress: lower case' })).toBe(false);
+    expect(isMainQuest({ name: '' })).toBe(false);
+  });
+
+  it('strips the prefix and the space after it from a main title, and leaves other names alone', () => {
+    expect(questTitle({ name: 'Progress: Over the Ridge' })).toBe('Over the Ridge');
+    expect(questTitle({ name: 'Progress:   Spaced Out  ' })).toBe('Spaced Out');
+    expect(questTitle({ name: 'A Side Errand ' })).toBe('A Side Errand ');
+    expect(questTitle({ name: 'Side (Progress: none)' })).toBe('Side (Progress: none)');
   });
 });

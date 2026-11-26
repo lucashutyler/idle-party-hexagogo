@@ -7,7 +7,7 @@ import { CharItemsScreen } from '../src/screens/CharItemsScreen';
 import { dismissTop } from '../src/ui/ModalStack';
 import { forgetMissingAssets } from '../src/ui/assets';
 import type { GameClient } from '../src/network/GameClient';
-import type { WorldCache } from '../src/network/WorldCache';
+import type { MapRoomsFound, WorldCache } from '../src/network/WorldCache';
 
 type StateListener = (state: ServerStateMessage) => void;
 
@@ -76,9 +76,10 @@ function setup(className: string, inventory: Record<string, number>, equipment: 
     getSlotSchedule: () => [{ type: 'active', unlocksAtLevel: 1 }],
     getSkill: (id: string) => SKILLS[id as keyof typeof SKILLS] ?? null,
     contentGeneration: 0,
-  } as unknown as WorldCache;
+    roomsFoundByMap: vi.fn((_unlocked: readonly string[]) => roomsFound),
+  };
 
-  const screen = new CharItemsScreen('charitems', gameClient as unknown as GameClient, worldCache);
+  const screen = new CharItemsScreen('charitems', gameClient as unknown as GameClient, worldCache as unknown as WorldCache);
   if (activate) screen.onActivate();
 
   const push = (state: ServerStateMessage) => {
@@ -91,10 +92,12 @@ function setup(className: string, inventory: Record<string, number>, equipment: 
   };
   const emitBestiary = () => bestiaryListener();
   const slot = (name: string) => document.querySelector<HTMLElement>(`.items-equip-slot-square[data-slot="${name}"]`)!;
-  return { screen, gameClient, push, emitBestiary, openInventoryItem, slot };
+  return { screen, gameClient, worldCache, push, emitBestiary, openInventoryItem, slot };
 }
 
 const EMPTY = { mainhand: null, offhand: null };
+
+let roomsFound = new Map<string, MapRoomsFound>();
 
 function makeTrade(id: string, lastUpdatedBy: string) {
   return { id, status: 'proposed', lastUpdatedBy, initiator: { username: 'me', items: [] }, target: { username: 'friend', items: [] } };
@@ -690,5 +693,53 @@ describe('CharItemsScreen', () => {
     document.querySelector<HTMLElement>('.confirm-ok')!.click();
     await Promise.resolve();
     expect(t.gameClient.sendCancelTrade).toHaveBeenCalledWith('t1');
+  });
+
+  describe('exploration', () => {
+    const card = () => document.querySelector<HTMLElement>('.hero-pane-stats .hero-exploration')!;
+    const rows = () => [...card().querySelectorAll('.hero-exploration-row')].map(row =>
+      [row.querySelector('.hero-exploration-map')!.textContent, row.querySelector('.hero-exploration-count')!.textContent]);
+    const exploring = (unlocked: string[]) => ({ ...makeState('Knight', {}, EMPTY), unlocked }) as ServerStateMessage;
+
+    afterEach(() => { roomsFound = new Map(); });
+
+    it('lists the rooms found in each region visited, then how many regions are left', () => {
+      roomsFound = new Map([
+        ['isle', { name: 'Gull Isle', found: 41, total: 77 }],
+        ['cave', { name: 'Damp Cave', found: 0, total: 12 }],
+        ['town', { name: 'Old Town', found: 1, total: 1 }],
+        ['peak', { name: 'Far Peak', found: 0, total: 30 }],
+      ]);
+      const t = setup('Knight', {}, EMPTY);
+      t.push(exploring(['a', 'b']));
+      expect(card().querySelector('.items-section-label')!.textContent).toBe('Exploration');
+      expect(rows()).toEqual([['Gull Isle', '41 of 77 rooms'], ['Old Town', '1 of 1 room']]);
+      expect(card().querySelector<HTMLElement>('.hero-exploration-fill')!.style.transform).toBe('scaleX(0.532)');
+      expect(card().querySelector('.hero-exploration-rest')!.textContent).toBe('2 regions not yet visited');
+      expect(t.worldCache.roomsFoundByMap).toHaveBeenLastCalledWith(['a', 'b']);
+    });
+
+    it('asks again only when the number of rooms found changes', () => {
+      roomsFound = new Map([['isle', { name: 'Gull Isle', found: 2, total: 9 }]]);
+      const t = setup('Knight', {}, EMPTY);
+      t.push(exploring(['a', 'b']));
+      const calls = t.worldCache.roomsFoundByMap.mock.calls.length;
+      const before = card().firstElementChild;
+      t.push(exploring(['a', 'b']));
+      expect(t.worldCache.roomsFoundByMap).toHaveBeenCalledTimes(calls);
+      expect(card().firstElementChild).toBe(before);
+
+      roomsFound = new Map([['isle', { name: 'Gull Isle', found: 3, total: 9 }]]);
+      t.push(exploring(['a', 'b', 'c']));
+      expect(t.worldCache.roomsFoundByMap).toHaveBeenCalledTimes(calls + 1);
+      expect(rows()).toEqual([['Gull Isle', '3 of 9 rooms']]);
+      expect(card().querySelector('.hero-exploration-rest')).toBeNull();
+    });
+
+    it('stays empty until a room is found', () => {
+      roomsFound = new Map([['isle', { name: 'Gull Isle', found: 0, total: 9 }]]);
+      setup('Knight', {}, EMPTY);
+      expect(card().innerHTML).toBe('');
+    });
   });
 });

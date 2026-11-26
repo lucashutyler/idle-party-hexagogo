@@ -14,6 +14,7 @@ import { classAttackSkill, renderSkillCardMeta } from '../ui/SkillCardChip';
 import { partyGridCell } from '../ui/partyGridLayout';
 import { deferWhilePressed, setHtml } from '../ui/render';
 import { renderSegments, wireSegments } from '../ui/Segments';
+import { acceptInviteWithConfirm, inviteWhereText, runEndsWarning } from '../ui/partyInviteActions';
 
 type SubTab = 'party' | 'guild' | 'friends' | 'ranks';
 
@@ -34,8 +35,7 @@ const GRID_RESYNC_MS = 1500;
 const POPUP_MARGIN = 8;
 const RANK_ROWS_STEP = 100;
 const RANK_GROW_MARGIN_PX = 600;
-const PARTY_RUN_ENDS_WARNING = 'Your party\'s dungeon run will end for everyone in it.';
-const OWN_RUN_ENDS_WARNING = 'Your dungeon run will end.';
+const OFF_ROOM_INVITE_NOTE = 'They join you where you are, if they can walk here.';
 
 function resolveSubTab(requested: string | null): SubTab | null {
   if (!requested) return null;
@@ -53,6 +53,8 @@ interface PlayerRowOptions {
   className?: string;
   /** Escaped HTML for the line under the name. */
   sub?: string;
+  /** Plain text for a second line under the name. */
+  note?: string;
   lead?: string;
   trail?: string;
   actions?: string;
@@ -327,17 +329,7 @@ export class SocialScreen implements Screen {
         return;
       }
       if (btn.matches('.social-accept-invite') && partyId) {
-        const accept = () => this.gameClient.sendAcceptPartyInvite(partyId);
-        if (this.gameClient.lastState?.dungeon) {
-          this.confirmPartyChange({
-            title: 'Join this party?',
-            body: 'You will leave your current party.',
-            confirmLabel: 'Join Party',
-            danger: true,
-          }, accept);
-        } else {
-          accept();
-        }
+        void acceptInviteWithConfirm(this.gameClient, partyId, this.gameClient.lastState);
         return;
       }
       if (btn.matches('.social-decline-invite') && partyId) { this.gameClient.sendDeclinePartyInvite(partyId); return; }
@@ -471,9 +463,8 @@ export class SocialScreen implements Screen {
 
   /** Adds the warning while in a dungeon. */
   private confirmPartyChange(opts: ConfirmDialogOptions, action: () => void): void {
-    const state = this.gameClient.lastState;
-    const warning = (state?.social?.party?.members.length ?? 0) > 1 ? PARTY_RUN_ENDS_WARNING : OWN_RUN_ENDS_WARNING;
-    this.confirmThen({ ...opts, body: state?.dungeon ? `${opts.body} ${warning}` : opts.body }, action);
+    const warning = runEndsWarning(this.gameClient.lastState);
+    this.confirmThen({ ...opts, body: warning ? `${opts.body} ${warning}` : opts.body }, action);
   }
 
   private confirmThen(opts: ConfirmDialogOptions, action: () => void): void {
@@ -583,7 +574,7 @@ export class SocialScreen implements Screen {
       partyId: party?.id ?? null,
       members: (party?.members ?? []).map(m => `${m.username}:${m.role}:${m.gridPosition}`),
       henchmen: (party?.henchmen ?? []).map(h => `${h.instanceId}:${h.name ?? ''}:${h.gridPosition}`),
-      pending: (social.pendingInvites ?? []).map(i => `${i.partyId}:${i.inviterUsername}`),
+      pending: (social.pendingInvites ?? []).map(i => `${i.partyId}:${i.inviterUsername}:${inviteWhereText(i) ?? ''}`),
       outgoing: social.outgoingPartyInvites ?? [],
       sameTile,
     });
@@ -647,6 +638,7 @@ export class SocialScreen implements Screen {
         <span class="social-user-text">
           <span class="social-user-title">${name}</span>
           ${o.sub ? `<span class="social-user-sub">${o.sub}</span>` : ''}
+          ${o.note ? `<span class="social-user-sub social-user-note">${this.escapeHtml(o.note)}</span>` : ''}
         </span>
       </button>
       ${o.trail ?? ''}
@@ -797,10 +789,11 @@ export class SocialScreen implements Screen {
     if (invited) {
       return this.popupItem('party_invite', 'Invited to Party', { disabled: true, note: 'Waiting for their answer' });
     }
-    if (!sameRoom) {
-      return this.popupItem('party_invite', 'Invite to Party', { disabled: true, note: 'You must be in the same room to invite them' });
+    if (sameRoom) return this.popupItem('party_invite', 'Invite to Party');
+    if ((social?.friends ?? []).includes(username)) {
+      return this.popupItem('party_invite', 'Invite to Party', { note: OFF_ROOM_INVITE_NOTE });
     }
-    return this.popupItem('party_invite', 'Invite to Party');
+    return this.popupItem('party_invite', 'Invite to Party', { disabled: true, note: 'You must be in the same room to invite them, unless they are your friend' });
   }
 
   private popupItem(action: string, label: string, opts: PopupItemOptions = {}): string {
@@ -1351,15 +1344,21 @@ export class SocialScreen implements Screen {
     const invitesHtml = pendingInvites.length > 0 ? `
       ${this.sectionLabel('Party invites', pendingInvites.length)}
       <div class="social-user-list">
-        ${pendingInvites.map(inv => `
+        ${pendingInvites.map(inv => {
+          const where = inviteWhereText(inv);
+          return `
           <div class="social-user-row social-inline-actions" data-party-id="${this.escapeHtml(inv.partyId)}">
-            <span class="social-user-name">${this.escapeHtml(inv.inviterUsername)}'s party</span>
+            <span class="social-user-text">
+              <span class="social-user-name">${this.escapeHtml(inv.inviterUsername)}'s party</span>
+              ${where ? `<span class="social-user-sub">${this.escapeHtml(where)}</span>` : ''}
+            </span>
             <div class="social-user-actions">
               <button type="button" class="social-action-btn add-friend social-accept-invite" data-party-id="${this.escapeHtml(inv.partyId)}">Accept</button>
               <button type="button" class="social-action-btn social-decline-invite" data-party-id="${this.escapeHtml(inv.partyId)}">Decline</button>
             </div>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     ` : '';
 
@@ -1384,7 +1383,7 @@ export class SocialScreen implements Screen {
     const nearbyHtml = isLeaderOrOwner ? `
       ${this.sectionLabel('In this room', sameTilePlayers.length)}
       ${sameTilePlayers.length === 0
-        ? '<div class="social-list-note">No one else is here. Walk to another player\'s room to invite them.</div>'
+        ? '<div class="social-list-note">No one else is here. You can invite a friend from anywhere: tap their name in Friends.</div>'
         : `<div class="social-user-list">${nearbyRows}</div>${partyFull ? `<div class="social-list-note">Your party is full (${seatsUsed}/${MAX_PARTY_SIZE}). Henchmen take a seat too.</div>` : ''}`}
     ` : '';
 
@@ -1393,6 +1392,7 @@ export class SocialScreen implements Screen {
       online: onlineSet.has(m.username),
       className: this.getPlayerClassName(m.username),
       sub: this.playerSub(m.username),
+      note: m.role === 'member' ? 'Can\'t move the party' : undefined,
       trail: m.role === 'owner'
         ? '<span class="social-badge owner">Owner</span>'
         : m.role === 'leader' ? '<span class="social-badge friend">Leader</span>' : '',

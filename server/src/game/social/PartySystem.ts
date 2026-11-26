@@ -1,5 +1,12 @@
 import type { GamePartyInfo, HiredHenchman, PartyGridPosition, PartyInvite, PartyRole } from '@idle-party-rpg/shared';
-import { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY } from '@idle-party-rpg/shared';
+import { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY, PARTY_INVITE_TTL_MS, partyInviteExpiresAt } from '@idle-party-rpg/shared';
+
+export const INVITE_NO_LONGER_VALID = 'That invite is no longer valid';
+
+/** Why `inviter` may not invite `target` from wherever they are, or true. */
+export type InvitePolicy = (inviter: string, target: string) => true | string;
+/** Why `username` may not join `partyId` from where they stand, or true. */
+export type JoinPolicy = (username: string, partyId: string) => true | string;
 
 let partyIdCounter = 0;
 
@@ -59,20 +66,13 @@ function partyBodyCount(party: GamePartyInfo): number {
 }
 
 /**
- * PartySystem manages game parties (groups of players).
- * - Every player is always in a party (solo if alone)
- * - Pending invite flow: invite → accept/decline
- * - Invites invalidated when inviter leaves the tile
- * - Three-tier roles: owner > leader > member
- * - Owner can promote/demote leaders, transfer ownership
- * - Leaders can kick (including other leaders) and move
- * - Max 5 members, 3x3 grid positioning for combat
- * - Same-tile requirement for inviting
+ * PartySystem manages game parties (groups of players): solo parties, owner > leader > member roles,
+ * the 3x3 formation and pending invites. See docs/architecture/social.md → Party.
  */
 export class PartySystem {
   private parties = new Map<string, GamePartyInfo>();
 
-  /** Pending invites keyed by target username → list of invites. */
+  /** Pending invites keyed by target username → list of invites. Expired ones linger until `pruneExpired`. */
   private pendingInvites = new Map<string, PartyInvite[]>();
 
   /** Create a party with the given player as owner. Returns party or error string. */
@@ -105,7 +105,8 @@ export class PartySystem {
     inviterUsername: string,
     targetUsername: string,
     getPlayerPartyId: (u: string) => string | null,
-    areSameTile: (a: string, b: string) => boolean,
+    mayInvite: InvitePolicy,
+    now: number = Date.now(),
   ): true | string {
     const partyId = getPlayerPartyId(inviterUsername);
     if (!partyId) return 'You are not in a party';
@@ -118,60 +119,61 @@ export class PartySystem {
       return 'Only owners and leaders can invite';
     }
 
-    if (!areSameTile(inviterUsername, targetUsername)) {
-      return 'Must be in the same room to invite';
+    if (party.members.some(m => m.username === targetUsername)) {
+      return 'That player is already in your party';
     }
+
+    const allowed = mayInvite(inviterUsername, targetUsername);
+    if (allowed !== true) return allowed;
 
     if (partyBodyCount(party) >= MAX_PARTY_SIZE) {
       return `Party is full (max ${MAX_PARTY_SIZE})`;
     }
 
-    // Check if already a member of this party
-    if (party.members.some(m => m.username === targetUsername)) {
-      return 'That player is already in your party';
-    }
-
-    // Check if already invited to this party
-    const existing = this.pendingInvites.get(targetUsername) ?? [];
+    const existing = this.getPendingInvites(targetUsername, now);
     if (existing.some(inv => inv.partyId === partyId)) {
       return 'Already invited';
     }
 
-    const invite: PartyInvite = {
+    existing.push({
       partyId,
       inviterUsername,
       targetUsername,
-      timestamp: Date.now(),
-    };
-
-    existing.push(invite);
+      timestamp: now,
+      expiresAt: now + PARTY_INVITE_TTL_MS,
+    });
     this.pendingInvites.set(targetUsername, existing);
     return true;
   }
 
-  /** Accept a pending invite. Leaves current party and joins the invited one. */
+  /** Accept a pending invite. Leaves current party and joins the invited one. A refusal leaves both untouched. */
   acceptInvite(
     username: string,
     partyId: string,
     getPlayerPartyId: (u: string) => string | null,
     setPlayerPartyId: (u: string, id: string | null) => void,
-    areSameTile: (a: string, b: string) => boolean,
+    mayJoin: JoinPolicy,
+    now: number = Date.now(),
   ): { joined: GamePartyInfo; leftPartyId: string | null } | string {
-    const invites = this.pendingInvites.get(username) ?? [];
-    const invite = invites.find(inv => inv.partyId === partyId);
+    const invite = (this.pendingInvites.get(username) ?? [])
+      .find(inv => inv.partyId === partyId && partyInviteExpiresAt(inv) > now);
     if (!invite) return 'Invite not found or expired';
 
     const party = this.parties.get(partyId);
-    if (!party) return 'Party no longer exists';
+    if (!party) {
+      this.removeInvite(username, partyId);
+      return 'Party no longer exists';
+    }
+
+    if (!this.inviterStillInvites(invite)) {
+      this.removeInvite(username, partyId);
+      return INVITE_NO_LONGER_VALID;
+    }
 
     if (partyBodyCount(party) >= MAX_PARTY_SIZE) return 'Party is full';
 
-    // Verify inviter is still on the same tile
-    if (!areSameTile(invite.inviterUsername, username)) {
-      // Remove this invalid invite
-      this.removeInvite(username, partyId);
-      return 'Inviter is no longer in your room';
-    }
+    const allowed = mayJoin(username, partyId);
+    if (allowed !== true) return allowed;
 
     // Leave current party
     const oldPartyId = getPlayerPartyId(username);
@@ -198,7 +200,7 @@ export class PartySystem {
   declineInvite(username: string, partyId: string): true | string {
     const invites = this.pendingInvites.get(username) ?? [];
     const idx = invites.findIndex(inv => inv.partyId === partyId);
-    if (idx === -1) return 'Invite not found';
+    if (idx === -1) return 'That invite has already ended.';
 
     invites.splice(idx, 1);
     if (invites.length === 0) {
@@ -207,20 +209,68 @@ export class PartySystem {
     return true;
   }
 
-  /** Get pending invites for a player (invites they have received). */
-  getPendingInvites(username: string): PartyInvite[] {
-    return this.pendingInvites.get(username) ?? [];
+  /** Invites a player has received that can still be accepted. */
+  getPendingInvites(username: string, now: number = Date.now()): PartyInvite[] {
+    return (this.pendingInvites.get(username) ?? []).filter(inv => this.isLive(inv, now));
   }
 
   /** Get usernames this player has pending outgoing invites for. */
-  getOutgoingInvites(inviterUsername: string): string[] {
+  getOutgoingInvites(inviterUsername: string, now: number = Date.now()): string[] {
     const result: string[] = [];
     for (const [targetUsername, invites] of this.pendingInvites) {
-      if (invites.some(inv => inv.inviterUsername === inviterUsername)) {
+      if (invites.some(inv => inv.inviterUsername === inviterUsername && this.isLive(inv, now))) {
         result.push(targetUsername);
       }
     }
     return result;
+  }
+
+  /** Drop expired invites. Returns the usernames whose invite lists changed. */
+  pruneExpired(now: number = Date.now()): Set<string> {
+    const affected = new Set<string>();
+    for (const [targetUsername, invites] of Array.from(this.pendingInvites.entries())) {
+      const kept = invites.filter(inv => partyInviteExpiresAt(inv) > now);
+      if (kept.length === invites.length) continue;
+      for (const inv of invites) {
+        if (kept.includes(inv)) continue;
+        affected.add(inv.inviterUsername);
+        affected.add(inv.targetUsername);
+      }
+      if (kept.length === 0) this.pendingInvites.delete(targetUsername);
+      else this.pendingInvites.set(targetUsername, kept);
+    }
+    return affected;
+  }
+
+  /** Put back a saved invite (server restart). Returns false, adding nothing, when it could not be sent today. */
+  restoreInvite(invite: PartyInvite, now: number = Date.now()): boolean {
+    if (partyInviteExpiresAt(invite) <= now) return false;
+    const party = this.parties.get(invite.partyId);
+    if (!party || !this.inviterStillInvites(invite)) return false;
+    if (party.members.some(m => m.username === invite.targetUsername)) return false;
+    if (partyBodyCount(party) >= MAX_PARTY_SIZE) return false;
+
+    const existing = this.pendingInvites.get(invite.targetUsername) ?? [];
+    if (existing.some(inv => inv.partyId === invite.partyId)) return false;
+    existing.push({
+      partyId: invite.partyId,
+      inviterUsername: invite.inviterUsername,
+      targetUsername: invite.targetUsername,
+      timestamp: invite.timestamp,
+      expiresAt: partyInviteExpiresAt(invite),
+    });
+    this.pendingInvites.set(invite.targetUsername, existing);
+    return true;
+  }
+
+  private isLive(invite: PartyInvite, now: number): boolean {
+    return partyInviteExpiresAt(invite) > now && this.inviterStillInvites(invite);
+  }
+
+  /** The inviter is still in the party the invite is for, in a role that may invite. */
+  private inviterStillInvites(invite: PartyInvite): boolean {
+    const inviter = this.parties.get(invite.partyId)?.members.find(m => m.username === invite.inviterUsername);
+    return !!inviter && canInvite(inviter.role);
   }
 
   /** Remove a specific invite. */

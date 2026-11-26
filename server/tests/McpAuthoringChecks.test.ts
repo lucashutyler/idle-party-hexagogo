@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { suggestMonsterStats } from '@idle-party-rpg/shared';
+import { MAIN_QUEST_PREFIX, suggestMonsterStats } from '@idle-party-rpg/shared';
 import type { DungeonFloor, MonsterDefinition } from '@idle-party-rpg/shared';
 import { monsterScalingProblems } from '../src/admin/contentChecks.js';
 import { findContentProblems } from '../src/game/ContentValidation.js';
@@ -212,5 +212,10 @@ describe('get_content_schema — authoring references', () => {
     expect(result.description).toContain('a boss pays only on the kill');
     expect(result.description).toContain('nothing reads them');
     expect(result).not.toHaveProperty('checkpointDefaults');
+  });
+
+  it('tells authors that the quest name prefix marks the main story', async () => {
+    const result = await getContentSchema({ type: 'quests' }) as { description: string };
+    expect(result.description).toContain(`starts with '${MAIN_QUEST_PREFIX}'`);
   });
 });

@@ -5,17 +5,19 @@ import { MAX_PARTY_SIZE, MAX_HENCHMEN_PER_PARTY } from '@idle-party-rpg/shared';
 function createPlayerState() {
   const partyIds = new Map<string, string | null>();
   const positions = new Map<string, { col: number; row: number }>();
+  const sameTile = (a: string, b: string) => {
+    const pa = positions.get(a);
+    const pb = positions.get(b);
+    if (!pa || !pb) return false;
+    return pa.col === pb.col && pa.row === pb.row;
+  };
 
   return {
     getPartyId: (u: string) => partyIds.get(u) ?? null,
     setPartyId: (u: string, id: string | null) => { partyIds.set(u, id); },
     setPosition: (u: string, col: number, row: number) => { positions.set(u, { col, row }); },
-    areSameTile: (a: string, b: string) => {
-      const pa = positions.get(a);
-      const pb = positions.get(b);
-      if (!pa || !pb) return false;
-      return pa.col === pb.col && pa.row === pb.row;
-    },
+    canInvite: (a: string, b: string): true | string => sameTile(a, b) ? true : 'Not in the same room',
+    canJoin: (): true | string => true,
   };
 }
 
@@ -65,8 +67,8 @@ describe('PartySystem henchmen', () => {
     const party = soloParty('alice');
     const hired = hire('alice', 'hench_a');
 
-    system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
-    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.areSameTile);
+    system.inviteToParty('alice', 'bob', state.getPartyId, state.canInvite);
+    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.canJoin);
 
     const bob = party.members.find(m => m.username === 'bob');
     expect(bob).toBeDefined();
@@ -102,8 +104,8 @@ describe('PartySystem henchmen', () => {
   function fillWithPlayers(party: ReturnType<typeof soloParty>, names: string[]) {
     for (const n of names) {
       state.setPosition(n, 0, 0);
-      system.inviteToParty('alice', n, state.getPartyId, state.areSameTile);
-      system.acceptInvite(n, party.id, state.getPartyId, state.setPartyId, state.areSameTile);
+      system.inviteToParty('alice', n, state.getPartyId, state.canInvite);
+      system.acceptInvite(n, party.id, state.getPartyId, state.setPartyId, state.canJoin);
     }
   }
 
@@ -157,7 +159,7 @@ describe('PartySystem henchmen', () => {
     state.setPosition('erin', 0, 0);
 
     expect(party.members.length + party.henchmen!.length).toBe(MAX_PARTY_SIZE);
-    expect(system.inviteToParty('alice', 'erin', state.getPartyId, state.areSameTile))
+    expect(system.inviteToParty('alice', 'erin', state.getPartyId, state.canInvite))
       .toContain('Party is full');
   });
 
@@ -166,11 +168,11 @@ describe('PartySystem henchmen', () => {
     fillWithPlayers(party, ['bob', 'carol', 'dave']);
     const hired = hire('alice', 'hench_a');
     state.setPosition('erin', 0, 0);
-    expect(system.inviteToParty('alice', 'erin', state.getPartyId, state.areSameTile)).toContain('Party is full');
+    expect(system.inviteToParty('alice', 'erin', state.getPartyId, state.canInvite)).toContain('Party is full');
 
     system.dismissHenchman('alice', hired.instanceId, state.getPartyId);
 
-    expect(system.inviteToParty('alice', 'erin', state.getPartyId, state.areSameTile)).toBe(true);
+    expect(system.inviteToParty('alice', 'erin', state.getPartyId, state.canInvite)).toBe(true);
     expect(party.henchmen).toHaveLength(0);
   });
 
@@ -271,8 +273,8 @@ describe('PartySystem henchmen', () => {
 
   it('only lets owners and leaders hire and dismiss', () => {
     const party = soloParty('alice');
-    system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
-    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.areSameTile);
+    system.inviteToParty('alice', 'bob', state.getPartyId, state.canInvite);
+    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.canJoin);
     const hired = hire('alice', 'hench_a');
 
     expect(system.hireHenchman('bob', 'hench_b', 'overworld', state.getPartyId))
@@ -363,8 +365,8 @@ describe('PartySystem henchmen', () => {
 
   it('leaves ownership with a real player when a member departs a party holding henchmen', () => {
     const party = soloParty('alice');
-    system.inviteToParty('alice', 'bob', state.getPartyId, state.areSameTile);
-    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.areSameTile);
+    system.inviteToParty('alice', 'bob', state.getPartyId, state.canInvite);
+    system.acceptInvite('bob', party.id, state.getPartyId, state.setPartyId, state.canJoin);
     hire('alice', 'hench_a');
 
     system.leaveParty('alice', state.getPartyId, state.setPartyId);
