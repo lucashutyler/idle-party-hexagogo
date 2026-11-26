@@ -680,13 +680,15 @@ button, input, select, textarea {
   color: var(--text-primary);
 }
 
-/* Gold "?" on an NPC with a quest ready to turn in; green "!" on one with a new quest. */
+/* Gold "?" on an NPC with a quest ready to turn in, gold star on one with a main-story quest, green "!" on one with any other new quest. */
 .quest-ready-pip,
+.quest-main-pip,
 .quest-available-pip {
   position: relative;
   display: inline-block;
 }
 .quest-ready-pip::after,
+.quest-main-pip::after,
 .quest-available-pip::after {
   content: '?';
   position: absolute;
@@ -706,6 +708,12 @@ button, input, select, textarea {
 .quest-available-pip::after {
   content: '!';
   background: var(--accent-green);
+}
+.quest-main-pip::after {
+  content: '★';
+  background: var(--outline);
+  color: var(--accent-gold);
+  box-shadow: 0 0 0 1px var(--accent-gold);
 }
 
 .canvas-map-tooltip {

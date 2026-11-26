@@ -46,6 +46,11 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
     adjustZoom = vi.fn();
     setLockCheck = vi.fn();
     rebuildFromCache = vi.fn();
+    trackedClick?: (tileId: string) => void;
+    setTrackedRoom = vi.fn();
+    setOnTrackedRoomClick = vi.fn((fn: (tileId: string) => void) => { this.trackedClick = fn; });
+    setEdgeArrowInsets = vi.fn();
+    avoidWithEdgeArrow = vi.fn();
     constructor() {
       mapStub.instances.push(this);
     }
@@ -235,6 +240,42 @@ describe('Looking at another map', () => {
     tapRoom(m, 1);
     expect(m.gameClient.sendMoveTo).toHaveBeenLastCalledWith('g1', undefined);
     expect(viewing()).toBe(true);
+  });
+
+  it('points the edge arrow at the main-story room only on the map drawn, and a tap there shows it', async () => {
+    const goal = (tileId: string) => partyState({
+      activeQuests: [{ questId: 'm1', status: 'accepted', progress: [0], acceptedAt: '' }],
+      questDefinitions: { m1: { id: 'm1', name: 'Progress: Find It', description: '', scope: 'solo', rewards: [], objectives: [{ kind: 'visit', tileId }] } },
+      questGuide: { steps: [{ questId: 'm1', name: 'Progress: Find It', status: 'active' }], mainQuestIds: ['m1'] },
+      questResolutions: { monsters: {}, items: {}, tiles: {} },
+    } as Partial<ServerStateMessage>);
+    const m = await mount(goal('g2'));
+    const tracked = (m.map as unknown as { setTrackedRoom: ReturnType<typeof vi.fn> }).setTrackedRoom;
+    expect(tracked).toHaveBeenLastCalledWith(null);
+
+    await viewGrotto(m);
+    expect(tracked).toHaveBeenLastCalledWith('g2');
+    (m.map as unknown as { trackedClick: (tileId: string) => void }).trackedClick('g2');
+    expect(m.map.focusOn).toHaveBeenLastCalledWith(2, 0);
+    expect(m.map.drawnMapId).toBe('grotto');
+    expect(sheetOpen()).toBe(true);
+
+    m.push(goal('v2'));
+    expect(tracked).toHaveBeenLastCalledWith(null);
+    document.querySelector<HTMLElement>('.map-view-back')!.click();
+    expect(tracked).toHaveBeenLastCalledWith('v2');
+  });
+
+  it('keeps the edge arrow clear of the view banner', async () => {
+    const m = await mount();
+    await viewGrotto(m);
+    const avoided = (m.map as unknown as { avoidWithEdgeArrow: ReturnType<typeof vi.fn> }).avoidWithEdgeArrow.mock.calls
+      .map(([el]) => (el as HTMLElement).className);
+    expect(avoided.filter(name => name === 'map-view-banner')).toHaveLength(1);
+    document.querySelector<HTMLElement>('.map-view-back')!.click();
+    await viewGrotto(m);
+    expect((m.map as unknown as { avoidWithEdgeArrow: ReturnType<typeof vi.fn> }).avoidWithEdgeArrow.mock.calls
+      .filter(([el]) => (el as HTMLElement).className === 'map-view-banner')).toHaveLength(1);
   });
 
   it('asks for no forecast off the party\'s map', async () => {

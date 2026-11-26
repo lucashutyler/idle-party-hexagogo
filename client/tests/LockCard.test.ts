@@ -223,4 +223,21 @@ describe('showLockDialog', () => {
     expect(onOpen).toHaveBeenCalledOnce();
     expect(dialog.isOpen).toBe(false);
   });
+
+  it('keeps a note about the monsters under the title through the server\'s answer, red only when told so', () => {
+    const note = () => document.querySelector<HTMLElement>('.lock-dialog .confirm-note');
+    const text = "Monsters there are level 16. You're level 4.";
+    const dialog = showLockDialog({ title: 'Travel', lines: [], note: { text, danger: true }, context: () => context(), onAction: vi.fn() });
+    expect(note()!.textContent).toBe(text);
+    expect(note()!.dataset.danger).toBe('1');
+    dialog.setLock(questLock(step()));
+    expect(note()!.textContent).toBe(text);
+    dialog.close();
+
+    showLockDialog({ title: 'Travel', lines: [], note: { text, danger: false }, context: () => context(), onAction: vi.fn() });
+    expect(note()!.dataset.danger).toBe('0');
+    dismissTop();
+    showLockDialog({ title: 'Travel', lines: [], context: () => context(), onAction: vi.fn() });
+    expect(note()).toBeNull();
+  });
 });

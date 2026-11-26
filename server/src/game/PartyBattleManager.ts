@@ -96,7 +96,7 @@ import { ServerBattleTimer } from './ServerBattleTimer.js';
 import type { CombatFlush } from './ServerBattleTimer.js';
 import { dungeonForecastKey, liveForecastKey, roomForecastKey } from './ForecastService.js';
 import type { ForecastService, ForecastWork } from './ForecastService.js';
-import { AUTO_RETREAT_SKIP_WINDOW, decideAutoRetreat, pickRetreatTarget, stratumUpperPct } from './AutoRetreat.js';
+import { AUTO_RETREAT_SKIP_WINDOW, decideAutoRetreat, doorRetreatDelayMs, isKnownSafe, pickRetreatTarget, stratumUpperPct } from './AutoRetreat.js';
 import type { RelocateCause, RetreatCandidate } from './AutoRetreat.js';
 import type { PlayerSession } from './PlayerSession.js';
 import type { ContentStore } from './ContentStore.js';
@@ -107,6 +107,11 @@ export type { DungeonRunState } from '@idle-party-rpg/shared';
 /** A live forecast re-runs at most this long after a party member falls. */
 export const LIVE_FORECAST_DEBOUNCE_MS = 3000;
 const AUTO_RETREAT_NOTICE = 'Auto-retreat kept your party out of a losing fight. Change it in Options.';
+const RETREAT_REASON: Record<PendingRetreat['kind'], string> = {
+  skip: 'Your party slips away from the fight.',
+  relocate: 'Your party falls back to a safer room.',
+  door: 'Your party falls back through the door.',
+};
 const ROUTE_CHANGED = 'the way on has changed.';
 
 export type { RouteRefusal } from './MoveRefusals.js';
@@ -140,10 +145,31 @@ interface ForecastPlan {
 
 interface PendingRetreat {
   battleId: number;
-  kind: 'skip' | 'relocate';
+  kind: 'skip' | 'relocate' | 'door';
   winPct: number;
   cause?: RelocateCause;
   target?: HexTile;
+  /** For a door retreat, the door of the party's room it takes. */
+  link?: MapTransitionLink;
+}
+
+interface RetreatTarget {
+  tile: HexTile;
+  door?: MapTransitionLink;
+}
+
+/** The last time the party came through a door, and between which rooms. */
+interface DoorArrival {
+  at: number;
+  fromTileId: string;
+  tileId: string;
+}
+
+/** A door retreat's crossing, due once the retreat itself has finished. */
+interface DoorRetreatStep {
+  battleId: number;
+  fromTileId: string;
+  toTileId: string;
 }
 
 /** The live forecast of the party's current fight: the latest result and the job still running. */
@@ -195,6 +221,8 @@ interface PartyBattleEntry {
   /** No auto-retreat while the party stays in this room. */
   retreatHold?: { tileId: string };
   pendingRetreat?: PendingRetreat;
+  doorStep?: DoorRetreatStep;
+  doorArrival?: DoorArrival;
   /** One flag per recent overworld battle: whether auto-retreat skipped it. */
   recentSkips: boolean[];
   precheckKey?: string;
@@ -510,6 +538,7 @@ export class PartyBattleManager {
     entry.retreatHold = undefined;
     entry.recentSkips = [];
     entry.pendingRetreat = undefined;
+    entry.doorStep = undefined;
     entry.battleTimer.cancelRetreat();
   }
 
@@ -696,8 +725,9 @@ export class PartyBattleManager {
       return { success: false, error: blocked.reason, blocked };
     }
 
+    const fromTileId = entry.serverParty.tile.id;
     entry.serverParty.switchMap(destGrid, destTile, link.mapId);
-    this.afterDoorCrossing(entry, link, destTile, destDef.name);
+    this.afterDoorCrossing(entry, link, fromTileId, destTile, destDef.name);
 
     // New map → fresh encounter.
     entry.battleTimer.restartBattle();
@@ -706,7 +736,8 @@ export class PartyBattleManager {
   }
 
   /** What every way through a door shares. Never restarts the fight or broadcasts: the door step runs inside the battle loop. */
-  private afterDoorCrossing(entry: PartyBattleEntry, link: MapTransitionLink, destTile: HexTile, destName: string): void {
+  private afterDoorCrossing(entry: PartyBattleEntry, link: MapTransitionLink, fromTileId: string, destTile: HexTile, destName: string): void {
+    entry.doorArrival = { at: Date.now(), fromTileId, tileId: destTile.id };
     this.announceHenchmenLeft(entry, this.dismissHenchmenOffMap(entry.partyId, link.mapId));
     const quests = this.content.getQuestCatalog();
     for (const username of entry.members) {
@@ -1007,7 +1038,7 @@ export class PartyBattleManager {
     }
 
     party.crossDoor(destGrid, arrival, door.toMapId, leg);
-    this.afterDoorCrossing(entry, door.link, arrival, this.roomNameById(arrival.id));
+    this.afterDoorCrossing(entry, door.link, door.fromTileId, arrival, this.roomNameById(arrival.id));
     return true;
   }
 
@@ -1832,24 +1863,27 @@ export class PartyBattleManager {
     if (!combat || !timer.isFighting(battle.battleId)) return;
 
     let pending: PendingRetreat = { battleId: battle.battleId, kind: 'skip', winPct: decision.winPct };
+    let delayMs = RUN_AVAILABLE_MS - combatRealElapsedMs(combat);
     if (decision.kind === 'relocate') {
       const target = this.findRetreatTarget(entry, battle, belowPct);
       if (target === null) {
         this.holdHere(entry);
         return;
       }
-      if (target !== 'wait') pending = { ...pending, kind: 'relocate', cause: decision.cause, target };
+      if (target !== 'wait') {
+        pending = { ...pending, kind: target.door ? 'door' : 'relocate', cause: decision.cause, target: target.tile, link: target.door };
+        if (target.door) delayMs = doorRetreatDelayMs(delayMs, entry.doorArrival?.at, Date.now());
+      }
     }
     entry.pendingRetreat = pending;
-    const reason = pending.target ? 'Your party falls back to a safer room.' : 'Your party slips away from the fight.';
-    timer.scheduleRetreat(battle.battleId, RUN_AVAILABLE_MS - combatRealElapsedMs(combat), reason);
+    timer.scheduleRetreat(battle.battleId, delayMs, RETREAT_REASON[pending.kind]);
   }
 
   /**
    * An adjacent room on this map that a member has found, the party may enter, and whose forecast is
-   * known to clear the threshold. 'wait' while neighbours are still being forecast.
+   * known to clear the threshold; with none, the same through a door of this room. 'wait' while rooms are still being forecast.
    */
-  private findRetreatTarget(entry: PartyBattleEntry, battle: OverworldBattle, belowPct: number): HexTile | 'wait' | null {
+  private findRetreatTarget(entry: PartyBattleEntry, battle: OverworldBattle, belowPct: number): RetreatTarget | 'wait' | null {
     const svc = this.forecaster;
     const grid = this.grids.get(entry.serverParty.currentMapId);
     if (!svc || !grid) return null;
@@ -1865,10 +1899,66 @@ export class PartyBattleManager {
       candidates.push({ tile, forecast: svc.get(roomForecastKey(epoch, pk, tile.id)), previous: tile.id === previousId });
     }
     const pick = pickRetreatTarget(candidates, belowPct);
-    if (pick.kind === 'target') return pick.tile;
-    if (pick.kind === 'none') return null;
+    if (pick.kind === 'target') return { tile: pick.tile };
+    if (pick.kind === 'wait') return this.forecastRetreatRooms(pick.unknown, battle, pk) ? 'wait' : null;
+
+    const doors = this.doorRetreatCandidates(entry, pk);
+    const doorPick = pickRetreatTarget(doors, belowPct);
+    if (doorPick.kind === 'target') return { tile: doorPick.tile, door: doors.find(c => c.tile === doorPick.tile)?.door };
+    if (doorPick.kind === 'none') return null;
+    return this.forecastRetreatRooms(doorPick.unknown, battle, pk) ? 'wait' : null;
+  }
+
+  /**
+   * Rooms behind this room's doors that a member has found and every member may enter, with found, open doors leading
+   * back. None while the party has hires: a player's trip asks before leaving hires behind or going where there is
+   * no way back, and an automatic retreat can't ask.
+   */
+  private doorRetreatCandidates(entry: PartyBattleEntry, pk: string): RetreatCandidate[] {
+    const svc = this.forecaster;
+    if (!svc || this.getPartyHenchmen(entry.partyId).length > 0) return [];
+    const index = routeIndexOf(this.content);
+    const here = entry.serverParty.tile;
+    const doors = index.doorsFrom(here.id);
+    if (doors.length === 0) return [];
+    const arrival = entry.doorArrival?.tileId === here.id ? entry.doorArrival : undefined;
+    const sessions = [...entry.members].map(m => this.getSession(m)).filter((s): s is PlayerSession => !!s);
+    const found = (tileId: string) => sessions.some(s => s.isTileIdUnlocked(tileId));
+    const infos = this.buildMemberInfos(entry.members);
+    const labels = this.roomLabels();
+    const open = (door: RouteDoor, to: HexTile) =>
+      !validateRoomEntry(door.link.entryRequirements, infos, labels) && !validateRoomEntry(to.entryRequirements, infos, labels);
+    const usableBack = (door: RouteDoor) => {
+      const to = this.grids.get(door.toMapId)?.getTileById(door.toTileId);
+      return found(door.fromTileId) && !!to && open(door, to);
+    };
+    const epoch = this.content.contentEpoch;
+    const candidates: RetreatCandidate[] = [];
+    for (const door of doors) {
+      const tile = this.grids.get(door.toMapId)?.getTileById(door.toTileId);
+      if (!tile || tile.id === here.id || !found(tile.id) || !open(door, tile)) continue;
+      if (!planRouteDoors(index, tile.id, here.id, usableBack)) continue;
+      candidates.push({ tile, door: door.link, forecast: svc.get(roomForecastKey(epoch, pk, tile.id)), previous: tile.id === arrival?.fromTileId });
+    }
+    return candidates;
+  }
+
+  /** Whether the room behind a scheduled door retreat is still one it would take: open, with a way back, known to win. */
+  private retreatDoorStillSafe(entry: PartyBattleEntry, tileId: string): boolean {
+    const battle = entry.battle;
+    const belowPct = this.retreatThreshold(entry);
+    if (!battle || belowPct <= 0) return false;
+    const candidate = this.doorRetreatCandidates(entry, battle.partyKey ?? partyKeyOf(battle.players)).find(c => c.tile.id === tileId);
+    return !!candidate && isKnownSafe(candidate, belowPct);
+  }
+
+  /** Queues pre-check forecasts for retreat rooms; false when none could be queued. */
+  private forecastRetreatRooms(rooms: readonly RetreatCandidate[], battle: OverworldBattle, pk: string): boolean {
+    const svc = this.forecaster;
+    if (!svc) return false;
+    const epoch = this.content.contentEpoch;
     let queued = false;
-    for (const { tile } of pick.unknown) {
+    for (const { tile } of rooms) {
       const answer = svc.request({
         key: roomForecastKey(epoch, pk, tile.id),
         priority: 'precheck',
@@ -1876,7 +1966,7 @@ export class PartyBattleManager {
       });
       if (answer.status !== 'unavailable') queued = true;
     }
-    return queued ? 'wait' : null;
+    return queued;
   }
 
   /** Nowhere safer to go: fight on in this room, and journal it unless that is already the latest retreat line. */
@@ -1902,15 +1992,26 @@ export class PartyBattleManager {
     const at = Date.now();
 
     const target = pending.target && this.grids.get(entry.serverParty.currentMapId)?.getTileById(pending.target.id);
-    if (pending.kind === 'relocate' && target) {
-      if (entry.serverParty.hasDestination && !entry.serverParty.isRetreatStepQueued) this.recordRouteStopped(partyId, from);
+    const why = pending.cause === 'skips'
+      ? '(lost-cause fights kept coming up)'
+      : `— ${from} was too dangerous (win chance ${pct}%)`;
+    if (pending.kind === 'door' && pending.target && pending.link && this.retreatDoorStillSafe(entry, pending.target.id)) {
+      this.stopRouteForRetreat(entry, from);
+      entry.serverParty.clearDestination();
+      entry.recentSkips = [];
+      const to = this.roomName(pending.target);
+      this.logRetreat(entry, `Auto-retreat took your party through the door from ${from} to ${to} ${why}`);
+      this.recordRetreat(partyId, { at, kind: 'relocate', from, to, winPct: pending.winPct });
+      const step: DoorRetreatStep = { battleId, fromTileId: entry.serverParty.tile.id, toTileId: pending.link.tileId };
+      entry.doorStep = step;
+      // Crossing here would start the next fight while the timer is still finishing this retreat.
+      setTimeout(() => this.takeRetreatDoor(entry, step), 0);
+    } else if (pending.kind === 'relocate' && target) {
+      this.stopRouteForRetreat(entry, from);
       entry.serverParty.retreatTo(target);
       entry.retreatHold = { tileId: target.id };
       entry.recentSkips = [];
       const to = this.roomName(target);
-      const why = pending.cause === 'skips'
-        ? '(lost-cause fights kept coming up)'
-        : `— ${from} was too dangerous (win chance ${pct}%)`;
       this.logRetreat(entry, `Auto-retreat moved your party from ${from} to ${to} ${why}`);
       this.recordRetreat(partyId, { at, kind: 'relocate', from, to, winPct: pending.winPct });
     } else {
@@ -1924,6 +2025,29 @@ export class PartyBattleManager {
       if (this.getSession(username)?.noteAutoRetreat()) {
         this.notify(username, 'auto_retreat', { title: 'Auto-retreat', body: AUTO_RETREAT_NOTICE });
       }
+    }
+  }
+
+  /** A route the retreat abandons counts as stopped in the recap; the retreat's own queued step does not. */
+  private stopRouteForRetreat(entry: PartyBattleEntry, from: string): void {
+    if (entry.serverParty.hasDestination && !entry.serverParty.isRetreatStepQueued) this.recordRouteStopped(entry.partyId, from);
+  }
+
+  /** The crossing of a door retreat. Anything that changed since (an order, a hire, a new fight) calls it off. */
+  private takeRetreatDoor(entry: PartyBattleEntry, step: DoorRetreatStep): void {
+    try {
+      if (this.entries.get(entry.partyId) !== entry || entry.doorStep !== step) return;
+      entry.doorStep = undefined;
+      if (entry.dungeonRun || entry.battleTimer.battleId !== step.battleId || entry.serverParty.tile.id !== step.fromTileId) return;
+      if (this.getPartyHenchmen(entry.partyId).length > 0) {
+        this.holdHere(entry);
+        return;
+      }
+      // Set first: the crossing starts the next fight, which must not decide a retreat straight back.
+      entry.retreatHold = { tileId: step.toTileId };
+      if (!this.enterTransition(entry.partyId, step.toTileId).success) this.holdHere(entry);
+    } catch (err) {
+      console.error('[PartyBattleManager] door retreat failed:', err);
     }
   }
 

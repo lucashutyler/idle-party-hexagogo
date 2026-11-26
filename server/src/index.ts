@@ -1402,11 +1402,7 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'transfer_party_ownership' && typeof msg.username === 'string') {
-        const result = playerManager.parties.transferOwnership(
-          username,
-          msg.username,
-          (u) => playerManager.getSessionByUsername(u)?.getPartyId() ?? null,
-        );
+        const result = playerManager.transferPartyOwnership(username, msg.username);
         if (typeof result === 'string') {
           ws.send(JSON.stringify({ type: 'error', message: result }));
           return;

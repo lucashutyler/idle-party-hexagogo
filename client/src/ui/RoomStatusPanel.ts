@@ -1,5 +1,5 @@
 import type { DungeonRunInfo } from '@idle-party-rpg/shared';
-import { LOCKED_DETAIL, ROOM_ICONS, actionLabel, actionShortLabel, questPipClass } from './RoomActions';
+import { LEVEL_DANGER_TEXT, LOCKED_DETAIL, ROOM_ICONS, actionLabel, actionShortLabel, questPipClass } from './RoomActions';
 import type { RoomAction } from './RoomActions';
 import { deferWhilePressed } from './render';
 
@@ -20,6 +20,9 @@ interface Chip {
   /** Stands in for the label where labels are hidden (mobile). */
   badge?: string;
   detail?: string;
+  /** A travel chip's monster level, shown where labels are. */
+  level?: string;
+  levelDanger?: boolean;
   pip?: string;
   locked?: boolean;
   onClick?: () => void;
@@ -49,6 +52,10 @@ export class RoomStatusPanel {
       if (chipEl) this.chips[Number(chipEl.getAttribute('data-chip-index'))]?.onClick?.();
     });
     parent.appendChild(this.el);
+  }
+
+  get element(): HTMLElement {
+    return this.el;
   }
 
   update(status: RoomStatus | null): void {
@@ -88,7 +95,9 @@ export class RoomStatusPanel {
       label: actionLabel(action),
       short: actionShortLabel(action),
       badge: action.locked ? ROOM_ICONS.lock : undefined,
-      detail: action.locked ? LOCKED_DETAIL : action.detail,
+      detail: action.locked ? LOCKED_DETAIL : action.danger ? `${action.detail} · ${LEVEL_DANGER_TEXT}` : action.detail,
+      level: action.kind === 'travel' && !action.locked ? action.detail : undefined,
+      levelDanger: !action.locked && action.danger,
       pip: questPipClass(action),
       locked: action.locked,
       onClick: () => this.onAction(action),
@@ -141,6 +150,15 @@ export class RoomStatusPanel {
     short.textContent = chip.short;
     short.setAttribute('aria-hidden', 'true');
     el.append(icon, label, short);
+
+    if (chip.level) {
+      const level = document.createElement('span');
+      level.className = 'room-status-chip-level';
+      if (chip.levelDanger) level.dataset.danger = '1';
+      level.textContent = chip.level;
+      level.setAttribute('aria-hidden', 'true');
+      el.appendChild(level);
+    }
 
     if (chip.badge) {
       const badge = document.createElement('span');

@@ -184,6 +184,7 @@ export async function forecastWorld(opts: WorldOptions = {}) {
     getEncounter: (id: string) => ENCOUNTERS[id],
     getAllEncounters: () => ENCOUNTERS,
     getTileById: (id: string) => tiles.find(t => t.id === id),
+    getTileType: () => undefined,
     getAllShops: () => ({}),
     getShop: () => undefined,
     getWorld: () => ({ tiles, startTile: START, ...fakeWorldMeta(START) }),

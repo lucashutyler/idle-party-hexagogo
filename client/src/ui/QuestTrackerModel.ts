@@ -96,10 +96,9 @@ function objectiveLine(
   if (objective.kind !== 'visit') return { kind: 'main', title, detail, action: { type: 'log' } };
 
   const room = lookups.getTileByGuid(objective.tileId);
-  const explored = state.unlocked?.includes(objective.tileId) ?? false;
   const action: TrackerAction = { type: 'room', roomId: objective.tileId };
-  if (room?.mapId === state.currentMapId) return { kind: 'main', title, detail, action: explored ? action : { type: 'log' } };
-  const viewable = !!room && explored && !!lookups.viewableMapIds?.(state.unlocked ?? []).has(room.mapId);
+  if (room?.mapId === state.currentMapId) return { kind: 'main', title, detail, action };
+  const viewable = !!room && !!lookups.viewableMapIds?.(state.unlocked ?? []).has(room.mapId);
   return { kind: 'main', title, detail: `${detail}${onMapText(room?.mapId, lookups)}`, action: viewable ? action : { type: 'log' } };
 }
 

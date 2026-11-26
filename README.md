@@ -208,12 +208,12 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] XP pay rule in one shared function: party share by bodies, level gap read on the member and the highest human, starter zones, dungeon floor XP and coin factors, and only the roster in a fight is paid
 - [x] Party buffs that count different classes or the strongest copy, and same-class damage skills
 - [x] Win forecasts (Monte Carlo sims on the server, time-sliced; rooms, dungeons and live boss fights, with reasons)
-- [x] Overworld auto-retreat (skip or leave rooms the forecast says you'll lose; off / 25 / 40 / 60 %, default 25 %)
+- [x] Overworld auto-retreat (skip or leave rooms the forecast says you'll lose; off / 25 / 40 / 60 %, default 25 %; back through a door with a way back, 20 s after arriving, when nowhere nearby is safe and the party has no hires)
 - [x] Autorun (party-wide toggle: walks a room every second while traveling; owners and leaders switch it)
 - [x] Kill mastery + bestiary (per-monster ranks, up to +10 % against that monster)
 - [x] "While you were away" recap (toast or story modal of what happened while the game was hidden, with quests ready to turn in, the next main-story step and how many items full bags left behind)
 - [x] "Now open" journal lines, recap moments and banner when a quest turn-in or level-up opens a locked room or door the player has found
-- [ ] Room level labels on the map (the server already sends each zone's and own-table room's authored monster level band)
+- [x] Room level labels (the room sheet and travel buttons show the monsters' authored level band, red with ⚠ when it is far above the party, and a door to such a room asks first)
 - [x] Content lab (`tools/content-lab`): measures a content export on the old and new engines and reworks it to pacing targets
 - [ ] Class-relative difficulty (level scaling does not equalise the classes — glass cannons fall off sooner above their level)
 
@@ -290,6 +290,7 @@ Real-time auto-battle on a timeline: every combatant acts on its own timer (ever
 - [x] Quest discovery (green `!` on NPCs with a quest you can take, quest destinations outlined on the map, objectives name rooms instead of coordinates)
 - [x] Quest popup feedback (Accept / Turn In show progress and the reason for any refusal)
 - [x] Main story guide (main-story quests pinned in gold in the Quest Log with the next step even before it can be taken, a goal line under the battle, a Quests dot when someone in your room has a quest; a visit counts when you accept a quest in its room)
+- [x] Gold main-story markers on the map, through fog, with a gold star on the NPCs who give the next step and an arrow at the screen edge for the current goal
 - [ ] Quest chains / storylines
 
 ### Dungeons

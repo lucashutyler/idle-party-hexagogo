@@ -6,7 +6,9 @@ import { ServerParty } from '../src/game/ServerParty.js';
 import { PlayerSession } from '../src/game/PlayerSession.js';
 import {
   AUTO_RETREAT_SKIPS_TO_RELOCATE,
+  DOOR_RETREAT_GRACE_MS,
   decideAutoRetreat,
+  doorRetreatDelayMs,
   pickRetreatTarget,
   stratumUpperPct,
 } from '../src/game/AutoRetreat.js';
@@ -68,6 +70,29 @@ describe('auto-retreat decisions', () => {
       { tile: c, forecast: room(95, [90, 99]), previous: false },
       { tile: d, forecast: null, previous: false },
     ], 25)).toEqual({ kind: 'target', tile: c });
+  });
+
+  it('treats rooms behind doors the same way: the one the party came through first, then the best', () => {
+    const tile = (id: string) => new HexTile(offsetToCube({ col: 0, row: 0 }), 'forest', 'z', id);
+    const door = (id: string) => ({ mapId: 'other', tileId: id });
+    const [a, b] = ['a', 'b'].map(tile);
+    expect(pickRetreatTarget([
+      { tile: a, forecast: room(95, [90, 99]), previous: false, door: door('a') },
+      { tile: b, forecast: room(40, [35, 45]), previous: true, door: door('b') },
+    ], 25)).toEqual({ kind: 'target', tile: b });
+    expect(pickRetreatTarget([
+      { tile: a, forecast: room(95, [90, 99]), previous: false, door: door('a') },
+      { tile: b, forecast: room(10, [5, 15]), previous: true, door: door('b') },
+    ], 25)).toEqual({ kind: 'target', tile: a });
+  });
+
+  it('waits out the grace after a door crossing, and never less than until Run opens', () => {
+    const now = 100_000;
+    expect(doorRetreatDelayMs(RUN_AVAILABLE_MS, undefined, now)).toBe(RUN_AVAILABLE_MS);
+    expect(doorRetreatDelayMs(RUN_AVAILABLE_MS, now, now)).toBe(DOOR_RETREAT_GRACE_MS);
+    expect(doorRetreatDelayMs(RUN_AVAILABLE_MS, now - 12_000, now)).toBe(DOOR_RETREAT_GRACE_MS - 12_000);
+    expect(doorRetreatDelayMs(RUN_AVAILABLE_MS, now - 60_000, now)).toBe(RUN_AVAILABLE_MS);
+    expect(doorRetreatDelayMs(0, now - 60_000, now)).toBe(0);
   });
 
   it('waits for unknown rooms to be forecast, and gives up when every known room is as bad', () => {

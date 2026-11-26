@@ -243,6 +243,21 @@
   line-height: 1.4;
   color: var(--text-2);
 }
+.confirm-note {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text-1);
+}
+.confirm-note[data-danger="1"] {
+  padding: 6px 10px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-md);
+  background: rgba(255, 77, 109, 0.14);
+}
+.confirm-note[data-danger="1"]::before {
+  content: '⚠ ';
+}
 .confirm-actions {
   display: flex;
   gap: 10px;

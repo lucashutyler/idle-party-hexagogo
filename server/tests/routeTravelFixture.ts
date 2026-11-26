@@ -99,6 +99,10 @@ const ZONE: ZoneDefinition = { id: 'test_dale', displayName: 'Test Dale', encoun
 export interface TravelOptions {
   /** On the west → east door. */
   doorGate?: RoomEntryRequirements;
+  /** On the east → west door. */
+  backDoorGate?: RoomEntryRequirements;
+  /** Where the test dungeon's entrance stands; w0 when unset. */
+  dungeonAt?: RoomKey;
   /** Adds a second, shorter door w1 → e1 with this gate. */
   shortcutGate?: RoomEntryRequirements;
   gates?: Partial<Record<RoomKey, RoomEntryRequirements>>;
@@ -115,7 +119,7 @@ function makeWorld(opts: TravelOptions): WorldData {
   const links: Partial<Record<RoomKey, WorldTileDefinition['transitions']>> = {
     w1: opts.shortcutGate ? [{ mapId: DELL, tileId: ROOM.e1, entryRequirements: opts.shortcutGate }] : undefined,
     w2: [{ mapId: DELL, tileId: ROOM.e0, ...(opts.doorGate ? { entryRequirements: opts.doorGate } : {}) }],
-    e0: [{ mapId: DELL, tileId: ROOM.w2 }],
+    e0: [{ mapId: DELL, tileId: ROOM.w2, ...(opts.backDoorGate ? { entryRequirements: opts.backDoorGate } : {}) }],
     e2: [{ mapId: BURROW, tileId: ROOM.b0 }],
     b0: [{ mapId: DELL, tileId: ROOM.e2 }],
     b1: [{ mapId: PIT, tileId: ROOM.p0 }],
@@ -126,7 +130,7 @@ function makeWorld(opts: TravelOptions): WorldData {
     type: key === 'x3' || opts.walls?.includes(key) ? 'cliff' : 'plains',
     zone: ZONE.id,
     name: `Room ${key}`,
-    ...(key === 'w0' ? { dungeonId: DUNGEON.id } : {}),
+    ...(key === (opts.dungeonAt ?? 'w0') ? { dungeonId: DUNGEON.id } : {}),
     ...(links[key] ? { transitions: links[key] } : {}),
     ...(opts.gates?.[key] ? { entryRequirements: opts.gates[key] } : {}),
     ...npcIn(opts, key),

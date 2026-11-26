@@ -1,5 +1,6 @@
 import { isSpoilerQuest, questTitle } from '@idle-party-rpg/shared';
 import type { GamePartyMember, QuestStepInfo, RoomLockInfo, RoomLockMember, RoomLockRequirement, ServerStateMessage } from '@idle-party-rpg/shared';
+import { confirmNoteHtml } from './ConfirmDialog';
 import { escapeHtml } from './ItemIcon';
 import { bringToFront, release } from './ModalStack';
 import { deferWhilePressed, setHtml } from './render';
@@ -174,6 +175,8 @@ export interface LockDialogOptions {
   title: string;
   /** What the client can tell, shown until the server's answer arrives. */
   lines: readonly string[];
+  /** Stays under the title whatever the server answers. */
+  note?: { text: string; danger: boolean } | null;
   context: () => LockCardContext;
   onAction: (action: LockCardAction) => void;
   /** Offered as a Travel button when the server finds nothing in the way after all. */
@@ -196,6 +199,7 @@ export function showLockDialog(opts: LockDialogOptions): LockDialog {
   overlay.innerHTML = `
     <div class="confirm-dialog lock-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(opts.title)}">
       <div class="confirm-title">${escapeHtml(opts.title)}</div>
+      ${confirmNoteHtml(opts.note)}
       <div class="lock-dialog-body"></div>
       <div class="confirm-actions">
         <button type="button" class="pixel-btn confirm-cancel lock-dialog-close">Close</button>

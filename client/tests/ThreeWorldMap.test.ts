@@ -153,6 +153,168 @@ describe('ThreeWorldMap overlays', () => {
     expect(parseFloat(container.querySelector<HTMLElement>('.three-map-quest-target')!.style.left)).toBeCloseTo(fog.x, 4);
   });
 
+  describe('the main story in gold', () => {
+    const at = (el: HTMLElement) => [parseFloat(el.style.left), parseFloat(el.style.top)];
+    const spot = (col: number, row: number) => {
+      const p = cubeToPixel(offsetToCube({ col, row }));
+      return [p.x, p.y];
+    };
+    const beacons = () => [...container.querySelectorAll<HTMLElement>('.three-map-quest-targets .three-map-quest-beacon')];
+    const questDefinitions = {
+      m1: visitQuest('m1', 'Progress: Ring the Bell', ['t-fog', 't-cellar']),
+      q9: visitQuest('q9', 'Find the Secret', ['t-fog']),
+    };
+
+    it('marks a main-story destination through the fog, on this map only, and never a side quest\'s', async () => {
+      const map = new ThreeWorldMap(container, await makeCache());
+      map.applyServerState(makeState({ activeQuests: [activeQuest('q9', 'accepted', [0])], questDefinitions }));
+      expect(beacons()).toHaveLength(0);
+
+      const both = [activeQuest('m1', 'accepted', [0, 0]), activeQuest('q9', 'accepted', [0])];
+      map.applyServerState(makeState({ activeQuests: both, questDefinitions }));
+      expect(beacons().map(at)).toEqual([spot(2, 0)]);
+      expect(beacons()[0].querySelector('.three-map-quest-beacon-star')!.textContent).toBe('★');
+      expect(container.querySelector('.three-map-quest-target')).toBeNull();
+      expect(hoverRoom(container, 2, 0)).toEqual(['Zone: Unexplored Room', '★ Ring the Bell']);
+      expect(map.getTileInfo(2, 0)!.mainStory).toEqual(['Ring the Bell']);
+      expect(map.getTileInfo(1, 0)!.mainStory).toBeUndefined();
+
+      map.applyServerState(makeState({ activeQuests: both, questDefinitions, unlocked: ['t-home', 't-shop', 't-fog'] }));
+      expect(beacons().map(at)).toEqual([spot(2, 0)]);
+      expect(container.querySelector('.three-map-quest-target')).toBeNull();
+      expect(hoverRoom(container, 2, 0)).toEqual(['Zone: Secret', '🧙 Mira', '★ Ring the Bell', '📜 Find the Secret']);
+
+      map.applyServerState(makeState({ activeQuests: [activeQuest('m1', 'accepted', [1, 0])], questDefinitions }));
+      expect(beacons()).toHaveLength(0);
+    });
+
+    it('marks every room where the next step is given, and stars the npc who gives it', async () => {
+      const map = new ThreeWorldMap(container, await makeCache());
+      const questGuide = { steps: [{ questId: 'q1', name: 'Progress: Meet Mira', status: 'available' as const, giverNpcIds: ['mira'] }], mainQuestIds: ['q1'] };
+      map.applyServerState(makeState({ availableQuestIds: ['q1'], questGuide }));
+      expect(beacons().map(at)).toEqual([spot(0, 0), spot(2, 0)]);
+      expect(container.querySelectorAll('.quest-main-pip')).toHaveLength(1);
+      expect(container.querySelector('.quest-available-pip')).toBeNull();
+      expect(hoverRoom(container, 2, 0)).toEqual(['Zone: Unexplored Room', '★ Meet Mira']);
+    });
+  });
+
+  describe('the edge arrow', () => {
+    const FAR_TILES = [
+      ...TILES,
+      { id: 't-far', mapId: 'overworld', col: 40, row: 0, type: 'plains', zone: 'z', zoneName: 'Zone', name: 'Test Far Room' },
+      { id: 't-low', mapId: 'overworld', col: 0, row: 1, type: 'plains', zone: 'z', zoneName: 'Zone', name: 'Low Field' },
+    ];
+    const rect = (left: number, top: number, right: number, bottom: number) =>
+      ({ left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top }) as DOMRect;
+    const placed = (arrow: HTMLElement) => /translate\(([-\d.e]+)px, ([-\d.e]+)px\)/.exec(arrow.style.transform)!.slice(1).map(Number);
+
+    async function sizedMap() {
+      localStorage.setItem('mapZoom2', '1');
+      const el = document.createElement('div');
+      const layoutReads = { count: 0 };
+      Object.defineProperty(el, 'clientWidth', { get: () => { layoutReads.count++; return 400; } });
+      Object.defineProperty(el, 'clientHeight', { get: () => { layoutReads.count++; return 300; } });
+      el.getBoundingClientRect = () => rect(0, 0, 400, 300);
+      document.body.appendChild(el);
+      const map = new ThreeWorldMap(el, await makeCache(FAR_TILES));
+      map.applyServerState(makeState());
+      localStorage.removeItem('mapZoom2');
+      return { el, map, layoutReads, arrow: el.querySelector<HTMLButtonElement>('.three-map-beacon-arrow')! };
+    }
+
+    it('reads no layout when a push keeps the arrow on its room, or moves it to another', async () => {
+      const { map, arrow, layoutReads } = await sizedMap();
+      map.setTrackedRoom('t-far');
+      map.applyServerState(makeState());
+      layoutReads.count = 0;
+      map.setTrackedRoom('t-far');
+      expect(layoutReads.count).toBe(0);
+      expect(arrow.hidden).toBe(false);
+
+      map.setTrackedRoom('t-shop');
+      expect(arrow.hidden).toBe(true);
+      expect(layoutReads.count).toBe(0);
+    });
+
+    it('keeps clear of a docked sheet, and points at a room hidden under it', async () => {
+      const { map, arrow } = await sizedMap();
+      map.setTrackedRoom('t-low');
+      expect(arrow.hidden).toBe(true);
+
+      map.setEdgeArrowInsets({ right: 0, bottom: 100 });
+      expect(arrow.hidden).toBe(false);
+      const [x, y] = placed(arrow);
+      expect(x).toBeCloseTo(200, 6);
+      expect(y).toBeCloseTo(170, 6);
+      expect(parseFloat(arrow.style.getPropertyValue('--edge-arrow-angle'))).toBeCloseTo(90, 6);
+
+      map.setTrackedRoom('t-far');
+      map.setEdgeArrowInsets({ right: 120, bottom: 0 });
+      expect(placed(arrow)[0]).toBeCloseTo(250, 6);
+
+      map.setEdgeArrowInsets({ right: 0, bottom: 0 });
+      map.setTrackedRoom('t-low');
+      expect(arrow.hidden).toBe(true);
+    });
+
+    it('slides clear of the controls over the map, measured again only when the sheet moves them', async () => {
+      const { map, arrow } = await sizedMap();
+      const zoomControls = document.createElement('div');
+      let zoomBox = rect(344, 82, 388, 288);
+      const measure = vi.fn(() => zoomBox);
+      zoomControls.getBoundingClientRect = measure;
+      map.avoidWithEdgeArrow(zoomControls);
+      map.avoidWithEdgeArrow(document.createElement('div'));
+      map.setTrackedRoom('t-far');
+      expect(placed(arrow)[0]).toBeCloseTo(314, 6);
+      expect(placed(arrow)[1]).toBeCloseTo(150, 6);
+
+      zoomBox = rect(0, 0, 0, 0);
+      measure.mockClear();
+      map.setEdgeArrowInsets({ right: 0, bottom: 0 });
+      expect(measure).not.toHaveBeenCalled();
+      map.setEdgeArrowInsets({ right: 0, bottom: 100 });
+      expect(measure).toHaveBeenCalledTimes(1);
+      expect(placed(arrow)[0]).toBeCloseTo(370, 6);
+    });
+
+    it('sits outside the moving overlay and shows only for a tracked room off screen', async () => {
+      const { el, map, arrow } = await sizedMap();
+      expect(arrow.closest('.three-map-overlay')).toBeNull();
+      expect(arrow.parentElement!.parentElement).toBe(el);
+      expect(arrow.hidden).toBe(true);
+
+      map.setTrackedRoom('t-shop');
+      expect(arrow.hidden).toBe(true);
+
+      map.setTrackedRoom('t-far');
+      expect(arrow.hidden).toBe(false);
+      const [x, y] = placed(arrow);
+      expect(x).toBeCloseTo(370, 6);
+      expect(y).toBeCloseTo(150, 6);
+      expect(parseFloat(arrow.style.getPropertyValue('--edge-arrow-angle'))).toBeCloseTo(0, 6);
+
+      map.setTrackedRoom('t-cellar');
+      expect(arrow.hidden).toBe(true);
+      map.setTrackedRoom(null);
+      expect(arrow.hidden).toBe(true);
+    });
+
+    it('hands the tracked room to whoever listens when tapped, and goes once the room is in view', async () => {
+      const { map, arrow } = await sizedMap();
+      const onTracked = vi.fn();
+      map.setOnTrackedRoomClick(onTracked);
+      map.setTrackedRoom('t-far');
+      arrow.click();
+      expect(onTracked).toHaveBeenCalledWith('t-far');
+
+      map.panBy(cubeToPixel(offsetToCube({ col: 40, row: 0 })).x - cubeToPixel(offsetToCube({ col: 0, row: 0 })).x, 0);
+      (map as unknown as { render(): void }).render();
+      expect(arrow.hidden).toBe(true);
+    });
+  });
+
   it('tooltip names the quests sending you to an explored room', async () => {
     const map = new ThreeWorldMap(container, await makeCache());
     map.applyServerState(makeState({

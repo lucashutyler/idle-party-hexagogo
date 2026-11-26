@@ -7,6 +7,8 @@ import type {
   WorldMapMeta,
   WorldTileDefinition,
 } from '@idle-party-rpg/shared';
+import { levelBandText } from './roomLevels';
+import type { LevelBand } from './roomLevels';
 
 export type RoomActionKind = 'npc' | 'shop' | 'dungeon' | 'travel';
 
@@ -19,13 +21,19 @@ export interface RoomAction {
   targetId: string;
   questReady?: boolean;
   questAvailable?: boolean;
+  /** NPC only: one of the quests it can hand out now moves the main story on. */
+  questMain?: boolean;
   /** Travel only: the client's preview says this exit would refuse the party. */
   locked?: boolean;
+  /** Travel only: the monsters behind this exit are far above the party. */
+  danger?: boolean;
 }
 
 export interface QuestMarks {
   ready: ReadonlySet<string>;
   available: ReadonlySet<string>;
+  /** The main story's quests and the guide's steps toward it. */
+  main: ReadonlySet<string>;
 }
 
 export interface RoomActionLookups {
@@ -34,6 +42,10 @@ export interface RoomActionLookups {
   getDungeon(id: string): DungeonDefinition | undefined;
   getTileByGuid(id: string): WorldTileDefinition | undefined;
   getMaps(): WorldMapMeta[];
+  /** Without it, exits carry no monster level. */
+  getRoomLevels?(def: WorldTileDefinition): LevelBand | undefined;
+  /** Without it, no exit is marked as far above the party. */
+  isLevelDanger?(band: LevelBand): boolean;
 }
 
 export type RoomContents = Pick<WorldTileDefinition, 'npcId' | 'shopId' | 'dungeonId' | 'transitions'>;
@@ -51,9 +63,11 @@ export const LOCKED_DETAIL = 'Locked';
 
 export const QUEST_READY_DETAIL = 'Quest ready to turn in';
 export const QUEST_AVAILABLE_DETAIL = 'New quest available';
+export const QUEST_MAIN_DETAIL = 'Main story quest available';
 export const HIRE_DETAIL = 'Henchmen for hire';
+export const LEVEL_DANGER_TEXT = 'Far above your party';
 
-const NO_QUEST_MARKS: QuestMarks = { ready: new Set(), available: new Set() };
+const NO_QUEST_MARKS: QuestMarks = { ready: new Set(), available: new Set(), main: new Set() };
 
 /** Everything a room offers, in display order: NPC, shop, dungeon, then one entry per exit. */
 export function getRoomActions(
@@ -75,7 +89,16 @@ export function getRoomActions(
   }
 
   for (const link of room.transitions ?? []) {
-    actions.push({ kind: 'travel', icon: ROOM_ICONS.travel, name: transitionName(link, lookups), targetId: link.tileId });
+    const dest = lookups.getTileByGuid(link.tileId);
+    const levels = dest ? lookups.getRoomLevels?.(dest) : undefined;
+    actions.push({
+      kind: 'travel',
+      icon: ROOM_ICONS.travel,
+      name: transitionName(link, dest, lookups),
+      targetId: link.tileId,
+      ...(levels ? { detail: levelBandText(levels) } : {}),
+      ...(levels && lookups.isLevelDanger?.(levels) ? { danger: true } : {}),
+    });
   }
 
   return actions;
@@ -116,14 +139,18 @@ export function actionShortLabel(action: RoomAction): string {
   }
 }
 
-/** Quests ready to turn in and quests some NPC can hand out now, from the latest state push. */
+/** Quests ready to turn in, quests some NPC can hand out now and the main story's, from the latest state push. */
 export function questMarks(state?: ServerStateMessage | null): QuestMarks {
   const ready = (state?.activeQuests ?? []).filter(q => q.status === 'ready').map(q => q.questId);
-  return { ready: new Set(ready), available: new Set(state?.availableQuestIds ?? []) };
+  const guide = state?.questGuide;
+  const main = [...(guide?.mainQuestIds ?? []), ...(guide?.steps ?? []).map(step => step.questId)];
+  return { ready: new Set(ready), available: new Set(state?.availableQuestIds ?? []), main: new Set(main) };
 }
 
+/** A turn-in wins over a new main-story quest, which wins over any other new quest. */
 export function questPipClass(action: RoomAction): string {
   if (action.questReady) return 'quest-ready-pip';
+  if (action.questMain) return 'quest-main-pip';
   if (action.questAvailable) return 'quest-available-pip';
   return '';
 }
@@ -132,7 +159,9 @@ function npcAction(npc: NpcDefinition, quests: QuestMarks): RoomAction {
   const action: RoomAction = { kind: 'npc', icon: npc.emoji, name: npc.name, targetId: npc.id };
   const questIds = npc.questIds ?? [];
   if (questIds.some(id => quests.ready.has(id))) return { ...action, detail: QUEST_READY_DETAIL, questReady: true };
-  if (questIds.some(id => quests.available.has(id))) return { ...action, detail: QUEST_AVAILABLE_DETAIL, questAvailable: true };
+  const available = questIds.filter(id => quests.available.has(id));
+  if (available.some(id => quests.main.has(id))) return { ...action, detail: QUEST_MAIN_DETAIL, questAvailable: true, questMain: true };
+  if (available.length > 0) return { ...action, detail: QUEST_AVAILABLE_DETAIL, questAvailable: true };
   return action;
 }
 
@@ -147,8 +176,7 @@ function shopAction(shop: ShopSummary): RoomAction {
   };
 }
 
-function transitionName(link: MapTransitionLink, lookups: RoomActionLookups): string {
-  const dest = lookups.getTileByGuid(link.tileId);
+function transitionName(link: MapTransitionLink, dest: WorldTileDefinition | undefined, lookups: RoomActionLookups): string {
   if (dest?.name) return dest.name;
   return lookups.getMaps().find(m => m.id === link.mapId)?.name ?? 'a passage';
 }

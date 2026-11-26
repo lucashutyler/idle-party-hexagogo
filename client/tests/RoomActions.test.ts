@@ -10,6 +10,7 @@ import type {
 import {
   HIRE_DETAIL,
   QUEST_AVAILABLE_DETAIL,
+  QUEST_MAIN_DETAIL,
   QUEST_READY_DETAIL,
   ROOM_ICONS,
   actionLabel,
@@ -40,8 +41,8 @@ const MAPS: WorldMapMeta[] = [
   { id: 'sewers', name: 'The Sewers', startTile: { col: 0, row: 0 } },
 ];
 
-function marks(ready: string[] = [], available: string[] = []): QuestMarks {
-  return { ready: new Set(ready), available: new Set(available) };
+function marks(ready: string[] = [], available: string[] = [], main: string[] = []): QuestMarks {
+  return { ready: new Set(ready), available: new Set(available), main: new Set(main) };
 }
 
 const lookups: RoomActionLookups = {
@@ -141,6 +142,55 @@ describe('getRoomActions', () => {
     }, lookups);
     expect(actions.map(a => a.name)).toEqual(['Darkwood Gate', 'The Sewers', 'a passage']);
     expect(actions.every(a => a.icon === ROOM_ICONS.travel)).toBe(true);
+  });
+
+  it('gives an exit the level of the monsters behind it, when the world knows it', () => {
+    const transitions = [{ mapId: 'forest', tileId: 'gate' }, { mapId: 'sewers', tileId: 'nameless' }];
+    const withLevels: RoomActionLookups = {
+      ...lookups,
+      getRoomLevels: def => (def.id === 'gate' ? [16, 16] : def.id === 'nameless' ? [3, 5] : undefined),
+    };
+    expect(getRoomActions({ transitions }, withLevels).map(a => a.detail)).toEqual(['Lv 16', 'Lv 3–5']);
+    expect(getRoomActions({ transitions }, { ...lookups, getRoomLevels: () => undefined }).map(a => a.detail)).toEqual([undefined, undefined]);
+    expect(getRoomActions({ transitions }, lookups).every(a => a.detail === undefined)).toBe(true);
+  });
+
+  it('marks an exit whose monsters are far above the party', () => {
+    const transitions = [{ mapId: 'forest', tileId: 'gate' }, { mapId: 'sewers', tileId: 'nameless' }];
+    const withLevels: RoomActionLookups = {
+      ...lookups,
+      getRoomLevels: def => (def.id === 'gate' ? [16, 16] : [3, 5]),
+      isLevelDanger: ([min]) => min > 10,
+    };
+    expect(getRoomActions({ transitions }, withLevels).map(a => a.danger)).toEqual([true, undefined]);
+    expect(getRoomActions({ transitions }, { ...withLevels, isLevelDanger: undefined }).map(a => a.danger)).toEqual([undefined, undefined]);
+  });
+});
+
+describe('main-story pips', () => {
+  it('gives an npc with a main-story quest to hand out a gold star over the green mark', () => {
+    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, marks([], ['q1'], ['q1']));
+    expect(npc).toMatchObject({ questAvailable: true, questMain: true, detail: QUEST_MAIN_DETAIL });
+    expect(questPipClass(npc)).toBe('quest-main-pip');
+
+    const [side] = getRoomActions({ npcId: 'mira' }, lookups, marks([], ['q1'], ['q2']));
+    expect(side.questMain).toBeUndefined();
+    expect(questPipClass(side)).toBe('quest-available-pip');
+  });
+
+  it('still shows a turn-in first', () => {
+    const [npc] = getRoomActions({ npcId: 'mira' }, lookups, marks(['q2'], ['q1'], ['q1']));
+    expect(npc.questReady).toBe(true);
+    expect(questPipClass(npc)).toBe('quest-ready-pip');
+  });
+
+  it('counts the main quests and every step of the guide as main', () => {
+    const state = {
+      availableQuestIds: ['m1', 'side'],
+      questGuide: { steps: [{ questId: 'lead', name: 'Lead', status: 'available' }], mainQuestIds: ['m1'] },
+    } as unknown as ServerStateMessage;
+    expect([...questMarks(state).main].sort()).toEqual(['lead', 'm1']);
+    expect(questMarks(null).main.size).toBe(0);
   });
 });
 

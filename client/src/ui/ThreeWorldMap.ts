@@ -29,8 +29,11 @@ import { escapeHtml } from './ItemIcon';
 import { setHtml } from './render';
 import { LOCKED_DETAIL, ROOM_ICONS, getRoomActions, lockTravel, questMarks, questPipClass } from './RoomActions';
 import type { QuestMarks, RoomAction } from './RoomActions';
-import { pendingVisitTargets, questMarkerKey } from './QuestTargets';
+import { mainBeaconRooms, pendingVisitTargets, questMarkerKey } from './QuestTargets';
+import type { VisitTarget } from './QuestTargets';
 import { lockPreviewKey } from './RoomEntryCheck';
+import { edgeArrowPlacement } from './mapEdgeArrow';
+import type { ScreenRect } from './mapEdgeArrow';
 
 export interface TileClickInfo {
   /** The map the room is on: the drawn map, which may be one the player is only viewing. */
@@ -49,6 +52,8 @@ export interface TileClickInfo {
   playersHere: { username: string; className?: string; partyId?: string; dungeonName?: string }[];
   partyMemberUsernames: string[];
   dungeonId?: string;
+  /** Titles of the main-story quests the room is marked in gold for. */
+  mainStory?: string[];
 }
 
 /** Whether the party would be refused, as far as the client can tell. Asked again only when `lockPreviewKey` moves. */
@@ -100,6 +105,9 @@ const MARKER_GROW_ZOOM = 0.75;
 const MARKER_MAX_GROW = 1.8;
 const TOOLTIP_MARGIN = 4;
 const QUEST_TARGET_ICON = '📜';
+const MAIN_STORY_ICON = '★';
+/** Keeps the 44px arrow whole inside the map. */
+const EDGE_ARROW_INSET = 30;
 
 interface TileOccupancy {
   col: number;
@@ -153,6 +161,16 @@ export class ThreeWorldMap {
   private markersEl: HTMLDivElement;
   private flagsEl: HTMLDivElement;
   private labelsEl: HTMLDivElement;
+  /** Screen-space, so the arrow in it stays at the edge whatever the camera does. */
+  private edgeEl: HTMLDivElement;
+  private edgeArrowEl: HTMLButtonElement;
+  private edgeArrowKey = '';
+  /** What a docked sheet covers, off the right or bottom of the map. */
+  private edgeInsets = { right: 0, bottom: 0 };
+  /** Controls over the map the arrow keeps clear of, and their boxes as last measured, in map pixels. */
+  private edgeAvoidEls: HTMLElement[] = [];
+  private edgeAvoid: ScreenRect[] = [];
+  private edgeAvoidObserver?: ResizeObserver;
   private tooltipEl: HTMLDivElement;
   private tooltipKey = '';
 
@@ -224,11 +242,19 @@ export class ThreeWorldMap {
   /** Room-action markers on explored rooms, keyed by "col,row". */
   private roomActions = new Map<string, RoomAction[]>();
   private questMarks: QuestMarks = questMarks();
-  /** Quest names sending the party to each room, keyed by room GUID. */
-  private questTargets = new Map<string, string[]>();
-  /** The same, for rooms on the current map, keyed by "col,row". */
+  /** Quests sending the party to each room, keyed by room GUID. */
+  private questTargets = new Map<string, VisitTarget>();
+  /** Side quests sending the party to explored rooms on the current map, keyed by "col,row". */
   private questTargetsByRoom = new Map<string, string[]>();
+  /** Main-story titles per gold-marked room, keyed by room GUID. */
+  private beacons = new Map<string, string[]>();
+  /** The same, for rooms on the current map, keyed by "col,row". */
+  private beaconsByRoom = new Map<string, string[]>();
   private questMarkerKey = '';
+  private trackedRoomId: string | null = null;
+  /** The tracked room's world position on the drawn map. */
+  private trackedSpot: { x: number; y: number } | null = null;
+  private onTrackedRoomClickFn?: (tileId: string) => void;
   private markersDirty = true;
   private lockChecks: MapLockChecks | null = null;
   private lockKey = '';
@@ -317,6 +343,25 @@ export class ThreeWorldMap {
     this.partyEl.appendChild(this.partyInnerEl);
     this.partyEl.style.display = 'none';
 
+    this.edgeEl = document.createElement('div');
+    this.edgeEl.className = 'three-map-edge';
+    this.edgeArrowEl = document.createElement('button');
+    this.edgeArrowEl.type = 'button';
+    this.edgeArrowEl.className = 'three-map-beacon-arrow';
+    this.edgeArrowEl.title = 'Show your main-story goal';
+    this.edgeArrowEl.setAttribute('aria-label', 'Show your main-story goal');
+    this.edgeArrowEl.innerHTML = '<span class="three-map-beacon-arrow-pointer" aria-hidden="true"></span>'
+      + `<span class="three-map-beacon-arrow-star" aria-hidden="true">${MAIN_STORY_ICON}</span>`;
+    this.edgeArrowEl.hidden = true;
+    for (const ev of ['pointerdown', 'mousedown', 'touchstart', 'click'] as const) {
+      this.edgeArrowEl.addEventListener(ev, e => e.stopPropagation());
+    }
+    this.edgeArrowEl.addEventListener('click', () => {
+      if (this.trackedRoomId) this.onTrackedRoomClickFn?.(this.trackedRoomId);
+    });
+    this.edgeEl.appendChild(this.edgeArrowEl);
+    this.container.appendChild(this.edgeEl);
+
     this.tooltipEl = document.createElement('div');
     this.tooltipEl.className = 'canvas-map-tooltip';
     this.tooltipEl.style.display = 'none';
@@ -397,6 +442,41 @@ export class ThreeWorldMap {
   /** Draw `mapId` instead of the party's map from the next state on; null goes back to the party's. */
   setViewedMap(mapId: string | null): void {
     this.viewedMapId = mapId;
+  }
+
+  /** The room the edge arrow points at while it is off screen. Null, or a room not on the drawn map, shows no arrow. */
+  setTrackedRoom(tileId: string | null): void {
+    const def = tileId ? this.worldCache.getTileByGuid(tileId) : undefined;
+    const roomId = def && def.mapId === this.gridMapId ? def.id : null;
+    const spot = roomId && def ? cubeToPixel(offsetToCube(def)) : null;
+    if (roomId === this.trackedRoomId && spot?.x === this.trackedSpot?.x && spot?.y === this.trackedSpot?.y) return;
+    this.trackedRoomId = roomId;
+    this.trackedSpot = spot;
+    this.updateEdgeArrow(this.sizedWidth, this.sizedHeight);
+  }
+
+  /** What a sheet docked over the map covers: the arrow stays out of it, and a room under it counts as off screen. */
+  setEdgeArrowInsets(insets: { right: number; bottom: number }): void {
+    if (insets.right === this.edgeInsets.right && insets.bottom === this.edgeInsets.bottom) return;
+    this.edgeInsets = { right: insets.right, bottom: insets.bottom };
+    // The sheet lifts the controls over the map without resizing them, so no observer sees them move.
+    this.remeasureEdgeArrow();
+  }
+
+  /** A control over the map that the edge arrow keeps clear of, measured whenever its size changes. */
+  avoidWithEdgeArrow(el: HTMLElement): void {
+    if (this.edgeAvoidEls.includes(el)) return;
+    this.edgeAvoidEls.push(el);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.edgeAvoidObserver ??= new ResizeObserver(() => this.remeasureEdgeArrow());
+      this.edgeAvoidObserver.observe(el);
+    }
+    this.remeasureEdgeArrow();
+  }
+
+  /** Told when the edge arrow is tapped, with the room it points at. */
+  setOnTrackedRoomClick(fn: (tileId: string) => void): void {
+    this.onTrackedRoomClickFn = fn;
   }
 
   /** The map on screen. */
@@ -510,12 +590,14 @@ export class ThreeWorldMap {
     this.pathEndsAtDoor = onPartyMap && !!state.party.route;
 
     const marks = questMarks(state);
-    const targets = pendingVisitTargets(state.activeQuests, state.questDefinitions);
-    const markerKey = questMarkerKey(marks, targets);
+    const targets = pendingVisitTargets(state.activeQuests, state.questDefinitions, marks.main);
+    const beacons = mainBeaconRooms(targets, state.questGuide, npcId => this.worldCache.getRoomsWithNpc(npcId));
+    const markerKey = questMarkerKey(marks, targets, beacons);
     if (markerKey !== this.questMarkerKey) {
       this.questMarkerKey = markerKey;
       this.questMarks = marks;
       this.questTargets = targets;
+      this.beacons = beacons;
       this.markersDirty = true;
     }
     const lockKey = lockPreviewKey(state);
@@ -566,6 +648,7 @@ export class ThreeWorldMap {
         .filter(p => p.col === col && p.row === row)
         .map(p => ({ username: p.username, className: p.className, partyId: p.partyId, dungeonName: p.dungeonName }))
       : [];
+    const mainStory = this.beaconsByRoom.get(`${col},${row}`);
 
     return {
       mapId: this.gridMapId,
@@ -583,6 +666,7 @@ export class ThreeWorldMap {
       playersHere,
       partyMemberUsernames: this.partyMemberUsernames,
       dungeonId: def?.dungeonId,
+      ...(mainStory ? { mainStory } : {}),
     };
   }
 
@@ -601,6 +685,7 @@ export class ThreeWorldMap {
     window.removeEventListener('mousemove', this.windowMouseMove);
     window.removeEventListener('mouseup', this.windowMouseUp);
     this.resizeObserver?.disconnect();
+    this.edgeAvoidObserver?.disconnect();
 
     this.terrainTexture?.dispose();
     this.coastTexture?.dispose();
@@ -614,6 +699,7 @@ export class ThreeWorldMap {
 
     this.canvas.remove();
     this.overlay.remove();
+    this.edgeEl.remove();
     this.tooltipEl.remove();
   }
 
@@ -934,6 +1020,7 @@ export class ThreeWorldMap {
     }
 
     if (this.terrainReady || this.baker.isBaking) this.requestViewArt();
+    this.measureEdgeAvoid();
     // setSize cleared the canvas: a deferred draw would paint one empty frame first.
     if (firstSize || this.paused) this.requestRender();
     else this.render();
@@ -1192,9 +1279,10 @@ export class ThreeWorldMap {
     const def = this.worldTileDefs.get(key);
     const zoneName = def?.zoneName ?? def?.zone ?? tile.zone;
     const lockLine = this.lockedRooms.has(key) ? [`${ROOM_ICONS.lock} ${LOCKED_DETAIL}`] : [];
-    if (!this.worldCache.isUnlocked(off.col, off.row)) return [`${zoneName}: Unexplored Room`, ...lockLine];
+    const mainLines = (this.beaconsByRoom.get(key) ?? []).map(title => `${MAIN_STORY_ICON} ${title}`);
+    if (!this.worldCache.isUnlocked(off.col, off.row)) return [`${zoneName}: Unexplored Room`, ...lockLine, ...mainLines];
 
-    const questLines = (this.questTargetsByRoom.get(key) ?? []).map(name => `${QUEST_TARGET_ICON} ${name}`);
+    const questLines = [...mainLines, ...(this.questTargetsByRoom.get(key) ?? []).map(name => `${QUEST_TARGET_ICON} ${name}`)];
     const lines = [`${zoneName}: ${def?.name || 'Unexplored Room'}`, ...lockLine];
     for (const action of this.roomActions.get(key) ?? []) {
       const detail = action.locked ? LOCKED_DETAIL : action.detail;
@@ -1538,6 +1626,39 @@ export class ThreeWorldMap {
       this.lod = lod;
       this.overlay.dataset.lod = lod;
     }
+    this.updateEdgeArrow(cw, ch);
+  }
+
+  /** Pins the arrow to the edge nearest the tracked room while that room is off screen. Takes the map's size so it reads no layout. */
+  private updateEdgeArrow(cw: number, ch: number): void {
+    const spot = this.trackedSpot;
+    const view = { left: 0, top: 0, right: cw - this.edgeInsets.right, bottom: ch - this.edgeInsets.bottom };
+    const point = spot && { x: cw / 2 + (spot.x - this.camWorldX) * this.zoom, y: ch / 2 + (spot.y - this.camWorldY) * this.zoom };
+    const placement = point ? edgeArrowPlacement(point, view, EDGE_ARROW_INSET, this.edgeAvoid) : null;
+    const key = placement ? `${placement.x.toFixed(1)},${placement.y.toFixed(1)},${placement.angleDeg.toFixed(1)}` : '';
+    if (key === this.edgeArrowKey) return;
+    this.edgeArrowKey = key;
+    this.edgeArrowEl.hidden = !placement;
+    if (!placement) return;
+    this.edgeArrowEl.style.transform = `translate(${placement.x}px, ${placement.y}px)`;
+    this.edgeArrowEl.style.setProperty('--edge-arrow-angle', `${placement.angleDeg}deg`);
+  }
+
+  /** Only when the controls change size or the sheet moves them, never per frame: it reads layout. */
+  private measureEdgeAvoid(): void {
+    if (this.edgeAvoidEls.length === 0) return;
+    const origin = this.container.getBoundingClientRect();
+    this.edgeAvoid = [];
+    for (const el of this.edgeAvoidEls) {
+      const box = el.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) continue;
+      this.edgeAvoid.push({ left: box.left - origin.left, top: box.top - origin.top, right: box.right - origin.left, bottom: box.bottom - origin.top });
+    }
+  }
+
+  private remeasureEdgeArrow(): void {
+    this.measureEdgeAvoid();
+    this.updateEdgeArrow(this.sizedWidth, this.sizedHeight);
   }
 
   /** Inherited through the whole overlay, so written once a zoom settles rather than every frame. */
@@ -1749,18 +1870,38 @@ export class ThreeWorldMap {
     return el;
   }
 
-  /** Outlines every explored room on this map that an active quest still sends the party to. */
+  /** Gold for main-story rooms on this map, fog or not; a dashed outline for explored rooms only side quests send the party to. */
   private updateQuestTargetsOverlay(): void {
     this.questTargetsByRoom.clear();
+    this.beaconsByRoom.clear();
     const outlines = document.createDocumentFragment();
     const mapId = this.gridMapId;
-    for (const [tileId, questNames] of this.questTargets) {
+    for (const [tileId, titles] of this.beacons) {
+      const def = this.worldCache.getTileByGuid(tileId);
+      if (!def || def.mapId !== mapId) continue;
+      this.beaconsByRoom.set(`${def.col},${def.row}`, titles);
+      outlines.appendChild(this.buildQuestBeacon(def.col, def.row));
+    }
+    for (const [tileId, target] of this.questTargets) {
       const def = this.worldCache.getTileByGuid(tileId);
       if (!def || def.mapId !== mapId || !this.worldCache.isUnlocked(def.col, def.row)) continue;
-      this.questTargetsByRoom.set(`${def.col},${def.row}`, questNames);
-      outlines.appendChild(this.buildQuestTarget(def.col, def.row));
+      const key = `${def.col},${def.row}`;
+      const beacon = this.beaconsByRoom.get(key);
+      const sideNames = target.names.filter(name => !beacon?.includes(name));
+      if (sideNames.length > 0) this.questTargetsByRoom.set(key, sideNames);
+      if (!beacon) outlines.appendChild(this.buildQuestTarget(def.col, def.row));
     }
     this.questTargetsEl.replaceChildren(outlines);
+  }
+
+  private buildQuestBeacon(col: number, row: number): HTMLElement {
+    const p = cubeToPixel(offsetToCube({ col, row }));
+    const el = document.createElement('div');
+    el.className = 'three-map-quest-beacon';
+    el.style.left = `${p.x}px`;
+    el.style.top = `${p.y}px`;
+    el.innerHTML = hexOutlineSvg() + `<span class="three-map-quest-beacon-star">${MAIN_STORY_ICON}</span>`;
+    return el;
   }
 
   private buildQuestTarget(col: number, row: number): HTMLElement {

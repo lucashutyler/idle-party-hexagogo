@@ -1,9 +1,11 @@
 import { wilsonInterval } from '@idle-party-rpg/shared';
-import type { ForecastResult, ForecastStratum, HexTile } from '@idle-party-rpg/shared';
+import type { ForecastResult, ForecastStratum, HexTile, MapTransitionLink } from '@idle-party-rpg/shared';
 
 /** Battles remembered for the "too many skips here" relocation rule. */
 export const AUTO_RETREAT_SKIP_WINDOW = 10;
 export const AUTO_RETREAT_SKIPS_TO_RELOCATE = 3;
+/** A retreat back through a door waits this long after the party last came through one. */
+export const DOOR_RETREAT_GRACE_MS = 20_000;
 
 /** Why a party relocates: the whole room is too dangerous, or lost-cause fights kept coming up in it. */
 export type RelocateCause = 'room' | 'skips';
@@ -25,8 +27,16 @@ export interface RetreatCandidate {
   tile: HexTile;
   /** Cached room forecast for this party, null when unknown. */
   forecast: ForecastResult | null;
-  /** The room the party walked in from. */
+  /** The room the party walked in from, or came through the door from. */
   previous: boolean;
+  /** Set when the room lies behind a door of the party's room. */
+  door?: MapTransitionLink;
+}
+
+/** A door retreat waits for Run to open and for the grace after the party's last door crossing to run out. */
+export function doorRetreatDelayMs(runWaitMs: number, crossedDoorAt: number | undefined, now: number): number {
+  const graceLeft = crossedDoorAt === undefined ? 0 : crossedDoorAt + DOOR_RETREAT_GRACE_MS - now;
+  return Math.max(runWaitMs, graceLeft);
 }
 
 /** Upper end (percent) of the 95 % interval for one table entry, sized by its share of the sims. */
@@ -55,12 +65,16 @@ export function decideAutoRetreat(
   return { kind: 'skip', winPct: stratum.winPct };
 }
 
+export function isKnownSafe(candidate: RetreatCandidate, belowPct: number): boolean {
+  return candidate.forecast !== null && candidate.forecast.winPct >= belowPct;
+}
+
 /**
  * Only a room known to be safe enough is a target: the previous room when it is, else the best
  * known neighbour. With none known, wait for the unknown rooms' forecasts; with none left, give up.
  */
 export function pickRetreatTarget(candidates: readonly RetreatCandidate[], belowPct: number): RetreatTargetPick {
-  const safe = candidates.filter(c => c.forecast !== null && c.forecast.winPct >= belowPct);
+  const safe = candidates.filter(c => isKnownSafe(c, belowPct));
   const previous = safe.find(c => c.previous);
   if (previous) return { kind: 'target', tile: previous.tile };
   let best: RetreatCandidate | null = null;
