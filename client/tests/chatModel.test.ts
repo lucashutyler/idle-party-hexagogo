@@ -279,14 +279,19 @@ describe('membership and sendable channels', () => {
   });
 
   it('offers Party and Guild when they exist', () => {
-    const social = { party: { members: [{}, {}] }, guild: { id: 'g1' } };
+    const social = { party: { id: 'p1', members: [{}, {}] }, guild: { id: 'g1' } };
     const membership = chatMembership({ social } as unknown as ServerStateMessage);
-    expect(membership).toEqual({ inParty: true, guildId: 'g1' });
+    expect(membership).toEqual({ inParty: true, partyId: 'p1', guildId: 'g1' });
     expect(sendableChannels(membership)).toEqual(['global', 'zone', 'tile', 'party', 'guild', 'dm']);
   });
 
+  it('names no party for a party of one, whose chat reaches no one', () => {
+    const solo = chatMembership({ social: { party: { id: 'p1', members: [{}] }, guild: null } } as unknown as ServerStateMessage);
+    expect(solo.partyId).toBeNull();
+  });
+
   it('is empty before the first state', () => {
-    expect(chatMembership(null)).toEqual({ inParty: false, guildId: null });
+    expect(chatMembership(null)).toEqual({ inParty: false, partyId: null, guildId: null });
   });
 });
 

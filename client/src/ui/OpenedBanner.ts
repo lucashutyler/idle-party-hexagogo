@@ -1,9 +1,16 @@
 import type { CombatLogEntry, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
+import type { WorldCache } from '../network/WorldCache';
 import { bringToFront, release } from './ModalStack';
 import { deferWhilePressed } from './render';
 
 export const OPENED_BANNER_MS = 10_000;
+
+export interface OpenedBannerActions {
+  /** Opens the map on the room, whichever map holds it. */
+  showRoom: (roomId: string) => void;
+  showMap: () => void;
+}
 
 /** The `opened` journal entries after `lastSeenId`, oldest first. */
 export function newOpenings(log: readonly CombatLogEntry[], lastSeenId: number): CombatLogEntry[] {
@@ -22,7 +29,11 @@ export class OpenedBanner {
   private timer?: ReturnType<typeof setTimeout>;
   private unsubscribe: () => void;
 
-  constructor(gameClient: GameClient, private onOpen: (roomId: string | undefined) => void) {
+  constructor(
+    gameClient: GameClient,
+    private worldCache: Pick<WorldCache, 'getTileByGuid'>,
+    private actions: OpenedBannerActions,
+  ) {
     this.unsubscribe = gameClient.subscribe(state => this.update(state), { replay: true });
   }
 
@@ -56,7 +67,8 @@ export class OpenedBanner {
     banner.textContent = `🔓 ${text}`;
     banner.addEventListener('click', () => {
       this.remove();
-      this.onOpen(roomId);
+      if (roomId && this.worldCache.getTileByGuid(roomId)) this.actions.showRoom(roomId);
+      else this.actions.showMap();
     });
     document.body.appendChild(banner);
     bringToFront(banner);

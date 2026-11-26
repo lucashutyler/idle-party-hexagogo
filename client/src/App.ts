@@ -572,10 +572,6 @@ export class App {
     });
 
     this.openedBanner?.destroy();
-    this.openedBanner = new OpenedBanner(this.gameClient, (roomId) => {
-      const room = roomId ? this.worldCache.getTileByGuid(roomId) : undefined;
-      if (roomId && room?.mapId === this.worldCache.getCurrentMapId()) showRoom(roomId);
-      else navigate('map');
-    });
+    this.openedBanner = new OpenedBanner(this.gameClient, this.worldCache, { showRoom, showMap: () => navigate('map') });
   }
 }

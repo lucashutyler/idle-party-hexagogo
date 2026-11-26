@@ -45,10 +45,10 @@ export function renderLockCard(lock: RoomLockInfo, ctx: LockCardContext): string
     + '</div>';
 }
 
-/** Changes whenever the server's card could: anything that moves the preview, or a quest the viewer takes on. */
+/** Changes whenever the server's card could: anything that moves the preview, a quest the viewer takes on, or any member's gear (the party's forecast key). */
 export function lockCardKey(state: ServerStateMessage | null): string {
   const taken = (state?.activeQuests ?? []).map(q => q.questId).join(',');
-  return `${lockPreviewKey(state)}|${taken}`;
+  return `${lockPreviewKey(state)}|${taken}|${state?.social?.party?.forecastKey ?? ''}`;
 }
 
 export function lockCardTitle(lock: RoomLockInfo): string {
@@ -178,6 +178,8 @@ export interface LockDialogOptions {
   onAction: (action: LockCardAction) => void;
   /** Offered as a Travel button when the server finds nothing in the way after all. */
   onOpen?: () => void;
+  /** However the dialog closed. */
+  onClose?: () => void;
 }
 
 export interface LockDialog {
@@ -210,6 +212,7 @@ export function showLockDialog(opts: LockDialogOptions): LockDialog {
     open = false;
     release(overlay);
     overlay.remove();
+    opts.onClose?.();
   };
 
   let pressedBackdrop = false;

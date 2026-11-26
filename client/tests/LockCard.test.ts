@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GamePartyMember, QuestStepInfo, RoomLockInfo } from '@idle-party-rpg/shared';
-import { LOCK_OPEN_NOW_TEXT, LOCK_SPOILER_TEXT, NO_WAY_YET_TEXT, lockCardAction, lockCardTitle, renderLockCard, showLockDialog } from '../src/ui/LockCard';
+import type { GamePartyMember, QuestStepInfo, RoomLockInfo, ServerStateMessage } from '@idle-party-rpg/shared';
+import { LOCK_OPEN_NOW_TEXT, LOCK_SPOILER_TEXT, NO_WAY_YET_TEXT, lockCardAction, lockCardKey, lockCardTitle, renderLockCard, showLockDialog } from '../src/ui/LockCard';
 import type { LockCardContext } from '../src/ui/LockCard';
 import { dismissTop } from '../src/ui/ModalStack';
 
@@ -154,6 +154,20 @@ describe('lockCardTitle', () => {
   });
 });
 
+describe('lockCardKey', () => {
+  const state = (forecastKey?: string) => ({
+    username: 'ana',
+    character: { level: 4, equipment: {} },
+    activeQuests: [],
+    social: { party: { id: 'p1', forecastKey, members: [member('ana', 'owner'), { ...member('bo', 'member'), level: 4 }] } },
+  }) as unknown as ServerStateMessage;
+
+  it('moves with the party\'s forecast key, which follows every member\'s gear', () => {
+    expect(lockCardKey(state('k1'))).toBe(lockCardKey(state('k1')));
+    expect(lockCardKey(state('k2'))).not.toBe(lockCardKey(state('k1')));
+  });
+});
+
 describe('lockCardAction', () => {
   it('reads the button a click landed on', () => {
     const host = render(questLock(step()));
@@ -183,6 +197,21 @@ describe('showLockDialog', () => {
     expect(dismissTop()).toBe(true);
     expect(dialog.isOpen).toBe(false);
     expect(document.querySelector('.lock-dialog')).toBeNull();
+  });
+
+  it('says once that it closed, however it closed', () => {
+    const closers: ((dialog: ReturnType<typeof showLockDialog>) => void)[] = [
+      dialog => dialog.close(),
+      () => document.querySelector<HTMLElement>('.lock-dialog-close')!.click(),
+      () => { dismissTop(); },
+    ];
+    for (const close of closers) {
+      const onClose = vi.fn();
+      const dialog = showLockDialog({ title: 'Travel', lines: [], context: () => context(), onAction: vi.fn(), onClose });
+      close(dialog);
+      dialog.close();
+      expect(onClose).toHaveBeenCalledOnce();
+    }
   });
 
   it('offers to travel when the server finds nothing in the way', () => {
