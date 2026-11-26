@@ -33,6 +33,9 @@ import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
 import { forgetMissingAssets } from './ui/assets';
 import { dismissModals } from './ui/ModalStack';
+import { showMapToast } from './ui/MapToast';
+import { createCodexOpener, installCodexDelegate } from './ui/codexLinks';
+import type { CodexModal } from './ui/codex/CodexModal';
 import { runStepsWhenIdle, saveDataRequested } from './ui/idleSteps';
 import {
   ACTIVE_SCREEN_KEY,
@@ -83,6 +86,7 @@ export class App {
   private recapModal?: RecapModal;
   private openedBanner?: OpenedBanner;
   private masteryToasts?: MasteryToasts;
+  private codexModal?: CodexModal;
   private openOptionsDelegate?: (e: MouseEvent) => void;
   private removeShellListeners?: () => void;
   private cancelPrebuild?: () => void;
@@ -448,6 +452,10 @@ export class App {
       navigate('map');
       mapScreen.focusRoom(roomId);
     };
+    const goToRoom = (roomId: string): void => {
+      navigate('map');
+      mapScreen.goToRoomById(roomId);
+    };
     const questLog = new QuestLog(this.gameClient, this.worldCache, showRoom);
     combatScreen.setQuestTrackerActions({ openQuestLog: () => questLog.open(), showRoom });
     mapScreen.setOpenQuestLog(() => questLog.open());
@@ -530,9 +538,22 @@ export class App {
       },
     });
 
+    this.codexModal?.destroy();
+    this.codexModal = undefined;
+    const openCodex = createCodexOpener({
+      available: () => !!this.gameClient.lastState?.character?.codexVersion,
+      load: async () => {
+        const { CodexModal } = await import('./ui/codex/CodexModal');
+        this.codexModal = new CodexModal({ gameClient: this.gameClient, worldCache: this.worldCache, showRoom, goToRoom });
+        return this.codexModal;
+      },
+      toast: (message) => { showMapToast(document.body, message); },
+    });
+
     this.removeShellListeners?.();
     const shellListeners = [
       installNavDelegate(),
+      installCodexDelegate((target) => { void openCodex(target); }),
       installEscapeHandler(),
       installBackHandler(() => {
         if (!chatPopout.isLandscapeColumn()) return false;

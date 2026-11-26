@@ -60,6 +60,7 @@ const SPELLED_OUT_CHIPS_QUERY = '(min-width: 768px)';
 const BLOCKED_ROOM_TEXT = "You can't walk there";
 const CHARTING_TEXT = 'Charting the map…';
 const UNVISITED_MAP_TEXT = "You haven't visited that map yet.";
+const ROOM_GONE_TEXT = 'That room is gone.';
 const OWN_TRAVEL_FOLLOW_MS = 5000;
 /** How long Go and a door wait for the server's answer before the sheet closes and a refusal becomes a toast. */
 export const ORDER_ANSWER_MS = 5000;
@@ -86,6 +87,8 @@ export class MapScreen implements Screen {
   private creatingMap = false;
   private active = false;
   private pendingFocusRoomId: string | null = null;
+  /** The pending focus room also gets Go once the map is built. */
+  private pendingGoRoomId: string | null = null;
   private statusCard?: HTMLElement;
   private unsubscribeState?: () => void;
   private unsubscribeForecast?: () => void;
@@ -193,6 +196,7 @@ export class MapScreen implements Screen {
   focusRoom(roomId: string): void {
     if (!this.map) {
       this.pendingFocusRoomId = roomId;
+      this.pendingGoRoomId = null;
       return;
     }
     const def = this.worldCache.getTileByGuid(roomId);
@@ -206,6 +210,35 @@ export class MapScreen implements Screen {
       return;
     }
     if (info && !info.isCurrentTile) this.selectRoom(info, false);
+  }
+
+  /**
+   * Opens the room's sheet and sends Go from it, as two taps would; a room on a map not yet visited is just sent to.
+   * Before the map is first built, both wait for it.
+   */
+  goToRoomById(roomId: string): void {
+    if (!this.map) {
+      this.pendingFocusRoomId = roomId;
+      this.pendingGoRoomId = roomId;
+      return;
+    }
+    this.closeLockDialog();
+    this.roomView?.hide();
+    const def = this.worldCache.getTileByGuid(roomId);
+    if (!def) {
+      this.showMoveToast(ROOM_GONE_TEXT);
+      return;
+    }
+    const info = this.showRoomOnMap(def);
+    if (info?.isCurrentTile) {
+      this.dismissSheet();
+      this.showRoom(info);
+    } else if (info) {
+      this.selectRoom(info, false);
+      this.goToRoom(info);
+    } else if (this.sendOrder(() => this.gameClient.sendMoveTo(roomId, this.coordsOnPartyMap(def.mapId, def)))) {
+      this.dismissSheet();
+    }
   }
 
   /** Draws the room's map and pans to it: undefined when that map is one the player hasn't visited. */
@@ -558,8 +591,11 @@ export class MapScreen implements Screen {
   private applyPendingFocus(): void {
     const roomId = this.pendingFocusRoomId;
     if (!roomId) return;
+    const go = this.pendingGoRoomId === roomId;
     this.pendingFocusRoomId = null;
-    this.focusRoom(roomId);
+    this.pendingGoRoomId = null;
+    if (go) this.goToRoomById(roomId);
+    else this.focusRoom(roomId);
   }
 
   private wireMap(map: ThreeWorldMap): void {
@@ -1007,7 +1043,7 @@ export class MapScreen implements Screen {
   private runLockAction(action: LockCardAction): void {
     switch (action.kind) {
       case 'walk':
-        this.walkToRoom(action.roomId);
+        this.goToRoomById(action.roomId);
         break;
       case 'show':
         this.closeLockDialog();
@@ -1021,24 +1057,6 @@ export class MapScreen implements Screen {
       case 'remove':
         void this.confirmRemove(action.username);
         break;
-    }
-  }
-
-  /** Opens the room's sheet and sends Go from it, as two taps would; a room on a map not yet visited is just sent to. */
-  private walkToRoom(roomId: string): void {
-    this.closeLockDialog();
-    this.roomView?.hide();
-    const def = this.worldCache.getTileByGuid(roomId);
-    if (!def) return;
-    const info = this.showRoomOnMap(def);
-    if (info?.isCurrentTile) {
-      this.dismissSheet();
-      this.showRoom(info);
-    } else if (info) {
-      this.selectRoom(info, false);
-      this.goToRoom(info);
-    } else if (this.sendOrder(() => this.gameClient.sendMoveTo(roomId, this.coordsOnPartyMap(def.mapId, def)))) {
-      this.dismissSheet();
     }
   }
 
