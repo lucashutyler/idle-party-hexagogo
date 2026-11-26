@@ -59,7 +59,7 @@ describe('Codex save and restore', () => {
     expect('codex' in JSON.parse(JSON.stringify(session.toSaveData()))).toBe(false);
   });
 
-  it('fills a save without the field from kills, bag, gear, completed quest rewards and dungeons, silently', () => {
+  it('fills a save without the field from kills, bag, gear and dungeons, silently, never from quest rewards', () => {
     const { session, restore, marker } = setup();
     const save = olderSave(session, {
       monsterKills: { wolf: 3, bear: 0, goblin: 2.5 },
@@ -73,7 +73,7 @@ describe('Codex save and restore', () => {
 
     expect(restored.toSaveData().codex).toEqual({
       monsters: ['wolf'],
-      items: ['pelt', 'lamp', 'sword'],
+      items: ['pelt', 'lamp'],
       dungeons: ['damp_cave', 'sunken_vault'],
     });
     expect(revisionOf(marker(restored))).toBe('0');

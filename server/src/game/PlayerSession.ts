@@ -1429,21 +1429,13 @@ export class PlayerSession {
     );
   }
 
-  /** What the save already proves: kills, bag, gear, completed quests' item rewards, dungeons cleared or under way. */
+  /** What the save already proves: kills, bag, gear, dungeons cleared or under way. */
   private codexBackfill(runDungeonId: unknown): CodexBackfill {
     const items = new Set<string>();
     if (this.character) {
       for (const itemId of Object.keys(this.character.inventory)) items.add(itemId);
       for (const itemId of Object.values(this.character.equipment)) {
         if (typeof itemId === 'string') items.add(itemId);
-      }
-    }
-    const catalog = this.content.getQuestCatalog();
-    for (const { questId } of this.quests.getCompleted()) {
-      const rewards = hasOwn(catalog, questId) ? catalog[questId]?.rewards : undefined;
-      if (!Array.isArray(rewards)) continue;
-      for (const reward of rewards) {
-        if (reward.kind === 'item') items.add(reward.itemId);
       }
     }
     const dungeons = [...this.clearedDungeons];

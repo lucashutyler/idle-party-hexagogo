@@ -7,7 +7,7 @@ The Codex is each player's own record of the monsters, items, rooms and shops th
 | Entry | Discovered when | Data |
 |---|---|---|
 | Monster | Met in a fight as a human fighter, whatever the outcome, or killed before the Codex existed | `codex.monsters`, backfilled from `monsterKills` |
-| Item | Has been in the player's bags by any route (drop, dungeon reward, shop, quest reward, gift, trade, craft), or is in the stock of a shop they have visited | `codex.items`, visited shops' current stock |
+| Item | Has been in the player's bags by any route (drop, dungeon reward, shop, quest reward, gift, trade, craft), or is in the stock of a shop they have visited | `codex.items` (recorded from release on, backfilled only from the bag and gear), visited shops' current stock |
 | Room | Found: in the player's unlocked set (fog of war), still in content and walkable | `unlockedKeys` (no new data) |
 | Shop | The player fought in its room, in the overworld | `codex.shops` |
 | Dungeon | The player fought one of its floors | `codex.dungeons`, backfilled from `clearedDungeons` and a saved run |
