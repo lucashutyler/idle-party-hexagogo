@@ -31,7 +31,7 @@ Ids that leave content are kept in the knowledge and skipped when a reply is bui
 
 ## Recording
 
-Fight start is the only place a fight is credited (`PartyBattleManager.createCombatForParty`), drops are credited at the victory payout, and every way into the bags marks the item: `storeRewardItem` (combat drops and dungeon rewards), `addOneToInventory` (shop buys, quest rewards), `addToInventory` (gifts, trades) and craft completion. The details, including why hires are never credited and why a dungeon floor never credits the entrance room's shop, are in `combat.md` → Codex recording. All of it costs a few set lookups per event and no content scan.
+Fight start is the only place a fight is credited (`PartyBattleManager.createCombatForParty`), drops are credited at the victory payout, and every way into the bags marks the item: `storeRewardItem` (combat drops and dungeon rewards), `addOneToInventory` (shop buys, quest rewards), `addToInventory` (gifts, trades) and craft completion. An item received in a trade that is then rolled back stays recorded; its definition was already shown in the trade offer. The details, including why hires are never credited and why a dungeon floor never credits the entrance room's shop, are in `combat.md` → Codex recording. All of it costs a few set lookups per event and no content scan.
 
 The first meeting with a monster writes one `codex` journal line, "New in your Codex: {names}.", whose `codex` field is a ref to the first new monster. The backfill writes nothing.
 
