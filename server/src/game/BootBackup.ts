@@ -30,6 +30,7 @@ export async function backUpDataFiles(dataDir: string, files: readonly string[],
 
     const target = path.join(root, bootBackupName(at));
     let copied = 0;
+    let failed = 0;
     for (const [i, file] of files.entries()) {
       const bytes = current[i];
       if (bytes === undefined) continue;
@@ -39,8 +40,14 @@ export async function backUpDataFiles(dataDir: string, files: readonly string[],
         await writeFile(copy, bytes, { flag: 'wx' });
         copied++;
       } catch (err) {
+        failed++;
         console.error(`[BootBackup] Could not copy ${displayPath(file)} to ${displayPath(copy)}:`, err);
       }
+    }
+    if (failed > 0) {
+      await rm(target, { recursive: true, force: true });
+      console.error(`[BootBackup] Removed the incomplete backup ${displayPath(target)} and kept the older ones; starting anyway`);
+      return undefined;
     }
     await pruneBackups(root);
     console.log(`[BootBackup] Copied ${copied} data file(s) to ${displayPath(target)}`);

@@ -139,13 +139,25 @@ describe('ContentStore loads what it can read', () => {
     }
   });
 
-  it('seeds again when all four core files are gone', async () => {
+  it('seeds again when every content file is gone', async () => {
     await loadedStore();
-    for (const name of CORE_FILES) await fs.rm(path.join(dataDir, name));
+    for (const name of CONTENT_FILES) await fs.rm(path.join(dataDir, name));
 
     const store = await loadedStore();
 
     expect(store.getWorld().tiles.length).toBeGreaterThan(0);
+  });
+
+  it('refuses to seed over the other content files when only the four core files are gone', async () => {
+    const first = await loadedStore();
+    await first.addOrUpdateQuest({ id: 'q1', name: 'Q', description: 'D', scope: 'solo', objectives: [], rewards: [] } as QuestDefinition);
+    for (const name of CORE_FILES) await fs.rm(path.join(dataDir, name));
+    const before = await filesOnDisk();
+
+    await expect(new ContentStore().load()).rejects.toThrow('monsters.json');
+
+    expect(await filesOnDisk()).toEqual(before);
+    expect(JSON.parse(before['quests.json'])).toHaveLength(1);
   });
 
   it('loads an absent optional file as before: seeded where it always was, otherwise empty', async () => {
@@ -343,6 +355,26 @@ describe('boot backups', () => {
 
     expect(await backupNames()).toEqual([...made.slice(2), 'kept-by-hand'].sort());
     expect(await fs.readFile(path.join(backupsDir(), made[11], 'monsters.json'), 'utf-8')).toBe('[11]');
+  });
+
+  it('keeps every older backup when a copy fails, and leaves no partial one', async () => {
+    const file = path.join(dataDir, 'monsters.json');
+    await fs.mkdir(dataDir, { recursive: true });
+    const made: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      await fs.writeFile(file, `[${i}]`);
+      const target = await bootBackup.backUpDataFiles(dataDir, [file], new Date(Date.UTC(2026, 0, 1, 0, 0, i)));
+      made.push(path.basename(target!));
+    }
+    await fs.writeFile(file, '[10]');
+    const failing = new Date(Date.UTC(2026, 0, 1, 0, 0, 10));
+    await fs.mkdir(path.join(backupsDir(), bootBackup.bootBackupName(failing), 'monsters.json'), { recursive: true });
+
+    const target = await bootBackup.backUpDataFiles(dataDir, [file], failing);
+
+    expect(await backupNames()).toEqual(made);
+    expect(await fs.readFile(path.join(backupsDir(), made[0], 'monsters.json'), 'utf-8')).toBe('[0]');
+    expect(target).toBeUndefined();
   });
 
   it('names a backup by its time in a form every filesystem takes', () => {

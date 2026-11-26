@@ -15,7 +15,7 @@ import { SEED_MONSTERS, SEED_ITEMS, SEED_ZONES, SEED_ENCOUNTERS, SEED_TILE_TYPES
 import { TileType } from '@idle-party-rpg/shared';
 import { ACCOUNTS_FILE } from '../auth/AccountStore.js';
 import { backUpDataFiles } from './BootBackup.js';
-import { UnreadableDataFileError, displayPath, isJsonObject, readJsonFile, writeFileAtomic } from './JsonFiles.js';
+import { UnreadableDataFileError, displayPath, isJsonObject, pathExists, readJsonFile, writeFileAtomic } from './JsonFiles.js';
 import { MANIFEST_FILE } from './VersionStore.js';
 
 /** Generated definitions merged only where their id is still free. */
@@ -47,14 +47,15 @@ const DUNGEONS_FILE = path.join(DATA_DIR, 'dungeons.json');
 const SKILLS_FILE = path.join(DATA_DIR, 'skills.json');
 const SKILL_SLOTS_FILE = path.join(DATA_DIR, 'skill-slots.json');
 const DESIGN_NOTES_FILE = path.join(DATA_DIR, 'design-notes.json');
-const CONTENT_FILES = [
-  MONSTERS_FILE, ITEMS_FILE, ZONES_FILE, WORLD_FILE, ENCOUNTERS_FILE, SETS_FILE, SHOPS_FILE, HENCHMEN_FILE,
-  TILE_TYPES_FILE, RECIPES_FILE, NPCS_FILE, QUESTS_FILE, DUNGEONS_FILE, SKILLS_FILE, SKILL_SLOTS_FILE, DESIGN_NOTES_FILE,
+const OPTIONAL_CONTENT_FILES = [
+  ENCOUNTERS_FILE, SETS_FILE, SHOPS_FILE, HENCHMEN_FILE, TILE_TYPES_FILE, RECIPES_FILE, NPCS_FILE, QUESTS_FILE,
+  DUNGEONS_FILE, SKILLS_FILE, SKILL_SLOTS_FILE, DESIGN_NOTES_FILE,
 ];
+const CONTENT_FILES = [MONSTERS_FILE, ITEMS_FILE, ZONES_FILE, WORLD_FILE, ...OPTIONAL_CONTENT_FILES];
 
 /**
- * Loads and manages game content from JSON files in data/. Seeds defaults only when none of
- * the four core files exist; a damaged file stops the load. See docs/architecture/persistence.md.
+ * Loads and manages game content from JSON files in data/. Seeds defaults only when no content
+ * file exists; a damaged or missing one stops the load. See docs/architecture/persistence.md.
  */
 export class ContentStore {
   private monsters = new Map<string, MonsterDefinition>();
@@ -964,7 +965,7 @@ export class ContentStore {
     return Array.from(this.skillSlotSchedules.entries()).map(([className, slots]) => ({ className, slots }));
   }
 
-  /** False when none of the four core files exist. Throws {@link UnreadableDataFileError} rather than load around a damaged file. */
+  /** False when no content file exists. Throws {@link UnreadableDataFileError} rather than load or seed around a damaged or missing file. */
   private async tryLoadAll(): Promise<boolean> {
     const [monstersArr, itemsArr, zonesArr, world] = await Promise.all([
       readContentList<MonsterDefinition>(MONSTERS_FILE),
@@ -975,7 +976,7 @@ export class ContentStore {
     if (!monstersArr || !itemsArr || !zonesArr || !world) {
       const core: [string, unknown][] = [[MONSTERS_FILE, monstersArr], [ITEMS_FILE, itemsArr], [ZONES_FILE, zonesArr], [WORLD_FILE, world]];
       const missing = core.filter(([, value]) => value === undefined).map(([file]) => file);
-      if (missing.length === core.length) return false;
+      if (missing.length === core.length && !(await anyPathExists(OPTIONAL_CONTENT_FILES))) return false;
       throw new UnreadableDataFileError(missing[0], new Error('it is missing while other content files exist'));
     }
 
@@ -1303,6 +1304,10 @@ async function writeAll(files: readonly [string, string][]): Promise<void> {
   const results = await Promise.allSettled(files.map(([file, json]) => writeFileAtomic(file, json, { fsync: true })));
   const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
   if (failure) throw failure.reason;
+}
+
+async function anyPathExists(files: readonly string[]): Promise<boolean> {
+  return (await Promise.all(files.map(pathExists))).some(Boolean);
 }
 
 async function readContentList<T>(file: string): Promise<T[] | undefined> {

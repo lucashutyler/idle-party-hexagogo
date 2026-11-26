@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises';
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'fs/promises';
 import path from 'path';
 
 export interface AtomicWriteOptions {
@@ -31,7 +31,7 @@ export function isDamagedDataFileError(err: unknown): err is UnreadableDataFileE
   return err instanceof UnreadableDataFileError && !err.readFailed;
 }
 
-const UTF8_BOM = '﻿';
+const UTF8_BOM = '\uFEFF';
 let tempFileSeq = 0;
 
 /** Write to a temp file beside `file`, then rename it over `file`, so a reader or a crash never sees half a file. */
@@ -84,6 +84,16 @@ export async function moveAside(file: string): Promise<string> {
   const aside = `${file}.unreadable-${Date.now()}`;
   await rename(file, aside);
   return aside;
+}
+
+/** False only when nothing is at `file`; a check that fails any other way counts as something there. */
+export async function pathExists(file: string): Promise<boolean> {
+  try {
+    await stat(file);
+    return true;
+  } catch (err) {
+    return !isMissingFileError(err);
+  }
 }
 
 export function isMissingFileError(err: unknown): boolean {

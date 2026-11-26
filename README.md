@@ -109,8 +109,8 @@ For a named instance, append the instance name to the unit
 
 Every start copies the content files, the version manifest and the accounts file
 into `data/boot-backups/<time>/` when they changed since the last copy (the newest
-10 are kept). If a data file is
-damaged, the service refuses to start and the log names the file; see
+10 are kept). If a data file is damaged, the service refuses to start and the
+log names the file; see
 `docs/architecture/persistence.md` → Damaged data files for how to restore it.
 
 If you skipped certbot, point the domain at the server and terminate TLS upstream.
