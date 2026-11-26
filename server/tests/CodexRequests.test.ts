@@ -80,17 +80,22 @@ describe('Codex marker', () => {
 
   it('stays put while nothing the Codex shows changes', async () => {
     const { alice, marker } = await setup();
+    const known = CodexKnowledge.fromSave(alice.toSaveData().codex);
+    expect(known.hasEncounter('goblins')).toBe(true);
+    expect(known.hasMonster('goblin')).toBe(true);
     const before = marker();
 
     alice.grantGold(5);
+    expect(marker()).toBe(before);
     alice.noteCodexFight([{ id: 'goblin', name: 'Goblin' }], { kind: 'room', encounterId: 'goblins' });
+    expect(marker()).toBe(before);
+
     alice.addToInventory('rope', 1);
     const afterRope = marker();
     alice.addToInventory('rope', 1);
 
-    expect(marker()).toBe(afterRope);
     expect(afterRope).not.toBe(before);
-    expect(marker()).toBe(marker());
+    expect(marker()).toBe(afterRope);
   });
 
   it('moves on a new fact and on a raised drop tally', async () => {
