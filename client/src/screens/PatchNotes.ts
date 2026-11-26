@@ -1,5 +1,12 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.25.3',
+    notes: [
+      'Signing in on a new device now uses a 6-digit code from your sign-in email.',
+      'Direct-message emails no longer include the message itself.',
+    ],
+  },
+  {
     version: '2026.11.25.2',
     notes: [
       'When Autorun walks your party into the last room of a route, the battle screen now stays steady until the fight there begins.',

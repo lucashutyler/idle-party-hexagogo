@@ -43,15 +43,24 @@ export class ApproveScreen implements Screen {
     try {
       const result = await approveLogin(token);
       if (result.success) {
-        this.messageEl.textContent = 'Sign in approved!';
-        this.hintEl.textContent = 'You can close this tab and return to your other device.';
-        this.hintEl.style.display = 'block';
+        this.showMessage('Sign in approved!', 'Go back to the tab where you asked to sign in. You can close this one.');
+      } else if (result.needsCode) {
+        this.showMessage(
+          'Almost there.',
+          'Type the 6-digit code from this email on the screen where you asked to sign in. If you didn\'t ask, ignore the email.',
+        );
       } else {
         this.showError(result.error ?? 'Approval failed. The link may have expired.');
       }
     } catch {
       this.showError('Could not connect to server.');
     }
+  }
+
+  private showMessage(message: string, hint: string): void {
+    this.messageEl.textContent = message;
+    this.hintEl.textContent = hint;
+    this.hintEl.style.display = 'block';
   }
 
   private showError(message: string): void {
