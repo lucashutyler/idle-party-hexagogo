@@ -192,6 +192,7 @@ export class QuestSystem {
   /**
    * Fit every active entry to its quest as authored now, then recompute collect-objective progress
    * from current inventory ownership counts. Called before exposing state to the client.
+   * Fires `ready` for each entry that becomes ready here.
    */
   recomputeCollect(
     quests: Readonly<Record<string, QuestDefinition>>,
@@ -200,6 +201,7 @@ export class QuestSystem {
     for (const entry of this.active.values()) {
       const def = quests[entry.questId];
       if (!def) continue;
+      const before = entry.status;
       fitProgress(entry, def);
       for (let i = 0; i < def.objectives.length; i++) {
         const obj = def.objectives[i];
@@ -207,6 +209,9 @@ export class QuestSystem {
         entry.progress[i] = Math.min(obj.count, getInventoryCount(obj.itemId));
       }
       entry.status = computeStatus(def, entry.progress);
+      if (entry.status === 'ready' && before !== 'ready') {
+        this.fire({ type: 'ready', questId: entry.questId, username: this.username });
+      }
     }
   }
 

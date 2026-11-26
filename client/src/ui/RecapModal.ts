@@ -1,13 +1,33 @@
-import type { AwayLedger, AwayMoment, AwayMomentKind, ItemDefinition, ItemRarity } from '@idle-party-rpg/shared';
-import { AUTO_RETREAT_OPTIONS, AWAY_NOTABLE_MIN_RARITY, awayRarityRank, awayRecapStyle, topAwayMoments } from '@idle-party-rpg/shared';
+import type {
+  AwayLedger,
+  AwayMoment,
+  AwayMomentKind,
+  ItemDefinition,
+  ItemRarity,
+  QuestDefinition,
+  QuestProgressEntry,
+  ServerStateMessage,
+} from '@idle-party-rpg/shared';
+import {
+  AUTO_RETREAT_OPTIONS,
+  AWAY_NOTABLE_MIN_RARITY,
+  awayRarityRank,
+  awayRecapStyle,
+  getObjectiveTarget,
+  isMainQuest,
+  questTitle,
+  topAwayMoments,
+} from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderItemIcon } from './ItemIcon';
 import { reducedMotion } from './motion';
 import { OPEN_OPTIONS_ATTR } from './ForecastChip';
+import { objectiveText } from './QuestText';
 
 export const RECAP_TIMELINE_MAX = 6;
 export const RECAP_LOSS_NUDGE_FRACTION = 0.25;
+export const RECAP_READY_MAX = 3;
 const TOAST_LIFETIME_MS = 8000;
 const COUNT_UP_MS = 700;
 const PCT = ' %';
@@ -22,6 +42,8 @@ const MOMENT_ICONS: Record<AwayMomentKind, string> = {
   relocate: '🏳️',
   mastery: '⭐',
   closest_call: '❤️',
+  quest_ready: '📜',
+  opened: '🔓',
 };
 
 export interface RecapLevelProgress {
@@ -34,7 +56,7 @@ export interface RecapLevelProgress {
   fillFrac: number;
 }
 
-export type RecapWarningAction = 'options' | 'map';
+export type RecapWarningAction = 'options' | 'map' | 'hero';
 
 export interface RecapWarning {
   kind: 'losses' | 'route' | 'ejected' | 'left' | 'items_lost';
@@ -123,6 +145,10 @@ function momentPhrase(moment: AwayMoment, ledger: AwayLedger, item: RecapItemLoo
     }
     case 'closest_call':
       return ledger.closestCall ? `survived a close call against ${ledger.closestCall.vs}` : lowerFirst(moment.text);
+    case 'quest_ready':
+      return 'finished a quest';
+    case 'opened':
+      return 'opened up somewhere new';
   }
 }
 
@@ -182,10 +208,54 @@ export function recapWarnings(
   if (ledger.itemsLost > 0) {
     warnings.push({
       kind: 'items_lost',
-      text: `Your bags were full: ${fmt(ledger.itemsLost)} ${ledger.itemsLost === 1 ? 'item was' : 'items were'} left behind.`,
+      text: `Your bags were full: ${fmt(ledger.itemsLost)} ${ledger.itemsLost === 1 ? 'item was' : 'items were'} left behind. Sell some from the Hero screen to make room.`,
+      action: 'hero',
     });
   }
   return warnings;
+}
+
+type RecapQuestState = Pick<ServerStateMessage, 'activeQuests' | 'questDefinitions' | 'questResolutions' | 'questGuide'>;
+
+/** Titles of the quests ready to turn in, at most `max`, and how many more there are. */
+export function recapReadyQuests(
+  state: RecapQuestState | null | undefined,
+  max = RECAP_READY_MAX,
+): { names: string[]; more: number } {
+  const defs = state?.questDefinitions ?? {};
+  const names = (state?.activeQuests ?? [])
+    .filter(entry => entry.status === 'ready')
+    .map(entry => defs[entry.questId])
+    .filter((def): def is QuestDefinition => !!def)
+    .map(def => questTitle(def));
+  return { names: names.slice(0, max), more: Math.max(0, names.length - max) };
+}
+
+/** HTML-safe: the first main-story step, else the first active main quest's next objective; null when there is none. */
+export function recapNextMainStep(state: RecapQuestState | null | undefined): string | null {
+  if (!state) return null;
+  const defs = state.questDefinitions ?? {};
+  const active = state.activeQuests ?? [];
+  const step = state.questGuide?.steps[0];
+  if (step) {
+    const entry = active.find(e => e.questId === step.questId);
+    const def = defs[step.questId];
+    if (step.status === 'active' && entry && def) return activeStepHtml(def, entry, state.questResolutions);
+    const title = escapeHtml(questTitle(step));
+    if (step.status === 'needs_level' && step.requiredLevel) return `${title}: reach level ${step.requiredLevel}`;
+    if (step.status === 'available') return `${title}: ready to accept`;
+    return title;
+  }
+  const entry = active.find(e => defs[e.questId] && isMainQuest(defs[e.questId]));
+  return entry ? activeStepHtml(defs[entry.questId], entry, state.questResolutions) : null;
+}
+
+function activeStepHtml(def: QuestDefinition, entry: QuestProgressEntry, resolutions: RecapQuestState['questResolutions']): string {
+  const title = escapeHtml(questTitle(def));
+  if (entry.status === 'ready') return `${title}: ready to turn in`;
+  const index = def.objectives.findIndex((obj, i) => (entry.progress[i] ?? 0) < getObjectiveTarget(obj));
+  if (index < 0) return title;
+  return `${title}: ${objectiveText(def.objectives[index], entry.progress[index] ?? 0, resolutions)}`;
 }
 
 function lossWarning(ledger: AwayLedger, autoRetreatPct: number): RecapWarning {
@@ -214,11 +284,12 @@ export function recapFooterHtml(ledger: AwayLedger): string {
   return parts.join(' · ');
 }
 
-/** "While you were away (12 min): +3 % of a level · 42 gold". */
-export function recapToastText(ledger: AwayLedger, now: number): string {
+/** "While you were away (12 min): +3 % of a level · 42 gold · 2 quests ready". */
+export function recapToastText(ledger: AwayLedger, now: number, questsReady = 0): string {
   const away = formatAwayDuration((ledger.until ?? now) - ledger.since);
   const parts = [recapLevelProgress(ledger).gainText];
   if (ledger.gold > 0) parts.push(`${fmt(ledger.gold)} gold`);
+  if (questsReady > 0) parts.push(`${fmt(questsReady)} ${questsReady === 1 ? 'quest' : 'quests'} ready`);
   return `While you were away (${away}): ${parts.join(' · ')}`;
 }
 
@@ -236,6 +307,8 @@ function countSpan(n: number): string {
 
 export interface RecapModalOptions {
   onOpenMap?: () => void;
+  onOpenQuests?: () => void;
+  onOpenHero?: () => void;
   now?: () => number;
 }
 
@@ -288,7 +361,8 @@ export class RecapModal {
     toast.type = 'button';
     toast.className = 'recap-toast';
     toast.setAttribute('role', 'status');
-    toast.textContent = recapToastText(recap, this.now());
+    const ready = recapReadyQuests(this.gameClient.lastState);
+    toast.textContent = recapToastText(recap, this.now(), ready.names.length + ready.more);
     toast.addEventListener('click', () => {
       this.removeToast();
       this.showModal(recap);
@@ -330,8 +404,10 @@ export class RecapModal {
         + `<span class="recap-warning-text">${escapeHtml(w.text)}</span>`
         + (w.action === 'options' ? `<button type="button" class="pixel-btn recap-warning-action" ${OPEN_OPTIONS_ATTR}>Options</button>` : '')
         + (w.action === 'map' && this.opts.onOpenMap ? '<button type="button" class="pixel-btn recap-warning-action" data-recap-action="map">Map</button>' : '')
+        + (w.action === 'hero' && this.opts.onOpenHero ? '<button type="button" class="pixel-btn recap-warning-action" data-recap-action="hero">Hero</button>' : '')
         + '</li>').join('')}</ul>`
       : '';
+    const questsHtml = this.questsHtml(state);
 
     const overlay = document.createElement('div');
     overlay.className = 'player-options-overlay recap-overlay';
@@ -354,6 +430,7 @@ export class RecapModal {
             </div>
           </div>
           ${timelineHtml}
+          ${questsHtml}
           ${lootHtml}
           ${warningsHtml}
         </div>
@@ -367,16 +444,43 @@ export class RecapModal {
     this.overlay = overlay;
 
     overlay.querySelector('.recap-continue')!.addEventListener('click', () => this.acknowledge());
-    overlay.querySelector('[data-recap-action="map"]')?.addEventListener('click', () => {
-      this.acknowledge();
-      this.opts.onOpenMap?.();
-    });
+    const actions: Record<string, (() => void) | undefined> = {
+      map: this.opts.onOpenMap,
+      quests: this.opts.onOpenQuests,
+      hero: this.opts.onOpenHero,
+    };
+    for (const button of overlay.querySelectorAll<HTMLElement>('[data-recap-action]')) {
+      const open = actions[button.dataset.recapAction ?? ''];
+      button.addEventListener('click', () => {
+        this.acknowledge();
+        open?.();
+      });
+    }
     document.addEventListener('keydown', this.keyHandler);
 
     bringToFront(overlay, () => this.acknowledge());
     wireFocusOnInteract(overlay);
     (overlay.querySelector('.recap-continue') as HTMLElement | null)?.focus({ preventScroll: true });
     if (!reducedMotion()) this.countUp(overlay);
+  }
+
+  private questsHtml(state: ServerStateMessage | null): string {
+    const ready = recapReadyQuests(state);
+    const next = recapNextMainStep(state);
+    if (ready.names.length === 0 && !next) return '';
+    const readyHtml = ready.names.length > 0
+      ? '<div class="recap-section-title">Ready to turn in</div>'
+        + `<ul class="recap-ready-list">${ready.names.map(name => `<li class="recap-ready-quest">${escapeHtml(name)}</li>`).join('')}`
+        + (ready.more > 0 ? `<li class="recap-ready-more">+${fmt(ready.more)} more</li>` : '')
+        + '</ul>'
+      : '';
+    const nextHtml = next
+      ? `<p class="recap-next-main"><span class="recap-next-label">Next on the main story:</span> ${next}</p>`
+      : '';
+    const button = this.opts.onOpenQuests
+      ? '<button type="button" class="pixel-btn recap-quests-action" data-recap-action="quests">Quests</button>'
+      : '';
+    return `<section class="recap-quests">${readyHtml}${nextHtml}${button}</section>`;
   }
 
   private countUp(root: HTMLElement): void {

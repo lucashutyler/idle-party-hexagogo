@@ -50,6 +50,7 @@ function createFakeContentStore(dungeon: DungeonDefinition): ContentStore {
     getAllShops: () => ({}),
     getShop: () => undefined,
     getWorld: () => ({ tiles: [entranceTile], startTile: { col: 0, row: 0 }, ...fakeWorldMeta() }),
+    getAllTileTypes: () => ({}),
     getAllSets: () => ({}),
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,

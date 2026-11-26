@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.25.5'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.25.6'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -138,12 +138,14 @@ export interface OtherPlayerState {
   dungeonName?: string;
 }
 
-export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'mastery';
+export type CombatLogType = 'battle' | 'victory' | 'defeat' | 'move' | 'unlock' | 'damage' | 'levelup' | 'retreat' | 'mastery' | 'opened';
 
 export interface CombatLogEntry {
   id: number;
   text: string;
   type: CombatLogType;
+  /** The room a line is about (an `opened` line names the room or door room that opened). */
+  roomId?: string;
 }
 
 export interface ServerStateMessage {

@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AwayLedger, AwayMoment } from '@idle-party-rpg/shared';
+import type { AwayLedger, AwayMoment, QuestDefinition, ServerStateMessage } from '@idle-party-rpg/shared';
 import {
   RecapModal,
   commonItemCount,
   formatAwayDuration,
   recapHeadline,
   recapLevelProgress,
+  recapNextMainStep,
+  recapReadyQuests,
   recapTimeline,
   recapToastText,
   recapWarnings,
@@ -138,7 +140,13 @@ describe('recap helpers', () => {
     expect(warnings[0]).toMatchObject({ action: 'map', text: 'Your party stopped traveling at Old Mill (14:05). Pick a new destination on the map.' });
     expect(warnings[1].text).toBe('Your party was defeated in Crystal Trial. Enter again to start a new run.');
     expect(warnings[2].text).toBe('Your party\'s run in Sunken Throne ended early. Enter again to start a new run.');
-    expect(warnings[3].text).toBe('Your bags were full: 3 items were left behind.');
+    expect(warnings[3]).toEqual({
+      kind: 'items_lost',
+      action: 'hero',
+      text: 'Your bags were full: 3 items were left behind. Sell some from the Hero screen to make room.',
+    });
+    expect(recapWarnings(ledger({ itemsLost: 1 }))[0].text)
+      .toBe('Your bags were full: 1 item was left behind. Sell some from the Hero screen to make room.');
   });
 
   it('warns only about how each dungeon stands now', () => {
@@ -171,13 +179,61 @@ describe('recap helpers', () => {
   it('summarises a short absence for the toast', () => {
     const l = ledger({ since: NOW - 12 * MIN, xpFracFrom: 0.2, xpFracTo: 0.23, gold: 42 });
     expect(recapToastText(l, NOW)).toBe(`While you were away (12 min): +3${P} of a level · 42 gold`);
+    expect(recapToastText(l, NOW, 1)).toBe(`While you were away (12 min): +3${P} of a level · 42 gold · 1 quest ready`);
+    expect(recapToastText(l, NOW, 4)).toBe(`While you were away (12 min): +3${P} of a level · 42 gold · 4 quests ready`);
+  });
+
+  it('heads the recap with a finished quest or a lock that opened', () => {
+    const l = ledger({ moments: [moment('quest_ready', NOW - 2 * MIN), moment('opened', NOW - MIN, 'Now open: Old Mill')] });
+    expect(recapHeadline(l, undefined)).toBe('Your party opened up somewhere new and finished a quest.');
+  });
+
+  it('lists the quests ready to turn in, at most three, by title', () => {
+    const state = questState(['a', 'b', 'c', 'd', 'e'], ['a', 'c', 'd', 'e', 'missing']);
+    expect(recapReadyQuests(state)).toEqual({ names: ['Quest a', 'Mend the Mill', 'Quest d'], more: 1 });
+    expect(recapReadyQuests(questState(['a'], []))).toEqual({ names: [], more: 0 });
+    expect(recapReadyQuests(null)).toEqual({ names: [], more: 0 });
+  });
+
+  it('names the next main-story step from the guide, else from the first main quest', () => {
+    const withGuide = (steps: RecapState['questGuide']) => ({ ...questState(['c'], []), questGuide: steps });
+    expect(recapNextMainStep(withGuide({ steps: [{ questId: 'c', name: 'Progress: Mend the Mill', status: 'active' }], mainQuestIds: ['c'] })))
+      .toBe('Mend the Mill: Kill Goblin (1/4)');
+    expect(recapNextMainStep(withGuide({ steps: [{ questId: 'x', name: 'Progress: Into the Hills', status: 'needs_level', requiredLevel: 6 }], mainQuestIds: [] })))
+      .toBe('Into the Hills: reach level 6');
+    expect(recapNextMainStep(withGuide({ steps: [{ questId: 'y', name: 'Progress: <Gate>', status: 'available' }], mainQuestIds: [] })))
+      .toBe('&lt;Gate&gt;: ready to accept');
+    expect(recapNextMainStep(questState(['a', 'c'], []))).toBe('Mend the Mill: Kill Goblin (1/4)');
+    expect(recapNextMainStep(questState(['a', 'c'], ['c']))).toBe('Mend the Mill: ready to turn in');
+    expect(recapNextMainStep(questState(['a'], []))).toBeNull();
   });
 });
+
+type RecapState = Pick<ServerStateMessage, 'activeQuests' | 'questDefinitions' | 'questResolutions' | 'questGuide'>;
+
+/** Quests `ids` are active; `ready` of them are ready. Quest `c` is the main quest "Mend the Mill". */
+function questState(ids: string[], ready: string[]): RecapState {
+  const def = (id: string): QuestDefinition => ({
+    id,
+    name: id === 'c' ? 'Progress: Mend the Mill' : `Quest ${id}`,
+    description: '',
+    scope: 'party_shared',
+    objectives: [{ kind: 'kill', monsterId: 'goblin', count: 4 }],
+    rewards: [],
+  });
+  return {
+    activeQuests: [...ids, ...ready.filter(id => !ids.includes(id))].map(id => ({
+      questId: id, status: ready.includes(id) ? 'ready' : 'in_progress', progress: [ready.includes(id) ? 4 : 1], acceptedAt: '',
+    })),
+    questDefinitions: Object.fromEntries(ids.map(id => [id, def(id)])),
+    questResolutions: { monsters: { goblin: 'Goblin' }, items: {}, tiles: {} },
+  };
+}
 
 interface FakeClient {
   recapListener: ((recap: AwayLedger | null) => void) | null;
   lastRecapItemDefinitions: Record<string, unknown>;
-  lastState: { zoneName: string } | null;
+  lastState: ({ zoneName: string } & Partial<RecapState>) | null;
   onRecap: (cb: (recap: AwayLedger | null) => void) => () => void;
   sendAckRecap: ReturnType<typeof vi.fn>;
 }
@@ -342,5 +398,60 @@ describe('RecapModal', () => {
     expect(onOpenMap).toHaveBeenCalled();
     expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
     modal.destroy();
+  });
+
+  it('warns about items left behind and offers the Hero screen', () => {
+    const client = fakeClient();
+    const onOpenHero = vi.fn();
+    const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW, onOpenHero });
+    client.recapListener!(ledger({ itemsLost: 7 }));
+    const warning = document.querySelector('.recap-warning[data-kind="items_lost"]')!;
+    expect(warning.querySelector('.recap-warning-text')!.textContent)
+      .toBe('Your bags were full: 7 items were left behind. Sell some from the Hero screen to make room.');
+    (warning.querySelector('[data-recap-action="hero"]') as HTMLButtonElement).click();
+    expect(onOpenHero).toHaveBeenCalled();
+    expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
+    modal.destroy();
+  });
+
+  it('lists quests ready to turn in, capped at three, with a Quests button and the next main step', () => {
+    const client = fakeClient();
+    client.lastState = { zoneName: 'Old Mill', ...questState(['a', 'b', 'c', 'd', 'e'], ['a', 'b', 'd', 'e']) };
+    const onOpenQuests = vi.fn();
+    const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW, onOpenQuests });
+    client.recapListener!(ledger({ moments: [moment('quest_ready', NOW - MIN, 'Quest ready to turn in: Quest a')] }));
+
+    const section = document.querySelector('.recap-quests')!;
+    expect([...section.querySelectorAll('.recap-ready-quest')].map(li => li.textContent)).toEqual(['Quest a', 'Quest b', 'Quest d']);
+    expect(section.querySelector('.recap-ready-more')!.textContent).toBe('+1 more');
+    expect(section.querySelector('.recap-next-main')!.textContent).toBe('Next on the main story: Mend the Mill: Kill Goblin (1/4)');
+    expect(document.querySelector('.recap-moment[data-kind="quest_ready"] .recap-moment-icon')!.textContent).toBe('📜');
+    (section.querySelector('[data-recap-action="quests"]') as HTMLButtonElement).click();
+    expect(onOpenQuests).toHaveBeenCalled();
+    expect(client.sendAckRecap).toHaveBeenCalledWith('r1');
+    modal.destroy();
+  });
+
+  it('leaves the quest section out when nothing is ready and there is no main story', () => {
+    const client = fakeClient();
+    const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW, onOpenQuests: vi.fn() });
+    client.recapListener!(ledger());
+    expect(document.querySelector('.recap-quests')).toBeNull();
+    modal.destroy();
+  });
+
+  it('makes a short absence with a quest ready a modal, and counts ready quests on the toast', () => {
+    const client = fakeClient();
+    const modal = new RecapModal(client as unknown as GameClient, { now: () => NOW });
+    client.recapListener!(ledger({ id: 'r2', since: NOW - 12 * MIN, moments: [moment('quest_ready', NOW - MIN)] }));
+    expect(document.querySelector('.recap-toast')).toBeNull();
+    expect(document.querySelector('.recap-overlay')).toBeTruthy();
+    modal.destroy();
+
+    client.lastState = { zoneName: 'Old Mill', ...questState(['a', 'b'], ['a', 'b']) };
+    const quiet = new RecapModal(client as unknown as GameClient, { now: () => NOW });
+    client.recapListener!(ledger({ id: 'r3', since: NOW - 12 * MIN }));
+    expect(document.querySelector('.recap-toast')!.textContent).toMatch(/ · 2 quests ready$/);
+    quiet.destroy();
   });
 });

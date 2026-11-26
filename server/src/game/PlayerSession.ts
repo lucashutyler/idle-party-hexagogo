@@ -84,6 +84,7 @@ import {
   nextWeeklyReopening,
   isBlockedUser,
   createPaysXpCheck,
+  passesGate,
 } from '@idle-party-rpg/shared';
 import { COMBAT_PACE, hireLevelLimitText, isHireWithinLevelLimit, paceHitDamage } from '@idle-party-rpg/shared';
 import type {
@@ -137,6 +138,10 @@ import type {
   NotificationEntry,
   NotificationPreferences,
   WebPushSubscription,
+  GateRef,
+  RoomEntryMemberInfo,
+  WorldMapMeta,
+  WorldTileDefinition,
 } from '@idle-party-rpg/shared';
 import { randomUUID } from 'crypto';
 import type { PlayerSaveData } from './GameStateStore.js';
@@ -146,6 +151,9 @@ import { QuestSystem } from './QuestSystem.js';
 import type { QuestEvent } from './QuestSystem.js';
 import { questOnlyCollectItems } from './QuestKeptItems.js';
 import { buildQuestGuide, questGivers } from './QuestGuide.js';
+import { gateIndex, gatesOpenedByLevel } from './GateIndexCache.js';
+import { roomLevelBands } from './RoomLevels.js';
+import type { LevelBand } from './RoomLevels.js';
 import type { QuestDefinition, QuestGuide, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
 
 const MAX_LOG_ENTRIES = 1000;
@@ -154,12 +162,20 @@ const MAX_CHAT_HISTORY = 1000;
 const MASTERY_RECENT_COUNT = 5;
 /** A victory at or below this share of party HP becomes a recap moment. */
 const CLOSE_CALL_MOMENT_PCT = 20;
+/** More openings than this at once share one "Now open" line. */
+const MAX_OPENING_LINES = 3;
 
 /** A monster credited to kill mastery; the tier is the one it had in the fight. */
 export interface KilledMonster {
   id: string;
   name: string;
   tier?: MonsterTier;
+}
+
+/** What the player had before a turn-in or level-up, to tell which locks just opened. */
+interface GateProgress {
+  level: number;
+  completed: ReadonlySet<string>;
 }
 
 export class PlayerSession {
@@ -201,6 +217,7 @@ export class PlayerSession {
   private chatFocus: { channelType: string; channelId: string } | null = null;
   private availableQuests: { key: string; ids: string[]; computedAt: number; staleAt: number } | null = null;
   private questGuide: { key: string; guide: QuestGuide; computedAt: number; staleAt: number } | null = null;
+  private acceptingQuestId: string | null = null;
   /** Per-player quest tracking. */
   quests: QuestSystem;
 
@@ -245,7 +262,7 @@ export class PlayerSession {
     this.username = username;
     this.grids = grids;
     this.content = content;
-    this.quests = new QuestSystem(username, onQuestEvent);
+    this.quests = new QuestSystem(username, event => this.handleQuestEvent(event, onQuestEvent));
 
     const startPos = content.getStartTile();
     const startCoord = offsetToCube(startPos);
@@ -348,9 +365,9 @@ export class PlayerSession {
     this.addLogEntry('Victory!', 'victory');
 
     if (options?.unlockTiles !== false) {
-      const unlocked = this.unlockSystem.unlockAdjacentTiles(tile);
-      if (unlocked.length > 0) {
-        this.addLogEntry(`${unlocked.length} new room${unlocked.length > 1 ? 's' : ''} unlocked!`, 'unlock');
+      const found = this.unlockSystem.unlockAdjacentTiles(tile);
+      if (found.length > 0) {
+        this.addLogEntry(`${found.length} new room${found.length > 1 ? 's' : ''} discovered`, 'unlock');
       }
     }
 
@@ -360,20 +377,37 @@ export class PlayerSession {
       this.addLogEntry(`+${rewards.gold} Gold`, 'victory');
     }
 
+    let stored = 0;
+    let leftBehind = 0;
     for (const itemId of rewards.items) {
-      const itemDef = this.storeRewardItem(itemId);
-      if (itemDef) this.addLogEntry(`Found ${itemDef.name}!`, 'victory');
+      const reward = this.storeRewardItem(itemId);
+      if (!reward) continue;
+      if (reward.stored) {
+        stored++;
+        this.addLogEntry(`Found ${reward.def.name}!`, 'victory');
+      } else {
+        leftBehind++;
+      }
     }
+    this.noteItemsLeftBehind(leftBehind);
+    if (stored > 0) this.refreshCollectQuests();
 
     const { levelsGained } = addXp(this.character, rewards.xp);
     this.xpRateXpTotal += rewards.xp;
-    this.addLogEntry(`+${rewards.xp} XP`, 'victory');
+    if (rewards.xp > 0) this.addLogEntry(`+${rewards.xp} XP`, 'victory');
     this.announceLevelUps(levelsGained);
     this.updateAway(l => recordAwayBattle(l, { won: true, xp: rewards.xp, gold: goldAdded, kills: options?.kills ?? 0 }));
   }
 
-  /** Journal lines, recap moment and skill unlocks for levels just gained. */
+  /** Level-up lines, then any lock the new level opens. */
   private announceLevelUps(levelsGained: number): void {
+    if (!this.character || levelsGained <= 0) return;
+    this.logLevelUps(levelsGained);
+    this.announceOpenings({ level: this.character.level - levelsGained, completed: this.quests.getCompletedQuestIds() });
+  }
+
+  /** Journal lines, recap moment and skill unlocks for levels just gained. */
+  private logLevelUps(levelsGained: number): void {
     if (!this.character || levelsGained <= 0) return;
     for (let i = 0; i < levelsGained; i++) {
       this.addLogEntry(`Level up! Now level ${this.character.level - levelsGained + i + 1}!`, 'levelup');
@@ -382,21 +416,108 @@ export class PlayerSession {
     this.autoUnlockSkills();
   }
 
-  /** Add a combat reward item; a full stack counts as lost in the away recap. Returns the definition when stored. */
-  private storeRewardItem(itemId: string): ItemDefinition | null {
+  /** Add a combat reward item; a full stack leaves it behind. Null for an unknown item. */
+  private storeRewardItem(itemId: string): { def: ItemDefinition; stored: boolean } | null {
     if (!this.character) return null;
     const def = this.content.getItem(itemId);
     if (!def) return null;
-    if (!addItemToInventory(this.character.inventory, itemId)) {
-      this.updateAway(l => recordAwayItemsLost(l, 1));
-      return null;
-    }
+    if (!addItemToInventory(this.character.inventory, itemId)) return { def, stored: false };
     const rarity = def.rarity ?? 'common';
     this.updateAway(l => recordAwayItem(l, itemId, rarity));
     if (awayRarityRank(rarity) >= awayRarityRank(AWAY_NOTABLE_MIN_RARITY)) {
       this.addAwayMoment('rare_item', `Found ${def.name}`, { itemId });
     }
-    return def;
+    return { def, stored: true };
+  }
+
+  /** One journal line for items a full stack couldn't take, also counted in the away recap. */
+  private noteItemsLeftBehind(count: number, what = count === 1 ? '1 item' : `${count} items`): void {
+    if (count <= 0) return;
+    this.addLogEntry(`Bags full: ${what} couldn't be carried. Sell some from the Hero screen.`, 'battle');
+    this.updateAway(l => recordAwayItemsLost(l, count));
+  }
+
+  /** Collect objectives follow the inventory; a quest they complete announces itself through the `ready` event. */
+  private refreshCollectQuests(): void {
+    if (this.quests.getActiveQuestIds().size === 0) return;
+    this.quests.recomputeCollect(this.content.getQuestCatalog(), itemId => this.getInventoryCount(itemId));
+  }
+
+  /** A quest ready the moment it is accepted is announced after the "Accepted quest" line instead. */
+  private handleQuestEvent(event: QuestEvent, forward?: (event: QuestEvent) => void): void {
+    if (event.type === 'ready' && event.questId !== this.acceptingQuestId) this.announceQuestReady(event.questId);
+    forward?.(event);
+  }
+
+  private announceQuestReady(questId: string): void {
+    const def = this.content.getQuestCatalog()[questId];
+    if (!def) return;
+    const text = `Quest ready to turn in: ${def.name}`;
+    this.addLogEntry(text, 'unlock');
+    this.addAwayMoment('quest_ready', text);
+  }
+
+  private gateProgress(): GateProgress {
+    return { level: this.getLevel(), completed: this.quests.getCompletedQuestIds() };
+  }
+
+  /** "Now open" lines for every lock, in a room the player has found, that `before` failed and the player passes now. */
+  private announceOpenings(before: GateProgress): void {
+    if (!this.character) return;
+    const index = gateIndex(this.content);
+    const completed = this.quests.getCompletedQuestIds();
+    const candidates = new Set<GateRef>();
+    for (const questId of completed) {
+      if (before.completed.has(questId)) continue;
+      for (const gate of index.byQuest.get(questId) ?? []) candidates.add(gate);
+    }
+    for (const gate of gatesOpenedByLevel(index, before.level, this.character.level)) candidates.add(gate);
+    if (candidates.size === 0) return;
+
+    const now: RoomEntryMemberInfo = {
+      username: this.username,
+      level: this.character.level,
+      equippedItemIds: this.getEquippedItemIds(),
+      completedQuestIds: completed,
+    };
+    const was: RoomEntryMemberInfo = { ...now, level: before.level, completedQuestIds: before.completed };
+    const opened = new Map<string, GateRef>();
+    for (const gate of candidates) {
+      if (!this.isTileIdUnlocked(gate.tileId)) continue;
+      if (!passesGate(gate, now) || passesGate(gate, was)) continue;
+      opened.set(`${gate.kind}:${gate.tileId}:${gate.linkTileId ?? ''}`, gate);
+    }
+    const roomsOpened = new Set([...opened.values()].filter(gate => gate.kind === 'room').map(gate => gate.tileId));
+    const gates = [...opened.values()].filter(gate => gate.kind === 'room' || !roomsOpened.has(gate.linkTileId ?? ''));
+    if (gates.length === 0) return;
+
+    if (gates.length <= MAX_OPENING_LINES) {
+      for (const gate of gates) this.logOpening(`Now open: ${this.gateLabel(gate)}`, gate.tileId);
+    } else {
+      this.logOpening(`Now open: ${this.gateLabel(gates[0])}, ${this.gateLabel(gates[1])} and ${gates.length - 2} more`);
+    }
+  }
+
+  private logOpening(text: string, roomId?: string): void {
+    this.addLogEntry(text, 'opened', roomId ? { roomId } : undefined);
+    this.addAwayMoment('opened', text);
+  }
+
+  /** "{room}" for a room; "{door room} → {map}" for a door, or the room behind it when the door stays on its map. */
+  private gateLabel(gate: GateRef): string {
+    const room = this.roomLabel(this.content.getTileById(gate.tileId));
+    if (gate.kind === 'room') return room;
+    const world = this.content.getWorld();
+    const destination = gate.linkMapId && gate.linkMapId !== gate.mapId
+      ? mapName(world.maps, gate.linkMapId)
+      : gate.linkTileId ? this.roomLabel(this.content.getTileById(gate.linkTileId)) : undefined;
+    return destination ? `${room} → ${destination}` : room;
+  }
+
+  private roomLabel(tile: WorldTileDefinition | undefined): string {
+    if (tile?.name) return tile.name;
+    const zone = tile ? this.content.getZone(tile.zone)?.displayName : undefined;
+    return zone ? `a room in ${zone}` : 'a room';
   }
 
   /** Check if a tile is unlocked for this player. */
@@ -435,12 +556,15 @@ export class PlayerSession {
   getWorldData(): {
     startTile: { col: number; row: number };
     defaultMapId: string;
-    maps: import('@idle-party-rpg/shared').WorldMapMeta[];
-    tiles: import('@idle-party-rpg/shared').WorldTileDefinition[];
+    maps: WorldMapMeta[];
+    tiles: WorldTileDefinition[];
+    /** Authored monster levels of each zone's encounter table; zones without any are left out. */
+    zoneLevels: Record<string, LevelBand>;
   } {
     const world = this.content.getWorld();
     const allZones = this.content.getAllZones();
     const noXp = noXpTileIds(this.content);
+    const levels = roomLevelBands(this.content);
 
     return {
       startTile: world.startTile,
@@ -448,8 +572,14 @@ export class PlayerSession {
       maps: world.maps,
       tiles: world.tiles.map(wt => {
         const zone = getZone(wt.zone, allZones);
-        return { ...wt, zoneName: zone?.displayName ?? wt.zone, noXp: noXp.has(wt.id) ? true : undefined };
+        return {
+          ...wt,
+          zoneName: zone?.displayName ?? wt.zone,
+          noXp: noXp.has(wt.id) ? true : undefined,
+          levels: levels.rooms.get(wt.id),
+        };
       }),
+      zoneLevels: { ...levels.zones },
     };
   }
 
@@ -711,13 +841,20 @@ export class PlayerSession {
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
 
-    const reason = this.quests.accept(def, {
-      playerLevel: this.character.level,
-      partySize,
-      currentTileId: this.getCurrentTile?.()?.id,
-    });
+    this.acceptingQuestId = questId;
+    let reason: string | null;
+    try {
+      reason = this.quests.accept(def, {
+        playerLevel: this.character.level,
+        partySize,
+        currentTileId: this.getCurrentTile?.()?.id,
+      });
+    } finally {
+      this.acceptingQuestId = null;
+    }
     if (reason) return { success: false, error: reason };
     this.addLogEntry(`Accepted quest: ${def.name}`, 'battle');
+    if (this.quests.isStatus(questId, 'ready')) this.announceQuestReady(questId);
     return { success: true };
   }
 
@@ -730,6 +867,7 @@ export class PlayerSession {
     const def = this.content.getQuest(questId);
     if (!def) return { success: false, error: 'Quest not found.' };
 
+    const before = this.gateProgress();
     const result = this.quests.turnIn(
       questId,
       this.content.getAllQuests(),
@@ -742,12 +880,14 @@ export class PlayerSession {
     let totalXp = 0;
     let totalGold = 0;
     const grantedItems: string[] = [];
+    let leftBehind = 0;
     for (const reward of result.rewards ?? []) {
       if (reward.kind === 'xp') totalXp += reward.amount;
       else if (reward.kind === 'gold') totalGold += reward.amount;
       else if (reward.kind === 'item') {
         for (let i = 0; i < reward.quantity; i++) {
           if (this.addOneToInventory(reward.itemId)) grantedItems.push(reward.itemId);
+          else leftBehind++;
         }
       }
     }
@@ -759,13 +899,15 @@ export class PlayerSession {
       const itemDef = this.content.getItem(itemId);
       if (itemDef) this.addLogEntry(`Quest reward: ${itemDef.name}`, 'victory');
     }
+    this.noteItemsLeftBehind(leftBehind, leftBehind === 1 ? '1 quest reward' : `${leftBehind} quest rewards`);
     if (totalXp > 0) {
       const { levelsGained } = addXp(this.character, totalXp);
       this.xpRateXpTotal += totalXp;
       this.addLogEntry(`+${totalXp} XP (quest reward)`, 'victory');
-      this.announceLevelUps(levelsGained);
+      this.logLevelUps(levelsGained);
     }
     this.addLogEntry(`Completed quest: ${def.name}`, 'victory');
+    this.announceOpenings(before);
     return { success: true };
   }
 
@@ -903,19 +1045,20 @@ export class PlayerSession {
     const events = processCompletions(recipes, this.character.inventory, this.craftQueue, now);
     if (events.length === 0) return false;
     let totalCraftXp = 0;
+    let produced = false;
     for (const ev of events) {
       const itemDef = items[ev.resultItemId];
       const itemName = itemDef?.name ?? ev.resultItemId;
       if (ev.quantityProduced > 0) {
         const qtyStr = ev.quantityProduced > 1 ? `x${ev.quantityProduced}` : '';
         this.addLogEntry(`Crafted ${itemName}${qtyStr}.`, 'unlock');
+        produced = true;
       }
-      if (ev.quantityLost > 0) {
-        this.addLogEntry(`Crafted ${itemName} but inventory full — lost ${ev.quantityLost}.`, 'damage');
-      }
+      this.noteItemsLeftBehind(ev.quantityLost, `${itemName}${ev.quantityLost > 1 ? ` x${ev.quantityLost}` : ''} from crafting`);
       const recipe = recipes[ev.recipeId];
       if (recipe?.xpReward) totalCraftXp += recipe.xpReward;
     }
+    if (produced) this.refreshCollectQuests();
     if (totalCraftXp > 0) {
       const skillName = getCraftSkillName(this.character.className);
       const result = addCraftXp(this.character, totalCraftXp);
@@ -1147,9 +1290,16 @@ export class PlayerSession {
     this.updateAway(l => ({ ...l, gold: l.gold + added }));
   }
 
-  /** One dungeon reward item; false when the stack is full (counted as lost in the away recap). */
+  /** One dungeon reward item; false when it is unknown or the stack is full (then journaled and counted as left behind). */
   grantRewardItem(itemId: string): boolean {
-    return this.storeRewardItem(itemId) !== null;
+    const reward = this.storeRewardItem(itemId);
+    if (!reward) return false;
+    if (!reward.stored) {
+      this.noteItemsLeftBehind(1, reward.def.name);
+      return false;
+    }
+    this.refreshCollectQuests();
+    return true;
   }
 
   getLevel(): number { return this.character?.level ?? 0; }
@@ -1470,8 +1620,8 @@ export class PlayerSession {
     return true;
   }
 
-  addLogEntry(text: string, type: CombatLogEntry['type']): void {
-    this.combatLog.push({ id: ++this.logIdCounter, text, type });
+  addLogEntry(text: string, type: CombatLogEntry['type'], refs?: Pick<CombatLogEntry, 'roomId'>): void {
+    this.combatLog.push({ id: ++this.logIdCounter, text, type, ...refs });
     if (this.combatLog.length > MAX_LOG_ENTRIES) {
       this.combatLog.shift();
     }
@@ -1608,7 +1758,7 @@ export class PlayerSession {
     // Resolve the grid for the saved map (legacy saves → default map) for unlock seeding.
     const grid = grids.get(data.mapId ?? content.getWorld().defaultMapId) ?? grids.getOrThrow(content.getWorld().defaultMapId);
     session['battleCount'] = data.battleCount;
-    session.quests = new QuestSystem(data.username, onQuestEvent);
+    session.quests = new QuestSystem(data.username, event => session.handleQuestEvent(event, onQuestEvent));
     session.quests.loadFromSaveData({
       active: data.activeQuests ?? [],
       completed: data.completedQuests ?? [],
@@ -1699,6 +1849,7 @@ export class PlayerSession {
     session['notificationPreferences'] = data.notificationPreferences ?? emptyNotificationPreferences();
     session['pushSubscriptions'] = data.pushSubscriptions ? [...data.pushSubscriptions] : [];
     session['chatFocus'] = null;
+    session['acceptingQuestId'] = null;
 
     // Restore craft queue (lazy completion happens on next tick)
     session['craftQueue'] = data.craftQueue
@@ -1892,6 +2043,10 @@ export class PlayerSession {
 
 function plainError(message: string): ServerErrorMessage {
   return { type: 'error', message };
+}
+
+function mapName(maps: readonly WorldMapMeta[], mapId: string): string | undefined {
+  return maps.find(map => map.id === mapId)?.name;
 }
 
 const noXpTiles = new WeakMap<ContentStore, { epoch: number; ids: ReadonlySet<string> }>();

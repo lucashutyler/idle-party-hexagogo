@@ -19,7 +19,7 @@ import {
   xpForNextLevel,
   recordAwayBattle,
 } from '@idle-party-rpg/shared';
-import type { MonsterDefinition, PartyCombatState, PartyGridPosition, ServerStateMessage, WorldTileDefinition } from '@idle-party-rpg/shared';
+import type { MonsterDefinition, PartyCombatState, PartyGridPosition, QuestDefinition, ServerStateMessage, WorldTileDefinition } from '@idle-party-rpg/shared';
 import WebSocket from 'ws';
 
 const MONSTERS: Record<string, MonsterDefinition> = {
@@ -28,6 +28,13 @@ const MONSTERS: Record<string, MonsterDefinition> = {
   elder: { id: 'elder', name: 'Elder', hp: 10, damage: 1, damageType: 'physical', xp: 100, goldMin: 0, goldMax: 0, level: 1 },
   brute: { id: 'brute', name: 'Brute', hp: 10, damage: 1, damageType: 'physical', xp: 100, goldMin: 0, goldMax: 0 },
   chief: { id: 'chief', name: 'Chief', hp: 30, damage: 1, damageType: 'physical', xp: 50, goldMin: 0, goldMax: 0, tier: 'boss' },
+};
+
+const QUESTS: Record<string, QuestDefinition> = {
+  hunt: {
+    id: 'hunt', name: 'Goblin Hunt', description: '', scope: 'party_shared',
+    objectives: [{ kind: 'kill', monsterId: 'goblin', count: 2 }], rewards: [],
+  },
 };
 
 const pacedXp = (amount: number, shares = 1): number => Math.ceil((amount * COMBAT_PACE.rewardMultiplier) / shares);
@@ -52,11 +59,12 @@ function createFakeContentStore(): ContentStore {
     getRecipe: () => undefined,
     getAllNpcs: () => ({}),
     getNpc: () => undefined,
-    getAllQuests: () => ({}),
-    getQuestCatalog: () => ({}),
+    getAllQuests: () => QUESTS,
+    getQuestCatalog: () => QUESTS,
     getQuestRevision: () => 0,
     getNpcQuestIds: () => [],
-    getQuest: () => undefined,
+    getQuest: (id: string) => QUESTS[id],
+    getAllTileTypes: () => ({}),
     getDungeon: () => undefined,
     getAllDungeons: () => ({}),
     ...fakeSkillContent(),
@@ -337,6 +345,22 @@ describe('While you were away', () => {
     const state = lastState(ws)!;
     expect(state.awayRecap!.levelTo).toBe(2);
     expect(Object.keys(state.awayRecapItemDefinitions ?? {})).toEqual(['rare_blade']);
+  });
+
+  it('turns an away kill that readies a quest into one journal line and one moment', async () => {
+    const { pm, ws, session, win } = await setup();
+    session.quests.accept(QUESTS.hunt, { playerLevel: 1, partySize: 1 });
+    pm.setPresence(ws, false);
+
+    win(['goblin']);
+    win(['goblin']);
+    win(['goblin']);
+
+    const ready = session.toSaveData().combatLog.filter(l => l.text === 'Quest ready to turn in: Goblin Hunt');
+    expect(ready).toHaveLength(1);
+    expect(ready[0].type).toBe('unlock');
+    expect(session.getAwayLedger()!.moments.filter(m => m.kind === 'quest_ready').map(m => m.text))
+      .toEqual(['Quest ready to turn in: Goblin Hunt']);
   });
 
   it('counts auto-retreats through the party hook', async () => {

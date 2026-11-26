@@ -8,7 +8,9 @@ export type AwayMomentKind =
   | 'run_ended'
   | 'relocate'
   | 'mastery'
-  | 'closest_call';
+  | 'closest_call'
+  | 'quest_ready'
+  | 'opened';
 
 export interface AwayMoment {
   at: number;
@@ -100,7 +102,9 @@ export const AWAY_NOTABLE_MIN_RARITY: ItemRarity = 'rare';
 export const AWAY_MOMENT_PRIORITY: Record<AwayMomentKind, number> = {
   level_up: 7,
   first_clear: 6,
+  opened: 6,
   rare_item: 5,
+  quest_ready: 5,
   eject: 4,
   run_ended: 4,
   relocate: 3,

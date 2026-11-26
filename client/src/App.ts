@@ -27,6 +27,7 @@ import { PersistentXpBar } from './ui/PersistentXpBar';
 import { TopHud } from './ui/TopHud';
 import { NotificationCenter } from './ui/NotificationCenter';
 import { RecapModal } from './ui/RecapModal';
+import { OpenedBanner } from './ui/OpenedBanner';
 import { BestiaryModal, MasteryToasts } from './ui/BestiaryModal';
 import { OPEN_OPTIONS_ATTR } from './ui/ForecastChip';
 import { chatFocusTracker } from './network/ChatFocusTracker';
@@ -80,6 +81,7 @@ export class App {
     suspended: (email) => this.showSuspensionScreen(email),
   });
   private recapModal?: RecapModal;
+  private openedBanner?: OpenedBanner;
   private masteryToasts?: MasteryToasts;
   private openOptionsDelegate?: (e: MouseEvent) => void;
   private removeShellListeners?: () => void;
@@ -561,6 +563,15 @@ export class App {
     this.recapModal?.destroy();
     this.recapModal = new RecapModal(this.gameClient, {
       onOpenMap: () => navigate('map'),
+      onOpenQuests: () => questLog.open(),
+      onOpenHero: () => navigate('items'),
+    });
+
+    this.openedBanner?.destroy();
+    this.openedBanner = new OpenedBanner(this.gameClient, (roomId) => {
+      const room = roomId ? this.worldCache.getTileByGuid(roomId) : undefined;
+      if (roomId && room?.mapId === this.worldCache.getCurrentMapId()) showRoom(roomId);
+      else navigate('map');
     });
   }
 }

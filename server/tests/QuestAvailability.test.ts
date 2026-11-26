@@ -86,6 +86,7 @@ function createFakeContentStore(
     getStartTile: () => world.startTile,
     getWorld: () => world,
     getTileType: () => undefined,
+    getAllTileTypes: () => ({}),
     getTileById: (id: string) => world.tiles.find(t => t.id === id),
     getMonster: () => ({ id: 'goblin', name: 'Goblin', hp: 10, damage: 2, drops: [], damageType: 'physical' }),
     getItem: (id: string) => (id ? { id, name: id, value: 1 } : null),
