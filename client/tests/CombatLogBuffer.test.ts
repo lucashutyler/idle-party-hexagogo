@@ -121,12 +121,72 @@ describe('CombatLogBuffer live release', () => {
     expect(buffer.pendingCount).toBe(0);
   });
 
-  it('keeps journal entries flowing while live lines are held', () => {
+  it('holds journal entries that arrive behind held live lines until those lines are out, in order', () => {
     const buffer = new CombatLogBuffer();
     buffer.setHoldLive(true);
     buffer.pushLive(1, ['hit'], 1000);
-    buffer.ingestJournal(journal(3));
-    expect(texts(buffer)).toEqual(['entry 3']);
+    buffer.pushLive(1, ['Goblin is defeated!'], 1200);
+    buffer.ingestJournal(journal(3, 4));
+    expect(texts(buffer)).toEqual([]);
+    expect(buffer.hasPending).toBe(true);
+    buffer.release(1, 1000);
+    expect(texts(buffer)).toEqual(['hit']);
+    buffer.release(1, 1200);
+    expect(texts(buffer)).toEqual(['hit', 'Goblin is defeated!', 'entry 3', 'entry 4']);
+    expect(buffer.entries.slice(2).every(e => isJournalLine(e) && e.type === 'victory')).toBe(true);
+    expect(buffer.hasPending).toBe(false);
+  });
+
+  it('appends journal entries at once with nothing held, or while the screen is away', () => {
+    const held = new CombatLogBuffer();
+    held.setHoldLive(true);
+    held.ingestJournal(journal(1));
+    expect(texts(held)).toEqual(['entry 1']);
+    held.pushLive(1, ['hit'], 1000);
+    held.release(1, 1000);
+    held.ingestJournal(journal(1, 2));
+    expect(texts(held)).toEqual(['entry 1', 'hit', 'entry 2']);
+
+    const away = new CombatLogBuffer();
+    away.pushLive(1, ['hit'], 1000);
+    away.ingestJournal(journal(5));
+    expect(texts(away)).toEqual(['hit', 'entry 5']);
+  });
+
+  it('flushes held journal entries in arrival order on releaseAll and when holding stops', () => {
+    for (const flush of [(b: CombatLogBuffer) => b.releaseAll(), (b: CombatLogBuffer) => b.setHoldLive(false)]) {
+      const buffer = new CombatLogBuffer();
+      buffer.setHoldLive(true);
+      buffer.pushLive(1, ['a'], 1000);
+      buffer.ingestJournal(journal(1));
+      buffer.pushLive(1, ['b'], 1500);
+      buffer.ingestJournal(journal(1, 2));
+      flush(buffer);
+      expect(texts(buffer)).toEqual(['a', 'entry 1', 'b', 'entry 2']);
+      expect(buffer.pendingCount).toBe(0);
+    }
+  });
+
+  it('drops held journal entries on a journal reset, and takes the new tail once', () => {
+    const buffer = new CombatLogBuffer();
+    buffer.ingestJournal(journal(40));
+    buffer.setHoldLive(true);
+    buffer.pushLive(1, ['hit'], 1000);
+    buffer.ingestJournal(journal(40, 41));
+    buffer.ingestJournal(journal(1, 2));
+    buffer.ingestJournal(journal(1, 2));
+    buffer.releaseAll();
+    expect(texts(buffer)).toEqual(['hit', 'entry 1', 'entry 2']);
+  });
+
+  it('keeps held journal entries after a battle\'s replaced live lines', () => {
+    const buffer = new CombatLogBuffer();
+    buffer.setHoldLive(true);
+    buffer.pushLive(4, ['a'], 50);
+    buffer.ingestJournal(journal(7));
+    buffer.replaceLive(4, ['a', 'b']);
+    expect(texts(buffer)).toEqual(['a', 'b', 'entry 7']);
+    expect(buffer.pendingCount).toBe(0);
   });
 
   it('replaces a battle\'s live lines on resync without touching other lines', () => {

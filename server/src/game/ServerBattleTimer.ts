@@ -68,6 +68,11 @@ export class ServerBattleTimer {
   private destroyed = false;
   private consecutiveFailures = 0;
   private loggedFailureBattleId = -1;
+  private recovering = false;
+  /** Autorun ended the current fight, or let it be won on the way, so the coming walk is its own. */
+  private leftByAutoRun = false;
+  /** Walking after such an exit, until the next fight starts. */
+  private autoRunHop = false;
 
   private stepInterval?: ReturnType<typeof setInterval>;
   private killBeatTimeout?: ReturnType<typeof setTimeout>;
@@ -173,12 +178,21 @@ export class ServerBattleTimer {
    * opens mid-fight arms none. Between fights, the next one will arm its own.
    */
   get autoRunWalking(): boolean {
+    if (this.recovering) return false;
+    // The walk into the route's last room has nowhere left to go, but it is still Autorun's.
+    if (this.autoRunHop && !!this.isAutoRun?.()) return true;
     return this.autoRunApplies && (!this.isFighting(this.currentBattleId) || this.autoRunTimeout !== undefined);
   }
 
-  /** Time until Autorun leaves this fight (a win it is waiting out included), while its exit is armed. */
+  /** Whether a fight failed to run and the server is waiting to try again. */
+  get isRecovering(): boolean {
+    return this.recovering;
+  }
+
+  /** Time until Autorun leaves this fight, while its exit is armed or a win it waited out has yet to walk on. */
   get autoRunLeaveMs(): number | undefined {
-    return this.autoRunTimeout !== undefined && this.autoRunApplies ? this.autoRunDueMs() : undefined;
+    const waiting = this.autoRunTimeout !== undefined || (this.leftByAutoRun && !this.autoRunHop);
+    return waiting && this.autoRunApplies ? this.autoRunDueMs() : undefined;
   }
 
   /** True while a fight (including its kill beat) is on screen. */
@@ -225,6 +239,7 @@ export class ServerBattleTimer {
   /** Autorun's exit: no rewards and no wait for Run to open, and with no result to show it walks at once. */
   autoRunAway(): boolean {
     if (!this.isFighting(this.currentBattleId) || !this.walksOn) return false;
+    this.leftByAutoRun = true;
     this.leaveFight(0);
     return true;
   }
@@ -292,7 +307,9 @@ export class ServerBattleTimer {
     const battleId = this.currentBattleId;
     this.autoRunTimeout = setTimeout(() => this.guard(() => {
       this.autoRunTimeout = undefined;
-      if (this.isFighting(battleId) && this.walksOn) this.onAutoRun?.();
+      if (!this.isFighting(battleId)) return;
+      if (this.walksOn) this.onAutoRun?.();
+      else this.standDownAutoRun();
     }), this.autoRunDueMs());
   }
 
@@ -303,6 +320,13 @@ export class ServerBattleTimer {
   /** Timed by the wall clock: the combat clock only moves in whole steps, which would round each room up. */
   private autoRunDueMs(): number {
     return Math.max(0, this.battleStartedAt + AUTO_RUN_ROOM_MS - MOVE_DURATION - Date.now());
+  }
+
+  /** Autorun will not leave this fight after all; screens showing its timer hear at once. */
+  private standDownAutoRun(): void {
+    if (this.autoRunTimeout) clearTimeout(this.autoRunTimeout);
+    this.autoRunTimeout = undefined;
+    this.onStateChange?.(this.state);
   }
 
   private leaveFight(pauseMs: number): void {
@@ -367,6 +391,9 @@ export class ServerBattleTimer {
     this.pendingResult = null;
     this.resultSettled = false;
     this.currentResult = undefined;
+    this.recovering = false;
+    this.leftByAutoRun = false;
+    this.autoRunHop = false;
     this.pendingEvents = [];
     this.pendingLog = [];
     this.liveLog = [];
@@ -403,11 +430,14 @@ export class ServerBattleTimer {
       this.pendingResult = tick.result === 'victory' ? 'victory' : 'defeat';
       // A fight won before Autorun left is paid, and the party still walks on schedule.
       const onTheWay = this.pendingResult === 'victory' && this.autoRunTimeout !== undefined;
+      const lostOnTheWay = !onTheWay && this.autoRunTimeout !== undefined;
+      if (onTheWay) this.leftByAutoRun = true;
       const beatMs = onTheWay ? this.autoRunDueMs() : KILL_BEAT_MS;
       const pauseMs = onTheWay ? 0 : RESULT_PAUSE;
       this.pauseEndsAt = Date.now() + beatMs + pauseMs + MOVE_DURATION;
       this.killBeatTimeout = setTimeout(() => this.guard(() => this.showBattleResult(pauseMs)), beatMs);
       this.flush('dynamic');
+      if (lostOnTheWay) this.standDownAutoRun();
       return;
     }
 
@@ -501,7 +531,10 @@ export class ServerBattleTimer {
 
   private moveThenFight(): void {
     this.resultTimeout = undefined;
-    if (this.party.moveToNextTile()) this.onMove?.();
+    if (this.party.moveToNextTile()) {
+      this.autoRunHop = this.leftByAutoRun;
+      this.onMove?.();
+    }
     this.currentVisual = 'none';
     this.onStateChange?.(this.state);
     this.moveTimeout = setTimeout(() => this.guard(() => this.triggerBattle()), MOVE_DURATION);
@@ -527,6 +560,9 @@ export class ServerBattleTimer {
     this.resultSettled = true;
     this.currentVisual = 'none';
     this.party.exitBattle();
+    this.recovering = true;
+    this.leftByAutoRun = false;
+    this.autoRunHop = false;
     try {
       this.state = 'result';
       this.onStateChange?.('result');

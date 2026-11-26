@@ -51,9 +51,11 @@ function setup(initial?: ServerStateMessage, skills: Record<string, SkillDefinit
   const combatListeners = new Set<CombatListener>();
   const combatLog = new CombatLogBuffer();
   let lastState: ServerStateMessage = initial ?? makeState(1, GOBLIN, []);
+  let lastStateAt = Date.now();
 
   const gameClient = {
     get lastState() { return lastState; },
+    get lastStateAt() { return lastStateAt; },
     lastCombat: null,
     lastBestiary: null,
     combatLog,
@@ -78,11 +80,13 @@ function setup(initial?: ServerStateMessage, skills: Record<string, SkillDefinit
 
   const pushState = (battleId: number, monster: ClientCombatUnit, log: CombatLogEntry[] = []) => {
     lastState = makeState(battleId, monster, log);
+    lastStateAt = Date.now();
     combatLog.ingestJournal(log);
     for (const l of stateListeners) l(lastState);
   };
   const push = (next: ServerStateMessage) => {
     lastState = next;
+    lastStateAt = Date.now();
     for (const l of stateListeners) l(lastState);
   };
   const playEvents = (events: CombatEvent[], battleId = 1) => {
@@ -191,6 +195,31 @@ describe('CombatScreen', () => {
     expect(entry.textContent).toBe('Wolf attacks you for 3 physical damage');
     expect(entry.querySelector('.log-name-enemy')?.textContent).toBe('Wolf');
     expect(entry.querySelector('.log-name-self')?.textContent).toBe('you');
+  });
+
+  it('lets journal lines straight into the log while the page is hidden, and holds them again once it is back', () => {
+    const t = start();
+    const log = t.gameClient.combatLog;
+    const entry = (id: number) => ({ id, text: `entry ${id}`, type: 'victory' }) as CombatLogEntry;
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+    try {
+      log.pushLive(1, ['Goblin is defeated!'], 60_000);
+      visibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+      for (let id = 1; id <= 3; id++) t.pushState(1, GOBLIN, [entry(id)]);
+      expect(log.pendingCount).toBe(0);
+      expect(log.entries.map(e => e.text)).toEqual(['Goblin is defeated!', 'entry 1', 'entry 2', 'entry 3']);
+
+      visibility = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      log.pushLive(1, ['Goblin hits alice'], 60_000);
+      t.pushState(1, GOBLIN, [entry(4)]);
+      expect(log.entries.at(-1)?.text).toBe('entry 3');
+      expect(log.pendingCount).toBe(2);
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+    }
   });
 
   it('draws no placeholder slots: an empty seat is just the plate', () => {
@@ -321,6 +350,80 @@ describe('CombatScreen', () => {
     expect(animate).toHaveBeenCalledTimes(1);
   });
 
+  it('runs Autorun\'s timer on Run straight through a win it waited out, and keeps it empty while the party stands after one it did not', () => {
+    const t = start();
+    const bar = document.querySelector('.combat-run-btn .autorun-fill') as HTMLElement;
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel: vi.fn() }) as unknown as Animation);
+    bar.animate = animate;
+    const base = makeState(1, GOBLIN, []);
+    const won = { ...snapshot(1, { ...GOBLIN, hp: 0 }), finished: true, result: 'victory' as const };
+
+    t.push(withBattle(base, { autoRunWalking: true, autoRunLeaveMs: 600 }));
+    vi.advanceTimersByTime(600);
+    const shown: string[] = [];
+    for (const battle of [
+      { visual: 'victory', combat: won, autoRunWalking: true, autoRunLeaveMs: 0 },
+      { state: 'result', visual: 'victory', combat: won, autoRunWalking: true, autoRunLeaveMs: 0 },
+      { state: 'result', visual: 'none', combat: won, autoRunWalking: true },
+    ]) {
+      t.push(withBattle(base, battle));
+      shown.push(bar.style.transform);
+    }
+    expect(shown).not.toContain('scaleX(0)');
+    expect(shown.at(-1)).toBe('scaleX(1)');
+    expect(animate).toHaveBeenCalledTimes(1);
+
+    t.push(withBattle(makeState(2, GOBLIN, []), { state: 'result', visual: 'victory', combat: { ...won, battleId: 2 }, autoRunWalking: true }));
+    expect(bar.style.transform).toBe('scaleX(0)');
+    t.push(withBattle(makeState(2, GOBLIN, []), { state: 'result', visual: 'none', combat: { ...won, battleId: 2 }, autoRunWalking: true }));
+    expect(bar.style.transform).toBe('scaleX(1)');
+  });
+
+  it('picks Autorun\'s timer up where it is when the player comes back to the battle screen', () => {
+    const t = start();
+    const bar = document.querySelector('.combat-run-btn .autorun-fill') as HTMLElement;
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel: vi.fn() }) as unknown as Animation);
+    bar.animate = animate;
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { autoRunWalking: true, autoRunLeaveMs: 600 }));
+    t.screen.onDeactivate();
+    vi.advanceTimersByTime(200);
+    t.screen.onActivate();
+    expect(animate).toHaveBeenCalledTimes(1);
+
+    t.screen.onDeactivate();
+    t.push(withBattle(makeState(2, WOLF, []), { combat: snapshot(2, WOLF), autoRunWalking: true, autoRunLeaveMs: 600 }));
+    vi.advanceTimersByTime(300);
+    t.screen.onActivate();
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate).toHaveBeenLastCalledWith([{ transform: 'scaleX(0.5)' }, { transform: 'scaleX(1)' }], { duration: 300, easing: 'linear' });
+  });
+
+  it('keeps Run\'s own charge to its own fight: empty between fights and from the start of the next', () => {
+    const t = start();
+    const run = () => document.querySelector('.combat-run-btn') as HTMLElement;
+    const charge = () => Number(run().style.getPropertyValue('--run'));
+    const runHint = () => document.querySelector('.combat-run-hint')!.textContent;
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(charge()).toBeGreaterThan(0);
+
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(charge()).toBe(0);
+    expect(runHint()).toBe('The next fight is about to start');
+
+    t.push(withBattle(makeState(2, WOLF, []), { combat: snapshot(2, WOLF, 0) }));
+    expect(charge()).toBe(0);
+    vi.advanceTimersByTime(3000);
+    expect(charge()).toBeGreaterThan(0.2);
+
+    t.push(withBattle(makeState(3, GOBLIN, []), { combat: snapshot(3, GOBLIN, 0) }));
+    expect(charge()).toBe(0);
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(charge()).toBeLessThan(0.05);
+    expect(runHint()).toBe('Run becomes available 5 seconds into a fight');
+  });
+
   it('drops the per-fight banners and dimming while Autorun walks the party on', () => {
     const elite: ClientCombatUnit = { ...GOBLIN, tier: 'elite' };
     const t = start();
@@ -346,6 +449,13 @@ describe('CombatScreen', () => {
     t.push(withBattle(base, { state: 'result', visual: 'none', combat: finished, autoRunWalking: true }, onward));
     expect(statusText()).toBe('Victory+15 XPWalking to Old Mill');
     expect(stage().classList.contains('victory')).toBe(true);
+  });
+
+  it('does not say the party is walking while the server retries a fight that failed to start', () => {
+    const t = start();
+    t.push(withBattle(makeState(1, GOBLIN, []), { state: 'result', visual: 'none', combat: undefined, recovering: true }));
+    vi.advanceTimersByTime(FRAME_MS * 2);
+    expect(statusText()).toBe('Regrouping');
   });
 
   it('does not say the party is walking while it waits to fight again', () => {

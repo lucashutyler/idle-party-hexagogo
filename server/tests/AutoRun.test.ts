@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { AUTO_RUN_ROOM_MS, COMBAT_PACE, MOVE_DURATION, RUN_AVAILABLE_MS, SEED_SKILLS, UnlockSystem, createMonsterInstance, createPartyCombatState } from '@idle-party-rpg/shared';
+import { AUTO_RUN_ROOM_MS, COMBAT_PACE, COMBAT_STEP_MS, MOVE_DURATION, RUN_AVAILABLE_MS, SEED_SKILLS, UnlockSystem, createMonsterInstance, createPartyCombatState } from '@idle-party-rpg/shared';
+import type { BattleTimerState, BattleVisual } from '@idle-party-rpg/shared';
 import { ServerBattleTimer } from '../src/game/ServerBattleTimer.js';
 import type { ServerParty } from '../src/game/ServerParty.js';
 import { PartySystem } from '../src/game/social/PartySystem.js';
@@ -29,9 +30,40 @@ const longFight = () => fight('Knight', 1_000_000);
 /** An Archer's first arrow lands before Autorun leaves, and it is enough. */
 const quickKill = () => fight('Archer', 1);
 
+/** The monster strikes on the first step and the party falls before Autorun leaves. */
+function quickLoss() {
+  const monster = createMonsterInstance(
+    { id: 'brute', name: 'Brute', hp: 1_000_000, damage: 1_000_000, damageType: 'physical', xp: 5, goldMin: 0, goldMax: 0 },
+    4,
+  );
+  const combat = createPartyCombatState([{
+    username: 'alice',
+    maxHp: 1,
+    baseDamage: 1,
+    playerDamageType: 'physical',
+    gridPosition: 4,
+    className: 'Knight',
+    level: 1,
+    attack: SEED_SKILLS.knight_attack,
+    equippedSkills: [null, null, null, null, null],
+  }], [monster], { pace: COMBAT_PACE });
+  combat.monsters[0].actionRemainingMs = COMBAT_STEP_MS;
+  return combat;
+}
+
+interface Push {
+  state: BattleTimerState;
+  visual: BattleVisual;
+  walking: boolean;
+  leaveMs?: number;
+}
+
+const walkingPush = (p: Push) => p.state === 'result' && p.visual === 'none';
+
 function harness(opts: { autoRun: boolean; destination: boolean; walkable?: boolean }, createCombat = longFight) {
   const state = { ...opts, walkable: opts.walkable ?? true };
   const moves: number[] = [];
+  const pushes: Push[] = [];
   const party = {
     get hasDestination() { return state.destination; },
     enterBattle: vi.fn(),
@@ -44,6 +76,7 @@ function harness(opts: { autoRun: boolean; destination: boolean; walkable?: bool
   const timer = new ServerBattleTimer(party as unknown as ServerParty, createCombat, {
     onBattleStart,
     onBattleEnd,
+    onStateChange: () => pushes.push({ state: timer.currentState, visual: timer.visual, walking: timer.autoRunWalking, leaveMs: timer.autoRunLeaveMs }),
     canMoveToNextTile: () => state.walkable,
     isAutoRun: () => state.autoRun,
     onAutoRun: () => {
@@ -51,7 +84,7 @@ function harness(opts: { autoRun: boolean; destination: boolean; walkable?: bool
       timer.autoRunAway();
     },
   }, 'test-party');
-  return { timer, state, party, moves, onAutoRun, onBattleStart, onBattleEnd };
+  return { timer, state, party, moves, pushes, onAutoRun, onBattleStart, onBattleEnd };
 }
 
 const gaps = (times: number[]) => times.slice(1).map((t, i) => t - times[i]);
@@ -109,6 +142,79 @@ describe('auto run', () => {
     expect(h.timer.autoRunLeaveMs).toBeUndefined();
     h.timer.destroy();
   });
+
+  it('keeps reporting the time left through a quick win until the walk begins, a re-sent route included', () => {
+    const h = harness({ autoRun: true, destination: true }, quickKill);
+    h.timer.start();
+    vi.advanceTimersByTime(400);
+    expect(h.timer.isFighting(h.timer.battleId)).toBe(false);
+    h.timer.syncAutoRun();
+    expect(h.timer.autoRunLeaveMs).toBe(LEAVE_MS - 400);
+
+    vi.advanceTimersByTime(LEAVE_MS - 400 + 10);
+    expect(h.moves).toHaveLength(1);
+    const standing = h.pushes.filter(p => !walkingPush(p));
+    expect(standing.length).toBeGreaterThan(0);
+    for (const p of standing) expect(p).toMatchObject({ walking: true, leaveMs: 0 });
+    expect(h.pushes.at(-1)).toMatchObject({ state: 'result', visual: 'none', walking: true });
+    expect(h.pushes.at(-1)?.leaveMs).toBeUndefined();
+    h.timer.destroy();
+  });
+
+  it('stops reporting a wait once the party falls before it leaves, and says so at once', () => {
+    const h = harness({ autoRun: true, destination: true }, quickLoss);
+    h.timer.start();
+    vi.advanceTimersByTime(LEAVE_MS - 100);
+    expect(h.timer.isFighting(h.timer.battleId)).toBe(false);
+    expect(h.timer.autoRunLeaveMs).toBeUndefined();
+    expect(h.pushes).toHaveLength(1);
+    expect(h.pushes[0]).toMatchObject({ state: 'battle', walking: true });
+    expect(h.pushes[0].leaveMs).toBeUndefined();
+
+    vi.advanceTimersByTime(AUTO_RUN_ROOM_MS * 2);
+    expect(h.moves.length).toBeGreaterThan(0);
+    expect(h.onAutoRun).not.toHaveBeenCalled();
+    const walk = h.pushes.findIndex(walkingPush);
+    expect(walk).toBeGreaterThan(0);
+    for (const p of h.pushes.slice(0, walk)) expect(p.leaveMs).toBeUndefined();
+    h.timer.destroy();
+  });
+
+  it('says nothing about walking while it waits to retry a fight that failed to start', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let broken = true;
+    const h = harness({ autoRun: true, destination: true }, () => {
+      if (broken) throw new Error('no fight');
+      return longFight();
+    });
+    h.timer.start();
+    expect(h.timer.isRecovering).toBe(true);
+    expect(h.timer.autoRunWalking).toBe(false);
+    expect(h.pushes.at(-1)).toMatchObject({ state: 'result', visual: 'none', walking: false });
+
+    broken = false;
+    vi.advanceTimersByTime(1000);
+    expect(h.timer.isRecovering).toBe(false);
+    expect(h.timer.autoRunWalking).toBe(true);
+    expect(h.timer.autoRunLeaveMs).toBe(LEAVE_MS);
+    h.timer.destroy();
+    vi.restoreAllMocks();
+  });
+
+  it.each([['an unfinished fight', longFight], ['a quick win', quickKill]])(
+    'still reports the walk into the last room of its route, after %s',
+    (_, createCombat) => {
+      const h = harness({ autoRun: true, destination: true }, createCombat);
+      h.party.moveToNextTile.mockImplementationOnce(() => { h.state.destination = false; return true; });
+      h.timer.start();
+      vi.advanceTimersByTime(LEAVE_MS + 50);
+      expect(h.party.moveToNextTile).toHaveBeenCalledTimes(1);
+      expect(h.timer.autoRunWalking).toBe(true);
+      vi.advanceTimersByTime(MOVE_DURATION);
+      expect(h.timer.autoRunWalking).toBe(false);
+      h.timer.destroy();
+    },
+  );
 
   it('keeps the usual pauses after a quick win with auto run off', () => {
     const h = harness({ autoRun: false, destination: true }, quickKill);
@@ -205,6 +311,7 @@ describe('auto run', () => {
     vi.advanceTimersByTime(RUN_AVAILABLE_MS);
     expect(h.onAutoRun).not.toHaveBeenCalled();
     expect(h.timer.isLive).toBe(true);
+    expect(h.pushes.at(-1)).toMatchObject({ state: 'battle', walking: false });
     h.timer.destroy();
   });
 
@@ -271,6 +378,8 @@ describe('auto run through the party battle manager', () => {
     expect(w.entry().serverParty.tile.id).toBe(tileId(2, 1));
     expect(w.journal().join('\n')).toContain('Moved to');
     expect(w.journal()).not.toContain('Escaped the battle!');
+    expect(w.pm.partyBattles.getBattleState(w.partyId)?.autoRunWalking).toBe(true);
+    vi.advanceTimersByTime(MOVE_DURATION);
     expect(w.pm.partyBattles.getBattleState(w.partyId)?.autoRunWalking).toBeUndefined();
     w.pm.partyBattles.destroyEntry(w.partyId);
     vi.restoreAllMocks();

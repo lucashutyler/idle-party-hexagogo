@@ -250,7 +250,7 @@ export class CombatScreen implements Screen {
     this.isActive = true;
     const visible = document.visibilityState !== 'hidden';
     this.playback.setActive(visible);
-    this.gameClient.combatLog.setHoldLive(true);
+    this.gameClient.combatLog.setHoldLive(visible);
     this.gameClient.sendCombatView(true);
     this.logView.setActive(true);
     this.lastJournalSeq = this.newestJournalSeq();
@@ -414,6 +414,7 @@ export class CombatScreen implements Screen {
       if (!this.isActive) return;
       const visible = document.visibilityState !== 'hidden';
       this.playback.setActive(visible);
+      this.gameClient.combatLog.setHoldLive(visible);
       if (visible) this.startLoop();
       else this.stopLoop();
     });
@@ -705,7 +706,7 @@ export class CombatScreen implements Screen {
     const regroupLeftMs = this.regroupEndsAt - performance.now();
     const regroupSeconds = regroupLeftMs > 0 ? Math.ceil(regroupLeftMs / 1000) : 0;
     this.bookRegroupRepaint(regroupLeftMs);
-    const walking = state.battle.visual === 'none' && state.battle.state === 'result';
+    const walking = state.battle.visual === 'none' && state.battle.state === 'result' && !state.battle.recovering;
     const nextRoom = state.party?.path?.[0];
     const target = walking ? state.party : nextRoom;
     const fought = this.headerLatch?.battleId === this.playback.battleId ? this.headerLatch.state.dungeon : state.dungeon;
