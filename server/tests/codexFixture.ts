@@ -71,7 +71,7 @@ export function codexWorld(): CodexWorld {
     },
     encounters: {
       goblins: { id: 'goblins', name: 'Goblin Gang', type: 'random', monsterPool: [{ monsterId: 'goblin', min: 1, max: 2 }] },
-      wolves: { id: 'wolves', name: 'Wolf Pack', type: 'random', monsterPool: [{ monsterId: 'wolf', min: 1, max: 2 }] },
+      wolves: { id: 'wolves', name: 'Wolves', type: 'random', monsterPool: [{ monsterId: 'wolf', min: 1, max: 2 }] },
       bears: { id: 'bears', name: 'Bear Lair', type: 'explicit', placements: [{ monsterId: 'bear', gridPosition: 4 }] },
       camp: { id: 'camp', name: 'Goblin Camp', type: 'random', monsterPool: [{ monsterId: 'goblin', min: 1, max: 1 }, { monsterId: 'shaman', min: 0, max: 1 }] },
       toads: { id: 'toads', name: 'Toad Chorus', type: 'random', monsterPool: [{ monsterId: 'toad', min: 1, max: 1 }] },
