@@ -37,6 +37,7 @@ export const LIST_TITLES: Readonly<Record<CodexKind, string>> = {
 };
 
 const LIST_ORDER: readonly CodexKind[] = ['monster', 'item', 'room', 'shop'];
+const ADDED_AS_YOU_PLAY = 'Drops, fights and shop visits are added as you play.';
 const NOTHING_YET = 'Nothing here yet. Fight, explore and shop, and what you find is written down here.';
 
 const MISSING_HINTS: Readonly<Record<CodexKind, string>> = {
@@ -300,7 +301,7 @@ export function codexHomeHtml(ctx: CodexViewContext, opts: CodexHomeOptions): st
     + `<span class="codex-list-name">${LIST_TITLES[kind]}</span><span class="codex-list-count">${n(counts[kind])}</span>`
     + '<span class="codex-row-chevron" aria-hidden="true">›</span></button>').join('');
   return `${top}<nav class="codex-lists" aria-label="Codex sections">${lists}</nav>`
-    + '<p class="codex-footnote">Drops, fights and shop visits are added as you play.</p>';
+    + `<p class="codex-footnote">${ADDED_AS_YOU_PLAY}</p>`;
 }
 
 /** Builds row HTML for the shown slice only. */
@@ -455,10 +456,10 @@ export function codexItemHtml(itemId: string, ctx: CodexViewContext): string {
   if (!entry) return codexMissingHtml('item');
   const { state, world, index } = ctx;
   const { def } = entry;
-  const itemDefs: Record<string, ItemDefinition> = {};
-  for (const [id, item] of index.items) itemDefs[id] = item.def;
+  const indexItemDefs: Record<string, ItemDefinition> = {};
+  for (const [id, item] of index.items) indexItemDefs[id] = item.def;
   const card = renderItemPopupContent(def, {
-    itemDefs,
+    itemDefs: { ...state?.itemDefinitions, ...indexItemDefs },
     setDefs: state?.setDefinitions ?? {},
     ownedItemIds: ownedItemIds(state),
     equippedItemIds: getEquippedItemIds(state?.character?.equipment ?? {}),
@@ -506,7 +507,9 @@ export function codexItemHtml(itemId: string, ctx: CodexViewContext): string {
     .map(id => dungeonLine(id, ctx, name => `Reward in ${name} (dungeon)`)).filter(Boolean);
   if (dungeons.length > 0) sources.push(section('Dungeon reward', lines(dungeons)));
 
-  parts.push(sources.length > 0 ? sources.join('') : emptyLine("You haven't found where this comes from yet."));
+  parts.push(sources.length > 0
+    ? sources.join('')
+    : emptyLine("You haven't found where this comes from yet.") + `<p class="codex-footnote">${ADDED_AS_YOU_PLAY}</p>`);
   return `<div class="codex-entry">${parts.join('')}</div>`;
 }
 

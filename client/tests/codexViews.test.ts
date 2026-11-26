@@ -138,6 +138,22 @@ describe('item entry', () => {
     expect(text(blade.querySelector('.codex-owned'))).toBe('Equipped');
     const potion = render(codexEntryHtml({ kind: 'item', id: 'potion' }, ctx(), false));
     expect(text(potion.querySelector('.codex-empty'))).toBe("You haven't found where this comes from yet.");
+    expect(text(potion.querySelector('.codex-empty + .codex-footnote'))).toBe('Drops, fights and shop visits are added as you play.');
+    expect(text(blade.querySelector('.codex-footnote'))).toBe('Drops, fights and shop visits are added as you play.');
+    const fang = render(codexEntryHtml({ kind: 'item', id: 'fang' }, ctx(), false));
+    expect(fang.querySelector('.codex-footnote')).toBeNull();
+  });
+
+  it('names a set piece the Codex has no entry for, as the Hero popup does', () => {
+    const gloves = { id: 'wolf_gloves_x9', name: 'Wolfhide Gloves', rarity: 'uncommon' as const, equipSlot: 'hands' as const };
+    const base = codexState();
+    const state = codexState({
+      setDefinitions: { wolfhide: { id: 'wolfhide', name: 'Wolfhide', itemIds: ['pelt', 'wolf_gloves_x9'], breakpoints: [] } },
+      itemDefinitions: { ...base.itemDefinitions, wolf_gloves_x9: gloves },
+    });
+    const el = render(codexEntryHtml({ kind: 'item', id: 'pelt' }, ctx(codexReply(), state), false));
+    expect(el.textContent).toContain('Wolfhide Gloves');
+    expect(el.textContent).not.toContain('wolf_gloves_x9');
   });
 });
 
