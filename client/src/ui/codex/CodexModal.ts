@@ -1,5 +1,6 @@
 import type { CodexKind, ServerStateMessage } from '@idle-party-rpg/shared';
 import { CODEX_RECENT_MAX, codexRefKey } from '@idle-party-rpg/shared';
+import { CODEX_RETRY_MS } from '../../network/GameClient';
 import type { GameClient } from '../../network/GameClient';
 import type { WorldCache } from '../../network/WorldCache';
 import { codexTargetKey } from '../codexLinks';
@@ -9,7 +10,7 @@ import { bringToFront, dismissModals, release, wireFocusOnInteract } from '../Mo
 import { navigate } from '../navigate';
 import { deferWhilePressed, setHtml } from '../render';
 import type { CodexIndex, CodexListSort, CodexSort } from './codexModel';
-import { CODEX_SORT_LABELS, CODEX_SORTS, buildCodexIndex, newRecentKeys, ownedItemIds } from './codexModel';
+import { CODEX_SORT_LABELS, CODEX_SORTS, buildCodexIndex, hasCodexEntry, newRecentKeys, ownedItemIds } from './codexModel';
 import type { CodexListOptions, CodexViewContext } from './codexViews';
 import {
   CODEX_PAGE,
@@ -90,6 +91,7 @@ export class CodexModal {
   private memo: { key: readonly unknown[]; index: CodexIndex } | null = null;
   private requestedAt = 0;
   private refreshTimer?: ReturnType<typeof setTimeout>;
+  private refreshDue = 0;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private unsubscribers: (() => void)[] = [];
 
@@ -111,6 +113,7 @@ export class CodexModal {
       if (this.stack.length > CODEX_STACK_MAX) this.stack.shift();
     }
     this.paint();
+    if (this.isStale()) this.scheduleRefetch();
   }
 
   close(): void {
@@ -285,8 +288,10 @@ export class CodexModal {
 
   private onState(state: ServerStateMessage): void {
     if (!this.overlay) return;
-    const marker = state.character?.codexVersion;
-    if (marker !== undefined && this.host.gameClient.lastCodex?.version !== marker) this.scheduleRefetch();
+    if (this.isStale()) {
+      if (this.host.gameClient.lastCodex === null) this.refetch();
+      else this.scheduleRefetch();
+    }
     deferWhilePressed(this.overlay, () => this.paint());
   }
 
@@ -304,21 +309,40 @@ export class CodexModal {
     this.requestedAt = Date.now();
     const { gameClient } = this.host;
     gameClient.requestCodex();
-    if (gameClient.lastCodex?.version !== gameClient.lastState?.character?.codexVersion) this.scheduleRefetch();
+    if (this.isStale()) this.scheduleRefetch();
   }
 
-  /** At most one fetch per CODEX_REFRESH_MS while open; a timer covers the last change in a window. */
+  /** At most one fetch per retry gap while open; a timer covers the last change in a window. */
   private scheduleRefetch(): void {
-    if (this.refreshTimer) return;
-    const wait = this.requestedAt + CODEX_REFRESH_MS - Date.now();
+    const due = this.requestedAt + this.retryGap();
+    if (this.refreshTimer && this.refreshDue <= due) return;
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
+    const wait = due - Date.now();
     if (wait <= 0) {
       this.refetch();
       return;
     }
+    this.refreshDue = due;
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
       if (this.overlay) this.refetch();
     }, wait);
+  }
+
+  private isStale(): boolean {
+    const { gameClient } = this.host;
+    const marker = gameClient.lastState?.character?.codexVersion;
+    return marker !== undefined && gameClient.lastCodex?.version !== marker;
+  }
+
+  /** The window has nothing true to show: no snapshot, or an entry missing from a stale one. */
+  private retryGap(): number {
+    const { gameClient } = this.host;
+    if (!gameClient.lastCodex) return CODEX_RETRY_MS;
+    const target = this.top()?.target;
+    if (!target || target.kind === 'home' || target.kind === 'list') return CODEX_REFRESH_MS;
+    return hasCodexEntry(this.index(gameClient.lastState), target) ? CODEX_REFRESH_MS : CODEX_RETRY_MS;
   }
 
   private index(state: ServerStateMessage | null): CodexIndex {
@@ -371,6 +395,7 @@ export class CodexModal {
       const opts: CodexListOptions = { query: list.query, sort: list.sort, shown: list.shown, zones: list.zones, zoneShown: list.zoneShown };
       return codexListHtml(target.list, ctx, opts);
     }
+    if (!hasCodexEntry(index, target) && this.isStale()) return codexLoadingHtml();
     return codexEntryHtml(target, ctx, view.expanded);
   }
 

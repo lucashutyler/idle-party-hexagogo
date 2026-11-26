@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerCodexMessage, ServerStateMessage } from '@idle-party-rpg/shared';
+import { CODEX_RETRY_MS } from '../src/network/GameClient';
 import type { GameClient } from '../src/network/GameClient';
 import type { WorldCache } from '../src/network/WorldCache';
 import { CODEX_REFRESH_MS, CODEX_SEARCH_DEBOUNCE_MS, CodexModal } from '../src/ui/codex/CodexModal';
@@ -14,7 +15,19 @@ function fakeClient(state: ServerStateMessage, codex: ServerCodexMessage | null)
   const client = {
     lastState: state,
     lastCodex: codex,
-    requestCodex: vi.fn(() => client.lastCodex),
+    requestedAt: null as number | null,
+    /** When a request really went out, by GameClient's rule: only while stale, at most once per CODEX_RETRY_MS while unanswered. */
+    sent: [] as number[],
+    requestCodex: vi.fn(() => {
+      const marker = client.lastState.character?.codexVersion;
+      if (marker === undefined || client.lastCodex?.version === marker) return client.lastCodex;
+      const now = Date.now();
+      if (client.requestedAt === null || now - client.requestedAt >= CODEX_RETRY_MS) {
+        client.requestedAt = now;
+        client.sent.push(now);
+      }
+      return client.lastCodex;
+    }),
     subscribe(cb: (s: ServerStateMessage) => void) {
       stateListeners.add(cb);
       return () => { stateListeners.delete(cb); };
@@ -29,6 +42,7 @@ function fakeClient(state: ServerStateMessage, codex: ServerCodexMessage | null)
     },
     reply(message: ServerCodexMessage) {
       client.lastCodex = message;
+      client.requestedAt = null;
       for (const l of codexListeners) l(message);
     },
     get listening() {
@@ -266,8 +280,65 @@ describe('CodexModal', () => {
     mount(codexState(), null);
     modal.open({ kind: 'home' });
     expect(client.requestCodex).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(CODEX_REFRESH_MS);
+    vi.advanceTimersByTime(CODEX_RETRY_MS);
     expect(client.requestCodex).toHaveBeenCalledTimes(2);
+  });
+
+  describe('with nothing true to show', () => {
+    const moved = (marker: string) => codexState({ character: { ...codexState().character!, codexVersion: marker } });
+    const sentAt = (start: number) => client.sent.map(at => at - start);
+    /** No reply ever comes; state pushes arrive every second. */
+    const playWithoutReply = (seconds: number) => {
+      for (let i = 0; i < seconds; i++) {
+        vi.advanceTimersByTime(1000);
+        client.push(client.lastState);
+      }
+    };
+
+    it('shows the loading line, not "not discovered", for an entry missing from a stale snapshot', () => {
+      mount(moved('v2'), codexReply({ version: 'v1' }));
+      modal.open({ kind: 'monster', id: 'bear' });
+      expect(body().textContent).toBe('Opening your Codex…');
+
+      client.reply(codexReply({ version: 'v2', monsters: [...codexReply().monsters, { id: 'bear', name: 'Bear', tier: 'trash', kills: 0, drops: [], dropKinds: 0 }] }));
+      expect(body().querySelector('.codex-hero-name')!.textContent).toBe('Bear');
+    });
+
+    it('says "not discovered" once the snapshot is current and the entry is still missing', () => {
+      mount(moved('v2'), codexReply({ version: 'v1' }));
+      modal.open({ kind: 'monster', id: 'bear' });
+      client.reply(codexReply({ version: 'v2' }));
+      expect(body().querySelector('.codex-missing-title')!.textContent).toBe('You haven\'t discovered this yet.');
+    });
+
+    it('asks again at once when the snapshot is dropped while open', () => {
+      vi.useFakeTimers();
+      mount();
+      const start = Date.now();
+      modal.open({ kind: 'home' });
+      vi.advanceTimersByTime(5000);
+      client.lastCodex = null;
+      client.push(moved('v2'));
+      expect(sentAt(start)).toEqual([5000]);
+    });
+
+    it('with no snapshot, asks every 15 s and never faster', () => {
+      vi.useFakeTimers();
+      mount(codexState(), null);
+      const start = Date.now();
+      modal.open({ kind: 'home' });
+      playWithoutReply(40);
+      expect(sentAt(start)).toEqual([0, CODEX_RETRY_MS, 2 * CODEX_RETRY_MS]);
+    });
+
+    it('with an entry missing from a stale snapshot, asks every 15 s and never faster', () => {
+      vi.useFakeTimers();
+      mount(moved('v2'), codexReply({ version: 'v1' }));
+      const start = Date.now();
+      modal.open({ kind: 'monster', id: 'bear' });
+      playWithoutReply(40);
+      expect(sentAt(start)).toEqual([0, CODEX_RETRY_MS, 2 * CODEX_RETRY_MS]);
+    });
   });
 
   it('holds a repaint from a push while the player presses inside', () => {

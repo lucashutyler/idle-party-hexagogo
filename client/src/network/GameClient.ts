@@ -10,7 +10,7 @@ export const FORECAST_TTL_MS = 60_000;
 const FORECAST_RETRY_MS = 15_000;
 const FORECAST_UNAVAILABLE_TTL_MS = 10_000;
 const BESTIARY_RETRY_MS = 15_000;
-const CODEX_RETRY_MS = 15_000;
+export const CODEX_RETRY_MS = 15_000;
 const FORECAST_CACHE_MAX = 200;
 
 type StateListener = (state: ServerStateMessage) => void;
