@@ -3,6 +3,7 @@ import { SlidingWindowLimiter } from '../../RateLimiter.js';
 
 export const CHAT_SEND_LIMIT_REFUSAL = 'You\'re sending messages too fast. Wait a few seconds.';
 export const FRIEND_REQUEST_LIMIT_REFUSAL = 'You\'ve sent a lot of friend requests. Try again in a few minutes.';
+export const GUILD_INVITE_LIMIT_REFUSAL = 'You\'ve sent a lot of guild invites. Try again in a few minutes.';
 
 /** Every player message counts against `perSender`; global messages also count against `global`. See docs/architecture/social.md → Send limits. */
 export const CHAT_SEND_LIMITS = {
@@ -13,7 +14,13 @@ export const CHAT_SEND_LIMITS = {
   global: { limit: 1, windowMs: 3_000 },
 } as const;
 
-export const FRIEND_REQUEST_LIMIT = { limit: 20, windowMs: 10 * 60_000 } as const;
+export interface RequestLimit {
+  limit: number;
+  windowMs: number;
+}
+
+export const FRIEND_REQUEST_LIMIT: RequestLimit = { limit: 20, windowMs: 10 * 60_000 };
+export const GUILD_INVITE_LIMIT: RequestLimit = { limit: 20, windowMs: 10 * 60_000 };
 
 const PRUNE_EVERY_MS = 60_000;
 
@@ -60,12 +67,13 @@ export class ChatRateLimiter {
   }
 }
 
-export class FriendRequestLimiter {
+/** Counts only requests that went through: ask `allows` first, then `take` once the request has gone. */
+export class RequestLimiter {
   private readonly limiter: SlidingWindowLimiter;
   private readonly pruning: PrunedLimiters;
 
-  constructor(now: Clock = () => Date.now()) {
-    this.limiter = new SlidingWindowLimiter(FRIEND_REQUEST_LIMIT.limit, FRIEND_REQUEST_LIMIT.windowMs, now);
+  constructor({ limit, windowMs }: RequestLimit, now: Clock = () => Date.now()) {
+    this.limiter = new SlidingWindowLimiter(limit, windowMs, now);
     this.pruning = new PrunedLimiters([this.limiter], now);
   }
 

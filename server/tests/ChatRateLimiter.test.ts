@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ChatRateLimiter, FriendRequestLimiter } from '../src/game/social/ChatRateLimiter.js';
+import { ChatRateLimiter, FRIEND_REQUEST_LIMIT, GUILD_INVITE_LIMIT, RequestLimiter } from '../src/game/social/ChatRateLimiter.js';
 
 function clock(start = 1_000_000) {
   let now = start;
@@ -90,10 +90,10 @@ describe('ChatRateLimiter', () => {
   });
 });
 
-describe('FriendRequestLimiter', () => {
+describe('RequestLimiter', () => {
   it('refuses the 21st friend request in ten minutes, and allows one once the window has passed', () => {
     const c = clock();
-    const limits = new FriendRequestLimiter(c.now);
+    const limits = new RequestLimiter(FRIEND_REQUEST_LIMIT, c.now);
 
     for (let i = 0; i < 20; i++) {
       expect(limits.allows('Testy')).toBe(true);
@@ -108,10 +108,21 @@ describe('FriendRequestLimiter', () => {
   });
 
   it('counts only what was taken', () => {
-    const limits = new FriendRequestLimiter(clock().now);
+    const limits = new RequestLimiter(FRIEND_REQUEST_LIMIT, clock().now);
 
     for (let i = 0; i < 50; i++) limits.allows('Testy');
 
+    expect(limits.allows('Testy')).toBe(true);
+  });
+
+  it('allows 20 guild invites in ten minutes', () => {
+    const c = clock();
+    const limits = new RequestLimiter(GUILD_INVITE_LIMIT, c.now);
+
+    for (let i = 0; i < 20; i++) limits.take('Testy');
+    expect(limits.allows('Testy')).toBe(false);
+
+    c.advance(10 * 60_000);
     expect(limits.allows('Testy')).toBe(true);
   });
 });

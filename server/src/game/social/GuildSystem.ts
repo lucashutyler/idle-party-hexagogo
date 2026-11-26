@@ -170,12 +170,13 @@ export class GuildSystem {
     return this.store.get(guildId);
   }
 
-  /** Unexpired invites; expired ones are dropped from the guild as they are found. */
+  /** Unexpired invites from current members; the rest are dropped from the guild as they are found. */
   private openInvites(guild: GuildData): GuildInvite[] {
     const invites = guild.invites;
     if (!invites) return [];
     const cutoff = this.now() - GUILD_INVITE_TTL_MS;
-    const open = invites.filter(invite => invite.createdAt > cutoff);
+    const members = new Set(guild.members.map(m => m.username));
+    const open = invites.filter(invite => invite.createdAt > cutoff && members.has(invite.inviterUsername));
     if (open.length !== invites.length) this.setInvites(guild, open);
     return open;
   }

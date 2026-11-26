@@ -29,7 +29,7 @@ The `inventory` and `equipment` fields are optional within `character` — old s
 
 All of the fields above are optional. `PlayerSession.fromSaveData` bypasses the constructor, so every new field is assigned explicitly there (and cleaned — malformed values fall back to their defaults). **Master reset** (`resetForMasterReset`) clears `monsterKills`, `awayLedger` and `pendingRecap` along with the character, but keeps `combatPrefs` and `autoRetreatNotified`; presence is then re-evaluated for every session, so offline players get a fresh ledger.
 
-Guild data is saved separately in `data/guilds.json`: per guild `info`, `members` and, while any are open, `invites` (`username`, `inviterUsername`, `createdAt`; optional, so older files load with none, expired ones are dropped as they are read, and an unreadable entry is dropped without touching its guild — see `social.md` → Guild). Active async trades are saved separately in `data/trades.json` via `TradeStore`. Game content is saved separately via `ContentStore`.
+Guild data is saved separately in `data/guilds.json`: per guild `info`, `members` and, while any are open, `invites` (`username`, `inviterUsername`, `createdAt`; optional, so older files load with none, closed ones (expired, or whose inviter is no longer in the guild) are dropped as they are read, and an unreadable entry is dropped without touching its guild — see `social.md` → Guild). Active async trades are saved separately in `data/trades.json` via `TradeStore`. Game content is saved separately via `ContentStore`.
 
 The store interface is swappable for SQLite/Postgres.
 

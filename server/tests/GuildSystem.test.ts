@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GUILD_INVITE_TTL_MS, MIN_GUILD_LEVEL } from '@idle-party-rpg/shared';
 import type { GuildInfo } from '@idle-party-rpg/shared';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import { GUILD_INVITE_NOT_FOUND, GUILD_INVITE_REFUSED, GuildSystem } from '../src/game/social/GuildSystem.js';
+import { GUILD_INVITE_LIMIT_REFUSAL } from '../src/game/social/ChatRateLimiter.js';
 import type { PlayerManager } from '../src/game/PlayerManager.js';
 import { enterAsKnight, itemRulesContent, itemRulesManager } from './itemRulesFixture.js';
 
@@ -187,6 +188,47 @@ describe('GuildSystem', () => {
     });
   });
 
+  describe('an invite whose inviter is no longer in the guild', () => {
+    beforeEach(() => {
+      guilds.inviteToGuild('Testy', 'Oskar', false);
+      guilds.acceptInvite('Oskar', lanterns.id);
+      guilds.inviteToGuild('Oskar', 'Mira', false);
+      guilds.inviteToGuild('Testy', 'Wren', false);
+    });
+
+    it('closes when the leader removes the inviter', () => {
+      guilds.kickMember('Testy', 'Oskar');
+
+      expect(guilds.getInvitesFor('Mira')).toEqual([]);
+      expect(guilds.getInvitedUsernames(lanterns.id)).toEqual(['Wren']);
+      expect(guilds.acceptInvite('Mira', lanterns.id)).toBe(GUILD_INVITE_NOT_FOUND);
+      expect(members(lanterns)).toEqual(['Testy']);
+    });
+
+    it('closes when the inviter leaves', () => {
+      guilds.leaveGuild('Oskar');
+
+      expect(guilds.acceptInvite('Mira', lanterns.id)).toBe(GUILD_INVITE_NOT_FOUND);
+      expect(typeof guilds.acceptInvite('Wren', lanterns.id)).not.toBe('string');
+    });
+
+    it('closes when a leader who sent it leaves, and the new leader can invite again', () => {
+      guilds.leaveGuild('Testy');
+
+      expect(guilds.getGuild(lanterns.id)!.info.leaderUsername).toBe('Oskar');
+      expect(guilds.getInvitesFor('Wren')).toEqual([]);
+      expect(typeof guilds.inviteToGuild('Oskar', 'Wren', false)).not.toBe('string');
+      expect(typeof guilds.acceptInvite('Wren', lanterns.id)).not.toBe('string');
+    });
+
+    it('lets the player be invited again by someone still in the guild', () => {
+      guilds.kickMember('Testy', 'Oskar');
+
+      expect(typeof guilds.inviteToGuild('Testy', 'Mira', false)).not.toBe('string');
+      expect(guilds.getInvitesFor('Mira')).toEqual([{ guildId: lanterns.id, guildName: 'Lanterns', inviterUsername: 'Testy' }]);
+    });
+  });
+
   it('keeps an old guild\'s members as they were', () => {
     const store = new GuildStore();
     store.set('g_old', {
@@ -311,5 +353,64 @@ describe('guild invites through PlayerManager', () => {
 
     expect(socialOf('Mira').guildInvites).toHaveLength(1);
     expect(inbox('Mira', 'guild_invite_received')).toHaveLength(1);
+  });
+
+  it('takes a removed member\'s invites off the target\'s list', () => {
+    pm.inviteToGuild('Testy', 'Oskar');
+    pm.acceptGuildInvite('Oskar', guild.id);
+    pm.inviteToGuild('Oskar', 'Mira');
+
+    pm.kickGuildMember('Testy', 'Oskar');
+
+    expect(socialOf('Mira').guildInvites).toEqual([]);
+    expect(socialOf('Testy').outgoingGuildInvites).toEqual([]);
+    expect(pm.acceptGuildInvite('Mira', guild.id)).toBe(GUILD_INVITE_NOT_FOUND);
+  });
+
+  describe('invites per sender', () => {
+    beforeEach(() => {
+      const start = Date.now();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(start);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const inviteAndDecline = () => {
+      expect(pm.inviteToGuild('Testy', 'Mira')).toBeNull();
+      expect(pm.declineGuildInvite('Mira', guild.id)).toBeNull();
+    };
+
+    it('refuses the 21st invite in ten minutes, and allows one once the window has passed', () => {
+      for (let i = 0; i < 20; i++) inviteAndDecline();
+
+      expect(pm.inviteToGuild('Testy', 'Oskar')).toBe(GUILD_INVITE_LIMIT_REFUSAL);
+      expect(socialOf('Oskar').guildInvites).toEqual([]);
+      expect(inbox('Oskar', 'guild_invite_received')).toEqual([]);
+
+      vi.setSystemTime(Date.now() + 10 * 60_000);
+      expect(pm.inviteToGuild('Testy', 'Oskar')).toBeNull();
+    });
+
+    it('counts only invites that went through', () => {
+      for (let i = 0; i < 30; i++) {
+        expect(pm.inviteToGuild('Testy', 'Testy')).toBe('They are already in a guild.');
+        expect(pm.inviteToGuild('Testy', 'Nobody')).toBe(GUILD_INVITE_REFUSED);
+      }
+      for (let i = 0; i < 19; i++) inviteAndDecline();
+
+      expect(pm.inviteToGuild('Testy', 'Oskar')).toBeNull();
+    });
+
+    it('keeps each sender apart', () => {
+      expect(pm.inviteToGuild('Testy', 'Quill')).toBeNull();
+      expect(pm.acceptGuildInvite('Quill', guild.id)).toBeNull();
+      for (let i = 0; i < 19; i++) inviteAndDecline();
+      expect(pm.inviteToGuild('Testy', 'Oskar')).toBe(GUILD_INVITE_LIMIT_REFUSAL);
+
+      expect(pm.inviteToGuild('Quill', 'Oskar')).toBeNull();
+    });
   });
 });

@@ -41,7 +41,7 @@ import { canMove } from './game/social/PartySystem.js';
 import { parseForecastRequestTarget } from './game/ForecastService.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
 import { isEmailConfigured } from './auth/EmailService.js';
-import { CHAT_SEND_LIMIT_REFUSAL, FRIEND_REQUEST_LIMIT_REFUSAL, FriendRequestLimiter } from './game/social/ChatRateLimiter.js';
+import { CHAT_SEND_LIMIT_REFUSAL, FRIEND_REQUEST_LIMIT, FRIEND_REQUEST_LIMIT_REFUSAL, RequestLimiter } from './game/social/ChatRateLimiter.js';
 import { FRIEND_REQUEST_NOTICE_WINDOW_MS } from './game/social/NotificationService.js';
 
 /**
@@ -99,7 +99,7 @@ function friendRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'friend_refused' };
 }
 
-const friendRequestLimits = new FriendRequestLimiter();
+const friendRequestLimits = new RequestLimiter(FRIEND_REQUEST_LIMIT);
 
 function giftRefusal(message: string): ServerErrorMessage {
   return message === GIFT_NOT_FOUND ? { type: 'error', message } : { type: 'error', message, code: 'gift_refused' };

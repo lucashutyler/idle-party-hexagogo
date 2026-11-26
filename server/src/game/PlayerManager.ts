@@ -28,7 +28,7 @@ import type { SentStateFields } from './StatePush.js';
 import { SharedRosters } from './SharedRosters.js';
 import type { RosterSnapshot } from './SharedRosters.js';
 import { chatBucket } from '@idle-party-rpg/shared';
-import { ChatRateLimiter, CHAT_SEND_LIMIT_REFUSAL } from './social/ChatRateLimiter.js';
+import { ChatRateLimiter, CHAT_SEND_LIMIT_REFUSAL, GUILD_INVITE_LIMIT, GUILD_INVITE_LIMIT_REFUSAL, RequestLimiter } from './social/ChatRateLimiter.js';
 
 /** A socket buffering more than this skips droppable combat messages. */
 export const COMBAT_BACKPRESSURE_BYTES = 256 * 1024;
@@ -85,6 +85,7 @@ export class PlayerManager {
   private wholeStateSockets = new WeakSet<WebSocket>();
   private rosters = new SharedRosters(() => this.rosterSnapshot());
   private readonly chatLimits = new ChatRateLimiter();
+  private readonly guildInviteLimits = new RequestLimiter(GUILD_INVITE_LIMIT);
   private grids: WorldGrids;
   private content: ContentStore;
   private accountStore: AccountStore;
@@ -514,8 +515,10 @@ export class PlayerManager {
   /** Invites `target` to the player's guild. Returns why it was refused, or null. See docs/architecture/social.md → Guild. */
   inviteToGuild(username: string, target: string): string | null {
     if (!this.sessions.get(target)?.hasCharacter()) return GUILD_INVITE_REFUSED;
+    if (!this.guildInviteLimits.allows(username)) return GUILD_INVITE_LIMIT_REFUSAL;
     const guild = this.guilds.inviteToGuild(username, target, this.isTradeBlocked(username, target));
     if (typeof guild === 'string') return guild;
+    this.guildInviteLimits.take(username);
 
     this.sendStateToPlayer(username);
     this.sendStateToPlayer(target);
