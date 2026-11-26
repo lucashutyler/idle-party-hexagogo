@@ -120,6 +120,41 @@ describe('SocialScreen gift refusals', () => {
 
     expect(document.querySelector('.map-toast')).toBeNull();
   });
+
+  it('says why an item a quest needs was kept back', () => {
+    const t = setup();
+
+    t.serverError('Test Key is needed for a quest.', 'item_protected');
+
+    expect(document.querySelector('.map-toast')?.textContent).toBe('Test Key is needed for a quest.');
+  });
+});
+
+describe('SocialScreen pickers and quest items', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const pickerIds = () => [...document.querySelectorAll<HTMLElement>('.trade-picker-row .trade-qty-inc, .trade-picker-row .gift-qty-inc')]
+    .map(btn => btn.dataset.itemId);
+  const bag = { character: { inventory: { test_key: 1, test_pebble: 3 }, level: 30, questKeptItemIds: ['test_key'] } };
+
+  it('leaves them out of the gift picker', () => {
+    const t = setup();
+    t.push([], {}, bag);
+    t.screen.onActivate();
+    t.screen.openGiftModal('bob');
+    expect(pickerIds()).toEqual(['test_pebble']);
+    t.screen.dismissGiftModal();
+  });
+
+  it('leaves them out of the trade picker', () => {
+    const t = setup();
+    t.push([], { proposedTrades: [] }, bag);
+    t.screen.openTradeModal('bob');
+    expect(pickerIds()).toEqual(['test_pebble']);
+    t.screen.dismissTradeModal();
+  });
 });
 
 function stubSheetViewport(matches: boolean): void {

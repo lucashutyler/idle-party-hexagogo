@@ -154,6 +154,8 @@ export {
   getItemsDisplacedByEquip,
   getItemEffectText,
   rollDrops,
+  isWholeItemCount,
+  itemSellValue,
 } from './systems/ItemTypes.js';
 export type {
   ItemRarity,

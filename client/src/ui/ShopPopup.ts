@@ -8,6 +8,7 @@ import {
   getOwnedItemIds,
   getEquippedItemIds,
   canClassEquipItem,
+  itemSellValue,
   MAX_PARTY_SIZE,
   MAX_HENCHMEN_PER_PARTY,
   MAX_STACK,
@@ -106,7 +107,13 @@ export class ShopPopup {
 
     this.unsubscribeError?.();
     this.unsubscribeError = this.gameClient.onServerError((message, code) => {
-      if (!this.isOpen() || code) return;
+      if (!this.isOpen()) return;
+      // The refusal's own toast says why; the sale just stops waiting.
+      if (code === 'item_protected' && this.pendingSell) {
+        this.pendingSell = null;
+        return;
+      }
+      if (code) return;
       if (this.pendingHireId) {
         this.pendingHireId = null;
         this.setNotice(message);
@@ -276,6 +283,7 @@ export class ShopPopup {
       afford: view.kind === 'buy' ? ShopPopup.affordableCount(char?.gold ?? 0, view.price) : null,
       eq: view.kind === 'buy' ? char?.equipment ?? {} : null,
       inv: this.mode === 'sell' || view.kind === 'sell' ? char?.inventory ?? {} : null,
+      kept: this.mode === 'sell' || view.kind === 'sell' ? char?.questKeptItemIds ?? [] : null,
       sets: view.kind === 'buy' || view.kind === 'sell' ? ShopPopup.setProgress(view.itemId, state) : null,
     });
   }
@@ -326,7 +334,7 @@ export class ShopPopup {
 
   private computeSellable(state: ServerStateMessage, itemId: string): number {
     const char = state.character;
-    if (!char) return 0;
+    if (!char || char.questKeptItemIds?.includes(itemId)) return 0;
     return getUnequippedCount(itemId, char.inventory);
   }
 
@@ -401,7 +409,7 @@ export class ShopPopup {
       ? `<div class="shop-hire-list">${this.renderHireList(offers, state)}</div>`
       : `<div class="shop-items-grid">${this.mode === 'buy'
           ? this.renderBuyItems(shop, itemDefs, char.className, char.gold)
-          : this.renderSellItems(char.inventory, itemDefs)}</div>`;
+          : this.renderSellItems(char.inventory, itemDefs, new Set(char.questKeptItemIds ?? []))}</div>`;
 
     const hireToggle = offers.length > 0
       ? `<button class="shop-toggle-btn${hireActive}" data-mode="hire" data-focus-key="mode:hire">Hire</button>`
@@ -466,8 +474,17 @@ export class ShopPopup {
     return `<div class="shop-item-cell" role="button" tabindex="0" data-focus-key="item:${escapeHtml(itemId)}">${square}<div class="shop-item-name" style="color:${color}">${escapeHtml(name)}</div></div>`;
   }
 
+  /** What the class can use first; the authored order holds within each group. */
+  private static buyOrder(shop: ShopDefinition, itemDefs: Record<string, ItemDefinition>, className: string): ShopDefinition['inventory'] {
+    const usable = (itemId: string) => {
+      const def = itemDefs[itemId];
+      return !def?.equipSlot || canClassEquipItem(def, className);
+    };
+    return [...shop.inventory.filter(si => usable(si.itemId)), ...shop.inventory.filter(si => !usable(si.itemId))];
+  }
+
   private renderBuyItems(shop: ShopDefinition, itemDefs: Record<string, ItemDefinition>, className: string, gold: number): string {
-    return shop.inventory.map(si => {
+    return ShopPopup.buyOrder(shop, itemDefs, className).map(si => {
       const price = `<span class="shop-item-price${si.price > gold ? ' unaffordable' : ''}">${si.price}g</span>`;
       const def = itemDefs[si.itemId];
       if (!def) {
@@ -488,10 +505,10 @@ export class ShopPopup {
     }).join('');
   }
 
-  private renderSellItems(inventory: Record<string, number>, itemDefs: Record<string, ItemDefinition>): string {
+  private renderSellItems(inventory: Record<string, number>, itemDefs: Record<string, ItemDefinition>, questKept: ReadonlySet<string>): string {
     // Sellable = every unequipped copy. `inventory` already excludes equipped copies
     // (`equipItem` removes from inventory on equip), so do NOT subtract equipped counts.
-    const entries = listUnequippedEntries(inventory);
+    const entries = listUnequippedEntries(inventory).filter(([itemId]) => !questKept.has(itemId));
 
     if (entries.length === 0) {
       return '<div class="shop-empty">No items to sell</div>';
@@ -505,7 +522,7 @@ export class ShopPopup {
           <span class="shop-item-price">1g</span>
         </div>`, UNKNOWN_ITEM, undefined);
       }
-      const value = def.value ?? 1;
+      const value = itemSellValue(def);
       const html = renderItemIcon(itemId, def, {
         qty,
         extraClass: 'shop-item-square',
@@ -721,7 +738,7 @@ export class ShopPopup {
     const def = itemDefs[view.itemId];
     if (!char || !def) return;
     const { itemId } = view;
-    const value = def.value ?? 1;
+    const value = itemSellValue(def);
 
     let qty = Math.min(view.qty, max);
     view.qty = qty;

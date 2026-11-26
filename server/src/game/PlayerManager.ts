@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { offsetToCube, cubeDistance, cubeToKey, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit } from '@idle-party-rpg/shared';
-import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage } from '@idle-party-rpg/shared';
+import { offsetToCube, cubeDistance, cubeToKey, hireLevelLimitText, isBlockedUser, isHireWithinLevelLimit, isWholeItemCount } from '@idle-party-rpg/shared';
+import type { HexGrid, HexTile, OtherPlayerState, PlayerListEntry, ClientSocialState, ChatChannelType, ChatMessage, PartyGridPosition, PartyRole, ClassName, HiredHenchman, NotificationEntry, RoomEntryFailure, GamePartyMember, AutoRetreatPct, ServerBestiaryMessage, PartyAutoRetreatInfo, ForecastRequestTarget, ServerForecastMessage, ServerErrorMessage, TradeOfferItem } from '@idle-party-rpg/shared';
 import { PlayerSession } from './PlayerSession.js';
 import type { WorldGrids } from './WorldGrids.js';
 import type { GameStateStore, PlayerSaveData } from './GameStateStore.js';
@@ -10,7 +10,7 @@ import { GuildSystem } from './social/GuildSystem.js';
 import type { GuildStore } from './social/GuildStore.js';
 import { ChatSystem } from './social/ChatSystem.js';
 import { PartySystem, canMove } from './social/PartySystem.js';
-import { TradeSystem } from './social/TradeSystem.js';
+import { TradeSystem, INVALID_TRADE_ITEMS, parseOfferItems } from './social/TradeSystem.js';
 import { MailboxSystem, mailboxesWithEntriesFrom } from './social/MailboxSystem.js';
 import type { MailboxStore, Mailboxes } from './social/MailboxStore.js';
 import { NotificationSystem } from './social/NotificationSystem.js';
@@ -1671,9 +1671,9 @@ export class PlayerManager {
     return isBlockedUser(b, blockedByA) || isBlockedUser(a, blockedByB);
   }
 
-  /** Returns why the gift can't be sent, or null once it has gone. */
-  sendGift(fromUsername: string, targetUsername: string, itemId: string, quantity: number): string | null {
-    if (!Number.isInteger(quantity) || quantity < 1) return 'Invalid quantity';
+  /** Returns why the gift can't be sent, or null once it has gone. A quest item's refusal carries its own code. */
+  sendGift(fromUsername: string, targetUsername: string, itemId: string, quantity: number): string | ServerErrorMessage | null {
+    if (!isWholeItemCount(quantity)) return 'Invalid quantity';
     const target = this.accountStore.findByUsername(targetUsername);
     if (!target?.username) return 'Player not found';
     // Accounts match a name in any case, but mailboxes are keyed by the exact one.
@@ -1683,6 +1683,8 @@ export class PlayerManager {
     if (target.deactivated || this.isTradeBlocked(fromUsername, toUsername)) return 'That player can\'t receive gifts';
     const sender = this.sessions.get(fromUsername);
     if (!sender) return 'No session';
+    const kept = sender.protectedItemRefusal(itemId);
+    if (kept) return kept;
     if (!sender.removeFromInventory(itemId, quantity)) return 'Not enough items in inventory';
 
     this.mailboxes.addEntry(toUsername, fromUsername, itemId, quantity);
@@ -1757,6 +1759,18 @@ export class PlayerManager {
     } catch (err) {
       console.error('[PlayerManager] Failed to save mailboxes:', err);
     }
+  }
+
+  /** What `username` may offer in a trade, one whole-number line per item, or why it's refused. */
+  tradeOffer(username: string, rawItems: unknown): TradeOfferItem[] | ServerErrorMessage {
+    const items = parseOfferItems(rawItems);
+    if (!items) return { type: 'error', message: INVALID_TRADE_ITEMS };
+    const session = this.sessions.get(username);
+    for (const { itemId } of items) {
+      const kept = session?.protectedItemRefusal(itemId);
+      if (kept) return kept;
+    }
+    return items;
   }
 
   /** Check if a player has an item in their unequipped inventory. */

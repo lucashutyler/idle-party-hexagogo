@@ -651,8 +651,29 @@
   box-shadow: none;
   text-shadow: none;
 }
-.item-popup-actions :is(.popup-action-equip, .popup-action-unequip, .items-modal-confirm, .items-modal-cancel) {
+.item-popup-actions :is(.popup-action-equip, .popup-action-unequip, .popup-action-sell, .items-modal-confirm, .items-modal-cancel) {
   flex: 1;
+}
+.item-popup .item-popup-actions .popup-action-sell {
+  --mt-btn-bg: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
+  --mt-btn-edge: var(--bg-0);
+  --mt-btn-fg: var(--text-1);
+}
+.item-popup .item-popup-actions .items-modal-confirm:not(.danger) {
+  --mt-btn-bg: var(--grad-primary);
+  --mt-btn-edge: var(--edge-primary);
+  --mt-btn-fg: #5a3300;
+  --mt-btn-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.popup-action-kept {
+  align-self: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.items-modal-total {
+  margin-top: 8px;
+  color: var(--gold);
+  font-size: var(--fs-md);
 }
 .item-popup .item-popup-actions .popup-action-blocked {
   --mt-btn-bg: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);

@@ -20,6 +20,9 @@ import {
   unequipItem,
   destroyItems,
   equipItemForceDestroy,
+  getItemsDisplacedByEquip,
+  isWholeItemCount,
+  itemSellValue,
   EQUIP_SLOTS,
   isTwoHandedEquipped,
   getOwnedItemIds,
@@ -107,6 +110,7 @@ import type {
   ServerBattleState,
   ServerPartyState,
   OtherPlayerState,
+  ServerErrorMessage,
   CombatLogEntry,
   CharacterState,
   ClassName,
@@ -140,6 +144,7 @@ import type { ContentStore } from './ContentStore.js';
 import type { WorldGrids } from './WorldGrids.js';
 import { QuestSystem } from './QuestSystem.js';
 import type { QuestEvent } from './QuestSystem.js';
+import { questOnlyCollectItems } from './QuestKeptItems.js';
 import type { QuestDefinition, QuestProgressEntry, CompletedQuestEntry } from '@idle-party-rpg/shared';
 
 const MAX_LOG_ENTRIES = 1000;
@@ -448,15 +453,29 @@ export class PlayerSession {
 
   /**
    * Build item definitions for items the player currently owns (inventory + equipment),
-   * plus shop items and every piece of any set the player has at least one piece of —
+   * plus shop items, gifts waiting in the mailbox, both sides of every pending trade, and
+   * every piece of any set the player has at least one piece of —
    * the latter so the set-info popup can render piece names instead of item GUIDs.
    */
-  private getOwnedItemDefinitions(setDefs: Record<string, SetDefinition>): Record<string, ItemDefinition> {
+  private getOwnedItemDefinitions(
+    setDefs: Record<string, SetDefinition>,
+    social: ClientSocialState | undefined,
+  ): Record<string, ItemDefinition> {
     if (!this.character) return {};
     const defs: Record<string, ItemDefinition> = {};
 
     // Owned items (unequipped + equipped, deduped)
     for (const itemId of getOwnedItemIds(this.character.inventory, this.character.equipment)) {
+      const def = this.content.getItem(itemId);
+      if (def) defs[itemId] = def;
+    }
+
+    const socialItemIds = [
+      ...(social?.mailbox ?? []).map(entry => entry.itemId),
+      ...(social?.proposedTrades ?? []).flatMap(trade => [...trade.initiator.items, ...(trade.target?.items ?? [])].map(line => line.itemId)),
+    ];
+    for (const itemId of socialItemIds) {
+      if (defs[itemId]) continue;
       const def = this.content.getItem(itemId);
       if (def) defs[itemId] = def;
     }
@@ -747,6 +766,9 @@ export class PlayerSession {
         combatPrefs: { ...this.combatPrefs },
         mastery: this.getMasterySummary(),
       };
+      const inventory = this.character.inventory;
+      const questKeptItemIds = this.questKeptItemIds().filter(itemId => hasOwn(inventory, itemId));
+      if (questKeptItemIds.length > 0) charState.questKeptItemIds = questKeptItemIds;
     }
 
     const allZones = this.content.getAllZones();
@@ -756,6 +778,7 @@ export class PlayerSession {
     const setDefs = this.getOwnedSetDefinitions();
     const questBlock = this.buildQuestState();
     const recap = this.pendingRecap ? this.recapBlock(this.pendingRecap) : {};
+    const social = this.getSocialState?.();
 
     return {
       ...recap,
@@ -771,8 +794,8 @@ export class PlayerSession {
       character: charState,
       zone: partyZone ?? '',
       zoneName,
-      social: this.getSocialState?.(),
-      itemDefinitions: this.getOwnedItemDefinitions(setDefs),
+      social,
+      itemDefinitions: this.getOwnedItemDefinitions(setDefs, social),
       setDefinitions: setDefs,
       shopDefinition: this.getCurrentShop(),
       henchmanOffers: this.getHenchmanOffers(),
@@ -1598,7 +1621,7 @@ export class PlayerSession {
         level: data.character.level,
         xp: data.character.xp,
         gold: data.character.gold ?? 0,
-        inventory: data.character.inventory ? { ...data.character.inventory } : {},
+        inventory: sanitizeInventory(data.character.inventory, data.username),
         equipment: data.character.equipment
           ? { ...data.character.equipment }
           : { head: null, shoulders: null, chest: null, bracers: null, gloves: null, mainhand: null, offhand: null, foot: null, ring: null, necklace: null, back: null, relic: null },
@@ -1763,24 +1786,76 @@ export class PlayerSession {
     return null;
   }
 
-  handleEquipItemForceDestroy(itemId: string): boolean {
-    if (!this.character) return false;
+  /** Null once equipped. Refused when an item it would destroy is one a quest still needs. */
+  handleEquipItemForceDestroy(itemId: string): ServerErrorMessage | null {
+    if (!this.character) return plainError('Cannot equip item');
     const def = this.content.getItem(itemId);
-    if (!def || !def.equipSlot) return false;
+    if (!def || !def.equipSlot) return plainError('Cannot equip item');
 
+    for (const destroyedId of getItemsDisplacedByEquip(def, this.character.equipment)) {
+      const kept = this.protectedItemRefusal(destroyedId);
+      if (kept) return kept;
+    }
     const result = equipItemForceDestroy(
       this.character.inventory, this.character.equipment, itemId, this.content.getAllItems(), this.character.className
     );
-    if (result.success) this.reconcileLoadoutAfterEquipmentChange();
-    return result.success;
+    if (!result.success) return plainError('Cannot equip item');
+    this.reconcileLoadoutAfterEquipmentChange();
+    return null;
   }
 
-  handleDestroyItems(itemId: string, count: number): boolean {
-    if (!this.character) return false;
+  /** Null once destroyed. */
+  handleDestroyItems(itemId: string, count: number): ServerErrorMessage | null {
+    if (!this.character) return plainError('Cannot destroy item');
+    const kept = this.protectedItemRefusal(itemId);
+    if (kept) return kept;
     const result = destroyItems(this.character.inventory, itemId, count);
-    return result.success;
+    return result.success ? null : plainError('Cannot destroy item');
   }
 
+  /** Sell at the item's sell value; no shop is needed in the room. Null once sold. */
+  handleSellItems(itemId: string, quantity: number): ServerErrorMessage | null {
+    if (!isWholeItemCount(quantity)) return plainError('Invalid quantity');
+    if (this.getInventoryCount(itemId) < quantity) return plainError('Not enough items');
+    const def = this.content.getItem(itemId);
+    if (!def) return plainError('Unknown item');
+    const kept = this.protectedItemRefusal(itemId);
+    if (kept) return kept;
+    if (!this.removeFromInventory(itemId, quantity)) return plainError('Failed to remove items');
+
+    const gold = itemSellValue(def) * quantity;
+    this.grantGold(gold);
+    const sold = quantity > 1 ? `${def.name} x${quantity}` : def.name;
+    this.addLogEntry(`Sold ${sold} for ${gold} gold`, 'victory');
+    return null;
+  }
+
+  /** Items an unfinished one-time quest collects that nothing repeatable hands out. See docs/architecture/content.md → Quest items. */
+  questKeptItemIds(): string[] {
+    const questOnly = questOnlyCollectItems(this.content);
+    if (questOnly.size === 0) return [];
+    const completed = this.quests.getCompletedQuestIds();
+    const kept: string[] = [];
+    for (const [itemId, questIds] of questOnly) {
+      if (questIds.some(questId => !completed.has(questId))) kept.push(itemId);
+    }
+    return kept;
+  }
+
+  /** Why `itemId` can't be destroyed, sold, gifted or traded away; null when it can. */
+  protectedItemRefusal(itemId: string): ServerErrorMessage | null {
+    const questIds = questOnlyCollectItems(this.content).get(itemId);
+    if (!questIds) return null;
+    const completed = this.quests.getCompletedQuestIds();
+    if (questIds.every(questId => completed.has(questId))) return null;
+    const name = this.content.getItem(itemId)?.name ?? 'This item';
+    return { type: 'error', message: `${name} is needed for a quest.`, code: 'item_protected' };
+  }
+
+}
+
+function plainError(message: string): ServerErrorMessage {
+  return { type: 'error', message };
 }
 
 const noXpTiles = new WeakMap<ContentStore, { epoch: number; ids: ReadonlySet<string> }>();
@@ -1841,6 +1916,18 @@ function sanitizeKillCounts(raw: unknown): Record<string, number> {
     if (isNonNegativeInteger(count) && count > 0) kills[id] = count;
   }
   return kills;
+}
+
+/** Whole stacks only: a stack below 1 is dropped and a fractional one rounded down, each logged. */
+function sanitizeInventory(raw: unknown, username: string): Record<string, number> {
+  if (!isRecord(raw)) return {};
+  const kept: [string, number][] = [];
+  for (const [itemId, stored] of Object.entries(raw)) {
+    const whole = isFiniteNumber(stored) && stored >= 1 ? Math.floor(stored) : 0;
+    if (whole !== stored) console.log(`[PlayerSession] ${username}: inventory ${itemId} ${String(stored)} -> ${whole}`);
+    if (whole > 0) kept.push([itemId, whole]);
+  }
+  return Object.fromEntries(kept);
 }
 
 const AWAY_DUNGEON_OUTCOMES: readonly AwayDungeonOutcome[] = ['cleared', 'ejected', 'left', 'in_progress'];
