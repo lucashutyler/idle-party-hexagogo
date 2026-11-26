@@ -1,4 +1,4 @@
-import { classIconHtml } from '@idle-party-rpg/shared';
+import { classIconHtml, codexRefKey } from '@idle-party-rpg/shared';
 import type { RoomLockInfo } from '@idle-party-rpg/shared';
 import { forecastHeadline, forecastVerdict } from '../combat/ForecastFormat';
 import { artworkUrl, placeholderUrl } from './assets';
@@ -94,6 +94,7 @@ export class RoomSheet {
   private lockEl: HTMLElement;
   private goEl: HTMLButtonElement;
   private detailsEl: HTMLButtonElement;
+  private codexEl: HTMLButtonElement;
   private handlers: RoomSheetHandlers;
   private forecastProvider: RoomForecastProvider;
   private model: RoomSheetModel | null = null;
@@ -123,6 +124,7 @@ export class RoomSheet {
         <div class="room-sheet-lock" role="status" hidden></div>
         <button type="button" class="room-sheet-go">Go</button>
         <button type="button" class="room-sheet-details">Details</button>
+        <button type="button" class="room-sheet-codex" aria-label="Open in the Codex" hidden><span aria-hidden="true">📖</span><span class="room-sheet-codex-label" aria-hidden="true">Codex</span></button>
       </div>
     `;
     this.artEl = this.el.querySelector('.room-sheet-art')!;
@@ -133,6 +135,7 @@ export class RoomSheet {
     this.lockEl.addEventListener('animationend', () => this.lockEl.classList.remove(LOCK_PULSE_CLASS));
     this.goEl = this.el.querySelector('.room-sheet-go')!;
     this.detailsEl = this.el.querySelector('.room-sheet-details')!;
+    this.codexEl = this.el.querySelector('.room-sheet-codex')!;
 
     const stop = (e: Event) => { e.stopPropagation(); };
     for (const ev of ['pointerdown', 'mousedown', 'click', 'touchstart'] as const) {
@@ -297,11 +300,20 @@ export class RoomSheet {
     this.paintArt(model, explored);
     this.paintLock(model);
     this.detailsEl.hidden = !explored;
+    this.paintCodexLink(model);
     this.goEl.disabled = model.inDungeon || this.pending;
     const goText = model.inDungeon ? DUNGEON_TRAVEL_LOCK_TEXT : this.pending ? SETTING_OFF_TEXT : 'Go';
     if (this.goEl.textContent !== goText) this.goEl.textContent = goText;
     this.goEl.dataset.locked = model.inDungeon ? '1' : '0';
     this.goEl.dataset.pending = this.pending ? '1' : '0';
+  }
+
+  private paintCodexLink({ info, roomId }: RoomSheetModel): void {
+    const value = info.isUnlocked && roomId ? codexRefKey({ kind: 'room', id: roomId }) : null;
+    this.codexEl.hidden = value === null;
+    if (this.codexEl.getAttribute('data-codex') === value) return;
+    if (value === null) this.codexEl.removeAttribute('data-codex');
+    else this.codexEl.setAttribute('data-codex', value);
   }
 
   private paintLock(model: RoomSheetModel): void {

@@ -1,4 +1,5 @@
-import type { CombatLogEntry, CombatLogType } from '@idle-party-rpg/shared';
+import type { CodexRef, CombatLogEntry, CombatLogType } from '@idle-party-rpg/shared';
+import { isCodexRef } from '@idle-party-rpg/shared';
 
 export const COMBAT_LOG_CAPACITY = 300;
 
@@ -8,6 +9,8 @@ export interface CombatLogLine {
   seq: number;
   text: string;
   type: CombatLogType;
+  /** The Codex entry a journal line announces. */
+  codex?: CodexRef;
 }
 
 type PendingLine = Omit<CombatLogLine, 'seq'>;
@@ -92,7 +95,7 @@ export class CombatLogBuffer {
       this.lastJournalId = entry.id;
       const key = `j:${entry.id}`;
       if (this.keys.has(key)) continue;
-      fresh.push({ key, text: entry.text, type: entry.type });
+      fresh.push(isCodexRef(entry.codex) ? { key, text: entry.text, type: entry.type, codex: entry.codex } : { key, text: entry.text, type: entry.type });
     }
     const behind = this.holdLive ? this.pending[this.pending.length - 1] : undefined;
     if (behind && fresh.length > 0) {
@@ -156,13 +159,14 @@ export class CombatLogBuffer {
   }
 
   private appendLines(lines: readonly PendingLine[]): void {
-    for (const line of lines) this.append(line.key, line.text, line.type);
+    for (const line of lines) this.append(line.key, line.text, line.type, line.codex);
   }
 
-  private append(key: string, text: string, type: CombatLogType): void {
+  private append(key: string, text: string, type: CombatLogType, codex?: CodexRef): void {
     if (this.keys.has(key)) return;
     this.keys.add(key);
-    this.lines.push({ key, seq: this.nextSeq++, text, type });
+    const seq = this.nextSeq++;
+    this.lines.push(codex ? { key, seq, text, type, codex } : { key, seq, text, type });
   }
 
   private removeWhere(predicate: (line: CombatLogLine) => boolean): void {

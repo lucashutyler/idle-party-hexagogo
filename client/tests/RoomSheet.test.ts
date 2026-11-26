@@ -86,6 +86,24 @@ describe('RoomSheet', () => {
     expect(q('.room-sheet-action-icon').classList.contains('quest-ready-pip')).toBe(true);
   });
 
+  it('offers the Codex for a found room only, without taking the tap as Go or Details', () => {
+    const codex = () => q<HTMLButtonElement>('.room-sheet-codex');
+    sheet.show(makeModel());
+    expect(codex().hidden).toBe(false);
+    expect(codex().getAttribute('data-codex')).toBe('room:room-1');
+    expect(codex().getAttribute('aria-label')).toBe('Open in the Codex');
+    codex().click();
+    expect(handlers.onGo).not.toHaveBeenCalled();
+    expect(handlers.onDetails).not.toHaveBeenCalled();
+
+    sheet.show(makeModel({ info: makeInfo({ col: 9, isUnlocked: false }), roomId: 'room-9', actions: [] }));
+    expect(codex().hidden).toBe(true);
+    expect(codex().hasAttribute('data-codex')).toBe(false);
+
+    sheet.show(makeModel({ info: makeInfo({ col: 8 }), roomId: 'room-8' }));
+    expect(codex().getAttribute('data-codex')).toBe('room:room-8');
+  });
+
   it('says when a room pays no XP, after its zone and players, and only for an explored room', () => {
     sheet.show(makeModel());
     expect(parent.querySelector('.room-sheet-sub-noxp')).toBeNull();

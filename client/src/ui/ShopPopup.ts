@@ -674,6 +674,7 @@ export class ShopPopup {
       className: char.className,
       skills: this.worldCache.getSkillContent().skills,
       extraHtml: unusableNote + renderEquipCompareBlock(def, char.equipment, itemDefs),
+      codexLink: true,
     });
     const disabled = canAfford ? '' : ' disabled';
 
@@ -764,6 +765,7 @@ export class ShopPopup {
       equippedItemIds: getEquippedItemIds(char.equipment),
       className: char.className,
       skills: this.worldCache.getSkillContent().skills,
+      codexLink: true,
     });
 
     this.overlay.innerHTML = `

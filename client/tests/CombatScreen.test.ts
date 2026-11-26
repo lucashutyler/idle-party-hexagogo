@@ -599,6 +599,15 @@ describe('CombatScreen', () => {
     t.screen.onActivate();
   });
 
+  it('links a monster popup to the monster\'s Codex entry', () => {
+    const t = start();
+    t.enemyCard(1)!.click();
+    const link = document.querySelector('.monster-popup .monster-popup-codex')!;
+    expect(link.getAttribute('data-codex')).toBe('monster:goblin');
+    expect(link.textContent).toBe('Codex ›');
+    expect(dismissTop()).toBe(true);
+  });
+
   it('lets Back close a monster popup', () => {
     const t = start();
     t.enemyCard(1)!.click();

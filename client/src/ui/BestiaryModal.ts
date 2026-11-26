@@ -3,6 +3,7 @@ import { LEVEL_CON_INFO, isMasteryMoment, levelCon } from '@idle-party-rpg/share
 import type { GameClient } from '../network/GameClient';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
 import { renderAssetImg } from './assets';
+import { codexTargetAttr } from './codexLinks';
 
 export type BestiarySort = 'closest' | 'kills' | 'name' | 'rank';
 
@@ -13,7 +14,7 @@ export const BESTIARY_SORT_LABELS: Record<BestiarySort, string> = {
   name: 'Name',
 };
 
-const TIER_BADGES: Partial<Record<MonsterTier, { glyph: string; label: string }>> = {
+export const TIER_BADGES: Partial<Record<MonsterTier, { glyph: string; label: string }>> = {
   elite: { glyph: '◆', label: 'Elite' },
   boss: { glyph: '♛', label: 'Boss' },
   raid: { glyph: '♛', label: 'Raid boss' },
@@ -107,10 +108,12 @@ export function renderBestiaryRow(entry: MasteryEntry, viewerLevel: number | und
   const next = `<span class="bestiary-next">${nextRankText(entry)}</span>`;
   const art = renderAssetImg('monster', entry.monsterId, { label: entry.name, width: 96, height: 96, alt: '' });
   const compact = opts?.compact ? ' bestiary-row-compact' : '';
+  const codex = `<button type="button" class="codex-link bestiary-codex" data-codex="${codexTargetAttr({ kind: 'monster', id: entry.monsterId })}"`
+    + ` aria-label="${escapeHtml(`Open ${entry.name} in the Codex`)}">›</button>`;
   return `<div class="bestiary-row${compact}" role="listitem" data-monster-id="${escapeHtml(entry.monsterId)}" data-rank="${entry.rank}"${entry.nextAt === null ? ' data-mastered="true"' : ''}>`
     + `<span class="bestiary-art">${art}</span>`
     + '<div class="bestiary-main">'
-    + `<div class="bestiary-title"><span class="bestiary-name">${escapeHtml(entry.name)}</span>${levelHtml}${tierHtml}</div>`
+    + `<div class="bestiary-title"><span class="bestiary-name">${escapeHtml(entry.name)}</span>${levelHtml}${tierHtml}${codex}</div>`
     + '<div class="bestiary-progress">'
     + `<div class="bestiary-bar" role="progressbar" aria-label="Progress to next rank" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">`
     + `<div class="bestiary-bar-fill" style="width:${pct}%"></div></div>`
@@ -193,7 +196,7 @@ export class BestiaryCard {
   }
 }
 
-function levelBadge(level: number, viewerLevel: number | undefined): string {
+export function levelBadge(level: number, viewerLevel: number | undefined): string {
   const con = levelCon(level, viewerLevel ?? level);
   const info = LEVEL_CON_INFO[con];
   return `<span class="lvl-badge bestiary-lvl" data-con="${con}" aria-label="Level ${level}, ${info.label}">`
@@ -213,7 +216,7 @@ export class BestiaryModal {
   private renderedAt = 0;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private keyHandler = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || this.isCovered()) return;
     e.preventDefault();
     this.close();
   };
@@ -292,6 +295,13 @@ export class BestiaryModal {
     this.overlay = null;
     this.listEl = null;
     this.summaryEl = null;
+  }
+
+  /** Escape belongs to a window opened over the bestiary, such as a Codex entry from one of its rows. */
+  private isCovered(): boolean {
+    const z = Number(this.overlay?.style.zIndex || 0);
+    return [...document.querySelectorAll<HTMLElement>('body > *')]
+      .some(el => el !== this.overlay && el.getAttribute('role') !== 'status' && Number(el.style.zIndex || 0) > z);
   }
 
   private onMasteryVersion(version: number | undefined): void {
