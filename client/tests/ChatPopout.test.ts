@@ -1406,6 +1406,58 @@ describe('ChatPopout when the party or guild being typed to goes away', () => {
     expect(unsent().hidden).toBe(true);
     expect(t.status().hidden).toBe(true);
   });
+
+  it('keeps a refused guild line off the composer while the channel list has yet to catch up with the removal', () => {
+    const t = setup(inGuild());
+    t.chat.open();
+    t.select().value = 'guild';
+    t.select().dispatchEvent(new Event('change'));
+    t.input().value = 'raid at nine';
+    pressEnter(t);
+    expect(t.gameClient.sendChat).toHaveBeenCalledWith('guild', 'guild-id', 'raid at nine');
+
+    press(t.input());
+    t.pushState(stateWith());
+    t.serverError('You aren\'t in that guild', 'chat_refused');
+    t.input().click();
+    vi.advanceTimersByTime(0);
+    pressEnter(t);
+
+    expect(t.gameClient.sendChat).toHaveBeenCalledOnce();
+    expect(t.select().value).toBe('global');
+    expect(t.input().value).toBe('');
+    expect(unsent().textContent).toContain('raid at nine');
+  });
+
+  it('keeps a refused party line off the composer once the player is in another party', () => {
+    const t = setup(inParty('p1', ['bob']));
+    t.chat.open();
+    t.tab('party').click();
+    t.input().value = 'bob, wait for me';
+    pressEnter(t);
+
+    t.pushState(inParty('p2', ['carol']));
+    t.serverError('You\'re sending messages too fast. Wait a few seconds.', 'chat_refused', { sendLimited: true });
+    pressEnter(t);
+
+    expect(t.gameClient.sendChat).toHaveBeenCalledOnce();
+    expect(t.input().value).toBe('');
+    expect(unsent().textContent).toContain('bob, wait for me');
+  });
+
+  it('still puts a refused party line back while the party is the same', () => {
+    const t = setup(inParty('p1', ['bob']));
+    t.chat.open();
+    t.tab('party').click();
+    t.input().value = 'again';
+    pressEnter(t);
+
+    t.pushState(inParty('p1', ['bob', 'carol']));
+    t.serverError('You\'re sending messages too fast. Wait a few seconds.', 'chat_refused', { sendLimited: true });
+
+    expect(t.input().value).toBe('again');
+    expect(unsent().hidden).toBe(true);
+  });
 });
 
 describe('ChatPopout state-driven view changes', () => {

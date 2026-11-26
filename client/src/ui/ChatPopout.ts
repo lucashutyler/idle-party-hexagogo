@@ -140,7 +140,7 @@ export class ChatPopout {
   private lastPreviewAt = 0;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
   /** Sends awaiting an echo or a refusal, oldest first. The server answers in send order. */
-  private pendingSends: { text: string; channel: ChatChannelType; target: string; at: number }[] = [];
+  private pendingSends: { text: string; channel: ChatChannelType; target: string; group: string | null; at: number }[] = [];
   private unsentTexts: string[] = [];
 
   private typing = false;
@@ -640,7 +640,7 @@ export class ChatPopout {
       this.showStatus('Not connected. Your message wasn\'t sent.');
       return;
     }
-    this.pendingSends.push({ text, channel, target: channel === 'dm' ? target.channelId : '', at: Date.now() });
+    this.pendingSends.push({ text, channel, target: channel === 'dm' ? target.channelId : '', group: this.groupOf(channel), at: Date.now() });
     this.inputEl.value = '';
     this.clearStatus();
     if (this.tab === 'dm' && !this.thread) this.showThread(target.channelId);
@@ -655,6 +655,7 @@ export class ChatPopout {
     if (!sent) return;
 
     const composerFree = !this.inputEl.value && this.currentChannel() === sent.channel
+      && this.groupOf(sent.channel) === sent.group
       && (sent.channel !== 'dm' || sameUser(this.thread ?? this.dmInput.value.trim(), sent.target));
     if (composerFree) this.inputEl.value = sent.text;
 
@@ -786,6 +787,13 @@ export class ChatPopout {
     const addressed = this.currentChannel();
     if (addressed === 'party' && (!next.inParty || next.partyId !== this.membership.partyId)) return 'party';
     if (addressed === 'guild' && next.guildId !== this.membership.guildId) return 'guild';
+    return null;
+  }
+
+  /** The party or guild a send on `channel` reaches now; null for every other channel. */
+  private groupOf(channel: ChatChannelType): string | null {
+    if (channel === 'party') return this.membership.partyId;
+    if (channel === 'guild') return this.membership.guildId;
     return null;
   }
 
