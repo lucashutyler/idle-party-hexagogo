@@ -361,7 +361,7 @@ export class PlayerSession {
   /**
    * Handle victory rewards (called by PartyBattleManager with pre-split rewards).
    * Set `options.unlockTiles = false` to skip adjacent-tile unlocking (dungeon
-   * floors aren't overworld tiles).
+   * floors aren't overworld tiles). `itemSources[i]` is the monster that dropped `items[i]`.
    */
   handleVictory(
     rewards: { xp: number; gold: number; items: string[]; itemSources?: readonly string[] },
