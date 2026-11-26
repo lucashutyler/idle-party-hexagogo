@@ -101,6 +101,32 @@ describe('journal lines', () => {
     view.setOpen(false);
     vi.useRealTimers();
   });
+
+  it('hold the full log still under a press, then catch up with every line that came meanwhile', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
+    const wrapper = document.createElement('div');
+    document.body.appendChild(wrapper);
+    const buffer = new CombatLogBuffer();
+    const view = new CombatLogView(wrapper, buffer, new CombatLogFormatter());
+    view.setActive(true);
+    buffer.ingestJournal(entries.slice(0, 2));
+    view.setOpen(true);
+    const lines = () => [...wrapper.querySelectorAll('.combat-log .log-entry')].map(el => el.textContent);
+    const link = wrapper.querySelector('.combat-log [data-codex]')!;
+    link.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+
+    buffer.ingestJournal([...entries.slice(0, 2), { id: 4, text: 'Bought Rope for 2 gold', type: 'victory' }]);
+    vi.advanceTimersByTime(1000);
+    buffer.ingestJournal([...entries.slice(0, 2), { id: 4, text: 'Bought Rope for 2 gold', type: 'victory' }, { id: 5, text: 'New in your Codex: Bear.', type: 'codex', codex: { kind: 'monster', id: 'bear' } }]);
+    vi.advanceTimersByTime(1000);
+    expect(lines()).toEqual(['New in your Codex: Wolf.', 'Victory!']);
+    expect(link.isConnected).toBe(true);
+
+    document.dispatchEvent(new PointerEvent('pointercancel'));
+    expect(lines()).toEqual(['New in your Codex: Wolf.', 'Victory!', 'Bought Rope for 2 gold', 'New in your Codex: Bear.']);
+    expect(wrapper.querySelector('.combat-log [data-codex]')).toBe(link);
+    view.setOpen(false);
+  });
 });
 
 afterEach(() => {

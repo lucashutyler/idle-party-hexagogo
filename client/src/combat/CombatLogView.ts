@@ -140,7 +140,11 @@ export class CombatLogView {
     this.dirty = false;
     this.lastTickerAt = performance.now();
     this.renderTicker();
-    if (this.open && !this.paused) this.renderFull(false);
+    if (this.open && !this.paused) {
+      deferWhilePressed(this.full, () => {
+        if (this.open && !this.paused) this.renderFull(false);
+      });
+    }
   }
 
   private renderTicker(): void {
