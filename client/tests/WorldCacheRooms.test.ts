@@ -15,7 +15,7 @@ async function loadCache(): Promise<WorldCache> {
       maps: [
         { id: 'isle', name: 'Gull Isle', startTile: { col: 0, row: 0 } },
         { id: 'cave', name: 'Damp Cave', startTile: { col: 0, row: 0 } },
-        { id: 'sea', name: 'Open Sea', startTile: { col: 0, row: 0 } },
+        { id: 'sea', name: 'Test Sea', startTile: { col: 0, row: 0 } },
       ],
       tiles: [
         room('i1', 'isle', 'plains', 0),
