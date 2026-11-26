@@ -1,6 +1,6 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
-    version: '2026.11.25.7',
+    version: '2026.11.25.6',
     notes: [
       'When your bags are full, the log now says how many items couldn\'t be carried, from fights, crafting and quest rewards. The summary when you come back counts them too, with a Hero button to sell some.',
       'Coming back after time away now shows the quests you can turn in and your next main-story step.',
