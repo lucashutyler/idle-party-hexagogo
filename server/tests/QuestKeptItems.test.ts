@@ -107,6 +107,13 @@ describe('questOnlyCollectItems', () => {
     expect(kept.has('plain_rock')).toBe(false);
   });
 
+  it('counts only quests some NPC offers, since no other quest can be turned in', () => {
+    const offered = Object.keys(QUESTS).filter(id => id !== 'q_gate');
+    const kept = questOnlyCollectItems(itemRulesContent({ items: ITEMS, quests: QUESTS, npcQuestIds: offered }));
+    expect(kept.get('moon_key')).toEqual(['q_gate_again']);
+    expect(kept.has('worn_hat')).toBe(false);
+  });
+
   it('is rebuilt once the content changes', () => {
     const live = content();
     const before = questOnlyCollectItems(live);

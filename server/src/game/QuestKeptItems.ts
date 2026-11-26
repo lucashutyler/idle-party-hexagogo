@@ -3,14 +3,14 @@ import type { ContentStore } from './ContentStore.js';
 
 type QuestKeptContent = Pick<
   ContentStore,
-  'contentEpoch' | 'getQuestCatalog' | 'getAllMonsters' | 'getAllShops' | 'getAllRecipes' | 'getAllDungeons'
+  'contentEpoch' | 'getQuestCatalog' | 'getNpcQuestIds' | 'getAllMonsters' | 'getAllShops' | 'getAllRecipes' | 'getAllDungeons'
 >;
 
 const questOnlyItems = new WeakMap<QuestKeptContent, { epoch: number; items: ReadonlyMap<string, readonly string[]> }>();
 
 /**
- * Items a one-time quest collects that no drop, shop, recipe, dungeon or repeatable quest
- * hands out, each with the one-time quests that collect it. Rebuilt once per content change.
+ * Items a one-time quest some NPC offers collects that no drop, shop, recipe, dungeon or repeatable
+ * quest hands out, each with the one-time quests that collect it. Rebuilt once per content change.
  * See docs/architecture/content.md → Quest items.
  */
 export function questOnlyCollectItems(content: QuestKeptContent): ReadonlyMap<string, readonly string[]> {
@@ -23,9 +23,10 @@ export function questOnlyCollectItems(content: QuestKeptContent): ReadonlyMap<st
 
 function buildQuestOnlyCollectItems(content: QuestKeptContent): Map<string, string[]> {
   const quests = Object.values(content.getQuestCatalog());
+  const offered = new Set(content.getNpcQuestIds());
   const collectedBy = new Map<string, string[]>();
   for (const quest of quests) {
-    if (!isOnceQuest(quest)) continue;
+    if (!isOnceQuest(quest) || !offered.has(quest.id)) continue;
     for (const objective of quest.objectives) {
       if (objective.kind !== 'collect') continue;
       const questIds = collectedBy.get(objective.itemId) ?? [];

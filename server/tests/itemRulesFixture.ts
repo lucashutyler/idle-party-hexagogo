@@ -24,6 +24,8 @@ export interface ItemRulesContentParts {
   shops?: Record<string, ShopDefinition>;
   recipes?: Record<string, RecipeDefinition>;
   dungeons?: Record<string, DungeonDefinition>;
+  /** Quests some NPC offers; every quest when absent. */
+  npcQuestIds?: string[];
 }
 
 /** A content store over plain records; bump `contentEpoch` after editing one. */
@@ -34,6 +36,7 @@ export function itemRulesContent(parts: ItemRulesContentParts = {}): ContentStor
   const shops = parts.shops ?? {};
   const recipes = parts.recipes ?? {};
   const dungeons = parts.dungeons ?? {};
+  const npcQuestIds = parts.npcQuestIds ?? Object.keys(quests);
   return {
     contentEpoch: 1,
     getStartTile: () => ({ col: 0, row: 0 }),
@@ -54,7 +57,7 @@ export function itemRulesContent(parts: ItemRulesContentParts = {}): ContentStor
     getAllDungeons: () => dungeons,
     getNpc: () => undefined,
     getAllNpcs: () => ({}),
-    getNpcQuestIds: () => [],
+    getNpcQuestIds: () => npcQuestIds,
     getQuestRevision: () => 0,
     getQuest: (id: string) => quests[id],
     getAllQuests: () => quests,
