@@ -1,6 +1,6 @@
 import type { BlockLevel, ChatChannelType, ChatMessage, ServerStateMessage } from '@idle-party-rpg/shared';
+import { CLIENT_CHAT_CAPS, trimChatHistory } from '@idle-party-rpg/shared';
 
-export const CHAT_MESSAGE_CAP = 500;
 export const CHAT_ROW_CAP = 200;
 
 export type ChatTab = 'all' | 'party' | 'guild' | 'dm';
@@ -77,7 +77,7 @@ export function normalizeChatMessage(raw: ChatMessage): ChatMessage {
   };
 }
 
-/** Messages held in timestamp order, deduplicated by id, oldest dropped past the cap. Merges only: never replaces. */
+/** Messages held in timestamp order, deduplicated by id, each bucket's oldest dropped past its cap. Merges only: never replaces. */
 export class ChatLog {
   readonly messages: ChatMessage[] = [];
   private ids = new Set<string>();
@@ -96,11 +96,11 @@ export class ChatLog {
       added.push(message);
     }
     if (!inOrder) this.messages.sort((a, b) => a.timestamp - b.timestamp);
-    const excess = this.messages.length - CHAT_MESSAGE_CAP;
-    if (excess > 0) {
-      for (const dropped of this.messages.splice(0, excess)) this.ids.delete(dropped.id);
-    }
-    return { added, inOrder };
+    const kept = trimChatHistory(this.messages, CLIENT_CHAT_CAPS);
+    if (kept.length === this.messages.length) return { added, inOrder };
+    this.messages.splice(0, this.messages.length, ...kept);
+    this.ids = new Set(kept.map(message => message.id));
+    return { added: added.filter(message => this.ids.has(message.id)), inOrder };
   }
 
   latestId(): string | undefined {

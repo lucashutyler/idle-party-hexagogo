@@ -85,6 +85,23 @@ describe('POST /auth/username', () => {
       expect(heldName()).toBeNull();
     });
 
+    it('refuses a name that looks like game staff', async () => {
+      for (const name of ['Admin', 'GameMaster', 'Mod_Testy']) {
+        const res = await post(name);
+
+        expect(res.status).toBe(409);
+        expect(await res.json()).toEqual({ error: 'That name is reserved' });
+      }
+      expect(heldName()).toBeNull();
+    });
+
+    it('takes a name that only contains a staff word inside another word', async () => {
+      const res = await post('Badminton');
+
+      expect(res.status).toBe(200);
+      expect(heldName()).toBe('Badminton');
+    });
+
     it('lets only one of two requests sent together through', async () => {
       const responses = await Promise.all([post('first'), post('second')]);
 
@@ -145,6 +162,28 @@ describe('POST /auth/username', () => {
 
       expect(res.status).toBe(400);
       expect(heldName()).toBe('alice');
+    });
+  });
+
+  describe('an account that already holds a staff-like name', () => {
+    beforeEach(() => {
+      accounts.findByEmail(EMAIL)!.username = 'Admin';
+      session.username = 'Admin';
+    });
+
+    it('can send it again', async () => {
+      const res = await post('Admin');
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ success: true, username: 'Admin', oldUsername: 'Admin' });
+      expect(heldName()).toBe('Admin');
+    });
+
+    it('still can\'t change it', async () => {
+      const res = await post('bob');
+
+      expect(res.status).toBe(409);
+      expect(heldName()).toBe('Admin');
     });
   });
 

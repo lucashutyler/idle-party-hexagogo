@@ -1,5 +1,5 @@
 import type { GameClient } from '../network/GameClient';
-import type { ServerStateMessage, ClientSocialState, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState } from '@idle-party-rpg/shared';
+import type { ServerStateMessage, ClientSocialState, PlayerListEntry, PlayerProfileMessage, TradeOfferItem, TradeState, ItemDefinition, SetDefinition, HiredHenchman, OtherPlayerState, GuildInviteInfo } from '@idle-party-rpg/shared';
 import { MAX_PARTY_SIZE, MIN_GUILD_LEVEL, CLASS_GLYPHS, classIconHtml, getItemEffectText, listUnequippedEntries, getEquippedItemIds, isBlockedUser } from '@idle-party-rpg/shared';
 import type { Screen } from './ScreenManager';
 import type { WorldCache } from '../network/WorldCache';
@@ -175,7 +175,9 @@ export class SocialScreen implements Screen {
     // A confirm rejected on a stale nonce means the partner's offer moved. The
     // re-synced state repaints the new offer; this explains why nothing happened.
     this.gameClient.onServerError((message, code) => {
-      if (code === 'gift_refused' || code === 'party_refused' || code === 'item_protected') showMapToast(document.body, message);
+      if (code === 'gift_refused' || code === 'party_refused' || code === 'item_protected' || code === 'guild_refused' || code === 'friend_refused') {
+        showMapToast(document.body, message);
+      }
       if (code !== 'trade_nonce_mismatch' || !this.tradeModalEl) return;
       this.tradeNotice = 'That offer changed before your confirmation went through. Review the updated offer below, then confirm again.';
       deferWhilePressed(this.tradeModalEl, () => this.refreshTradeModal());
@@ -235,6 +237,7 @@ export class SocialScreen implements Screen {
     const social = this.gameClient.lastState?.social;
     const badges: Partial<Record<SubTab, number>> = {
       party: social?.pendingInvites?.length ?? 0,
+      guild: social?.guildInvites?.length ?? 0,
       friends: social?.incomingFriendRequests?.length ?? 0,
     };
     const items = SUB_TABS.map(t => ({ ...t, badge: badges[t.id] }));
@@ -347,6 +350,18 @@ export class SocialScreen implements Screen {
       if (btn.matches('.social-guild-create-btn')) {
         const name = this.guildNameDraft.trim();
         if (name) this.gameClient.sendCreateGuild(name);
+        return;
+      }
+      const guildId = btn.getAttribute('data-guild-id');
+      if (btn.matches('.social-guild-accept-invite') && guildId) { this.gameClient.sendAcceptGuildInvite(guildId); return; }
+      if (btn.matches('.social-guild-decline-invite') && guildId) { this.gameClient.sendDeclineGuildInvite(guildId); return; }
+      if (btn.matches('.social-guild-remove-btn') && username) {
+        this.confirmThen({
+          title: `Remove ${username} from ${this.lastSocial?.guild?.name ?? 'the guild'}?`,
+          body: 'They can only join again with a new invite.',
+          confirmLabel: 'Remove',
+          danger: true,
+        }, () => this.gameClient.sendKickGuildMember(username));
         return;
       }
 
@@ -552,15 +567,22 @@ export class SocialScreen implements Screen {
     return JSON.stringify({
       guildId: social.guild?.id ?? null,
       leader: social.guild?.leaderUsername ?? null,
+      self: this.lastState?.username ?? null,
       members: (social.guildMembers ?? []).map(m => `${m.username}:${m.role}:${onlineSet.has(m.username) ? 1 : 0}:${this.playerEntry(m.username)?.level ?? ''}`),
-      canCreate: this.selfLevel() >= MIN_GUILD_LEVEL,
     });
   }
 
+  /** Without a guild the panel holds the name field, so invites and the level reason are patched in place. */
   private updateGuildPanel(): void {
     const social = this.lastSocial;
     if (!social) return;
-    if (this.guildPanelKey(social) !== this.lastRenderedGuildKey) this.renderGuildPanel();
+    if (this.guildPanelKey(social) !== this.lastRenderedGuildKey) {
+      this.renderGuildPanel();
+      return;
+    }
+    if (social.guild) return;
+    this.renderGuildInvites();
+    this.syncGuildCreateButton();
   }
 
   private updatePartyPanel(): void {
@@ -702,7 +724,7 @@ export class SocialScreen implements Screen {
     const relations: string[] = [];
     relations.push(...this.friendPopupItems(username, isFriend));
     if (!isPartyMember) relations.push(this.partyInviteItem(username, tileCol, tileRow));
-    if (social.guild && !isGuildMember) relations.push(this.popupItem('guild_invite', 'Invite to Guild'));
+    if (social.guild && !isGuildMember) relations.push(this.guildInviteItem(username));
 
     const safety = isBlocked
       ? this.popupItem('unblock', 'Unblock')
@@ -768,6 +790,13 @@ export class SocialScreen implements Screen {
       return [this.popupItem('revoke_friend', 'Revoke Friend Request')];
     }
     return [this.popupItem('add_friend', 'Add Friend')];
+  }
+
+  private guildInviteItem(username: string): string {
+    if ((this.lastSocial?.outgoingGuildInvites ?? []).includes(username)) {
+      return this.popupItem('guild_invite', 'Invited to Guild', { disabled: true, note: 'Waiting for their answer' });
+    }
+    return this.popupItem('guild_invite', 'Invite to Guild');
   }
 
   private partyInviteItem(username: string, tileCol?: number, tileRow?: number): string {
@@ -1195,6 +1224,7 @@ export class SocialScreen implements Screen {
     const guild = social.guild;
     if (!guild) {
       setHtml(this.panelContainer, this.guildCreateHtml());
+      this.renderGuildInvites();
       this.syncGuildCreateButton();
       return;
     }
@@ -1205,6 +1235,10 @@ export class SocialScreen implements Screen {
       return online !== 0 ? online : a.username.localeCompare(b.username);
     });
     const onlineCount = members.filter(m => onlineSet.has(m.username)).length;
+    const selfUsername = this.lastState?.username ?? '';
+    const isLeader = guild.leaderUsername === selfUsername;
+    const removeButton = (username: string): string =>
+      `<button type="button" class="social-action-btn remove-friend social-guild-remove-btn" data-username="${this.escapeHtml(username)}">Remove</button>`;
 
     setHtml(this.panelContainer, `
       <div class="social-guild-info">
@@ -1220,6 +1254,7 @@ export class SocialScreen implements Screen {
           className: this.getPlayerClassName(m.username),
           sub: this.playerSub(m.username),
           trail: m.role === 'leader' ? '<span class="social-badge friend">Leader</span>' : '',
+          actions: isLeader && m.username !== selfUsername ? removeButton(m.username) : '',
         })).join('')}
       </div>
       <div class="social-leave-row">
@@ -1229,11 +1264,8 @@ export class SocialScreen implements Screen {
   }
 
   private guildCreateHtml(): string {
-    const level = this.selfLevel();
-    const note = level >= MIN_GUILD_LEVEL
-      ? 'Pick a name to start your guild.'
-      : `Starting a guild needs level ${MIN_GUILD_LEVEL}. You are level ${level}.`;
     return `
+      <div class="social-guild-invites"></div>
       <div class="social-guild-create">
         <div class="social-guild-create-title">You are not in a guild</div>
         <div class="social-guild-note">Ask any guild member to invite you, or start your own.</div>
@@ -1241,18 +1273,49 @@ export class SocialScreen implements Screen {
           <input class="social-search social-guild-name-input" type="text" placeholder="Guild name..." aria-label="Guild name" maxlength="20" autocomplete="off" value="${this.escapeHtml(this.guildNameDraft)}" />
           <button type="button" class="social-action-btn add-friend social-guild-create-btn">Create Guild</button>
         </div>
-        <div class="social-guild-note social-guild-reason">${note}</div>
+        <div class="social-guild-note social-guild-reason"></div>
       </div>
     `;
   }
 
+  private renderGuildInvites(): void {
+    const list = this.panelContainer.querySelector('.social-guild-invites');
+    if (list) setHtml(list, this.guildInvitesHtml(this.lastSocial?.guildInvites ?? []));
+  }
+
+  private guildInvitesHtml(invites: readonly GuildInviteInfo[]): string {
+    if (invites.length === 0) return '';
+    const rows = invites.map(inv => {
+      const guildId = this.escapeHtml(inv.guildId);
+      return `
+        <div class="social-user-row social-inline-actions" data-guild-id="${guildId}">
+          <span class="social-user-text">
+            <span class="social-user-name">${this.escapeHtml(inv.guildName)}</span>
+            <span class="social-user-sub">Invited by ${this.escapeHtml(inv.inviterUsername)}</span>
+          </span>
+          <div class="social-user-actions">
+            <button type="button" class="social-action-btn add-friend social-guild-accept-invite" data-guild-id="${guildId}">Accept</button>
+            <button type="button" class="social-action-btn social-guild-decline-invite" data-guild-id="${guildId}">Decline</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    return `${this.sectionLabel('Guild invites', invites.length)}<div class="social-user-list">${rows}</div>`;
+  }
+
   private syncGuildCreateButton(): void {
     const btn = this.panelContainer.querySelector<HTMLButtonElement>('.social-guild-create-btn');
-    const eligible = this.selfLevel() >= MIN_GUILD_LEVEL;
+    const level = this.selfLevel();
+    const eligible = level >= MIN_GUILD_LEVEL;
     const named = !!this.guildNameDraft.trim();
     if (btn) btn.disabled = !eligible || !named;
     const reason = this.panelContainer.querySelector<HTMLElement>('.social-guild-reason');
-    if (reason) reason.hidden = eligible && named;
+    if (!reason) return;
+    const text = eligible
+      ? 'Pick a name to start your guild.'
+      : `Starting a guild needs level ${MIN_GUILD_LEVEL}. You are level ${level}.`;
+    if (reason.textContent !== text) reason.textContent = text;
+    reason.hidden = eligible && named;
   }
 
   // ── Party panel ──────────────────────────────────────────────

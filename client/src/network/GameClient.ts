@@ -28,6 +28,7 @@ export const OFFLINE_NOTICE = "You're offline — reconnecting. Try again in a m
 
 export interface ServerErrorDetail {
   questId?: string;
+  sendLimited?: boolean;
 }
 type ServerErrorListener = (message: string, code?: ServerErrorCode, detail?: ServerErrorDetail) => void;
 type CombatListener = (message: ServerCombatMessage, receivedAt: number) => void;
@@ -340,7 +341,7 @@ export class GameClient {
         console.warn('[GameClient] server error:', msg.message);
         for (const listener of this.serverErrorListeners) {
           try {
-            listener(msg.message, msg.code, { questId: msg.questId });
+            listener(msg.message, msg.code, { questId: msg.questId, sendLimited: msg.sendLimited === true });
           } catch (err) {
             console.error('[GameClient] error in server-error listener:', err);
           }
@@ -802,16 +803,24 @@ export class GameClient {
     this.sendRaw({ type: 'create_guild', name });
   }
 
-  sendJoinGuild(guildId: string): void {
-    this.sendRaw({ type: 'join_guild', guildId });
-  }
-
   sendLeaveGuild(): void {
     this.sendRaw({ type: 'leave_guild' });
   }
 
   sendInviteGuild(username: string): void {
     this.sendRaw({ type: 'invite_guild', username });
+  }
+
+  sendAcceptGuildInvite(guildId: string): void {
+    this.sendRaw({ type: 'accept_guild_invite', guildId });
+  }
+
+  sendDeclineGuildInvite(guildId: string): void {
+    this.sendRaw({ type: 'decline_guild_invite', guildId });
+  }
+
+  sendKickGuildMember(username: string): void {
+    this.sendRaw({ type: 'kick_guild_member', username });
   }
 
   // --- Party ---

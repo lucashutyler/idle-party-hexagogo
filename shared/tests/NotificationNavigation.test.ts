@@ -16,6 +16,14 @@ describe('resolveNotificationNavigation', () => {
     }
   });
 
+  it('routes every guild-category event to the guild target', () => {
+    const guildEvents = NOTIFICATION_EVENT_REGISTRY.filter(d => d.category === 'guild').map(d => d.eventKey);
+    expect(guildEvents).toEqual(['guild_invite_received', 'guild_kicked']);
+    for (const eventKey of guildEvents) {
+      expect(resolveNotificationNavigation(entryFor(eventKey))).toEqual({ kind: 'guild' });
+    }
+  });
+
   it('routes a new friend request to the friend_requests target', () => {
     expect(resolveNotificationNavigation(entryFor('friend_request_received'))).toEqual({ kind: 'friend_requests' });
   });

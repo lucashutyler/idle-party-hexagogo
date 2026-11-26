@@ -11,7 +11,7 @@ Saved state per player (`PlayerSaveData`):
 - `character` (className, level, xp, inventory, equipment, skillLoadout, including the priority list `actionOrder`) — optional; old saves or saves with invalid/legacy classes get `character = null` on load, forcing class re-selection. Within `skillLoadout`, only `equippedSkills` is authoritative — `unlockedSkills` is derived and recomputed from level + skill content on every restore (`reconcileSkillLoadout` also clears slots whose skill no longer exists or lost availability). Legacy `skillPoints` is ignored on load.
 - `friends`, `outgoingFriendRequests`, `blockedUsers` — optional; default to empty
 - `guildId`, `partyId`, `partyRole`, `partyGridPosition` — party state survives server restarts for multi-player parties; a lone player gets a new party with their saved seat, set before their hires are restored
-- `chatHistory` (last 1000 messages), `chatSendChannel`, `chatDmTarget`
+- `chatHistory` (at most 1000 messages: the newest 300 DMs, 200 party or guild lines and 500 public lines, in arrival order; an older save is trimmed the same way on restore, and an older server reads the trimmed list whole — see `social.md` → Chat history), `chatSendChannel`, `chatDmTarget`
 - `mailbox` (only in saves from before `MailboxStore`: read on load and never written)
 - `activeQuests`, `completedQuests`, `weeklyCompletions` — quest state (see `docs/architecture/content.md` Quest system)
 - `partyAutoRun` (boolean) — the party's auto run switch, mirrored onto every member's save like `partyHenchmen`; the owner's save is read on restore.
@@ -29,7 +29,7 @@ The `inventory` and `equipment` fields are optional within `character` — old s
 
 All of the fields above are optional. `PlayerSession.fromSaveData` bypasses the constructor, so every new field is assigned explicitly there (and cleaned — malformed values fall back to their defaults). **Master reset** (`resetForMasterReset`) clears `monsterKills`, `awayLedger` and `pendingRecap` along with the character, but keeps `combatPrefs` and `autoRetreatNotified`; presence is then re-evaluated for every session, so offline players get a fresh ledger.
 
-Guild data is saved separately in `data/guilds.json`. Active async trades are saved separately in `data/trades.json` via `TradeStore`. Game content is saved separately via `ContentStore`.
+Guild data is saved separately in `data/guilds.json`: per guild `info`, `members` and, while any are open, `invites` (`username`, `inviterUsername`, `createdAt`; optional, so older files load with none, closed ones (expired, or whose inviter is no longer in the guild) are dropped as they are read, and an unreadable entry is dropped without touching its guild — see `social.md` → Guild). Active async trades are saved separately in `data/trades.json` via `TradeStore`. Game content is saved separately via `ContentStore`.
 
 The store interface is swappable for SQLite/Postgres.
 

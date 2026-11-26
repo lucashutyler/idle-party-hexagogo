@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { ChatMessage, ChatChannelType } from '@idle-party-rpg/shared';
+import { stripTextDirectionControls } from '@idle-party-rpg/shared';
 
 export interface ChatRecipient {
   username: string;
@@ -24,14 +25,15 @@ export class ChatSystem {
     text: string,
     recipients: ChatRecipient[],
   ): ChatMessage | null {
-    if (!text || text.length === 0 || text.length > 500) return null;
+    const cleanText = stripTextDirectionControls(text);
+    if (!cleanText || cleanText.length > 500) return null;
 
     const message: ChatMessage = {
       id: randomUUID(),
       channelType,
       channelId,
       senderUsername,
-      text,
+      text: cleanText,
       timestamp: Date.now(),
     };
 

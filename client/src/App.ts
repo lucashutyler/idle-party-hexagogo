@@ -499,6 +499,9 @@ export class App {
         case 'party':
           navigate('social', 'party');
           break;
+        case 'guild':
+          navigate('social', 'guild');
+          break;
         case 'friend_requests':
           navigate('social', 'friends');
           break;

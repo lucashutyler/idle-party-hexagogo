@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { CLIENT_CHAT_CAPS } from '@idle-party-rpg/shared';
 import type { ChatChannelType, ChatMessage, ServerStateMessage } from '@idle-party-rpg/shared';
 import {
   buildDmThreads,
   canonicalUsername,
-  CHAT_MESSAGE_CAP,
   CHAT_ROW_CAP,
   ChatLog,
   chatMembership,
@@ -99,10 +99,41 @@ describe('ChatLog', () => {
     const log = new ChatLog();
     const first = msg({ id: 'first', timestamp: 0 });
     log.add([first]);
-    log.add(Array.from({ length: CHAT_MESSAGE_CAP }, (_, i) => msg({ id: `n${i}`, timestamp: i + 1 })));
-    expect(log.messages).toHaveLength(CHAT_MESSAGE_CAP);
+    log.add(Array.from({ length: CLIENT_CHAT_CAPS.public }, (_, i) => msg({ id: `n${i}`, timestamp: i + 1 })));
+    expect(log.messages).toHaveLength(CLIENT_CHAT_CAPS.public);
     expect(log.messages[0].id).toBe('n0');
-    expect(log.add([first]).added).toHaveLength(1);
+    expect(log.add([{ ...first, timestamp: 10_000 }]).added).toHaveLength(1);
+  });
+
+  it('keeps DMs past 500 public messages, with the newest still last', () => {
+    const log = new ChatLog();
+    const dms = [msg({ id: 'dm1', channelType: 'dm', channelId: 'me' }), msg({ id: 'dm2', channelType: 'dm', channelId: 'me' })];
+    log.add(dms);
+    for (let i = 0; i < 500; i++) log.add([msg({ id: `p${i}` })]);
+
+    expect(log.messages.filter(m => m.channelType === 'dm').map(m => m.id)).toEqual(['dm1', 'dm2']);
+    expect(log.messages.filter(m => m.channelType === 'global')).toHaveLength(CLIENT_CHAT_CAPS.public);
+    expect(log.latestId()).toBe('p499');
+  });
+
+  it('keeps party and guild lines apart from public ones', () => {
+    const log = new ChatLog();
+    log.add([msg({ id: 'party1', channelType: 'party' }), msg({ id: 'guild1', channelType: 'guild' })]);
+    log.add(Array.from({ length: 300 }, (_, i) => msg({ id: `z${i}`, channelType: 'zone' })));
+
+    expect(log.messages.slice(0, 2).map(m => m.id)).toEqual(['party1', 'guild1']);
+    expect(log.messages).toHaveLength(2 + CLIENT_CHAT_CAPS.public);
+  });
+
+  it('reports only what it kept as added', () => {
+    const log = new ChatLog();
+    const batch = Array.from({ length: CLIENT_CHAT_CAPS.public + 10 }, (_, i) => msg({ id: `b${i}` }));
+
+    const { added } = log.add(batch);
+
+    expect(added).toHaveLength(CLIENT_CHAT_CAPS.public);
+    expect(added[0].id).toBe('b10');
+    expect(log.add([batch[0]]).added).toEqual([]);
   });
 });
 

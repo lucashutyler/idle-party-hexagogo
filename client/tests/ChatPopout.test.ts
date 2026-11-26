@@ -12,7 +12,7 @@ type ChatListener = (msg: ChatMessage) => void;
 type SyncListener = (messages: ChatMessage[], full: boolean) => void;
 type StateListener = (state: ServerStateMessage) => void;
 type ConnectionListener = (connected: boolean) => void;
-type ErrorListener = (message: string, code?: ServerErrorCode) => void;
+type ErrorListener = (message: string, code?: ServerErrorCode, detail?: { sendLimited?: boolean }) => void;
 
 interface MediaOverrides {
   column?: boolean;
@@ -141,7 +141,9 @@ function setup(initialState: ServerStateMessage | null = stateWith()) {
     for (const l of stateListeners) l(state);
   };
   const connect = () => { for (const l of connectionListeners) l(true); };
-  const serverError = (text: string, code?: ServerErrorCode) => { for (const l of errorListeners) l(text, code); };
+  const serverError = (text: string, code?: ServerErrorCode, detail?: { sendLimited?: boolean }) => {
+    for (const l of errorListeners) l(text, code, detail);
+  };
   const senderBtn = (user: string) => document.querySelector(`.chat-msg-sender-btn[data-user="${user}"]`) as HTMLButtonElement | null;
   const texts = () => [...document.querySelectorAll('.chat-msg-text')].map(el => el.textContent);
   const tab = (id: string) => document.querySelector(`.chat-tab[data-tab="${id}"]`) as HTMLButtonElement;
@@ -668,6 +670,44 @@ describe('ChatPopout sending', () => {
     t.serverError('User not found', 'chat_refused');
     expect(t.input().value).toBe('are you there');
     expect(t.status().textContent).toContain('Nobody');
+  });
+
+  it('stays in a DM thread when a send there was refused for going too fast', () => {
+    const t = setup();
+    t.chat.openDm('Mira');
+    t.input().value = 'slow down';
+    t.clickSend();
+
+    t.serverError('You\'re sending messages too fast. Wait a few seconds.', 'chat_refused', { sendLimited: true });
+
+    expect(t.input().value).toBe('slow down');
+    expect(t.status().textContent).toBe('You\'re sending messages too fast. Wait a few seconds.');
+    expect(document.querySelector('.chat-thread-name')?.textContent).toBe('Mira');
+    expect(t.gameClient.sendChat).toHaveBeenLastCalledWith('dm', 'Mira', 'slow down');
+  });
+
+  it('sends text without direction controls, so a later refusal puts back the send it answers', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = 'meet \u{2066}Mira\u{2069} here\u{202E}';
+    t.clickSend();
+    t.receive(message('m1', 'me', 'meet Mira here', { channelType: 'global', channelId: '' }));
+    t.input().value = 'one more';
+    t.clickSend();
+
+    t.serverError('You\'re sending messages too fast. Wait a few seconds.', 'chat_refused', { sendLimited: true });
+
+    expect(t.input().value).toBe('one more');
+    expect(unsent().hidden).toBe(true);
+    expect(t.gameClient.sendChat).toHaveBeenNthCalledWith(1, 'global', '', 'meet Mira here');
+  });
+
+  it('sends nothing for a message made only of direction controls', () => {
+    const t = setup();
+    t.chat.open();
+    t.input().value = '\u{202A}\u{202E}\u{2066}\u{2069}';
+    t.clickSend();
+    expect(t.gameClient.sendChat).not.toHaveBeenCalled();
   });
 
   it('puts a refused channel send back and says why', () => {

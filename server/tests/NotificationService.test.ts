@@ -95,3 +95,67 @@ describe('NotificationService', () => {
     expect(push.deliver).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('NotificationService dedupe', () => {
+  const vars = { title: 'Friend request', body: 'Testy sent you a friend request.' };
+  const fromTesty = { dedupeKey: 'Testy', withinMs: 10 * 60_000 };
+  let now: number;
+  let inApp: ReturnType<typeof makeDriver>;
+  let service: NotificationService;
+
+  beforeEach(() => {
+    now = 1_000_000;
+    inApp = makeDriver('in_app');
+    service = new NotificationService(() => undefined, [inApp.driver], () => now);
+  });
+
+  it('suppresses a repeat inside the window and delivers it after', () => {
+    service.notify('Quill', 'friend_request_received', vars, fromTesty);
+    now += 9 * 60_000;
+    service.notify('Quill', 'friend_request_received', vars, fromTesty);
+    expect(inApp.deliver).toHaveBeenCalledTimes(1);
+
+    now += 60_001;
+    service.notify('Quill', 'friend_request_received', vars, fromTesty);
+    expect(inApp.deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it('times the window from the last delivered one, not from suppressed repeats', () => {
+    service.notify('Quill', 'friend_request_received', vars, fromTesty);
+    for (let i = 0; i < 9; i++) {
+      now += 60_000;
+      service.notify('Quill', 'friend_request_received', vars, fromTesty);
+    }
+    now += 60_001;
+    service.notify('Quill', 'friend_request_received', vars, fromTesty);
+
+    expect(inApp.deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps recipients, events and dedupe keys apart', () => {
+    service.notify('Quill', 'friend_request_received', vars, fromTesty);
+    service.notify('Mira', 'friend_request_received', vars, fromTesty);
+    service.notify('Quill', 'friend_request_received', vars, { ...fromTesty, dedupeKey: 'Oskar' });
+    service.notify('Quill', 'party_invite_received', vars, fromTesty);
+
+    expect(inApp.deliver).toHaveBeenCalledTimes(4);
+  });
+
+  it('leaves calls without a dedupe key unchanged', () => {
+    service.notify('Quill', 'friend_request_received', vars, fromTesty);
+    service.notify('Quill', 'friend_request_received', vars);
+    service.notify('Quill', 'friend_request_received', vars);
+
+    expect(inApp.deliver).toHaveBeenCalledTimes(3);
+  });
+
+  it('forgets windows that have ended', () => {
+    service.notify('Quill', 'friend_request_received', vars, { dedupeKey: 'Testy', withinMs: 1_000 });
+    expect(service.dedupeKeyCount).toBe(1);
+
+    now += 61_000;
+    service.notify('Quill', 'party_invite_received', vars, { dedupeKey: 'Testy', withinMs: 1_000 });
+
+    expect(service.dedupeKeyCount).toBe(1);
+  });
+});

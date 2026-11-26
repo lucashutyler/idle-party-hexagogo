@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import WebSocket from 'ws';
-import { HexGrid, HexTile, MIN_GUILD_LEVEL, isBlockedUser, offsetToCube } from '@idle-party-rpg/shared';
-import type { BlockLevel, ChatMessage } from '@idle-party-rpg/shared';
+import { HexGrid, HexTile, MIN_GUILD_LEVEL, chatBucket, isBlockedUser, offsetToCube } from '@idle-party-rpg/shared';
+import type { BlockLevel, ChatChannelType, ChatMessage } from '@idle-party-rpg/shared';
 import { PlayerManager } from '../src/game/PlayerManager.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
-import type { GameStateStore } from '../src/game/GameStateStore.js';
+import { CHAT_SEND_LIMIT_REFUSAL } from '../src/game/social/ChatRateLimiter.js';
+import type { GameStateStore, PlayerSaveData } from '../src/game/GameStateStore.js';
 import type { AccountStore } from '../src/auth/AccountStore.js';
 import type { ContentStore } from '../src/game/ContentStore.js';
 import { wrapGrids, fakeWorldMeta, fakeSkillContent } from './testGrids.js';
@@ -227,7 +228,8 @@ describe('sendPlayerChat channel validation', () => {
     const withOutsider = await setup('alice', 'bob', 'carol');
     const guild = withOutsider.pm.guilds.createGuild('alice', 'Testers', MIN_GUILD_LEVEL);
     if (typeof guild === 'string') throw new Error(guild);
-    withOutsider.pm.guilds.joinGuild('bob', guild.id);
+    withOutsider.pm.guilds.inviteToGuild('alice', 'bob', false);
+    withOutsider.pm.guilds.acceptInvite('bob', guild.id);
 
     expect(withOutsider.pm.sendPlayerChat('alice', 'guild', guild.id, 'hello')).toBeNull();
     expect(withOutsider.historyOf('bob')).toMatchObject([{ channelType: 'guild', channelId: guild.id, text: 'hello' }]);
@@ -490,5 +492,268 @@ describe('the zone in a state push', () => {
 
     expect(zone).toBeTruthy();
     expect(t.pm.sendPlayerChat('alice', 'zone', zone, 'hello')).toBeNull();
+  });
+});
+
+/** Only `Date` is faked, so the login timers still run as usual. */
+function fakeClock(): { advance(ms: number): void } {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(1_000_000);
+  return { advance: (ms: number) => vi.setSystemTime(Date.now() + ms) };
+}
+
+const inBucket = (messages: readonly ChatMessage[], bucket: 'dm' | 'group' | 'public') =>
+  messages.filter(m => chatBucket(m.channelType) === bucket);
+
+let lineId = 0;
+function storedLine(channelType: ChatChannelType, over: Partial<ChatMessage> = {}): ChatMessage {
+  lineId++;
+  return { id: `line${lineId}`, channelType, channelId: '', senderUsername: 'alice', text: `line ${lineId}`, timestamp: lineId, ...over };
+}
+
+describe('chat history per channel', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps a bystander\'s DMs through 1,200 global lines from one sender', async () => {
+    const clock = fakeClock();
+    const t = await setup('alice', 'bob', 'carol');
+    expect(t.pm.sendPlayerChat('carol', 'dm', 'bob', 'first')).toBeNull();
+    clock.advance(1_000);
+    expect(t.pm.sendPlayerChat('carol', 'dm', 'bob', 'second')).toBeNull();
+
+    for (let i = 0; i < 1_200; i++) {
+      clock.advance(3_100);
+      expect(t.pm.sendPlayerChat('alice', 'global', '', `shout ${i}`)).toBeNull();
+    }
+
+    const history = t.historyOf('bob');
+    expect(inBucket(history, 'dm').map(m => m.text)).toEqual(['first', 'second']);
+    expect(inBucket(history, 'public')).toHaveLength(500);
+    expect(history[history.length - 1].text).toBe('shout 1199');
+    expect(inBucket(history, 'public')[0].text).toBe('shout 700');
+  });
+
+  it('sends the newest DMs and group lines in a full sync, however much public chat came after', async () => {
+    const t = await setup('alice', 'bob');
+    const dms = Array.from({ length: 120 }, () => storedLine('dm', { channelId: 'bob' }));
+    const party = Array.from({ length: 60 }, () => storedLine('party'));
+    const publicLines = Array.from({ length: 300 }, () => storedLine('global'));
+    for (const message of [...dms, ...party, ...publicLines]) t.pm.sendChatToPlayer('bob', message);
+
+    const { messages, full } = t.pm.syncChatForPlayer('bob');
+
+    expect(full).toBe(true);
+    expect(inBucket(messages, 'dm')).toEqual(dms.slice(-100));
+    expect(inBucket(messages, 'group')).toEqual(party.slice(-50));
+    expect(inBucket(messages, 'public')).toEqual(publicLines.slice(-200));
+    expect(messages.map(m => m.timestamp)).toEqual([...messages.map(m => m.timestamp)].sort((a, b) => a - b));
+  });
+
+  it('counts a DM among the newest 200 only once', async () => {
+    const t = await setup('alice', 'bob');
+    const lines = [storedLine('global'), storedLine('dm', { channelId: 'bob' }), storedLine('global')];
+    for (const message of lines) t.pm.sendChatToPlayer('bob', message);
+
+    expect(t.pm.syncChatForPlayer('bob').messages).toEqual(lines);
+  });
+
+  it('sends the same latest batch for a stale sinceId, marked as not full', async () => {
+    const t = await setup('alice', 'bob');
+    const dm = storedLine('dm', { channelId: 'bob' });
+    const publicLines = Array.from({ length: 300 }, () => storedLine('global'));
+    for (const message of [dm, ...publicLines]) t.pm.sendChatToPlayer('bob', message);
+
+    const stale = t.pm.syncChatForPlayer('bob', 'gone');
+
+    expect(stale.full).toBe(false);
+    expect(stale.messages).toEqual([dm, ...publicLines.slice(-200)]);
+  });
+
+  it('sends everything after a known sinceId, as before', async () => {
+    const t = await setup('alice', 'bob');
+    const lines = [storedLine('global'), storedLine('dm', { channelId: 'bob' }), storedLine('party'), storedLine('global')];
+    for (const message of lines) t.pm.sendChatToPlayer('bob', message);
+
+    expect(t.pm.syncChatForPlayer('bob', lines[0].id)).toEqual({ messages: lines.slice(1), full: true });
+    expect(t.pm.syncChatForPlayer('bob', lines[3].id)).toEqual({ messages: [], full: true });
+  });
+});
+
+describe('chat history save and restore', () => {
+  function saveWith(chatHistory: unknown): PlayerSaveData {
+    return {
+      username: 'dana',
+      battleCount: 0,
+      combatLog: [],
+      unlockedKeys: ['tile-start'],
+      position: { col: 0, row: 0 },
+      target: null,
+      movementQueue: [],
+      character: { className: 'Knight', level: 5, xp: 1000 },
+      chatHistory,
+    } as unknown as PlayerSaveData;
+  }
+
+  it('restores an old save with 1,000 public lines to the newest 500, keeping every DM', async () => {
+    const t = await setup('alice');
+    const dms = Array.from({ length: 5 }, () => storedLine('dm', { channelId: 'dana' }));
+    const publicLines = Array.from({ length: 1_000 }, () => storedLine('zone'));
+    const old = [dms[0], ...publicLines.slice(0, 400), ...dms.slice(1), ...publicLines.slice(400)];
+
+    t.pm.restoreFromSaveData([saveWith(old)]);
+
+    const history = t.historyOf('dana');
+    expect(inBucket(history, 'dm')).toEqual(dms);
+    expect(inBucket(history, 'public')).toEqual(publicLines.slice(-500));
+    expect(history).toEqual(old.filter(m => chatBucket(m.channelType) === 'dm' || publicLines.slice(-500).includes(m)));
+  });
+
+  it('saves what it restored, no more than an older build keeps', async () => {
+    const t = await setup('alice');
+    const old = [...Array.from({ length: 900 }, () => storedLine('global')), ...Array.from({ length: 100 }, () => storedLine('dm', { channelId: 'dana' }))];
+    t.pm.restoreFromSaveData([saveWith(old)]);
+
+    const saved = t.pm.getAllSaveData().find(data => data.username === 'dana')!;
+
+    expect(saved.chatHistory).toEqual(t.historyOf('dana'));
+    expect(saved.chatHistory!.length).toBeLessThanOrEqual(1_000);
+    expect(saved.chatHistory!.slice(-100)).toEqual(old.slice(-100));
+  });
+
+  it('keeps a save that already fits exactly as it was', async () => {
+    const t = await setup('alice');
+    const old = [storedLine('global'), storedLine('dm', { channelId: 'dana' }), storedLine('guild')];
+
+    t.pm.restoreFromSaveData([saveWith(old)]);
+
+    expect(t.historyOf('dana')).toEqual(old);
+  });
+
+  it.each([
+    ['no chat history', undefined],
+    ['a history that is not a list', 'nonsense'],
+    ['a history with a damaged entry', [null, storedLine('global')]],
+  ])('restores a save with %s', async (_label, chatHistory) => {
+    const t = await setup('alice');
+
+    t.pm.restoreFromSaveData([saveWith(chatHistory)]);
+
+    expect(t.historyOf('dana').every(m => m !== null)).toBe(true);
+    t.pm.sendChatToPlayer('dana', storedLine('dm', { channelId: 'dana' }));
+    expect(inBucket(t.historyOf('dana'), 'dm')).toHaveLength(1);
+  });
+
+  it('trims each bucket on its own as new lines arrive after a restore', async () => {
+    const t = await setup('alice');
+    const dms = Array.from({ length: 300 }, () => storedLine('dm', { channelId: 'dana' }));
+    t.pm.restoreFromSaveData([saveWith(dms)]);
+
+    const newest = storedLine('dm', { channelId: 'dana' });
+    t.pm.sendChatToPlayer('dana', storedLine('global'));
+    t.pm.sendChatToPlayer('dana', newest);
+
+    const history = t.historyOf('dana');
+    expect(inBucket(history, 'dm')).toEqual([...dms.slice(1), newest]);
+    expect(inBucket(history, 'public')).toHaveLength(1);
+  });
+});
+
+describe('chat send limits', () => {
+  let clock: { advance(ms: number): void };
+  let t: Awaited<ReturnType<typeof setup>>;
+
+  beforeEach(async () => {
+    clock = fakeClock();
+    t = await setup('alice', 'bob');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('refuses a 6th message inside 5 seconds, and allows it once the window has passed', () => {
+    for (let i = 0; i < 5; i++) {
+      expect(t.pm.sendPlayerChat('alice', 'tile', '', `line ${i}`)).toBeNull();
+      clock.advance(500);
+    }
+
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', 'too soon')).toBe(CHAT_SEND_LIMIT_REFUSAL);
+    expect(t.historyOf('bob').map(m => m.text)).not.toContain('too soon');
+    expect(t.historyOf('alice').map(m => m.text)).not.toContain('too soon');
+
+    clock.advance(3_000);
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', 'later')).toBeNull();
+    expect(t.historyOf('bob').map(m => m.text)).toContain('later');
+  });
+
+  it('shares one budget between DMs and global chat', () => {
+    expect(t.pm.sendPlayerChat('alice', 'global', '', 'hello all')).toBeNull();
+    for (let i = 0; i < 4; i++) expect(t.pm.sendPlayerChat('alice', 'dm', 'bob', `dm ${i}`)).toBeNull();
+
+    expect(t.pm.sendPlayerChat('alice', 'dm', 'bob', 'one more')).toBe(CHAT_SEND_LIMIT_REFUSAL);
+    expect(t.notify).toHaveBeenCalledTimes(4);
+  });
+
+  it('allows one global message every 3 seconds', () => {
+    expect(t.pm.sendPlayerChat('alice', 'global', '', 'one')).toBeNull();
+    expect(t.pm.sendPlayerChat('alice', 'global', '', 'two')).toBe(CHAT_SEND_LIMIT_REFUSAL);
+    clock.advance(3_001);
+    expect(t.pm.sendPlayerChat('alice', 'global', '', 'three')).toBeNull();
+  });
+
+  it('checks the channel before the limit, so a refused channel costs nothing', () => {
+    for (let i = 0; i < 10; i++) expect(t.pm.sendPlayerChat('alice', 'dm', 'nobody', 'hi')).toBe('User not found');
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', 'still fine')).toBeNull();
+  });
+
+  it('never limits server lines', () => {
+    t.joinParty('bob', 'alice');
+    const partyId = t.pm.getSessionByUsername('alice')!.getPartyId()!;
+    const serverLines = () => t.historyOf('alice').filter(m => m.senderUsername === 'Server').length;
+    const before = serverLines();
+
+    for (let i = 0; i < 30; i++) {
+      t.pm.broadcastServerMessage(`notice ${i}`);
+      t.pm.broadcastPartyEvent(partyId, 'bob', `You did ${i}`, `bob did ${i}`);
+    }
+
+    expect(serverLines() - before).toBe(60);
+    expect(t.pm.sendPlayerChat('alice', 'party', '', 'still mine to say')).toBeNull();
+  });
+});
+
+describe('chat text', () => {
+  let t: Awaited<ReturnType<typeof setup>>;
+
+  beforeEach(async () => {
+    t = await setup('alice', 'bob');
+  });
+
+  it('removes text direction controls before delivering', () => {
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', 'abc\u{202E}def\u{2066}g\u{2069}')).toBeNull();
+    expect(t.historyOf('bob').map(m => m.text)).toEqual(['abcdefg']);
+  });
+
+  it('drops a message made only of text direction controls', () => {
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', '\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}')).toBeNull();
+    expect(t.historyOf('bob')).toEqual([]);
+    expect(t.historyOf('alice')).toEqual([]);
+  });
+
+  it('keeps zero-width joiners', () => {
+    t.pm.sendPlayerChat('alice', 'tile', '', 'a\u{200D}b');
+    expect(t.historyOf('bob').map(m => m.text)).toEqual(['a\u{200D}b']);
+  });
+
+  it('measures the length after removing them', () => {
+    expect(t.pm.sendPlayerChat('alice', 'tile', '', `${'x'.repeat(500)}\u{202E}`)).toBeNull();
+    expect(t.historyOf('bob').map(m => m.text.length)).toEqual([500]);
+  });
+
+  it('leaves them out of the DM notice too', () => {
+    t.pm.sendPlayerChat('alice', 'dm', 'bob', '\u{202E}hello');
+    expect(t.notify).toHaveBeenCalledWith('bob', 'dm_received', expect.objectContaining({ body: 'hello' }));
   });
 });

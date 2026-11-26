@@ -1,5 +1,15 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.26.2',
+    notes: [
+      'Private messages stay in your chat history even when other channels are busy.',
+      'Chat now slows down anyone sending messages very fast.',
+      'Names that look like game staff can no longer be chosen.',
+      'Guild invites now ask you first, and guild leaders can remove members.',
+      'You can start a guild from level 5.',
+    ],
+  },
+  {
     version: '2026.11.26.1',
     notes: [
       'Tap a room beyond a door, or on another map you know a way to, and your party walks there, stepping through doors on the way.',
