@@ -327,6 +327,19 @@ describe('CodexModal', () => {
       expect(body().querySelector('.codex-missing-title')!.textContent).toBe('You haven\'t discovered this yet.');
     });
 
+    it('keeps "not discovered" once a current snapshot said so, while the marker moves on, and asks on the 30 s refresh', () => {
+      vi.useFakeTimers();
+      mount(moved('v2'), codexReply({ version: 'v1' }));
+      const start = Date.now();
+      modal.open({ kind: 'monster', id: 'bear' });
+      client.reply(codexReply({ version: 'v2' }));
+      client.push(moved('v3'));
+      expect(body().querySelector('.codex-missing-title')!.textContent).toBe('You haven\'t discovered this yet.');
+      playWithoutReply(40);
+      expect(body().querySelector('.codex-missing-title')!.textContent).toBe('You haven\'t discovered this yet.');
+      expect(sentAt(start)).toEqual([0, CODEX_REFRESH_MS]);
+    });
+
     it('asks again at once when the snapshot is dropped while open', () => {
       vi.useFakeTimers();
       mount();

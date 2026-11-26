@@ -38,6 +38,7 @@ interface CodexView {
   target: CodexTarget;
   scrollTop: number;
   expanded: boolean;
+  checked: boolean;
 }
 
 interface ListState {
@@ -106,11 +107,11 @@ export class CodexModal {
   open(target: CodexTarget): void {
     if (!this.overlay) {
       this.mount();
-      this.stack = [{ target, scrollTop: 0, expanded: false }];
+      this.stack = [{ target, scrollTop: 0, expanded: false, checked: false }];
     } else {
       const top = this.top();
       if (top && codexTargetKey(top.target) === codexTargetKey(target)) return;
-      this.stack.push({ target, scrollTop: 0, expanded: false });
+      this.stack.push({ target, scrollTop: 0, expanded: false, checked: false });
       if (this.stack.length > CODEX_STACK_MAX) this.stack.shift();
     }
     this.paint();
@@ -313,7 +314,6 @@ export class CodexModal {
     if (this.isStale()) this.scheduleRefetch();
   }
 
-  /** At most one fetch per retry gap while open; a timer covers the last change in a window. */
   private scheduleRefetch(): void {
     const due = this.requestedAt + this.retryGap();
     if (this.refreshTimer && this.refreshDue <= due) return;
@@ -337,13 +337,12 @@ export class CodexModal {
     return marker !== undefined && gameClient.lastCodex?.version !== marker;
   }
 
-  /** The window has nothing true to show: no snapshot, or an entry missing from a stale one. */
   private retryGap(): number {
     const { gameClient } = this.host;
     if (!gameClient.lastCodex) return CODEX_RETRY_MS;
-    const target = this.top()?.target;
-    if (!target || target.kind === 'home' || target.kind === 'list') return CODEX_REFRESH_MS;
-    return hasCodexEntry(this.index(gameClient.lastState), target) ? CODEX_REFRESH_MS : CODEX_RETRY_MS;
+    const view = this.top();
+    if (!view || view.checked || view.target.kind === 'home' || view.target.kind === 'list') return CODEX_REFRESH_MS;
+    return hasCodexEntry(this.index(gameClient.lastState), view.target) ? CODEX_REFRESH_MS : CODEX_RETRY_MS;
   }
 
   private index(state: ServerStateMessage | null): CodexIndex {
@@ -397,11 +396,13 @@ export class CodexModal {
       const opts: CodexListOptions = { query: list.query, sort: list.sort, shown: list.shown, zones: list.zones, zoneShown: list.zoneShown };
       return codexListHtml(target.list, ctx, opts);
     }
-    if (!hasCodexEntry(index, target) && this.isStale()) return codexLoadingHtml();
+    if (!hasCodexEntry(index, target)) {
+      if (!this.isStale()) view.checked = true;
+      else if (!view.checked) return codexLoadingHtml();
+    }
     return codexEntryHtml(target, ctx, view.expanded);
   }
 
-  /** "New" is judged against the seen list as it stood at this opening; the next opening shows only what arrived since. */
   private rememberSeen(): void {
     const username = this.host.gameClient.lastState?.username;
     if (username && this.memo) writeSeen(username, this.memo.index.recent.map(codexRefKey));
