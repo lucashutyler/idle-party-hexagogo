@@ -872,6 +872,34 @@ export type {
   ClientAckRecapMessage,
   ClientPresenceMessage,
 } from './systems/BattleTypes.js';
+export type {
+  CodexKind,
+  CodexRef,
+  CodexSaveData,
+  ClientRequestCodexMessage,
+  CodexMonsterDrop,
+  CodexMonster,
+  CodexItem,
+  CodexShopStock,
+  CodexShopHire,
+  CodexShop,
+  CodexTable,
+  CodexDungeon,
+  ServerCodexMessage,
+} from './systems/CodexTypes.js';
+export {
+  CODEX_KINDS,
+  CODEX_ID_MAX_LENGTH,
+  CODEX_RECENT_MAX,
+  CODEX_DROP_TALLY_MAX,
+  CODEX_CAPS,
+  codexTableKey,
+  codexRefKey,
+  isCodexKind,
+  isCodexId,
+  parseCodexRefKey,
+  isCodexRef,
+} from './systems/CodexTypes.js';
 
 // Forecasting (Monte Carlo over the real engine)
 export {
@@ -903,6 +931,9 @@ export {
   forecastReasons,
   createForecastJob,
   runForecast,
+  tableShares,
+  encounterMonsterIds,
+  tableMonsterIds,
 } from './systems/Forecast.js';
 export type {
   SimResult,
@@ -915,4 +946,5 @@ export type {
   ForecastJob,
   ForecastReasonInput,
   SummarizeOptions,
+  TableShare,
 } from './systems/Forecast.js';

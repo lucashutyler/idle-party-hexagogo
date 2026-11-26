@@ -612,6 +612,33 @@ function encounterMonsterDefs(
   return fallback ? [fallback] : [];
 }
 
+/** Distinct monster ids one encounter can put in a fight: placements, or pool entries with max > 0; the fallback when none is known. */
+export function encounterMonsterIds(
+  encounterId: string,
+  monsters: Record<string, MonsterDefinition>,
+  encounters: Record<string, EncounterDefinition>,
+): string[] {
+  return [...new Set(encounterMonsterDefs(encounterId, monsters, encounters).map(def => def.id))];
+}
+
+/** Distinct monster ids a weighted table can put in a fight, mirroring `createEncounter` as `tableShares` does. */
+export function tableMonsterIds(
+  table: readonly EncounterTableEntry[],
+  monsters: Record<string, MonsterDefinition>,
+  encounters: Record<string, EncounterDefinition>,
+): string[] {
+  const ids = new Set<string>();
+  for (const { entryId } of tableShares(table)) {
+    if (entryId === '') {
+      const fallback = fallbackMonster(monsters);
+      if (fallback) ids.add(fallback.id);
+      continue;
+    }
+    for (const id of encounterMonsterIds(entryId, monsters, encounters)) ids.add(id);
+  }
+  return [...ids];
+}
+
 export interface TableShare {
   entryId: string;
   share: number;
