@@ -2,6 +2,7 @@ import type { ServerStateMessage } from '@idle-party-rpg/shared';
 import type { GameClient } from '../network/GameClient';
 import { countText } from './countText';
 import { questOfferedHere } from './QuestLogModel';
+import { isTravelling } from './routeSummary';
 
 export const NEW_QUEST_HERE_TEXT = 'new quest here';
 
@@ -144,7 +145,7 @@ export class BottomNav {
           combatTab.classList.toggle('defeat-flash', visual === 'defeat' && lastVisual === 'fighting');
         }
       }
-      this.tabButtons.get('map')?.classList.toggle('has-path', state.party.path.length > 0);
+      this.tabButtons.get('map')?.classList.toggle('has-path', isTravelling(state.party));
       this.setQuestBadge(state);
 
       const social = state.social;

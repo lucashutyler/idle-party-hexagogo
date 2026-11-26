@@ -6,6 +6,8 @@ import type { RoomAction } from '../src/ui/RoomActions';
 
 function makeInfo(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
   return {
+    mapId: 'here',
+    tileId: 'room-1',
     col: 3,
     row: 4,
     tileType: 'Plains',
@@ -108,7 +110,7 @@ describe('RoomView modal pipeline', () => {
     const goBtn = parent.querySelector('.room-view-action-go') as HTMLElement;
     expect(goBtn).toBeTruthy();
     goBtn.click();
-    expect(onMove).toHaveBeenCalledWith(3, 4);
+    expect(onMove).toHaveBeenCalledWith(expect.objectContaining({ mapId: 'here', tileId: 'room-1', col: 3, row: 4 }));
     const overlay = parent.querySelector('.room-view-overlay') as HTMLElement;
     expect(overlay.style.display).toBe('none');
   });
@@ -300,10 +302,10 @@ describe('RoomView room actions', () => {
 
   it('says why a remote room is out of reach and offers no Go to room', () => {
     const view = new RoomView(parent, () => {});
-    view.blockedLines = ['Opens later in the story', 'No walking route from here. This area is reached through a door.'];
+    view.blockedLines = ['Opens later in the story', "You haven't found a way there yet."];
     view.show(makeInfo());
     const lines = [...parent.querySelectorAll('.room-view-lock-line')].map(el => el.textContent);
-    expect(lines).toEqual(['Opens later in the story', 'No walking route from here. This area is reached through a door.']);
+    expect(lines).toEqual(['Opens later in the story', "You haven't found a way there yet."]);
     expect(parent.querySelector('.room-view-action-go')).toBeNull();
 
     view.blockedLines = [];

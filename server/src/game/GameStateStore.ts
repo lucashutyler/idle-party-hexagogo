@@ -20,6 +20,8 @@ export interface PlayerSaveData {
   mapId?: string;
   target: { col: number; row: number } | null;
   movementQueue: { col: number; row: number }[];
+  /** The doors still ahead once `movementQueue` is walked. Absent → no door route. Checked on restore, never re-planned. */
+  route?: { destinationId: string; doors: { fromTileId: string; toTileId: string }[] };
   character?: {
     className: string;
     level: number;

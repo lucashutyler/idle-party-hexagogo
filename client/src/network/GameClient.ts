@@ -1,6 +1,7 @@
 import type { ServerStateMessage, ServerEquipBlockedMessage, ServerCombatMessage,
   ServerMoveBlockedMessage, PlayerProfileMessage, BlockLevel, ChatMessage, ChatChannelType, TradeOfferItem, NotificationEntry, NotificationPreferences, WebPushSubscription, ServerErrorCode,
-  ServerForecastMessage, ServerBestiaryMessage, ForecastTarget, ForecastRequestTarget, AutoRetreatPct, AwayLedger, ItemDefinition } from '@idle-party-rpg/shared';
+  ServerForecastMessage, ServerBestiaryMessage, ForecastTarget, ForecastRequestTarget, AutoRetreatPct, AwayLedger, ItemDefinition,
+  RouteWarningKind, ServerRouteConfirmMessage } from '@idle-party-rpg/shared';
 import { PARTIAL_STATE_PARAM, restoreElidedState } from '@idle-party-rpg/shared';
 import { CombatLogBuffer } from '../combat/CombatLogBuffer';
 
@@ -20,6 +21,7 @@ type EquipBlockedListener = (msg: ServerEquipBlockedMessage) => void;
 type SuspensionListener = () => void;
 type ResumeListener = () => void;
 type MoveBlockedListener = (msg: ServerMoveBlockedMessage) => void;
+type RouteConfirmListener = (msg: ServerRouteConfirmMessage) => void;
 type PlayerProfileListener = (profile: PlayerProfileMessage) => void;
 type NotificationListener = (notification: NotificationEntry) => void;
 export const OFFLINE_NOTICE = "You're offline — reconnecting. Try again in a moment.";
@@ -70,6 +72,7 @@ export class GameClient {
   private worldUpdateListeners = new Set<WorldUpdateListener>();
   private equipBlockedListeners = new Set<EquipBlockedListener>();
   private moveBlockedListeners = new Set<MoveBlockedListener>();
+  private routeConfirmListeners = new Set<RouteConfirmListener>();
   private suspensionListeners = new Set<SuspensionListener>();
   private resumeListeners = new Set<ResumeListener>();
   private playerProfileListeners = new Set<PlayerProfileListener>();
@@ -309,6 +312,14 @@ export class GameClient {
             console.error('[GameClient] error in move_blocked listener:', err);
           }
         }
+      } else if (msg.type === 'route_confirm') {
+        for (const listener of this.routeConfirmListeners) {
+          try {
+            listener(msg as ServerRouteConfirmMessage);
+          } catch (err) {
+            console.error('[GameClient] error in route_confirm listener:', err);
+          }
+        }
       } else if (msg.type === 'player_profile') {
         for (const listener of this.playerProfileListeners) {
           try {
@@ -488,8 +499,18 @@ export class GameClient {
     return true;
   }
 
-  sendMove(col: number, row: number): boolean {
-    return this.sendRaw({ type: 'move', col, row });
+  /**
+   * Send the party to a room by id. Give `coords` only for a room on the party's map: an older server then
+   * still walks there, and it ignores a move with an id alone, so it can never misroute one.
+   */
+  sendMoveTo(tileId: string, coords?: { col: number; row: number }, accept?: readonly RouteWarningKind[]): boolean {
+    return this.sendRaw({ type: 'move', tileId, ...coords, ...(accept?.length ? { accept: [...accept] } : {}) });
+  }
+
+  /** A route the server wants the player to agree to first. Returns an unsubscribe function. */
+  onRouteConfirm(listener: RouteConfirmListener): () => void {
+    this.routeConfirmListeners.add(listener);
+    return () => { this.routeConfirmListeners.delete(listener); };
   }
 
   sendStopTravel(): boolean {

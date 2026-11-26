@@ -65,6 +65,25 @@ describe('WorldCache.roomsFoundByMap', () => {
     expect(cache.roomsFoundByMap(['i6']).get('isle')).toEqual({ name: 'Gull Isle', found: 1, total: 4 });
   });
 
+  it('names the maps with a found walkable room as viewable', async () => {
+    const cache = await loadCache();
+    expect([...cache.viewableMapIds(['i1', 'c2'])]).toEqual(['isle', 'cave']);
+    expect([...cache.viewableMapIds(['i4', 's1'])]).toEqual([]);
+  });
+
+  it('splits route areas by the same walkability rule, once per world load', async () => {
+    const cache = await loadCache();
+    const index = cache.routeIndex();
+    expect(index.areaOf('i1')).toBe(index.areaOf('i3'));
+    expect(index.areaOf('i4')).toBeUndefined();
+    expect(index.areaOf('i6')).not.toBe(index.areaOf('i1'));
+    expect(index.areaOf('c1')).not.toBe(index.areaOf('i1'));
+    expect(cache.routeIndex()).toBe(index);
+
+    await cache.loadWorld();
+    expect(cache.routeIndex()).not.toBe(index);
+  });
+
   it('is empty before the world loads', () => {
     expect(new WorldCache().roomsFoundByMap(['i1']).size).toBe(0);
   });

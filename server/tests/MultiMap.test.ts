@@ -390,4 +390,60 @@ describe('Displaced-party sweep and multi-map reachability', () => {
     expect(pm.relocateDisplacedParties(grids, content)).toBe(1);
     expect(pm.partyBattles.getTile(partyId)!.id).not.toBe(ORPHAN_ID);
   });
+
+  it('leaves a party in a part of the start map that only a door reaches, through any map, and still moves the orphan', async () => {
+    const LEDGE_ID = 'overworld-ledge';
+    const world = makeIslandWorld();
+    world.tiles.push({ id: LEDGE_ID, mapId: 'overworld', col: 4, row: 4, type: 'plains', zone: 'town', name: 'High Ledge' });
+    world.tiles.find(t => t.id === SEWER_ENTRANCE_ID)!.transitions = [{ mapId: 'overworld', tileId: LEDGE_ID, entryRequirements: { minLevel: 99 } }];
+    const content = createFakeContentStore(world);
+    const grids = new WorldGrids(content);
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    const session = await pm.login(createFakeWs(), 'alice');
+    session.setClass('Knight');
+    pm.ensureParty('alice');
+    const partyId = session.getPartyId()!;
+    const overworld = grids.getOrThrow('overworld');
+
+    pm.partyBattles.relocateParty(partyId, overworld.getTileById(LEDGE_ID)!, 'overworld');
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(0);
+    expect(pm.partyBattles.getTile(partyId)!.id).toBe(LEDGE_ID);
+
+    pm.partyBattles.relocateParty(partyId, overworld.getTileById(ORPHAN_ID)!, 'overworld');
+    expect(pm.relocateDisplacedParties(grids, content)).toBe(1);
+    expect(pm.partyBattles.getTile(partyId)!.id).not.toBe(ORPHAN_ID);
+  });
+});
+
+describe('Arriving through a door', () => {
+  const VISIT_ENTRANCE: QuestDefinition = {
+    id: 'q_test_descend',
+    name: 'Look Below',
+    description: 'A test quest.',
+    scope: 'solo',
+    objectives: [{ kind: 'visit', tileId: SEWER_ENTRANCE_ID }],
+    rewards: [],
+  };
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('counts as a visit for quests, and a manual trip ends any route', async () => {
+    const world = makeWorld();
+    const content = createFakeContentStore(world, { [VISIT_ENTRANCE.id]: VISIT_ENTRANCE });
+    const grids = new WorldGrids(content);
+    const pm = new PlayerManager(grids, content, new GuildStore(), createFakeAccountStore(['alice']), createFakeStore());
+    const session = await pm.login(createFakeWs(), 'alice');
+    session.setClass('Knight');
+    pm.ensureParty('alice');
+    const partyId = session.getPartyId()!;
+    session.quests.accept(VISIT_ENTRANCE, { playerLevel: 1, partySize: 1 });
+
+    expect(pm.partyBattles.handleMoveToRoom(partyId, 'sewer-tunnel', ['no_way_back'])).toEqual({ success: true });
+    expect(pm.partyBattles.getPartyState(partyId)!.route?.doors).toBe(1);
+
+    expect(pm.handleEnterTransition('alice', SEWER_ENTRANCE_ID).success).toBe(true);
+    expect(pm.partyBattles.getPartyState(partyId)!.route).toBeUndefined();
+    expect(session.quests.getProgress(VISIT_ENTRANCE.id)?.progress).toEqual([1]);
+  });
 });

@@ -1,5 +1,16 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.26.1',
+    notes: [
+      'Tap a room beyond a door, or on another map you know a way to, and your party walks there, stepping through doors on the way.',
+      'Routes show how many rooms and doors are left. You\'re asked first if a route would leave your hired fighters behind, or leads somewhere your party knows no way back from.',
+      'Stepping through a door to another map also asks first when your hired fighters would stay behind, and hiring someone while your route leads to another map says they will be left behind.',
+      'Arriving through a door now counts as visiting that room for quests.',
+      'New Maps button on the map: look at any map you\'ve visited, tap its rooms and send your party there.',
+      'Rooms on other maps in the Quest Log and the battle tracker now open that map.',
+    ],
+  },
+  {
     version: '2026.11.25.6',
     notes: [
       'When your bags are full, the log now says how many items couldn\'t be carried, from fights, crafting and quest rewards. The summary when you come back counts them too, with a Hero button to sell some.',

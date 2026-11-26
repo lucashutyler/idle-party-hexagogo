@@ -1685,6 +1685,7 @@ export class PlayerSession {
     mapId: string;
     target: { col: number; row: number } | null;
     movementQueue: { col: number; row: number }[];
+    route?: PlayerSaveData['route'];
   }, partyInfo?: {
     role: 'owner' | 'leader' | 'member';
     gridPosition: number;
@@ -1700,6 +1701,7 @@ export class PlayerSession {
       mapId: movementData?.mapId ?? this.getMapId(),
       target: movementData?.target ?? null,
       movementQueue: movementData?.movementQueue ?? [],
+      ...(movementData?.route ? { route: movementData.route } : {}),
       character: this.character ? {
         className: this.character.className,
         level: this.character.level,

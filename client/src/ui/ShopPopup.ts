@@ -19,6 +19,8 @@ import { renderEquipCompareBlock } from './EquipCompare';
 import { renderTrackedImg } from './assets';
 import { deferWhilePressed } from './render';
 import { bringToFront, release, wireFocusOnInteract } from './ModalStack';
+import { confirmDialog } from './ConfirmDialog';
+import { hireLeftBehindText, routeLeavesMap } from './travelWarnings';
 
 const UNKNOWN_ITEM = 'Unknown item';
 
@@ -445,8 +447,7 @@ export class ShopPopup {
           this.rerender();
           return;
         }
-        this.pendingHireId = henchmanId;
-        this.gameClient.sendHireHenchman(henchmanId);
+        void this.hire(henchmanId);
       });
     }
 
@@ -532,6 +533,18 @@ export class ShopPopup {
     }).join('');
   }
 
+  /** A hire the party's route would leave behind on this map is asked about first. */
+  private async hire(henchmanId: string): Promise<void> {
+    const state = this.gameClient.lastState;
+    if (routeLeavesMap(state)) {
+      const name = state?.henchmanOffers?.find(o => o.henchmanId === henchmanId)?.name ?? 'This fighter';
+      const go = await confirmDialog({ title: `Hire ${name}?`, body: hireLeftBehindText(name), confirmLabel: 'Hire' });
+      if (!go || !this.isOpen()) return;
+    }
+    this.pendingHireId = henchmanId;
+    this.gameClient.sendHireHenchman(henchmanId);
+  }
+
   /** Ask which hired henchman makes room for a new one. */
   private renderReplaceConfirm(henchmanId: string, state: ServerStateMessage): void {
     const offer = (state.henchmanOffers ?? []).find(o => o.henchmanId === henchmanId);
@@ -560,6 +573,7 @@ export class ShopPopup {
         <div class="shop-replace-text">
           Your party has no room. Choose who leaves; ${escapeHtml(offer.name)} takes their place in your formation.
         </div>
+        ${routeLeavesMap(state) ? `<div class="shop-replace-text shop-route-warning">${escapeHtml(hireLeftBehindText(offer.name))}</div>` : ''}
         <div class="shop-replace-choices">${choices}</div>
         <div class="shop-replace-actions">
           <button class="item-popup-btn item-popup-btn-secondary shop-replace-cancel">Cancel</button>

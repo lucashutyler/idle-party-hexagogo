@@ -5,6 +5,8 @@ import type { TileClickInfo } from '../src/ui/ThreeWorldMap';
 import { dismissMapToast } from '../src/ui/MapToast';
 import { dismissModals, dismissTop } from '../src/ui/ModalStack';
 import { OFFLINE_NOTICE } from '../src/network/GameClient';
+import { buildRouteIndex } from '@idle-party-rpg/shared';
+import type { RouteRoom } from '@idle-party-rpg/shared';
 
 const mapStub = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -15,7 +17,9 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
   class ThreeWorldMap {
     tap?: (info: unknown) => void;
     background?: () => void;
-    setSendMove = vi.fn();
+    drawnMapId = 'here';
+    isFollowing = true;
+    setViewedMap = vi.fn();
     setOnTileClick = vi.fn((fn: (info: unknown) => void) => { this.tap = fn; });
     setOnBackgroundClick = vi.fn((fn: () => void) => { this.background = fn; });
     setOnFollowChange = vi.fn();
@@ -31,7 +35,6 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
     panBy = vi.fn();
     adjustZoom = vi.fn();
     setLockCheck = vi.fn();
-    getWalkableArea = vi.fn((_col: number, _row: number): number | null => null);
     constructor() {
       if (mapStub.failNext) {
         mapStub.failNext = false;
@@ -44,49 +47,55 @@ vi.mock('../src/ui/ThreeWorldMap', () => {
 });
 
 import { MapScreen } from '../src/screens/MapScreen';
+import { NO_KNOWN_WAY_TEXT } from '../src/ui/routePreview';
 
 function info(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
   return {
-    col: 3, row: 4, tileType: 'Plains', zoneName: 'Zone', roomName: 'Room', zoneId: 'z',
+    mapId: 'here', tileId: 'room-1', col: 3, row: 4, tileType: 'Plains', zoneName: 'Zone', roomName: 'Room', zoneId: 'z',
     isTraversable: true, isUnlocked: true, isSameZone: true, isCurrentTile: false, playersHere: [], partyMemberUsernames: [],
     ...overrides,
   };
 }
 
 let stateListeners: ((state: unknown) => void)[] = [];
+const PARTY_ROOM = { id: 'party-room', mapId: 'here', col: 0, row: 0, type: 'plains' };
 
-function mount(lastState: unknown = null, tile: Record<string, unknown> = { id: 'room-1', type: 'plains' }) {
+function mount(lastState: unknown = null, tile: Record<string, unknown> = { id: 'room-1', type: 'plains' }, routeRooms: RouteRoom[] = []) {
   stateListeners = [];
   document.body.innerHTML = '<div id="map-screen"></div><div id="game-container"></div>';
   const gameClient = {
     lastState,
     isInitialState: false,
     onMoveBlocked: () => () => {},
+    onRouteConfirm: () => () => {},
     onServerError: () => () => {},
     onForecast: () => () => {},
     subscribe: vi.fn((listener: (state: unknown) => void) => { stateListeners.push(listener); return () => {}; }),
-    sendMove: vi.fn(() => true),
+    sendMoveTo: vi.fn(() => true),
     sendEnterTransition: vi.fn(() => true),
     requestForecast: () => null,
     peekForecast: () => null,
   } as unknown as GameClient;
+  const index = buildRouteIndex(routeRooms);
   const worldCache = {
     isLoaded: true,
-    getTile: () => tile,
-    getTileOn: () => undefined,
+    getTileOn: (mapId: string, col: number, row: number) => (mapId === 'here' && col === 0 && row === 0 ? PARTY_ROOM : tile),
     getTileByGuid: (id: string) => (id === 'room-1' ? { col: 3, row: 4, mapId: 'here' } : id === 'far' ? { col: 1, row: 1, mapId: 'there' } : undefined),
     getCurrentMapId: () => 'here',
     getNpc: () => undefined,
     getDungeon: () => undefined,
     getMaps: () => [],
     getTileTypeDef: () => undefined,
+    routeIndex: () => index,
+    viewableMapIds: () => new Set(['here']),
+    roomsFoundByMap: () => new Map(),
   } as unknown as WorldCache;
   return { screen: new MapScreen('map-screen', gameClient, worldCache), gameClient };
 }
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 const tick = async () => { for (let i = 0; i < 5; i++) await flush(); };
-type StubMap = { tap: (i: TileClickInfo) => void; background: (blocked?: boolean) => void; setSelectedRoom: ReturnType<typeof vi.fn>; setLockCheck: ReturnType<typeof vi.fn>; getWalkableArea: ReturnType<typeof vi.fn>; revealRoom: ReturnType<typeof vi.fn>; focusOn: ReturnType<typeof vi.fn>; getTileInfo: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> };
+type StubMap = { tap: (i: TileClickInfo) => void; background: (blocked?: boolean) => void; setSelectedRoom: ReturnType<typeof vi.fn>; setLockCheck: ReturnType<typeof vi.fn>; revealRoom: ReturnType<typeof vi.fn>; focusOn: ReturnType<typeof vi.fn>; getTileInfo: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> };
 const latestMap = () => mapStub.instances[mapStub.instances.length - 1] as StubMap;
 
 const resizeObservers: (() => void)[] = [];
@@ -202,8 +211,8 @@ describe('MapScreen room selection', () => {
   beforeEach(() => { mapStub.instances.length = 0; mapStub.failNext = false; });
   afterEach(() => dismissMapToast());
 
-  async function opened(lastState: unknown = { party: { col: 0, row: 0 }, unlocked: [], social: null }, tile?: Record<string, unknown>) {
-    const mounted = mount(lastState, tile);
+  async function opened(lastState: unknown = { party: { col: 0, row: 0 }, unlocked: [], social: null, currentMapId: 'here' }, tile?: Record<string, unknown>, routeRooms?: RouteRoom[]) {
+    const mounted = mount(lastState, tile, routeRooms);
     mounted.screen.onActivate();
     await tick();
     return { ...mounted, map: latestMap() };
@@ -217,10 +226,10 @@ describe('MapScreen room selection', () => {
     expect(sheet().hidden).toBe(false);
     expect(map.setSelectedRoom).toHaveBeenLastCalledWith({ col: 3, row: 4 });
     expect(map.revealRoom).toHaveBeenCalled();
-    expect(gameClient.sendMove).not.toHaveBeenCalled();
+    expect(gameClient.sendMoveTo).not.toHaveBeenCalled();
 
     map.tap(info());
-    expect(gameClient.sendMove).toHaveBeenCalledWith(3, 4);
+    expect(gameClient.sendMoveTo).toHaveBeenCalledWith('room-1', { col: 3, row: 4 });
     expect(sheet().hidden).toBe(true);
     expect(map.setSelectedRoom).toHaveBeenLastCalledWith(null);
   });
@@ -258,7 +267,7 @@ describe('MapScreen room selection', () => {
     });
     map.tap(info());
     map.tap(info());
-    expect(gameClient.sendMove).not.toHaveBeenCalled();
+    expect(gameClient.sendMoveTo).not.toHaveBeenCalled();
     expect(sheet().hidden).toBe(false);
     expect(document.querySelector('#map-screen .map-toast')?.textContent).toBe('Only the party owner or a leader can move');
   });
@@ -268,12 +277,12 @@ describe('MapScreen room selection', () => {
     map.tap(info());
     expect(document.querySelector<HTMLButtonElement>('.room-sheet-go')!.disabled).toBe(true);
     map.tap(info());
-    expect(gameClient.sendMove).not.toHaveBeenCalled();
+    expect(gameClient.sendMoveTo).not.toHaveBeenCalled();
     expect(document.querySelector('#map-screen .map-toast')?.textContent).toBe('Leave the dungeon before traveling');
   });
 
   describe('a room the party cannot enter', () => {
-    const lowLevel = { username: 'me', party: { col: 0, row: 0 }, unlocked: [], social: null, character: { level: 1, equipment: {} } };
+    const lowLevel = { username: 'me', party: { col: 0, row: 0 }, unlocked: [], social: null, currentMapId: 'here', character: { level: 1, equipment: {} } };
     const lockLines = () => [...document.querySelectorAll('.room-sheet-lock-line')].map(line => line.textContent);
 
     it('says why on the sheet, and a second tap sends nothing but draws the eye to the lock', async () => {
@@ -283,7 +292,7 @@ describe('MapScreen room selection', () => {
       expect(document.querySelector<HTMLElement>('.room-sheet-go')!.hidden).toBe(true);
 
       map.tap(info());
-      expect(gameClient.sendMove).not.toHaveBeenCalled();
+      expect(gameClient.sendMoveTo).not.toHaveBeenCalled();
       expect(sheet().hidden).toBe(false);
       expect(document.querySelector('.room-sheet-lock')!.classList.contains('room-sheet-lock-pulse')).toBe(true);
     });
@@ -296,22 +305,24 @@ describe('MapScreen room selection', () => {
       expect(document.querySelector('.room-view-action-go')).toBeNull();
     });
 
-    it('says a room cut off from the party is reached through a door', async () => {
-      const { map, gameClient } = await opened(lowLevel);
-      map.getWalkableArea.mockImplementation((col: number) => (col === 3 ? 2 : 1));
+    it('says when the player knows no way to a room cut off from the party, and sends nothing', async () => {
+      const cutOff: RouteRoom[] = [
+        { id: 'party-room', mapId: 'here', col: 0, row: 0, traversable: true },
+        { id: 'room-1', mapId: 'here', col: 3, row: 4, traversable: true },
+      ];
+      const { map, gameClient } = await opened(lowLevel, undefined, cutOff);
       map.tap(info());
-      expect(lockLines()).toEqual(['No walking route from here. This area is reached through a door.']);
+      expect(lockLines()).toEqual([NO_KNOWN_WAY_TEXT]);
       map.tap(info());
-      expect(gameClient.sendMove).not.toHaveBeenCalled();
+      expect(gameClient.sendMoveTo).not.toHaveBeenCalled();
     });
 
     it('walks into a gated room the party already qualifies for', async () => {
       const { map, gameClient } = await opened({ ...lowLevel, character: { level: 9, equipment: {} } }, { id: 'room-1', type: 'plains', entryRequirements: { minLevel: 5 } });
-      map.getWalkableArea.mockReturnValue(1);
       map.tap(info());
       expect(document.querySelector<HTMLElement>('.room-sheet-lock')!.hidden).toBe(true);
       map.tap(info());
-      expect(gameClient.sendMove).toHaveBeenCalledWith(3, 4);
+      expect(gameClient.sendMoveTo).toHaveBeenCalledWith('room-1', { col: 3, row: 4 });
     });
   });
 
@@ -325,11 +336,11 @@ describe('MapScreen room selection', () => {
     expect(map.focusOn).toHaveBeenCalledWith(3, 4);
   });
 
-  it('focusRoom refuses a room on another map', async () => {
+  it('focusRoom refuses a room on a map the player has not visited', async () => {
     const { screen, map } = await opened();
     screen.focusRoom('far');
     expect(map.focusOn).not.toHaveBeenCalled();
-    expect(document.querySelector('#map-screen .map-toast')?.textContent).toBe('That room is on another map');
+    expect(document.querySelector('#map-screen .map-toast')?.textContent).toBe("You haven't visited that map yet.");
   });
 
   it('says so when a blocked room is tapped, and only then', async () => {
@@ -345,23 +356,22 @@ describe('MapScreen room selection', () => {
 
   it('keeps the sheet open and says why when Go finds the socket closed', async () => {
     const { map, gameClient } = await opened();
-    vi.mocked(gameClient.sendMove).mockReturnValue(false);
+    vi.mocked(gameClient.sendMoveTo).mockReturnValue(false);
     map.tap(info());
     map.tap(info());
     expect(sheet().hidden).toBe(false);
     expect(document.querySelector('#map-screen .map-toast')?.textContent).toBe(OFFLINE_NOTICE);
   });
 
-  it('dismisses the sheet when the party changes map', async () => {
+  it('dismisses the sheet once another map is drawn', async () => {
     const state = { party: { col: 0, row: 0, path: [] }, unlocked: [], social: null, currentMapId: 'here', otherPlayers: [] };
-    const { map, gameClient } = await opened(state);
+    const { map } = await opened(state);
     map.getTileInfo.mockReturnValue(info());
     map.tap(info());
     expect(sheet().hidden).toBe(false);
 
-    const moved = { ...state, currentMapId: 'there' };
-    (gameClient as unknown as { lastState: unknown }).lastState = moved;
-    for (const listener of stateListeners) listener(moved);
+    (map as unknown as { drawnMapId: string }).drawnMapId = 'there';
+    for (const listener of stateListeners) listener(state);
     expect(sheet().hidden).toBe(true);
     expect(map.setSelectedRoom).toHaveBeenLastCalledWith(null);
   });
@@ -418,21 +428,68 @@ describe('MapScreen status chips', () => {
   const state = { party: { col: 0, row: 0, path: [] }, unlocked: [], social: null, currentMapId: 'here', character: {}, zoneName: 'Z' };
   const transitionTile = { id: 'room-1', name: 'Pier', transitions: [{ tileId: 'far', mapId: 'there' }] };
 
-  async function withTravelChip(wide: boolean) {
+  const withHires = {
+    ...state,
+    username: 'me',
+    social: { party: { members: [{ username: 'me', role: 'owner' }], henchmen: [{ instanceId: 'h1', henchmanId: 'brin', mapId: 'here', name: 'Brin' }] } },
+  };
+
+  async function withTravelChip(wide: boolean, lastState: unknown = state, link = transitionTile.transitions[0]) {
     vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
       matches: query.includes('min-width: 768px') && wide,
       addEventListener: () => {},
       removeEventListener: () => {},
     }) as unknown as MediaQueryList);
-    const mounted = mount(state);
+    const mounted = mount(lastState);
     Object.assign((mounted.screen as unknown as { worldCache: object }).worldCache, {
-      getTileOn: () => transitionTile,
-      getTileByGuid: () => ({ name: 'Harbour', mapId: 'there' }),
+      getTileOn: () => ({ ...transitionTile, transitions: [link] }),
+      getTileByGuid: () => ({ name: 'Harbour', mapId: link.mapId }),
+      getMaps: () => [{ id: 'here', name: 'Home Isle', startTile: { col: 0, row: 0 } }],
     });
     mounted.screen.onActivate();
     await tick();
     return mounted;
   }
+
+  describe('a door to another map while the party has hired fighters', () => {
+    const hiresLine = 'Your hired fighter (Brin) stays behind when your party leaves Home Isle.';
+
+    it.each([[false], [true]])('warns before travel starts, with Go and Cancel (wide: %s)', async (wide) => {
+      const { gameClient } = await withTravelChip(wide, withHires);
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(gameClient.sendEnterTransition).not.toHaveBeenCalled();
+      expect(document.querySelector('.confirm-body')!.textContent).toBe(hiresLine);
+      expect(document.querySelector('.confirm-ok')!.textContent).toBe('Go');
+      expect(document.querySelector('.confirm-cancel')!.textContent).toBe('Cancel');
+
+      document.querySelector<HTMLElement>('.confirm-cancel')!.click();
+      await tick();
+      expect(gameClient.sendEnterTransition).not.toHaveBeenCalled();
+
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      document.querySelector<HTMLElement>('.confirm-ok')!.click();
+      await tick();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+
+    it('warns from the room card\'s travel button too', async () => {
+      const { gameClient } = await withTravelChip(true, withHires);
+      latestMap().tap(info({ isCurrentTile: true, col: 0, row: 0 }));
+      document.querySelector<HTMLElement>('.room-view-action-travel')!.click();
+      expect(gameClient.sendEnterTransition).not.toHaveBeenCalled();
+      expect(document.querySelector('.confirm-body')!.textContent).toBe(hiresLine);
+      document.querySelector<HTMLElement>('.confirm-ok')!.click();
+      await tick();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+
+    it('goes straight through a door that stays on this map, hires and all', async () => {
+      const { gameClient } = await withTravelChip(true, withHires, { tileId: 'far', mapId: 'here' });
+      document.querySelector<HTMLElement>('.room-status-chip')!.click();
+      expect(document.querySelector('.confirm-dialog')).toBeNull();
+      expect(gameClient.sendEnterTransition).toHaveBeenCalledWith('far');
+    });
+  });
 
   it('asks before a one-word chip takes the party away', async () => {
     const { gameClient } = await withTravelChip(false);

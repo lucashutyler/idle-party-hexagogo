@@ -12,7 +12,6 @@ import type {
 import { getEquippedItemIds, isRoomGateEmpty, resolveTileRequirements, validateRoomEntryAll } from '@idle-party-rpg/shared';
 import type { WorldCache } from '../network/WorldCache';
 
-export const NO_WALKING_ROUTE_TEXT = 'No walking route from here. This area is reached through a door.';
 export const UNKNOWN_QUEST_LOCK_TEXT = 'Opens later in the story';
 const UNKNOWN_ITEM_NAME = 'a special item';
 const NO_COMPLETED_QUESTS: readonly CompletedQuestEntry[] = [];

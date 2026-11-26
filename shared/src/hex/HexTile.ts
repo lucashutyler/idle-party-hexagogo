@@ -118,6 +118,12 @@ export const SEED_TILE_TYPES: TileTypeDefinition[] = [
   { id: 'volcano', name: 'Volcano', icon: '\uD83C\uDF0B', color: '#4a1a1a', traversable: false },
 ];
 
+/** Whether a room of this type can be walked into: its definition decides, else the built-in config, else yes. */
+export function isTileTraversable(type: string, typeDef?: TileTypeDefinition): boolean {
+  if (typeDef) return typeDef.traversable;
+  return TILE_CONFIGS[type as TileType]?.traversable ?? true;
+}
+
 export class HexTile {
   readonly coord: CubeCoord;
   readonly type: string;
@@ -154,10 +160,7 @@ export class HexTile {
   }
 
   get isTraversable(): boolean {
-    if (this._tileTypeDef) return this._tileTypeDef.traversable;
-    // Fallback for tiles without a definition (legacy/test)
-    const config = TILE_CONFIGS[this.type as TileType];
-    return config?.traversable ?? true;
+    return isTileTraversable(this.type, this._tileTypeDef);
   }
 
   /**

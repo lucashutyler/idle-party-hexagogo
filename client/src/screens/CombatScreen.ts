@@ -725,7 +725,7 @@ export class CombatScreen implements Screen {
       inDungeon: !!fought,
       lastFloor: !!fought && fought.floor >= fought.totalFloors,
       walking,
-      hasDestination: !!nextRoom,
+      hasDestination: !!nextRoom || !!state.party?.route,
       roomName: target ? discoveredRoomName(state, this.worldCache, target.col, target.row) : null,
       rewards: this.rewards,
       regroupSeconds,

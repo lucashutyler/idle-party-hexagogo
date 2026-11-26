@@ -4,11 +4,12 @@ import { dismissTop } from '../src/ui/ModalStack';
 import { DUNGEON_TRAVEL_LOCK_TEXT, ROOM_SHEET_FORECAST_DEBOUNCE_MS, RoomSheet } from '../src/ui/RoomSheet';
 import type { RoomSheetHandlers, RoomSheetModel } from '../src/ui/RoomSheet';
 import type { RoomForecastProvider } from '../src/ui/RoomView';
+import { LOCKED_DOOR_WAY_TEXT, NO_KNOWN_WAY_TEXT } from '../src/ui/routePreview';
 import type { TileClickInfo } from '../src/ui/ThreeWorldMap';
 
 function makeInfo(overrides: Partial<TileClickInfo> = {}): TileClickInfo {
   return {
-    col: 3, row: 4, tileType: 'Plains', zoneName: 'Hatchetmill', roomName: 'Town Square', zoneId: 'hatchetmill',
+    mapId: 'here', tileId: 'room-1', col: 3, row: 4, tileType: 'Plains', zoneName: 'Hatchetmill', roomName: 'Town Square', zoneId: 'hatchetmill',
     isTraversable: true, isUnlocked: true, isSameZone: true, isCurrentTile: false, playersHere: [], partyMemberUsernames: [],
     ...overrides,
   };
@@ -25,7 +26,9 @@ function makeModel(overrides: Partial<RoomSheetModel> = {}): RoomSheetModel {
     inDungeon: false,
     paysNoXp: false,
     lock: null,
-    unreachable: false,
+    route: null,
+    routeLines: [],
+    partyHasOthers: false,
     ...overrides,
   };
 }
@@ -132,11 +135,27 @@ describe('RoomSheet', () => {
       expect(q('.room-sheet-details').hidden).toBe(true);
     });
 
-    it('says only a door leads to a room out of walking reach', () => {
-      sheet.show(makeModel({ unreachable: true }));
-      expect(lockLines()).toEqual(['No walking route from here. This area is reached through a door.']);
+    it('says a lone player knows no way there, and holds back Go', () => {
+      sheet.show(makeModel({ route: { kind: 'none' }, routeLines: [NO_KNOWN_WAY_TEXT] }));
+      expect(lockLines()).toEqual([NO_KNOWN_WAY_TEXT]);
       expect(q('.room-sheet-name').textContent).toBe('Town Square');
       expect(q('.room-sheet-go').hidden).toBe(true);
+      expect(sheet.isBlocked).toBe(true);
+    });
+
+    it('heads the lock lines of the only door on the way', () => {
+      const lines = [LOCKED_DOOR_WAY_TEXT, "Needs level 5 (you're level 1)"];
+      sheet.show(makeModel({ route: { kind: 'locked', lines: [] }, routeLines: lines }));
+      expect(lockLines()).toEqual(lines);
+      expect(q('.room-sheet-go').hidden).toBe(true);
+    });
+
+    it('keeps Go in a party with other players, who may know a door, and says what the viewer knows', () => {
+      sheet.show(makeModel({ route: { kind: 'none' }, routeLines: [NO_KNOWN_WAY_TEXT], partyHasOthers: true }));
+      expect(q('.room-sheet-lock').hidden).toBe(true);
+      expect(q('.room-sheet-go').hidden).toBe(false);
+      expect(q('.room-sheet-sub-route').textContent).toBe(NO_KNOWN_WAY_TEXT);
+      expect(sheet.isBlocked).toBe(false);
     });
 
     it('gives Go back once a push says the room opened', () => {
@@ -166,6 +185,37 @@ describe('RoomSheet', () => {
       const action = q('.room-sheet-action');
       expect(action.classList.contains('room-sheet-action-locked')).toBe(true);
       expect(action.title).toBe('Cellar · Locked');
+    });
+  });
+
+  describe('the way there', () => {
+    it('names the doors on the way under the zone, with Go kept', () => {
+      sheet.show(makeModel({ route: { kind: 'doors', doors: 2, otherMap: true }, routeLines: ['Through 2 doors'] }));
+      expect(q('.room-sheet-sub-route').textContent).toBe('Through 2 doors');
+      expect(q('.room-sheet-go').hidden).toBe(false);
+    });
+
+    it('names them on an unexplored room too', () => {
+      sheet.show(makeModel({
+        info: makeInfo({ isUnlocked: false, roomName: 'Unexplored Room' }),
+        actions: [],
+        forecastTileId: null,
+        route: { kind: 'doors', doors: 1, otherMap: false },
+        routeLines: ['Through 1 door'],
+      }));
+      expect(q('.room-sheet-sub').textContent).toBe('Through 1 door');
+    });
+
+    it('says nothing for a walk', () => {
+      sheet.show(makeModel({ route: { kind: 'walk' } }));
+      expect(parent.querySelector('.room-sheet-sub-route')).toBeNull();
+    });
+
+    it('tells the same spot on two maps apart', () => {
+      sheet.show(makeModel());
+      expect(sheet.isShowing('here', 3, 4)).toBe(true);
+      expect(sheet.isShowing('there', 3, 4)).toBe(false);
+      expect(sheet.selectedMapId).toBe('here');
     });
   });
 

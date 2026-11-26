@@ -58,6 +58,8 @@ export class QuestLog {
   private showCompleted = false;
   private showOtherMapGivers = false;
   private currentMapId: string | undefined;
+  /** Maps a row can open besides the party's: those with a found room. */
+  private viewableMapIds: ReadonlySet<string> = new Set();
 
   constructor(
     private gameClient: GameClient,
@@ -139,6 +141,7 @@ export class QuestLog {
     const guide = state?.questGuide;
     const { main, other } = splitMainQuests(state?.activeQuests ?? [], guide);
     this.currentMapId = state?.currentMapId;
+    this.viewableMapIds = this.worldCache.viewableMapIds(state?.unlocked ?? []);
 
     const otherHtml = other.map(entry => this.renderActive(entry, defs[entry.questId], resolutions, unlocked)).join('');
     const emptyHtml = main.length + other.length === 0 ? NO_ACTIVE_QUESTS : '';
@@ -182,7 +185,7 @@ export class QuestLog {
 
     const place = where ? [where.roomName, where.zoneName].filter(Boolean).join(', ') : '';
     const text = `${lead}: talk to ${escapeHtml(place ? `${npcName}, ${place}` : npcName)}`;
-    if (!this.onGoToRoom || !where?.roomId || where.mapId !== this.currentMapId) return `<div class="quest-log-step">${text}</div>`;
+    if (!this.onGoToRoom || !where?.roomId || !this.canOpenMap(where.mapId)) return `<div class="quest-log-step">${text}</div>`;
     return `<button type="button" class="quest-log-go quest-log-step" data-room-id="${escapeHtml(where.roomId)}">${text}</button>`;
   }
 
@@ -264,11 +267,15 @@ export class QuestLog {
     `;
   }
 
-  /** A button when the room is on this map and someone can take us there; otherwise just the words. */
+  /** A button when the room is on a map the map screen can open; otherwise just the words. */
   private locationHtml(loc: NpcLocation): string {
     const text = locationText(loc);
-    if (!this.onGoToRoom || !loc.roomId || loc.mapId !== this.currentMapId) return text;
+    if (!this.onGoToRoom || !loc.roomId || !this.canOpenMap(loc.mapId)) return text;
     return `<button type="button" class="quest-log-go" data-room-id="${escapeHtml(loc.roomId)}">${text}</button>`;
+  }
+
+  private canOpenMap(mapId: string | undefined): boolean {
+    return !!mapId && (mapId === this.currentMapId || this.viewableMapIds.has(mapId));
   }
 
   private renderCompleted(
