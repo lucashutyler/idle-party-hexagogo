@@ -64,6 +64,14 @@ export interface RoomEntryFailure {
   questName?: string;
   /** Set when kind === 'level'. */
   minLevel?: number;
+  /** The room whose gate failed; for a door, the room the door is in. */
+  roomId?: string;
+  /** The failing room or door lies on the way, not at the destination. */
+  onRoute?: true;
+  /** A door's gate failed: its link's own, or that of the room behind it. */
+  door?: true;
+  /** For a door, the room it leads to. */
+  doorTileId?: string;
 }
 
 /** True when a gate constrains nothing (undefined, or every field unset/empty). */

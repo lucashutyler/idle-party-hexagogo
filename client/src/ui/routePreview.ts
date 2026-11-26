@@ -1,7 +1,7 @@
-import { planRouteDoors } from '@idle-party-rpg/shared';
+import { isRoomGateEmpty, planRouteDoors } from '@idle-party-rpg/shared';
 import type { RoomEntryFailure, RouteDoor, ServerStateMessage } from '@idle-party-rpg/shared';
 import type { WorldCache } from '../network/WorldCache';
-import { previewTravelLock, roomLockLines } from './RoomEntryCheck';
+import { previewTravelLock, roomLockLines, roomRequirements } from './RoomEntryCheck';
 
 export const NO_KNOWN_WAY_TEXT = "You haven't found a way there yet.";
 export const LOCKED_DOOR_WAY_TEXT = 'The way there passes a locked door';
@@ -9,7 +9,8 @@ export const LOCKED_DOOR_WAY_TEXT = 'The way there passes a locked door';
 /** How the party would get to a room, as far as the viewer can tell. */
 export type RoutePreview =
   | { kind: 'walk' }
-  | { kind: 'doors'; doors: number; otherMap: boolean }
+  /** `gated`: some door on the way, or the room behind it, has a gate, which other members may fail. */
+  | { kind: 'doors'; doors: number; otherMap: boolean; gated: boolean }
   | { kind: 'locked'; lines: RoomEntryFailure[] }
   | { kind: 'none' };
 
@@ -32,7 +33,13 @@ export function previewRoute(state: ServerStateMessage, worldCache: RouteLookups
   const found = foundRooms(state);
   const locks = (door: RouteDoor) => previewTravelLock(door.link, worldCache.getTileByGuid(door.toTileId), worldCache, state);
   const doors = planRouteDoors(index, here.id, tileId, door => found.has(door.fromTileId) && locks(door) === null);
-  if (doors) return { kind: 'doors', doors: doors.length, otherMap: doors.some(d => d.toMapId !== d.fromMapId) };
+  if (doors) {
+    const gated = doors.some(door => {
+      const arrival = worldCache.getTileByGuid(door.toTileId);
+      return !isRoomGateEmpty(door.link.entryRequirements) || (!!arrival && !isRoomGateEmpty(roomRequirements(arrival, worldCache)));
+    });
+    return { kind: 'doors', doors: doors.length, otherMap: doors.some(d => d.toMapId !== d.fromMapId), gated };
+  }
 
   const anyDoors = planRouteDoors(index, here.id, tileId, door => found.has(door.fromTileId));
   for (const door of anyDoors ?? []) {

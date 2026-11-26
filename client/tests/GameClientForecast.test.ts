@@ -291,6 +291,20 @@ describe('GameClient bestiary and combat prefs', () => {
   });
 });
 
+describe('GameClient lock info', () => {
+  it('asks what locks a room or door and hands the answer to listeners', () => {
+    const socket = connect();
+    const heard = vi.fn();
+    client!.onLockInfo(heard);
+    expect(client!.sendInspectLock({ kind: 'door', fromTileId: 'r-a', tileId: 'r-b' })).toBe(true);
+    expect(socket.ofType('inspect_lock')).toEqual([{ type: 'inspect_lock', target: { kind: 'door', fromTileId: 'r-a', tileId: 'r-b' } }]);
+
+    const reply = { type: 'lock_info', target: { kind: 'room', tileId: 'r-b' }, lock: null };
+    socket.receive(reply);
+    expect(heard).toHaveBeenCalledWith(reply);
+  });
+});
+
 describe('GameClient recap', () => {
   it('caches the recap from state and replays it to late subscribers', () => {
     const socket = connect();

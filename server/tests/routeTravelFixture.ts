@@ -5,6 +5,7 @@ import type {
   HenchmanDefinition,
   HexTile,
   MonsterDefinition,
+  NpcDefinition,
   QuestDefinition,
   RoomEntryRequirements,
   TileTypeDefinition,
@@ -104,6 +105,10 @@ export interface TravelOptions {
   walls?: RoomKey[];
   /** Without one every fight is won at once, so the party walks on after every fight. */
   monster?: MonsterDefinition;
+  /** Besides the visit quest. */
+  quests?: QuestDefinition[];
+  /** Each NPC stands in the rooms given. */
+  npcs?: { npc: NpcDefinition; rooms: RoomKey[] }[];
 }
 
 function makeWorld(opts: TravelOptions): WorldData {
@@ -124,6 +129,7 @@ function makeWorld(opts: TravelOptions): WorldData {
     ...(key === 'w0' ? { dungeonId: DUNGEON.id } : {}),
     ...(links[key] ? { transitions: links[key] } : {}),
     ...(opts.gates?.[key] ? { entryRequirements: opts.gates[key] } : {}),
+    ...npcIn(opts, key),
   }));
   return {
     startTile: { col: 0, row: 0 },
@@ -137,14 +143,21 @@ function makeWorld(opts: TravelOptions): WorldData {
   };
 }
 
+function npcIn(opts: TravelOptions, key: RoomKey): { npcId?: string } {
+  const placed = opts.npcs?.find(entry => entry.rooms.includes(key));
+  return placed ? { npcId: placed.npc.id } : {};
+}
+
 interface FakeContent {
   content: ContentStore;
   /** A content change, as a save makes it: the epoch moves before anything is rebuilt. */
   bump: () => void;
 }
 
-function fakeContent(world: WorldData, monster?: MonsterDefinition): FakeContent {
-  const quests = { [VISIT_QUEST.id]: VISIT_QUEST };
+function fakeContent(world: WorldData, opts: TravelOptions): FakeContent {
+  const monster = opts.monster;
+  const quests: Record<string, QuestDefinition> = Object.fromEntries([VISIT_QUEST, ...(opts.quests ?? [])].map(q => [q.id, q]));
+  const npcs: Record<string, NpcDefinition> = Object.fromEntries((opts.npcs ?? []).map(({ npc }) => [npc.id, npc]));
   const epoch = { value: 1 };
   const content = {
     get contentEpoch() { return epoch.value; },
@@ -165,13 +178,13 @@ function fakeContent(world: WorldData, monster?: MonsterDefinition): FakeContent
     getAllSets: () => ({}),
     getAllRecipes: () => ({}),
     getRecipe: () => undefined,
-    getAllNpcs: () => ({}),
-    getNpcQuestIds: () => [],
+    getAllNpcs: () => npcs,
+    getNpcQuestIds: () => [...new Set(Object.values(npcs).flatMap(npc => npc.questIds ?? []))],
     getQuestRevision: () => 0,
     getQuestCatalog: () => quests,
-    getNpc: () => undefined,
+    getNpc: (id: string) => npcs[id],
     getAllQuests: () => quests,
-    getQuest: (id: string) => quests[id as keyof typeof quests],
+    getQuest: (id: string) => quests[id],
     getDungeon: (id: string) => (id === DUNGEON.id ? DUNGEON : undefined),
     getAllDungeons: () => ({ [DUNGEON.id]: DUNGEON }),
     getHenchman: (id: string) => (id === HIRE.id ? HIRE : undefined),
@@ -236,7 +249,7 @@ export interface TravelWorld {
 /** Every named player is a Knight with a solo party in w0. */
 export async function setupTravel(usernames: string[], opts: TravelOptions = {}): Promise<TravelWorld> {
   const world = makeWorld(opts);
-  const { content, bump } = fakeContent(world, opts.monster);
+  const { content, bump } = fakeContent(world, opts);
   const grids = new WorldGrids(content);
   const pm = new PlayerManager(grids, content, new GuildStore(), fakeAccounts(usernames), fakeStore());
   const sessions: Record<string, PlayerSession> = {};

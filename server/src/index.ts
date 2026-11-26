@@ -34,9 +34,9 @@ import { mountAssetDirs } from './assetMounts.js';
 import swaggerUi from 'swagger-ui-express';
 import { adminSwaggerSpec, gameSwaggerSpec } from './admin/adminSwaggerSpec.js';
 import { JsonSessionStore } from './auth/JsonSessionStore.js';
-import type { ClassName, ItemDefinition, RoomEntryFailure, ServerErrorMessage, ServerMoveBlockedMessage, ServerRouteConfirmMessage } from '@idle-party-rpg/shared';
-import { ALL_CLASS_NAMES, EQUIP_SLOTS, ROUTE_WARNING_KINDS, getEquippedItemIds, setAppliesToClass, isAutoRetreatPct, toShopSummary } from '@idle-party-rpg/shared';
-import type { RouteRefusal } from './game/PartyBattleManager.js';
+import type { ClassName, ItemDefinition, RoomEntryFailure, RoomLockInfo, ServerErrorMessage, ServerMoveBlockedMessage, ServerRouteConfirmMessage } from '@idle-party-rpg/shared';
+import { ALL_CLASS_NAMES, EQUIP_SLOTS, ROUTE_WARNING_KINDS, getEquippedItemIds, parseLockTarget, setAppliesToClass, isAutoRetreatPct, toShopSummary } from '@idle-party-rpg/shared';
+import { LEADERS_ONLY, moveRefusalText } from './game/MoveRefusals.js';
 import { canMove } from './game/social/PartySystem.js';
 import { parseForecastRequestTarget } from './game/ForecastService.js';
 import { getVapidPublicKey } from './game/social/BrowserPushNotificationDriver.js';
@@ -49,7 +49,7 @@ import { FRIEND_REQUEST_NOTICE_WINDOW_MS } from './game/social/NotificationServi
  * carrying `itemId`/`itemName` so the payload stays shaped the way it was
  * before gates generalized beyond equipped items.
  */
-function toMoveBlockedMessage(failure: RoomEntryFailure): ServerMoveBlockedMessage {
+function toMoveBlockedMessage(failure: RoomEntryFailure, lock: RoomLockInfo | null): ServerMoveBlockedMessage {
   return {
     type: 'move_blocked',
     requirement: failure.kind,
@@ -58,6 +58,10 @@ function toMoveBlockedMessage(failure: RoomEntryFailure): ServerMoveBlockedMessa
     ...(failure.itemId !== undefined ? { itemId: failure.itemId, itemName: failure.itemName } : {}),
     ...(failure.questId !== undefined ? { questId: failure.questId, questName: failure.questName } : {}),
     ...(failure.minLevel !== undefined ? { minLevel: failure.minLevel } : {}),
+    ...(failure.roomId !== undefined ? { roomId: failure.roomId } : {}),
+    ...(failure.onRoute ? { onRoute: true as const } : {}),
+    ...(failure.door ? { door: true as const, doorTileId: failure.doorTileId } : {}),
+    ...(lock ? { lock } : {}),
   };
 }
 
@@ -76,14 +80,6 @@ function partyRefusal(message: string): ServerErrorMessage {
 function travelRefusal(message: string): ServerErrorMessage {
   return { type: 'error', message, code: 'travel_refused' };
 }
-
-const ROUTE_REFUSALS: Record<RouteRefusal, string> = {
-  no_route: "Your party hasn't found a way there yet.",
-  in_dungeon: 'Leave the dungeon before traveling',
-  not_walkable: "You can't walk there",
-  gone: 'That room is gone.',
-  no_party: 'Your party is still getting ready. Try again in a moment.',
-};
 
 function chatRefusal(message: string): ServerErrorMessage {
   return message === CHAT_SEND_LIMIT_REFUSAL
@@ -393,15 +389,9 @@ wss.on('connection', (ws, req) => {
 
       const byRoomId = typeof msg.tileId === 'string';
       if (msg.type === 'move' && (byRoomId || (typeof msg.col === 'number' && typeof msg.row === 'number'))) {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
-          return;
-        }
-
-        const partyId = session.getPartyId();
+        const partyId = playerManager.getSessionByUsername(username)?.getPartyId();
         if (!partyId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No party' }));
+          ws.send(JSON.stringify(travelRefusal(moveRefusalText('no_party'))));
           return;
         }
 
@@ -410,43 +400,42 @@ wss.on('connection', (ws, req) => {
         if (party) {
           const member = party.members.find(m => m.username === username);
           if (!member || !canMove(member.role)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can move' }));
+            ws.send(JSON.stringify(travelRefusal(LEADERS_ONLY.move)));
             return;
           }
         }
 
-        if (byRoomId) {
-          const accept = Array.isArray(msg.accept) ? ROUTE_WARNING_KINDS.filter(kind => msg.accept.includes(kind)) : [];
-          const result = playerManager.handleMoveToRoom(username, msg.tileId, accept);
-          if (!result || result.success) return;
-          if ('confirm' in result) {
-            const confirm: ServerRouteConfirmMessage = { type: 'route_confirm', tileId: msg.tileId, warnings: result.confirm };
-            ws.send(JSON.stringify(confirm));
-          } else if (result.blocked) {
-            ws.send(JSON.stringify(toMoveBlockedMessage(result.blocked)));
-          } else {
-            ws.send(JSON.stringify(travelRefusal(ROUTE_REFUSALS[result.reason ?? 'no_route'])));
-          }
-          return;
+        const result = byRoomId
+          ? playerManager.handleMoveToRoom(username, msg.tileId, Array.isArray(msg.accept) ? ROUTE_WARNING_KINDS.filter(kind => msg.accept.includes(kind)) : [])
+          : playerManager.partyBattles.handleMove(partyId, msg.col, msg.row);
+        if (result.success) return;
+        if ('confirm' in result) {
+          const confirm: ServerRouteConfirmMessage = { type: 'route_confirm', tileId: msg.tileId, warnings: result.confirm };
+          ws.send(JSON.stringify(confirm));
+        } else if (result.blocked) {
+          ws.send(JSON.stringify(toMoveBlockedMessage(result.blocked, playerManager.lockForRefusal(username, result.blocked))));
+        } else {
+          ws.send(JSON.stringify(travelRefusal(moveRefusalText(result.reason ?? 'no_route'))));
         }
+        return;
+      }
 
-        const moveResult = playerManager.partyBattles.handleMove(partyId, msg.col, msg.row);
-        if (!moveResult.success) {
-          if (moveResult.blocked) {
-            ws.send(JSON.stringify(toMoveBlockedMessage(moveResult.blocked)));
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid move' }));
-          }
-        }
+      if (msg.type === 'inspect_lock') {
+        const target = parseLockTarget(msg.target);
+        const reply = target ? playerManager.handleInspectLock(username, target) : null;
+        if (reply) ws.send(JSON.stringify(reply));
         return;
       }
 
       if (msg.type === 'stop_travel') {
         const partyId = playerManager.getSessionByUsername(username)?.getPartyId();
-        if (!partyId) return;
+        if (!partyId) {
+          ws.send(JSON.stringify(travelRefusal(moveRefusalText('no_party'))));
+          return;
+        }
         const member = playerManager.parties.getParty(partyId)?.members.find(m => m.username === username);
         if (!member || !canMove(member.role)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can move' }));
+          ws.send(JSON.stringify(travelRefusal(LEADERS_ONLY.move)));
           return;
         }
         playerManager.partyBattles.stopTravel(partyId);
@@ -481,9 +470,11 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'set_auto_run') {
-        const session = playerManager.getSessionByUsername(username);
-        const partyId = session?.getPartyId();
-        if (!session || !partyId) return;
+        const partyId = playerManager.getSessionByUsername(username)?.getPartyId();
+        if (!partyId) {
+          ws.send(JSON.stringify(travelRefusal(moveRefusalText('no_party'))));
+          return;
+        }
         if (typeof msg.enabled !== 'boolean') {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid auto run setting' }));
           return;
@@ -491,7 +482,7 @@ wss.on('connection', (ws, req) => {
 
         const member = playerManager.parties.getParty(partyId)?.members.find(m => m.username === username);
         if (!member || !canMove(member.role)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can change auto run' }));
+          ws.send(JSON.stringify(travelRefusal(LEADERS_ONLY.autoRun)));
           return;
         }
 
@@ -506,15 +497,9 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'enter_transition' && typeof msg.tileId === 'string') {
-        const session = playerManager.getSessionByUsername(username);
-        if (!session) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No session' }));
-          return;
-        }
-
-        const partyId = session.getPartyId();
+        const partyId = playerManager.getSessionByUsername(username)?.getPartyId();
         if (!partyId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'No party' }));
+          ws.send(JSON.stringify(travelRefusal(moveRefusalText('no_party'))));
           return;
         }
 
@@ -523,7 +508,7 @@ wss.on('connection', (ws, req) => {
         if (party) {
           const member = party.members.find(m => m.username === username);
           if (!member || !canMove(member.role)) {
-            ws.send(JSON.stringify(travelRefusal('Only owners and leaders can travel')));
+            ws.send(JSON.stringify(travelRefusal(LEADERS_ONLY.travel)));
             return;
           }
         }
@@ -531,7 +516,8 @@ wss.on('connection', (ws, req) => {
         const transitionResult = playerManager.handleEnterTransition(username, msg.tileId);
         if (!transitionResult.success) {
           if (transitionResult.blocked) {
-            ws.send(JSON.stringify(toMoveBlockedMessage(transitionResult.blocked)));
+            const lock = playerManager.lockForRefusal(username, transitionResult.blocked);
+            ws.send(JSON.stringify(toMoveBlockedMessage(transitionResult.blocked, lock)));
           } else {
             ws.send(JSON.stringify(travelRefusal(transitionResult.error)));
           }
@@ -551,7 +537,7 @@ wss.on('connection', (ws, req) => {
         if (party) {
           const member = party.members.find(m => m.username === username);
           if (!member || !canMove(member.role)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Only owners and leaders can leave a dungeon' }));
+            ws.send(JSON.stringify(travelRefusal(LEADERS_ONLY.leaveDungeon)));
             return;
           }
         }

@@ -757,6 +757,8 @@ body > .map-toast {
   font-size: var(--fs-sm);
   /* Gate rejections are full sentences — wrap rather than run off the map. */
   white-space: normal;
+  /* Without it, left: 50% caps the width at half the map. */
+  width: max-content;
   max-width: min(90%, 30rem);
   text-align: center;
   z-index: 200;

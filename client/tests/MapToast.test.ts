@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerErrorCode } from '@idle-party-rpg/shared';
 import { dismissMapToast, MAP_TOAST_MS, showMapToast } from '../src/ui/MapToast';
@@ -61,16 +63,19 @@ describe('showMapToast', () => {
 describe('MapScreen dungeon refusals', () => {
   type ErrorListener = (message: string, code?: ServerErrorCode) => void;
 
-  function mountScreen() {
+  function mountScreen(onScreen = true) {
     document.body.innerHTML = '<div id="map-screen"></div><div id="game-container"></div>';
     const errorListeners: ErrorListener[] = [];
     const gameClient = {
       lastState: null,
       onMoveBlocked: () => () => {},
       onRouteConfirm: () => () => {},
+      onLockInfo: () => () => {},
+      onConnection: () => () => {},
       onServerError: (l: ErrorListener) => { errorListeners.push(l); return () => {}; },
     } as unknown as GameClient;
     const screen = new MapScreen('map-screen', gameClient, {} as WorldCache);
+    (screen as unknown as { active: boolean }).active = onScreen;
     const sendError = (message: string, code?: ServerErrorCode) => { for (const l of errorListeners) l(message, code); };
     const toast = () => document.querySelector('#map-screen .map-toast');
     return { screen, sendError, toast };
@@ -84,6 +89,17 @@ describe('MapScreen dungeon refusals', () => {
     expect(toast()?.textContent).toBe('Thorn must be at least level 5 to enter.');
   });
 
+  it('shows a travel refusal over the map, or over the page while another screen is up', () => {
+    const { sendError, toast } = mountScreen();
+    sendError('Only the party owner or a leader can change Autorun', 'travel_refused');
+    expect(toast()?.textContent).toBe('Only the party owner or a leader can change Autorun');
+
+    const away = mountScreen(false);
+    away.sendError('Only the party owner or a leader can leave a dungeon', 'travel_refused');
+    expect(away.toast()).toBeNull();
+    expect(document.querySelector('body > .map-toast')?.textContent).toBe('Only the party owner or a leader can leave a dungeon');
+  });
+
   it('leaves other errors and refusals the open entry popup shows itself alone', () => {
     const { screen, sendError, toast } = mountScreen();
     sendError("That quest isn't offered in this room.", 'quest_refused');
@@ -93,5 +109,16 @@ describe('MapScreen dungeon refusals', () => {
     (screen as unknown as { dungeonEntryPopup: { isOpen: boolean } }).dungeonEntryPopup = { isOpen: true };
     sendError('Thorn must be at least level 5 to enter.', 'dungeon_entry_refused');
     expect(toast()).toBeNull();
+  });
+});
+
+describe('map toast layout', () => {
+  const css = readFileSync(resolve(__dirname, '../src/styles/pixel-theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector.trim(), body }));
+
+  it('sizes a centred toast to its text, so a long refusal is not squeezed into half the screen', () => {
+    const centred = rules.find(r => r.selector === '.map-toast' && /left:\s*50%/.test(r.body));
+    expect(centred?.body).toMatch(/width:\s*max-content/);
+    expect(centred?.body).toMatch(/max-width:\s*min\(90%/);
   });
 });

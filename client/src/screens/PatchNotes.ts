@@ -1,5 +1,16 @@
 export const PATCH_NOTES: { version: string; notes: string[] }[] = [
   {
+    version: '2026.11.26.3',
+    notes: [
+      'Every refused trip now tells you why, and solo players no longer see themselves listed as missing something.',
+      'Tapping a locked room keeps its card open with what you need, your next step and a Walk there button; in a party you see a tick or a cross for each member.',
+      'Go, and Go to room in a room\'s details, now keep the room card open until your party sets off, and show there why it can\'t.',
+      'Map messages now use the width of the screen instead of wrapping in a narrow column.',
+      'On phones, a locked door\'s travel button shows what\'s needed instead of asking you to confirm.',
+      'When a locked room stops your party you\'re told which member is missing it and whether they\'re online, and the leader can remove them.',
+    ],
+  },
+  {
     version: '2026.11.26.2',
     notes: [
       'Private messages stay in your chat history even when other channels are busy.',

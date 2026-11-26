@@ -22,7 +22,7 @@ import type { RoomEntryFailureKind } from './RoomRequirements.js';
 import type { CombatPrefs, ForecastRequestTarget, ForecastResult, ForecastStatus, ForecastTarget } from './ForecastTypes.js';
 import type { MasteryEntry, MasterySummary } from './Mastery.js';
 import type { AwayLedger } from './AwayTypes.js';
-
+import type { LockTarget, RoomLockInfo } from './RoomLock.js';
 
 export type BattleTimerState = 'battle' | 'result';
 export type BattleResult = 'victory' | 'defeat';
@@ -30,7 +30,7 @@ export type PartyState = 'idle' | 'moving' | 'in_battle';
 
 export const RESULT_PAUSE = 600;      // ms to show victory/defeat before movement
 export const MOVE_DURATION = 400;     // ms for tile movement (client animation)
-export const GAME_VERSION = '2026.11.26.2'; // Keep in sync with PATCH_NOTES in client
+export const GAME_VERSION = '2026.11.26.3'; // Keep in sync with PATCH_NOTES in client
 
 // --- Protocol types (server → client, client → server) ---
 
@@ -392,6 +392,26 @@ export interface ServerMoveBlockedMessage {
   questName?: string;
   /** Level gates only. */
   minLevel?: number;
+  /** The room whose gate failed; for a door, the room the door is in. */
+  roomId?: string;
+  onRoute?: true;
+  door?: true;
+  doorTileId?: string;
+  /** Everything that stops the party, for the lock card. Absent from an older server. */
+  lock?: RoomLockInfo;
+}
+
+/** What locks a room or one of the party's room's doors. A few at once are answered, then about one each 200 ms; the rest are dropped. */
+export interface ClientInspectLockMessage {
+  type: 'inspect_lock';
+  target: LockTarget;
+}
+
+/** `lock` is null when nothing stops the party. */
+export interface ServerLockInfoMessage {
+  type: 'lock_info';
+  target: LockTarget;
+  lock: RoomLockInfo | null;
 }
 
 export interface ClientEquipSkillMessage {
@@ -440,6 +460,7 @@ export type ServerMessage =
   | ServerSyncChatMessage
   | ServerEquipBlockedMessage
   | ServerMoveBlockedMessage
+  | ServerLockInfoMessage
   | ServerRouteConfirmMessage
   | ServerTradeProposedMessage
   | ServerTradeCancelledMessage
@@ -599,6 +620,7 @@ export type ClientMessage =
   | ClientEnterDungeonMessage
   | ClientLeaveDungeonMessage
   | ClientEnterTransitionMessage
+  | ClientInspectLockMessage
   | ClientRequestForecastMessage
   | ClientSetCombatPrefsMessage
   | ClientRequestBestiaryMessage

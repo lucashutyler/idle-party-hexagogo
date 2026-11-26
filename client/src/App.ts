@@ -450,6 +450,7 @@ export class App {
     };
     const questLog = new QuestLog(this.gameClient, this.worldCache, showRoom);
     combatScreen.setQuestTrackerActions({ openQuestLog: () => questLog.open(), showRoom });
+    mapScreen.setOpenQuestLog(() => questLog.open());
 
     const chatPopout = new ChatPopout(this.gameClient);
     this.chatPopout = chatPopout;

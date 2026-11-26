@@ -213,16 +213,16 @@ describe('route refusals', () => {
 
   it('keeps col and row moves to the party\'s area, refusing another area as before', async () => {
     const w = await alice();
-    expect(w.pm.partyBattles.handleMove(w.partyOf('alice'), 5, 0)).toEqual({ success: false });
+    expect(w.pm.partyBattles.handleMove(w.partyOf('alice'), 5, 0)).toEqual({ success: false, reason: 'no_route' });
     expect(w.pm.partyBattles.handleMove(w.partyOf('alice'), 2, 0)).toEqual({ success: true });
     expect(pathCols(w)).toEqual([1, 2]);
     expect(party(w).route).toBeUndefined();
   });
 
-  it('drops a second move by room id sent within the gap', async () => {
+  it('refuses a second move by room id sent within the gap, saying so, and changes nothing', async () => {
     const w = await alice();
     expect(w.pm.handleMoveToRoom('alice', ROOM.e1, [], 10_000)).toEqual({ success: true });
-    expect(w.pm.handleMoveToRoom('alice', ROOM.w1, [], 10_000 + ROUTE_MOVE_GAP_MS - 1)).toBeNull();
+    expect(w.pm.handleMoveToRoom('alice', ROOM.w1, [], 10_000 + ROUTE_MOVE_GAP_MS - 1)).toEqual({ success: false, reason: 'too_soon' });
     expect(party(w).route?.destinationId).toBe(ROOM.e1);
     expect(w.pm.handleMoveToRoom('alice', ROOM.w1, [], 10_000 + ROUTE_MOVE_GAP_MS)).toEqual({ success: true });
     expect(party(w).route).toBeUndefined();

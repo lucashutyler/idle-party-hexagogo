@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PlayerManager } from '../src/game/PlayerManager.js';
+import { moveRefusalText } from '../src/game/MoveRefusals.js';
+import type { RouteRefusal } from '../src/game/MoveRefusals.js';
 import { WorldGrids } from '../src/game/WorldGrids.js';
 import { GuildStore } from '../src/game/social/GuildStore.js';
 import type { GameStateStore } from '../src/game/GameStateStore.js';
@@ -41,6 +43,7 @@ const SHRINE_ID = 'room-shrine';
 const CLIFF_ID = 'room-cliff';
 const LAVA_ID = 'room-lava';
 const CALDERA_ID = 'room-caldera';
+const ISLAND_ID = 'room-island';
 
 const POS: Record<string, { col: number; row: number }> = {
   [START_ID]: { col: 2, row: 2 },
@@ -52,6 +55,7 @@ const POS: Record<string, { col: number; row: number }> = {
   [CLIFF_ID]: { col: 1, row: 2 },
   [LAVA_ID]: { col: 1, row: 1 },
   [CALDERA_ID]: { col: 2, row: 3 },
+  [ISLAND_ID]: { col: 9, row: 7 },
 };
 
 const LANTERN_QUEST: QuestDefinition = {
@@ -104,6 +108,8 @@ function makeWorld(): WorldData {
       { id: LAVA_ID, mapId: MAP_ID, ...POS[LAVA_ID], type: 'lava_field', zone: ZONE_ID, name: 'Lava Flow' },
       // Same type, but overrides the item requirement while inheriting minLevel.
       { id: CALDERA_ID, mapId: MAP_ID, ...POS[CALDERA_ID], type: 'lava_field', zone: ZONE_ID, name: 'Caldera Rim', entryRequirements: { requiredItemId: 'ruby_boots' } },
+      // No walk and no door reaches it.
+      { id: ISLAND_ID, mapId: MAP_ID, ...POS[ISLAND_ID], type: 'plains', zone: ZONE_ID, name: 'Lone Isle' },
     ],
   };
 }
@@ -448,5 +454,41 @@ describe('Movement gating (PartyBattleManager via PlayerManager)', () => {
     expect(locked).toContain('silver_key');  // authored via the legacy scalar field
     // A locked item cannot be taken off while the party still needs it.
     expect(session.handleUnequipItem('necklace')).toEqual({ success: false, lockedByTile: true });
+  });
+
+  // ── Refusals say why ────────────────────────────────────────
+
+  it('gives every refused col/row move a reason', async () => {
+    const { pm, partyId } = await setup();
+    expect(moveTo(pm, partyId, ISLAND_ID)).toEqual({ success: false, reason: 'no_route' });
+    expect(pm.partyBattles.handleMove(partyId, 40, 40)).toEqual({ success: false, reason: 'not_walkable' });
+    expect(pm.partyBattles.handleMove('no-such-party', 3, 2)).toEqual({ success: false, reason: 'no_party' });
+  });
+
+  it('names the locked room, on the way or at the end, and builds the card for it with every member', async () => {
+    const { pm, partyId } = await setup(['alice', 'bob']);
+    joinParty(pm, 'alice', 'bob');
+
+    const atEnd = expectBlocked(moveTo(pm, partyId, VAULT_ID));
+    expect(atEnd.roomId).toBe(VAULT_ID);
+    expect(atEnd.onRoute).toBeUndefined();
+    expect(pm.lockForRefusal('alice', atEnd)).toEqual({
+      roomId: VAULT_ID,
+      requirements: [{ kind: 'item', itemName: 'Silver Key', members: [{ username: 'alice', met: false }, { username: 'bob', met: false }] }],
+    });
+
+    const onTheWay = expectBlocked(moveTo(pm, partyId, ROAD_2_ID));
+    expect(onTheWay).toMatchObject({ roomId: VAULT_ID, onRoute: true });
+    expect(pm.lockForRefusal('alice', onTheWay)).toMatchObject({ roomId: VAULT_ID, onRoute: true });
+  });
+});
+
+describe('moveRefusalText', () => {
+  it('has one sentence for each reason', () => {
+    const reasons: RouteRefusal[] = ['no_party', 'in_dungeon', 'gone', 'not_walkable', 'no_route', 'too_soon'];
+    const texts = reasons.map(moveRefusalText);
+    expect(new Set(texts).size).toBe(reasons.length);
+    expect(moveRefusalText('no_route')).toBe("Your party hasn't found a way there yet.");
+    expect(texts.every(text => text.length > 0 && !text.includes('door'))).toBe(true);
   });
 });
