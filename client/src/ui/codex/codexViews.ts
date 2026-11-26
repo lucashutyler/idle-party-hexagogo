@@ -147,7 +147,7 @@ export function monsterKillsText(monster: Pick<CodexMonster, 'passive'>, kills: 
   return kills > 0 ? `${n(kills)} defeated` : 'Not defeated yet';
 }
 
-/** Rows carry the snapshot's kills so their HTML holds still between victories; this sets the live count in place. */
+/** Sets each monster row's live kill count in place. */
 export function patchMonsterKills(root: ParentNode, index: CodexIndex, state: ServerStateMessage | null): void {
   for (const el of root.querySelectorAll<HTMLElement>('[data-codex-kills]')) {
     const monster = index.monsters.get(el.dataset.codexKills ?? '');

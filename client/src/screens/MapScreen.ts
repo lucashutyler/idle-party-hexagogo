@@ -212,10 +212,7 @@ export class MapScreen implements Screen {
     if (info && !info.isCurrentTile) this.selectRoom(info, false);
   }
 
-  /**
-   * Opens the room's sheet and sends Go from it, as two taps would; a room on a map not yet visited is just sent to.
-   * Before the map is first built, both wait for it.
-   */
+  /** Opens the room's sheet and sends Go from it; before the map is first built, both wait for it. */
   goToRoomById(roomId: string): void {
     if (!this.map) {
       this.pendingFocusRoomId = roomId;

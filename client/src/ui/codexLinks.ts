@@ -17,7 +17,6 @@ export function codexTargetKey(target: CodexTarget): string {
   return codexRefKey(target);
 }
 
-/** The escaped `data-codex` value for `target`. */
 export function codexTargetAttr(target: CodexTarget): string {
   return escapeHtml(codexTargetKey(target));
 }
