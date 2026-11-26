@@ -237,7 +237,7 @@ describe('chatPreview', () => {
   it('shows your own message when nothing is unread', () => {
     const mine = msg({ timestamp: 6, senderUsername: 'me' });
     const preview = chatPreview([msg({ timestamp: 5 }), mine], 10, audience());
-    expect(preview).toEqual({ count: 0, message: mine, unread: false, own: true, mention: false });
+    expect(preview).toEqual({ count: 0, message: mine, unread: false, own: true, mention: false, latestAt: 6 });
   });
 
   it('shows your own message over an older server line, and never counts it', () => {
@@ -256,7 +256,7 @@ describe('chatPreview', () => {
       msg({ timestamp: 13, senderUsername: 'me' }),
       msg({ timestamp: 14, channelType: 'server', senderUsername: 'Server' }),
     ];
-    expect(chatPreview(messages, 10, audience())).toEqual({ count: 1, message: fromBob, unread: true, own: false, mention: false });
+    expect(chatPreview(messages, 10, audience())).toEqual({ count: 1, message: fromBob, unread: true, own: false, mention: false, latestAt: 14 });
   });
 
   it('shows the newest line of any kind once everything is read', () => {
@@ -296,6 +296,26 @@ describe('chatPreview', () => {
     expect(chatPreview([line], 10, audience()).mention).toBe(true);
     expect(chatPreview([line], 20, audience()).mention).toBe(false);
     expect(chatPreview([msg({ timestamp: 15, text: 'memes' })], 10, audience()).mention).toBe(false);
+  });
+
+  it('keeps an unread mention on the line over a later plain line from another player', () => {
+    const mention = msg({ timestamp: 11, text: 'hey me, want to party?' });
+    const preview = chatPreview([mention, msg({ timestamp: 12, senderUsername: 'carol', text: 'lol' })], 10, audience());
+    expect(preview).toMatchObject({ message: mention, mention: true, unread: true, count: 2 });
+  });
+
+  it('still pins an unread DM over a newer mention', () => {
+    const dm = msg({ channelType: 'dm', channelId: 'me', senderUsername: 'Mira', text: 'psst', timestamp: 11 });
+    const messages = [dm, msg({ timestamp: 12, text: 'me, over here' }), msg({ timestamp: 13, senderUsername: 'carol' })];
+    expect(chatPreview(messages, 10, audience())).toMatchObject({ message: dm, mention: false, count: 3 });
+  });
+
+  it('reports the newest timestamp in the log, blocked and filtered lines included', () => {
+    const messages = [msg({ timestamp: 5 }), msg({ timestamp: 7, senderUsername: 'Grief' }), msg({ timestamp: 9, channelType: 'zone' })];
+    const preview = chatPreview(messages, 10, { ...withFilterOff('zone'), blocked: { Grief: 'all' } });
+    expect(preview.message).toBe(messages[0]);
+    expect(preview.latestAt).toBe(9);
+    expect(chatPreview([], 10, audience()).latestAt).toBe(0);
   });
 });
 

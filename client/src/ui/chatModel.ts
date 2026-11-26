@@ -26,6 +26,8 @@ export interface ChatPreview {
   own: boolean;
   /** The line is unread and names the reader. */
   mention: boolean;
+  /** The newest timestamp in the log, shown or not. */
+  latestAt: number;
 }
 
 export interface DmThread {
@@ -173,14 +175,15 @@ function belongsInPreview(message: ChatMessage, audience: ChatAudience): boolean
 }
 
 /**
- * The strip's line and count: the newest unread DM, else the newest unread line from another player,
- * else the newest line of any kind. Server lines and your own never count.
+ * The strip's line and count: the newest unread DM, else the newest unread line that names the reader,
+ * else the newest unread line from another player, else the newest line of any kind. Server lines and your own never count.
  */
 export function chatPreview(messages: readonly ChatMessage[], lastSeenAt: number, audience: ChatAudience): ChatPreview {
   let count = 0;
   let newest: ChatMessage | null = null;
   let newestUnread: ChatMessage | null = null;
   let pinnedDm: ChatMessage | null = null;
+  let pinnedMention: ChatMessage | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     const unread = message.timestamp > lastSeenAt;
@@ -191,8 +194,9 @@ export function chatPreview(messages: readonly ChatMessage[], lastSeenAt: number
     count++;
     newestUnread ??= message;
     if (message.channelType === 'dm') pinnedDm ??= message;
+    else if (!pinnedMention && isChatMention(message, audience.me)) pinnedMention = message;
   }
-  const unreadLine = pinnedDm ?? newestUnread;
+  const unreadLine = pinnedDm ?? pinnedMention ?? newestUnread;
   const message = unreadLine ?? newest;
   return {
     count,
@@ -200,6 +204,7 @@ export function chatPreview(messages: readonly ChatMessage[], lastSeenAt: number
     unread: unreadLine !== null,
     own: !!message && !!audience.me && message.senderUsername === audience.me,
     mention: !!unreadLine && isChatMention(unreadLine, audience.me),
+    latestAt: messages[messages.length - 1]?.timestamp ?? 0,
   };
 }
 

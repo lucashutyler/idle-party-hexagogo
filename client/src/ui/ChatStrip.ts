@@ -53,12 +53,20 @@ function previewHtml(preview: ChatPreview, message: ChatMessage, arriving: boole
     + '</span>';
 }
 
+/** The cue class goes once it has played, or a strip hidden and shown again (rotation, resize) would replay it. */
+function settleArrival(line: Element | null): void {
+  if (!line) return;
+  const settle = () => line.classList.remove('chat-strip-arrive');
+  line.addEventListener('animationend', settle, { once: true });
+  line.addEventListener('animationcancel', settle, { once: true });
+}
+
 /** The phone's one-line chat preview, painted inside the strip's existing button. */
 export class ChatStrip {
   private labelEl: HTMLElement | null;
   private slot: HTMLElement;
-  /** Null until a line is painted: what is already there at load never animates. */
-  private cuedAt: number | null = null;
+  /** The log's newest timestamp at the last paint; null until there is one, so what is there at load never animates. */
+  private knownAt: number | null = null;
 
   constructor(slot: HTMLElement, onOpen: () => void) {
     this.slot = slot;
@@ -79,18 +87,17 @@ export class ChatStrip {
       if (message) this.slot.dataset.ch = message.channelType;
       else delete this.slot.dataset.ch;
       setHtml(label, message ? previewHtml(preview, message, arriving) : 'Chat');
+      if (arriving) settleArrival(label.querySelector('.chat-strip-arrive'));
     });
   }
 
+  /** Only a line newer than anything in the log at the last paint arrives, so a block or unblock never replays one. */
   private takeArrival(preview: ChatPreview): boolean {
     const message = preview.message;
-    if (!message) return false;
-    if (this.cuedAt === null) {
-      this.cuedAt = message.timestamp;
-      return false;
-    }
-    if (!preview.unread || message.timestamp <= this.cuedAt) return false;
-    this.cuedAt = message.timestamp;
-    return !reducedMotion();
+    const knownAt = this.knownAt;
+    const latest = Math.max(preview.latestAt, message?.timestamp ?? 0);
+    if (latest > 0) this.knownAt = Math.max(knownAt ?? 0, latest);
+    if (!message || knownAt === null) return false;
+    return preview.unread && message.timestamp > knownAt && !reducedMotion();
   }
 }

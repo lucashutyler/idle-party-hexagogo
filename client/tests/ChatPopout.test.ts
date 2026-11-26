@@ -482,7 +482,7 @@ describe('ChatStrip', () => {
   }
 
   function line(msg: ChatMessage | null, over: Partial<ChatPreview> = {}): ChatPreview {
-    return { count: 0, message: msg, unread: false, own: false, mention: false, ...over };
+    return { count: 0, message: msg, unread: false, own: false, mention: false, latestAt: msg?.timestamp ?? 0, ...over };
   }
 
   function unreadFrom(id: string, sender: string, timestamp: number): ChatPreview {
@@ -562,6 +562,44 @@ describe('ChatStrip', () => {
 
     s.render(unreadFrom('m4', 'bob', 4000));
     expect(arriving(slot)).toBe(true);
+  });
+
+  it('plays no arrival cue for an older line a block or unblock brings back', () => {
+    const { strip: s, slot } = strip();
+    const dm = message('d1', 'Grief', 'psst', { channelType: 'dm', timestamp: 10 });
+    s.render(line(dm, { count: 2, unread: true, latestAt: 50 }));
+    s.render(line(message('m1', 'bob', 'hi', { timestamp: 50 }), { count: 1, unread: true }));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('bob');
+    expect(arriving(slot)).toBe(false);
+
+    s.render(line(dm, { count: 2, unread: true, latestAt: 50 }));
+    expect(arriving(slot)).toBe(false);
+    s.render(unreadFrom('m2', 'carol', 60));
+    expect(arriving(slot)).toBe(true);
+  });
+
+  it('plays no arrival cue for a line older than the newest one the log already held', () => {
+    const { strip: s, slot } = strip();
+    s.render(unreadFrom('m1', 'bob', 1000));
+    s.render(line(message('m1', 'bob', 'from bob', { timestamp: 1000 }), { count: 2, unread: true, latestAt: 3000 }));
+    s.render(unreadFrom('m2', 'carol', 2000));
+    expect(arriving(slot)).toBe(false);
+  });
+
+  it('drops the arrival cue once it has played or been cut short, so showing the strip again does not replay it', () => {
+    const { strip: s, slot } = strip();
+    s.render(unreadFrom('m1', 'bob', 1000));
+    s.render(unreadFrom('m2', 'carol', 2000));
+    slot.querySelector('.chat-strip-line')!.dispatchEvent(new Event('animationend'));
+    expect(arriving(slot)).toBe(false);
+
+    s.render(unreadFrom('m3', 'dan', 3000));
+    slot.querySelector('.chat-strip-line')!.dispatchEvent(new Event('animationcancel'));
+    expect(arriving(slot)).toBe(false);
+
+    s.render(unreadFrom('m3', 'dan', 3000));
+    expect(slot.querySelector('.chat-strip-sender')?.textContent).toBe('dan');
+    expect(arriving(slot)).toBe(false);
   });
 
   it('plays no arrival cue with reduced motion', () => {
